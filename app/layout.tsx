@@ -8,7 +8,8 @@ const _geistMono = Geist_Mono({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
   title: 'Frontbill',
-  description: 'Hotel management software built with Next.js',
+  description: 'Created with v0',
+  generator: 'v0.app',
 }
 
 export default function RootLayout({

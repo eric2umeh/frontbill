@@ -10,12 +10,14 @@ import {
   Calendar,
   CreditCard,
   Building2,
-  FileText,
   TrendingUp,
   Settings,
   Hotel,
   FileBarChart,
   Briefcase,
+  CalendarClock,
+  Receipt,
+  Database,
 } from 'lucide-react'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
@@ -27,9 +29,19 @@ const routes = [
     href: '/dashboard',
   },
   {
-    label: 'Guests',
-    icon: Users,
-    href: '/guests',
+    label: 'Bookings',
+    icon: Calendar,
+    href: '/bookings',
+  },
+  {
+    label: 'Reservations',
+    icon: CalendarClock,
+    href: '/reservations',
+  },
+  {
+    label: 'Guest Database',
+    icon: Database,
+    href: '/guest-database',
   },
   {
     label: 'Rooms',
@@ -37,19 +49,9 @@ const routes = [
     href: '/rooms',
   },
   {
-    label: 'Bookings',
-    icon: Calendar,
-    href: '/bookings',
-  },
-  {
-    label: 'Payments',
-    icon: CreditCard,
-    href: '/payments',
-  },
-  {
-    label: 'City Ledger',
-    icon: FileText,
-    href: '/ledger',
+    label: 'Transactions',
+    icon: Receipt,
+    href: '/transactions',
   },
   {
     label: 'Organizations',
