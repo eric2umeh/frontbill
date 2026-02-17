@@ -137,12 +137,15 @@ export function EnhancedDataTable<T extends Record<string, any>>({
       {/* Table or Card View */}
       {viewMode === 'table' ? (
         <div className="border rounded-lg overflow-hidden">
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto md:overflow-visible">
             <table className="w-full">
               <thead className="bg-muted/50">
                 <tr>
-                  {columns.map((column) => (
-                    <th key={column.key.toString()} className="px-4 py-3 text-left text-sm font-medium">
+                  {columns.map((column, index) => (
+                    <th 
+                      key={column.key.toString()} 
+                      className={`px-4 py-3 text-left text-sm font-medium ${index >= 3 ? 'hidden md:table-cell' : ''}`}
+                    >
                       {column.label}
                     </th>
                   ))}
@@ -151,8 +154,11 @@ export function EnhancedDataTable<T extends Record<string, any>>({
               <tbody className="divide-y">
                 {paginatedData.map((item, index) => (
                   <tr key={index} className="hover:bg-muted/50 transition-colors">
-                    {columns.map((column) => (
-                      <td key={column.key.toString()} className="px-4 py-3 text-sm">
+                    {columns.map((column, colIndex) => (
+                      <td 
+                        key={column.key.toString()} 
+                        className={`px-4 py-3 text-sm ${colIndex >= 3 ? 'hidden md:table-cell' : ''}`}
+                      >
                         {column.render ? column.render(item) : item[column.key]}
                       </td>
                     ))}
@@ -172,28 +178,57 @@ export function EnhancedDataTable<T extends Record<string, any>>({
 
       {/* Pagination */}
       {totalPages > 1 && (
-        <div className="flex items-center justify-between">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-            disabled={currentPage === 1}
-          >
-            <ChevronLeft className="h-4 w-4 mr-1" />
-            Previous
-          </Button>
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+              disabled={currentPage === 1}
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            
+            <div className="flex items-center gap-1">
+              {Array.from({ length: totalPages }, (_, i) => i + 1)
+                .filter(page => {
+                  // Show first page, last page, current page, and 2 pages around current
+                  return (
+                    page === 1 ||
+                    page === totalPages ||
+                    Math.abs(page - currentPage) <= 1
+                  )
+                })
+                .map((page, index, array) => (
+                  <div key={page} className="flex items-center">
+                    {index > 0 && array[index - 1] !== page - 1 && (
+                      <span className="px-2 text-muted-foreground">...</span>
+                    )}
+                    <Button
+                      variant={currentPage === page ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() => setCurrentPage(page)}
+                      className="w-9 h-9"
+                    >
+                      {page}
+                    </Button>
+                  </div>
+                ))}
+            </div>
+
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+              disabled={currentPage === totalPages}
+            >
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
+          
           <span className="text-sm text-muted-foreground">
             Page {currentPage} of {totalPages}
           </span>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-            disabled={currentPage === totalPages}
-          >
-            Next
-            <ChevronRight className="h-4 w-4 ml-1" />
-          </Button>
         </div>
       )}
     </div>
