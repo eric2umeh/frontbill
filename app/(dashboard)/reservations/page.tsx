@@ -6,16 +6,18 @@ import { Button } from '@/components/ui/button'
 import { CardContent } from '@/components/ui/card'
 import { generateEnhancedMockGuests } from '@/lib/mock-data'
 import { formatNaira } from '@/lib/utils/currency'
-import { Eye, UserPlus } from 'lucide-react'
+import { Eye, Calendar } from 'lucide-react'
 
-const mockGuests = generateEnhancedMockGuests(50)
+// Filter only future bookings (reserved status)
+const allGuests = generateEnhancedMockGuests(50)
+const futureReservations = allGuests.filter(guest => 
+  guest.status === 'reserved' || new Date(guest.checkIn) > new Date()
+)
 
-export default function GuestsPage() {
+export default function ReservationsPage() {
   const statusColors = {
     reserved: 'bg-blue-500/10 text-blue-700 border-blue-200',
-    checked_in: 'bg-green-500/10 text-green-700 border-green-200',
-    checked_out: 'bg-gray-500/10 text-gray-700 border-gray-200',
-    no_show: 'bg-orange-500/10 text-orange-700 border-orange-200',
+    confirmed: 'bg-green-500/10 text-green-700 border-green-200',
     cancelled: 'bg-red-500/10 text-red-700 border-red-200',
   }
 
@@ -23,40 +25,24 @@ export default function GuestsPage() {
     paid: 'bg-green-500/10 text-green-700 border-green-200',
     partial: 'bg-yellow-500/10 text-yellow-700 border-yellow-200',
     pending: 'bg-orange-500/10 text-orange-700 border-orange-200',
-    cancelled: 'bg-red-500/10 text-red-700 border-red-200',
   }
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Guests</h1>
-          <p className="text-muted-foreground">Manage guest reservations and check-ins</p>
+          <h1 className="text-3xl font-bold tracking-tight">Reservations</h1>
+          <p className="text-muted-foreground">Manage future bookings and reservations</p>
         </div>
-        <Button>
-          <UserPlus className="mr-2 h-4 w-4" />
-          New Guest
-        </Button>
       </div>
 
       <EnhancedDataTable
-        data={mockGuests}
+        data={futureReservations}
         searchKeys={['name', 'phone', 'email', 'room']}
         filters={[
           {
-            key: 'status',
-            label: 'Status',
-            options: [
-              { value: 'reserved', label: 'Reserved' },
-              { value: 'checked_in', label: 'Checked In' },
-              { value: 'checked_out', label: 'Checked Out' },
-              { value: 'no_show', label: 'No Show' },
-              { value: 'cancelled', label: 'Cancelled' },
-            ],
-          },
-          {
             key: 'payment',
-            label: 'Payment',
+            label: 'Payment Status',
             options: [
               { value: 'paid', label: 'Paid' },
               { value: 'partial', label: 'Partial' },
@@ -67,7 +53,6 @@ export default function GuestsPage() {
             key: 'guestType',
             label: 'Type',
             options: [
-              { value: 'walkin', label: 'Walk-in' },
               { value: 'reservation', label: 'Reservation' },
               { value: 'organization', label: 'Organization' },
             ],
@@ -96,7 +81,7 @@ export default function GuestsPage() {
           },
           {
             key: 'checkIn',
-            label: 'Check-in',
+            label: 'Check-in Date',
             render: (guest) => (
               <div className="text-sm">
                 {new Date(guest.checkIn).toLocaleDateString('en-GB')}
@@ -104,42 +89,12 @@ export default function GuestsPage() {
             ),
           },
           {
-            key: 'nights',
-            label: 'Nights',
-            render: (guest) => <div className="text-center">{guest.nights}</div>,
-          },
-          {
-            key: 'status',
-            label: 'Status',
-            render: (guest) => (
-              <Badge variant="outline" className={statusColors[guest.status]}>
-                {guest.status.replace('_', ' ')}
-              </Badge>
-            ),
-          },
-          {
             key: 'payment',
-            label: 'Payment',
+            label: 'Payment Status',
             render: (guest) => (
-              <div className="space-y-1">
-                <Badge variant="outline" className={paymentColors[guest.payment]}>
-                  {guest.payment}
-                </Badge>
-                {guest.balance > 0 && (
-                  <div className="text-xs text-muted-foreground">
-                    Bal: {formatNaira(guest.balance)}
-                  </div>
-                )}
-              </div>
-            ),
-          },
-          {
-            key: 'actions',
-            label: '',
-            render: (guest) => (
-              <Button variant="ghost" size="sm">
-                <Eye className="h-4 w-4" />
-              </Button>
+              <Badge variant="outline" className={paymentColors[guest.payment]}>
+                {guest.payment}
+              </Badge>
             ),
           },
         ]}
@@ -151,36 +106,28 @@ export default function GuestsPage() {
                   <div className="font-semibold">{guest.name}</div>
                   <div className="text-sm text-muted-foreground">{guest.phone}</div>
                 </div>
-                <Badge variant="outline" className={statusColors[guest.status]}>
-                  {guest.status.replace('_', ' ')}
+                <Badge variant="outline" className={paymentColors[guest.payment]}>
+                  {guest.payment}
                 </Badge>
               </div>
               <div className="grid grid-cols-2 gap-2 text-sm">
                 <div>
                   <div className="text-muted-foreground">Room</div>
-                  <div className="font-medium">{guest.room} - {guest.type}</div>
-                </div>
-                <div>
-                  <div className="text-muted-foreground">Nights</div>
-                  <div className="font-medium">{guest.nights}</div>
+                  <div className="font-medium">{guest.room}</div>
                 </div>
                 <div>
                   <div className="text-muted-foreground">Check-in</div>
                   <div className="font-medium">{new Date(guest.checkIn).toLocaleDateString('en-GB')}</div>
                 </div>
                 <div>
-                  <div className="text-muted-foreground">Payment</div>
-                  <Badge variant="outline" className={paymentColors[guest.payment]}>
-                    {guest.payment}
-                  </Badge>
+                  <div className="text-muted-foreground">Nights</div>
+                  <div className="font-medium">{guest.nights}</div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">Amount</div>
+                  <div className="font-semibold">{formatNaira(guest.amount)}</div>
                 </div>
               </div>
-              {guest.balance > 0 && (
-                <div className="pt-2 border-t text-sm">
-                  <span className="text-muted-foreground">Balance:</span>{' '}
-                  <span className="font-semibold text-destructive">{formatNaira(guest.balance)}</span>
-                </div>
-              )}
             </div>
           </CardContent>
         )}
