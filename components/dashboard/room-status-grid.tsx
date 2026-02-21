@@ -1,4 +1,5 @@
-import { createClient } from '@/lib/supabase/server'
+'use client'
+
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -13,13 +14,24 @@ const statusConfig = {
   cleaning: { label: 'Cleaning', color: 'bg-purple-500' },
 }
 
-export async function RoomStatusGrid() {
-  const supabase = await createClient()
-  const { data: rooms } = await supabase
-    .from('rooms')
-    .select('*')
-    .order('room_number', { ascending: true })
-    .limit(12)
+// Mock rooms data
+const mockRooms = [
+  { id: 1, room_number: '101', status: 'occupied', floor: 1, room_type: 'single' },
+  { id: 2, room_number: '102', status: 'available', floor: 1, room_type: 'double' },
+  { id: 3, room_number: '103', status: 'occupied', floor: 1, room_type: 'suite' },
+  { id: 4, room_number: '104', status: 'cleaning', floor: 1, room_type: 'single' },
+  { id: 5, room_number: '201', status: 'occupied', floor: 2, room_type: 'double' },
+  { id: 6, room_number: '202', status: 'reserved', floor: 2, room_type: 'suite' },
+  { id: 7, room_number: '203', status: 'available', floor: 2, room_type: 'single' },
+  { id: 8, room_number: '204', status: 'occupied', floor: 2, room_type: 'double' },
+  { id: 9, room_number: '301', status: 'available', floor: 3, room_type: 'suite' },
+  { id: 10, room_number: '302', status: 'maintenance', floor: 3, room_type: 'single' },
+  { id: 11, room_number: '303', status: 'occupied', floor: 3, room_type: 'double' },
+  { id: 12, room_number: '304', status: 'available', floor: 3, room_type: 'single' },
+]
+
+export function RoomStatusGrid() {
+  const rooms = mockRooms
 
   return (
     <Card>
@@ -30,9 +42,9 @@ export async function RoomStatusGrid() {
         </CardTitle>
       </CardHeader>
       <CardContent>
-        <ScrollArea className="h-[350px]">
-          <div className="grid grid-cols-2 gap-3">
-            {rooms?.map((room) => {
+        <ScrollArea className="h-[300px]">
+          <div className="grid grid-cols-3 gap-3">
+            {rooms.map((room) => {
               const config = statusConfig[room.status as keyof typeof statusConfig]
               return (
                 <div
@@ -50,7 +62,7 @@ export async function RoomStatusGrid() {
                     <div>
                       <p className="font-semibold text-sm">{room.room_number}</p>
                       <p className="text-xs text-muted-foreground capitalize">
-                        {room.room_type.replace('_', ' ')}
+                        {room.room_type?.replace('_', ' ') || 'Standard'}
                       </p>
                     </div>
                     <div
