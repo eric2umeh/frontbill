@@ -1,6 +1,9 @@
 'use client'
 
 // Mock authentication system for development without Supabase
+// NOTE: Hardcoded credentials are for DEVELOPMENT ONLY and should never be used in production
+// For demo purposes only - see .env.example for proper credential handling
+
 export interface MockUser {
   id: string
   email: string
@@ -8,11 +11,12 @@ export interface MockUser {
   full_name: string
 }
 
+// Demo credentials - NOT FOR PRODUCTION USE
 const MOCK_USERS = [
-  { id: '1', email: 'admin@frontbill.com', password: 'Admin@123456', role: 'admin' as const, full_name: 'Admin User' },
-  { id: '2', email: 'manager@frontbill.com', password: 'Manager@123', role: 'manager' as const, full_name: 'Manager User' },
-  { id: '3', email: 'desk@frontbill.com', password: 'Desk@123', role: 'front_desk' as const, full_name: 'Front Desk User' },
-  { id: '4', email: 'accountant@frontbill.com', password: 'Account@123', role: 'accountant' as const, full_name: 'Accountant User' },
+  { id: '1', email: 'admin@frontbill.com', password: 'demo', role: 'admin' as const, full_name: 'Admin User' },
+  { id: '2', email: 'manager@frontbill.com', password: 'demo', role: 'manager' as const, full_name: 'Manager User' },
+  { id: '3', email: 'desk@frontbill.com', password: 'demo', role: 'front_desk' as const, full_name: 'Front Desk User' },
+  { id: '4', email: 'accountant@frontbill.com', password: 'demo', role: 'accountant' as const, full_name: 'Accountant User' },
 ]
 
 const AUTH_STORAGE_KEY = 'frontbill_mock_auth'
