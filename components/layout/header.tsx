@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { User } from '@supabase/supabase-js'
+import { type MockUser, mockAuth } from '@/lib/auth/mock-auth'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -13,23 +13,22 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Bell, Menu, LogOut, User as UserIcon, Loader2 } from 'lucide-react'
-import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 
 interface HeaderProps {
-  user: User
+  user: MockUser
+  onMenuClick?: () => void
 }
 
-export function Header({ user }: HeaderProps) {
+export function Header({ user, onMenuClick }: HeaderProps) {
   const [loggingOut, setLoggingOut] = useState(false)
   const router = useRouter()
-  const supabase = createClient()
 
   const handleLogout = async () => {
     setLoggingOut(true)
     try {
-      await supabase.auth.signOut()
+      await mockAuth.signOut()
       toast.success('Logged out successfully')
       router.push('/auth/login')
       router.refresh()
@@ -47,12 +46,12 @@ export function Header({ user }: HeaderProps) {
   return (
     <header className="flex h-16 items-center justify-between border-b bg-card px-4 md:px-6">
       <div className="flex items-center gap-4">
-        <Button variant="ghost" size="icon" className="md:hidden">
+        <Button variant="ghost" size="icon" className="md:hidden" onClick={onMenuClick}>
           <Menu className="h-5 w-5" />
         </Button>
         <div>
           <h2 className="text-sm font-medium text-muted-foreground">Welcome back,</h2>
-          <p className="text-lg font-semibold">{user.email?.split('@')[0]}</p>
+          <p className="text-lg font-semibold">{user.full_name}</p>
         </div>
       </div>
 
@@ -75,9 +74,9 @@ export function Header({ user }: HeaderProps) {
           <DropdownMenuContent className="w-56" align="end" forceMount>
             <DropdownMenuLabel className="font-normal">
               <div className="flex flex-col space-y-1">
-                <p className="text-sm font-medium leading-none">{user.email}</p>
+                <p className="text-sm font-medium leading-none">{user.full_name}</p>
                 <p className="text-xs leading-none text-muted-foreground">
-                  Front Desk Staff
+                  {user.role.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}
                 </p>
               </div>
             </DropdownMenuLabel>

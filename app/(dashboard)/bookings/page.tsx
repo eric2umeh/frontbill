@@ -8,12 +8,19 @@ import { CardContent } from '@/components/ui/card'
 import { NewBookingModal } from '@/components/bookings/new-booking-modal'
 import { generateEnhancedMockGuests } from '@/lib/mock-data'
 import { formatNaira } from '@/lib/utils/currency'
-import { Eye, Plus } from 'lucide-react'
+import { Plus } from 'lucide-react'
+import { useRouter } from 'next/navigation'
+import { addDays } from 'date-fns'
 
-const mockGuests = generateEnhancedMockGuests(50)
+const mockGuests = generateEnhancedMockGuests(50).map(g => ({
+  ...g,
+  folioId: `FL${Math.random().toString(36).substr(2, 9).toUpperCase()}`,
+  checkOut: addDays(new Date(g.checkIn), g.nights).toISOString(),
+}))
 
 export default function BookingsPage() {
   const [modalOpen, setModalOpen] = useState(false)
+  const router = useRouter()
   
   const statusColors = {
     reserved: 'bg-blue-500/10 text-blue-700 border-blue-200',
@@ -53,7 +60,6 @@ export default function BookingsPage() {
             key: 'status',
             label: 'Status',
             options: [
-              { value: 'reserved', label: 'Reserved' },
               { value: 'checked_in', label: 'Checked In' },
               { value: 'checked_out', label: 'Checked Out' },
               { value: 'no_show', label: 'No Show' },
@@ -70,21 +76,36 @@ export default function BookingsPage() {
             ],
           },
           {
-            key: 'guestType',
-            label: 'Type',
+            key: 'checkIn',
+            label: 'Check-in Date',
             options: [
-              { value: 'walkin', label: 'Walk-in' },
-              { value: 'reservation', label: 'Reservation' },
-              { value: 'organization', label: 'Organization' },
+              { value: 'today', label: 'Today' },
+              { value: 'past', label: 'Past' },
+              { value: 'future', label: 'Future' },
             ],
           },
         ]}
         columns={[
           {
+            key: 'folioId',
+            label: 'Folio ID',
+            render: (guest) => (
+              <div 
+                className="font-mono text-sm cursor-pointer hover:text-primary"
+                onClick={() => router.push(`/bookings/${guest.folioId}`)}
+              >
+                {guest.folioId}
+              </div>
+            ),
+          },
+          {
             key: 'name',
             label: 'Guest',
             render: (guest) => (
-              <div>
+              <div 
+                className="cursor-pointer hover:text-primary"
+                onClick={() => router.push(`/bookings/${guest.folioId}`)}
+              >
                 <div className="font-medium">{guest.name}</div>
                 <div className="text-xs text-muted-foreground">{guest.phone}</div>
               </div>
@@ -94,7 +115,10 @@ export default function BookingsPage() {
             key: 'room',
             label: 'Room',
             render: (guest) => (
-              <div>
+              <div 
+                className="cursor-pointer"
+                onClick={() => router.push(`/bookings/${guest.folioId}`)}
+              >
                 <div className="font-medium">Room {guest.room}</div>
                 <div className="text-xs text-muted-foreground">{guest.type}</div>
               </div>
@@ -110,9 +134,13 @@ export default function BookingsPage() {
             ),
           },
           {
-            key: 'nights',
-            label: 'Nights',
-            render: (guest) => <div className="text-center">{guest.nights}</div>,
+            key: 'checkOut',
+            label: 'Check-out',
+            render: (guest) => (
+              <div className="text-sm">
+                {new Date(guest.checkOut).toLocaleDateString('en-GB')}
+              </div>
+            ),
           },
           {
             key: 'status',
@@ -137,15 +165,6 @@ export default function BookingsPage() {
                   </div>
                 )}
               </div>
-            ),
-          },
-          {
-            key: 'actions',
-            label: '',
-            render: (guest) => (
-              <Button variant="ghost" size="sm">
-                <Eye className="h-4 w-4" />
-              </Button>
             ),
           },
         ]}

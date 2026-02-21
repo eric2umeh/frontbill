@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { createClient } from '@/lib/supabase/client'
+import { mockAuth } from '@/lib/auth/mock-auth'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -15,54 +15,23 @@ export default function LoginPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
-  const [seeding, setSeeding] = useState(false)
   const router = useRouter()
-  const supabase = createClient()
-
-  const seedDemoUsers = async () => {
-    setSeeding(true)
-    try {
-      const res = await fetch('/api/setup/seed-users', { method: 'POST' })
-      const data = await res.json()
-      if (res.ok) {
-        toast.success('Demo accounts created! Use the credentials below.')
-        console.log('[v0] Demo users:', data.credentials)
-      } else {
-        toast.error(data.error || 'Failed to seed users')
-      }
-    } catch (error: any) {
-      toast.error('Error creating demo accounts')
-    } finally {
-      setSeeding(false)
-    }
-  }
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
 
-    console.log('[v0] Login attempt started', { email })
-
     try {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
-      })
+      const { user, error } = await mockAuth.signIn(email, password)
 
-      const data = await res.json()
-      console.log('[v0] Login response:', { status: res.status, data })
-
-      if (!res.ok) {
-        throw new Error(data.error || 'Login failed')
+      if (error) {
+        toast.error(error)
+      } else if (user) {
+        toast.success('Login successful!')
+        router.push('/dashboard')
+        router.refresh()
       }
-
-      console.log('[v0] Login successful, redirecting...')
-      toast.success('Login successful!')
-      router.push('/dashboard')
-      router.refresh()
     } catch (error: any) {
-      console.error('[v0] Login failed:', error)
       toast.error(error.message || 'Failed to login')
     } finally {
       setLoading(false)
@@ -113,25 +82,13 @@ export default function LoginPage() {
               {loading ? 'Signing in...' : 'Sign In'}
             </Button>
           </form>
-          <div className="mt-4 space-y-2 text-center text-sm">
-            <p className="font-semibold text-foreground mb-2">First Time Setup?</p>
-            <Button
-              type="button"
-              variant="outline"
-              className="w-full"
-              onClick={seedDemoUsers}
-              disabled={seeding}
-            >
-              {seeding ? 'Creating Demo Accounts...' : '✓ Create Demo Accounts'}
-            </Button>
-            <div className="mt-3 p-3 bg-muted rounded text-xs space-y-1">
-              <p className="font-semibold">Demo Credentials:</p>
-              <p>📧 <code className="bg-background px-1 py-0.5 rounded">admin@frontbill.com</code></p>
-              <p>🔐 <code className="bg-background px-1 py-0.5 rounded">Admin@123456</code></p>
-              <p>or</p>
-              <p>📧 <code className="bg-background px-1 py-0.5 rounded">frontdesk@frontbill.com</code></p>
-              <p>🔐 <code className="bg-background px-1 py-0.5 rounded">Desk@123456</code></p>
-            </div>
+          <div className="mt-4 p-3 bg-muted rounded text-xs space-y-1">
+            <p className="font-semibold text-center mb-2">Demo Credentials</p>
+            <p>📧 <code className="bg-background px-1 py-0.5 rounded">admin@frontbill.com</code></p>
+            <p>🔐 <code className="bg-background px-1 py-0.5 rounded">Admin@123456</code></p>
+            <p className="pt-1">or</p>
+            <p>📧 <code className="bg-background px-1 py-0.5 rounded">manager@frontbill.com</code></p>
+            <p>🔐 <code className="bg-background px-1 py-0.5 rounded">Manager@123</code></p>
           </div>
 
           <div className="mt-4 space-y-2 text-center text-sm text-muted-foreground">
