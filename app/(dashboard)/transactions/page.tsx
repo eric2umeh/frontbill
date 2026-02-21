@@ -1,11 +1,17 @@
 'use client'
 
+import { useState, useMemo } from 'react'
 import { EnhancedDataTable } from '@/components/shared/enhanced-data-table'
 import { Badge } from '@/components/ui/badge'
-import { CardContent } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { Calendar } from '@/components/ui/calendar'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { generateEnhancedMockGuests } from '@/lib/mock-data'
 import { formatNaira } from '@/lib/utils/currency'
-import { Receipt } from 'lucide-react'
+import { Calendar as CalendarIcon, TrendingUp, CreditCard } from 'lucide-react'
+import { format, isToday, isSameDay } from 'date-fns'
+import { cn } from '@/lib/utils'
 
 const mockGuests = generateEnhancedMockGuests(50)
 
@@ -37,6 +43,20 @@ const transactions = mockGuests.flatMap((guest) => {
 })
 
 export default function TransactionsPage() {
+  const [selectedDate, setSelectedDate] = useState<Date>(new Date())
+
+  const filteredTransactions = useMemo(() => {
+    return transactions.filter(txn => 
+      isSameDay(new Date(txn.date), selectedDate)
+    )
+  }, [selectedDate])
+
+  const totalAmount = useMemo(() => {
+    return filteredTransactions
+      .filter(txn => txn.status === 'completed')
+      .reduce((sum, txn) => sum + txn.amount, 0)
+  }, [filteredTransactions])
+
   const methodColors: Record<string, string> = {
     cash: 'bg-green-500/10 text-green-700 border-green-200',
     pos: 'bg-blue-500/10 text-blue-700 border-blue-200',
@@ -57,10 +77,70 @@ export default function TransactionsPage() {
           <h1 className="text-3xl font-bold tracking-tight">Transactions</h1>
           <p className="text-muted-foreground">All payment transactions and records</p>
         </div>
+        <Popover>
+          <PopoverTrigger asChild>
+            <Button variant="outline" className="gap-2">
+              <CalendarIcon className="h-4 w-4" />
+              {format(selectedDate, 'PPP')}
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-auto p-0" align="end">
+            <Calendar
+              mode="single"
+              selected={selectedDate}
+              onSelect={(date) => date && setSelectedDate(date)}
+            />
+          </PopoverContent>
+        </Popover>
       </div>
 
+      {/* Credit Card Style Total Card */}
+      <Card className="relative overflow-hidden bg-gradient-to-br from-primary to-primary/80 text-primary-foreground">
+        <CardContent className="p-6">
+          <div className="flex items-start justify-between">
+            <div className="space-y-2">
+              <p className="text-sm opacity-90">
+                {isToday(selectedDate) ? "Today's Total Revenue" : `Total Revenue for ${format(selectedDate, 'MMM dd, yyyy')}`}
+              </p>
+              <p className="text-4xl font-bold tracking-tight">
+                {formatNaira(totalAmount)}
+              </p>
+              <div className="flex items-center gap-2 text-sm opacity-90">
+                <TrendingUp className="h-4 w-4" />
+                <span>{filteredTransactions.length} transaction{filteredTransactions.length !== 1 ? 's' : ''}</span>
+              </div>
+            </div>
+            <div className="rounded-full bg-primary-foreground/20 p-3">
+              <CreditCard className="h-8 w-8" />
+            </div>
+          </div>
+          <div className="mt-4 pt-4 border-t border-primary-foreground/20">
+            <div className="grid grid-cols-3 gap-4 text-sm">
+              <div>
+                <p className="opacity-75">Cash</p>
+                <p className="font-semibold">
+                  {formatNaira(filteredTransactions.filter(t => t.method === 'cash' && t.status === 'completed').reduce((sum, t) => sum + t.amount, 0))}
+                </p>
+              </div>
+              <div>
+                <p className="opacity-75">POS</p>
+                <p className="font-semibold">
+                  {formatNaira(filteredTransactions.filter(t => t.method === 'pos' && t.status === 'completed').reduce((sum, t) => sum + t.amount, 0))}
+                </p>
+              </div>
+              <div>
+                <p className="opacity-75">Transfer</p>
+                <p className="font-semibold">
+                  {formatNaira(filteredTransactions.filter(t => t.method === 'transfer' && t.status === 'completed').reduce((sum, t) => sum + t.amount, 0))}
+                </p>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       <EnhancedDataTable
-        data={transactions}
+        data={filteredTransactions}
         searchKeys={['transactionId', 'guestName', 'room']}
         filters={[
           {

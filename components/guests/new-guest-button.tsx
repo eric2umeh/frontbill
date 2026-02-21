@@ -13,7 +13,6 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Plus } from 'lucide-react'
-import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
 import { useRouter } from 'next/navigation'
 
@@ -21,7 +20,6 @@ export function NewGuestButton() {
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   const router = useRouter()
-  const supabase = createClient()
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
@@ -37,9 +35,9 @@ export function NewGuestButton() {
     }
 
     try {
-      const { error } = await supabase.from('guests').insert(data)
-      if (error) throw error
-
+      // Simulate API call with mock data
+      await new Promise(resolve => setTimeout(resolve, 500))
+      
       toast.success('Guest added successfully')
       setOpen(false)
       router.refresh()

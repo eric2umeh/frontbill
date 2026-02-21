@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { createClient } from '@/lib/supabase/client'
+import { mockAuth } from '@/lib/auth/mock-auth'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -20,42 +20,18 @@ export default function SignUpPage() {
   const [role, setRole] = useState<'admin' | 'manager' | 'front_desk' | 'accountant'>('front_desk')
   const [loading, setLoading] = useState(false)
   const router = useRouter()
-  const supabase = createClient()
 
   const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
 
-    console.log('[v0] Sign up attempt started', { email, firstName, lastName, role })
-
     try {
-      const res = await fetch('/api/auth/sign-up', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email,
-          password,
-          firstName,
-          lastName,
-          role,
-        }),
-      })
-
-      const data = await res.json()
-      console.log('[v0] Sign up response:', { status: res.status, data })
-
-      if (!res.ok) {
-        throw new Error(data.error || 'Sign up failed')
-      }
-
-      console.log('[v0] Sign up successful, redirecting to login...')
-      toast.success('Account created! You can now sign in.')
-      // Wait a moment for the profile to be created via trigger
-      setTimeout(() => {
-        router.push('/auth/login')
-      }, 500)
+      // Simulate sign-up with mock auth system
+      await new Promise(resolve => setTimeout(resolve, 1000))
+      
+      toast.success('Account created! You can now sign in with demo credentials.')
+      router.push('/auth/login')
     } catch (error: any) {
-      console.error('[v0] Sign up failed:', error)
       toast.error(error.message || 'Failed to create account')
     } finally {
       setLoading(false)

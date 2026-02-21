@@ -43,7 +43,6 @@ interface NewBookingModalProps {
 
 export function NewBookingModal({ open, onClose }: NewBookingModalProps) {
   const [step, setStep] = useState(1)
-  const [searchQuery, setSearchQuery] = useState('')
   const [filteredGuests, setFilteredGuests] = useState<any[]>([])
   const [selectedGuest, setSelectedGuest] = useState<any>(null)
 
@@ -66,33 +65,30 @@ export function NewBookingModal({ open, onClose }: NewBookingModalProps) {
   const [selectedOrganization, setSelectedOrganization] = useState<any>(null)
   const [showOrgSearch, setShowOrgSearch] = useState(false)
 
-  // Handle guest search
+  // Handle guest search and auto-populate
   useEffect(() => {
-    if (searchQuery.length > 0) {
+    if (fullName.length > 2) {
       const filtered = mockGuests.filter(g => 
-        g.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        g.phone.includes(searchQuery)
+        g.name.toLowerCase().includes(fullName.toLowerCase()) ||
+        g.phone.includes(fullName)
       ).slice(0, 5)
       setFilteredGuests(filtered)
+
+      // Auto-populate if exact match found
+      const exactMatch = mockGuests.find(g => 
+        g.name.toLowerCase() === fullName.toLowerCase()
+      )
+      if (exactMatch && !selectedGuest) {
+        setSelectedGuest(exactMatch)
+        setPhone(exactMatch.phone)
+        setAddress(exactMatch.email || '')
+        setFilteredGuests([])
+        toast.success('Guest found in database!')
+      }
     } else {
       setFilteredGuests([])
     }
-  }, [searchQuery])
-
-  // Auto-populate when typing name
-  useEffect(() => {
-    if (fullName.length > 2 && !selectedGuest) {
-      const match = mockGuests.find(g => 
-        g.name.toLowerCase() === fullName.toLowerCase()
-      )
-      if (match) {
-        setSelectedGuest(match)
-        setPhone(match.phone)
-        setAddress(match.email || '')
-        toast.success('Guest found in database!')
-      }
-    }
-  }, [fullName])
+  }, [fullName, selectedGuest])
 
   // Calculate nights when dates change
   useEffect(() => {
@@ -134,7 +130,6 @@ export function NewBookingModal({ open, onClose }: NewBookingModalProps) {
     setFullName(guest.name)
     setPhone(guest.phone)
     setAddress(guest.email || '')
-    setSearchQuery('')
     setFilteredGuests([])
   }
 
@@ -178,11 +173,11 @@ export function NewBookingModal({ open, onClose }: NewBookingModalProps) {
 
   const resetForm = () => {
     setStep(1)
-    setSearchQuery('')
     setSelectedGuest(null)
     setFullName('')
     setAddress('')
     setPhone('')
+    setFilteredGuests([])
     setArrivalDate(undefined)
     setDepartureDate(undefined)
     setNights(1)
@@ -205,19 +200,23 @@ export function NewBookingModal({ open, onClose }: NewBookingModalProps) {
           {/* Step 1: Guest Info */}
           {step === 1 && (
             <div className="space-y-4">
-              <div>
-                <Label>Search Existing Guest</Label>
+              <div className="space-y-2">
+                <Label htmlFor="fullName">Full Name *</Label>
                 <div className="relative">
                   <Input
-                    placeholder="Search by name or phone..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
+                    id="fullName"
+                    value={fullName}
+                    onChange={(e) => {
+                      setFullName(e.target.value)
+                      setSelectedGuest(null)
+                    }}
+                    placeholder="Type guest name or phone to search..."
                     className="pr-8"
                   />
                   <Search className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 </div>
                 {filteredGuests.length > 0 && (
-                  <Card className="mt-2">
+                  <Card className="mt-1 absolute z-10 w-full">
                     <CardContent className="p-2">
                       {filteredGuests.map((guest) => (
                         <div
@@ -232,16 +231,11 @@ export function NewBookingModal({ open, onClose }: NewBookingModalProps) {
                     </CardContent>
                   </Card>
                 )}
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="fullName">Full Name *</Label>
-                <Input
-                  id="fullName"
-                  value={fullName}
-                  onChange={(e) => setFullName(e.target.value)}
-                  placeholder="Enter guest name"
-                />
+                {selectedGuest && (
+                  <p className="text-sm text-green-600 flex items-center gap-1">
+                    <Check className="h-3 w-3" /> Guest found in database
+                  </p>
+                )}
               </div>
 
               <div className="space-y-2">

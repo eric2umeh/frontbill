@@ -1,17 +1,15 @@
-import { createClient } from '@/lib/supabase/server'
+'use client'
+
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Calendar } from 'lucide-react'
-import { formatDate } from '@/lib/utils/date'
 import { formatNaira } from '@/lib/utils/currency'
 
-export async function RecentBookings() {
-  const supabase = await createClient()
-  const { data: bookings } = await supabase
-    .from('bookings')
-    .select('*, guest:guests(*), room:rooms(*)')
-    .order('created_at', { ascending: false })
-    .limit(5)
+// Mock bookings data
+const mockBookings: any[] = []
+
+export function RecentBookings() {
+  const bookings = mockBookings
 
   const statusColors: Record<string, string> = {
     pending: 'bg-yellow-100 text-yellow-800',

@@ -1,21 +1,21 @@
-import { createClient } from '@/lib/supabase/server'
+'use client'
+
 import { PaymentsTable } from '@/components/payments/payments-table'
 import { Button } from '@/components/ui/button'
 import { Plus, Download } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { formatNaira } from '@/lib/utils/currency'
 
-export default async function PaymentsPage() {
-  const supabase = await createClient()
-  const { data: payments } = await supabase
-    .from('payments')
-    .select('*, guest:guests(*), organization:organizations(*), booking:bookings(*)')
-    .order('payment_date', { ascending: false })
+// Mock payments data
+const mockPayments: any[] = []
 
-  const totalReceived = payments?.reduce((sum, p) => sum + Number(p.amount), 0) || 0
-  const cashPayments = payments?.filter(p => p.payment_method === 'cash').reduce((sum, p) => sum + Number(p.amount), 0) || 0
-  const posPayments = payments?.filter(p => p.payment_method === 'pos').reduce((sum, p) => sum + Number(p.amount), 0) || 0
-  const transferPayments = payments?.filter(p => p.payment_method === 'transfer').reduce((sum, p) => sum + Number(p.amount), 0) || 0
+export default function PaymentsPage() {
+  const payments = mockPayments
+
+  const totalReceived = payments.reduce((sum, p) => sum + Number(p.amount), 0)
+  const cashPayments = payments.filter(p => p.payment_method === 'cash').reduce((sum, p) => sum + Number(p.amount), 0)
+  const posPayments = payments.filter(p => p.payment_method === 'pos').reduce((sum, p) => sum + Number(p.amount), 0)
+  const transferPayments = payments.filter(p => p.payment_method === 'transfer').reduce((sum, p) => sum + Number(p.amount), 0)
 
   return (
     <div className="space-y-6">
@@ -65,7 +65,7 @@ export default async function PaymentsPage() {
         </Card>
       </div>
 
-      <PaymentsTable payments={payments || []} />
+      <PaymentsTable payments={payments} />
     </div>
   )
 }
