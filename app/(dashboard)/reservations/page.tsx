@@ -1,20 +1,30 @@
 'use client'
 
+import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { EnhancedDataTable } from '@/components/shared/enhanced-data-table'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { CardContent } from '@/components/ui/card'
 import { generateEnhancedMockGuests } from '@/lib/mock-data'
 import { formatNaira } from '@/lib/utils/currency'
-import { Eye, Calendar } from 'lucide-react'
+import { Plus, Users } from 'lucide-react'
+import { BulkBookingModal } from '@/components/reservations/bulk-booking-modal'
 
 // Filter only future bookings (reserved status)
 const allGuests = generateEnhancedMockGuests(50)
 const futureReservations = allGuests.filter(guest => 
   guest.status === 'reserved' || new Date(guest.checkIn) > new Date()
-)
+).map(g => ({
+  ...g,
+  reservationDate: new Date(Date.now() - Math.random() * 30 * 24 * 60 * 60 * 1000).toISOString(),
+  amountPaid: Math.floor(g.amount * (g.payment === 'paid' ? 1 : g.payment === 'partial' ? 0.5 : 0)),
+  paymentMethod: ['Cash', 'POS', 'Transfer'][Math.floor(Math.random() * 3)],
+}))
 
 export default function ReservationsPage() {
+  const [bulkModalOpen, setBulkModalOpen] = useState(false)
+  const router = useRouter()
   const statusColors = {
     reserved: 'bg-blue-500/10 text-blue-700 border-blue-200',
     confirmed: 'bg-green-500/10 text-green-700 border-green-200',
@@ -29,10 +39,22 @@ export default function ReservationsPage() {
 
   return (
     <div className="space-y-6">
+      <BulkBookingModal open={bulkModalOpen} onClose={() => setBulkModalOpen(false)} />
+      
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Reservations</h1>
           <p className="text-muted-foreground">Manage future bookings and reservations</p>
+        </div>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => setBulkModalOpen(true)}>
+            <Users className="mr-2 h-4 w-4" />
+            Bulk Booking
+          </Button>
+          <Button onClick={() => router.push('/bookings')}>
+            <Plus className="mr-2 h-4 w-4" />
+            New Reservation
+          </Button>
         </div>
       </div>
 
@@ -63,7 +85,10 @@ export default function ReservationsPage() {
             key: 'name',
             label: 'Guest',
             render: (guest) => (
-              <div>
+              <div 
+                className="cursor-pointer hover:text-primary"
+                onClick={() => router.push(`/reservations/${guest.id}`)}
+              >
                 <div className="font-medium">{guest.name}</div>
                 <div className="text-xs text-muted-foreground">{guest.phone}</div>
               </div>
@@ -73,9 +98,18 @@ export default function ReservationsPage() {
             key: 'room',
             label: 'Room',
             render: (guest) => (
-              <div>
+              <div className="cursor-pointer" onClick={() => router.push(`/reservations/${guest.id}`)}>
                 <div className="font-medium">Room {guest.room}</div>
                 <div className="text-xs text-muted-foreground">{guest.type}</div>
+              </div>
+            ),
+          },
+          {
+            key: 'reservationDate',
+            label: 'Reservation Date',
+            render: (guest) => (
+              <div className="text-sm">
+                {new Date(guest.reservationDate).toLocaleDateString('en-GB')}
               </div>
             ),
           },
@@ -89,12 +123,26 @@ export default function ReservationsPage() {
             ),
           },
           {
-            key: 'payment',
-            label: 'Payment Status',
+            key: 'amountPaid',
+            label: 'Amount Paid',
             render: (guest) => (
-              <Badge variant="outline" className={paymentColors[guest.payment]}>
-                {guest.payment}
-              </Badge>
+              <div className="space-y-1">
+                <div className="font-semibold">{formatNaira(guest.amountPaid)}</div>
+                <div className="text-xs text-muted-foreground">{guest.paymentMethod}</div>
+              </div>
+            ),
+          },
+          {
+            key: 'actions',
+            label: 'Actions',
+            render: (guest) => (
+              <Button 
+                size="sm" 
+                variant="outline"
+                onClick={() => router.push(`/reservations/${guest.id}`)}
+              >
+                View
+              </Button>
             ),
           },
         ]}
