@@ -1,21 +1,89 @@
 'use client'
 
+import { useEffect, useState } from 'react'
+import { createClient } from '@/lib/supabase/client'
+import { useRouter } from 'next/navigation'
 import { PaymentsTable } from '@/components/payments/payments-table'
 import { Button } from '@/components/ui/button'
-import { Plus, Download } from 'lucide-react'
+import { Plus, Download, Loader2 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { formatNaira } from '@/lib/utils/currency'
+import { toast } from 'sonner'
 
-// Mock payments data
-const mockPayments: any[] = []
+interface Payment {
+  id: string
+  booking_id: string
+  amount: number
+  method: string
+  payment_date: string
+  created_at: string
+}
 
 export default function PaymentsPage() {
-  const payments = mockPayments
+  const [payments, setPayments] = useState<Payment[]>([])
+  const [loading, setLoading] = useState(true)
+  const router = useRouter()
+
+  useEffect(() => {
+    fetchPayments()
+  }, [])
+
+  const fetchPayments = async () => {
+    try {
+      setLoading(true)
+      const supabase = createClient()
+      
+      if (!supabase) {
+        setPayments([])
+        setLoading(false)
+        return
+      }
+
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) {
+        router.push('/auth/login')
+        return
+      }
+
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('organization_id')
+        .eq('id', user.id)
+        .single()
+
+      if (!profile) {
+        toast.error('Organization not found')
+        return
+      }
+
+      const { data, error } = await supabase
+        .from('payments')
+        .select('*')
+        .eq('organization_id', profile.organization_id)
+        .order('payment_date', { ascending: false })
+
+      if (error) throw error
+      setPayments(data || [])
+    } catch (error) {
+      console.error('Error fetching payments:', error)
+      toast.error('Failed to load payments')
+    } finally {
+      setLoading(false)
+    }
+  }
 
   const totalReceived = payments.reduce((sum, p) => sum + Number(p.amount), 0)
-  const cashPayments = payments.filter(p => p.payment_method === 'cash').reduce((sum, p) => sum + Number(p.amount), 0)
-  const posPayments = payments.filter(p => p.payment_method === 'pos').reduce((sum, p) => sum + Number(p.amount), 0)
-  const transferPayments = payments.filter(p => p.payment_method === 'transfer').reduce((sum, p) => sum + Number(p.amount), 0)
+  const cashPayments = payments.filter(p => p.method === 'cash').reduce((sum, p) => sum + Number(p.amount), 0)
+  const posPayments = payments.filter(p => p.method === 'pos').reduce((sum, p) => sum + Number(p.amount), 0)
+  const transferPayments = payments.filter(p => p.method === 'transfer').reduce((sum, p) => sum + Number(p.amount), 0)
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-96">
+        <Loader2 className="h-8 w-8 animate-spin" />
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6">

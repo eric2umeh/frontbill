@@ -1,36 +1,85 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import { EnhancedDataTable } from '@/components/shared/enhanced-data-table'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { CardContent } from '@/components/ui/card'
-import { generateEnhancedMockGuests } from '@/lib/mock-data'
 import { formatNaira } from '@/lib/utils/currency'
-import { Plus, Users } from 'lucide-react'
+import { Plus, Users, Loader2 } from 'lucide-react'
 import { BulkBookingModal } from '@/components/reservations/bulk-booking-modal'
 import { NewBookingModal } from '@/components/bookings/new-booking-modal'
 
-// Filter only future bookings (reserved status)
-const allGuests = generateEnhancedMockGuests(50)
-const futureReservations = allGuests.filter(guest => 
-  guest.status === 'reserved' || new Date(guest.checkIn) > new Date()
-).map(g => ({
-  ...g,
-  reservationDate: new Date(Date.now() - Math.random() * 30 * 24 * 60 * 60 * 1000).toISOString(),
-  amountPaid: Math.floor(g.amount * (g.payment === 'paid' ? 1 : g.payment === 'partial' ? 0.5 : 0)),
-  paymentMethod: ['Cash', 'POS', 'Transfer'][Math.floor(Math.random() * 3)],
-}))
+interface Reservation {
+  id: string
+  booking_reference: string
+  guest_id: string
+  room_id: string
+  check_in_date: string
+  check_out_date: string
+  status: string
+  payment_status: string
+  rate_per_night: number
+  guests?: { full_name: string; phone: string }
+  rooms?: { number: string; type: string }
+}
 
 export default function ReservationsPage() {
+  const [reservations, setReservations] = useState<Reservation[]>([])
+  const [loading, setLoading] = useState(true)
   const [bulkModalOpen, setBulkModalOpen] = useState(false)
   const [newReservationOpen, setNewReservationOpen] = useState(false)
   const router = useRouter()
-  const statusColors = {
-    reserved: 'bg-blue-500/10 text-blue-700 border-blue-200',
-    confirmed: 'bg-green-500/10 text-green-700 border-green-200',
-    cancelled: 'bg-red-500/10 text-red-700 border-red-200',
+
+  useEffect(() => {
+    fetchReservations()
+  }, [])
+
+  const fetchReservations = async () => {
+    try {
+      setLoading(true)
+      const supabase = createClient()
+      
+      if (!supabase) {
+        setReservations([])
+        setLoading(false)
+        return
+      }
+
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) {
+        router.push('/auth/login')
+        return
+      }
+
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('organization_id')
+        .eq('id', user.id)
+        .single()
+
+      if (!profile) {
+        setReservations([])
+        return
+      }
+
+      const { data, error } = await supabase
+        .from('bookings')
+        .select('*, guests(full_name, phone), rooms(number, type)')
+        .eq('organization_id', profile.organization_id)
+        .eq('status', 'reserved')
+        .order('check_in_date', { ascending: true })
+
+      if (error) throw error
+      setReservations(data || [])
+    } catch (error: any) {
+      console.error('Error fetching reservations:', error)
+      setReservations([])
+    } finally {
+      setLoading(false)
+    }
   }
 
   const paymentColors = {
@@ -39,10 +88,24 @@ export default function ReservationsPage() {
     pending: 'bg-orange-500/10 text-orange-700 border-orange-200',
   }
 
+  const statusColors = {
+    reserved: 'bg-blue-500/10 text-blue-700 border-blue-200',
+    confirmed: 'bg-green-500/10 text-green-700 border-green-200',
+    cancelled: 'bg-red-500/10 text-red-700 border-red-200',
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-96">
+        <Loader2 className="h-8 w-8 animate-spin" />
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-6">
-      <BulkBookingModal open={bulkModalOpen} onClose={() => setBulkModalOpen(false)} />
-      <NewBookingModal open={newReservationOpen} onClose={() => setNewReservationOpen(false)} />
+      <BulkBookingModal open={bulkModalOpen} onClose={() => { setBulkModalOpen(false); fetchReservations() }} />
+      <NewBookingModal open={newReservationOpen} onClose={() => { setNewReservationOpen(false); fetchReservations() }} />
       
       <div className="flex items-center justify-between">
         <div>
@@ -62,12 +125,12 @@ export default function ReservationsPage() {
       </div>
 
       <EnhancedDataTable
-        data={futureReservations}
-        searchKeys={['name', 'phone', 'email', 'room']}
-        dateField="checkIn"
+        data={reservations}
+        searchKeys={['booking_reference', 'guests.full_name', 'rooms.number']}
+        dateField="check_in_date"
         filters={[
           {
-            key: 'payment',
+            key: 'payment_status',
             label: 'Payment Status',
             options: [
               { value: 'paid', label: 'Paid' },
@@ -75,109 +138,104 @@ export default function ReservationsPage() {
               { value: 'pending', label: 'Pending' },
             ],
           },
-          {
-            key: 'guestType',
-            label: 'Type',
-            options: [
-              { value: 'reservation', label: 'Reservation' },
-              { value: 'organization', label: 'Organization' },
-            ],
-          },
         ]}
         columns={[
           {
-            key: 'name',
+            key: 'booking_reference',
+            label: 'Booking Ref',
+            render: (res) => (
+              <div 
+                className="font-mono text-sm cursor-pointer hover:text-primary"
+                onClick={() => router.push(`/reservations/${res.id}`)}
+              >
+                {res.booking_reference}
+              </div>
+            ),
+          },
+          {
+            key: 'guest',
             label: 'Guest',
-            render: (guest) => (
+            render: (res) => (
               <div 
                 className="cursor-pointer hover:text-primary"
-                onClick={() => router.push(`/reservations/${guest.id}`)}
+                onClick={() => router.push(`/reservations/${res.id}`)}
               >
-                <div className="font-medium">{guest.name}</div>
-                <div className="text-xs text-muted-foreground">{guest.phone}</div>
+                <div className="font-medium">{res.guests?.full_name}</div>
+                <div className="text-xs text-muted-foreground">{res.guests?.phone}</div>
               </div>
             ),
           },
           {
             key: 'room',
             label: 'Room',
-            render: (guest) => (
-              <div className="cursor-pointer" onClick={() => router.push(`/reservations/${guest.id}`)}>
-                <div className="font-medium">Room {guest.room}</div>
-                <div className="text-xs text-muted-foreground">{guest.type}</div>
+            render: (res) => (
+              <div className="cursor-pointer" onClick={() => router.push(`/reservations/${res.id}`)}>
+                <div className="font-medium">Room {res.rooms?.number}</div>
+                <div className="text-xs text-muted-foreground">{res.rooms?.type}</div>
               </div>
             ),
           },
           {
-            key: 'reservationDate',
-            label: 'Reservation Date',
-            render: (guest) => (
-              <div className="text-sm">
-                {new Date(guest.reservationDate).toLocaleDateString('en-GB')}
-              </div>
-            ),
-          },
-          {
-            key: 'checkIn',
+            key: 'check_in_date',
             label: 'Check-in Date',
-            render: (guest) => (
+            render: (res) => (
               <div className="text-sm">
-                {new Date(guest.checkIn).toLocaleDateString('en-GB')}
+                {new Date(res.check_in_date).toLocaleDateString('en-GB')}
               </div>
             ),
           },
           {
-            key: 'amountPaid',
-            label: 'Amount Paid',
-            render: (guest) => (
-              <div className="space-y-1">
-                <div className="font-semibold">{formatNaira(guest.amountPaid)}</div>
-                <div className="text-xs text-muted-foreground">{guest.paymentMethod}</div>
+            key: 'check_out_date',
+            label: 'Check-out Date',
+            render: (res) => (
+              <div className="text-sm">
+                {new Date(res.check_out_date).toLocaleDateString('en-GB')}
               </div>
+            ),
+          },
+          {
+            key: 'payment_status',
+            label: 'Payment',
+            render: (res) => (
+              <Badge variant="outline" className={paymentColors[res.payment_status]}>
+                {res.payment_status}
+              </Badge>
             ),
           },
           {
             key: 'actions',
             label: 'Actions',
-            render: (guest) => (
+            render: (res) => (
               <Button 
                 size="sm" 
                 variant="outline"
-                onClick={() => router.push(`/reservations/${guest.id}`)}
+                onClick={() => router.push(`/reservations/${res.id}`)}
               >
                 View
               </Button>
             ),
           },
         ]}
-        renderCard={(guest) => (
+        renderCard={(res) => (
           <CardContent className="p-4">
             <div className="space-y-3">
               <div className="flex items-start justify-between">
                 <div>
-                  <div className="font-semibold">{guest.name}</div>
-                  <div className="text-sm text-muted-foreground">{guest.phone}</div>
+                  <div className="font-semibold">{res.guests?.full_name}</div>
+                  <div className="text-sm text-muted-foreground">{res.guests?.phone}</div>
                 </div>
-                <Badge variant="outline" className={paymentColors[guest.payment]}>
-                  {guest.payment}
+                <Badge variant="outline" className={paymentColors[res.payment_status]}>
+                  {res.payment_status}
                 </Badge>
               </div>
               <div className="grid grid-cols-2 gap-2 text-sm">
                 <div>
                   <div className="text-muted-foreground">Room</div>
-                  <div className="font-medium">{guest.room}</div>
+                  <div className="font-medium">Room {res.rooms?.number}</div>
                 </div>
                 <div>
                   <div className="text-muted-foreground">Check-in</div>
-                  <div className="font-medium">{new Date(guest.checkIn).toLocaleDateString('en-GB')}</div>
-                </div>
-                <div>
-                  <div className="text-muted-foreground">Nights</div>
-                  <div className="font-medium">{guest.nights}</div>
-                </div>
-                <div>
-                  <div className="text-muted-foreground">Amount</div>
-                  <div className="font-semibold">{formatNaira(guest.amount)}</div>
+                  <div className="font-medium">{new Date(res.check_in_date).toLocaleDateString('en-GB')}</div>
                 </div>
               </div>
             </div>

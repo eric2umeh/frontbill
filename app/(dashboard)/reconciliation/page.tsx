@@ -1,24 +1,92 @@
 'use client'
 
+import { useEffect, useState } from 'react'
+import { createClient } from '@/lib/supabase/client'
+import { useRouter } from 'next/navigation'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { formatNaira } from '@/lib/utils/currency'
-import { AlertTriangle, CheckCircle, Clock, Plus } from 'lucide-react'
+import { AlertTriangle, CheckCircle, Clock, Plus, Loader2 } from 'lucide-react'
+import { toast } from 'sonner'
 
-// Mock reconciliation data
-const mockReconciliations = [
-  { id: '1', shiftDate: '2024-01-15', shiftType: 'morning', status: 'approved', totalExpected: 450000, totalActual: 450000, variance: 0, anomalyFlags: [], reconciledBy: 'John Doe' },
-  { id: '2', shiftDate: '2024-01-15', shiftType: 'afternoon', status: 'pending', totalExpected: 380000, totalActual: 380000, variance: 0, anomalyFlags: [], reconciledBy: null },
-  { id: '3', shiftDate: '2024-01-14', shiftType: 'night', status: 'flagged', totalExpected: 220000, totalActual: 215000, variance: -5000, anomalyFlags: [{ type: 'cash_shortage', amount: 5000 }], reconciledBy: 'Jane Smith' },
-  { id: '4', shiftDate: '2024-01-14', shiftType: 'afternoon', status: 'approved', totalExpected: 520000, totalActual: 520000, variance: 0, anomalyFlags: [], reconciledBy: 'Mike Johnson' },
-  { id: '5', shiftDate: '2024-01-14', shiftType: 'morning', status: 'approved', totalExpected: 480000, totalActual: 485000, variance: 5000, anomalyFlags: [{ type: 'cash_overage', amount: 5000 }], reconciledBy: 'Sarah Williams' },
-]
+interface Reconciliation {
+  id: string
+  shift_date: string
+  shift_type: string
+  status: string
+  total_expected: number
+  total_actual: number
+  variance: number
+  anomalies?: any[]
+  reconciled_by?: string
+}
 
 export default function ReconciliationPage() {
-  const pending = mockReconciliations.filter(r => r.status === 'pending').length
-  const flagged = mockReconciliations.filter(r => r.status === 'flagged').length
-  const approved = mockReconciliations.filter(r => r.status === 'approved').length
+  const [reconciliations, setReconciliations] = useState<Reconciliation[]>([])
+  const [loading, setLoading] = useState(true)
+  const router = useRouter()
+
+  useEffect(() => {
+    fetchReconciliations()
+  }, [])
+
+  const fetchReconciliations = async () => {
+    try {
+      setLoading(true)
+      const supabase = createClient()
+      
+      if (!supabase) {
+        setReconciliations([])
+        setLoading(false)
+        return
+      }
+
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) {
+        router.push('/auth/login')
+        return
+      }
+
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('organization_id')
+        .eq('id', user.id)
+        .single()
+
+      if (!profile) {
+        setReconciliations([])
+        return
+      }
+
+      const { data, error } = await supabase
+        .from('reconciliations')
+        .select('*')
+        .eq('organization_id', profile.organization_id)
+        .order('shift_date', { ascending: false })
+        .limit(20)
+
+      if (error) throw error
+      setReconciliations(data || [])
+    } catch (error: any) {
+      console.error('Error fetching reconciliations:', error)
+      setReconciliations([])
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const pending = reconciliations.filter(r => r.status === 'pending').length
+  const flagged = reconciliations.filter(r => r.status === 'flagged').length
+  const approved = reconciliations.filter(r => r.status === 'approved').length
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-96">
+        <Loader2 className="h-8 w-8 animate-spin" />
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6">
@@ -70,66 +138,72 @@ export default function ReconciliationPage() {
           <CardTitle>Recent Reconciliations</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="space-y-4">
-            {mockReconciliations.map((recon) => (
-              <div key={recon.id} className="flex items-start justify-between border-b pb-4 last:border-0 last:pb-0">
-                <div className="space-y-2">
-                  <div className="flex items-center gap-3">
-                    <p className="font-medium">{new Date(recon.shiftDate).toLocaleDateString('en-GB')}</p>
-                    <Badge variant="secondary" className="capitalize">
-                      {recon.shiftType}
-                    </Badge>
-                    <Badge
-                      variant={
-                        recon.status === 'approved' ? 'default' :
-                        recon.status === 'flagged' ? 'destructive' :
-                        'secondary'
-                      }
-                    >
-                      {recon.status}
-                    </Badge>
-                  </div>
-                  <div className="grid grid-cols-3 gap-4 text-sm">
-                    <div>
-                      <p className="text-muted-foreground">Expected</p>
-                      <p className="font-medium">{formatNaira(recon.totalExpected)}</p>
+          {reconciliations.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground">
+              <p>No reconciliations found. Start by creating a new reconciliation.</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {reconciliations.map((recon) => (
+                <div key={recon.id} className="flex items-start justify-between border-b pb-4 last:border-0 last:pb-0">
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-3">
+                      <p className="font-medium">{new Date(recon.shift_date).toLocaleDateString('en-GB')}</p>
+                      <Badge variant="secondary" className="capitalize">
+                        {recon.shift_type}
+                      </Badge>
+                      <Badge
+                        variant={
+                          recon.status === 'approved' ? 'default' :
+                          recon.status === 'flagged' ? 'destructive' :
+                          'secondary'
+                        }
+                      >
+                        {recon.status}
+                      </Badge>
                     </div>
-                    <div>
-                      <p className="text-muted-foreground">Actual</p>
-                      <p className="font-medium">{formatNaira(recon.totalActual)}</p>
+                    <div className="grid grid-cols-3 gap-4 text-sm">
+                      <div>
+                        <p className="text-muted-foreground">Expected</p>
+                        <p className="font-medium">{formatNaira(recon.total_expected)}</p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground">Actual</p>
+                        <p className="font-medium">{formatNaira(recon.total_actual)}</p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground">Variance</p>
+                        <p className={`font-medium ${
+                          recon.variance > 0 ? 'text-green-600' : 
+                          recon.variance < 0 ? 'text-red-600' : ''
+                        }`}>
+                          {recon.variance > 0 ? '+' : ''}{formatNaira(recon.variance)}
+                        </p>
+                      </div>
                     </div>
-                    <div>
-                      <p className="text-muted-foreground">Variance</p>
-                      <p className={`font-medium ${
-                        recon.variance > 0 ? 'text-green-600' : 
-                        recon.variance < 0 ? 'text-red-600' : ''
-                      }`}>
-                        {recon.variance > 0 ? '+' : ''}{formatNaira(recon.variance)}
+                    {recon.anomalies && recon.anomalies.length > 0 && (
+                      <div className="flex flex-wrap gap-2">
+                        {recon.anomalies.map((anomaly, i) => (
+                          <Badge key={i} variant="destructive" className="text-xs">
+                            <AlertTriangle className="h-3 w-3 mr-1" />
+                            {typeof anomaly === 'string' ? anomaly : anomaly.type}
+                          </Badge>
+                        ))}
+                      </div>
+                    )}
+                    {recon.reconciled_by && (
+                      <p className="text-xs text-muted-foreground">
+                        Reconciled by: {recon.reconciled_by}
                       </p>
-                    </div>
+                    )}
                   </div>
-                  {recon.anomalyFlags && recon.anomalyFlags.length > 0 && (
-                    <div className="flex flex-wrap gap-2">
-                      {recon.anomalyFlags.map((flag, i) => (
-                        <Badge key={i} variant="destructive" className="text-xs">
-                          <AlertTriangle className="h-3 w-3 mr-1" />
-                          {flag.type.replace('_', ' ')}
-                        </Badge>
-                      ))}
-                    </div>
-                  )}
-                  {recon.reconciledBy && (
-                    <p className="text-xs text-muted-foreground">
-                      Reconciled by: {recon.reconciledBy}
-                    </p>
-                  )}
+                  <Button variant="outline" size="sm">
+                    View Details
+                  </Button>
                 </div>
-                <Button variant="outline" size="sm">
-                  View Details
-                </Button>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

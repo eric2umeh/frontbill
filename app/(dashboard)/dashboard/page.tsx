@@ -1,6 +1,6 @@
 'use client'
 
-import { Suspense, useState } from 'react'
+import { Suspense, useState, useEffect } from 'react'
 import { DashboardStats } from '@/components/dashboard/dashboard-stats'
 import { RoomStatusGrid } from '@/components/dashboard/room-status-grid'
 import { RevenueChart } from '@/components/dashboard/revenue-chart'
@@ -11,15 +11,68 @@ import { NewBookingModal } from '@/components/bookings/new-booking-modal'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { UserCheck } from 'lucide-react'
-import { generateEnhancedMockGuests } from '@/lib/mock-data'
+import { createClient } from '@/lib/supabase/client'
+import { useRouter } from 'next/navigation'
+
+function StatsLoader() {
+  return (
+    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      {[...Array(4)].map((_, i) => (
+        <Skeleton key={i} className="h-32" />
+      ))}
+    </div>
+  )
+}
+
+function ChartLoader() {
+  return <Skeleton className="h-[400px] rounded-lg" />
+}
+
+function TableLoader() {
+  return <Skeleton className="h-[300px] rounded-lg" />
+}
+
+function GridLoader() {
+  return <Skeleton className="h-[400px] rounded-lg" />
+}
 
 export default function DashboardPage() {
   const [bookingModalOpen, setBookingModalOpen] = useState(false)
-  const mockGuests = generateEnhancedMockGuests(30)
+  const [orgId, setOrgId] = useState<string | null>(null)
+  const router = useRouter()
+
+  useEffect(() => {
+    getOrganization()
+  }, [])
+
+  const getOrganization = async () => {
+    try {
+      const supabase = createClient()
+      if (!supabase) return
+
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) {
+        router.push('/auth/login')
+        return
+      }
+
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('organization_id')
+        .eq('id', user.id)
+        .single()
+
+      if (profile) {
+        setOrgId(profile.organization_id)
+      }
+    } catch (error) {
+      console.error('Error fetching organization:', error)
+    }
+  }
   
   return (
     <div className="space-y-6">
-      <NewBookingModal open={bookingModalOpen} onClose={() => setBookingModalOpen(false)} />
+      <NewBookingModal open={bookingModalOpen} onClose={() => { setBookingModalOpen(false) }} />
       
       <div className="flex items-center justify-between">
         <div>
@@ -41,12 +94,14 @@ export default function DashboardPage() {
       {/* AI Insights Section */}
       <div className="border-t pt-6">
         <h2 className="text-lg font-semibold mb-4">AI-Powered Insights</h2>
-        <AIInsightsPanel bookings={mockGuests} dailyData={{
-          checkouts: 5,
-          checkIns: 8,
-          occupancy: 75,
-          revenue: 1500000,
-        }} />
+        {orgId && (
+          <AIInsightsPanel bookings={[]} dailyData={{
+            checkouts: 0,
+            checkIns: 0,
+            occupancy: 0,
+            revenue: 0,
+          }} />
+        )}
       </div>
 
       <div className="grid gap-6 lg:grid-cols-3">
@@ -70,26 +125,4 @@ export default function DashboardPage() {
       </div>
     </div>
   )
-}
-
-function StatsLoader() {
-  return (
-    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-      {[...Array(4)].map((_, i) => (
-        <Skeleton key={i} className="h-32" />
-      ))}
-    </div>
-  )
-}
-
-function ChartLoader() {
-  return <Skeleton className="h-[400px] rounded-lg" />
-}
-
-function TableLoader() {
-  return <Skeleton className="h-[300px] rounded-lg" />
-}
-
-function GridLoader() {
-  return <Skeleton className="h-[400px] rounded-lg" />
 }
