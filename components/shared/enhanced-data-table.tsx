@@ -5,7 +5,10 @@ import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Card, CardContent } from '@/components/ui/card'
-import { Search, Filter, LayoutGrid, List, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Calendar } from '@/components/ui/calendar'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Search, Filter, LayoutGrid, List, ChevronLeft, ChevronRight, CalendarIcon } from 'lucide-react'
+import { format, isSameDay, isWithinInterval, startOfDay, endOfDay } from 'date-fns'
 
 interface Column<T> {
   key: keyof T | string
@@ -26,6 +29,8 @@ interface EnhancedDataTableProps<T> {
   searchKeys?: (keyof T)[]
   renderCard?: (item: T) => React.ReactNode
   itemsPerPage?: number
+  dateField?: keyof T
+  onDateFilterChange?: (date: Date | undefined) => void
 }
 
 export function EnhancedDataTable<T extends Record<string, any>>({
@@ -35,11 +40,14 @@ export function EnhancedDataTable<T extends Record<string, any>>({
   searchKeys = [],
   renderCard,
   itemsPerPage = 10,
+  dateField,
+  onDateFilterChange,
 }: EnhancedDataTableProps<T>) {
   const [searchQuery, setSearchQuery] = useState('')
   const [activeFilters, setActiveFilters] = useState<Record<string, string>>({})
   const [viewMode, setViewMode] = useState<'table' | 'card'>('table')
   const [currentPage, setCurrentPage] = useState(1)
+  const [selectedDate, setSelectedDate] = useState<Date | undefined>()
 
   // Filter and search logic
   const filteredData = data.filter((item) => {
@@ -55,7 +63,12 @@ export function EnhancedDataTable<T extends Record<string, any>>({
       return item[key]?.toString().toLowerCase() === value.toLowerCase()
     })
 
-    return matchesSearch && matchesFilters
+    // Date filter
+    const matchesDate = !dateField || !selectedDate 
+      ? true 
+      : isSameDay(new Date(item[dateField]), selectedDate)
+
+    return matchesSearch && matchesFilters && matchesDate
   })
 
   // Pagination
@@ -66,6 +79,12 @@ export function EnhancedDataTable<T extends Record<string, any>>({
   const handleFilterChange = (key: string, value: string) => {
     setActiveFilters(prev => ({ ...prev, [key]: value }))
     setCurrentPage(1)
+  }
+
+  const handleDateChange = (date: Date | undefined) => {
+    setSelectedDate(date)
+    setCurrentPage(1)
+    onDateFilterChange?.(date)
   }
 
   return (
@@ -105,6 +124,36 @@ export function EnhancedDataTable<T extends Record<string, any>>({
               </SelectContent>
             </Select>
           ))}
+
+          {dateField && (
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" className="gap-2 w-[180px]">
+                  <CalendarIcon className="h-4 w-4" />
+                  {selectedDate ? format(selectedDate, 'MMM dd') : 'Select Date'}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="start">
+                <Calendar
+                  mode="single"
+                  selected={selectedDate}
+                  onSelect={handleDateChange}
+                />
+                {selectedDate && (
+                  <div className="p-3 border-t">
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      className="w-full"
+                      onClick={() => handleDateChange(undefined)}
+                    >
+                      Clear filter
+                    </Button>
+                  </div>
+                )}
+              </PopoverContent>
+            </Popover>
+          )}
 
           {renderCard && (
             <div className="flex items-center gap-1 border rounded-md">
