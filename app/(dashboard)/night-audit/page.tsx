@@ -276,6 +276,7 @@ export default function NightAuditPage() {
           <EnhancedDataTable
             data={pendingCheckouts}
             searchKeys={['room', 'guest']}
+            dateField="checkOut"
             columns={[
               {
                 key: 'room',
@@ -321,6 +322,7 @@ export default function NightAuditPage() {
           <EnhancedDataTable
             data={expectedArrivals}
             searchKeys={['room', 'guest']}
+            dateField="checkIn"
             columns={[
               {
                 key: 'room',

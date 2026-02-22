@@ -7,46 +7,16 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Calendar } from '@/components/ui/calendar'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { generateEnhancedMockGuests } from '@/lib/mock-data'
+import { mockTransactions } from '@/lib/mock-data'
 import { formatNaira } from '@/lib/utils/currency'
 import { Calendar as CalendarIcon, TrendingUp, CreditCard } from 'lucide-react'
 import { format, isToday, isSameDay } from 'date-fns'
-import { cn } from '@/lib/utils'
-
-const mockGuests = generateEnhancedMockGuests(50)
-
-// Generate transaction records from bookings
-const transactions = mockGuests.flatMap((guest) => {
-  const baseTransaction = {
-    id: Math.random().toString(),
-    transactionId: `TXN-${Math.random().toString(36).substring(2, 10).toUpperCase()}`,
-    date: guest.checkIn,
-    guestName: guest.name,
-    room: guest.room,
-    amount: guest.amount,
-    method: ['cash', 'pos', 'transfer', 'city_ledger'][Math.floor(Math.random() * 4)],
-    status: guest.payment === 'paid' ? 'completed' : guest.payment === 'partial' ? 'partial' : 'pending',
-    description: `Room ${guest.room} - ${guest.nights} night(s)`,
-  }
-
-  // If partial payment, create multiple transactions
-  if (guest.payment === 'partial') {
-    const paidAmount = guest.amount * 0.6
-    const remainingAmount = guest.amount * 0.4
-    return [
-      { ...baseTransaction, amount: paidAmount, status: 'completed' },
-      { ...baseTransaction, id: Math.random().toString(), transactionId: `TXN-${Math.random().toString(36).substring(2, 10).toUpperCase()}`, amount: remainingAmount, status: 'pending' }
-    ]
-  }
-
-  return [baseTransaction]
-})
 
 export default function TransactionsPage() {
   const [selectedDate, setSelectedDate] = useState<Date>(new Date())
 
   const filteredTransactions = useMemo(() => {
-    return transactions.filter(txn => 
+    return mockTransactions.filter(txn => 
       isSameDay(new Date(txn.date), selectedDate)
     )
   }, [selectedDate])
@@ -140,8 +110,9 @@ export default function TransactionsPage() {
       </Card>
 
       <EnhancedDataTable
-        data={filteredTransactions}
-        searchKeys={['transactionId', 'guestName', 'room']}
+        data={mockTransactions}
+        searchKeys={['guestName', 'room', 'transactionId']}
+        dateField="date"
         filters={[
           {
             key: 'method',

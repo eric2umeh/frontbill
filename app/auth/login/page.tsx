@@ -1,106 +1,155 @@
 'use client'
 
-import { useState } from 'react'
-import { useRouter } from 'next/navigation'
-import Link from 'next/link'
-import { mockAuth } from '@/lib/auth/mock-auth'
+import { useEffect, useState } from 'react'
+import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Hotel, Loader2, AlertCircle } from 'lucide-react'
+import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { Hotel } from 'lucide-react'
 
-export default function LoginPage() {
+export default function Page() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [loading, setLoading] = useState(false)
+  const [isLoading, setIsLoading] = useState(false)
+  const [isConfigured, setIsConfigured] = useState(true)
   const router = useRouter()
+
+  useEffect(() => {
+    const supabase = createClient()
+    if (!supabase) {
+      setIsConfigured(false)
+    }
+  }, [])
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
-    setLoading(true)
+    setIsLoading(true)
 
     try {
-      const { user, error } = await mockAuth.signIn(email, password)
+      const supabase = createClient()
+      if (!supabase) {
+        toast.error('Supabase not configured. Please add environment variables.')
+        setIsConfigured(false)
+        setIsLoading(false)
+        return
+      }
+
+      console.log("[v0] Starting login for:", email)
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      })
 
       if (error) {
-        toast.error(error)
-      } else if (user) {
-        toast.success('Login successful!')
-        router.push('/dashboard')
-        router.refresh()
+        console.log("[v0] Login error:", error.message)
+        throw error
       }
+
+      console.log("[v0] Login successful, user:", data.user?.id)
+      toast.success('Login successful!')
+      
+      // Redirect after a short delay to ensure session is established
+      setTimeout(() => {
+        console.log("[v0] Redirecting to dashboard")
+        router.push('/dashboard')
+      }, 1000)
     } catch (error: any) {
+      console.log("[v0] Login failed:", error.message)
       toast.error(error.message || 'Failed to login')
-    } finally {
-      setLoading(false)
+      setIsLoading(false)
     }
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100 p-4">
-      <Card className="w-full max-w-md">
-        <CardHeader className="space-y-4 text-center">
-          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-primary">
-            <Hotel className="h-6 w-6 text-primary-foreground" />
-          </div>
-          <div>
-            <CardTitle className="text-2xl font-bold">FrontBill</CardTitle>
-            <CardDescription className="mt-2">
-              Hotel Financial Accountability System
-            </CardDescription>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleLogin} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                type="email"
-                placeholder="admin@hotel.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                disabled={loading}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
-              <Input
-                id="password"
-                type="password"
-                placeholder="Enter your password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                disabled={loading}
-              />
-            </div>
-            <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? 'Signing in...' : 'Sign In'}
-            </Button>
-          </form>
-          <div className="mt-4 p-3 bg-muted rounded text-xs space-y-1">
-            <p className="font-semibold text-center mb-2">Demo Credentials</p>
-            <p>📧 <code className="bg-background px-1 py-0.5 rounded">admin@frontbill.com</code></p>
-            <p>🔐 <code className="bg-background px-1 py-0.5 rounded">Admin@123456</code></p>
-            <p className="pt-1">or</p>
-            <p>📧 <code className="bg-background px-1 py-0.5 rounded">manager@frontbill.com</code></p>
-            <p>🔐 <code className="bg-background px-1 py-0.5 rounded">Manager@123</code></p>
-          </div>
-
-          <div className="mt-4 space-y-2 text-center text-sm text-muted-foreground">
-            <p>
-              Don't have an account?{' '}
-              <Link href="/auth/sign-up" className="text-primary hover:underline">
-                Sign up
-              </Link>
-            </p>
-          </div>
-        </CardContent>
-      </Card>
+    <div className="flex min-h-svh w-full items-center justify-center p-6 md:p-10 bg-gradient-to-br from-slate-50 to-slate-100">
+      <div className="w-full max-w-sm">
+        <div className="flex flex-col gap-6">
+          <Card>
+            <CardHeader className="space-y-4">
+              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-primary">
+                <Hotel className="h-6 w-6 text-primary-foreground" />
+              </div>
+              <div className="text-center">
+                <CardTitle className="text-2xl">FrontBill</CardTitle>
+                <CardDescription>
+                  Hotel Financial Accountability System
+                </CardDescription>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {!isConfigured && (
+                <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg flex gap-3">
+                  <AlertCircle className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                  <div className="text-sm text-amber-700">
+                    <p className="font-semibold mb-1">Setup Required</p>
+                    <p className="mb-3">Environment variables not configured.</p>
+                    <Link href="/auth/setup" className="underline font-semibold hover:underline-offset-2">
+                      Go to Setup Guide
+                    </Link>
+                  </div>
+                </div>
+              )}
+              
+              <form onSubmit={handleLogin}>
+                <div className="flex flex-col gap-6">
+                  <div className="grid gap-2">
+                    <Label htmlFor="email">Email</Label>
+                    <Input
+                      id="email"
+                      type="email"
+                      placeholder="m@example.com"
+                      required
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      disabled={!isConfigured}
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="password">Password</Label>
+                    <Input
+                      id="password"
+                      type="password"
+                      required
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      disabled={!isConfigured}
+                    />
+                  </div>
+                  <Button type="submit" className="w-full" disabled={isLoading || !isConfigured}>
+                    {isLoading ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Logging in...
+                      </>
+                    ) : (
+                      'Login'
+                    )}
+                  </Button>
+                </div>
+                <div className="mt-4 text-center text-sm">
+                  Don&apos;t have an account?{' '}
+                  <Link
+                    href="/auth/sign-up"
+                    className="underline underline-offset-4"
+                  >
+                    Sign up
+                  </Link>
+                </div>
+              </form>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
     </div>
   )
 }

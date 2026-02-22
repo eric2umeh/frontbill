@@ -3,21 +3,21 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { mockAuth } from '@/lib/auth/mock-auth'
+import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { toast } from 'sonner'
-import { Hotel } from 'lucide-react'
+import { Hotel, Loader2 } from 'lucide-react'
 
 export default function SignUpPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [firstName, setFirstName] = useState('')
   const [lastName, setLastName] = useState('')
-  const [role, setRole] = useState<'admin' | 'manager' | 'front_desk' | 'accountant'>('front_desk')
+  const [role, setRole] = useState<'admin' | 'manager' | 'staff' | 'accountant'>('staff')
   const [loading, setLoading] = useState(false)
   const router = useRouter()
 
@@ -26,11 +26,30 @@ export default function SignUpPage() {
     setLoading(true)
 
     try {
-      // Simulate sign-up with mock auth system
-      await new Promise(resolve => setTimeout(resolve, 1000))
+      const supabase = createClient()
+      if (!supabase) {
+        toast.error('Supabase not configured. Please add environment variables.')
+        return
+      }
+
+      const fullName = `${firstName} ${lastName}`
       
-      toast.success('Account created! You can now sign in with demo credentials.')
-      router.push('/auth/login')
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          emailRedirectTo: `${window.location.origin}/dashboard`,
+          data: {
+            full_name: fullName,
+            role: role,
+          },
+        },
+      })
+
+      if (error) throw error
+
+      toast.success('Account created! Please check your email to verify your account.')
+      router.push('/auth/sign-up-success')
     } catch (error: any) {
       toast.error(error.message || 'Failed to create account')
     } finally {
@@ -114,13 +133,20 @@ export default function SignUpPage() {
                 <SelectContent>
                   <SelectItem value="admin">Admin</SelectItem>
                   <SelectItem value="manager">Manager</SelectItem>
-                  <SelectItem value="front_desk">Front Desk</SelectItem>
+                  <SelectItem value="staff">Staff</SelectItem>
                   <SelectItem value="accountant">Accountant</SelectItem>
                 </SelectContent>
               </Select>
             </div>
             <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? 'Creating account...' : 'Create Account'}
+              {loading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Creating account...
+                </>
+              ) : (
+                'Create Account'
+              )}
             </Button>
           </form>
           <p className="mt-4 text-center text-sm text-muted-foreground">

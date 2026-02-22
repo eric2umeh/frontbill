@@ -1,16 +1,17 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { EnhancedDataTable } from '@/components/shared/enhanced-data-table'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { CardContent } from '@/components/ui/card'
 import { NewBookingModal } from '@/components/bookings/new-booking-modal'
+import { ExtendStayModal } from '@/components/bookings/extend-stay-modal'
 import { generateEnhancedMockGuests } from '@/lib/mock-data'
 import { formatNaira } from '@/lib/utils/currency'
 import { Plus } from 'lucide-react'
 import { useRouter } from 'next/navigation'
-import { addDays } from 'date-fns'
+import { addDays, isSameDay } from 'date-fns'
 
 const mockGuests = generateEnhancedMockGuests(50).map(g => ({
   ...g,
@@ -20,6 +21,8 @@ const mockGuests = generateEnhancedMockGuests(50).map(g => ({
 
 export default function BookingsPage() {
   const [modalOpen, setModalOpen] = useState(false)
+  const [extendModalOpen, setExtendModalOpen] = useState(false)
+  const [selectedBooking, setSelectedBooking] = useState<any>(null)
   const router = useRouter()
   
   const statusColors = {
@@ -40,6 +43,16 @@ export default function BookingsPage() {
   return (
     <div className="space-y-6">
       <NewBookingModal open={modalOpen} onClose={() => setModalOpen(false)} />
+      {selectedBooking && (
+        <ExtendStayModal 
+          open={extendModalOpen} 
+          onClose={() => {
+            setExtendModalOpen(false)
+            setSelectedBooking(null)
+          }}
+          booking={selectedBooking}
+        />
+      )}
       
       <div className="flex items-center justify-between">
         <div>
@@ -54,34 +67,16 @@ export default function BookingsPage() {
 
       <EnhancedDataTable
         data={mockGuests}
-        searchKeys={['name', 'phone', 'email', 'room']}
+        searchKeys={['name', 'room', 'folioId']}
+        dateField="checkIn"
         filters={[
           {
-            key: 'status',
-            label: 'Status',
-            options: [
-              { value: 'checked_in', label: 'Checked In' },
-              { value: 'checked_out', label: 'Checked Out' },
-              { value: 'no_show', label: 'No Show' },
-              { value: 'cancelled', label: 'Cancelled' },
-            ],
-          },
-          {
             key: 'payment',
-            label: 'Payment',
+            label: 'All Payment',
             options: [
               { value: 'paid', label: 'Paid' },
               { value: 'partial', label: 'Partial' },
               { value: 'pending', label: 'Pending' },
-            ],
-          },
-          {
-            key: 'checkIn',
-            label: 'Check-in Date',
-            options: [
-              { value: 'today', label: 'Today' },
-              { value: 'past', label: 'Past' },
-              { value: 'future', label: 'Future' },
             ],
           },
         ]}
@@ -143,15 +138,6 @@ export default function BookingsPage() {
             ),
           },
           {
-            key: 'status',
-            label: 'Status',
-            render: (guest) => (
-              <Badge variant="outline" className={statusColors[guest.status]}>
-                {guest.status.replace('_', ' ')}
-              </Badge>
-            ),
-          },
-          {
             key: 'payment',
             label: 'Payment',
             render: (guest) => (
@@ -165,6 +151,29 @@ export default function BookingsPage() {
                   </div>
                 )}
               </div>
+            ),
+          },
+          {
+            key: 'actions',
+            label: 'Actions',
+            render: (guest) => (
+              <Button 
+                size="sm" 
+                variant="outline"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setSelectedBooking({
+                    folioId: guest.folioId,
+                    guestName: guest.name,
+                    room: `Room ${guest.room}`,
+                    currentCheckOut: guest.checkOut,
+                    ratePerNight: guest.amount / guest.nights,
+                  })
+                  setExtendModalOpen(true)
+                }}
+              >
+                Extend Stay
+              </Button>
             ),
           },
         ]}
