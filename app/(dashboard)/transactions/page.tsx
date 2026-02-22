@@ -1,55 +1,92 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
+import { createClient } from '@/lib/supabase/client'
+import { useRouter } from 'next/navigation'
 import { EnhancedDataTable } from '@/components/shared/enhanced-data-table'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Calendar } from '@/components/ui/calendar'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { generateEnhancedMockGuests } from '@/lib/mock-data'
 import { formatNaira } from '@/lib/utils/currency'
-import { Calendar as CalendarIcon, TrendingUp, CreditCard } from 'lucide-react'
+import { Calendar as CalendarIcon, TrendingUp, CreditCard, Loader2 } from 'lucide-react'
 import { format, isToday, isSameDay } from 'date-fns'
-import { cn } from '@/lib/utils'
 
-const mockGuests = generateEnhancedMockGuests(50)
-
-// Generate transaction records from bookings
-const transactions = mockGuests.flatMap((guest) => {
-  const baseTransaction = {
-    id: Math.random().toString(),
-    transactionId: `TXN-${Math.random().toString(36).substring(2, 10).toUpperCase()}`,
-    date: guest.checkIn,
-    guestName: guest.name,
-    room: guest.room,
-    amount: guest.amount,
-    method: ['cash', 'pos', 'transfer', 'city_ledger'][Math.floor(Math.random() * 4)],
-    status: guest.payment === 'paid' ? 'completed' : guest.payment === 'partial' ? 'partial' : 'pending',
-    description: `Room ${guest.room} - ${guest.nights} night(s)`,
-  }
-
-  // If partial payment, create multiple transactions
-  if (guest.payment === 'partial') {
-    const paidAmount = guest.amount * 0.6
-    const remainingAmount = guest.amount * 0.4
-    return [
-      { ...baseTransaction, amount: paidAmount, status: 'completed' },
-      { ...baseTransaction, id: Math.random().toString(), transactionId: `TXN-${Math.random().toString(36).substring(2, 10).toUpperCase()}`, amount: remainingAmount, status: 'pending' }
-    ]
-  }
-
-  return [baseTransaction]
-})
+interface Transaction {
+  id: string
+  transaction_id: string
+  booking_id: string
+  amount: number
+  method: string
+  status: string
+  payment_date: string
+  guest_name: string
+  description?: string
+}
 
 export default function TransactionsPage() {
   const [selectedDate, setSelectedDate] = useState<Date>(new Date())
+  const [transactions, setTransactions] = useState<Transaction[]>([])
+  const [loading, setLoading] = useState(true)
+  const router = useRouter()
+
+  useEffect(() => {
+    fetchTransactions()
+  }, [selectedDate])
+
+  const fetchTransactions = async () => {
+    try {
+      setLoading(true)
+      const supabase = createClient()
+      
+      if (!supabase) {
+        setTransactions([])
+        setLoading(false)
+        return
+      }
+
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) {
+        router.push('/auth/login')
+        return
+      }
+
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('organization_id')
+        .eq('id', user.id)
+        .single()
+
+      if (!profile) {
+        setTransactions([])
+        return
+      }
+
+      const dateStr = format(selectedDate, 'yyyy-MM-dd')
+      const { data, error } = await supabase
+        .from('payments')
+        .select('*')
+        .eq('organization_id', profile.organization_id)
+        .gte('payment_date', `${dateStr}T00:00:00`)
+        .lte('payment_date', `${dateStr}T23:59:59`)
+        .order('payment_date', { ascending: false })
+
+      if (error) throw error
+      setTransactions(data || [])
+    } catch (error: any) {
+      console.error('Error fetching transactions:', error)
+      setTransactions([])
+    } finally {
+      setLoading(false)
+    }
+  }
 
   const filteredTransactions = useMemo(() => {
     return transactions.filter(txn => 
-      isSameDay(new Date(txn.date), selectedDate)
+      isSameDay(new Date(txn.payment_date), selectedDate)
     )
-  }, [selectedDate])
+  }, [transactions, selectedDate])
 
   const totalAmount = useMemo(() => {
     return filteredTransactions
@@ -68,6 +105,14 @@ export default function TransactionsPage() {
     completed: 'bg-green-500/10 text-green-700 border-green-200',
     partial: 'bg-yellow-500/10 text-yellow-700 border-yellow-200',
     pending: 'bg-orange-500/10 text-orange-700 border-orange-200',
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-96">
+        <Loader2 className="h-8 w-8 animate-spin" />
+      </div>
+    )
   }
 
   return (
@@ -141,7 +186,8 @@ export default function TransactionsPage() {
 
       <EnhancedDataTable
         data={filteredTransactions}
-        searchKeys={['transactionId', 'guestName', 'room']}
+        searchKeys={['guest_name', 'transaction_id', 'description']}
+        dateField="payment_date"
         filters={[
           {
             key: 'method',
@@ -165,28 +211,28 @@ export default function TransactionsPage() {
         ]}
         columns={[
           {
-            key: 'transactionId',
+            key: 'transaction_id',
             label: 'Transaction ID',
             render: (txn) => (
-              <div className="font-mono text-sm">{txn.transactionId}</div>
+              <div className="font-mono text-sm">{txn.transaction_id}</div>
             ),
           },
           {
-            key: 'guestName',
+            key: 'guest_name',
             label: 'Guest',
             render: (txn) => (
               <div>
-                <div className="font-medium">{txn.guestName}</div>
-                <div className="text-xs text-muted-foreground">{txn.description}</div>
+                <div className="font-medium">{txn.guest_name}</div>
+                <div className="text-xs text-muted-foreground">{txn.description || 'Payment'}</div>
               </div>
             ),
           },
           {
-            key: 'date',
+            key: 'payment_date',
             label: 'Date',
             render: (txn) => (
               <div className="text-sm">
-                {new Date(txn.date).toLocaleDateString('en-GB')}
+                {new Date(txn.payment_date).toLocaleDateString('en-GB')}
               </div>
             ),
           },
@@ -212,9 +258,9 @@ export default function TransactionsPage() {
             <div className="space-y-3">
               <div className="flex items-start justify-between">
                 <div>
-                  <div className="font-mono text-sm text-muted-foreground">{txn.transactionId}</div>
-                  <div className="font-semibold mt-1">{txn.guestName}</div>
-                  <div className="text-sm text-muted-foreground">{txn.description}</div>
+                  <div className="font-mono text-sm text-muted-foreground">{txn.transaction_id}</div>
+                  <div className="font-semibold mt-1">{txn.guest_name}</div>
+                  <div className="text-sm text-muted-foreground">{txn.description || 'Payment'}</div>
                 </div>
                 <Badge variant="outline" className={statusColors[txn.status]}>
                   {txn.status}

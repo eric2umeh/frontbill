@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { type MockUser, mockAuth } from '@/lib/auth/mock-auth'
+import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -16,8 +16,15 @@ import { Bell, Menu, LogOut, User as UserIcon, Loader2 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 
+interface DashboardUser {
+  id: string
+  email: string
+  name: string
+  role: string
+}
+
 interface HeaderProps {
-  user: MockUser
+  user: DashboardUser
   onMenuClick?: () => void
 }
 
@@ -28,12 +35,21 @@ export function Header({ user, onMenuClick }: HeaderProps) {
   const handleLogout = async () => {
     setLoggingOut(true)
     try {
-      await mockAuth.signOut()
+      const supabase = createClient()
+      if (!supabase) {
+        toast.error('Unable to logout')
+        setLoggingOut(false)
+        return
+      }
+
+      const { error } = await supabase.auth.signOut()
+      if (error) throw error
+
       toast.success('Logged out successfully')
       router.push('/auth/login')
       router.refresh()
-    } catch (error) {
-      toast.error('Failed to logout')
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to logout')
       setLoggingOut(false)
     }
   }
@@ -51,7 +67,7 @@ export function Header({ user, onMenuClick }: HeaderProps) {
         </Button>
         <div>
           <h2 className="text-sm font-medium text-muted-foreground">Welcome back,</h2>
-          <p className="text-lg font-semibold">{user.full_name}</p>
+          <p className="text-lg font-semibold">{user.name}</p>
         </div>
       </div>
 
@@ -74,7 +90,7 @@ export function Header({ user, onMenuClick }: HeaderProps) {
           <DropdownMenuContent className="w-56" align="end" forceMount>
             <DropdownMenuLabel className="font-normal">
               <div className="flex flex-col space-y-1">
-                <p className="text-sm font-medium leading-none">{user.full_name}</p>
+                <p className="text-sm font-medium leading-none">{user.name}</p>
                 <p className="text-xs leading-none text-muted-foreground">
                   {user.role.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}
                 </p>

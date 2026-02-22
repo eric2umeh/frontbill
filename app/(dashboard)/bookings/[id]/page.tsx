@@ -10,14 +10,19 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { ArrowLeft, CreditCard, Trash2, Edit, Plus } from 'lucide-react'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { ArrowLeft, CreditCard, Trash2, Edit, Plus, Clock } from 'lucide-react'
 import { formatNaira } from '@/lib/utils/currency'
 import { toast } from 'sonner'
+import { ExtendStayModal } from '@/components/bookings/extend-stay-modal'
 
 export default function BookingDetailPage({ params }: { params: { id: string } }) {
   const router = useRouter()
-  const [paymentModalOpen, setPaymentModalOpen] = useState(false)
-  const [paymentAmount, setPaymentAmount] = useState('')
+  const [addChargeModalOpen, setAddChargeModalOpen] = useState(false)
+  const [extendStayModalOpen, setExtendStayModalOpen] = useState(false)
+  const [chargeAmount, setChargeAmount] = useState('')
+  const [chargeDescription, setChargeDescription] = useState('')
+  const [chargeType, setChargeType] = useState('payment')
   const [paymentMethod, setPaymentMethod] = useState('')
 
   // Mock booking data with folio
@@ -50,24 +55,44 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
     { id: '6', date: '2024-01-17', description: 'Bar - Drinks', amount: 8000, type: 'beverage' },
   ])
 
-  const handlePaymentUpdate = () => {
-    if (!paymentAmount || !paymentMethod) {
-      toast.error('Please enter amount and select payment method')
+  const handleAddCharge = () => {
+    if (!chargeAmount) {
+      toast.error('Please enter amount')
+      return
+    }
+
+    if (chargeType === 'payment' && !paymentMethod) {
+      toast.error('Please select payment method')
+      return
+    }
+
+    if (chargeType !== 'payment' && !chargeDescription) {
+      toast.error('Please enter charge description')
       return
     }
 
     const newCharge = {
       id: Date.now().toString(),
       date: new Date().toISOString().split('T')[0],
-      description: `Payment Received - ${paymentMethod}`,
-      amount: -Number(paymentAmount),
-      type: 'payment',
+      description: chargeType === 'payment' 
+        ? `Payment Received - ${paymentMethod}`
+        : chargeDescription,
+      amount: chargeType === 'payment' ? -Number(chargeAmount) : Number(chargeAmount),
+      type: chargeType,
     }
 
     setFolioCharges([...folioCharges, newCharge])
-    toast.success(`Payment of ${formatNaira(Number(paymentAmount))} recorded`)
-    setPaymentModalOpen(false)
-    setPaymentAmount('')
+    
+    if (chargeType === 'payment') {
+      toast.success(`Payment of ${formatNaira(Number(chargeAmount))} recorded`)
+    } else {
+      toast.success(`Charge of ${formatNaira(Number(chargeAmount))} added`)
+    }
+    
+    setAddChargeModalOpen(false)
+    setChargeAmount('')
+    setChargeDescription('')
+    setChargeType('payment')
     setPaymentMethod('')
   }
 
@@ -82,37 +107,79 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
 
   return (
     <div className="space-y-6">
-      <Dialog open={paymentModalOpen} onOpenChange={setPaymentModalOpen}>
+      <ExtendStayModal 
+        open={extendStayModalOpen}
+        onClose={() => setExtendStayModalOpen(false)}
+        booking={{
+          folioId: booking.folioId,
+          guestName: booking.guestName,
+          room: `Room ${booking.room}`,
+          currentCheckOut: booking.checkOut,
+          ratePerNight: booking.ratePerNight,
+        }}
+      />
+      
+      <Dialog open={addChargeModalOpen} onOpenChange={setAddChargeModalOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Update Payment</DialogTitle>
+            <DialogTitle>Add Charge or Payment</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label>Amount</Label>
-              <Input
-                type="number"
-                placeholder="Enter amount"
-                value={paymentAmount}
-                onChange={(e) => setPaymentAmount(e.target.value)}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Payment Method</Label>
-              <Select value={paymentMethod} onValueChange={setPaymentMethod}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select method" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Cash">Cash</SelectItem>
-                  <SelectItem value="POS">POS</SelectItem>
-                  <SelectItem value="Transfer">Transfer</SelectItem>
-                  <SelectItem value="City Ledger">City Ledger</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <Button onClick={handlePaymentUpdate} className="w-full">
-              Record Payment
+            <Tabs value={chargeType} onValueChange={(value) => setChargeType(value)}>
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="charge">Add Charge</TabsTrigger>
+                <TabsTrigger value="payment">Record Payment</TabsTrigger>
+              </TabsList>
+              
+              <TabsContent value="charge" className="space-y-4 mt-4">
+                <div className="space-y-2">
+                  <Label>Charge Amount</Label>
+                  <Input
+                    type="number"
+                    placeholder="Enter amount"
+                    value={chargeAmount}
+                    onChange={(e) => setChargeAmount(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Description</Label>
+                  <Input
+                    placeholder="e.g., Restaurant - Dinner"
+                    value={chargeDescription}
+                    onChange={(e) => setChargeDescription(e.target.value)}
+                  />
+                </div>
+              </TabsContent>
+              
+              <TabsContent value="payment" className="space-y-4 mt-4">
+                <div className="space-y-2">
+                  <Label>Payment Amount</Label>
+                  <Input
+                    type="number"
+                    placeholder="Enter amount"
+                    value={chargeAmount}
+                    onChange={(e) => setChargeAmount(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Payment Method</Label>
+                  <Select value={paymentMethod} onValueChange={setPaymentMethod}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select method" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Cash">Cash</SelectItem>
+                      <SelectItem value="POS">POS</SelectItem>
+                      <SelectItem value="Transfer">Transfer</SelectItem>
+                      <SelectItem value="City Ledger">City Ledger</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </TabsContent>
+            </Tabs>
+            
+            <Button onClick={handleAddCharge} className="w-full">
+              {chargeType === 'payment' ? 'Record Payment' : 'Add Charge'}
             </Button>
           </div>
         </DialogContent>
@@ -124,6 +191,10 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
           Back to Bookings
         </Button>
         <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={() => setExtendStayModalOpen(true)}>
+            <Clock className="mr-2 h-4 w-4" />
+            Extend Stay
+          </Button>
           <Button variant="outline" size="sm">
             <Edit className="mr-2 h-4 w-4" />
             Edit
@@ -178,7 +249,7 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
             <div>
               <div className="flex items-center justify-between mb-4">
                 <h3 className="font-semibold text-lg">Folio - All Charges & Payments</h3>
-                <Button size="sm" variant="outline">
+                <Button size="sm" variant="outline" onClick={() => setAddChargeModalOpen(true)}>
                   <Plus className="mr-2 h-4 w-4" />
                   Add Charge
                 </Button>
@@ -225,10 +296,6 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
                   {totalCharges > 0 ? '-' : ''}{formatNaira(Math.abs(totalCharges))}
                 </span>
               </div>
-              <Button className="w-full" onClick={() => setPaymentModalOpen(true)}>
-                <CreditCard className="mr-2 h-4 w-4" />
-                Update Payment
-              </Button>
             </CardContent>
           </Card>
 

@@ -1,6 +1,7 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import { EnhancedDataTable } from '@/components/shared/enhanced-data-table'
 import { AddOrganizationModal } from '@/components/organizations/add-organization-modal'
@@ -8,23 +9,74 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { CardContent } from '@/components/ui/card'
 import { formatNaira } from '@/lib/utils/currency'
-import { Building2, Plus } from 'lucide-react'
+import { Building2, Plus, Loader2 } from 'lucide-react'
+import { toast } from 'sonner'
 
-// Mock organizations with varied balances (negative = debt, positive = credit)
-const mockOrganizations = [
-  { id: '1', name: 'Federal Ministry of Health', type: 'government', contactPerson: 'Dr. Adewale Johnson', email: 'adewale@health.gov.ng', phone: '+234 803 456 7890', balance: -450000, status: 'active', creditLimit: 1000000 },
-  { id: '2', name: 'Shell Nigeria Ltd', type: 'private', contactPerson: 'Mrs. Fatima Bello', email: 'fatima.bello@shell.com.ng', phone: '+234 805 234 5678', balance: 0, status: 'active', creditLimit: 2000000 },
-  { id: '3', name: 'United Nations Development Programme', type: 'ngo', contactPerson: 'Mr. John Smith', email: 'john.smith@undp.org', phone: '+234 802 345 6789', balance: 120000, status: 'active', creditLimit: 800000 },
-  { id: '4', name: 'Lagos State Government', type: 'government', contactPerson: 'Hon. Ngozi Okonjo', email: 'ngozi@lagosstate.gov.ng', phone: '+234 806 789 0123', balance: -875000, status: 'active', creditLimit: 1500000 },
-  { id: '5', name: 'TotalEnergies Nigeria', type: 'private', contactPerson: 'Mr. Pierre Dubois', email: 'pierre.dubois@totalenergies.com', phone: '+234 807 890 1234', balance: 0, status: 'active', creditLimit: 2000000 },
-  { id: '6', name: 'Red Cross Nigeria', type: 'ngo', contactPerson: 'Mrs. Aisha Mohammed', email: 'aisha@redcross.org.ng', phone: '+234 808 901 2345', balance: -200000, status: 'active', creditLimit: 500000 },
-  { id: '7', name: 'Dangote Group', type: 'private', contactPerson: 'Alhaji Sani Dangote', email: 'sani@dangote.com', phone: '+234 809 012 3456', balance: 350000, status: 'active', creditLimit: 2500000 },
-  { id: '8', name: 'World Health Organization', type: 'ngo', contactPerson: 'Dr. Sarah Williams', email: 'sarah.williams@who.int', phone: '+234 810 123 4567', balance: -100000, status: 'active', creditLimit: 600000 },
-]
+interface Organization {
+  id: string
+  name: string
+  type: string
+  contact_person: string
+  email: string
+  phone: string
+  balance: number
+  status: string
+  credit_limit: number
+}
 
 export default function OrganizationsPage() {
-  const router = useRouter()
+  const [organizations, setOrganizations] = useState<Organization[]>([])
+  const [loading, setLoading] = useState(true)
   const [addOrgModalOpen, setAddOrgModalOpen] = useState(false)
+  const router = useRouter()
+  
+  useEffect(() => {
+    fetchOrganizations()
+  }, [])
+
+  const fetchOrganizations = async () => {
+    try {
+      setLoading(true)
+      const supabase = createClient()
+      
+      if (!supabase) {
+        setOrganizations([])
+        setLoading(false)
+        return
+      }
+
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) {
+        router.push('/auth/login')
+        return
+      }
+
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('organization_id')
+        .eq('id', user.id)
+        .single()
+
+      if (!profile) {
+        setOrganizations([])
+        return
+      }
+
+      const { data, error } = await supabase
+        .from('organizations')
+        .select('*')
+        .eq('organization_id', profile.organization_id)
+        .order('created_at', { ascending: false })
+
+      if (error) throw error
+      setOrganizations(data || [])
+    } catch (error: any) {
+      console.error('Error fetching organizations:', error)
+      setOrganizations([])
+    } finally {
+      setLoading(false)
+    }
+  }
   
   const typeColors = {
     government: 'bg-blue-500/10 text-blue-700 border-blue-200',
@@ -32,11 +84,19 @@ export default function OrganizationsPage() {
     ngo: 'bg-purple-500/10 text-purple-700 border-purple-200',
   }
 
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-96">
+        <Loader2 className="h-8 w-8 animate-spin" />
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-6">
       <AddOrganizationModal 
         open={addOrgModalOpen} 
-        onClose={() => setAddOrgModalOpen(false)}
+        onClose={() => { setAddOrgModalOpen(false); fetchOrganizations() }}
       />
 
       <div className="flex items-center justify-between">
@@ -53,8 +113,8 @@ export default function OrganizationsPage() {
       </div>
 
       <EnhancedDataTable
-        data={mockOrganizations}
-        searchKeys={['name', 'contactPerson', 'email']}
+        data={organizations}
+        searchKeys={['name', 'contact_person', 'email']}
         filters={[
           {
             key: 'type',
@@ -81,10 +141,10 @@ export default function OrganizationsPage() {
             render: (org) => (
               <div 
                 className="cursor-pointer hover:text-primary"
-                onClick={() => router.push(`/organizations/${org.id}?data=${encodeURIComponent(JSON.stringify(org))}`)}
+                onClick={() => router.push(`/organizations/${org.id}`)}
               >
                 <div className="font-semibold">{org.name}</div>
-                <div className="text-xs text-muted-foreground">{org.contactPerson}</div>
+                <div className="text-xs text-muted-foreground">{org.contact_person}</div>
               </div>
             ),
           },
@@ -113,7 +173,7 @@ export default function OrganizationsPage() {
             render: (org) => (
               <div 
                 className={`font-semibold cursor-pointer ${org.balance > 0 ? 'text-green-600' : org.balance < 0 ? 'text-red-600' : ''}`}
-                onClick={() => router.push(`/organizations/${org.id}?data=${encodeURIComponent(JSON.stringify(org))}`)}
+                onClick={() => router.push(`/organizations/${org.id}`)}
               >
                 {org.balance < 0 ? 'Debt: ' : org.balance > 0 ? 'Credit: ' : ''}{formatNaira(Math.abs(org.balance))}
               </div>
@@ -123,7 +183,7 @@ export default function OrganizationsPage() {
         renderCard={(org) => (
           <CardContent 
             className="p-4 cursor-pointer hover:bg-accent"
-            onClick={() => router.push(`/organizations/${org.id}?data=${encodeURIComponent(JSON.stringify(org))}`)}
+            onClick={() => router.push(`/organizations/${org.id}`)}
           >
             <div className="space-y-3">
               <div className="flex items-start justify-between">
@@ -132,7 +192,7 @@ export default function OrganizationsPage() {
                     <Building2 className="h-4 w-4" />
                     {org.name}
                   </div>
-                  <div className="text-sm text-muted-foreground">{org.contactPerson}</div>
+                  <div className="text-sm text-muted-foreground">{org.contact_person}</div>
                 </div>
                 <Badge variant="outline" className={typeColors[org.type as keyof typeof typeColors]}>
                   {org.type.toUpperCase()}
@@ -147,7 +207,7 @@ export default function OrganizationsPage() {
                 </div>
                 <div>
                   <div className="text-muted-foreground">Credit Limit</div>
-                  <div className="font-semibold">{formatNaira(org.creditLimit)}</div>
+                  <div className="font-semibold">{formatNaira(org.credit_limit)}</div>
                 </div>
               </div>
               <div className="pt-2 border-t text-sm text-muted-foreground">

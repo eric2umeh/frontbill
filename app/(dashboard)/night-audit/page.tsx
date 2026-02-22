@@ -1,57 +1,127 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { createClient } from '@/lib/supabase/client'
+import { useRouter } from 'next/navigation'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Separator } from '@/components/ui/separator'
 import { EnhancedDataTable } from '@/components/shared/enhanced-data-table'
 import { formatNaira } from '@/lib/utils/currency'
 import { 
-  Moon, 
   CheckCircle2, 
   AlertTriangle, 
   TrendingUp, 
   Users, 
   Bed,
-  CreditCard,
   DollarSign,
-  FileText,
   Clock,
-  Play
+  Play,
+  Loader2
 } from 'lucide-react'
 import { toast } from 'sonner'
 
 export default function NightAuditPage() {
   const [auditRunning, setAuditRunning] = useState(false)
   const [auditComplete, setAuditComplete] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [auditData, setAuditData] = useState<any>(null)
+  const router = useRouter()
 
-  // Mock data for demonstration
-  const auditDate = new Date().toLocaleDateString('en-GB')
-  const occupancyRate = 78
-  const totalRooms = 50
-  const occupiedRooms = 39
-  const totalRevenue = 1250000
-  const cashRevenue = 450000
-  const posRevenue = 600000
-  const transferRevenue = 200000
-  const cityLedgerRevenue = 0
-  
-  const pendingCheckouts = [
-    { room: '101', guest: 'Mr. Adewale Johnson', checkOut: new Date().toISOString(), balance: 0 },
-    { room: '205', guest: 'Mrs. Fatima Bello', checkOut: new Date().toISOString(), balance: 15000 },
-    { room: '301', guest: 'Chief Emeka Okafor', checkOut: new Date().toISOString(), balance: 0 },
-  ]
+  useEffect(() => {
+    fetchAuditData()
+  }, [])
 
-  const expectedArrivals = [
-    { room: '102', guest: 'Dr. Sarah Williams', checkIn: new Date().toISOString(), status: 'confirmed' },
-    { room: '208', guest: 'Mr. Pierre Dubois', checkIn: new Date().toISOString(), status: 'confirmed' },
-  ]
+  const fetchAuditData = async () => {
+    try {
+      setLoading(true)
+      const supabase = createClient()
+      
+      if (!supabase) {
+        setAuditData({
+          occupancyRate: 0,
+          totalRooms: 0,
+          occupiedRooms: 0,
+          totalRevenue: 0,
+          revenues: { cash: 0, pos: 0, transfer: 0, cityLedger: 0 },
+          pendingCheckouts: [],
+          expectedArrivals: [],
+          anomalies: []
+        })
+        setLoading(false)
+        return
+      }
 
-  const anomalies = [
-    { type: 'Cash Variance', description: 'Cash drawer short by ₦5,000', severity: 'medium' },
-    { type: 'Unposted Charges', description: '2 minibar charges not posted to folios', severity: 'high' },
-  ]
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) {
+        router.push('/auth/login')
+        return
+      }
+
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('organization_id')
+        .eq('id', user.id)
+        .single()
+
+      if (!profile) {
+        setAuditData({
+          occupancyRate: 0,
+          totalRooms: 0,
+          occupiedRooms: 0,
+          totalRevenue: 0,
+          revenues: { cash: 0, pos: 0, transfer: 0, cityLedger: 0 },
+          pendingCheckouts: [],
+          expectedArrivals: [],
+          anomalies: []
+        })
+        return
+      }
+
+      // Fetch audit data
+      const { data: bookings } = await supabase
+        .from('bookings')
+        .select('*, rooms(id)')
+        .eq('organization_id', profile.organization_id)
+        .eq('status', 'checked_in')
+
+      const { data: payments } = await supabase
+        .from('payments')
+        .select('*')
+        .eq('organization_id', profile.organization_id)
+        .gte('payment_date', new Date().toISOString().split('T')[0])
+
+      setAuditData({
+        occupancyRate: bookings?.length || 0,
+        totalRooms: 50,
+        occupiedRooms: bookings?.length || 0,
+        totalRevenue: payments?.reduce((sum, p) => sum + p.amount, 0) || 0,
+        revenues: {
+          cash: payments?.filter(p => p.method === 'cash').reduce((sum, p) => sum + p.amount, 0) || 0,
+          pos: payments?.filter(p => p.method === 'pos').reduce((sum, p) => sum + p.amount, 0) || 0,
+          transfer: payments?.filter(p => p.method === 'transfer').reduce((sum, p) => sum + p.amount, 0) || 0,
+          cityLedger: 0
+        },
+        pendingCheckouts: bookings?.slice(0, 3) || [],
+        expectedArrivals: [],
+        anomalies: []
+      })
+    } catch (error: any) {
+      console.error('Error fetching audit data:', error)
+      setAuditData({
+        occupancyRate: 0,
+        totalRooms: 0,
+        occupiedRooms: 0,
+        totalRevenue: 0,
+        revenues: { cash: 0, pos: 0, transfer: 0, cityLedger: 0 },
+        pendingCheckouts: [],
+        expectedArrivals: [],
+        anomalies: []
+      })
+    } finally {
+      setLoading(false)
+    }
+  }
 
   const handleRunAudit = () => {
     setAuditRunning(true)
@@ -63,6 +133,17 @@ export default function NightAuditPage() {
       toast.success('Night audit completed successfully!')
     }, 3000)
   }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-96">
+        <Loader2 className="h-8 w-8 animate-spin" />
+      </div>
+    )
+  }
+
+  const auditDate = new Date().toLocaleDateString('en-GB')
+  const occupancyPercent = auditData?.totalRooms ? Math.round((auditData.occupiedRooms / auditData.totalRooms) * 100) : 0
 
   return (
     <div className="space-y-6">
@@ -98,7 +179,6 @@ export default function NightAuditPage() {
         </Button>
       </div>
 
-      {/* Audit Status Banner */}
       {auditComplete && (
         <Card className="border-green-200 bg-green-50">
           <CardContent className="flex items-center gap-3 p-4">
@@ -111,7 +191,6 @@ export default function NightAuditPage() {
         </Card>
       )}
 
-      {/* Key Metrics */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
@@ -121,9 +200,9 @@ export default function NightAuditPage() {
             <Bed className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{occupancyRate}%</div>
+            <div className="text-2xl font-bold">{occupancyPercent}%</div>
             <p className="text-xs text-muted-foreground mt-1">
-              {occupiedRooms} of {totalRooms} rooms occupied
+              {auditData?.occupiedRooms || 0} of {auditData?.totalRooms || 0} rooms occupied
             </p>
           </CardContent>
         </Card>
@@ -136,10 +215,10 @@ export default function NightAuditPage() {
             <DollarSign className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{formatNaira(totalRevenue)}</div>
+            <div className="text-2xl font-bold">{formatNaira(auditData?.totalRevenue || 0)}</div>
             <p className="text-xs text-green-600 mt-1 flex items-center gap-1">
               <TrendingUp className="h-3 w-3" />
-              +12% from yesterday
+              Today's revenue
             </p>
           </CardContent>
         </Card>
@@ -152,9 +231,9 @@ export default function NightAuditPage() {
             <Users className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{pendingCheckouts.length}</div>
+            <div className="text-2xl font-bold">{auditData?.pendingCheckouts?.length || 0}</div>
             <p className="text-xs text-muted-foreground mt-1">
-              Expected departures tomorrow
+              Expected departures
             </p>
           </CardContent>
         </Card>
@@ -167,15 +246,14 @@ export default function NightAuditPage() {
             <Users className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{expectedArrivals.length}</div>
+            <div className="text-2xl font-bold">{auditData?.expectedArrivals?.length || 0}</div>
             <p className="text-xs text-muted-foreground mt-1">
-              Confirmed reservations tomorrow
+              Confirmed reservations
             </p>
           </CardContent>
         </Card>
       </div>
 
-      {/* Revenue Breakdown */}
       <Card>
         <CardHeader>
           <CardTitle>Revenue Breakdown</CardTitle>
@@ -190,9 +268,9 @@ export default function NightAuditPage() {
               </div>
               <div className="flex items-center gap-4">
                 <div className="text-sm text-muted-foreground">
-                  {((cashRevenue / totalRevenue) * 100).toFixed(1)}%
+                  {auditData?.totalRevenue ? ((auditData.revenues.cash / auditData.totalRevenue) * 100).toFixed(1) : 0}%
                 </div>
-                <div className="font-semibold">{formatNaira(cashRevenue)}</div>
+                <div className="font-semibold">{formatNaira(auditData?.revenues.cash || 0)}</div>
               </div>
             </div>
             <div className="flex items-center justify-between">
@@ -202,9 +280,9 @@ export default function NightAuditPage() {
               </div>
               <div className="flex items-center gap-4">
                 <div className="text-sm text-muted-foreground">
-                  {((posRevenue / totalRevenue) * 100).toFixed(1)}%
+                  {auditData?.totalRevenue ? ((auditData.revenues.pos / auditData.totalRevenue) * 100).toFixed(1) : 0}%
                 </div>
-                <div className="font-semibold">{formatNaira(posRevenue)}</div>
+                <div className="font-semibold">{formatNaira(auditData?.revenues.pos || 0)}</div>
               </div>
             </div>
             <div className="flex items-center justify-between">
@@ -214,44 +292,30 @@ export default function NightAuditPage() {
               </div>
               <div className="flex items-center gap-4">
                 <div className="text-sm text-muted-foreground">
-                  {((transferRevenue / totalRevenue) * 100).toFixed(1)}%
+                  {auditData?.totalRevenue ? ((auditData.revenues.transfer / auditData.totalRevenue) * 100).toFixed(1) : 0}%
                 </div>
-                <div className="font-semibold">{formatNaira(transferRevenue)}</div>
-              </div>
-            </div>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <div className="h-2 w-2 rounded-full bg-orange-500" />
-                <span className="text-sm font-medium">City Ledger</span>
-              </div>
-              <div className="flex items-center gap-4">
-                <div className="text-sm text-muted-foreground">
-                  {((cityLedgerRevenue / totalRevenue) * 100).toFixed(1)}%
-                </div>
-                <div className="font-semibold">{formatNaira(cityLedgerRevenue)}</div>
+                <div className="font-semibold">{formatNaira(auditData?.revenues.transfer || 0)}</div>
               </div>
             </div>
           </div>
         </CardContent>
       </Card>
 
-      {/* Anomalies and Warnings */}
-      {anomalies.length > 0 && (
+      {auditData?.anomalies && auditData.anomalies.length > 0 && (
         <Card className="border-orange-200">
           <CardHeader>
             <div className="flex items-center gap-2">
               <AlertTriangle className="h-5 w-5 text-orange-600" />
               <CardTitle>Anomalies Detected</CardTitle>
             </div>
-            <CardDescription>Items requiring attention before completing audit</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            {anomalies.map((anomaly, index) => (
+            {auditData.anomalies.map((anomaly: any, index: number) => (
               <div key={index} className="flex items-start justify-between p-3 bg-orange-50 rounded-lg">
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
-                    <Badge variant={anomaly.severity === 'high' ? 'destructive' : 'secondary'}>
-                      {anomaly.severity}
+                    <Badge variant="secondary">
+                      {anomaly.severity || 'medium'}
                     </Badge>
                     <span className="font-semibold text-sm">{anomaly.type}</span>
                   </div>
@@ -265,96 +329,6 @@ export default function NightAuditPage() {
           </CardContent>
         </Card>
       )}
-
-      {/* Pending Checkouts */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Pending Checkouts</CardTitle>
-          <CardDescription>Guests scheduled to depart tomorrow</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <EnhancedDataTable
-            data={pendingCheckouts}
-            searchKeys={['room', 'guest']}
-            columns={[
-              {
-                key: 'room',
-                label: 'Room',
-                render: (item) => <div className="font-medium">Room {item.room}</div>,
-              },
-              {
-                key: 'guest',
-                label: 'Guest',
-                render: (item) => <div>{item.guest}</div>,
-              },
-              {
-                key: 'checkOut',
-                label: 'Check-out Date',
-                render: (item) => (
-                  <div className="text-sm">
-                    {new Date(item.checkOut).toLocaleDateString('en-GB')}
-                  </div>
-                ),
-              },
-              {
-                key: 'balance',
-                label: 'Balance',
-                render: (item) => (
-                  <div className={`font-semibold ${item.balance > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                    {item.balance > 0 ? formatNaira(item.balance) : 'Settled'}
-                  </div>
-                ),
-              },
-            ]}
-            itemsPerPage={5}
-          />
-        </CardContent>
-      </Card>
-
-      {/* Expected Arrivals */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Expected Arrivals</CardTitle>
-          <CardDescription>Confirmed reservations for tomorrow</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <EnhancedDataTable
-            data={expectedArrivals}
-            searchKeys={['room', 'guest']}
-            columns={[
-              {
-                key: 'room',
-                label: 'Room',
-                render: (item) => <div className="font-medium">Room {item.room}</div>,
-              },
-              {
-                key: 'guest',
-                label: 'Guest',
-                render: (item) => <div>{item.guest}</div>,
-              },
-              {
-                key: 'checkIn',
-                label: 'Check-in Date',
-                render: (item) => (
-                  <div className="text-sm">
-                    {new Date(item.checkIn).toLocaleDateString('en-GB')}
-                  </div>
-                ),
-              },
-              {
-                key: 'status',
-                label: 'Status',
-                render: (item) => (
-                  <Badge variant="outline" className="bg-green-500/10 text-green-700 border-green-200">
-                    {item.status}
-                  </Badge>
-                ),
-              },
-            ]}
-            itemsPerPage={5}
-          />
-        </CardContent>
-      </Card>
     </div>
   )
 }
