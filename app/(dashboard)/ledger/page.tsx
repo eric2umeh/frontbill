@@ -23,10 +23,58 @@ export default function CityLedgerPage() {
     try {
       setLoading(true)
       const supabase = createClient()
+      
       if (!supabase) {
-        toast.error('Supabase not configured')
+        // No Supabase configured - show empty state
+        setAccounts([])
+        setTransactions([])
+        setLoading(false)
         return
       }
+
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) {
+        router.push('/auth/login')
+        return
+      }
+
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('organization_id')
+        .eq('id', user.id)
+        .single()
+
+      if (!profile) {
+        toast.error('Organization not found')
+        return
+      }
+
+      const { data: ledgerAccounts, error: accountsError } = await supabase
+        .from('city_ledger_accounts')
+        .select('*')
+        .eq('organization_id', profile.organization_id)
+        .order('created_at', { ascending: false })
+
+      if (accountsError) throw accountsError
+
+      const { data: ledgerTransactions, error: transError } = await supabase
+        .from('transactions')
+        .select('*')
+        .eq('organization_id', profile.organization_id)
+        .eq('category', 'city_ledger')
+        .order('created_at', { ascending: false })
+
+      if (transError) throw transError
+
+      setAccounts(ledgerAccounts || [])
+      setTransactions(ledgerTransactions || [])
+    } catch (error: any) {
+      console.error('Error fetching ledger data:', error)
+      toast.error('Failed to load ledger data')
+    } finally {
+      setLoading(false)
+    }
+  }
 
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) {

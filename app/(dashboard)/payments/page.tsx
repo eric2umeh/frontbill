@@ -32,10 +32,46 @@ export default function PaymentsPage() {
     try {
       setLoading(true)
       const supabase = createClient()
+      
       if (!supabase) {
-        toast.error('Supabase not configured')
+        // No Supabase configured - show empty state
+        setPayments([])
+        setLoading(false)
         return
       }
+
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) {
+        router.push('/auth/login')
+        return
+      }
+
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('organization_id')
+        .eq('id', user.id)
+        .single()
+
+      if (!profile) {
+        toast.error('Organization not found')
+        return
+      }
+
+      const { data, error } = await supabase
+        .from('payments')
+        .select('*')
+        .eq('organization_id', profile.organization_id)
+        .order('payment_date', { ascending: false })
+
+      if (error) throw error
+      setPayments(data || [])
+    } catch (error: any) {
+      console.error('Error fetching payments:', error)
+      toast.error('Failed to load payments')
+    } finally {
+      setLoading(false)
+    }
+  }
 
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) {

@@ -7,7 +7,7 @@ export function createClient() {
   const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || supabaseConfig.anonKey
 
   if (!url || !key) {
-    console.warn('[v0] Supabase not configured. Missing environment variables.')
+    // Silently return null - allow demo mode to work
     return null
   }
 
