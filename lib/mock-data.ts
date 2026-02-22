@@ -635,7 +635,102 @@ export const generateMockActivities = (guestId: number, guestName: string, guest
 
 export const mockGuests = generateEnhancedMockGuests(30);
 
+// Generate mock payments based on guests with better date distribution
+function generateMockPayments() {
+  const payments: any[] = [];
+  const today = new Date();
+  
+  mockGuests
+    .filter(guest => guest.totalPaid > 0)
+    .forEach((guest, index) => {
+      // Generate 1-3 payments per guest for more realistic data
+      const paymentCount = Math.floor(Math.random() * 3) + 1;
+      const totalAmount = guest.totalPaid;
+      
+      for (let i = 0; i < paymentCount; i++) {
+        // Distribute dates: 40% today, 30% this week, 30% this month
+        const dateRandom = Math.random();
+        let paymentDate: Date;
+        
+        if (dateRandom < 0.4) {
+          // Today
+          paymentDate = new Date(today);
+          paymentDate.setHours(Math.floor(Math.random() * 24), Math.floor(Math.random() * 60));
+        } else if (dateRandom < 0.7) {
+          // This week
+          paymentDate = new Date(today.getTime() - Math.random() * 7 * 24 * 60 * 60 * 1000);
+        } else {
+          // This month
+          paymentDate = new Date(today.getTime() - Math.random() * 30 * 24 * 60 * 60 * 1000);
+        }
+        
+        const paymentAmount = paymentCount === 1 ? totalAmount : totalAmount / paymentCount;
+        
+        payments.push({
+          id: `PAY-${String(payments.length + 1).padStart(5, '0')}`,
+          guestName: guest.name,
+          guestId: guest.id,
+          folioId: guest.folioId,
+          room: guest.room,
+          date: paymentDate.toISOString(),
+          amount: Math.round(paymentAmount),
+          method: guest.payments && guest.payments.length > 0 
+            ? guest.payments[Math.min(i, guest.payments.length - 1)].method 
+            : ['Cash', 'Transfer', 'POS', 'City Ledger'][Math.floor(Math.random() * 4)],
+          payer: guest.name,
+          reference: `REF${String(payments.length + 1).padStart(6, '0')}`,
+          receivedBy: ['John Adamu', 'Sarah Chen', 'Michael Obi', 'Grace Eze'][Math.floor(Math.random() * 4)],
+          description: `Payment ${i + 1}/${paymentCount} for Room ${guest.room}`
+        });
+      }
+    });
+  
+  // Sort by date descending (newest first)
+  return payments.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+}
 
+export const mockPayments = generateMockPayments();
+
+// Generate comprehensive transaction records from bookings
+function generateMockTransactions() {
+  return mockGuests.flatMap((guest) => {
+    const baseTransaction = {
+      id: Math.random().toString(),
+      transactionId: `TXN-${Math.random().toString(36).substring(2, 10).toUpperCase()}`,
+      date: guest.checkIn,
+      guestName: guest.name,
+      room: guest.room,
+      amount: guest.amount,
+      method: ['cash', 'pos', 'transfer', 'city_ledger'][Math.floor(Math.random() * 4)],
+      status: guest.payment === 'paid' ? 'completed' : guest.payment === 'partial' ? 'partial' : 'pending',
+      description: `Room ${guest.room} - ${guest.nights} night(s)`,
+      folioId: guest.folioId,
+      receivedBy: ['John Adamu', 'Sarah Chen', 'Michael Obi', 'Grace Eze'][Math.floor(Math.random() * 4)]
+    }
+
+    // If partial payment, create multiple transactions
+    if (guest.payment === 'partial') {
+      const paidAmount = guest.amount * 0.6
+      const remainingAmount = guest.amount * 0.4
+      return [
+        { ...baseTransaction, amount: paidAmount, status: 'completed' },
+        { 
+          ...baseTransaction, 
+          id: Math.random().toString(), 
+          transactionId: `TXN-${Math.random().toString(36).substring(2, 10).toUpperCase()}`, 
+          amount: remainingAmount, 
+          status: 'pending' 
+        }
+      ]
+    }
+
+    return [baseTransaction]
+  })
+}
+
+export const mockTransactions = generateMockTransactions();
+
+// Sample activities for viewing
 export const mockActivities: Activity[] = [
  {
    id: 1,
