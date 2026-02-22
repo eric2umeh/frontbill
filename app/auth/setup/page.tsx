@@ -40,8 +40,8 @@ export default function SetupPage() {
                   <Label className="font-semibold">NEXT_PUBLIC_SUPABASE_ANON_KEY</Label>
                   <Badge>Required</Badge>
                 </div>
-                <div className="p-3 bg-muted rounded font-mono text-xs break-all max-h-24 overflow-y-auto">
-                  eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR1YWhha2ZhcWtubW1kbHFxcndyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE3Mzg0NTEsImV4cCI6MjA4NzMxNDQ1MX0.X4jVAA1EYoBtiaaYzELi0SBhoSY_pk4tGK9ZgUVltlM
+                <div className="p-3 bg-muted rounded font-mono text-xs text-muted-foreground">
+                  [Your Supabase Anon Key - Find in Supabase Dashboard → Settings → API]
                 </div>
               </div>
             </div>

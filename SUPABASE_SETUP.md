@@ -8,8 +8,8 @@ FrontBill is now connected to your shared Supabase project at `tuahakfaqknmmdlqq
 ### 1. Add Environment Variables
 In your Vercel project settings, add:
 ```
-NEXT_PUBLIC_SUPABASE_URL=https://...
-NEXT_PUBLIC_SUPABASE_ANON_KEY=...
+NEXT_PUBLIC_SUPABASE_URL=https://tuahakfaqknmmdlqqrwr.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR1YWhha2ZhcWtubW1kbHFxcndyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE3Mzg0NTEsImV4cCI6MjA4NzMxNDQ1MX0.X4jVAA1EYoBtiaaYzELi0SBhoSY_pk4tGK9ZgUVltlM
 ```
 
 ### 2. Execute Database Setup Scripts

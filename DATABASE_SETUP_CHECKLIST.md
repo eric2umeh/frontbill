@@ -9,7 +9,7 @@ You switched from your **eric2umeh project** (which had the schema set up) to yo
 ## Fix: Run SQL Scripts in Your New Supabase Project
 
 ### Step 1: Go to Supabase SQL Editor
-1. Visit: https://supabase.com/dashboard/project/...
+1. Visit: https://supabase.com/dashboard/project/tuahakfaqknmmdlqqrwr
 2. Click **"SQL Editor"** in the left sidebar
 3. Click **"New Query"**
 
