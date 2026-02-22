@@ -10,6 +10,7 @@ import { generateEnhancedMockGuests } from '@/lib/mock-data'
 import { formatNaira } from '@/lib/utils/currency'
 import { Plus, Users } from 'lucide-react'
 import { BulkBookingModal } from '@/components/reservations/bulk-booking-modal'
+import { NewBookingModal } from '@/components/bookings/new-booking-modal'
 
 // Filter only future bookings (reserved status)
 const allGuests = generateEnhancedMockGuests(50)
@@ -24,6 +25,7 @@ const futureReservations = allGuests.filter(guest =>
 
 export default function ReservationsPage() {
   const [bulkModalOpen, setBulkModalOpen] = useState(false)
+  const [newReservationOpen, setNewReservationOpen] = useState(false)
   const router = useRouter()
   const statusColors = {
     reserved: 'bg-blue-500/10 text-blue-700 border-blue-200',
@@ -40,6 +42,7 @@ export default function ReservationsPage() {
   return (
     <div className="space-y-6">
       <BulkBookingModal open={bulkModalOpen} onClose={() => setBulkModalOpen(false)} />
+      <NewBookingModal open={newReservationOpen} onClose={() => setNewReservationOpen(false)} />
       
       <div className="flex items-center justify-between">
         <div>
@@ -51,7 +54,7 @@ export default function ReservationsPage() {
             <Users className="mr-2 h-4 w-4" />
             Bulk Booking
           </Button>
-          <Button onClick={() => router.push('/bookings')}>
+          <Button onClick={() => setNewReservationOpen(true)}>
             <Plus className="mr-2 h-4 w-4" />
             New Reservation
           </Button>
@@ -61,6 +64,7 @@ export default function ReservationsPage() {
       <EnhancedDataTable
         data={futureReservations}
         searchKeys={['name', 'phone', 'email', 'room']}
+        dateField="checkIn"
         filters={[
           {
             key: 'payment',

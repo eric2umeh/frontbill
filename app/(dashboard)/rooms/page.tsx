@@ -1,5 +1,7 @@
 'use client'
 
+import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { EnhancedDataTable } from '@/components/shared/enhanced-data-table'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -7,10 +9,13 @@ import { CardContent } from '@/components/ui/card'
 import { generateRooms } from '@/lib/mock-data'
 import { formatNaira } from '@/lib/utils/currency'
 import { Plus, Users } from 'lucide-react'
+import { AddRoomModal } from '@/components/rooms/add-room-modal'
 
 const mockRooms = generateRooms()
 
 export default function RoomsPage() {
+  const [addRoomModalOpen, setAddRoomModalOpen] = useState(false)
+  const router = useRouter()
   const statusColors = {
     available: 'bg-green-500/10 text-green-700 border-green-200',
     occupied: 'bg-red-500/10 text-red-700 border-red-200',
@@ -21,12 +26,20 @@ export default function RoomsPage() {
 
   return (
     <div className="space-y-6">
+      <AddRoomModal 
+        open={addRoomModalOpen} 
+        onClose={() => setAddRoomModalOpen(false)} 
+        onSuccess={() => {
+          // Refresh room list here if needed
+        }}
+      />
+      
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Rooms</h1>
           <p className="text-muted-foreground">Manage room inventory and status</p>
         </div>
-        <Button>
+        <Button onClick={() => setAddRoomModalOpen(true)}>
           <Plus className="mr-2 h-4 w-4" />
           Add Room
         </Button>
@@ -74,7 +87,10 @@ export default function RoomsPage() {
             key: 'number',
             label: 'Room',
             render: (room) => (
-              <div>
+              <div 
+                className="cursor-pointer hover:text-primary"
+                onClick={() => router.push(`/rooms/${room.id}?data=${encodeURIComponent(JSON.stringify(room))}`)}
+              >
                 <div className="font-semibold text-lg">Room {room.number}</div>
                 <div className="text-xs text-muted-foreground">Floor {room.floor}</div>
               </div>
@@ -83,13 +99,23 @@ export default function RoomsPage() {
           {
             key: 'type',
             label: 'Type',
-            render: (room) => <div className="font-medium">{room.type}</div>,
+            render: (room) => (
+              <div 
+                className="cursor-pointer font-medium hover:text-primary"
+                onClick={() => router.push(`/rooms/${room.id}?data=${encodeURIComponent(JSON.stringify(room))}`)}
+              >
+                {room.type}
+              </div>
+            ),
           },
           {
             key: 'capacity',
             label: 'Capacity',
             render: (room) => (
-              <div className="flex items-center gap-1">
+              <div 
+                className="cursor-pointer flex items-center gap-1 hover:text-primary"
+                onClick={() => router.push(`/rooms/${room.id}?data=${encodeURIComponent(JSON.stringify(room))}`)}
+              >
                 <Users className="h-4 w-4 text-muted-foreground" />
                 <span>{room.capacity}</span>
               </div>
@@ -98,20 +124,35 @@ export default function RoomsPage() {
           {
             key: 'rate',
             label: 'Rate/Night',
-            render: (room) => <div className="font-semibold">{formatNaira(room.rate)}</div>,
+            render: (room) => (
+              <div 
+                className="cursor-pointer font-semibold hover:text-primary"
+                onClick={() => router.push(`/rooms/${room.id}?data=${encodeURIComponent(JSON.stringify(room))}`)}
+              >
+                {formatNaira(room.rate)}
+              </div>
+            ),
           },
           {
             key: 'status',
             label: 'Status',
             render: (room) => (
-              <Badge variant="outline" className={statusColors[room.status]}>
-                {room.status}
-              </Badge>
+              <div 
+                className="cursor-pointer"
+                onClick={() => router.push(`/rooms/${room.id}?data=${encodeURIComponent(JSON.stringify(room))}`)}
+              >
+                <Badge variant="outline" className={statusColors[room.status]}>
+                  {room.status}
+                </Badge>
+              </div>
             ),
           },
         ]}
         renderCard={(room) => (
-          <CardContent className="p-4">
+          <CardContent 
+            className="p-4 cursor-pointer hover:bg-accent"
+            onClick={() => router.push(`/rooms/${room.id}?data=${encodeURIComponent(JSON.stringify(room))}`)}
+          >
             <div className="space-y-3">
               <div className="flex items-start justify-between">
                 <div>

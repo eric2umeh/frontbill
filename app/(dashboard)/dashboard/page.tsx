@@ -6,13 +6,16 @@ import { RoomStatusGrid } from '@/components/dashboard/room-status-grid'
 import { RevenueChart } from '@/components/dashboard/revenue-chart'
 import { RecentPayments } from '@/components/dashboard/recent-payments'
 import { QuickActions } from '@/components/dashboard/quick-actions'
+import { AIInsightsPanel } from '@/components/ai/insights-panel'
 import { NewBookingModal } from '@/components/bookings/new-booking-modal'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { UserCheck } from 'lucide-react'
+import { generateEnhancedMockGuests } from '@/lib/mock-data'
 
 export default function DashboardPage() {
   const [bookingModalOpen, setBookingModalOpen] = useState(false)
+  const mockGuests = generateEnhancedMockGuests(30)
   
   return (
     <div className="space-y-6">
@@ -34,6 +37,17 @@ export default function DashboardPage() {
       <Suspense fallback={<StatsLoader />}>
         <DashboardStats />
       </Suspense>
+
+      {/* AI Insights Section */}
+      <div className="border-t pt-6">
+        <h2 className="text-lg font-semibold mb-4">AI-Powered Insights</h2>
+        <AIInsightsPanel bookings={mockGuests} dailyData={{
+          checkouts: 5,
+          checkIns: 8,
+          occupancy: 75,
+          revenue: 1500000,
+        }} />
+      </div>
 
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="lg:col-span-2 space-y-6">
