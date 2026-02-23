@@ -86,43 +86,66 @@ All amounts are in **Nigerian Naira (₦)**
 
 ## Setup Instructions
 
+### ⚡ Fresh Start (Feb 2026)
+
+This project has been completely rewritten from mock data to production-ready Supabase integration:
+
+- ✅ Database schema with 9 fully-normalized tables
+- ✅ Row Level Security (RLS) for multi-tenant data isolation
+- ✅ Automatic trigger functions for folio ID generation, balance calculations, room status sync
+- ✅ Real-time subscriptions enabled on key tables
+- ✅ Complete authentication with Supabase Auth + session management
+- ✅ All API endpoints connected to live database (no mock data)
+- ✅ Server-side data operations for security
+
+See `SETUP_COMPLETE.md` and `INTEGRATION_GUIDE.md` for complete documentation.
+
 ### Prerequisites
 - Node.js 18+
-- Supabase account
+- Supabase account with project created
 - Vercel account (for deployment)
 
-### Installation
+### Quick Start
 
-1. Clone the repository:
-```bash
-git clone https://github.com/eric2umeh/frontbill.git
-cd frontbill
-```
+1. **Ensure Supabase is Connected**
+   - The project comes with Supabase pre-configured
+   - Database migrations have already been applied
+   - Environment variables should be auto-set in Vercel
 
-2. Install dependencies:
+2. **Install & Run Locally**
 ```bash
 pnpm install
-```
-
-3. Configure Supabase:
-   - Create a new Supabase project
-   - Run all SQL scripts in `/scripts` folder in order (001 through 010)
-   - Set environment variables in Vercel or `.env.local`:
-     - `NEXT_PUBLIC_SUPABASE_URL`
-     - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-     - `SUPABASE_SERVICE_ROLE_KEY`
-
-4. Run development server:
-```bash
 pnpm dev
 ```
 
-5. Access at `http://localhost:3000`
+3. **Create Test Account**
+   - Go to `http://localhost:3000/auth/sign-up`
+   - Create an account (profile auto-creates in database)
+   - Log in - you'll be redirected to dashboard
 
-### Default Login
+4. **Set Up Test Data**
+   - Create an organization in Supabase dashboard
+   - Link your user to the organization
+   - Add test rooms, guests, and bookings
+   - See `INTEGRATION_GUIDE.md` for SQL examples
+
+### Manual Supabase Setup (if needed)
+
+If you're starting fresh without the auto-applied migrations:
+
+1. Go to Supabase project SQL editor
+2. Run migration scripts in order:
+   - `001_create_schema.sql` - Core tables
+   - `002_rls_policies.sql` - Security policies
+   - `003_triggers_realtime.sql` - Automation
+   - `004_auto_profile_creation.sql` - Auth integration
+
+### Environment Variables
+
+These are auto-configured by v0:
 ```
-Email: admin@hotel.com
-Password: password123
+NEXT_PUBLIC_SUPABASE_URL=your_project_url
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_anon_key
 ```
 
 ## Deployment
