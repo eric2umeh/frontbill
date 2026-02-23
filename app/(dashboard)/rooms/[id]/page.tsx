@@ -1,7 +1,7 @@
 'use client'
 
-import { useState } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useState, useEffect } from 'react'
+import { useRouter, useParams } from 'next/navigation'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -12,26 +12,123 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { ArrowLeft, Edit, Trash2, Users, DollarSign, MapPin } from 'lucide-react'
 import { formatNaira } from '@/lib/utils/currency'
 import { toast } from 'sonner'
+import { createClient } from '@/lib/supabase/client'
 
-export default function RoomDetailPage({ params }: { params: { id: string } }) {
+interface Room {
+  id: string
+  room_number: string
+  room_type: string
+  floor_number: number
+  max_occupancy: number
+  price_per_night: number
+  status: string
+  amenities: string[]
+}
+
+export default function RoomDetailPage() {
   const router = useRouter()
-  const searchParams = useSearchParams()
-  const [editModalOpen, setEditModalOpen] = useState(false)
+  const params = useParams()
+  const roomId = params.id as string
   
-  const roomData = searchParams.get('data')
-  const room = roomData ? JSON.parse(decodeURIComponent(roomData)) : null
-
+  const [room, setRoom] = useState<Room | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [editModalOpen, setEditModalOpen] = useState(false)
+  const [saveLoading, setSaveLoading] = useState(false)
+  
   const [formData, setFormData] = useState({
-    number: room?.number || '',
-    type: room?.type || '',
-    floor: room?.floor || '',
-    capacity: room?.capacity || '',
-    rate: room?.rate || '',
-    status: room?.status || 'available',
-    amenities: room?.amenities || [],
+    room_type: '',
+    floor_number: '',
+    max_occupancy: '',
+    price_per_night: '',
+    status: 'available',
+    amenities: [] as string[],
   })
 
-  const statusColors = {
+  useEffect(() => {
+    fetchRoom()
+  }, [roomId])
+
+  const fetchRoom = async () => {
+    try {
+      const supabase = createClient()
+      const { data, error } = await supabase
+        .from('rooms')
+        .select('*')
+        .eq('id', roomId)
+        .single()
+
+      if (error) throw error
+      if (!data) {
+        toast.error('Room not found')
+        return
+      }
+
+      setRoom(data)
+      setFormData({
+        room_type: data.room_type || '',
+        floor_number: data.floor_number || '',
+        max_occupancy: data.max_occupancy || '',
+        price_per_night: data.price_per_night || '',
+        status: data.status || 'available',
+        amenities: data.amenities || [],
+      })
+    } catch (error: any) {
+      console.log('[v0] Error fetching room:', error.message)
+      toast.error('Failed to load room')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleSaveChanges = async () => {
+    try {
+      setSaveLoading(true)
+      const supabase = createClient()
+      
+      const { error } = await supabase
+        .from('rooms')
+        .update({
+          room_type: formData.room_type,
+          floor_number: parseInt(formData.floor_number as string),
+          max_occupancy: parseInt(formData.max_occupancy as string),
+          price_per_night: parseFloat(formData.price_per_night as string),
+          status: formData.status,
+          amenities: formData.amenities,
+        })
+        .eq('id', roomId)
+
+      if (error) throw error
+      
+      toast.success('Room details updated successfully')
+      setEditModalOpen(false)
+      fetchRoom()
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to update room')
+    } finally {
+      setSaveLoading(false)
+    }
+  }
+
+  const handleDelete = async () => {
+    if (!window.confirm('Are you sure you want to delete this room?')) return
+
+    try {
+      const supabase = createClient()
+      const { error } = await supabase
+        .from('rooms')
+        .delete()
+        .eq('id', roomId)
+
+      if (error) throw error
+      
+      toast.success('Room deleted successfully')
+      router.back()
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to delete room')
+    }
+  }
+
+  const statusColors: { [key: string]: string } = {
     available: 'bg-green-500/10 text-green-700 border-green-200',
     occupied: 'bg-red-500/10 text-red-700 border-red-200',
     cleaning: 'bg-yellow-500/10 text-yellow-700 border-yellow-200',
@@ -39,16 +136,12 @@ export default function RoomDetailPage({ params }: { params: { id: string } }) {
     reserved: 'bg-blue-500/10 text-blue-700 border-blue-200',
   }
 
-  const handleSaveChanges = () => {
-    toast.success('Room details updated successfully')
-    setEditModalOpen(false)
-  }
-
-  const handleDelete = () => {
-    if (window.confirm('Are you sure you want to delete this room?')) {
-      toast.success('Room deleted successfully')
-      router.back()
-    }
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <p className="text-muted-foreground">Loading room details...</p>
+      </div>
+    )
   }
 
   if (!room) {
@@ -73,20 +166,38 @@ export default function RoomDetailPage({ params }: { params: { id: string } }) {
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <Label>Room Number</Label>
+              <Label>Room Type</Label>
               <Input
-                value={formData.number}
-                onChange={(e) => setFormData({ ...formData, number: e.target.value })}
-                placeholder="e.g., 101"
+                value={formData.room_type}
+                onChange={(e) => setFormData({ ...formData, room_type: e.target.value })}
+                placeholder="e.g., Deluxe"
               />
             </div>
             <div className="space-y-2">
               <Label>Floor</Label>
               <Input
                 type="number"
-                value={formData.floor}
-                onChange={(e) => setFormData({ ...formData, floor: e.target.value })}
+                value={formData.floor_number}
+                onChange={(e) => setFormData({ ...formData, floor_number: e.target.value })}
                 placeholder="e.g., 1"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Capacity</Label>
+              <Input
+                type="number"
+                value={formData.max_occupancy}
+                onChange={(e) => setFormData({ ...formData, max_occupancy: e.target.value })}
+                placeholder="e.g., 2"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Rate Per Night</Label>
+              <Input
+                type="number"
+                value={formData.price_per_night}
+                onChange={(e) => setFormData({ ...formData, price_per_night: e.target.value })}
+                placeholder="e.g., 25000"
               />
             </div>
             <div className="space-y-2">
@@ -104,17 +215,8 @@ export default function RoomDetailPage({ params }: { params: { id: string } }) {
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-2">
-              <Label>Rate Per Night</Label>
-              <Input
-                type="number"
-                value={formData.rate}
-                onChange={(e) => setFormData({ ...formData, rate: e.target.value })}
-                placeholder="e.g., 50000"
-              />
-            </div>
-            <Button onClick={handleSaveChanges} className="w-full">
-              Save Changes
+            <Button onClick={handleSaveChanges} className="w-full" disabled={saveLoading}>
+              {saveLoading ? 'Saving...' : 'Save Changes'}
             </Button>
           </div>
         </DialogContent>
@@ -141,8 +243,8 @@ export default function RoomDetailPage({ params }: { params: { id: string } }) {
         <CardHeader>
           <div className="flex items-start justify-between">
             <div>
-              <CardTitle className="text-3xl">Room {room.number}</CardTitle>
-              <p className="text-muted-foreground mt-1">{room.type}</p>
+              <CardTitle className="text-3xl">Room {room.room_number}</CardTitle>
+              <p className="text-muted-foreground mt-1">{room.room_type}</p>
             </div>
             <Badge variant="outline" className={statusColors[room.status]}>
               {room.status}
@@ -156,21 +258,21 @@ export default function RoomDetailPage({ params }: { params: { id: string } }) {
                 <MapPin className="h-4 w-4" />
                 <span className="text-sm">Location</span>
               </div>
-              <p className="font-semibold">Floor {room.floor}</p>
+              <p className="font-semibold">Floor {room.floor_number}</p>
             </div>
             <div className="space-y-2">
               <div className="flex items-center gap-2 text-muted-foreground">
                 <Users className="h-4 w-4" />
                 <span className="text-sm">Capacity</span>
               </div>
-              <p className="font-semibold">{room.capacity} guests</p>
+              <p className="font-semibold">{room.max_occupancy} guests</p>
             </div>
             <div className="space-y-2">
               <div className="flex items-center gap-2 text-muted-foreground">
                 <DollarSign className="h-4 w-4" />
                 <span className="text-sm">Rate/Night</span>
               </div>
-              <p className="font-semibold">{formatNaira(room.rate)}</p>
+              <p className="font-semibold">{formatNaira(room.price_per_night)}</p>
             </div>
             <div className="space-y-2">
               <div className="text-sm text-muted-foreground">Status</div>
@@ -194,11 +296,11 @@ export default function RoomDetailPage({ params }: { params: { id: string } }) {
             <div className="grid grid-cols-2 gap-4 text-sm">
               <div>
                 <p className="text-muted-foreground">Room Type</p>
-                <p className="font-medium">{room.type}</p>
+                <p className="font-medium">{room.room_type}</p>
               </div>
               <div>
                 <p className="text-muted-foreground">Floor</p>
-                <p className="font-medium">{room.floor}</p>
+                <p className="font-medium">{room.floor_number}</p>
               </div>
             </div>
           </div>
