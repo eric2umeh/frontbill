@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { ArrowLeft, UserCheck, Trash2, Edit, CreditCard } from 'lucide-react'
+import { ArrowLeft, UserCheck, Trash2, Edit, CreditCard, AlertCircle } from 'lucide-react'
 import { formatNaira } from '@/lib/utils/currency'
 import { toast } from 'sonner'
 
@@ -18,6 +18,7 @@ export default function ReservationDetailPage({ params }: { params: { id: string
   const [paymentModalOpen, setPaymentModalOpen] = useState(false)
   const [paymentAmount, setPaymentAmount] = useState('')
   const [paymentMethod, setPaymentMethod] = useState('')
+  const [actionLoading, setActionLoading] = useState(false)
 
   // Mock reservation data
   const reservation = {
@@ -41,10 +42,43 @@ export default function ReservationDetailPage({ params }: { params: { id: string
   }
 
   const handleCheckin = () => {
-    if (confirm('Check in this guest?')) {
-      toast.success('Guest checked in successfully')
-      router.push('/bookings')
-    }
+    toast(
+      (t) => (
+        <div className="flex flex-col gap-3">
+          <div className="flex gap-2 items-start">
+            <AlertCircle className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
+            <div>
+              <p className="font-semibold">Check in Guest?</p>
+              <p className="text-sm text-muted-foreground">The guest will be moved to active bookings.</p>
+            </div>
+          </div>
+          <div className="flex gap-2 justify-end">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => toast.dismiss(t)}
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              disabled={actionLoading}
+              onClick={() => {
+                setActionLoading(true)
+                toast.success('Guest checked in successfully')
+                setTimeout(() => router.push('/bookings'), 500)
+                toast.dismiss(t)
+              }}
+            >
+              Check-in
+            </Button>
+          </div>
+        </div>
+      ),
+      {
+        duration: Infinity,
+      }
+    )
   }
 
   const handlePaymentUpdate = () => {
@@ -60,10 +94,45 @@ export default function ReservationDetailPage({ params }: { params: { id: string
   }
 
   const handleDelete = () => {
-    if (confirm('Are you sure you want to cancel this reservation?')) {
-      toast.success('Reservation cancelled')
-      router.push('/reservations')
-    }
+    toast(
+      (t) => (
+        <div className="flex flex-col gap-3">
+          <div className="flex gap-2 items-start">
+            <AlertCircle className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" />
+            <div>
+              <p className="font-semibold">Cancel Reservation?</p>
+              <p className="text-sm text-muted-foreground">This action cannot be undone.</p>
+            </div>
+          </div>
+          <div className="flex gap-2 justify-end">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => toast.dismiss(t)}
+            >
+              Keep
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              disabled={actionLoading}
+              onClick={() => {
+                setActionLoading(true)
+                toast.success('Reservation cancelled')
+                setTimeout(() => router.push('/reservations'), 500)
+                toast.dismiss(t)
+              }}
+            >
+              Cancel Reservation
+            </Button>
+          </div>
+        </div>
+      ),
+      {
+        duration: Infinity,
+        className: 'bg-red-50 border-red-200',
+      }
+    )
   }
 
   return (

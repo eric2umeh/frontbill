@@ -13,6 +13,7 @@ import { ArrowLeft, Edit, Trash2, Users, DollarSign, MapPin } from 'lucide-react
 import { formatNaira } from '@/lib/utils/currency'
 import { toast } from 'sonner'
 import { createClient } from '@/lib/supabase/client'
+import { AlertCircle } from 'lucide-react'
 
 interface Room {
   id: string
@@ -34,6 +35,8 @@ export default function RoomDetailPage() {
   const [loading, setLoading] = useState(true)
   const [editModalOpen, setEditModalOpen] = useState(false)
   const [saveLoading, setSaveLoading] = useState(false)
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
+  const [deleteLoading, setDeleteLoading] = useState(false)
   
   const [formData, setFormData] = useState({
     room_type: '',
@@ -109,10 +112,53 @@ export default function RoomDetailPage() {
     }
   }
 
-  const handleDelete = async () => {
-    if (!window.confirm('Are you sure you want to delete this room?')) return
+  const handleDeleteClick = () => {
+    setDeleteConfirmId(roomId)
+    toast(
+      (t) => (
+        <div className="flex flex-col gap-3">
+          <div className="flex gap-2 items-start">
+            <AlertCircle className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" />
+            <div>
+              <p className="font-semibold">Delete Room?</p>
+              <p className="text-sm text-muted-foreground">This action cannot be undone.</p>
+            </div>
+          </div>
+          <div className="flex gap-2 justify-end">
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={handleDeleteClick}
+                disabled={deleteLoading}
+                className="gap-2"
+              >
+                <Trash2 className="w-4 h-4" />
+                Delete Room
+              </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              disabled={deleteLoading}
+              onClick={() => {
+                handleDeleteConfirm()
+                toast.dismiss(t)
+              }}
+            >
+              {deleteLoading ? 'Deleting...' : 'Delete'}
+            </Button>
+          </div>
+        </div>
+      ),
+      {
+        duration: Infinity,
+        className: 'bg-red-50 border-red-200',
+      }
+    )
+  }
 
+  const handleDeleteConfirm = async () => {
     try {
+      setDeleteLoading(true)
       const supabase = createClient()
       const { error } = await supabase
         .from('rooms')
@@ -125,6 +171,9 @@ export default function RoomDetailPage() {
       router.back()
     } catch (error: any) {
       toast.error(error.message || 'Failed to delete room')
+    } finally {
+      setDeleteLoading(false)
+      setDeleteConfirmId(null)
     }
   }
 
