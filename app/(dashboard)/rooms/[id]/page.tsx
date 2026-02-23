@@ -113,7 +113,6 @@ export default function RoomDetailPage() {
   }
 
   const handleDeleteClick = () => {
-    setDeleteConfirmId(roomId)
     toast(
       (t) => (
         <div className="flex flex-col gap-3">
@@ -125,16 +124,13 @@ export default function RoomDetailPage() {
             </div>
           </div>
           <div className="flex gap-2 justify-end">
-              <Button
-                variant="destructive"
-                size="sm"
-                onClick={handleDeleteClick}
-                disabled={deleteLoading}
-                className="gap-2"
-              >
-                <Trash2 className="w-4 h-4" />
-                Delete Room
-              </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => toast.dismiss(t)}
+            >
+              Cancel
+            </Button>
             <Button
               variant="destructive"
               size="sm"
@@ -281,7 +277,7 @@ export default function RoomDetailPage() {
             <Edit className="mr-2 h-4 w-4" />
             Edit
           </Button>
-          <Button variant="destructive" size="sm" onClick={handleDelete}>
+          <Button variant="destructive" size="sm" onClick={handleDeleteClick}>
             <Trash2 className="mr-2 h-4 w-4" />
             Delete
           </Button>
