@@ -84,40 +84,29 @@ export function AddRoomModal({ open, onClose, onSuccess }: AddRoomModalProps) {
         .eq('id', user.id)
         .single()
 
-      console.log('[v0] Profile fetch:', { user: user.id, profile, profileError })
-
       if (profileError) {
-        console.log('[v0] Profile error:', profileError)
-        toast.error(`Profile error: ${profileError.message}`)
+        toast.error(profileError.message || 'Failed to load profile')
         return
       }
 
       if (!profile?.organization_id) {
-        console.log('[v0] No organization_id in profile:', profile)
         toast.error('No organization linked to account. Please log out and sign up again.')
         return
       }
 
       // Create room
-      const roomData = {
-        organization_id: profile.organization_id,
-        room_number: formData.number,
-        floor_number: parseInt(formData.floor),
-        room_type: formData.type,
-        price_per_night: formData.rate,
-        max_occupancy: formData.capacity,
-        status: formData.status,
-        amenities: selectedAmenities,
-      }
-      
-      console.log('[v0] Creating room:', roomData)
-      
-      const { data: roomResponse, error } = await supabase
+      const { error } = await supabase
         .from('rooms')
-        .insert([roomData])
-        .select()
-
-      console.log('[v0] Room created:', { roomResponse, error })
+        .insert([{
+          organization_id: profile.organization_id,
+          room_number: formData.number,
+          floor_number: parseInt(formData.floor),
+          room_type: formData.type,
+          price_per_night: formData.rate,
+          max_occupancy: formData.capacity,
+          status: formData.status,
+          amenities: selectedAmenities,
+        }])
 
       if (error) throw error
       
