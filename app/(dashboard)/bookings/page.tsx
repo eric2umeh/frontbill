@@ -71,9 +71,9 @@ export default function BookingsPage() {
 
       const { data, error } = await supabase
         .from('bookings')
-        .select('*, guests(full_name, phone), rooms(number, type)')
+        .select('*, guests(name, phone), rooms(room_number, room_type)')
         .eq('organization_id', profile.organization_id)
-        .order('check_in_date', { ascending: false })
+        .order('check_in', { ascending: false })
 
       if (error) throw error
       setBookings(data || [])
@@ -100,9 +100,9 @@ export default function BookingsPage() {
     cancelled: 'bg-red-500/10 text-red-700 border-red-200',
   }
 
-  const calculateNights = (checkIn: string, checkOut: string) => {
-    const start = new Date(checkIn)
-    const end = new Date(checkOut)
+  const calculateNights = (checkIn: string | Date, checkOut: string | Date) => {
+    const start = typeof checkIn === 'string' ? new Date(checkIn) : checkIn
+    const end = typeof checkOut === 'string' ? new Date(checkOut) : checkOut
     return Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24))
   }
 

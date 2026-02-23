@@ -1,547 +1,353 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { createClient } from '@/lib/supabase/client'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Card, CardContent } from '@/components/ui/card'
 import { Calendar } from '@/components/ui/calendar'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem } from '@/components/ui/command'
-import { Card, CardContent } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
-import { Calendar as CalendarIcon, Search, X, Check, ChevronLeft, ChevronRight } from 'lucide-react'
-import { format, addDays, differenceInDays } from 'date-fns'
-import { cn } from '@/lib/utils'
+import { format } from 'date-fns'
+import { Calendar as CalendarIcon } from 'lucide-react'
 import { formatNaira } from '@/lib/utils/currency'
 import { toast } from 'sonner'
-import { generateEnhancedMockGuests, generateRooms } from '@/lib/mock-data'
-
-const mockGuests = generateEnhancedMockGuests(100)
-const mockRooms = generateRooms()
-const mockOrganizations = [
-  { id: '1', name: 'Federal Ministry of Works', balance: -150000 },
-  { id: '2', name: 'Shell Petroleum', balance: 0 },
-  { id: '3', name: 'MTN Nigeria', balance: 75000 },
-  { id: '4', name: 'Dangote Group', balance: -50000 },
-  { id: '5', name: 'Access Bank Plc', balance: 0 },
-]
-
-const roomTypes = [
-  { value: 'deluxe', label: 'Deluxe', baseRate: 25000 },
-  { value: 'royal', label: 'Royal Suite', baseRate: 50000 },
-  { value: 'king', label: 'King Suite', baseRate: 45000 },
-  { value: 'mini', label: 'Mini Suite', baseRate: 30000 },
-  { value: 'executive', label: 'Executive', baseRate: 35000 },
-  { value: 'diplomatic', label: 'Diplomatic', baseRate: 40000 },
-]
 
 interface NewBookingModalProps {
   open: boolean
   onClose: () => void
+  onSuccess?: () => void
 }
 
-export function NewBookingModal({ open, onClose }: NewBookingModalProps) {
+export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalProps) {
   const [step, setStep] = useState(1)
-  const [filteredGuests, setFilteredGuests] = useState<any[]>([])
-  const [selectedGuest, setSelectedGuest] = useState<any>(null)
+  const [loading, setLoading] = useState(false)
+  const [guests, setGuests] = useState<any[]>([])
+  const [rooms, setRooms] = useState<any[]>([])
+  const [organizationId, setOrganizationId] = useState<string>('')
 
-  // Step 1: Guest Info
-  const [fullName, setFullName] = useState('')
-  const [address, setAddress] = useState('')
-  const [phone, setPhone] = useState('')
+  // Form data
+  const [guestId, setGuestId] = useState('')
+  const [guestName, setGuestName] = useState('')
+  const [guestPhone, setGuestPhone] = useState('')
+  const [roomId, setRoomId] = useState('')
+  const [checkInDate, setCheckInDate] = useState<Date>()
+  const [checkOutDate, setCheckOutDate] = useState<Date>()
+  const [ratePerNight, setRatePerNight] = useState(0)
+  const [paymentMethod, setPaymentMethod] = useState('cash')
 
-  // Step 2: Stay Details
-  const [arrivalDate, setArrivalDate] = useState<Date>()
-  const [departureDate, setDepartureDate] = useState<Date>()
-  const [nights, setNights] = useState(1)
-
-  // Step 3: Room Selection
-  const [selectedRoomType, setSelectedRoomType] = useState('')
-  const [availableRooms, setAvailableRooms] = useState<any[]>([])
-  const [selectedRoom, setSelectedRoom] = useState<any>(null)
-  const [roomPrice, setRoomPrice] = useState(0)
-  const [paymentMethod, setPaymentMethod] = useState('')
-  const [selectedOrganization, setSelectedOrganization] = useState<any>(null)
-  const [showOrgSearch, setShowOrgSearch] = useState(false)
-
-  // Handle guest search and auto-populate
+  // Load organization and data
   useEffect(() => {
-    if (fullName.length > 2) {
-      const filtered = mockGuests.filter(g => 
-        g.name.toLowerCase().includes(fullName.toLowerCase()) ||
-        g.phone.includes(fullName)
-      ).slice(0, 5)
-      setFilteredGuests(filtered)
-
-      // Auto-populate if exact match found
-      const exactMatch = mockGuests.find(g => 
-        g.name.toLowerCase() === fullName.toLowerCase()
-      )
-      if (exactMatch && !selectedGuest) {
-        setSelectedGuest(exactMatch)
-        setPhone(exactMatch.phone)
-        setAddress(exactMatch.email || '')
-        setFilteredGuests([])
-        toast.success('Guest found in database!')
-      }
-    } else {
-      setFilteredGuests([])
+    if (open) {
+      loadData()
     }
-  }, [fullName, selectedGuest])
+  }, [open])
 
-  // Calculate nights when dates change
-  useEffect(() => {
-    if (arrivalDate && departureDate) {
-      const diff = differenceInDays(departureDate, arrivalDate)
-      if (diff > 0) {
-        setNights(diff)
-      }
-    }
-  }, [arrivalDate, departureDate])
-
-  // Update departure when nights change
-  const handleNightsChange = (value: number) => {
-    setNights(value)
-    if (arrivalDate) {
-      setDepartureDate(addDays(arrivalDate, value))
-    }
-  }
-
-  // Filter rooms by type
-  useEffect(() => {
-    if (selectedRoomType) {
-      const filtered = mockRooms.filter(r => 
-        r.type.toLowerCase().includes(selectedRoomType.toLowerCase()) && 
-        r.status === 'available'
-      )
-      setAvailableRooms(filtered)
+  const loadData = async () => {
+    try {
+      const supabase = createClient()
+      const { data: { user } } = await supabase.auth.getUser()
       
-      // Set default room price
-      const typeInfo = roomTypes.find(t => t.value === selectedRoomType)
-      if (typeInfo) {
-        setRoomPrice(typeInfo.baseRate)
-      }
-    }
-  }, [selectedRoomType])
+      if (!user) return
 
-  const handleSelectGuest = (guest: any) => {
-    setSelectedGuest(guest)
-    setFullName(guest.name)
-    setPhone(guest.phone)
-    setAddress(guest.email || '')
-    setFilteredGuests([])
-  }
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('organization_id')
+        .eq('id', user.id)
+        .single()
 
-  const handleNext = () => {
-    if (step === 1) {
-      if (!fullName || !phone) {
-        toast.error('Please fill in required fields')
+      if (!profile?.organization_id) {
+        toast.error('Organization not found')
         return
       }
+
+      setOrganizationId(profile.organization_id)
+
+      // Load guests
+      const { data: guestData } = await supabase
+        .from('guests')
+        .select('*')
+        .eq('organization_id', profile.organization_id)
+        .order('name')
+
+      // Load available rooms
+      const { data: roomData } = await supabase
+        .from('rooms')
+        .select('*')
+        .eq('organization_id', profile.organization_id)
+        .eq('status', 'available')
+        .order('room_number')
+
+      setGuests(guestData || [])
+      setRooms(roomData || [])
+    } catch (error: any) {
+      toast.error('Failed to load data')
     }
-    if (step === 2) {
-      if (!arrivalDate || !departureDate) {
-        toast.error('Please select arrival and departure dates')
-        return
-      }
-    }
-    setStep(step + 1)
   }
 
-  const handleBack = () => {
-    setStep(step - 1)
+  const handleSelectGuest = (id: string) => {
+    const guest = guests.find(g => g.id === id)
+    if (guest) {
+      setGuestId(id)
+      setGuestName(guest.name)
+      setGuestPhone(guest.phone)
+    }
   }
 
-  const handleSubmit = () => {
-    if (!selectedRoom || !paymentMethod) {
-      toast.error('Please select a room and payment method')
+  const handleCreateNewGuest = async () => {
+    if (!guestName || !guestPhone) {
+      toast.error('Please enter guest name and phone')
       return
     }
 
-    const totalAmount = roomPrice * nights
-    const guestBalance = selectedGuest?.balance || 0
-    const orgBalance = selectedOrganization?.balance || 0
-    const applicableBalance = paymentMethod === 'city_ledger' 
-      ? (selectedOrganization ? orgBalance : guestBalance)
-      : 0
+    try {
+      const supabase = createClient()
+      const { data: newGuest, error } = await supabase
+        .from('guests')
+        .insert([{
+          organization_id: organizationId,
+          name: guestName,
+          phone: guestPhone,
+        }])
+        .select()
+        .single()
 
-    toast.success(`Booking created! Total: ${formatNaira(totalAmount)}${applicableBalance !== 0 ? `, Balance applied: ${formatNaira(applicableBalance)}` : ''}`)
-    onClose()
-    resetForm()
+      if (error) throw error
+      setGuestId(newGuest.id)
+      setGuests([...guests, newGuest])
+      toast.success('Guest created')
+    } catch (error: any) {
+      toast.error('Failed to create guest')
+    }
+  }
+
+  const handleSelectRoom = (id: string) => {
+    const room = rooms.find(r => r.id === id)
+    if (room) {
+      setRoomId(id)
+      setRatePerNight(room.price_per_night)
+    }
+  }
+
+  const handleSubmit = async () => {
+    if (!guestId || !roomId || !checkInDate || !checkOutDate) {
+      toast.error('Please fill in all required fields')
+      return
+    }
+
+    setLoading(true)
+    try {
+      const supabase = createClient()
+      const nights = Math.ceil((checkOutDate.getTime() - checkInDate.getTime()) / (1000 * 60 * 60 * 24))
+      const totalAmount = ratePerNight * nights
+
+      // Create booking
+      const { error } = await supabase
+        .from('bookings')
+        .insert([{
+          organization_id: organizationId,
+          guest_id: guestId,
+          room_id: roomId,
+          check_in: format(checkInDate, 'yyyy-MM-dd'),
+          check_out: format(checkOutDate, 'yyyy-MM-dd'),
+          rate_per_night: ratePerNight,
+          total_amount: totalAmount,
+          payment_status: 'pending',
+          status: 'active',
+        }])
+
+      if (error) throw error
+
+      toast.success(`Booking created! Total: ${formatNaira(totalAmount)}`)
+      resetForm()
+      onClose()
+      onSuccess?.()
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to create booking')
+    } finally {
+      setLoading(false)
+    }
   }
 
   const resetForm = () => {
     setStep(1)
-    setSelectedGuest(null)
-    setFullName('')
-    setAddress('')
-    setPhone('')
-    setFilteredGuests([])
-    setArrivalDate(undefined)
-    setDepartureDate(undefined)
-    setNights(1)
-    setSelectedRoomType('')
-    setSelectedRoom(null)
-    setRoomPrice(0)
-    setPaymentMethod('')
-    setSelectedOrganization(null)
-    setShowOrgSearch(false)
+    setGuestId('')
+    setGuestName('')
+    setGuestPhone('')
+    setRoomId('')
+    setCheckInDate(undefined)
+    setCheckOutDate(undefined)
+    setRatePerNight(0)
+    setPaymentMethod('cash')
+  }
+
+  const handleClose = () => {
+    resetForm()
+    onClose()
   }
 
   return (
-    <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
-      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+    <Dialog open={open} onOpenChange={handleClose}>
+      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>New Booking - Step {step} of 3</DialogTitle>
-          <DialogDescription>
-            {step === 1 && 'Enter guest information'}
-            {step === 2 && 'Select check-in and check-out dates'}
-            {step === 3 && 'Choose room and payment method'}
-          </DialogDescription>
+          <DialogTitle>New Booking</DialogTitle>
+          <DialogDescription>Step {step} of 3</DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-6 py-4">
-          {/* Step 1: Guest Info */}
+        <div className="space-y-4">
           {step === 1 && (
             <div className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="fullName">Full Name *</Label>
-                <div className="relative">
+              <Label>Guest</Label>
+              <Select value={guestId} onValueChange={handleSelectGuest}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select guest or create new" />
+                </SelectTrigger>
+                <SelectContent>
+                  {guests.map(guest => (
+                    <SelectItem key={guest.id} value={guest.id}>
+                      {guest.name} - {guest.phone}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <div className="border-t pt-4">
+                <Label className="text-sm">Or Create New Guest</Label>
+                <div className="space-y-2 mt-2">
                   <Input
-                    id="fullName"
-                    value={fullName}
-                    onChange={(e) => {
-                      setFullName(e.target.value)
-                      setSelectedGuest(null)
-                    }}
-                    placeholder="Type guest name or phone to search..."
-                    className="pr-8"
+                    placeholder="Guest name"
+                    value={guestName}
+                    onChange={(e) => setGuestName(e.target.value)}
                   />
-                  <Search className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Phone"
+                    value={guestPhone}
+                    onChange={(e) => setGuestPhone(e.target.value)}
+                  />
+                  <Button onClick={handleCreateNewGuest} variant="outline" className="w-full">
+                    Create Guest
+                  </Button>
                 </div>
-                {filteredGuests.length > 0 && (
-                  <Card className="mt-1 absolute z-10 w-full">
-                    <CardContent className="p-2">
-                      {filteredGuests.map((guest) => (
-                        <div
-                          key={guest.name}
-                          className="p-2 hover:bg-accent rounded cursor-pointer"
-                          onClick={() => handleSelectGuest(guest)}
-                        >
-                          <div className="font-medium">{guest.name}</div>
-                          <div className="text-sm text-muted-foreground">{guest.phone}</div>
-                        </div>
-                      ))}
-                    </CardContent>
-                  </Card>
-                )}
-                {selectedGuest && (
-                  <p className="text-sm text-green-600 flex items-center gap-1">
-                    <Check className="h-3 w-3" /> Guest found in database
-                  </p>
-                )}
+              </div>
+            </div>
+          )}
+
+          {step === 2 && (
+            <div className="space-y-4">
+              <div>
+                <Label>Check-in Date</Label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" className="w-full justify-start">
+                      <CalendarIcon className="mr-2 h-4 w-4" />
+                      {checkInDate ? format(checkInDate, 'PPP') : 'Pick a date'}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0">
+                    <Calendar
+                      mode="single"
+                      selected={checkInDate}
+                      onSelect={setCheckInDate}
+                      disabled={(date) => date < new Date()}
+                    />
+                  </PopoverContent>
+                </Popover>
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="address">Address</Label>
-                <Input
-                  id="address"
-                  value={address}
-                  onChange={(e) => setAddress(e.target.value)}
-                  placeholder="Enter address"
-                />
+              <div>
+                <Label>Check-out Date</Label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" className="w-full justify-start">
+                      <CalendarIcon className="mr-2 h-4 w-4" />
+                      {checkOutDate ? format(checkOutDate, 'PPP') : 'Pick a date'}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0">
+                    <Calendar
+                      mode="single"
+                      selected={checkOutDate}
+                      onSelect={setCheckOutDate}
+                      disabled={(date) => !checkInDate || date <= checkInDate}
+                    />
+                  </PopoverContent>
+                </Popover>
+              </div>
+            </div>
+          )}
+
+          {step === 3 && (
+            <div className="space-y-4">
+              <Label>Room</Label>
+              <Select value={roomId} onValueChange={handleSelectRoom}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select room" />
+                </SelectTrigger>
+                <SelectContent>
+                  {rooms.map(room => (
+                    <SelectItem key={room.id} value={room.id}>
+                      Room {room.room_number} - {room.room_type} ({formatNaira(room.price_per_night)}/night)
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <div>
+                <Label>Payment Method</Label>
+                <Select value={paymentMethod} onValueChange={setPaymentMethod}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="cash">Cash</SelectItem>
+                    <SelectItem value="card">Card</SelectItem>
+                    <SelectItem value="transfer">Transfer</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="phone">Phone Number *</Label>
-                <Input
-                  id="phone"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  placeholder="Enter phone number"
-                />
-              </div>
-
-              {selectedGuest && selectedGuest.balance !== 0 && (
-                <Card className="bg-muted">
-                  <CardContent className="p-3">
-                    <div className="text-sm">
-                      <span className="text-muted-foreground">Guest Balance: </span>
-                      <span className={`font-semibold ${selectedGuest.balance < 0 ? 'text-destructive' : 'text-green-600'}`}>
-                        {formatNaira(Math.abs(selectedGuest.balance))} {selectedGuest.balance < 0 ? '(Debt)' : '(Credit)'}
-                      </span>
+              {roomId && checkInDate && checkOutDate && (
+                <Card>
+                  <CardContent className="pt-4">
+                    <div className="space-y-2 text-sm">
+                      <div className="flex justify-between">
+                        <span>Rate per night:</span>
+                        <span>{formatNaira(ratePerNight)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Nights:</span>
+                        <span>{Math.ceil((checkOutDate.getTime() - checkInDate.getTime()) / (1000 * 60 * 60 * 24))}</span>
+                      </div>
+                      <div className="border-t pt-2 flex justify-between font-semibold">
+                        <span>Total:</span>
+                        <span>{formatNaira(ratePerNight * Math.ceil((checkOutDate.getTime() - checkInDate.getTime()) / (1000 * 60 * 60 * 24)))}</span>
+                      </div>
                     </div>
                   </CardContent>
                 </Card>
               )}
             </div>
           )}
+        </div>
 
-          {/* Step 2: Stay Details */}
-          {step === 2 && (
-            <div className="space-y-4">
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label>Arrival Date *</Label>
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <Button
-                        variant="outline"
-                        className={cn('w-full justify-start text-left font-normal', !arrivalDate && 'text-muted-foreground')}
-                      >
-                        <CalendarIcon className="mr-2 h-4 w-4" />
-                        {arrivalDate ? format(arrivalDate, 'PPP') : 'Pick a date'}
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-auto p-0">
-                      <Calendar
-                        mode="single"
-                        selected={arrivalDate}
-                        onSelect={setArrivalDate}
-                        initialFocus
-                      />
-                    </PopoverContent>
-                  </Popover>
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Departure Date *</Label>
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <Button
-                        variant="outline"
-                        className={cn('w-full justify-start text-left font-normal', !departureDate && 'text-muted-foreground')}
-                      >
-                        <CalendarIcon className="mr-2 h-4 w-4" />
-                        {departureDate ? format(departureDate, 'PPP') : 'Pick a date'}
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-auto p-0">
-                      <Calendar
-                        mode="single"
-                        selected={departureDate}
-                        onSelect={setDepartureDate}
-                        initialFocus
-                        disabled={(date) => arrivalDate ? date <= arrivalDate : false}
-                      />
-                    </PopoverContent>
-                  </Popover>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="nights">Number of Nights</Label>
-                <Input
-                  id="nights"
-                  type="number"
-                  min="1"
-                  value={nights}
-                  onChange={(e) => handleNightsChange(parseInt(e.target.value) || 1)}
-                />
-              </div>
-            </div>
-          )}
-
-          {/* Step 3: Room Selection */}
-          {step === 3 && (
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <Label>Room Type *</Label>
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                  {roomTypes.map((type) => (
-                    <Button
-                      key={type.value}
-                      variant={selectedRoomType === type.value ? 'default' : 'outline'}
-                      onClick={() => setSelectedRoomType(type.value)}
-                      className="h-auto py-3"
-                    >
-                      <div className="text-center">
-                        <div className="font-medium">{type.label}</div>
-                        <div className="text-xs">{formatNaira(type.baseRate)}/night</div>
-                      </div>
-                    </Button>
-                  ))}
-                </div>
-              </div>
-
-              {selectedRoomType && (
-                <>
-                  <div className="space-y-2">
-                    <Label>Room Price (Editable)</Label>
-                    <Input
-                      type="number"
-                      value={roomPrice}
-                      onChange={(e) => setRoomPrice(parseInt(e.target.value) || 0)}
-                    />
-                    <p className="text-sm text-muted-foreground">
-                      Total: {formatNaira(roomPrice * nights)} ({nights} night{nights > 1 ? 's' : ''})
-                    </p>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label>Available Rooms ({availableRooms.length})</Label>
-                    <div className="grid grid-cols-2 md:grid-cols-3 gap-2 max-h-60 overflow-y-auto">
-                      {availableRooms.map((room) => (
-                        <Card
-                          key={room.id}
-                          className={cn(
-                            'cursor-pointer transition-all',
-                            selectedRoom?.id === room.id && 'ring-2 ring-primary'
-                          )}
-                          onClick={() => setSelectedRoom(room)}
-                        >
-                          <CardContent className="p-3">
-                            <div className="font-semibold">Room {room.number}</div>
-                            <div className="text-sm text-muted-foreground">Floor {room.floor}</div>
-                            <div className="text-sm font-medium mt-1">{formatNaira(room.rate)}</div>
-                          </CardContent>
-                        </Card>
-                      ))}
-                    </div>
-                  </div>
-
-                  {selectedRoom && (
-                    <>
-                      <div className="space-y-2">
-                        <Label>Payment Method *</Label>
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                          {['cash', 'pos', 'transfer', 'city_ledger'].map((method) => (
-                            <Button
-                              key={method}
-                              variant={paymentMethod === method ? 'default' : 'outline'}
-                              onClick={() => {
-                                setPaymentMethod(method)
-                                if (method !== 'city_ledger') {
-                                  setShowOrgSearch(false)
-                                  setSelectedOrganization(null)
-                                }
-                              }}
-                            >
-                              {method.replace('_', ' ').toUpperCase()}
-                            </Button>
-                          ))}
-                        </div>
-                      </div>
-
-                      {paymentMethod === 'city_ledger' && (
-                        <div className="space-y-3">
-                          <Card className="bg-muted">
-                            <CardContent className="p-3">
-                              <div className="flex items-center justify-between">
-                                <div>
-                                  <div className="text-sm font-medium">{fullName}</div>
-                                  <div className="text-sm text-muted-foreground">
-                                    Balance: {formatNaira(selectedGuest?.balance || 0)}
-                                  </div>
-                                </div>
-                                {!showOrgSearch && (
-                                  <Badge variant="outline">Selected</Badge>
-                                )}
-                              </div>
-                            </CardContent>
-                          </Card>
-
-                          <div className="flex items-center gap-2">
-                            <div className="h-px flex-1 bg-border" />
-                            <span className="text-xs text-muted-foreground">OR</span>
-                            <div className="h-px flex-1 bg-border" />
-                          </div>
-
-                          <div>
-                            <Button
-                              variant="outline"
-                              className="w-full"
-                              onClick={() => setShowOrgSearch(!showOrgSearch)}
-                            >
-                              <Search className="mr-2 h-4 w-4" />
-                              {showOrgSearch ? 'Hide' : 'Search'} Organization
-                            </Button>
-
-                            {showOrgSearch && (
-                              <Card className="mt-2">
-                                <CardContent className="p-2">
-                                  <Command>
-                                    <CommandInput placeholder="Search organization..." />
-                                    <CommandEmpty>No organization found.</CommandEmpty>
-                                    <CommandGroup>
-                                      {mockOrganizations.map((org) => (
-                                        <CommandItem
-                                          key={org.id}
-                                          onSelect={() => {
-                                            setSelectedOrganization(org)
-                                            setShowOrgSearch(false)
-                                          }}
-                                        >
-                                          <div className="flex-1">
-                                            <div className="font-medium">{org.name}</div>
-                                            <div className="text-sm text-muted-foreground">
-                                              Balance: {formatNaira(org.balance)}
-                                            </div>
-                                          </div>
-                                          <Check className={cn('ml-2 h-4 w-4', selectedOrganization?.id === org.id ? 'opacity-100' : 'opacity-0')} />
-                                        </CommandItem>
-                                      ))}
-                                    </CommandGroup>
-                                  </Command>
-                                </CardContent>
-                              </Card>
-                            )}
-
-                            {selectedOrganization && (
-                              <Card className="mt-2 bg-primary/10 border-primary">
-                                <CardContent className="p-3">
-                                  <div className="flex items-center justify-between">
-                                    <div>
-                                      <div className="text-sm font-medium">{selectedOrganization.name}</div>
-                                      <div className="text-sm text-muted-foreground">
-                                        Balance: {formatNaira(selectedOrganization.balance)}
-                                      </div>
-                                    </div>
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={() => setSelectedOrganization(null)}
-                                    >
-                                      <X className="h-4 w-4" />
-                                    </Button>
-                                  </div>
-                                </CardContent>
-                              </Card>
-                            )}
-                          </div>
-                        </div>
-                      )}
-                    </>
-                  )}
-                </>
-              )}
-            </div>
-          )}
-
-          {/* Navigation Buttons */}
-          <div className="flex justify-between pt-4 border-t">
-            <Button variant="outline" onClick={step === 1 ? onClose : handleBack}>
-              {step === 1 ? (
-                'Cancel'
-              ) : (
-                <>
-                  <ChevronLeft className="mr-2 h-4 w-4" />
-                  Back
-                </>
-              )}
+        <div className="flex gap-2 justify-between">
+          {step > 1 && (
+            <Button variant="outline" onClick={() => setStep(step - 1)} disabled={loading}>
+              Back
             </Button>
-            {step < 3 ? (
-              <Button onClick={handleNext}>
-                Next
-                <ChevronRight className="ml-2 h-4 w-4" />
-              </Button>
-            ) : (
-              <Button onClick={handleSubmit}>
-                Create Booking
-              </Button>
-            )}
-          </div>
+          )}
+          {step < 3 && (
+            <Button onClick={() => setStep(step + 1)} disabled={loading} className="ml-auto">
+              Next
+            </Button>
+          )}
+          {step === 3 && (
+            <Button onClick={handleSubmit} disabled={loading} className="ml-auto">
+              {loading ? 'Creating...' : 'Create Booking'}
+            </Button>
+          )}
         </div>
       </DialogContent>
     </Dialog>
