@@ -98,7 +98,11 @@ export default function RoomsPage() {
     <div className="space-y-6">
       <AddRoomModal 
         open={addRoomModalOpen} 
-        onClose={() => { setAddRoomModalOpen(false); fetchRooms() }}
+        onClose={() => { 
+          setAddRoomModalOpen(false)
+          // Small delay to ensure database is updated
+          setTimeout(() => fetchRooms(), 500)
+        }}
       />
       
       <div className="flex items-center justify-between">
@@ -114,7 +118,7 @@ export default function RoomsPage() {
 
       <EnhancedDataTable
         data={rooms}
-        searchKeys={['number', 'type']}
+        searchKeys={['room_number', 'room_type']}
         filters={[
           {
             key: 'status',
