@@ -1,4 +1,6 @@
-import { createClient } from './supabase-client'
+'use server'
+
+import { createClient } from '@/lib/supabase/server'
 
 export const transactionsApi = {
   async getTransactions(orgId: string, options?: { limit?: number; offset?: number }) {
@@ -85,8 +87,4 @@ export const transactionsApi = {
     const total = data?.reduce((sum, t) => sum + (t.amount || 0), 0) || 0
     return total
   },
-}
-
-function createClient() {
-  return null as any
 }

@@ -44,27 +44,18 @@ export default function Page() {
         return
       }
 
-      console.log("[v0] Starting login for:", email)
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
       })
 
       if (error) {
-        console.log("[v0] Login error:", error.message)
         throw error
       }
 
-      console.log("[v0] Login successful, user:", data.user?.id)
       toast.success('Login successful!')
-      
-      // Redirect after a short delay to ensure session is established
-      setTimeout(() => {
-        console.log("[v0] Redirecting to dashboard")
-        router.push('/dashboard')
-      }, 1000)
+      router.push('/dashboard')
     } catch (error: any) {
-      console.log("[v0] Login failed:", error.message)
       toast.error(error.message || 'Failed to login')
       setIsLoading(false)
     }

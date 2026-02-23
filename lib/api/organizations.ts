@@ -1,4 +1,6 @@
-import { createClient } from './supabase-client'
+'use server'
+
+import { createClient } from '@/lib/supabase/server'
 
 export const organizationsApi = {
   async getOrganization(orgId: string) {
@@ -41,10 +43,4 @@ export const organizationsApi = {
   async updateSettings(orgId: string, settings: any) {
     return this.updateOrganization(orgId, settings)
   },
-}
-
-function createClient() {
-  // This would use the server-side client in real implementation
-  // For now, placeholder for browser client context
-  return null as any
 }

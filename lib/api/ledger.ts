@@ -1,4 +1,6 @@
-import { createClient } from './supabase-client'
+'use server'
+
+import { createClient } from '@/lib/supabase/server'
 
 export const ledgerApi = {
   async getLedgerAccounts(orgId: string) {
@@ -106,8 +108,4 @@ export const ledgerApi = {
       periodEnd: endDate,
     }
   },
-}
-
-function createClient() {
-  return null as any
 }
