@@ -139,7 +139,6 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
     setLedgerAccount(account.id)
     setLedgerSearch(account.name || account.full_name || '')
   }
-  }
 
   const loadData = async () => {
     try {
