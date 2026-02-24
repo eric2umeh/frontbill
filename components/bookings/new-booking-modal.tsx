@@ -125,11 +125,10 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
         .eq('status', 'available')
         .order('room_number')
 
-      // Load city ledger accounts
+      // Load city ledger accounts (organizations that accept city ledger payments)
       const { data: ledgerData } = await supabase
-        .from('city_ledger_accounts')
-        .select('*')
-        .eq('organization_id', profile.organization_id)
+        .from('organizations')
+        .select('id, name, email, current_balance')
         .order('name')
 
       setGuests(guestData || [])
