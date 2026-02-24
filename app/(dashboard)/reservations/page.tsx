@@ -22,6 +22,10 @@ interface Reservation {
   status: string
   payment_status: string
   rate_per_night: number
+  created_by?: string
+  created_by_name?: string
+  updated_by?: string
+  updated_by_name?: string
   guests?: { full_name: string; phone: string }
   rooms?: { number: string; type: string }
 }
@@ -67,13 +71,38 @@ export default function ReservationsPage() {
 
       const { data, error } = await supabase
         .from('bookings')
-        .select('*, guests(full_name, phone), rooms(number, type)')
+        .select('*, guests(full_name, phone), rooms(number, type), created_by, updated_by')
         .eq('organization_id', profile.organization_id)
         .eq('status', 'reserved')
         .order('check_in_date', { ascending: true })
 
       if (error) throw error
-      setReservations(data || [])
+      
+      // Fetch creator and updater profiles for all reservations
+      const userIds = Array.from(new Set(
+        [...(data || []).map((r: any) => r.created_by), ...(data || []).map((r: any) => r.updated_by)].filter(Boolean)
+      ))
+      let userMap: { [key: string]: string } = {}
+      
+      if (userIds.length > 0) {
+        const { data: profiles } = await supabase
+          .from('profiles')
+          .select('id, full_name')
+          .in('id', userIds)
+        
+        profiles?.forEach(profile => {
+          userMap[profile.id] = profile.full_name || 'Unknown User'
+        })
+      }
+      
+      // Add created_by_name and updated_by_name to each reservation
+      const reservationsWithUsers = (data || []).map((reservation: any) => ({
+        ...reservation,
+        created_by_name: reservation.created_by ? userMap[reservation.created_by] || 'Unknown User' : 'System',
+        updated_by_name: reservation.updated_by ? userMap[reservation.updated_by] || 'Unknown User' : null
+      }))
+      
+      setReservations(reservationsWithUsers)
     } catch (error: any) {
       console.error('Error fetching reservations:', error)
       setReservations([])
@@ -200,6 +229,30 @@ export default function ReservationsPage() {
               <Badge variant="outline" className={paymentColors[res.payment_status]}>
                 {res.payment_status}
               </Badge>
+            ),
+          },
+          {
+            key: 'created_by_name',
+            label: 'Created By',
+            render: (res) => (
+              <div className="text-sm text-muted-foreground">
+                {res.created_by_name}
+              </div>
+            ),
+          },
+          {
+            key: 'updated_by_name',
+            label: 'Last Updated',
+            render: (res) => (
+              <div className="text-sm">
+                {res.updated_by_name ? (
+                  <div className="text-muted-foreground">
+                    {res.updated_by_name}
+                  </div>
+                ) : (
+                  <span className="text-muted-foreground">—</span>
+                )}
+              </div>
             ),
           },
           {

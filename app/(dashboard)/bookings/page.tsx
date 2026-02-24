@@ -24,6 +24,11 @@ interface Booking {
   payment_status: string
   rate_per_night: number
   balance: number
+  created_by?: string
+  created_by_name?: string
+  updated_by?: string
+  updated_by_name?: string
+  updated_at?: string
   guests?: { full_name: string; phone: string }
   rooms?: { number: string; type: string }
 }
@@ -71,12 +76,37 @@ export default function BookingsPage() {
 
       const { data, error } = await supabase
         .from('bookings')
-        .select('*, guests(name, phone), rooms(room_number, room_type)')
+        .select('*, guests(name, phone), rooms(room_number, room_type), created_by, updated_by, updated_at')
         .eq('organization_id', profile.organization_id)
         .order('check_in', { ascending: false })
 
       if (error) throw error
-      setBookings(data || [])
+      
+      // Fetch creator and updater profiles for all bookings
+      const userIds = Array.from(new Set(
+        [...(data || []).map((b: any) => b.created_by), ...(data || []).map((b: any) => b.updated_by)].filter(Boolean)
+      ))
+      let userMap: { [key: string]: string } = {}
+      
+      if (userIds.length > 0) {
+        const { data: profiles } = await supabase
+          .from('profiles')
+          .select('id, full_name')
+          .in('id', userIds)
+        
+        profiles?.forEach(profile => {
+          userMap[profile.id] = profile.full_name || 'Unknown User'
+        })
+      }
+      
+      // Add created_by_name and updated_by_name to each booking
+      const bookingsWithUsers = (data || []).map((booking: any) => ({
+        ...booking,
+        created_by_name: booking.created_by ? userMap[booking.created_by] || 'Unknown User' : 'System',
+        updated_by_name: booking.updated_by ? userMap[booking.updated_by] || 'Unknown User' : null
+      }))
+      
+      setBookings(bookingsWithUsers)
     } catch (error: any) {
       console.error('Error fetching bookings:', error)
       toast.error('Failed to load bookings')
@@ -230,6 +260,30 @@ export default function BookingsPage() {
                   <div className="text-xs text-muted-foreground">
                     Bal: {formatNaira(booking.balance)}
                   </div>
+                )}
+              </div>
+            ),
+          },
+          {
+            key: 'created_by_name',
+            label: 'Created By',
+            render: (booking) => (
+              <div className="text-sm text-muted-foreground">
+                {booking.created_by_name}
+              </div>
+            ),
+          },
+          {
+            key: 'updated_by_name',
+            label: 'Last Updated',
+            render: (booking) => (
+              <div className="text-sm">
+                {booking.updated_by_name ? (
+                  <div className="text-muted-foreground">
+                    {booking.updated_by_name}
+                  </div>
+                ) : (
+                  <span className="text-muted-foreground">—</span>
                 )}
               </div>
             ),
