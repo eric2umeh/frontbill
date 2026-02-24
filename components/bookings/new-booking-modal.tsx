@@ -527,9 +527,19 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
               <Input
                 type="number"
                 min="1"
-                placeholder="Enter number of nights"
-                value={nights}
-                onChange={(e) => handleNightsChange(parseInt(e.target.value) || 0)}
+                placeholder="1"
+                value={nights.toString()}
+                onChange={(e) => {
+                  const val = e.target.value
+                  if (val === '') {
+                    setNights(1)
+                  } else {
+                    const num = parseInt(val)
+                    if (!isNaN(num) && num >= 1) {
+                      handleNightsChange(num)
+                    }
+                  }
+                }}
               />
               <p className="text-xs text-muted-foreground">
                 Changes will update checkout date automatically
