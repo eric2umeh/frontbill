@@ -71,6 +71,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
   const [selectedRoomType, setSelectedRoomType] = useState('')
   const [selectedRoom, setSelectedRoom] = useState<Room | null>(null)
   const [pricePerNight, setPricePerNight] = useState(0)
+  const [customPrice, setCustomPrice] = useState(0) // Custom/discounted price
   const [paymentMethod, setPaymentMethod] = useState('cash')
   const [ledgerSearch, setLedgerSearch] = useState('')
   const [ledgerType, setLedgerType] = useState('individual') // individual or organization
@@ -482,15 +483,6 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
                 </p>
               </div>
             )}
-
-            <div className="space-y-2">
-              <Label>Address</Label>
-              <Input
-                placeholder="Address"
-                value={address}
-                onChange={(e) => setAddress(e.target.value)}
-              />
-            </div>
           </div>
         )}
 
@@ -588,6 +580,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
                   if (room) {
                     setSelectedRoom(room)
                     setPricePerNight(room.price_per_night)
+                    setCustomPrice(0) // Reset custom price when room changes
                   }
                 }}>
                   <SelectTrigger>
@@ -606,18 +599,40 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
               </div>
             )}
 
-            <div className="space-y-2">
-              <Label>Price Per Night (Optional)</Label>
-              <Input
-                type="number"
-                value={pricePerNight}
-                onChange={(e) => setPricePerNight(parseFloat(e.target.value) || 0)}
-              />
-            </div>
+            {selectedRoom && (
+              <>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Standard Price Per Night</Label>
+                    <div className="px-3 py-2 bg-muted rounded border border-input">
+                      <p className="text-sm font-medium">{formatNaira(pricePerNight)}</p>
+                    </div>
+                  </div>
 
-            <div className="bg-muted p-3 rounded-lg">
-              <p className="text-sm font-medium">Total: {formatNaira(pricePerNight * nights)}</p>
-            </div>
+                  <div className="space-y-2">
+                    <Label>Custom Price Per Night (Optional)</Label>
+                    <Input
+                      type="number"
+                      placeholder="Leave empty for standard price"
+                      value={customPrice || ''}
+                      onChange={(e) => setCustomPrice(parseFloat(e.target.value) || 0)}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Use for discounts or special rates
+                    </p>
+                  </div>
+                </div>
+
+                <div className="bg-blue-50 border border-blue-200 p-3 rounded-lg">
+                  <p className="text-sm font-medium text-blue-900">
+                    Total: {formatNaira((customPrice || pricePerNight) * nights)}
+                  </p>
+                  <p className="text-xs text-blue-700 mt-1">
+                    {customPrice ? `${nights} nights × ${formatNaira(customPrice)} (custom)` : `${nights} nights × ${formatNaira(pricePerNight)}`}
+                  </p>
+                </div>
+              </>
+            )}
 
             <div className="space-y-2">
               <Label>Payment Method *</Label>
