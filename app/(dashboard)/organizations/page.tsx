@@ -55,29 +55,35 @@ export default function OrganizationsPage() {
     try {
       setLoading(true)
       const supabase = createClient()
+      
+      // Fetch organizations
       const { data, error } = await supabase
         .from('organizations')
-        .select(`
-          id, 
-          name, 
-          org_type, 
-          email, 
-          phone, 
-          contact_person, 
-          address, 
-          current_balance, 
-          created_at,
-          profiles:created_by(full_name)
-        `)
+        .select('id, name, org_type, email, phone, contact_person, address, current_balance, created_at, created_by')
         .not('name', 'like', '%Hotel%')
         .order('created_at', { ascending: false })
 
       if (error) throw error
       
+      // Fetch creator profiles for all organizations
+      const creatorIds = Array.from(new Set((data || []).map(org => org.created_by).filter(Boolean)))
+      let creatorMap: { [key: string]: string } = {}
+      
+      if (creatorIds.length > 0) {
+        const { data: profiles } = await supabase
+          .from('profiles')
+          .select('id, full_name')
+          .in('id', creatorIds)
+        
+        profiles?.forEach(profile => {
+          creatorMap[profile.id] = profile.full_name || 'Unknown User'
+        })
+      }
+      
       // Transform the data to flatten the creator name
       const transformed = (data || []).map((org: any) => ({
         ...org,
-        created_by_name: org.profiles?.full_name || 'Unknown User'
+        created_by_name: org.created_by ? creatorMap[org.created_by] || 'Unknown User' : 'System'
       }))
       
       setOrganizations(transformed)
