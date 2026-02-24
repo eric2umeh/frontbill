@@ -438,6 +438,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
     }
     return false
   }
+  }
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
