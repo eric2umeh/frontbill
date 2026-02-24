@@ -123,17 +123,13 @@ export default function OrganizationDetailPage() {
         .select()
 
       if (error) {
-        console.error('[v0] Update error:', error)
         throw error
       }
-
-      console.log('[v0] Update result:', result)
 
       toast.success('Organization updated successfully')
       setIsEditing(false)
       await fetchOrganization()
     } catch (error: any) {
-      console.error('[v0] Save error:', error)
       toast.error(error.message || 'Failed to update organization')
     } finally {
       setSaving(false)
