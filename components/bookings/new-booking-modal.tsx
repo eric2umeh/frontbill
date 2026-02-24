@@ -95,17 +95,56 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
   const handleLedgerTypeChange = (type: string) => {
     setLedgerSearch('')
     setLedgerAccount('')
-    setLedgerOpen(false)
     
     if (type === 'individual') {
-      // Show only guests with balance (owe money)
-      const filtered = guests.filter(g => (g.balance || g.current_balance || 0) > 0)
+      // For individual, auto-select the guest if one exists
+      if (guestId) {
+        const selectedGuest = guests.find(g => g.id === guestId)
+        if (selectedGuest) {
+          setLedgerAccount(guestId)
+          setLedgerSearch(selectedGuest.name)
+          console.log('[v0] Auto-selected guest:', selectedGuest)
+        }
+      }
+      // Show all guests available
+      setFilteredLedgerAccounts(guests)
+    } else {
+      // Show all organizations
+      setFilteredLedgerAccounts(ledgerAccounts)
+    }
+  }
+
+  const handleLedgerSearch = (value: string) => {
+    setLedgerSearch(value)
+    console.log('[v0] Searching ledger with value:', value, 'type:', ledgerType)
+    
+    let toSearch = []
+    if (ledgerType === 'individual') {
+      toSearch = guests
+    } else {
+      toSearch = ledgerAccounts
+    }
+    
+    console.log('[v0] Total accounts to search:', toSearch.length)
+    
+    if (value.trim().length > 0) {
+      const filtered = toSearch.filter(acc => {
+        const name = (acc.name || acc.full_name || '').toLowerCase()
+        const matches = name.includes(value.toLowerCase())
+        return matches
+      })
+      console.log('[v0] Filtered results:', filtered.length, filtered)
       setFilteredLedgerAccounts(filtered)
     } else {
-      // Show only organizations with balance (owe money)
-      const filtered = ledgerAccounts.filter(org => (org.current_balance || 0) > 0)
-      setFilteredLedgerAccounts(filtered)
+      setFilteredLedgerAccounts(toSearch)
     }
+  }
+
+  const selectLedgerAccount = (account: any) => {
+    console.log('[v0] Selected ledger account:', account)
+    setLedgerAccount(account.id)
+    setLedgerSearch(account.name || account.full_name || '')
+  }
   }
 
   const loadData = async () => {
@@ -161,13 +200,9 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
       // Initialize filtered ledger accounts based on current ledger type
       console.log('[v0] Loaded data - guests:', guestData?.length, 'ledger orgs:', ledgerData?.length)
       if (ledgerType === 'individual') {
-        const filtered = (guestData || []).filter(g => (g.balance || g.current_balance || 0) > 0)
-        console.log('[v0] Filtered individual accounts:', filtered)
-        setFilteredLedgerAccounts(filtered)
+        setFilteredLedgerAccounts(guestData || [])
       } else {
-        const filtered = (ledgerData || []).filter(org => (org.current_balance || 0) > 0)
-        console.log('[v0] Filtered organization accounts:', filtered)
-        setFilteredLedgerAccounts(filtered)
+        setFilteredLedgerAccounts(ledgerData || [])
       }
     } catch (error: any) {
       toast.error('Failed to load data')
