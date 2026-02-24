@@ -157,6 +157,15 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
     }
   }
 
+  const selectGuest = (guest: any) => {
+    setGuestId(guest.id)
+    setFullName(guest.name)
+    setPhone(guest.phone)
+    setEmail(guest.email || '')
+    setAddress(guest.address || '')
+    setGuestSearchOpen(false)
+  }
+
   const selectGuest = (guest: Guest) => {
     setGuestId(guest.id)
     setFullName(guest.name)
