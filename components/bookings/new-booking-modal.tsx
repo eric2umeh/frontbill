@@ -136,7 +136,10 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
       setRooms(roomData || [])
       setLedgerAccounts(ledgerData || [])
       setFilteredGuests(guestData || [])
-      setFilteredLedgerAccounts(ledgerData || [])
+      
+      // Filter ledger accounts - only show ones with balance (positive balance = owes money, can accept city ledger)
+      const filteredLedger = ledgerData?.filter(org => org.current_balance !== 0) || []
+      setFilteredLedgerAccounts(filteredLedger)
     } catch (error: any) {
       toast.error('Failed to load data')
     }
@@ -236,12 +239,26 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
   const handleLedgerSearch = (value: string) => {
     setLedgerSearch(value)
     if (value.length > 0) {
-      const filtered = ledgerAccounts.filter(acc =>
+      let toSearch = ledgerAccounts
+      
+      // If searching for individual accounts, filter from guests
+      if (ledgerType === 'individual') {
+        toSearch = guests.filter(g => g.current_balance > 0) // Only show guests with balance (owe money)
+      }
+      
+      const filtered = toSearch.filter(acc =>
         acc.name.toLowerCase().includes(value.toLowerCase())
       )
       setFilteredLedgerAccounts(filtered)
     } else {
-      setFilteredLedgerAccounts(ledgerAccounts)
+      // Show all ledger accounts filtered by type and balance
+      if (ledgerType === 'individual') {
+        const filtered = guests.filter(g => g.current_balance > 0)
+        setFilteredLedgerAccounts(filtered)
+      } else {
+        const filtered = ledgerAccounts.filter(org => org.current_balance > 0)
+        setFilteredLedgerAccounts(filtered)
+      }
     }
   }
 
@@ -316,7 +333,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
           payment_method: paymentMethod,
           payment_status: 'pending',
           status: 'confirmed',
-          ledger_organization_id: paymentMethod === 'ledger' ? ledgerAccount : null,
+          guest_type: paymentMethod === 'ledger' ? 'organization' : 'walkin',
           created_by: (await supabase.auth.getUser()).data.user?.id,
         }])
         .select()
@@ -680,7 +697,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
                               <div>
                                 <div className="font-medium">{account.name}</div>
                                 <div className="text-xs text-muted-foreground">
-                                  Balance: {formatNaira(account.balance || 0)}
+                                  Balance: {formatNaira(account.current_balance || account.balance || 0)}
                                 </div>
                               </div>
                             </CommandItem>
