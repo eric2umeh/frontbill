@@ -157,15 +157,6 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
     }
   }
 
-  const selectGuest = (guest: any) => {
-    setGuestId(guest.id)
-    setFullName(guest.name)
-    setPhone(guest.phone)
-    setEmail(guest.email || '')
-    setAddress(guest.address || '')
-    setGuestSearchOpen(false)
-  }
-
   const selectGuest = (guest: Guest) => {
     setGuestId(guest.id)
     setFullName(guest.name)
@@ -233,22 +224,6 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
     if (checkInDate) {
       const newCheckOut = addDays(checkInDate, validNights)
       setCheckOutDate(newCheckOut)
-    }
-  }
-  }
-
-  const handleCheckOutChange = (date: Date | undefined) => {
-    setCheckOutDate(date)
-    if (date && checkInDate) {
-      const diff = differenceInDays(date, checkInDate)
-      setNights(Math.max(1, diff))
-    }
-  }
-
-  const handleNightsChange = (value: number) => {
-    setNights(Math.max(1, value))
-    if (checkInDate) {
-      setCheckOutDate(addDays(checkInDate, Math.max(1, value)))
     }
   }
 
@@ -384,6 +359,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
     setPaymentMethod('cash')
     setLedgerSearch('')
     setLedgerAccount('')
+    setCustomPrice(0)
   }
 
   const canGoToNextStep = () => {
