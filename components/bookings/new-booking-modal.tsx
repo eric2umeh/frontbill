@@ -143,13 +143,16 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
 
   const handleGuestSearch = (value: string) => {
     setFullName(value)
+    setGuestId('') // Clear selected guest when typing
     if (value.length > 0) {
       const filtered = guests.filter(g =>
         g.name.toLowerCase().includes(value.toLowerCase())
       )
       setFilteredGuests(filtered)
+      setGuestSearchOpen(filtered.length > 0) // Only show popover if matches exist
     } else {
-      setFilteredGuests(guests)
+      setFilteredGuests([])
+      setGuestSearchOpen(false)
     }
   }
 
@@ -375,58 +378,87 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
           <div className="space-y-4 py-4">
             <div className="space-y-2">
               <Label>Full Name *</Label>
-              <Popover open={guestSearchOpen} onOpenChange={setGuestSearchOpen}>
-                <PopoverTrigger asChild>
-                  <Input
-                    placeholder="Search or type guest name"
-                    value={fullName}
-                    onChange={(e) => handleGuestSearch(e.target.value)}
-                  />
-                </PopoverTrigger>
-                <PopoverContent className="w-80 p-0" align="start">
-                  <Command>
-                    <CommandInput placeholder="Search guests..." />
-                    <CommandEmpty>
-                      <div className="p-2 text-sm text-muted-foreground">
-                        No guests found. Fill the form to create new.
-                      </div>
-                    </CommandEmpty>
-                    <CommandGroup>
-                      {filteredGuests.map(guest => (
-                        <CommandItem
-                          key={guest.id}
-                          onSelect={() => selectGuest(guest)}
-                        >
-                          <div>
-                            <div className="font-medium">{guest.name}</div>
-                            <div className="text-xs text-muted-foreground">{guest.phone}</div>
-                          </div>
-                        </CommandItem>
-                      ))}
-                    </CommandGroup>
-                  </Command>
-                </PopoverContent>
-              </Popover>
+              <div className="relative">
+                <Input
+                  placeholder="Type guest name (existing guests will appear below)"
+                  value={fullName}
+                  onChange={(e) => handleGuestSearch(e.target.value)}
+                  onFocus={() => {
+                    if (fullName.length > 0 && filteredGuests.length > 0) {
+                      setGuestSearchOpen(true)
+                    }
+                  }}
+                />
+                
+                {/* Suggestions Dropdown */}
+                {guestSearchOpen && filteredGuests.length > 0 && (
+                  <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-input rounded-md shadow-lg z-50 max-h-64 overflow-y-auto">
+                    {filteredGuests.map(guest => (
+                      <button
+                        key={guest.id}
+                        className="w-full text-left px-4 py-3 hover:bg-accent border-b last:border-b-0 transition-colors"
+                        onClick={() => selectGuest(guest)}
+                      >
+                        <div className="font-medium text-sm">{guest.name}</div>
+                        <div className="text-xs text-muted-foreground">{guest.phone}</div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              {filteredGuests.length > 0 && guestSearchOpen && (
+                <p className="text-xs text-muted-foreground">
+                  Click a suggestion or continue typing to create new guest
+                </p>
+              )}
             </div>
 
             <div className="space-y-2">
-              <Label>Phone Number *</Label>
+              <Label>Phone Number * {guestId && <span className="text-xs text-green-600">(from existing guest)</span>}</Label>
               <Input
                 placeholder="Phone number"
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
+                disabled={!!guestId}
               />
             </div>
 
             <div className="space-y-2">
-              <Label>Email</Label>
+              <Label>Email {guestId && <span className="text-xs text-green-600">(from existing guest)</span>}</Label>
               <Input
                 type="email"
                 placeholder="Email address"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
+                disabled={!!guestId}
               />
             </div>
+
+            <div className="space-y-2">
+              <Label>Address {guestId && <span className="text-xs text-green-600">(from existing guest)</span>}</Label>
+              <Input
+                placeholder="Street address"
+                value={address}
+                onChange={(e) => setAddress(e.target.value)}
+                disabled={!!guestId}
+              />
+            </div>
+
+            {guestId && (
+              <div className="bg-blue-50 border border-blue-200 rounded p-3">
+                <p className="text-sm text-blue-900">
+                  ✓ Guest details populated from existing record
+                </p>
+              </div>
+            )}
+
+            {!guestId && fullName.trim() && (
+              <div className="bg-amber-50 border border-amber-200 rounded p-3">
+                <p className="text-sm text-amber-900">
+                  This will create a new guest: <strong>{fullName}</strong>
+                </p>
+              </div>
+            )}
 
             <div className="space-y-2">
               <Label>Address</Label>
