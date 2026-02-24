@@ -1,4 +1,6 @@
-import { createClient } from './supabase-client'
+'use server'
+
+import { createClient } from '@/lib/supabase/server'
 
 export const analyticsApi = {
   async getDailyRevenue(orgId: string, startDate: string, endDate: string) {
@@ -89,8 +91,4 @@ export const analyticsApi = {
     if (error) throw error
     return data
   },
-}
-
-function createClient() {
-  return null as any
 }

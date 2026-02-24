@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { createClient } from '@/lib/supabase/client'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -67,9 +68,48 @@ export function AddRoomModal({ open, onClose, onSuccess }: AddRoomModalProps) {
 
     setLoading(true)
     try {
-      await new Promise(resolve => setTimeout(resolve, 500))
+      const supabase = createClient()
       
-      console.log('[v0] Room added:', { ...formData, amenities: selectedAmenities })
+      // Get current user
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) {
+        toast.error('User not found')
+        return
+      }
+
+      // Get user's organization
+      const { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .select('organization_id')
+        .eq('id', user.id)
+        .single()
+
+      if (profileError) {
+        toast.error(profileError.message || 'Failed to load profile')
+        return
+      }
+
+      if (!profile?.organization_id) {
+        toast.error('No organization linked to account. Please log out and sign up again.')
+        return
+      }
+
+      // Create room
+      const { error } = await supabase
+        .from('rooms')
+        .insert([{
+          organization_id: profile.organization_id,
+          room_number: formData.number,
+          floor_number: parseInt(formData.floor),
+          room_type: formData.type,
+          price_per_night: formData.rate,
+          max_occupancy: formData.capacity,
+          status: formData.status,
+          amenities: selectedAmenities,
+        }])
+
+      if (error) throw error
+      
       toast.success(`Room ${formData.number} added successfully!`)
       
       // Reset form

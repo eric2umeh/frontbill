@@ -11,7 +11,7 @@ import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { ArrowLeft, CreditCard, Trash2, Edit, Plus, Clock } from 'lucide-react'
+import { ArrowLeft, CreditCard, Trash2, Edit, Plus, Clock, AlertCircle } from 'lucide-react'
 import { formatNaira } from '@/lib/utils/currency'
 import { toast } from 'sonner'
 import { ExtendStayModal } from '@/components/bookings/extend-stay-modal'
@@ -24,6 +24,7 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
   const [chargeDescription, setChargeDescription] = useState('')
   const [chargeType, setChargeType] = useState('payment')
   const [paymentMethod, setPaymentMethod] = useState('')
+  const [deleteLoading, setDeleteLoading] = useState(false)
 
   // Mock booking data with folio
   const booking = {
@@ -97,10 +98,45 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
   }
 
   const handleDelete = () => {
-    if (confirm('Are you sure you want to delete this booking?')) {
-      toast.success('Booking deleted')
-      router.push('/bookings')
-    }
+    toast(
+      (t) => (
+        <div className="flex flex-col gap-3">
+          <div className="flex gap-2 items-start">
+            <AlertCircle className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" />
+            <div>
+              <p className="font-semibold">Delete Booking?</p>
+              <p className="text-sm text-muted-foreground">This action cannot be undone.</p>
+            </div>
+          </div>
+          <div className="flex gap-2 justify-end">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => toast.dismiss(t)}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              disabled={deleteLoading}
+              onClick={() => {
+                setDeleteLoading(true)
+                toast.success('Booking deleted')
+                setTimeout(() => router.push('/bookings'), 500)
+                toast.dismiss(t)
+              }}
+            >
+              Delete
+            </Button>
+          </div>
+        </div>
+      ),
+      {
+        duration: Infinity,
+        className: 'bg-red-50 border-red-200',
+      }
+    )
   }
 
   const totalCharges = folioCharges.reduce((sum, charge) => sum + charge.amount, 0)

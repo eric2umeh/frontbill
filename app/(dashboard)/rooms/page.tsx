@@ -14,11 +14,11 @@ import { toast } from 'sonner'
 
 interface Room {
   id: string
-  number: string
-  type: string
-  floor: number
-  capacity: number
-  rate_per_night: number
+  room_number: string
+  room_type: string
+  floor_number: number
+  max_occupancy: number
+  price_per_night: number
   status: string
   amenities: string[]
 }
@@ -66,7 +66,7 @@ export default function RoomsPage() {
         .from('rooms')
         .select('*')
         .eq('organization_id', profile.organization_id)
-        .order('number', { ascending: true })
+        .order('room_number', { ascending: true })
 
       if (error) throw error
       setRooms(data || [])
@@ -98,7 +98,11 @@ export default function RoomsPage() {
     <div className="space-y-6">
       <AddRoomModal 
         open={addRoomModalOpen} 
-        onClose={() => { setAddRoomModalOpen(false); fetchRooms() }}
+        onClose={() => { 
+          setAddRoomModalOpen(false)
+          // Small delay to ensure database is updated
+          setTimeout(() => fetchRooms(), 500)
+        }}
       />
       
       <div className="flex items-center justify-between">
@@ -114,7 +118,7 @@ export default function RoomsPage() {
 
       <EnhancedDataTable
         data={rooms}
-        searchKeys={['number', 'type']}
+        searchKeys={['room_number', 'room_type']}
         filters={[
           {
             key: 'status',
@@ -130,32 +134,32 @@ export default function RoomsPage() {
         ]}
         columns={[
           {
-            key: 'number',
+            key: 'room_number',
             label: 'Room',
             render: (room) => (
               <div 
                 className="cursor-pointer hover:text-primary"
                 onClick={() => router.push(`/rooms/${room.id}`)}
               >
-                <div className="font-semibold text-lg">Room {room.number}</div>
-                <div className="text-xs text-muted-foreground">Floor {room.floor}</div>
+                <div className="font-semibold text-lg">Room {room.room_number}</div>
+                <div className="text-xs text-muted-foreground">Floor {room.floor_number}</div>
               </div>
             ),
           },
           {
-            key: 'type',
+            key: 'room_type',
             label: 'Type',
             render: (room) => (
               <div 
                 className="cursor-pointer font-medium hover:text-primary"
                 onClick={() => router.push(`/rooms/${room.id}`)}
               >
-                {room.type}
+                {room.room_type}
               </div>
             ),
           },
           {
-            key: 'capacity',
+            key: 'max_occupancy',
             label: 'Capacity',
             render: (room) => (
               <div 
@@ -163,19 +167,19 @@ export default function RoomsPage() {
                 onClick={() => router.push(`/rooms/${room.id}`)}
               >
                 <Users className="h-4 w-4 text-muted-foreground" />
-                <span>{room.capacity}</span>
+                <span>{room.max_occupancy}</span>
               </div>
             ),
           },
           {
-            key: 'rate_per_night',
+            key: 'price_per_night',
             label: 'Rate/Night',
             render: (room) => (
               <div 
                 className="cursor-pointer font-semibold hover:text-primary"
                 onClick={() => router.push(`/rooms/${room.id}`)}
               >
-                {formatNaira(room.rate_per_night)}
+                {formatNaira(room.price_per_night)}
               </div>
             ),
           },
@@ -202,8 +206,8 @@ export default function RoomsPage() {
             <div className="space-y-3">
               <div className="flex items-start justify-between">
                 <div>
-                  <div className="text-2xl font-bold">Room {room.number}</div>
-                  <div className="text-sm text-muted-foreground">{room.type}</div>
+                  <div className="text-2xl font-bold">Room {room.room_number}</div>
+                  <div className="text-sm text-muted-foreground">{room.room_type}</div>
                 </div>
                 <Badge variant="outline" className={statusColors[room.status]}>
                   {room.status}
@@ -212,18 +216,18 @@ export default function RoomsPage() {
               <div className="space-y-2">
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-muted-foreground">Floor</span>
-                  <span className="font-medium">{room.floor}</span>
+                  <span className="font-medium">{room.floor_number}</span>
                 </div>
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-muted-foreground">Capacity</span>
                   <span className="font-medium flex items-center gap-1">
                     <Users className="h-3 w-3" />
-                    {room.capacity} guests
+                    {room.max_occupancy} guests
                   </span>
                 </div>
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-muted-foreground">Rate/Night</span>
-                  <span className="font-semibold">{formatNaira(room.rate_per_night)}</span>
+                  <span className="font-semibold">{formatNaira(room.price_per_night)}</span>
                 </div>
               </div>
             </div>
