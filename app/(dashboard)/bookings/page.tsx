@@ -26,6 +26,9 @@ interface Booking {
   balance: number
   created_by?: string
   created_by_name?: string
+  updated_by?: string
+  updated_by_name?: string
+  updated_at?: string
   guests?: { full_name: string; phone: string }
   rooms?: { number: string; type: string }
 }
@@ -73,34 +76,37 @@ export default function BookingsPage() {
 
       const { data, error } = await supabase
         .from('bookings')
-        .select('*, guests(name, phone), rooms(room_number, room_type), created_by')
+        .select('*, guests(name, phone), rooms(room_number, room_type), created_by, updated_by, updated_at')
         .eq('organization_id', profile.organization_id)
         .order('check_in', { ascending: false })
 
       if (error) throw error
       
-      // Fetch creator profiles for all bookings
-      const creatorIds = Array.from(new Set((data || []).map((b: any) => b.created_by).filter(Boolean)))
-      let creatorMap: { [key: string]: string } = {}
+      // Fetch creator and updater profiles for all bookings
+      const userIds = Array.from(new Set(
+        [...(data || []).map((b: any) => b.created_by), ...(data || []).map((b: any) => b.updated_by)].filter(Boolean)
+      ))
+      let userMap: { [key: string]: string } = {}
       
-      if (creatorIds.length > 0) {
+      if (userIds.length > 0) {
         const { data: profiles } = await supabase
           .from('profiles')
           .select('id, full_name')
-          .in('id', creatorIds)
+          .in('id', userIds)
         
         profiles?.forEach(profile => {
-          creatorMap[profile.id] = profile.full_name || 'Unknown User'
+          userMap[profile.id] = profile.full_name || 'Unknown User'
         })
       }
       
-      // Add created_by_name to each booking
-      const bookingsWithCreator = (data || []).map((booking: any) => ({
+      // Add created_by_name and updated_by_name to each booking
+      const bookingsWithUsers = (data || []).map((booking: any) => ({
         ...booking,
-        created_by_name: booking.created_by ? creatorMap[booking.created_by] || 'Unknown User' : 'System'
+        created_by_name: booking.created_by ? userMap[booking.created_by] || 'Unknown User' : 'System',
+        updated_by_name: booking.updated_by ? userMap[booking.updated_by] || 'Unknown User' : null
       }))
       
-      setBookings(bookingsWithCreator)
+      setBookings(bookingsWithUsers)
     } catch (error: any) {
       console.error('Error fetching bookings:', error)
       toast.error('Failed to load bookings')
@@ -264,6 +270,21 @@ export default function BookingsPage() {
             render: (booking) => (
               <div className="text-sm text-muted-foreground">
                 {booking.created_by_name}
+              </div>
+            ),
+          },
+          {
+            key: 'updated_by_name',
+            label: 'Last Updated',
+            render: (booking) => (
+              <div className="text-sm">
+                {booking.updated_by_name ? (
+                  <div className="text-muted-foreground">
+                    {booking.updated_by_name}
+                  </div>
+                ) : (
+                  <span className="text-muted-foreground">—</span>
+                )}
               </div>
             ),
           },

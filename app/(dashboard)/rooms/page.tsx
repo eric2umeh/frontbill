@@ -23,6 +23,9 @@ interface Room {
   amenities: string[]
   created_by?: string
   created_by_name?: string
+  updated_by?: string
+  updated_by_name?: string
+  updated_at?: string
 }
 
 export default function RoomsPage() {
@@ -66,34 +69,37 @@ export default function RoomsPage() {
 
       const { data, error } = await supabase
         .from('rooms')
-        .select('*, created_by')
+        .select('*, created_by, updated_by, updated_at')
         .eq('organization_id', profile.organization_id)
         .order('room_number', { ascending: true })
 
       if (error) throw error
       
-      // Fetch creator profiles for all rooms
-      const creatorIds = Array.from(new Set((data || []).map((r: any) => r.created_by).filter(Boolean)))
-      let creatorMap: { [key: string]: string } = {}
+      // Fetch creator and updater profiles for all rooms
+      const userIds = Array.from(new Set(
+        [...(data || []).map((r: any) => r.created_by), ...(data || []).map((r: any) => r.updated_by)].filter(Boolean)
+      ))
+      let userMap: { [key: string]: string } = {}
       
-      if (creatorIds.length > 0) {
+      if (userIds.length > 0) {
         const { data: profiles } = await supabase
           .from('profiles')
           .select('id, full_name')
-          .in('id', creatorIds)
+          .in('id', userIds)
         
         profiles?.forEach(profile => {
-          creatorMap[profile.id] = profile.full_name || 'Unknown User'
+          userMap[profile.id] = profile.full_name || 'Unknown User'
         })
       }
       
-      // Add created_by_name to each room
-      const roomsWithCreator = (data || []).map((room: any) => ({
+      // Add created_by_name and updated_by_name to each room
+      const roomsWithUsers = (data || []).map((room: any) => ({
         ...room,
-        created_by_name: room.created_by ? creatorMap[room.created_by] || 'Unknown User' : 'System'
+        created_by_name: room.created_by ? userMap[room.created_by] || 'Unknown User' : 'System',
+        updated_by_name: room.updated_by ? userMap[room.updated_by] || 'Unknown User' : null
       }))
       
-      setRooms(roomsWithCreator)
+      setRooms(roomsWithUsers)
     } catch (error: any) {
       console.error('Error fetching rooms:', error)
       toast.error('Failed to load rooms')
@@ -227,6 +233,21 @@ export default function RoomsPage() {
             render: (room) => (
               <div className="text-sm text-muted-foreground">
                 {room.created_by_name}
+              </div>
+            ),
+          },
+          {
+            key: 'updated_by_name',
+            label: 'Last Updated',
+            render: (room) => (
+              <div className="text-sm">
+                {room.updated_by_name ? (
+                  <div className="text-muted-foreground">
+                    {room.updated_by_name}
+                  </div>
+                ) : (
+                  <span className="text-muted-foreground">—</span>
+                )}
               </div>
             ),
           },

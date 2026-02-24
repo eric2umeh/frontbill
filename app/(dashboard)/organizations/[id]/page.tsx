@@ -26,9 +26,11 @@ interface Organization {
   current_balance: number
   created_at: string
   created_by?: string
+  updated_at?: string
+  updated_by?: string
 }
 
-interface CreatedByProfile {
+interface ProfileInfo {
   full_name?: string
 }
 
@@ -38,7 +40,8 @@ export default function OrganizationDetailPage() {
   const orgId = params.id as string
 
   const [organization, setOrganization] = useState<Organization | null>(null)
-  const [createdByProfile, setCreatedByProfile] = useState<CreatedByProfile | null>(null)
+  const [createdByProfile, setCreatedByProfile] = useState<ProfileInfo | null>(null)
+  const [updatedByProfile, setUpdatedByProfile] = useState<ProfileInfo | null>(null)
   const [loading, setLoading] = useState(true)
   const [isEditing, setIsEditing] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -64,7 +67,7 @@ export default function OrganizationDetailPage() {
 
       const { data, error } = await supabase
         .from('organizations')
-        .select('id, name, org_type, email, phone, contact_person, address, current_balance, created_at, created_by')
+        .select('id, name, org_type, email, phone, contact_person, address, current_balance, created_at, created_by, updated_at, updated_by')
         .eq('id', orgId)
         .single()
 
@@ -89,6 +92,17 @@ export default function OrganizationDetailPage() {
           .single()
 
         setCreatedByProfile(profile)
+      }
+
+      // Fetch updater profile if updated_by exists
+      if (data.updated_by) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('full_name')
+          .eq('id', data.updated_by)
+          .single()
+
+        setUpdatedByProfile(profile)
       }
     } catch (error: any) {
       toast.error(error.message || 'Organization not found')
@@ -118,6 +132,7 @@ export default function OrganizationDetailPage() {
           contact_person: formData.contact_person || null,
           address: formData.address || null,
           updated_at: new Date().toISOString(),
+          updated_by: user?.id,
         })
         .eq('id', orgId)
         .select()
@@ -431,6 +446,29 @@ export default function OrganizationDetailPage() {
                     {createdByProfile.full_name || 'Unknown User'}
                   </p>
                 </div>
+              )}
+
+              {organization.updated_at && organization.updated_at !== organization.created_at && (
+                <>
+                  <div className="pt-4 border-t">
+                    <p className="text-muted-foreground">Last Updated On</p>
+                    <p className="font-medium">
+                      {format(new Date(organization.updated_at), 'MMM dd, yyyy')}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {format(new Date(organization.updated_at), 'hh:mm a')}
+                    </p>
+                  </div>
+
+                  {updatedByProfile && (
+                    <div>
+                      <p className="text-muted-foreground">Last Updated By</p>
+                      <p className="font-medium">
+                        {updatedByProfile.full_name || 'Unknown User'}
+                      </p>
+                    </div>
+                  )}
+                </>
               )}
             </CardContent>
           </Card>
