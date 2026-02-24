@@ -404,6 +404,33 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
 
       if (bookingError) throw bookingError
 
+      // If payment method is ledger, add the charge to the ledger account
+      if (paymentMethod === 'ledger' && ledgerAccount) {
+        if (ledgerType === 'individual') {
+          // Add charge to guest's balance
+          const guestToUpdate = guests.find(g => g.id === ledgerAccount)
+          if (guestToUpdate) {
+            const newBalance = (guestToUpdate.balance || 0) + total
+            await supabase
+              .from('guests')
+              .update({ balance: newBalance })
+              .eq('id', ledgerAccount)
+            console.log('[v0] Updated guest balance:', ledgerAccount, 'new balance:', newBalance)
+          }
+        } else {
+          // Add charge to organization's balance
+          const orgToUpdate = ledgerAccounts.find(o => o.id === ledgerAccount)
+          if (orgToUpdate) {
+            const newBalance = (orgToUpdate.current_balance || 0) + total
+            await supabase
+              .from('organizations')
+              .update({ current_balance: newBalance })
+              .eq('id', ledgerAccount)
+            console.log('[v0] Updated organization balance:', ledgerAccount, 'new balance:', newBalance)
+          }
+        }
+      }
+
       // Update room status
       await supabase
         .from('rooms')
@@ -758,18 +785,22 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
                                 key={account.id}
                                 value={account.id}
                                 onSelect={() => selectLedgerAccount(account)}
+                                className="cursor-pointer"
                               >
-                                <div className="flex-1 cursor-pointer">
+                                <div className="flex-1">
                                   <div className="font-medium">{account.name || account.full_name}</div>
                                   <div className="text-xs text-muted-foreground">
-                                    Balance: {formatNaira(account.current_balance || account.balance || 0)}
+                                    {ledgerType === 'individual' 
+                                      ? `Balance: ${formatNaira(account.balance || 0)}`
+                                      : `Balance: ${formatNaira(account.current_balance || 0)}`
+                                    }
                                   </div>
                                 </div>
                               </CommandItem>
                             ))
                           ) : (
                             <div className="p-4 text-sm text-muted-foreground text-center">
-                              No {ledgerType === 'individual' ? 'guests' : 'organizations'} with balance found
+                              No {ledgerType === 'individual' ? 'guests' : 'organizations'} found
                             </div>
                           )}
                         </CommandGroup>
