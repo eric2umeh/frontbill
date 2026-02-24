@@ -99,10 +99,14 @@ export default function GuestDatabasePage() {
             key: 'full_name',
             label: 'Guest',
             render: (guest) => (
-              <div>
-                <div className="font-medium">{guest.full_name}</div>
-                <div className="text-xs text-muted-foreground">{guest.phone}</div>
-              </div>
+              <div className="font-medium">{guest.full_name}</div>
+            ),
+          },
+          {
+            key: 'phone',
+            label: 'Phone',
+            render: (guest) => (
+              <div className="text-sm">{guest.phone}</div>
             ),
           },
           {
@@ -117,13 +121,6 @@ export default function GuestDatabasePage() {
             label: 'Address',
             render: (guest) => (
               <div className="text-sm">{guest.address || 'N/A'}</div>
-            ),
-          },
-          {
-            key: 'phone',
-            label: 'Phone',
-            render: (guest) => (
-              <div className="text-sm">{guest.phone}</div>
             ),
           },
         ]}

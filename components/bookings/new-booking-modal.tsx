@@ -87,6 +87,27 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
     }
   }, [open])
 
+  // Update filtered ledger accounts when ledgerType changes
+  useEffect(() => {
+    handleLedgerTypeChange(ledgerType)
+  }, [ledgerType])
+
+  const handleLedgerTypeChange = (type: string) => {
+    setLedgerSearch('')
+    setLedgerAccount('')
+    setLedgerOpen(false)
+    
+    if (type === 'individual') {
+      // Show only guests with balance (owe money)
+      const filtered = guests.filter(g => (g.balance || g.current_balance || 0) > 0)
+      setFilteredLedgerAccounts(filtered)
+    } else {
+      // Show only organizations with balance (owe money)
+      const filtered = ledgerAccounts.filter(org => (org.current_balance || 0) > 0)
+      setFilteredLedgerAccounts(filtered)
+    }
+  }
+
   const loadData = async () => {
     try {
       const supabase = createClient()
@@ -238,27 +259,24 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
 
   const handleLedgerSearch = (value: string) => {
     setLedgerSearch(value)
+    
+    let accountsToSearch = []
+    
+    // Determine which accounts to search from based on ledger type
+    if (ledgerType === 'individual') {
+      accountsToSearch = guests.filter(g => (g.balance || g.current_balance || 0) > 0)
+    } else {
+      accountsToSearch = ledgerAccounts.filter(org => (org.current_balance || 0) > 0)
+    }
+    
     if (value.length > 0) {
-      let toSearch = ledgerAccounts
-      
-      // If searching for individual accounts, filter from guests
-      if (ledgerType === 'individual') {
-        toSearch = guests.filter(g => g.current_balance > 0) // Only show guests with balance (owe money)
-      }
-      
-      const filtered = toSearch.filter(acc =>
-        acc.name.toLowerCase().includes(value.toLowerCase())
+      const searchField = ledgerType === 'individual' ? 'name' : 'name'
+      const filtered = accountsToSearch.filter(acc =>
+        (acc.name || acc.full_name || '').toLowerCase().includes(value.toLowerCase())
       )
       setFilteredLedgerAccounts(filtered)
     } else {
-      // Show all ledger accounts filtered by type and balance
-      if (ledgerType === 'individual') {
-        const filtered = guests.filter(g => g.current_balance > 0)
-        setFilteredLedgerAccounts(filtered)
-      } else {
-        const filtered = ledgerAccounts.filter(org => org.current_balance > 0)
-        setFilteredLedgerAccounts(filtered)
-      }
+      setFilteredLedgerAccounts(accountsToSearch)
     }
   }
 
@@ -689,19 +707,25 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
                         <CommandInput placeholder="Search accounts..." />
                         <CommandEmpty>No accounts found</CommandEmpty>
                         <CommandGroup>
-                          {filteredLedgerAccounts.map(account => (
-                            <CommandItem
-                              key={account.id}
-                              onSelect={() => selectLedgerAccount(account)}
-                            >
-                              <div>
-                                <div className="font-medium">{account.name}</div>
-                                <div className="text-xs text-muted-foreground">
-                                  Balance: {formatNaira(account.current_balance || account.balance || 0)}
+                          {filteredLedgerAccounts.length > 0 ? (
+                            filteredLedgerAccounts.map(account => (
+                              <CommandItem
+                                key={account.id}
+                                onSelect={() => selectLedgerAccount(account)}
+                              >
+                                <div className="flex-1">
+                                  <div className="font-medium">{account.name || account.full_name}</div>
+                                  <div className="text-xs text-muted-foreground">
+                                    Balance: {formatNaira(account.current_balance || account.balance || 0)}
+                                  </div>
                                 </div>
-                              </div>
-                            </CommandItem>
-                          ))}
+                              </CommandItem>
+                            ))
+                          ) : (
+                            <div className="p-2 text-sm text-muted-foreground text-center">
+                              No {ledgerType === 'individual' ? 'guests' : 'organizations'} with balance found
+                            </div>
+                          )}
                         </CommandGroup>
                       </Command>
                     </PopoverContent>
