@@ -103,7 +103,6 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
         if (selectedGuest) {
           setLedgerAccount(guestId)
           setLedgerSearch(selectedGuest.name)
-          console.log('[v0] Auto-selected guest:', selectedGuest)
         }
       }
       // Show all guests available
@@ -116,7 +115,6 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
 
   const handleLedgerSearch = (value: string) => {
     setLedgerSearch(value)
-    console.log('[v0] Searching ledger with value:', value, 'type:', ledgerType)
     
     let toSearch = []
     if (ledgerType === 'individual') {
@@ -125,15 +123,12 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
       toSearch = ledgerAccounts
     }
     
-    console.log('[v0] Total accounts to search:', toSearch.length)
-    
     if (value.trim().length > 0) {
       const filtered = toSearch.filter(acc => {
         const name = (acc.name || acc.full_name || '').toLowerCase()
         const matches = name.includes(value.toLowerCase())
         return matches
       })
-      console.log('[v0] Filtered results:', filtered.length, filtered)
       setFilteredLedgerAccounts(filtered)
     } else {
       setFilteredLedgerAccounts(toSearch)
@@ -141,7 +136,6 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
   }
 
   const selectLedgerAccount = (account: any) => {
-    console.log('[v0] Selected ledger account:', account)
     setLedgerAccount(account.id)
     setLedgerSearch(account.name || account.full_name || '')
   }
@@ -198,7 +192,6 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
       setFilteredGuests(guestData || [])
       
       // Initialize filtered ledger accounts based on current ledger type
-      console.log('[v0] Loaded data - guests:', guestData?.length, 'ledger orgs:', ledgerData?.length)
       if (ledgerType === 'individual') {
         setFilteredLedgerAccounts(guestData || [])
       } else {
@@ -415,7 +408,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
               .from('guests')
               .update({ balance: newBalance })
               .eq('id', ledgerAccount)
-            console.log('[v0] Updated guest balance:', ledgerAccount, 'new balance:', newBalance)
+
           }
         } else {
           // Add charge to organization's balance
@@ -426,7 +419,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
               .from('organizations')
               .update({ current_balance: newBalance })
               .eq('id', ledgerAccount)
-            console.log('[v0] Updated organization balance:', ledgerAccount, 'new balance:', newBalance)
+
           }
         }
       }
