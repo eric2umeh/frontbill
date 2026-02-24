@@ -108,7 +108,7 @@ export default function OrganizationDetailPage() {
       setSaving(true)
       const supabase = createClient()
 
-      const { error } = await supabase
+      const { data: result, error } = await supabase
         .from('organizations')
         .update({
           name: formData.name,
@@ -117,15 +117,23 @@ export default function OrganizationDetailPage() {
           phone: formData.phone || null,
           contact_person: formData.contact_person || null,
           address: formData.address || null,
+          updated_at: new Date().toISOString(),
         })
         .eq('id', orgId)
+        .select()
 
-      if (error) throw error
+      if (error) {
+        console.error('[v0] Update error:', error)
+        throw error
+      }
+
+      console.log('[v0] Update result:', result)
 
       toast.success('Organization updated successfully')
       setIsEditing(false)
-      fetchOrganization()
+      await fetchOrganization()
     } catch (error: any) {
+      console.error('[v0] Save error:', error)
       toast.error(error.message || 'Failed to update organization')
     } finally {
       setSaving(false)
