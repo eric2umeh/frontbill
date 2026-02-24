@@ -319,7 +319,6 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
   }
 
   const selectLedgerAccount = (account: any) => {
-    console.log('[v0] Selected ledger account:', account)
     setLedgerAccount(account.id)
     setLedgerSearch(account.name || account.full_name || '')
     setLedgerOpen(false)
