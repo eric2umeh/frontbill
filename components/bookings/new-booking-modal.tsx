@@ -158,9 +158,17 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
       setLedgerAccounts(ledgerData || [])
       setFilteredGuests(guestData || [])
       
-      // Filter ledger accounts - only show ones with balance (positive balance = owes money, can accept city ledger)
-      const filteredLedger = ledgerData?.filter(org => org.current_balance !== 0) || []
-      setFilteredLedgerAccounts(filteredLedger)
+      // Initialize filtered ledger accounts based on current ledger type
+      console.log('[v0] Loaded data - guests:', guestData?.length, 'ledger orgs:', ledgerData?.length)
+      if (ledgerType === 'individual') {
+        const filtered = (guestData || []).filter(g => (g.balance || g.current_balance || 0) > 0)
+        console.log('[v0] Filtered individual accounts:', filtered)
+        setFilteredLedgerAccounts(filtered)
+      } else {
+        const filtered = (ledgerData || []).filter(org => (org.current_balance || 0) > 0)
+        console.log('[v0] Filtered organization accounts:', filtered)
+        setFilteredLedgerAccounts(filtered)
+      }
     } catch (error: any) {
       toast.error('Failed to load data')
     }
@@ -270,19 +278,22 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
     }
     
     if (value.length > 0) {
-      const searchField = ledgerType === 'individual' ? 'name' : 'name'
-      const filtered = accountsToSearch.filter(acc =>
-        (acc.name || acc.full_name || '').toLowerCase().includes(value.toLowerCase())
-      )
+      const filtered = accountsToSearch.filter(acc => {
+        const name = acc.name || acc.full_name || ''
+        return name.toLowerCase().includes(value.toLowerCase())
+      })
+      console.log('[v0] Filtered ledger accounts:', { value, accountsToSearch, filtered })
       setFilteredLedgerAccounts(filtered)
     } else {
+      console.log('[v0] Reset ledger search with accounts:', accountsToSearch)
       setFilteredLedgerAccounts(accountsToSearch)
     }
   }
 
   const selectLedgerAccount = (account: any) => {
+    console.log('[v0] Selected ledger account:', account)
     setLedgerAccount(account.id)
-    setLedgerSearch(account.name)
+    setLedgerSearch(account.name || account.full_name || '')
     setLedgerOpen(false)
   }
 
@@ -351,7 +362,6 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
           payment_method: paymentMethod,
           payment_status: 'pending',
           status: 'confirmed',
-          guest_type: paymentMethod === 'ledger' ? 'organization' : 'walkin',
           created_by: (await supabase.auth.getUser()).data.user?.id,
         }])
         .select()
@@ -697,23 +707,24 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
                   <Popover open={ledgerOpen} onOpenChange={setLedgerOpen}>
                     <PopoverTrigger asChild>
                       <Input
-                        placeholder="Search or create account"
+                        placeholder={`Search ${ledgerType === 'individual' ? 'guests' : 'organizations'} with balance...`}
                         value={ledgerSearch}
                         onChange={(e) => handleLedgerSearch(e.target.value)}
+                        onFocus={() => setLedgerOpen(true)}
                       />
                     </PopoverTrigger>
                     <PopoverContent className="w-80 p-0" align="start">
                       <Command>
-                        <CommandInput placeholder="Search accounts..." />
                         <CommandEmpty>No accounts found</CommandEmpty>
                         <CommandGroup>
                           {filteredLedgerAccounts.length > 0 ? (
                             filteredLedgerAccounts.map(account => (
                               <CommandItem
                                 key={account.id}
+                                value={account.id}
                                 onSelect={() => selectLedgerAccount(account)}
                               >
-                                <div className="flex-1">
+                                <div className="flex-1 cursor-pointer">
                                   <div className="font-medium">{account.name || account.full_name}</div>
                                   <div className="text-xs text-muted-foreground">
                                     Balance: {formatNaira(account.current_balance || account.balance || 0)}
@@ -722,7 +733,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
                               </CommandItem>
                             ))
                           ) : (
-                            <div className="p-2 text-sm text-muted-foreground text-center">
+                            <div className="p-4 text-sm text-muted-foreground text-center">
                               No {ledgerType === 'individual' ? 'guests' : 'organizations'} with balance found
                             </div>
                           )}
