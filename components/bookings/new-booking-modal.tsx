@@ -62,7 +62,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
   // Step 2: Dates
   const [checkInDate, setCheckInDate] = useState<Date>()
   const [checkOutDate, setCheckOutDate] = useState<Date>()
-  const [nights, setNights] = useState(1)
+  const [nights, setNights] = useState(0)
   const [checkInOpen, setCheckInOpen] = useState(false)
   const [checkOutOpen, setCheckOutOpen] = useState(false)
 
@@ -201,12 +201,9 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
     if (!date) return
     setCheckInDate(date)
     setCheckInOpen(false)
-    // Update checkout date to be at least 1 day after check-in
-    if (checkOutDate && checkOutDate <= date) {
-      const newCheckOut = addDays(date, 1)
-      setCheckOutDate(newCheckOut)
-      setNights(1)
-    }
+    // Reset checkout date and nights when check-in changes
+    setCheckOutDate(undefined)
+    setNights(0)
   }
 
   const handleCheckOutChange = (date: Date | undefined) => {
@@ -215,13 +212,13 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
     setCheckOutOpen(false)
     // Calculate nights
     const calculatedNights = Math.ceil((date.getTime() - checkInDate.getTime()) / (1000 * 60 * 60 * 24))
-    setNights(Math.max(1, calculatedNights))
+    setNights(Math.max(0, calculatedNights))
   }
 
   const handleNightsChange = (value: number) => {
-    const validNights = Math.max(1, value || 1)
+    const validNights = Math.max(0, value || 0)
     setNights(validNights)
-    if (checkInDate) {
+    if (checkInDate && validNights > 0) {
       const newCheckOut = addDays(checkInDate, validNights)
       setCheckOutDate(newCheckOut)
     }
@@ -319,7 +316,8 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
           payment_method: paymentMethod,
           payment_status: 'pending',
           status: 'confirmed',
-          city_ledger_id: paymentMethod === 'ledger' ? ledgerAccount : null,
+          ledger_organization_id: paymentMethod === 'ledger' ? ledgerAccount : null,
+          created_by: (await supabase.auth.getUser()).data.user?.id,
         }])
         .select()
         .single()
@@ -352,7 +350,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
     setGuestId('')
     setCheckInDate(undefined)
     setCheckOutDate(undefined)
-    setNights(1)
+    setNights(0)
     setSelectedRoomType('')
     setSelectedRoom(null)
     setPricePerNight(0)
