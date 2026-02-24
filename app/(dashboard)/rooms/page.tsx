@@ -21,6 +21,8 @@ interface Room {
   price_per_night: number
   status: string
   amenities: string[]
+  created_by?: string
+  created_by_name?: string
 }
 
 export default function RoomsPage() {
@@ -64,12 +66,34 @@ export default function RoomsPage() {
 
       const { data, error } = await supabase
         .from('rooms')
-        .select('*')
+        .select('*, created_by')
         .eq('organization_id', profile.organization_id)
         .order('room_number', { ascending: true })
 
       if (error) throw error
-      setRooms(data || [])
+      
+      // Fetch creator profiles for all rooms
+      const creatorIds = Array.from(new Set((data || []).map((r: any) => r.created_by).filter(Boolean)))
+      let creatorMap: { [key: string]: string } = {}
+      
+      if (creatorIds.length > 0) {
+        const { data: profiles } = await supabase
+          .from('profiles')
+          .select('id, full_name')
+          .in('id', creatorIds)
+        
+        profiles?.forEach(profile => {
+          creatorMap[profile.id] = profile.full_name || 'Unknown User'
+        })
+      }
+      
+      // Add created_by_name to each room
+      const roomsWithCreator = (data || []).map((room: any) => ({
+        ...room,
+        created_by_name: room.created_by ? creatorMap[room.created_by] || 'Unknown User' : 'System'
+      }))
+      
+      setRooms(roomsWithCreator)
     } catch (error: any) {
       console.error('Error fetching rooms:', error)
       toast.error('Failed to load rooms')
@@ -194,6 +218,15 @@ export default function RoomsPage() {
                 <Badge variant="outline" className={statusColors[room.status]}>
                   {room.status}
                 </Badge>
+              </div>
+            ),
+          },
+          {
+            key: 'created_by_name',
+            label: 'Created By',
+            render: (room) => (
+              <div className="text-sm text-muted-foreground">
+                {room.created_by_name}
               </div>
             ),
           },

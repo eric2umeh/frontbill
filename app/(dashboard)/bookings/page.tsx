@@ -24,6 +24,8 @@ interface Booking {
   payment_status: string
   rate_per_night: number
   balance: number
+  created_by?: string
+  created_by_name?: string
   guests?: { full_name: string; phone: string }
   rooms?: { number: string; type: string }
 }
@@ -71,12 +73,34 @@ export default function BookingsPage() {
 
       const { data, error } = await supabase
         .from('bookings')
-        .select('*, guests(name, phone), rooms(room_number, room_type)')
+        .select('*, guests(name, phone), rooms(room_number, room_type), created_by')
         .eq('organization_id', profile.organization_id)
         .order('check_in', { ascending: false })
 
       if (error) throw error
-      setBookings(data || [])
+      
+      // Fetch creator profiles for all bookings
+      const creatorIds = Array.from(new Set((data || []).map((b: any) => b.created_by).filter(Boolean)))
+      let creatorMap: { [key: string]: string } = {}
+      
+      if (creatorIds.length > 0) {
+        const { data: profiles } = await supabase
+          .from('profiles')
+          .select('id, full_name')
+          .in('id', creatorIds)
+        
+        profiles?.forEach(profile => {
+          creatorMap[profile.id] = profile.full_name || 'Unknown User'
+        })
+      }
+      
+      // Add created_by_name to each booking
+      const bookingsWithCreator = (data || []).map((booking: any) => ({
+        ...booking,
+        created_by_name: booking.created_by ? creatorMap[booking.created_by] || 'Unknown User' : 'System'
+      }))
+      
+      setBookings(bookingsWithCreator)
     } catch (error: any) {
       console.error('Error fetching bookings:', error)
       toast.error('Failed to load bookings')
@@ -231,6 +255,15 @@ export default function BookingsPage() {
                     Bal: {formatNaira(booking.balance)}
                   </div>
                 )}
+              </div>
+            ),
+          },
+          {
+            key: 'created_by_name',
+            label: 'Created By',
+            render: (booking) => (
+              <div className="text-sm text-muted-foreground">
+                {booking.created_by_name}
               </div>
             ),
           },
