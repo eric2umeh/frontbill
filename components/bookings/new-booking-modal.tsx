@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -10,10 +10,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Card, CardContent } from '@/components/ui/card'
 import { Calendar } from '@/components/ui/calendar'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { format } from 'date-fns'
-import { Calendar as CalendarIcon } from 'lucide-react'
+import { Badge } from '@/components/ui/badge'
+import { format, differenceInDays, addDays } from 'date-fns'
+import { Calendar as CalendarIcon, ChevronRight, ChevronLeft, X } from 'lucide-react'
 import { formatNaira } from '@/lib/utils/currency'
 import { toast } from 'sonner'
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem } from '@/components/ui/command'
+import { Popover as SearchPopover, PopoverContent as SearchPopoverContent, PopoverTrigger as SearchPopoverTrigger } from '@/components/ui/popover'
 
 interface NewBookingModalProps {
   open: boolean
@@ -21,24 +24,62 @@ interface NewBookingModalProps {
   onSuccess?: () => void
 }
 
+interface Guest {
+  id: string
+  name: string
+  phone: string
+  email: string
+  address: string
+}
+
+interface Room {
+  id: string
+  room_number: string
+  room_type: string
+  price_per_night: number
+}
+
+interface Organization {
+  id: string
+  name: string
+}
+
 export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalProps) {
   const [step, setStep] = useState(1)
   const [loading, setLoading] = useState(false)
-  const [guests, setGuests] = useState<any[]>([])
-  const [rooms, setRooms] = useState<any[]>([])
-  const [organizationId, setOrganizationId] = useState<string>('')
+  const [organizationId, setOrganizationId] = useState('')
 
-  // Form data
+  // Step 1: Guest Data
+  const [fullName, setFullName] = useState('')
+  const [phone, setPhone] = useState('')
+  const [email, setEmail] = useState('')
+  const [address, setAddress] = useState('')
   const [guestId, setGuestId] = useState('')
-  const [guestName, setGuestName] = useState('')
-  const [guestPhone, setGuestPhone] = useState('')
-  const [roomId, setRoomId] = useState('')
+  const [guestSearchOpen, setGuestSearchOpen] = useState(false)
+  const [guests, setGuests] = useState<Guest[]>([])
+  const [filteredGuests, setFilteredGuests] = useState<Guest[]>([])
+
+  // Step 2: Dates
   const [checkInDate, setCheckInDate] = useState<Date>()
   const [checkOutDate, setCheckOutDate] = useState<Date>()
-  const [ratePerNight, setRatePerNight] = useState(0)
-  const [paymentMethod, setPaymentMethod] = useState('cash')
+  const [nights, setNights] = useState(1)
+  const [checkInOpen, setCheckInOpen] = useState(false)
+  const [checkOutOpen, setCheckOutOpen] = useState(false)
 
-  // Load organization and data
+  // Step 3: Room & Payment
+  const [rooms, setRooms] = useState<Room[]>([])
+  const [selectedRoomType, setSelectedRoomType] = useState('')
+  const [selectedRoom, setSelectedRoom] = useState<Room | null>(null)
+  const [pricePerNight, setPricePerNight] = useState(0)
+  const [paymentMethod, setPaymentMethod] = useState('cash')
+  const [ledgerSearch, setLedgerSearch] = useState('')
+  const [ledgerType, setLedgerType] = useState('individual') // individual or organization
+  const [ledgerAccount, setLedgerAccount] = useState('')
+  const [ledgerAccounts, setLedgerAccounts] = useState<any[]>([])
+  const [ledgerOpen, setLedgerOpen] = useState(false)
+  const [filteredLedgerAccounts, setFilteredLedgerAccounts] = useState<any[]>([])
+
+  // Load initial data
   useEffect(() => {
     if (open) {
       loadData()
@@ -49,8 +90,11 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
     try {
       const supabase = createClient()
       const { data: { user } } = await supabase.auth.getUser()
-      
-      if (!user) return
+
+      if (!user) {
+        toast.error('User not authenticated')
+        return
+      }
 
       const { data: profile } = await supabase
         .from('profiles')
@@ -80,90 +124,207 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
         .eq('status', 'available')
         .order('room_number')
 
+      // Load city ledger accounts
+      const { data: ledgerData } = await supabase
+        .from('city_ledger_accounts')
+        .select('*')
+        .eq('organization_id', profile.organization_id)
+        .order('name')
+
       setGuests(guestData || [])
       setRooms(roomData || [])
+      setLedgerAccounts(ledgerData || [])
+      setFilteredGuests(guestData || [])
+      setFilteredLedgerAccounts(ledgerData || [])
     } catch (error: any) {
       toast.error('Failed to load data')
     }
   }
 
-  const handleSelectGuest = (id: string) => {
-    const guest = guests.find(g => g.id === id)
-    if (guest) {
-      setGuestId(id)
-      setGuestName(guest.name)
-      setGuestPhone(guest.phone)
+  const handleGuestSearch = (value: string) => {
+    setFullName(value)
+    if (value.length > 0) {
+      const filtered = guests.filter(g =>
+        g.name.toLowerCase().includes(value.toLowerCase())
+      )
+      setFilteredGuests(filtered)
+    } else {
+      setFilteredGuests(guests)
     }
   }
 
-  const handleCreateNewGuest = async () => {
-    if (!guestName || !guestPhone) {
-      toast.error('Please enter guest name and phone')
+  const selectGuest = (guest: Guest) => {
+    setGuestId(guest.id)
+    setFullName(guest.name)
+    setPhone(guest.phone)
+    setEmail(guest.email)
+    setAddress(guest.address)
+    setGuestSearchOpen(false)
+  }
+
+  const handleCreateGuest = async () => {
+    if (!fullName.trim() || !phone.trim()) {
+      toast.error('Full name and phone are required')
       return
     }
 
     try {
+      setLoading(true)
       const supabase = createClient()
-      const { data: newGuest, error } = await supabase
+      const { data, error } = await supabase
         .from('guests')
         .insert([{
           organization_id: organizationId,
-          name: guestName,
-          phone: guestPhone,
+          name: fullName,
+          phone,
+          email: email || null,
+          address: address || null,
         }])
         .select()
         .single()
 
       if (error) throw error
-      setGuestId(newGuest.id)
-      setGuests([...guests, newGuest])
-      toast.success('Guest created')
+      setGuestId(data.id)
+      toast.success('Guest created successfully')
     } catch (error: any) {
-      toast.error('Failed to create guest')
+      toast.error(error.message || 'Failed to create guest')
+    } finally {
+      setLoading(false)
     }
   }
 
-  const handleSelectRoom = (id: string) => {
-    const room = rooms.find(r => r.id === id)
-    if (room) {
-      setRoomId(id)
-      setRatePerNight(room.price_per_night)
+  const handleCheckInChange = (date: Date | undefined) => {
+    setCheckInDate(date)
+    if (date && checkOutDate) {
+      const diff = differenceInDays(checkOutDate, date)
+      setNights(Math.max(1, diff))
     }
+  }
+
+  const handleCheckOutChange = (date: Date | undefined) => {
+    setCheckOutDate(date)
+    if (date && checkInDate) {
+      const diff = differenceInDays(date, checkInDate)
+      setNights(Math.max(1, diff))
+    }
+  }
+
+  const handleNightsChange = (value: number) => {
+    setNights(Math.max(1, value))
+    if (checkInDate) {
+      setCheckOutDate(addDays(checkInDate, Math.max(1, value)))
+    }
+  }
+
+  const handleRoomTypeSelect = (roomType: string) => {
+    setSelectedRoomType(roomType)
+    const room = rooms.find(r => r.room_type === roomType)
+    if (room) {
+      setSelectedRoom(room)
+      setPricePerNight(room.price_per_night)
+    }
+  }
+
+  const handleLedgerSearch = (value: string) => {
+    setLedgerSearch(value)
+    if (value.length > 0) {
+      const filtered = ledgerAccounts.filter(acc =>
+        acc.name.toLowerCase().includes(value.toLowerCase())
+      )
+      setFilteredLedgerAccounts(filtered)
+    } else {
+      setFilteredLedgerAccounts(ledgerAccounts)
+    }
+  }
+
+  const selectLedgerAccount = (account: any) => {
+    setLedgerAccount(account.id)
+    setLedgerSearch(account.name)
+    setLedgerOpen(false)
   }
 
   const handleSubmit = async () => {
-    if (!guestId || !roomId || !checkInDate || !checkOutDate) {
-      toast.error('Please fill in all required fields')
-      return
-    }
-
-    setLoading(true)
     try {
+      setLoading(true)
+
+      // Validation
+      if (!guestId && !fullName) {
+        toast.error('Guest information is required')
+        return
+      }
+
+      if (!checkInDate || !checkOutDate) {
+        toast.error('Check-in and check-out dates are required')
+        return
+      }
+
+      if (!selectedRoom) {
+        toast.error('Room selection is required')
+        return
+      }
+
+      if (paymentMethod === 'ledger' && !ledgerAccount) {
+        toast.error('Ledger account is required')
+        return
+      }
+
       const supabase = createClient()
-      const nights = Math.ceil((checkOutDate.getTime() - checkInDate.getTime()) / (1000 * 60 * 60 * 24))
-      const totalAmount = ratePerNight * nights
+
+      // Create guest if new
+      let finalGuestId = guestId
+      if (!guestId) {
+        const { data: newGuest, error: guestError } = await supabase
+          .from('guests')
+          .insert([{
+            organization_id: organizationId,
+            name: fullName,
+            phone,
+            email: email || null,
+            address: address || null,
+          }])
+          .select()
+          .single()
+
+        if (guestError) throw guestError
+        finalGuestId = newGuest.id
+      }
+
+      // Calculate total
+      const total = pricePerNight * nights
 
       // Create booking
-      const { error } = await supabase
+      const { data: booking, error: bookingError } = await supabase
         .from('bookings')
         .insert([{
           organization_id: organizationId,
-          guest_id: guestId,
-          room_id: roomId,
-          check_in: format(checkInDate, 'yyyy-MM-dd'),
-          check_out: format(checkOutDate, 'yyyy-MM-dd'),
-          rate_per_night: ratePerNight,
-          total_amount: totalAmount,
+          guest_id: finalGuestId,
+          room_id: selectedRoom.id,
+          check_in: checkInDate.toISOString(),
+          check_out: checkOutDate.toISOString(),
+          number_of_nights: nights,
+          rate_per_night: pricePerNight,
+          total_charges: total,
+          balance: total,
+          payment_method: paymentMethod,
           payment_status: 'pending',
-          status: 'active',
+          status: 'confirmed',
+          city_ledger_id: paymentMethod === 'ledger' ? ledgerAccount : null,
         }])
+        .select()
+        .single()
 
-      if (error) throw error
+      if (bookingError) throw bookingError
 
-      toast.success(`Booking created! Total: ${formatNaira(totalAmount)}`)
-      resetForm()
-      onClose()
+      // Update room status
+      await supabase
+        .from('rooms')
+        .update({ status: 'occupied' })
+        .eq('id', selectedRoom.id)
+
+      toast.success(`Booking created successfully! Ref: ${booking.folio_id || booking.id}`)
       onSuccess?.()
+      onClose()
+      resetForm()
     } catch (error: any) {
       toast.error(error.message || 'Failed to create booking')
     } finally {
@@ -173,178 +334,327 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
 
   const resetForm = () => {
     setStep(1)
+    setFullName('')
+    setPhone('')
+    setEmail('')
+    setAddress('')
     setGuestId('')
-    setGuestName('')
-    setGuestPhone('')
-    setRoomId('')
     setCheckInDate(undefined)
     setCheckOutDate(undefined)
-    setRatePerNight(0)
+    setNights(1)
+    setSelectedRoomType('')
+    setSelectedRoom(null)
+    setPricePerNight(0)
     setPaymentMethod('cash')
+    setLedgerSearch('')
+    setLedgerAccount('')
   }
 
-  const handleClose = () => {
-    resetForm()
-    onClose()
+  const canGoToNextStep = () => {
+    if (step === 1) {
+      return (guestId || fullName.trim()) && phone.trim()
+    }
+    if (step === 2) {
+      return checkInDate && checkOutDate && nights > 0
+    }
+    if (step === 3) {
+      return selectedRoom && (paymentMethod !== 'ledger' || ledgerAccount)
+    }
+    return false
   }
 
   return (
-    <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className="max-w-2xl">
         <DialogHeader>
-          <DialogTitle>New Booking</DialogTitle>
-          <DialogDescription>Step {step} of 3</DialogDescription>
+          <DialogTitle>New Booking - Step {step} of 3</DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-4">
-          {step === 1 && (
-            <div className="space-y-4">
-              <Label>Guest</Label>
-              <Select value={guestId} onValueChange={handleSelectGuest}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select guest or create new" />
-                </SelectTrigger>
-                <SelectContent>
-                  {guests.map(guest => (
-                    <SelectItem key={guest.id} value={guest.id}>
-                      {guest.name} - {guest.phone}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-
-              <div className="border-t pt-4">
-                <Label className="text-sm">Or Create New Guest</Label>
-                <div className="space-y-2 mt-2">
+        {/* Step 1: Guest Information */}
+        {step === 1 && (
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label>Full Name *</Label>
+              <Popover open={guestSearchOpen} onOpenChange={setGuestSearchOpen}>
+                <PopoverTrigger asChild>
                   <Input
-                    placeholder="Guest name"
-                    value={guestName}
-                    onChange={(e) => setGuestName(e.target.value)}
+                    placeholder="Search or type guest name"
+                    value={fullName}
+                    onChange={(e) => handleGuestSearch(e.target.value)}
                   />
-                  <Input
-                    placeholder="Phone"
-                    value={guestPhone}
-                    onChange={(e) => setGuestPhone(e.target.value)}
-                  />
-                  <Button onClick={handleCreateNewGuest} variant="outline" className="w-full">
-                    Create Guest
-                  </Button>
-                </div>
-              </div>
+                </PopoverTrigger>
+                <PopoverContent className="w-80 p-0" align="start">
+                  <Command>
+                    <CommandInput placeholder="Search guests..." />
+                    <CommandEmpty>
+                      <div className="p-2 text-sm text-muted-foreground">
+                        No guests found. Fill the form to create new.
+                      </div>
+                    </CommandEmpty>
+                    <CommandGroup>
+                      {filteredGuests.map(guest => (
+                        <CommandItem
+                          key={guest.id}
+                          onSelect={() => selectGuest(guest)}
+                        >
+                          <div>
+                            <div className="font-medium">{guest.name}</div>
+                            <div className="text-xs text-muted-foreground">{guest.phone}</div>
+                          </div>
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  </Command>
+                </PopoverContent>
+              </Popover>
             </div>
-          )}
 
-          {step === 2 && (
-            <div className="space-y-4">
-              <div>
-                <Label>Check-in Date</Label>
-                <Popover>
+            <div className="space-y-2">
+              <Label>Phone Number *</Label>
+              <Input
+                placeholder="Phone number"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Email</Label>
+              <Input
+                type="email"
+                placeholder="Email address"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Address</Label>
+              <Input
+                placeholder="Address"
+                value={address}
+                onChange={(e) => setAddress(e.target.value)}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Step 2: Check-in/Check-out Dates */}
+        {step === 2 && (
+          <div className="space-y-4 py-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Check-in Date *</Label>
+                <Popover open={checkInOpen} onOpenChange={setCheckInOpen}>
                   <PopoverTrigger asChild>
-                    <Button variant="outline" className="w-full justify-start">
+                    <Button
+                      variant="outline"
+                      className="w-full justify-start text-left font-normal"
+                    >
                       <CalendarIcon className="mr-2 h-4 w-4" />
-                      {checkInDate ? format(checkInDate, 'PPP') : 'Pick a date'}
+                      {checkInDate ? format(checkInDate, 'MMM dd, yyyy') : 'Select date'}
                     </Button>
                   </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0">
+                  <PopoverContent className="w-auto p-0" align="start">
                     <Calendar
                       mode="single"
                       selected={checkInDate}
-                      onSelect={setCheckInDate}
+                      onSelect={handleCheckInChange}
                       disabled={(date) => date < new Date()}
                     />
                   </PopoverContent>
                 </Popover>
               </div>
 
-              <div>
-                <Label>Check-out Date</Label>
-                <Popover>
+              <div className="space-y-2">
+                <Label>Check-out Date *</Label>
+                <Popover open={checkOutOpen} onOpenChange={setCheckOutOpen}>
                   <PopoverTrigger asChild>
-                    <Button variant="outline" className="w-full justify-start">
+                    <Button
+                      variant="outline"
+                      className="w-full justify-start text-left font-normal"
+                    >
                       <CalendarIcon className="mr-2 h-4 w-4" />
-                      {checkOutDate ? format(checkOutDate, 'PPP') : 'Pick a date'}
+                      {checkOutDate ? format(checkOutDate, 'MMM dd, yyyy') : 'Select date'}
                     </Button>
                   </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0">
+                  <PopoverContent className="w-auto p-0" align="start">
                     <Calendar
                       mode="single"
                       selected={checkOutDate}
-                      onSelect={setCheckOutDate}
+                      onSelect={handleCheckOutChange}
                       disabled={(date) => !checkInDate || date <= checkInDate}
                     />
                   </PopoverContent>
                 </Popover>
               </div>
             </div>
-          )}
 
-          {step === 3 && (
-            <div className="space-y-4">
-              <Label>Room</Label>
-              <Select value={roomId} onValueChange={handleSelectRoom}>
+            <div className="space-y-2">
+              <Label>Number of Nights *</Label>
+              <Input
+                type="number"
+                min="1"
+                value={nights}
+                onChange={(e) => handleNightsChange(parseInt(e.target.value) || 1)}
+              />
+              <p className="text-xs text-muted-foreground">
+                Changes will update checkout date automatically
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Step 3: Room & Payment */}
+        {step === 3 && (
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label>Room Type *</Label>
+              <Select value={selectedRoomType} onValueChange={handleRoomTypeSelect}>
                 <SelectTrigger>
-                  <SelectValue placeholder="Select room" />
+                  <SelectValue placeholder="Select room type" />
                 </SelectTrigger>
                 <SelectContent>
-                  {rooms.map(room => (
-                    <SelectItem key={room.id} value={room.id}>
-                      Room {room.room_number} - {room.room_type} ({formatNaira(room.price_per_night)}/night)
+                  {Array.from(new Set(rooms.map(r => r.room_type))).map(type => (
+                    <SelectItem key={type} value={type}>
+                      {type}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
+            </div>
 
-              <div>
-                <Label>Payment Method</Label>
-                <Select value={paymentMethod} onValueChange={setPaymentMethod}>
+            {selectedRoom && (
+              <div className="space-y-2">
+                <Label>Select Room *</Label>
+                <Select value={selectedRoom?.id} onValueChange={(id) => {
+                  const room = rooms.find(r => r.id === id)
+                  if (room) {
+                    setSelectedRoom(room)
+                    setPricePerNight(room.price_per_night)
+                  }
+                }}>
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="cash">Cash</SelectItem>
-                    <SelectItem value="card">Card</SelectItem>
-                    <SelectItem value="transfer">Transfer</SelectItem>
+                    {rooms
+                      .filter(r => r.room_type === selectedRoomType)
+                      .map(room => (
+                        <SelectItem key={room.id} value={room.id}>
+                          Room {room.room_number}
+                        </SelectItem>
+                      ))}
                   </SelectContent>
                 </Select>
               </div>
+            )}
 
-              {roomId && checkInDate && checkOutDate && (
-                <Card>
-                  <CardContent className="pt-4">
-                    <div className="space-y-2 text-sm">
-                      <div className="flex justify-between">
-                        <span>Rate per night:</span>
-                        <span>{formatNaira(ratePerNight)}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span>Nights:</span>
-                        <span>{Math.ceil((checkOutDate.getTime() - checkInDate.getTime()) / (1000 * 60 * 60 * 24))}</span>
-                      </div>
-                      <div className="border-t pt-2 flex justify-between font-semibold">
-                        <span>Total:</span>
-                        <span>{formatNaira(ratePerNight * Math.ceil((checkOutDate.getTime() - checkInDate.getTime()) / (1000 * 60 * 60 * 24)))}</span>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
+            <div className="space-y-2">
+              <Label>Price Per Night (Optional)</Label>
+              <Input
+                type="number"
+                value={pricePerNight}
+                onChange={(e) => setPricePerNight(parseFloat(e.target.value) || 0)}
+              />
             </div>
-          )}
-        </div>
 
-        <div className="flex gap-2 justify-between">
-          {step > 1 && (
-            <Button variant="outline" onClick={() => setStep(step - 1)} disabled={loading}>
-              Back
-            </Button>
-          )}
-          {step < 3 && (
-            <Button onClick={() => setStep(step + 1)} disabled={loading} className="ml-auto">
+            <div className="bg-muted p-3 rounded-lg">
+              <p className="text-sm font-medium">Total: {formatNaira(pricePerNight * nights)}</p>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Payment Method *</Label>
+              <Select value={paymentMethod} onValueChange={setPaymentMethod}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="cash">Cash</SelectItem>
+                  <SelectItem value="transfer">Transfer</SelectItem>
+                  <SelectItem value="pos">POS</SelectItem>
+                  <SelectItem value="ledger">Ledger</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {paymentMethod === 'ledger' && (
+              <>
+                <div className="space-y-2">
+                  <Label>Ledger Account Type *</Label>
+                  <Select value={ledgerType} onValueChange={setLedgerType}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="individual">Individual Account</SelectItem>
+                      <SelectItem value="organization">Organization Account</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Search Ledger Account *</Label>
+                  <Popover open={ledgerOpen} onOpenChange={setLedgerOpen}>
+                    <PopoverTrigger asChild>
+                      <Input
+                        placeholder="Search or create account"
+                        value={ledgerSearch}
+                        onChange={(e) => handleLedgerSearch(e.target.value)}
+                      />
+                    </PopoverTrigger>
+                    <PopoverContent className="w-80 p-0" align="start">
+                      <Command>
+                        <CommandInput placeholder="Search accounts..." />
+                        <CommandEmpty>No accounts found</CommandEmpty>
+                        <CommandGroup>
+                          {filteredLedgerAccounts.map(account => (
+                            <CommandItem
+                              key={account.id}
+                              onSelect={() => selectLedgerAccount(account)}
+                            >
+                              <div>
+                                <div className="font-medium">{account.name}</div>
+                                <div className="text-xs text-muted-foreground">
+                                  Balance: {formatNaira(account.balance || 0)}
+                                </div>
+                              </div>
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* Navigation */}
+        <div className="flex justify-between gap-2 pt-4 border-t">
+          <Button
+            variant="outline"
+            onClick={() => setStep(step - 1)}
+            disabled={step === 1 || loading}
+          >
+            <ChevronLeft className="mr-2 h-4 w-4" />
+            Previous
+          </Button>
+
+          {step < 3 ? (
+            <Button
+              onClick={() => setStep(step + 1)}
+              disabled={!canGoToNextStep() || loading}
+            >
               Next
+              <ChevronRight className="ml-2 h-4 w-4" />
             </Button>
-          )}
-          {step === 3 && (
-            <Button onClick={handleSubmit} disabled={loading} className="ml-auto">
+          ) : (
+            <Button
+              onClick={handleSubmit}
+              disabled={!canGoToNextStep() || loading}
+            >
               {loading ? 'Creating...' : 'Create Booking'}
             </Button>
           )}
