@@ -1,25 +1,30 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { ArrowLeft, Plus, Building2, MoreVertical, Edit, Trash2, AlertCircle } from 'lucide-react'
+import { ArrowLeft, Plus } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
+import { Textarea } from '@/components/ui/textarea'
 import { toast } from 'sonner'
 import { createClient } from '@/lib/supabase/client'
 import { formatNaira } from '@/lib/utils/currency'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { EnhancedDataTable } from '@/components/shared/enhanced-data-table'
+import { Badge } from '@/components/ui/badge'
+import { format } from 'date-fns'
 
 interface Organization {
   id: string
   name: string
-  org_type: 'ngo' | 'government' | 'private'
-  email: string
+  org_type: 'ngo' | 'government' | 'private' | 'other'
+  email?: string
   phone?: string
+  contact_person?: string
+  address?: string
   current_balance: number
   created_at: string
 }
@@ -29,14 +34,15 @@ export default function OrganizationsPage() {
   const [organizations, setOrganizations] = useState<Organization[]>([])
   const [loading, setLoading] = useState(true)
   const [addOrgModalOpen, setAddOrgModalOpen] = useState(false)
-  const [deleteLoading, setDeleteLoading] = useState(false)
 
   // Form states
   const [formData, setFormData] = useState({
     name: '',
-    org_type: 'ngo' as 'ngo' | 'government' | 'private',
+    org_type: 'ngo' as 'ngo' | 'government' | 'private' | 'other',
     email: '',
     phone: '',
+    contact_person: '',
+    address: '',
   })
   const [submitting, setSubmitting] = useState(false)
 
@@ -50,8 +56,8 @@ export default function OrganizationsPage() {
       const supabase = createClient()
       const { data, error } = await supabase
         .from('organizations')
-        .select('id, name, org_type, email, phone, current_balance, created_at')
-        .not('name', 'like', '%Hotel%') // Exclude user hotels
+        .select('id, name, org_type, email, phone, contact_person, address, current_balance, created_at')
+        .not('name', 'like', '%Hotel%')
         .order('created_at', { ascending: false })
 
       if (error) throw error
@@ -66,29 +72,33 @@ export default function OrganizationsPage() {
   const handleAddOrganization = async (e: React.FormEvent) => {
     e.preventDefault()
     
-    if (!formData.name.trim() || !formData.email.trim()) {
-      toast.error('Please fill in name and email')
+    if (!formData.name.trim()) {
+      toast.error('Please fill in organization name')
       return
     }
 
     try {
       setSubmitting(true)
       const supabase = createClient()
-      const { data, error } = await supabase
+      const { data: { user } } = await supabase.auth.getUser()
+
+      const { error } = await supabase
         .from('organizations')
         .insert([{
           name: formData.name,
           org_type: formData.org_type,
-          email: formData.email,
+          email: formData.email || null,
           phone: formData.phone || null,
+          contact_person: formData.contact_person || null,
+          address: formData.address || null,
           current_balance: 0,
+          created_by: user?.id,
         }])
-        .select()
 
       if (error) throw error
 
-      toast.success(`${formData.org_type.toUpperCase()} "${formData.name}" created successfully`)
-      setFormData({ name: '', org_type: 'ngo', email: '', phone: '' })
+      toast.success(`${formData.org_type.charAt(0).toUpperCase() + formData.org_type.slice(1)} "${formData.name}" created successfully`)
+      setFormData({ name: '', org_type: 'ngo', email: '', phone: '', contact_person: '', address: '' })
       setAddOrgModalOpen(false)
       fetchOrganizations()
     } catch (error: any) {
@@ -98,69 +108,12 @@ export default function OrganizationsPage() {
     }
   }
 
-  const handleDelete = (org: Organization) => {
-    toast(
-      (t) => (
-        <div className="flex flex-col gap-3">
-          <div className="flex gap-2 items-start">
-            <AlertCircle className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" />
-            <div>
-              <p className="font-semibold">Delete {org.name}?</p>
-              <p className="text-sm text-muted-foreground">This action cannot be undone.</p>
-            </div>
-          </div>
-          <div className="flex gap-2 justify-end">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => toast.dismiss(t)}
-            >
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              size="sm"
-              disabled={deleteLoading}
-              onClick={() => handleDeleteConfirm(org.id, t)}
-            >
-              Delete
-            </Button>
-          </div>
-        </div>
-      ),
-      {
-        duration: Infinity,
-        className: 'bg-red-50 border-red-200',
-      }
-    )
-  }
-
-  const handleDeleteConfirm = async (orgId: string, toastId: any) => {
-    try {
-      setDeleteLoading(true)
-      const supabase = createClient()
-      const { error } = await supabase
-        .from('organizations')
-        .delete()
-        .eq('id', orgId)
-
-      if (error) throw error
-      
-      toast.success('Organization deleted successfully')
-      toast.dismiss(toastId)
-      fetchOrganizations()
-    } catch (error: any) {
-      toast.error(error.message || 'Failed to delete organization')
-    } finally {
-      setDeleteLoading(false)
-    }
-  }
-
   const getOrgTypeLabel = (type: string) => {
     const labels = {
       ngo: 'NGO',
       government: 'Government',
       private: 'Private Company',
+      other: 'Other',
     }
     return labels[type as keyof typeof labels] || type
   }
@@ -170,40 +123,41 @@ export default function OrganizationsPage() {
       ngo: 'bg-blue-100 text-blue-800',
       government: 'bg-purple-100 text-purple-800',
       private: 'bg-green-100 text-green-800',
+      other: 'bg-gray-100 text-gray-800',
     }
     return colors[type as keyof typeof colors] || 'bg-gray-100 text-gray-800'
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      <div className="max-w-7xl mx-auto p-6">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-8">
-          <div className="flex items-center gap-4">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => router.back()}
-            >
-              <ArrowLeft className="w-4 h-4" />
-            </Button>
-            <div>
-              <h1 className="text-3xl font-bold">Organizations</h1>
-              <p className="text-muted-foreground">Manage NGOs, Government, and Private organizations for city ledger billing</p>
-            </div>
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => router.back()}
+          >
+            <ArrowLeft className="w-4 h-4" />
+          </Button>
+          <div>
+            <h1 className="text-3xl font-bold">Organizations</h1>
+            <p className="text-muted-foreground">Manage NGOs, Government, and Private organizations for city ledger billing</p>
           </div>
-          <Dialog open={addOrgModalOpen} onOpenChange={setAddOrgModalOpen}>
-            <DialogTrigger asChild>
-              <Button>
-                <Plus className="mr-2 h-4 w-4" />
-                Add Organization
-              </Button>
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Create New Organization</DialogTitle>
-              </DialogHeader>
-              <form onSubmit={handleAddOrganization} className="space-y-4">
+        </div>
+        <Dialog open={addOrgModalOpen} onOpenChange={setAddOrgModalOpen}>
+          <DialogTrigger asChild>
+            <Button>
+              <Plus className="mr-2 h-4 w-4" />
+              Add Organization
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>Create New Organization</DialogTitle>
+            </DialogHeader>
+            <form onSubmit={handleAddOrganization} className="space-y-4 max-h-[80vh] overflow-y-auto">
+              <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Organization Name *</Label>
                   <Input
@@ -224,21 +178,34 @@ export default function OrganizationsPage() {
                       <SelectItem value="ngo">NGO</SelectItem>
                       <SelectItem value="government">Government</SelectItem>
                       <SelectItem value="private">Private Company</SelectItem>
+                      <SelectItem value="other">Other</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Contact Person</Label>
+                  <Input
+                    placeholder="Name of contact person"
+                    value={formData.contact_person}
+                    onChange={(e) => setFormData({ ...formData, contact_person: e.target.value })}
+                  />
+                </div>
 
                 <div className="space-y-2">
-                  <Label>Email Address *</Label>
+                  <Label>Email Address</Label>
                   <Input
                     type="email"
                     placeholder="contact@organization.com"
                     value={formData.email}
                     onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                    required
                   />
                 </div>
+              </div>
 
+              <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Phone Number</Label>
                   <Input
@@ -247,88 +214,146 @@ export default function OrganizationsPage() {
                     onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
                   />
                 </div>
+              </div>
 
-                <div className="flex gap-2 justify-end pt-4">
-                  <Button
-                    variant="outline"
-                    onClick={() => setAddOrgModalOpen(false)}
-                  >
-                    Cancel
-                  </Button>
-                  <Button disabled={submitting}>
-                    {submitting ? 'Creating...' : 'Create Organization'}
-                  </Button>
-                </div>
-              </form>
-            </DialogContent>
-          </Dialog>
+              <div className="space-y-2">
+                <Label>Address</Label>
+                <Textarea
+                  placeholder="Street address, city, state"
+                  value={formData.address}
+                  onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+                  rows={3}
+                />
+              </div>
+
+              <div className="flex gap-2 justify-end pt-4 border-t">
+                <Button
+                  variant="outline"
+                  onClick={() => setAddOrgModalOpen(false)}
+                >
+                  Cancel
+                </Button>
+                <Button disabled={submitting}>
+                  {submitting ? 'Creating...' : 'Create Organization'}
+                </Button>
+              </div>
+            </form>
+          </DialogContent>
+        </Dialog>
+      </div>
+
+      {/* Data Table */}
+      {loading ? (
+        <div className="text-center py-12">
+          <p className="text-muted-foreground">Loading organizations...</p>
         </div>
-
-        {/* Organizations List */}
-        {loading ? (
-          <div className="text-center py-12">
-            <p className="text-muted-foreground">Loading organizations...</p>
-          </div>
-        ) : organizations.length === 0 ? (
-          <Card>
-            <CardContent className="pt-12 text-center">
-              <Building2 className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-              <p className="text-muted-foreground mb-4">No organizations created yet</p>
-              <Button onClick={() => setAddOrgModalOpen(true)}>
-                Create First Organization
-              </Button>
-            </CardContent>
-          </Card>
-        ) : (
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {organizations.map((org) => (
-              <Card key={org.id} className="hover:shadow-lg transition-shadow">
-                <CardHeader className="pb-3">
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <CardTitle className="text-lg">{org.name}</CardTitle>
-                      <div className="flex gap-2 mt-2">
-                        <span className={`text-xs px-2 py-1 rounded-full ${getOrgTypeColor(org.org_type)}`}>
-                          {getOrgTypeLabel(org.org_type)}
-                        </span>
-                      </div>
-                    </div>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon">
-                          <MoreVertical className="w-4 h-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem className="text-red-600" onClick={() => handleDelete(org)}>
-                          <Trash2 className="w-4 h-4 mr-2" />
-                          Delete
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+      ) : (
+        <EnhancedDataTable
+          data={organizations}
+          searchKeys={['name', 'email', 'contact_person', 'phone']}
+          filters={[
+            {
+              key: 'org_type',
+              label: 'Organization Type',
+              options: [
+                { value: 'ngo', label: 'NGO' },
+                { value: 'government', label: 'Government' },
+                { value: 'private', label: 'Private Company' },
+                { value: 'other', label: 'Other' },
+              ],
+            },
+          ]}
+          columns={[
+            {
+              key: 'name',
+              label: 'Name',
+              render: (org) => (
+                <div 
+                  className="cursor-pointer hover:text-primary font-medium"
+                  onClick={() => router.push(`/organizations/${org.id}`)}
+                >
+                  {org.name}
+                </div>
+              ),
+            },
+            {
+              key: 'org_type',
+              label: 'Type',
+              render: (org) => (
+                <Badge className={getOrgTypeColor(org.org_type)}>
+                  {getOrgTypeLabel(org.org_type)}
+                </Badge>
+              ),
+            },
+            {
+              key: 'contact_person',
+              label: 'Contact',
+              render: (org) => (
+                <div className="text-sm">
+                  <div>{org.contact_person || '—'}</div>
+                  <div className="text-muted-foreground">{org.phone || '—'}</div>
+                </div>
+              ),
+            },
+            {
+              key: 'current_balance',
+              label: 'Balance',
+              render: (org) => (
+                <div className="font-semibold text-blue-600">
+                  {formatNaira(org.current_balance)}
+                </div>
+              ),
+            },
+            {
+              key: 'created_at',
+              label: 'Created',
+              render: (org) => (
+                <div className="text-sm text-muted-foreground">
+                  {format(new Date(org.created_at), 'MMM dd, yyyy')}
+                </div>
+              ),
+            },
+          ]}
+          renderCard={(org) => (
+            <Card
+              className="cursor-pointer hover:shadow-lg transition-shadow h-full"
+              onClick={() => router.push(`/organizations/${org.id}`)}
+            >
+              <CardContent className="p-4 space-y-3">
+                <div>
+                  <div className="font-semibold text-lg">{org.name}</div>
+                  <Badge className={`mt-2 ${getOrgTypeColor(org.org_type)}`}>
+                    {getOrgTypeLabel(org.org_type)}
+                  </Badge>
+                </div>
+                {org.contact_person && (
+                  <div>
+                    <p className="text-xs text-muted-foreground">Contact Person</p>
+                    <p className="text-sm font-medium">{org.contact_person}</p>
                   </div>
-                </CardHeader>
-                <CardContent className="space-y-3">
+                )}
+                {org.email && (
                   <div>
                     <p className="text-xs text-muted-foreground">Email</p>
-                    <p className="text-sm font-medium break-all">{org.email}</p>
+                    <p className="text-sm break-all">{org.email}</p>
                   </div>
-                  {org.phone && (
-                    <div>
-                      <p className="text-xs text-muted-foreground">Phone</p>
-                      <p className="text-sm font-medium">{org.phone}</p>
-                    </div>
-                  )}
-                  <div className="bg-blue-50 rounded p-3 border border-blue-200">
-                    <p className="text-xs text-muted-foreground">City Ledger Balance</p>
-                    <p className="text-lg font-bold text-blue-900">{formatNaira(org.current_balance)}</p>
+                )}
+                {org.phone && (
+                  <div>
+                    <p className="text-xs text-muted-foreground">Phone</p>
+                    <p className="text-sm">{org.phone}</p>
                   </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        )}
-      </div>
+                )}
+                <div className="pt-3 border-t">
+                  <p className="text-xs text-muted-foreground">City Ledger Balance</p>
+                  <p className="text-lg font-bold text-blue-600">{formatNaira(org.current_balance)}</p>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+          itemsPerPage={10}
+        />
+      )}
     </div>
   )
 }
