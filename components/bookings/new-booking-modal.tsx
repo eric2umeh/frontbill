@@ -293,37 +293,6 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
     }
   }
 
-  const handleLedgerSearch = (value: string) => {
-    setLedgerSearch(value)
-    
-    let accountsToSearch = []
-    
-    // Determine which accounts to search from based on ledger type
-    if (ledgerType === 'individual') {
-      accountsToSearch = guests.filter(g => (g.balance || g.current_balance || 0) > 0)
-    } else {
-      accountsToSearch = ledgerAccounts.filter(org => (org.current_balance || 0) > 0)
-    }
-    
-    if (value.length > 0) {
-      const filtered = accountsToSearch.filter(acc => {
-        const name = acc.name || acc.full_name || ''
-        return name.toLowerCase().includes(value.toLowerCase())
-      })
-      console.log('[v0] Filtered ledger accounts:', { value, accountsToSearch, filtered })
-      setFilteredLedgerAccounts(filtered)
-    } else {
-      console.log('[v0] Reset ledger search with accounts:', accountsToSearch)
-      setFilteredLedgerAccounts(accountsToSearch)
-    }
-  }
-
-  const selectLedgerAccount = (account: any) => {
-    setLedgerAccount(account.id)
-    setLedgerSearch(account.name || account.full_name || '')
-    setLedgerOpen(false)
-  }
-
   const handleSubmit = async () => {
     try {
       setLoading(true)
