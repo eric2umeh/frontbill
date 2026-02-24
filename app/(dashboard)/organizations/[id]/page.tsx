@@ -122,6 +122,9 @@ export default function OrganizationDetailPage() {
       setSaving(true)
       const supabase = createClient()
 
+      // Get current user
+      const { data: { user } } = await supabase.auth.getUser()
+
       const { data: result, error } = await supabase
         .from('organizations')
         .update({
