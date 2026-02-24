@@ -197,11 +197,34 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
   }
 
   const handleCheckInChange = (date: Date | undefined) => {
+    if (!date) return
     setCheckInDate(date)
-    if (date && checkOutDate) {
-      const diff = differenceInDays(checkOutDate, date)
-      setNights(Math.max(1, diff))
+    setCheckInOpen(false)
+    // Update checkout date to be at least 1 day after check-in
+    if (checkOutDate && checkOutDate <= date) {
+      const newCheckOut = addDays(date, 1)
+      setCheckOutDate(newCheckOut)
+      setNights(1)
     }
+  }
+
+  const handleCheckOutChange = (date: Date | undefined) => {
+    if (!date || !checkInDate) return
+    setCheckOutDate(date)
+    setCheckOutOpen(false)
+    // Calculate nights
+    const calculatedNights = Math.ceil((date.getTime() - checkInDate.getTime()) / (1000 * 60 * 60 * 24))
+    setNights(Math.max(1, calculatedNights))
+  }
+
+  const handleNightsChange = (value: number) => {
+    const validNights = Math.max(1, value || 1)
+    setNights(validNights)
+    if (checkInDate) {
+      const newCheckOut = addDays(checkInDate, validNights)
+      setCheckOutDate(newCheckOut)
+    }
+  }
   }
 
   const handleCheckOutChange = (date: Date | undefined) => {
@@ -527,8 +550,9 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
               <Input
                 type="number"
                 min="1"
+                placeholder="Enter number of nights"
                 value={nights}
-                onChange={(e) => handleNightsChange(parseInt(e.target.value) || 1)}
+                onChange={(e) => handleNightsChange(parseInt(e.target.value) || 0)}
               />
               <p className="text-xs text-muted-foreground">
                 Changes will update checkout date automatically
