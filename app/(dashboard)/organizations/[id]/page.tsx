@@ -29,9 +29,7 @@ interface Organization {
 }
 
 interface CreatedByProfile {
-  email?: string
-  first_name?: string
-  last_name?: string
+  full_name?: string
 }
 
 export default function OrganizationDetailPage() {
@@ -86,7 +84,7 @@ export default function OrganizationDetailPage() {
       if (data.created_by) {
         const { data: profile } = await supabase
           .from('profiles')
-          .select('email, first_name, last_name')
+          .select('full_name')
           .eq('id', data.created_by)
           .single()
 
@@ -426,9 +424,7 @@ export default function OrganizationDetailPage() {
                 <div>
                   <p className="text-muted-foreground">Created By</p>
                   <p className="font-medium">
-                    {createdByProfile.first_name && createdByProfile.last_name
-                      ? `${createdByProfile.first_name} ${createdByProfile.last_name}`
-                      : createdByProfile.email}
+                    {createdByProfile.full_name || 'Unknown User'}
                   </p>
                 </div>
               )}

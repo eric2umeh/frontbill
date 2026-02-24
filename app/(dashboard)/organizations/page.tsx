@@ -27,6 +27,7 @@ interface Organization {
   address?: string
   current_balance: number
   created_at: string
+  created_by_name?: string
 }
 
 export default function OrganizationsPage() {
@@ -56,12 +57,30 @@ export default function OrganizationsPage() {
       const supabase = createClient()
       const { data, error } = await supabase
         .from('organizations')
-        .select('id, name, org_type, email, phone, contact_person, address, current_balance, created_at')
+        .select(`
+          id, 
+          name, 
+          org_type, 
+          email, 
+          phone, 
+          contact_person, 
+          address, 
+          current_balance, 
+          created_at,
+          profiles:created_by(full_name)
+        `)
         .not('name', 'like', '%Hotel%')
         .order('created_at', { ascending: false })
 
       if (error) throw error
-      setOrganizations(data || [])
+      
+      // Transform the data to flatten the creator name
+      const transformed = (data || []).map((org: any) => ({
+        ...org,
+        created_by_name: org.profiles?.full_name || 'Unknown User'
+      }))
+      
+      setOrganizations(transformed)
     } catch (error: any) {
       toast.error(error.message || 'Failed to load organizations')
     } finally {
@@ -308,8 +327,9 @@ export default function OrganizationsPage() {
               key: 'created_at',
               label: 'Created',
               render: (org) => (
-                <div className="text-sm text-muted-foreground">
-                  {format(new Date(org.created_at), 'MMM dd, yyyy')}
+                <div className="text-sm">
+                  <div>{format(new Date(org.created_at), 'MMM dd, yyyy')}</div>
+                  <div className="text-muted-foreground text-xs">{org.created_by_name}</div>
                 </div>
               ),
             },
@@ -347,6 +367,9 @@ export default function OrganizationsPage() {
                 <div className="pt-3 border-t">
                   <p className="text-xs text-muted-foreground">City Ledger Balance</p>
                   <p className="text-lg font-bold text-blue-600">{formatNaira(org.current_balance)}</p>
+                </div>
+                <div className="pt-2 text-xs text-muted-foreground">
+                  Created by {org.created_by_name}
                 </div>
               </CardContent>
             </Card>
