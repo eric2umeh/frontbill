@@ -407,7 +407,6 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
               .from('guests')
               .update({ balance: newBalance })
               .eq('id', ledgerAccount)
-
           }
         } else {
           // Add charge to organization's balance
@@ -418,7 +417,6 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
               .from('organizations')
               .update({ current_balance: newBalance })
               .eq('id', ledgerAccount)
-
           }
         }
       }
