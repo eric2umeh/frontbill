@@ -61,7 +61,7 @@ export function RoomStatusGrid() {
         .from('rooms')
         .select('*')
         .eq('organization_id', profile.organization_id)
-        .order('number', { ascending: true })
+        .order('room_number', { ascending: true })
         .limit(12)
 
       if (error) throw error
