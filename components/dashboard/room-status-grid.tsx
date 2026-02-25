@@ -55,7 +55,7 @@ export function RoomStatusGrid() {
 
         const { data, error } = await supabase
           .from('rooms')
-          .select('*')
+          .select('id, room_number, room_type, status, organization_id')
           .eq('organization_id', profile.organization_id)
           .order('room_number', { ascending: true })
           .limit(12)
