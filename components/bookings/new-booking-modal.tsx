@@ -120,10 +120,11 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
         return matches
       })
       setFilteredLedgerAccounts(filtered)
-      setLedgerOpen(filtered.length > 0)
+      setLedgerOpen(true) // Keep dropdown open while filtering
     } else {
+      // When input is cleared, show all accounts but keep dropdown open for user to see them
       setFilteredLedgerAccounts(toSearch)
-      setLedgerOpen(false)
+      setLedgerOpen(toSearch.length > 0)
     }
   }
 
@@ -219,19 +220,24 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
       // Load city ledger accounts
       // For individuals: load all guests with balance info
       // For organizations: load organizations
-      const { data: guestLedgerData } = await supabase
+      const { data: guestLedgerData, error: guestError } = await supabase
         .from('guests')
         .select('id, name, phone, balance')
         .eq('organization_id', organizationId)
         .order('name')
 
-      const { data: orgLedgerData } = await supabase
+      const { data: orgLedgerData, error: orgError } = await supabase
         .from('organizations')
         .select('id, name, org_type, email, phone, current_balance')
         .eq('parent_id', organizationId)
         .order('name')
 
-      console.log('[v0] Loaded ledger accounts:', { guests: guestLedgerData, organizations: orgLedgerData })
+      console.log('[v0] Loaded ledger accounts:', { 
+        guests: guestLedgerData, 
+        organizations: orgLedgerData,
+        guestError,
+        orgError
+      })
 
       setGuests(guestData || [])
       setRooms(roomData || [])
@@ -241,7 +247,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
       })
       setFilteredGuests([])
       
-      // Initialize filtered ledger accounts based on current ledger type
+      // Initialize filtered ledger accounts - show all initially so user can see what's available
       if (ledgerType === 'individual') {
         setFilteredLedgerAccounts(guestLedgerData || [])
       } else {
@@ -798,11 +804,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
                       placeholder={ledgerType === 'individual' ? 'Search guest by name...' : 'Search organization by name...'}
                       value={ledgerSearch || ''}
                       onChange={(e) => handleLedgerSearch(e.target.value)}
-                      onFocus={() => {
-                        if (ledgerSearch.length > 0 && filteredLedgerAccounts.length > 0) {
-                          setLedgerOpen(true)
-                        }
-                      }}
+                      onFocus={() => setLedgerOpen(true)}
                     />
                     {ledgerAccount && (
                       <button
