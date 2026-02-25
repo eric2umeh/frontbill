@@ -372,8 +372,6 @@ export function ExtendStayModal({ open, onClose, booking }: ExtendStayModalProps
                   )}
                 </div>
               )}
-                </div>
-              )}
 
               <div className="flex gap-2">
                 <Button variant="outline" onClick={() => setStep(1)} className="flex-1">
