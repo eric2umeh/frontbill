@@ -86,16 +86,32 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
 
       if (chargesError) throw chargesError
 
-      // Format charges for display
-      const charges = chargesData.map(charge => ({
-        id: charge.id,
-        date: charge.created_at?.split('T')[0],
-        description: charge.description,
-        amount: charge.amount,
-        type: charge.charge_type,
+      // Fetch creator info for each charge
+      const chargesWithCreator = await Promise.all(chargesData.map(async (charge) => {
+        let creatorName = 'System'
+        if (charge.created_by) {
+          const { data: userData } = await supabase
+            .from('profiles')
+            .select('full_name')
+            .eq('id', charge.created_by)
+            .single()
+          creatorName = userData?.full_name || 'Unknown User'
+        }
+        
+        return {
+          id: charge.id,
+          date: charge.created_at?.split('T')[0],
+          timestamp: charge.created_at,
+          description: charge.description,
+          amount: charge.amount,
+          type: charge.charge_type,
+          createdBy: creatorName,
+          paymentStatus: charge.payment_status,
+          paymentMethod: charge.payment_method,
+        }
       }))
 
-      setFolioCharges(charges)
+      setFolioCharges(chargesWithCreator)
       setLoading(false)
     } catch (error: any) {
       console.error('[v0] Error fetching booking details:', error)
@@ -197,6 +213,33 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
     } catch (error: any) {
       console.error('[v0] Error adding charge:', error)
       toast.error(error.message || 'Failed to add charge')
+    }
+  }
+
+  const handleDeleteCharge = async (chargeId: string, chargeAmount: number) => {
+    try {
+      const supabase = createClient()
+      
+      // Delete charge
+      const { error: deleteError } = await supabase
+        .from('folio_charges')
+        .delete()
+        .eq('id', chargeId)
+
+      if (deleteError) throw deleteError
+
+      // Update booking balance
+      const newBalance = booking.balance - chargeAmount
+      await supabase
+        .from('bookings')
+        .update({ balance: newBalance })
+        .eq('id', bookingId)
+
+      toast.success('Charge deleted successfully')
+      await fetchBookingDetails(bookingId)
+    } catch (error: any) {
+      console.error('[v0] Error deleting charge:', error)
+      toast.error(error.message || 'Failed to delete charge')
     }
   }
 
@@ -413,15 +456,43 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
               </div>
               <div className="space-y-2">
                 {folioCharges.map((charge) => (
-                  <div key={charge.id} className="flex items-center justify-between p-3 border rounded-lg">
-                    <div>
+                  <div key={charge.id} className="flex items-start justify-between p-3 border rounded-lg hover:bg-accent/50 transition-colors">
+                    <div className="flex-1">
                       <div className="font-medium">{charge.description}</div>
-                      <div className="text-xs text-muted-foreground">
-                        {new Date(charge.date).toLocaleDateString('en-GB')} · {charge.type}
+                      <div className="text-xs text-muted-foreground mt-1 space-y-0.5">
+                        <div>{new Date(charge.timestamp).toLocaleString('en-GB')} · {charge.type}</div>
+                        <div>Created by {charge.createdBy}</div>
+                        {charge.paymentStatus && <div>Status: {charge.paymentStatus}</div>}
                       </div>
                     </div>
-                    <div className={`font-semibold ${charge.amount < 0 ? 'text-green-600' : 'text-foreground'}`}>
-                      {charge.amount < 0 ? '' : '+'}{formatNaira(charge.amount)}
+                    <div className="flex items-center gap-3 ml-4">
+                      <div className={`font-semibold text-right min-w-[100px] ${charge.amount < 0 ? 'text-green-600' : 'text-foreground'}`}>
+                        {charge.amount < 0 ? '' : '+'}{formatNaira(charge.amount)}
+                      </div>
+                      <div className="flex gap-1">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => {
+                            // TODO: Implement edit charge modal
+                            toast.info('Edit charge feature coming soon')
+                          }}
+                        >
+                          <Edit className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                          onClick={() => {
+                            if (confirm('Delete this charge?')) {
+                              handleDeleteCharge(charge.id, charge.amount)
+                            }
+                          }}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -440,19 +511,47 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                 <span className="text-muted-foreground">Total Amount</span>
                 <span className="font-semibold">{formatNaira(booking.total_amount)}</span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Amount Paid</span>
-                <span className="font-semibold text-green-600">
-                  {formatNaira(booking.deposit)}
-                </span>
-              </div>
-              <Separator />
-              <div className="flex justify-between text-lg">
-                <span className="font-semibold">Balance</span>
-                <span className={`font-bold ${booking.balance > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                  {formatNaira(booking.balance)}
-                </span>
-              </div>
+              
+              {/* Check if there are city ledger charges */}
+              {folioCharges.some(c => c.paymentMethod === 'city_ledger' && c.paymentStatus === 'pending') ? (
+                <>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Amount Billed (City Ledger)</span>
+                    <span className="font-semibold">
+                      {formatNaira(folioCharges.filter(c => c.paymentMethod === 'city_ledger' && c.paymentStatus === 'pending').reduce((sum, c) => sum + c.amount, 0))}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Amount Paid</span>
+                    <span className="font-semibold text-green-600">
+                      {formatNaira(booking.deposit)}
+                    </span>
+                  </div>
+                  <Separator />
+                  <div className="flex justify-between text-lg">
+                    <span className="font-semibold">Bill Balance (Unpaid)</span>
+                    <span className="font-bold text-red-600">
+                      {formatNaira(folioCharges.filter(c => c.paymentMethod === 'city_ledger' && c.paymentStatus === 'pending').reduce((sum, c) => sum + c.amount, 0) - booking.deposit)}
+                    </span>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Amount Paid</span>
+                    <span className="font-semibold text-green-600">
+                      {formatNaira(booking.deposit)}
+                    </span>
+                  </div>
+                  <Separator />
+                  <div className="flex justify-between text-lg">
+                    <span className="font-semibold">Balance</span>
+                    <span className={`font-bold ${booking.balance > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                      {formatNaira(booking.balance)}
+                    </span>
+                  </div>
+                </>
+              )}
             </CardContent>
           </Card>
 

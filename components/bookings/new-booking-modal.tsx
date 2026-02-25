@@ -240,7 +240,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
       setGuests(guestData || [])
       setRooms(roomData || [])
       setLedgerAccounts(ledgerData || [])
-      setFilteredGuests(guestData || [])
+      setFilteredGuests([]) // Start with empty filtered list
       
       // Initialize filtered ledger accounts based on current ledger type
       if (ledgerType === 'individual') {
@@ -520,12 +520,12 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
               <Label>Full Name *</Label>
               <div className="relative">
                   <Input
-                    placeholder={ledgerType === 'individual' ? 'Search guest by name...' : 'Search organization by name...'}
-                    value={ledgerSearch || ''}
-                    onChange={(e) => handleLedgerSearch(e.target.value)}
+                    placeholder="Type guest name (existing guests will appear below)"
+                    value={fullName || ''}
+                    onChange={(e) => handleGuestSearch(e.target.value)}
                     onFocus={() => {
-                      if (ledgerSearch.length > 0 && filteredLedgerAccounts.length > 0) {
-                        setLedgerOpen(true)
+                      if (fullName.length > 0 && filteredGuests.length > 0) {
+                        setGuestSearchOpen(true)
                       }
                     }}
                   />

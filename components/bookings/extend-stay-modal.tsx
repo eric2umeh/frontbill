@@ -203,7 +203,7 @@ export function ExtendStayModal({ open, onClose, booking }: ExtendStayModalProps
                     mode="single"
                     selected={newCheckOutDate}
                     onSelect={setNewCheckOutDate}
-                    disabled={(date) => date < currentCheckOut}
+                    disabled={(date) => date <= currentCheckOut}
                     className="rounded-md border"
                   />
                 </div>
