@@ -138,6 +138,8 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
   const selectLedgerAccount = (account: any) => {
     setLedgerAccount(account.id)
     setLedgerSearch(account.name || account.full_name || '')
+    setLedgerOpen(false)
+    setFilteredLedgerAccounts([])
   }
 
   const loadData = async () => {
@@ -338,11 +340,19 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
         finalGuestId = newGuest.id
       }
 
+      // Use custom price if provided, otherwise standard price
+      const effectiveRate = customPrice > 0 ? customPrice : pricePerNight
+
       // Calculate total
-      const total = pricePerNight * nights
+      const total = effectiveRate * nights
+
+      // Selecting a payment method means booking is paid in full
+      const isPaidUpfront = paymentMethod !== 'ledger'
 
       // Generate folio ID
       const folioId = `FOL-${Date.now().toString(36).toUpperCase()}`
+
+      const userId = (await supabase.auth.getUser()).data.user?.id
 
       // Create booking
       const { data: booking, error: bookingError } = await supabase
@@ -355,13 +365,13 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
           check_in: checkInDate.toISOString(),
           check_out: checkOutDate.toISOString(),
           number_of_nights: nights,
-          rate_per_night: pricePerNight,
+          rate_per_night: effectiveRate,
           total_amount: total,
-          balance: total,
-          deposit: 0,
-          payment_status: 'pending',
+          balance: isPaidUpfront ? 0 : total,
+          deposit: isPaidUpfront ? total : 0,
+          payment_status: isPaidUpfront ? 'paid' : 'pending',
           status: 'confirmed',
-          created_by: (await supabase.auth.getUser()).data.user?.id,
+          created_by: userId,
         }])
         .select()
         .single()
@@ -730,48 +740,53 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
                 </div>
 
                 <div className="space-y-2">
-                  <Label>Search Ledger Account *</Label>
-                  <Popover open={ledgerOpen} onOpenChange={setLedgerOpen}>
-                    <PopoverTrigger asChild>
-                      <Input
-                        placeholder={`Search ${ledgerType === 'individual' ? 'guests' : 'organizations'} with balance...`}
-                        value={ledgerSearch}
-                        onChange={(e) => handleLedgerSearch(e.target.value)}
-                        onFocus={() => setLedgerOpen(true)}
-                      />
-                    </PopoverTrigger>
-                    <PopoverContent className="w-80 p-0" align="start">
-                      <Command>
-                        <CommandEmpty>No accounts found</CommandEmpty>
-                        <CommandGroup>
-                          {filteredLedgerAccounts.length > 0 ? (
-                            filteredLedgerAccounts.map(account => (
-                              <CommandItem
-                                key={account.id}
-                                value={account.id}
-                                onSelect={() => selectLedgerAccount(account)}
-                                className="cursor-pointer"
-                              >
-                                <div className="flex-1">
-                                  <div className="font-medium">{account.name || account.full_name}</div>
-                                  <div className="text-xs text-muted-foreground">
-                                    {ledgerType === 'individual' 
-                                      ? `Balance: ${formatNaira(account.balance || 0)}`
-                                      : `Balance: ${formatNaira(account.current_balance || 0)}`
-                                    }
-                                  </div>
-                                </div>
-                              </CommandItem>
-                            ))
-                          ) : (
-                            <div className="p-4 text-sm text-muted-foreground text-center">
-                              No {ledgerType === 'individual' ? 'guests' : 'organizations'} found
+                  <Label>
+                    Search {ledgerType === 'individual' ? 'Guest' : 'Organization'} Account *
+                  </Label>
+                  <div className="relative">
+                    <Input
+                      placeholder={`Type to search ${ledgerType === 'individual' ? 'guests' : 'organizations'}...`}
+                      value={ledgerSearch}
+                      onChange={(e) => handleLedgerSearch(e.target.value)}
+                      onFocus={() => setLedgerOpen(true)}
+                    />
+                    {ledgerAccount && (
+                      <button
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                        onClick={() => { setLedgerAccount(''); setLedgerSearch('') }}
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    )}
+                    {ledgerOpen && filteredLedgerAccounts.length > 0 && (
+                      <div className="absolute top-full left-0 right-0 mt-1 bg-background border border-input rounded-md shadow-lg z-50 max-h-56 overflow-y-auto">
+                        {filteredLedgerAccounts.map(account => (
+                          <button
+                            key={account.id}
+                            className="w-full text-left px-4 py-3 hover:bg-accent border-b last:border-b-0 transition-colors"
+                            onMouseDown={(e) => { e.preventDefault(); selectLedgerAccount(account) }}
+                          >
+                            <div className="font-medium text-sm">{account.name || account.full_name}</div>
+                            <div className="text-xs text-muted-foreground">
+                              Balance: {formatNaira(
+                                ledgerType === 'individual'
+                                  ? (account.balance || 0)
+                                  : (account.current_balance || 0)
+                              )}
                             </div>
-                          )}
-                        </CommandGroup>
-                      </Command>
-                    </PopoverContent>
-                  </Popover>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {ledgerOpen && ledgerSearch.length > 0 && filteredLedgerAccounts.length === 0 && (
+                      <div className="absolute top-full left-0 right-0 mt-1 bg-background border border-input rounded-md shadow-lg z-50 p-4 text-sm text-muted-foreground text-center">
+                        No {ledgerType === 'individual' ? 'guests' : 'organizations'} found
+                      </div>
+                    )}
+                  </div>
+                  {ledgerAccount && (
+                    <p className="text-xs text-green-600 font-medium">Account selected: {ledgerSearch}</p>
+                  )}
                 </div>
               </>
             )}
