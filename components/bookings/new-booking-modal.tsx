@@ -1,5 +1,6 @@
 'use client'
 
+// Cache bust marker: 2025-02-25-final-fix
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
