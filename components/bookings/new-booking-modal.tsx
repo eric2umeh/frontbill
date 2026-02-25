@@ -503,6 +503,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
   }
 
   return (
+    <>
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
@@ -887,7 +888,6 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
       </DialogContent>
     </Dialog>
 
-    {/* New Account Creation Dialog */}
     <Dialog open={newAccountDialogOpen} onOpenChange={setNewAccountDialogOpen}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
@@ -956,5 +956,6 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
         </div>
       </DialogContent>
     </Dialog>
+    </>
   )
 }
