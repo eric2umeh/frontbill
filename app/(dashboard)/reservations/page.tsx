@@ -71,7 +71,7 @@ export default function ReservationsPage() {
 
       const { data, error } = await supabase
         .from('bookings')
-        .select('*, guests(full_name, phone), rooms(number, type), created_by, updated_by')
+        .select('*, guests(name, phone), rooms(room_number, room_type), created_by, updated_by')
         .eq('organization_id', profile.organization_id)
         .eq('status', 'reserved')
         .order('check_in_date', { ascending: true })
