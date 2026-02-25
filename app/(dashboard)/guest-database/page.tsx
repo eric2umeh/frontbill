@@ -13,7 +13,7 @@ import { Eye, History, Loader2 } from 'lucide-react'
 
 interface Guest {
   id: string
-  full_name: string
+  name: string
   phone: string
   email: string
   address: string
@@ -92,17 +92,21 @@ export default function GuestDatabasePage() {
 
       <EnhancedDataTable
         data={guests}
-        searchKeys={['full_name', 'phone', 'email']}
+        searchKeys={['name', 'phone', 'email']}
         filters={[]}
         columns={[
           {
-            key: 'full_name',
+            key: 'name',
             label: 'Guest',
             render: (guest) => (
-              <div>
-                <div className="font-medium">{guest.full_name}</div>
-                <div className="text-xs text-muted-foreground">{guest.phone}</div>
-              </div>
+              <div className="font-medium">{guest.name}</div>
+            ),
+          },
+          {
+            key: 'phone',
+            label: 'Phone',
+            render: (guest) => (
+              <div className="text-sm">{guest.phone}</div>
             ),
           },
           {
@@ -119,20 +123,13 @@ export default function GuestDatabasePage() {
               <div className="text-sm">{guest.address || 'N/A'}</div>
             ),
           },
-          {
-            key: 'phone',
-            label: 'Phone',
-            render: (guest) => (
-              <div className="text-sm">{guest.phone}</div>
-            ),
-          },
         ]}
         renderCard={(guest) => (
           <CardContent className="p-4">
             <div className="space-y-3">
               <div className="flex items-start justify-between">
                 <div>
-                  <div className="font-semibold">{guest.full_name}</div>
+                  <div className="font-semibold">{guest.name}</div>
                   <div className="text-sm text-muted-foreground">{guest.phone}</div>
                 </div>
               </div>
@@ -156,7 +153,7 @@ export default function GuestDatabasePage() {
         <Dialog open={!!selectedGuest} onOpenChange={() => setSelectedGuest(null)}>
           <DialogContent className="max-w-2xl">
             <DialogHeader>
-              <DialogTitle>Guest Details - {selectedGuest?.full_name}</DialogTitle>
+              <DialogTitle>Guest Details - {selectedGuest?.name}</DialogTitle>
             </DialogHeader>
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-4 p-4 bg-muted rounded-lg">
