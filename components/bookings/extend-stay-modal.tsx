@@ -8,10 +8,10 @@ import { Calendar } from '@/components/ui/calendar'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
-import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem } from '@/components/ui/command'
+import { Input } from '@/components/ui/input'
 import { formatNaira } from '@/lib/utils/currency'
 import { toast } from 'sonner'
-import { CalendarIcon, CreditCard, ChevronRight, Search, Check } from 'lucide-react'
+import { CreditCard, ChevronRight, Check } from 'lucide-react'
 import { format, differenceInDays } from 'date-fns'
 import { cn } from '@/lib/utils'
 import { createClient } from '@/lib/supabase/client'
@@ -311,10 +311,10 @@ export function ExtendStayModal({ open, onClose, booking }: ExtendStayModalProps
                       <Label>Search Organization</Label>
                       <div className="space-y-2">
                         <div className="relative">
-                          <CommandInput
+                          <Input
                             placeholder="Search organization by name..."
-                            value={orgSearchTerm}
-                            onValueChange={handleOrgSearch}
+                            value={orgSearchTerm || ''}
+                            onChange={(e) => handleOrgSearch(e.target.value)}
                             className="rounded-md border px-3 py-2"
                           />
                         </div>
