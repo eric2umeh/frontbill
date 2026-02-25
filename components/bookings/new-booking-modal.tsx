@@ -341,6 +341,9 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
       // Calculate total
       const total = pricePerNight * nights
 
+      // Generate folio ID
+      const folioId = `FOL-${Date.now().toString(36).toUpperCase()}`
+
       // Create booking
       const { data: booking, error: bookingError } = await supabase
         .from('bookings')
@@ -348,15 +351,16 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
           organization_id: organizationId,
           guest_id: finalGuestId,
           room_id: selectedRoom.id,
+          folio_id: folioId,
           check_in: checkInDate.toISOString(),
           check_out: checkOutDate.toISOString(),
           number_of_nights: nights,
           rate_per_night: pricePerNight,
-          total_charges: total,
+          total_amount: total,
           balance: total,
+          deposit: 0,
           payment_status: 'pending',
           status: 'confirmed',
-          guest_type: paymentMethod === 'ledger' ? 'organization' : 'walkin',
           created_by: (await supabase.auth.getUser()).data.user?.id,
         }])
         .select()
