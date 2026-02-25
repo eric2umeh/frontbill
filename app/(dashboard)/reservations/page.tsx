@@ -71,12 +71,42 @@ export default function ReservationsPage() {
 
       const { data, error } = await supabase
         .from('bookings')
-        .select('*, guests(name, phone), rooms(room_number, room_type), created_by, updated_by')
+        .select('id, booking_reference, guest_id, room_id, check_in, check_out, status, payment_status, rate_per_night, created_by, updated_by')
         .eq('organization_id', profile.organization_id)
         .eq('status', 'reserved')
         .order('check_in', { ascending: true })
 
       if (error) throw error
+      
+      // Fetch guests data
+      const guestIds = Array.from(new Set((data || []).map((r: any) => r.guest_id).filter(Boolean)))
+      let guestMap: { [key: string]: any } = {}
+      
+      if (guestIds.length > 0) {
+        const { data: guestsData } = await supabase
+          .from('guests')
+          .select('id, name, phone')
+          .in('id', guestIds)
+        
+        guestsData?.forEach(guest => {
+          guestMap[guest.id] = guest
+        })
+      }
+
+      // Fetch rooms data
+      const roomIds = Array.from(new Set((data || []).map((r: any) => r.room_id).filter(Boolean)))
+      let roomMap: { [key: string]: any } = {}
+      
+      if (roomIds.length > 0) {
+        const { data: roomsData } = await supabase
+          .from('rooms')
+          .select('id, room_number, room_type')
+          .in('id', roomIds)
+        
+        roomsData?.forEach(room => {
+          roomMap[room.id] = room
+        })
+      }
       
       // Fetch creator and updater profiles for all reservations
       const userIds = Array.from(new Set(
@@ -95,14 +125,16 @@ export default function ReservationsPage() {
         })
       }
       
-      // Add created_by_name and updated_by_name to each reservation
-      const reservationsWithUsers = (data || []).map((reservation: any) => ({
+      // Add guest, room, and user data to each reservation
+      const reservationsWithData = (data || []).map((reservation: any) => ({
         ...reservation,
+        guests: guestMap[reservation.guest_id],
+        rooms: roomMap[reservation.room_id],
         created_by_name: reservation.created_by ? userMap[reservation.created_by] || 'Unknown User' : 'System',
         updated_by_name: reservation.updated_by ? userMap[reservation.updated_by] || 'Unknown User' : null
       }))
       
-      setReservations(reservationsWithUsers)
+      setReservations(reservationsWithData)
     } catch (error: any) {
       console.error('Error fetching reservations:', error)
       setReservations([])

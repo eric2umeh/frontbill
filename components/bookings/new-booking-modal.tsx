@@ -518,16 +518,16 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
             <div className="space-y-2">
               <Label>Full Name *</Label>
               <div className="relative">
-                <Input
-                  placeholder="Type guest name (existing guests will appear below)"
-                  value={fullName}
-                  onChange={(e) => handleGuestSearch(e.target.value)}
-                  onFocus={() => {
-                    if (fullName.length > 0 && filteredGuests.length > 0) {
-                      setGuestSearchOpen(true)
-                    }
-                  }}
-                />
+                  <Input
+                    placeholder={ledgerType === 'individual' ? 'Search guest by name...' : 'Search organization by name...'}
+                    value={ledgerSearch || ''}
+                    onChange={(e) => handleLedgerSearch(e.target.value)}
+                    onFocus={() => {
+                      if (ledgerSearch.length > 0 && filteredLedgerAccounts.length > 0) {
+                        setLedgerOpen(true)
+                      }
+                    }}
+                  />
                 
                 {/* Suggestions Dropdown */}
                 {guestSearchOpen && filteredGuests.length > 0 && (
@@ -556,7 +556,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
               <Label>Phone Number * {guestId && <span className="text-xs text-green-600">(from existing guest)</span>}</Label>
               <Input
                 placeholder="Phone number"
-                value={phone}
+                value={phone || ''}
                 onChange={(e) => setPhone(e.target.value)}
                 disabled={!!guestId}
               />
@@ -567,7 +567,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
               <Input
                 type="email"
                 placeholder="Email address"
-                value={email}
+                value={email || ''}
                 onChange={(e) => setEmail(e.target.value)}
                 disabled={!!guestId}
               />
@@ -577,7 +577,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
               <Label>Address {guestId && <span className="text-xs text-green-600">(from existing guest)</span>}</Label>
               <Input
                 placeholder="Street address"
-                value={address}
+                value={address || ''}
                 onChange={(e) => setAddress(e.target.value)}
                 disabled={!!guestId}
               />
@@ -794,12 +794,11 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
                     Search {ledgerType === 'individual' ? 'Guest' : 'Organization'} Account *
                   </Label>
                   <div className="relative">
-                    <Input
-                      placeholder={`Type to search ${ledgerType === 'individual' ? 'guests' : 'organizations'}...`}
-                      value={ledgerSearch}
-                      onChange={(e) => handleLedgerSearch(e.target.value)}
-                      onFocus={() => setLedgerOpen(true)}
-                    />
+                  <Input
+                    placeholder="Search for available rooms..."
+                    value={roomSearch || ''}
+                    onChange={(e) => handleRoomSearch(e.target.value)}
+                  />
                     {ledgerAccount && (
                       <button
                         className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
@@ -904,7 +903,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
             <Input
               id="newAccountName"
               placeholder="Enter guest name"
-              value={newAccountName}
+              value={newAccountName || ''}
               onChange={(e) => setNewAccountName(e.target.value)}
               disabled={newAccountCreating}
             />
@@ -916,7 +915,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
               id="newAccountPhone"
               placeholder="Enter phone number"
               type="tel"
-              value={newAccountPhone}
+              value={newAccountPhone || ''}
               onChange={(e) => setNewAccountPhone(e.target.value)}
               disabled={newAccountCreating}
             />
@@ -928,7 +927,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
               id="newAccountEmail"
               placeholder="Enter email address"
               type="email"
-              value={newAccountEmail}
+              value={newAccountEmail || ''}
               onChange={(e) => setNewAccountEmail(e.target.value)}
               disabled={newAccountCreating}
             />
