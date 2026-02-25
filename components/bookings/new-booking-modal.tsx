@@ -124,10 +124,10 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
       ] = await Promise.all([
         supabase.from('guests').select('id, name, phone, email, address').eq('organization_id', orgId).order('name'),
         supabase.from('rooms').select('id, room_number, room_type, price_per_night').eq('organization_id', orgId).eq('status', 'available').order('room_number'),
-        // Load guests as individual ledger accounts (those with balance > 0 or unpaid bookings)
+        // Load guests as individual ledger accounts
         supabase.from('guests').select('id, name, phone, balance').eq('organization_id', orgId).order('name'),
-        // Load organizations as ledger accounts
-        supabase.from('organizations').select('id, name, phone, current_balance').eq('parent_id', orgId).order('name'),
+        // Load other organizations as ledger accounts (all organizations except current one)
+        supabase.from('organizations').select('id, name, phone, email').neq('id', orgId).order('name'),
       ])
 
       setGuests(guestData || [])
@@ -147,7 +147,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
           account_name: o.name,
           account_type: 'organization',
           contact_phone: o.phone || '',
-          balance: o.current_balance || 0,
+          balance: 0, // Organizations don't have a pre-existing balance in the current schema
         }))
       ]
 
@@ -244,15 +244,13 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
         if (error) throw error
         newAcc = { ...data, account_type: 'individual' }
       } else {
-        // Create as an organization
+        // Create as a new organization
         const { data, error } = await supabase
           .from('organizations')
           .insert([{
-            parent_id: organizationId,
             name: newAccountName.trim(),
             phone: newAccountPhone.trim(),
-            email: newAccountEmail.trim() || null,
-            current_balance: 0,
+            email: newAccountEmail.trim() || `org-${Date.now()}@noemail.com`,
           }])
           .select()
           .single()
@@ -384,18 +382,9 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
               .from('guests')
               .update({ balance: (guest?.balance || 0) + total })
               .eq('id', ledgerAccount)
-          } else {
-            // Update organization balance
-            const { data: org } = await supabase
-              .from('organizations')
-              .select('current_balance')
-              .eq('id', ledgerAccount)
-              .single()
-            await supabase
-              .from('organizations')
-              .update({ current_balance: (org?.current_balance || 0) + total })
-              .eq('id', ledgerAccount)
           }
+          // For organizations, balance tracking would use city_ledger_accounts table
+          // For now, we just record the transaction in the folio_charges
         }
       }
 
@@ -625,7 +614,18 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
 
               {paymentMethod === 'city_ledger' && (
                 <div className="space-y-2">
-                  <Label>Search Ledger Account *</Label>
+                  <div className="flex items-center justify-between">
+                    <Label>Search Ledger Account *</Label>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="text-xs h-8"
+                      onClick={() => setNewAccountDialogOpen(true)}
+                    >
+                      + Add New Account
+                    </Button>
+                  </div>
                   <div className="relative">
                     <Input
                       placeholder="Type to search guest or organization accounts..."
@@ -666,16 +666,12 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
                             </button>
                           ))
                         ) : (
-                          <div className="px-3 py-2 text-sm text-muted-foreground text-center">No accounts found</div>
+                          <div className="px-3 py-2 text-sm text-muted-foreground text-center">
+                            {allLedgerAccounts.length === 0 
+                              ? 'No accounts yet. Click "Add New Account" to create one.' 
+                              : 'No matching accounts found'}
+                          </div>
                         )}
-                        <div className="border-t border-input">
-                          <button
-                            className="w-full text-left px-3 py-2 hover:bg-primary/10 text-primary text-sm font-medium"
-                            onMouseDown={(e) => { e.preventDefault(); setLedgerOpen(false); setNewAccountDialogOpen(true) }}
-                          >
-                            + Add New Ledger Account
-                          </button>
-                        </div>
                       </div>
                     )}
                   </div>
@@ -683,7 +679,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
                     <p className="text-xs text-green-600 font-medium">Selected: {ledgerAccountName}</p>
                   )}
                   {allLedgerAccounts.length === 0 && (
-                    <p className="text-xs text-amber-600">No ledger accounts found. Click the search box to add a new one.</p>
+                    <p className="text-xs text-amber-600">No ledger accounts found. Click "Add New Account" above to create one.</p>
                   )}
                 </div>
               )}
