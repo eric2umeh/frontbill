@@ -76,7 +76,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
   const [ledgerSearch, setLedgerSearch] = useState('')
   const [ledgerType, setLedgerType] = useState('individual') // individual or organization
   const [ledgerAccount, setLedgerAccount] = useState('')
-  const [ledgerAccounts, setLedgerAccounts] = useState<any[]>([])
+  const [ledgerAccounts, setLedgerAccounts] = useState<{ guests: any[]; organizations: any[] }>({ guests: [], organizations: [] })
   const [ledgerOpen, setLedgerOpen] = useState(false)
   const [filteredLedgerAccounts, setFilteredLedgerAccounts] = useState<any[]>([])
   
@@ -100,17 +100,41 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
   }, [ledgerType])
 
   const handleLedgerTypeChange = (type: string) => {
-    setLedgerSearch('')
+    setLedgerType(type)
     setLedgerAccount('')
+    setLedgerSearch('')
     
     if (type === 'individual') {
-      // For individual, auto-select the guest if one exists
-      if (guestId) {
-        const selectedGuest = guests.find(g => g.id === guestId)
-        if (selectedGuest) {
-          setLedgerAccount(guestId)
-          setLedgerSearch(selectedGuest.name)
-        }
+      setFilteredLedgerAccounts(ledgerAccounts?.guests || [])
+    } else {
+      setFilteredLedgerAccounts(ledgerAccounts?.organizations || [])
+    }
+  }
+  
+  const handleLedgerSearch = (value: string) => {
+    setLedgerSearch(value)
+    console.log('[v0] Ledger search:', { value, ledgerType, ledgerAccounts })
+    
+    const toSearch = ledgerType === 'individual' 
+      ? (ledgerAccounts?.guests || [])
+      : (ledgerAccounts?.organizations || [])
+    
+    console.log('[v0] toSearch data:', toSearch)
+    
+    if (value.trim().length > 0) {
+      const filtered = toSearch.filter(acc => {
+        const name = (acc.name || acc.full_name || '').toLowerCase()
+        const matches = name.includes(value.toLowerCase())
+        return matches
+      })
+      console.log('[v0] Filtered results:', filtered)
+      setFilteredLedgerAccounts(filtered)
+      setLedgerOpen(filtered.length > 0)
+    } else {
+      setFilteredLedgerAccounts(toSearch)
+      setLedgerOpen(false)
+    }
+  }
       }
       // Show all guests available
       setFilteredLedgerAccounts(guests)
@@ -230,23 +254,36 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
         .eq('status', 'available')
         .order('room_number')
 
-      // Load city ledger accounts (organizations that accept city ledger payments)
-      const { data: ledgerData } = await supabase
+      // Load city ledger accounts
+      // For individuals: load all guests with balance info
+      // For organizations: load organizations
+      const { data: guestLedgerData } = await supabase
+        .from('guests')
+        .select('id, name, phone, balance')
+        .eq('organization_id', organizationId)
+        .order('name')
+
+      const { data: orgLedgerData } = await supabase
         .from('organizations')
         .select('id, name, org_type, email, phone, current_balance')
-        .not('name', 'like', '%Hotel%')
+        .eq('parent_id', organizationId)
         .order('name')
+
+      console.log('[v0] Loaded ledger accounts:', { guests: guestLedgerData, organizations: orgLedgerData })
 
       setGuests(guestData || [])
       setRooms(roomData || [])
-      setLedgerAccounts(ledgerData || [])
-      setFilteredGuests([]) // Start with empty filtered list
+      setLedgerAccounts({
+        guests: guestLedgerData || [],
+        organizations: orgLedgerData || []
+      })
+      setFilteredGuests([])
       
       // Initialize filtered ledger accounts based on current ledger type
       if (ledgerType === 'individual') {
-        setFilteredLedgerAccounts(guestData || [])
+        setFilteredLedgerAccounts(guestLedgerData || [])
       } else {
-        setFilteredLedgerAccounts(ledgerData || [])
+        setFilteredLedgerAccounts(orgLedgerData || [])
       }
     } catch (error: any) {
       toast.error('Failed to load data')
