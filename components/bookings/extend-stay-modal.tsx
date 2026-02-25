@@ -77,7 +77,11 @@ export function ExtendStayModal({ open, onClose, booking }: ExtendStayModalProps
     }
   }
 
-  const currentCheckOut = new Date(booking.currentCheckOut)
+  // Normalize to midnight local time to avoid timezone-offset arithmetic issues
+  const currentCheckOut = (() => {
+    const d = new Date(booking.currentCheckOut)
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate())
+  })()
   const additionalNights = newCheckOutDate ? differenceInDays(newCheckOutDate, currentCheckOut) : 0
   const additionalAmount = additionalNights * booking.ratePerNight
 
@@ -203,7 +207,7 @@ export function ExtendStayModal({ open, onClose, booking }: ExtendStayModalProps
                     mode="single"
                     selected={newCheckOutDate}
                     onSelect={setNewCheckOutDate}
-                    disabled={(date) => date <= currentCheckOut}
+                    disabled={(date) => date < currentCheckOut}
                     className="rounded-md border"
                   />
                 </div>

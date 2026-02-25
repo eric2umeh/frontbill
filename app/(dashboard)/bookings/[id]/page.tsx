@@ -32,6 +32,12 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
   const [folioCharges, setFolioCharges] = useState<any[]>([])
   const [createdByUser, setCreatedByUser] = useState<any>(null)
   const [updatedByUser, setUpdatedByUser] = useState<any>(null)
+  // Edit charge state
+  const [editChargeModalOpen, setEditChargeModalOpen] = useState(false)
+  const [editingCharge, setEditingCharge] = useState<any>(null)
+  const [editChargeAmount, setEditChargeAmount] = useState('')
+  const [editChargeDescription, setEditChargeDescription] = useState('')
+  const [editChargeLoading, setEditChargeLoading] = useState(false)
 
   useEffect(() => {
     const getParamsAndFetch = async () => {
@@ -216,30 +222,98 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
     }
   }
 
-  const handleDeleteCharge = async (chargeId: string, chargeAmount: number) => {
+  const handleDeleteCharge = (chargeId: string, chargeAmount: number) => {
+    toast(
+      (t) => (
+        <div className="flex flex-col gap-3">
+          <div className="flex gap-2 items-start">
+            <AlertCircle className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" />
+            <div>
+              <p className="font-semibold">Delete this charge?</p>
+              <p className="text-sm text-muted-foreground">Amount: {formatNaira(chargeAmount)}. This cannot be undone.</p>
+            </div>
+          </div>
+          <div className="flex gap-2 justify-end">
+            <Button variant="outline" size="sm" onClick={() => toast.dismiss(t)}>Cancel</Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={async () => {
+                toast.dismiss(t)
+                try {
+                  const supabase = createClient()
+                  const { error: deleteError } = await supabase
+                    .from('folio_charges')
+                    .delete()
+                    .eq('id', chargeId)
+                  if (deleteError) throw deleteError
+                  // Recalculate balance from remaining charges after deletion
+                  await fetchBookingDetails(bookingId)
+                  toast.success('Charge deleted')
+                } catch (error: any) {
+                  toast.error(error.message || 'Failed to delete charge')
+                }
+              }}
+            >
+              Delete
+            </Button>
+          </div>
+        </div>
+      ),
+      { duration: Infinity }
+    )
+  }
+
+  const openEditCharge = (charge: any) => {
+    setEditingCharge(charge)
+    setEditChargeAmount(String(Math.abs(charge.amount)))
+    setEditChargeDescription(charge.description)
+    setEditChargeModalOpen(true)
+  }
+
+  const handleUpdateCharge = async () => {
+    if (!editingCharge || !editChargeAmount) {
+      toast.error('Please enter an amount')
+      return
+    }
     try {
+      setEditChargeLoading(true)
       const supabase = createClient()
-      
-      // Delete charge
-      const { error: deleteError } = await supabase
+      // Preserve sign: payments are stored as negative
+      const newAmount = editingCharge.amount < 0
+        ? -Math.abs(Number(editChargeAmount))
+        : Math.abs(Number(editChargeAmount))
+
+      const { error } = await supabase
         .from('folio_charges')
-        .delete()
-        .eq('id', chargeId)
+        .update({ description: editChargeDescription, amount: newAmount })
+        .eq('id', editingCharge.id)
 
-      if (deleteError) throw deleteError
+      if (error) throw error
 
-      // Update booking balance
-      const newBalance = booking.balance - chargeAmount
+      // Recalculate booking balance from all charges
+      const { data: allCharges } = await supabase
+        .from('folio_charges')
+        .select('amount, payment_status')
+        .eq('booking_id', bookingId)
+
+      const unpaidTotal = (allCharges || [])
+        .filter(c => c.payment_status !== 'paid')
+        .reduce((sum, c) => sum + Number(c.amount), 0)
+
       await supabase
         .from('bookings')
-        .update({ balance: newBalance })
+        .update({ balance: Math.max(0, unpaidTotal) })
         .eq('id', bookingId)
 
-      toast.success('Charge deleted successfully')
+      toast.success('Charge updated successfully')
+      setEditChargeModalOpen(false)
+      setEditingCharge(null)
       await fetchBookingDetails(bookingId)
     } catch (error: any) {
-      console.error('[v0] Error deleting charge:', error)
-      toast.error(error.message || 'Failed to delete charge')
+      toast.error(error.message || 'Failed to update charge')
+    } finally {
+      setEditChargeLoading(false)
     }
   }
 
@@ -286,6 +360,12 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
   }
 
   const totalCharges = folioCharges.reduce((sum, charge) => sum + charge.amount, 0)
+  // All unpaid charges (positive charges with pending status)
+  const totalUnpaid = folioCharges
+    .filter(c => c.paymentStatus === 'pending' && c.amount > 0)
+    .reduce((sum, c) => sum + c.amount, 0)
+  // Add the original booking balance for unpaid room charge
+  const totalBillBalance = booking ? (booking.balance || 0) + totalUnpaid : 0
 
   if (loading) {
     return (
@@ -385,6 +465,42 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
         </DialogContent>
       </Dialog>
 
+      {/* Edit Charge Dialog */}
+      <Dialog open={editChargeModalOpen} onOpenChange={(o) => { if (!o) { setEditChargeModalOpen(false); setEditingCharge(null) } }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Edit Charge</DialogTitle>
+            <DialogDescription>Update the amount or description for this folio entry.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label>Amount</Label>
+              <Input
+                type="number"
+                min="0"
+                placeholder="Enter amount"
+                value={editChargeAmount}
+                onChange={(e) => setEditChargeAmount(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Description</Label>
+              <Input
+                placeholder="Charge description"
+                value={editChargeDescription}
+                onChange={(e) => setEditChargeDescription(e.target.value)}
+              />
+            </div>
+            <div className="flex gap-3 justify-end">
+              <Button variant="outline" onClick={() => { setEditChargeModalOpen(false); setEditingCharge(null) }}>Cancel</Button>
+              <Button onClick={handleUpdateCharge} disabled={editChargeLoading}>
+                {editChargeLoading ? 'Saving...' : 'Save Changes'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <div className="flex items-center justify-between">
         <Button variant="ghost" onClick={() => router.back()}>
           <ArrowLeft className="mr-2 h-4 w-4" />
@@ -473,10 +589,8 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                         <Button
                           size="sm"
                           variant="ghost"
-                          onClick={() => {
-                            // TODO: Implement edit charge modal
-                            toast.info('Edit charge feature coming soon')
-                          }}
+                          onClick={() => openEditCharge(charge)}
+                          title="Edit charge"
                         >
                           <Edit className="h-4 w-4" />
                         </Button>
@@ -484,11 +598,8 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                           size="sm"
                           variant="ghost"
                           className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                          onClick={() => {
-                            if (confirm('Delete this charge?')) {
-                              handleDeleteCharge(charge.id, charge.amount)
-                            }
-                          }}
+                          onClick={() => handleDeleteCharge(charge.id, charge.amount)}
+                          title="Delete charge"
                         >
                           <Trash2 className="h-4 w-4" />
                         </Button>
@@ -508,50 +619,26 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="flex justify-between">
-                <span className="text-muted-foreground">Total Amount</span>
+                <span className="text-muted-foreground">Room Charge</span>
                 <span className="font-semibold">{formatNaira(booking.total_amount)}</span>
               </div>
-              
-              {/* Check if there are city ledger charges */}
-              {folioCharges.some(c => c.paymentMethod === 'city_ledger' && c.paymentStatus === 'pending') ? (
-                <>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Amount Billed (City Ledger)</span>
-                    <span className="font-semibold">
-                      {formatNaira(folioCharges.filter(c => c.paymentMethod === 'city_ledger' && c.paymentStatus === 'pending').reduce((sum, c) => sum + c.amount, 0))}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Amount Paid</span>
-                    <span className="font-semibold text-green-600">
-                      {formatNaira(booking.deposit)}
-                    </span>
-                  </div>
-                  <Separator />
-                  <div className="flex justify-between text-lg">
-                    <span className="font-semibold">Bill Balance (Unpaid)</span>
-                    <span className="font-bold text-red-600">
-                      {formatNaira(folioCharges.filter(c => c.paymentMethod === 'city_ledger' && c.paymentStatus === 'pending').reduce((sum, c) => sum + c.amount, 0) - booking.deposit)}
-                    </span>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Amount Paid</span>
-                    <span className="font-semibold text-green-600">
-                      {formatNaira(booking.deposit)}
-                    </span>
-                  </div>
-                  <Separator />
-                  <div className="flex justify-between text-lg">
-                    <span className="font-semibold">Balance</span>
-                    <span className={`font-bold ${booking.balance > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                      {formatNaira(booking.balance)}
-                    </span>
-                  </div>
-                </>
+              {totalUnpaid > 0 && (
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Additional Charges (Unpaid)</span>
+                  <span className="font-semibold text-orange-600">+{formatNaira(totalUnpaid)}</span>
+                </div>
               )}
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Amount Paid</span>
+                <span className="font-semibold text-green-600">{formatNaira(booking.deposit)}</span>
+              </div>
+              <Separator />
+              <div className="flex justify-between text-lg">
+                <span className="font-semibold">Bill Balance (Unpaid)</span>
+                <span className={`font-bold ${totalBillBalance > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                  {formatNaira(totalBillBalance)}
+                </span>
+              </div>
             </CardContent>
           </Card>
 
