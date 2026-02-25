@@ -17,8 +17,8 @@ interface Reservation {
   booking_reference: string
   guest_id: string
   room_id: string
-  check_in_date: string
-  check_out_date: string
+  check_in: string
+  check_out: string
   status: string
   payment_status: string
   rate_per_night: number
@@ -26,8 +26,8 @@ interface Reservation {
   created_by_name?: string
   updated_by?: string
   updated_by_name?: string
-  guests?: { full_name: string; phone: string }
-  rooms?: { number: string; type: string }
+  guests?: { name: string; phone: string }
+  rooms?: { room_number: string; room_type: string }
 }
 
 export default function ReservationsPage() {
@@ -155,8 +155,8 @@ export default function ReservationsPage() {
 
       <EnhancedDataTable
         data={reservations}
-        searchKeys={['booking_reference', 'guests.full_name', 'rooms.number']}
-        dateField="check_in_date"
+        searchKeys={['booking_reference', 'guests.name', 'rooms.room_number']}
+        dateField="check_in"
         filters={[
           {
             key: 'payment_status',
@@ -189,7 +189,7 @@ export default function ReservationsPage() {
                 className="cursor-pointer hover:text-primary"
                 onClick={() => router.push(`/reservations/${res.id}`)}
               >
-                <div className="font-medium">{res.guests?.full_name}</div>
+                <div className="font-medium">{res.guests?.name}</div>
                 <div className="text-xs text-muted-foreground">{res.guests?.phone}</div>
               </div>
             ),
@@ -199,17 +199,17 @@ export default function ReservationsPage() {
             label: 'Room',
             render: (res) => (
               <div className="cursor-pointer" onClick={() => router.push(`/reservations/${res.id}`)}>
-                <div className="font-medium">Room {res.rooms?.number}</div>
-                <div className="text-xs text-muted-foreground">{res.rooms?.type}</div>
+                <div className="font-medium">Room {res.rooms?.room_number}</div>
+                <div className="text-xs text-muted-foreground">{res.rooms?.room_type}</div>
               </div>
             ),
           },
           {
-            key: 'check_in_date',
+            key: 'check_in',
             label: 'Check-in Date',
             render: (res) => (
               <div className="text-sm">
-                {new Date(res.check_in_date).toLocaleDateString('en-GB')}
+                {new Date(res.check_in).toLocaleDateString('en-GB')}
               </div>
             ),
           },
@@ -274,7 +274,7 @@ export default function ReservationsPage() {
             <div className="space-y-3">
               <div className="flex items-start justify-between">
                 <div>
-                  <div className="font-semibold">{res.guests?.full_name}</div>
+                  <div className="font-semibold">{res.guests?.name}</div>
                   <div className="text-sm text-muted-foreground">{res.guests?.phone}</div>
                 </div>
                 <Badge variant="outline" className={paymentColors[res.payment_status]}>
@@ -284,11 +284,11 @@ export default function ReservationsPage() {
               <div className="grid grid-cols-2 gap-2 text-sm">
                 <div>
                   <div className="text-muted-foreground">Room</div>
-                  <div className="font-medium">Room {res.rooms?.number}</div>
+                  <div className="font-medium">Room {res.rooms?.room_number}</div>
                 </div>
                 <div>
                   <div className="text-muted-foreground">Check-in</div>
-                  <div className="font-medium">{new Date(res.check_in_date).toLocaleDateString('en-GB')}</div>
+                  <div className="font-medium">{new Date(res.check_in).toLocaleDateString('en-GB')}</div>
                 </div>
               </div>
             </div>

@@ -683,7 +683,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
           <div className="space-y-4 py-4">
             <div className="space-y-2">
               <Label>Room Type *</Label>
-              <Select value={selectedRoomType} onValueChange={handleRoomTypeSelect}>
+                <Select value={selectedRoomType || ''} onValueChange={handleRoomTypeSelect}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select room type" />
                 </SelectTrigger>
@@ -700,7 +700,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
             {selectedRoom && (
               <div className="space-y-2">
                 <Label>Select Room *</Label>
-                <Select value={selectedRoom?.id} onValueChange={(id) => {
+                <Select value={selectedRoom?.id || ''} onValueChange={(id) => {
                   const room = rooms.find(r => r.id === id)
                   if (room) {
                     setSelectedRoom(room)
@@ -761,7 +761,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
 
             <div className="space-y-2">
               <Label>Payment Method *</Label>
-              <Select value={paymentMethod} onValueChange={setPaymentMethod}>
+                <Select value={paymentMethod || ''} onValueChange={setPaymentMethod}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -778,7 +778,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
               <>
                 <div className="space-y-2">
                   <Label>Ledger Account Type *</Label>
-                  <Select value={ledgerType} onValueChange={setLedgerType}>
+                  <Select value={ledgerType || ''} onValueChange={setLedgerType}>
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>

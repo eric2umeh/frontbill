@@ -113,9 +113,9 @@ export function RoomStatusGrid() {
                   >
                     <div className="flex items-start justify-between">
                       <div>
-                        <p className="font-semibold text-sm">{room.number}</p>
+                        <p className="font-semibold text-sm">{room.room_number}</p>
                         <p className="text-xs text-muted-foreground capitalize">
-                          {room.type?.replace('_', ' ') || 'Standard'}
+                          {room.room_type?.replace('_', ' ') || 'Standard'}
                         </p>
                       </div>
                       <div
