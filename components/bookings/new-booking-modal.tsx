@@ -101,7 +101,8 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
     } else {
       setFilteredLedgerAccounts(ledgerAccounts?.organizations || [])
     }
-  }, [ledgerType, ledgerAccounts])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ledgerType])
 
   const handleLedgerTypeChange = (type: string) => {
     setLedgerType(type)
