@@ -27,7 +27,7 @@ import {
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
 import { Button } from '@/components/ui/button'
-import { Sheet, SheetContent } from '@/components/ui/sheet'
+import { Sheet, SheetContent, SheetTitle, SheetDescription } from '@/components/ui/sheet'
 
 const routes = [
   {
@@ -190,7 +190,8 @@ export function Sidebar({ mobileOpen, onMobileClose }: SidebarProps = {}) {
 
       {/* Mobile Sidebar */}
       <Sheet open={mobileOpen} onOpenChange={onMobileClose}>
-        <SheetContent side="left" className="p-0 w-64">
+        <SheetContent side="left" className="p-0 w-64" aria-describedby={undefined}>
+          <SheetTitle className="sr-only">Navigation Menu</SheetTitle>
           <SidebarContent isMobile />
         </SheetContent>
       </Sheet>
