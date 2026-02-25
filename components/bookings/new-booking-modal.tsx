@@ -94,10 +94,14 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
     }
   }, [open])
 
-  // Update filtered ledger accounts when ledgerType changes
+  // Sync filtered ledger accounts when ledgerType changes
   useEffect(() => {
-    handleLedgerTypeChange(ledgerType)
-  }, [ledgerType])
+    if (ledgerType === 'individual') {
+      setFilteredLedgerAccounts(ledgerAccounts?.guests || [])
+    } else {
+      setFilteredLedgerAccounts(ledgerAccounts?.organizations || [])
+    }
+  }, [ledgerType, ledgerAccounts])
 
   const handleLedgerTypeChange = (type: string) => {
     setLedgerType(type)
