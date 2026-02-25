@@ -113,13 +113,10 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
   
   const handleLedgerSearch = (value: string) => {
     setLedgerSearch(value)
-    console.log('[v0] Ledger search:', { value, ledgerType, ledgerAccounts })
     
     const toSearch = ledgerType === 'individual' 
       ? (ledgerAccounts?.guests || [])
       : (ledgerAccounts?.organizations || [])
-    
-    console.log('[v0] toSearch data:', toSearch)
     
     if (value.trim().length > 0) {
       const filtered = toSearch.filter(acc => {
@@ -127,7 +124,6 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
         const matches = name.includes(value.toLowerCase())
         return matches
       })
-      console.log('[v0] Filtered results:', filtered)
       setFilteredLedgerAccounts(filtered)
       setLedgerOpen(filtered.length > 0)
     } else {
@@ -135,40 +131,11 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
       setLedgerOpen(false)
     }
   }
-      }
-      // Show all guests available
-      setFilteredLedgerAccounts(guests)
-    } else {
-      // Show all organizations
-      setFilteredLedgerAccounts(ledgerAccounts)
-    }
-  }
-
-  const handleLedgerSearch = (value: string) => {
-    setLedgerSearch(value)
-    
-    let toSearch = []
-    if (ledgerType === 'individual') {
-      toSearch = guests
-    } else {
-      toSearch = ledgerAccounts
-    }
-    
-    if (value.trim().length > 0) {
-      const filtered = toSearch.filter(acc => {
-        const name = (acc.name || acc.full_name || '').toLowerCase()
-        const matches = name.includes(value.toLowerCase())
-        return matches
-      })
-      setFilteredLedgerAccounts(filtered)
-    } else {
-      setFilteredLedgerAccounts(toSearch)
-    }
-  }
 
   const selectLedgerAccount = (account: any) => {
     setLedgerAccount(account.id)
     setLedgerSearch(account.name || account.full_name || '')
+    setLedgerOpen(false)
   }
 
   const handleCreateNewAccount = async () => {
