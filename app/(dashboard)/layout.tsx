@@ -46,25 +46,10 @@ export default function DashboardLayout({
           return
         }
 
-        // Check for active session
-        const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+        // Get authenticated user (single call instead of multiple)
+        const { data: { user: authUser }, error: authError } = await supabase.auth.getUser()
         
-        if (sessionError || !session) {
-          const { data: { user: authUser }, error } = await supabase.auth.getUser()
-          
-          if (error || !authUser) {
-            if (isMounted) {
-              setRedirected(true)
-              router.push('/auth/login')
-            }
-            return
-          }
-        }
-
-        // Get authenticated user
-        const { data: { user: authUser } } = await supabase.auth.getUser()
-        
-        if (!authUser) {
+        if (authError || !authUser) {
           if (isMounted) {
             setRedirected(true)
             router.push('/auth/login')
