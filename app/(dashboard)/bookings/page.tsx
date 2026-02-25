@@ -15,22 +15,25 @@ import { toast } from 'sonner'
 
 interface Booking {
   id: string
-  booking_reference: string
+  folio_id: string
   guest_id: string
   room_id: string
-  check_in_date: string
-  check_out_date: string
+  check_in: string
+  check_out: string
+  number_of_nights: number
   status: string
   payment_status: string
   rate_per_night: number
+  total_amount: number
   balance: number
+  deposit: number
   created_by?: string
   created_by_name?: string
   updated_by?: string
   updated_by_name?: string
   updated_at?: string
-  guests?: { full_name: string; phone: string }
-  rooms?: { number: string; type: string }
+  guests?: { name: string; phone: string }
+  rooms?: { room_number: string; room_type: string }
 }
 
 export default function BookingsPage() {
@@ -172,8 +175,8 @@ export default function BookingsPage() {
 
       <EnhancedDataTable
         data={bookings}
-        searchKeys={['booking_reference', 'guests.full_name', 'rooms.number']}
-        dateField="check_in_date"
+        searchKeys={['folio_id', 'guests.name', 'rooms.room_number']}
+        dateField="check_in"
         filters={[
           {
             key: 'payment_status',
@@ -196,14 +199,14 @@ export default function BookingsPage() {
         ]}
         columns={[
           {
-            key: 'booking_reference',
-            label: 'Booking Ref',
+            key: 'folio_id',
+            label: 'Folio ID',
             render: (booking) => (
               <div 
                 className="font-mono text-sm cursor-pointer hover:text-primary"
                 onClick={() => router.push(`/bookings/${booking.id}`)}
               >
-                {booking.booking_reference}
+                {booking.folio_id}
               </div>
             ),
           },
@@ -215,7 +218,7 @@ export default function BookingsPage() {
                 className="cursor-pointer hover:text-primary"
                 onClick={() => router.push(`/bookings/${booking.id}`)}
               >
-                <div className="font-medium">{booking.guests?.full_name}</div>
+                <div className="font-medium">{booking.guests?.name}</div>
                 <div className="text-xs text-muted-foreground">{booking.guests?.phone}</div>
               </div>
             ),
@@ -225,26 +228,26 @@ export default function BookingsPage() {
             label: 'Room',
             render: (booking) => (
               <div>
-                <div className="font-medium">Room {booking.rooms?.number}</div>
-                <div className="text-xs text-muted-foreground">{booking.rooms?.type}</div>
+                <div className="font-medium">Room {booking.rooms?.room_number}</div>
+                <div className="text-xs text-muted-foreground">{booking.rooms?.room_type}</div>
               </div>
             ),
           },
           {
-            key: 'check_in_date',
+            key: 'check_in',
             label: 'Check-in',
             render: (booking) => (
               <div className="text-sm">
-                {new Date(booking.check_in_date).toLocaleDateString('en-GB')}
+                {new Date(booking.check_in).toLocaleDateString('en-GB')}
               </div>
             ),
           },
           {
-            key: 'check_out_date',
+            key: 'check_out',
             label: 'Check-out',
             render: (booking) => (
               <div className="text-sm">
-                {new Date(booking.check_out_date).toLocaleDateString('en-GB')}
+                {new Date(booking.check_out).toLocaleDateString('en-GB')}
               </div>
             ),
           },
@@ -297,13 +300,13 @@ export default function BookingsPage() {
                 variant="outline"
                 onClick={(e) => {
                   e.stopPropagation()
-                  const nights = calculateNights(booking.check_in_date, booking.check_out_date)
+                  const nights = calculateNights(booking.check_in, booking.check_out)
                   setSelectedBooking({
                     id: booking.id,
-                    bookingReference: booking.booking_reference,
-                    guestName: booking.guests?.full_name,
-                    room: `Room ${booking.rooms?.number}`,
-                    currentCheckOut: booking.check_out_date,
+                    bookingReference: booking.folio_id,
+                    guestName: booking.guests?.name,
+                    room: `Room ${booking.rooms?.room_number}`,
+                    currentCheckOut: booking.check_out,
                     ratePerNight: booking.rate_per_night,
                   })
                   setExtendModalOpen(true)
@@ -319,7 +322,7 @@ export default function BookingsPage() {
             <div className="space-y-3">
               <div className="flex items-start justify-between">
                 <div>
-                  <div className="font-semibold">{booking.guests?.full_name}</div>
+                  <div className="font-semibold">{booking.guests?.name}</div>
                   <div className="text-sm text-muted-foreground">{booking.guests?.phone}</div>
                 </div>
                 <Badge variant="outline" className={statusColors[booking.status]}>
@@ -329,15 +332,15 @@ export default function BookingsPage() {
               <div className="grid grid-cols-2 gap-2 text-sm">
                 <div>
                   <div className="text-muted-foreground">Room</div>
-                  <div className="font-medium">{booking.rooms?.number} - {booking.rooms?.type}</div>
+                  <div className="font-medium">{booking.rooms?.room_number} - {booking.rooms?.room_type}</div>
                 </div>
                 <div>
                   <div className="text-muted-foreground">Nights</div>
-                  <div className="font-medium">{calculateNights(booking.check_in_date, booking.check_out_date)}</div>
+                  <div className="font-medium">{calculateNights(booking.check_in, booking.check_out)}</div>
                 </div>
                 <div>
                   <div className="text-muted-foreground">Check-in</div>
-                  <div className="font-medium">{new Date(booking.check_in_date).toLocaleDateString('en-GB')}</div>
+                  <div className="font-medium">{new Date(booking.check_in).toLocaleDateString('en-GB')}</div>
                 </div>
                 <div>
                   <div className="text-muted-foreground">Payment</div>
