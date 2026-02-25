@@ -17,11 +17,11 @@ import { toast } from 'sonner'
 import { ExtendStayModal } from '@/components/bookings/extend-stay-modal'
 import { createClient } from '@/lib/supabase/client'
 
-export default function BookingDetailPage({ params }: { params: { id: string } }) {
+export default function BookingDetailPage({ params }: { params: Promise<{ id: string }> | { id: string } }) {
   const router = useRouter()
-  const supabase = createClient()
   const [booking, setBooking] = useState<any>(null)
   const [loading, setLoading] = useState(true)
+  const [bookingId, setBookingId] = useState<string>('')
   const [addChargeModalOpen, setAddChargeModalOpen] = useState(false)
   const [extendStayModalOpen, setExtendStayModalOpen] = useState(false)
   const [chargeAmount, setChargeAmount] = useState('')
@@ -34,16 +34,23 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
   const [updatedByUser, setUpdatedByUser] = useState<any>(null)
 
   useEffect(() => {
-    fetchBookingDetails()
+    const getParamsAndFetch = async () => {
+      const resolvedParams = await Promise.resolve(params)
+      setBookingId(resolvedParams.id)
+      await fetchBookingDetails(resolvedParams.id)
+    }
+    getParamsAndFetch()
   }, [])
 
-  const fetchBookingDetails = async () => {
+  const fetchBookingDetails = async (id: string) => {
     try {
+      const supabase = createClient()
+      
       // Fetch booking with related data
       const { data: bookingData, error: bookingError } = await supabase
         .from('bookings')
         .select('*, guests(name, phone, email, address), rooms(room_number, room_type, price_per_night)')
-        .eq('id', params.id)
+        .eq('id', id)
         .single()
 
       if (bookingError) throw bookingError
@@ -101,6 +108,15 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
       setFolioCharges(charges)
       setLoading(false)
     } catch (error: any) {
+      console.error('[v0] Error fetching booking details:', error)
+      
+      // Check if it's an auth error
+      if (error?.status === 401 || error?.code === 'PGRST') {
+        toast.error('Session expired. Please log in again.')
+        router.push('/login')
+        return
+      }
+      
       toast.error(error.message || 'Failed to fetch booking details')
       setLoading(false)
     }
