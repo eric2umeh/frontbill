@@ -443,6 +443,9 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
       <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle>New Booking - Step {step} of 3</DialogTitle>
+          <DialogDescription>
+            Complete the booking process by providing guest information, selecting dates, and payment method.
+          </DialogDescription>
         </DialogHeader>
 
         {/* Step 1: Guest Information */}
