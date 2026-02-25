@@ -887,75 +887,71 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
         </div>
       </DialogContent>
     </Dialog>
-
-    <Dialog open={newAccountDialogOpen} onOpenChange={setNewAccountDialogOpen}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Create New Guest Account</DialogTitle>
-          <DialogDescription>
-            Add a new guest account to the city ledger with initial balance of 0 (unpaid status).
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="space-y-4 py-4">
-          <div className="space-y-2">
-            <Label htmlFor="newAccountName">Guest Name *</Label>
-            <Input
-              id="newAccountName"
-              placeholder="Enter guest name"
-              value={newAccountName || ''}
-              onChange={(e) => setNewAccountName(e.target.value)}
+    {newAccountDialogOpen && (
+      <Dialog open={newAccountDialogOpen} onOpenChange={setNewAccountDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Create New Guest Account</DialogTitle>
+            <DialogDescription>
+              Add a new guest account to the city ledger with initial balance of 0 (unpaid status).
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="newAccountName">Guest Name *</Label>
+              <Input
+                id="newAccountName"
+                placeholder="Enter guest name"
+                value={newAccountName || ''}
+                onChange={(e) => setNewAccountName(e.target.value)}
+                disabled={newAccountCreating}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="newAccountPhone">Phone Number *</Label>
+              <Input
+                id="newAccountPhone"
+                placeholder="Enter phone number"
+                type="tel"
+                value={newAccountPhone || ''}
+                onChange={(e) => setNewAccountPhone(e.target.value)}
+                disabled={newAccountCreating}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="newAccountEmail">Email (Optional)</Label>
+              <Input
+                id="newAccountEmail"
+                placeholder="Enter email address"
+                type="email"
+                value={newAccountEmail || ''}
+                onChange={(e) => setNewAccountEmail(e.target.value)}
+                disabled={newAccountCreating}
+              />
+            </div>
+            <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm">
+              <div className="font-medium text-amber-900">Initial Status: Unpaid (In Debt)</div>
+              <div className="text-amber-800">{'Starting balance: \u20A60 (will increase when charges are added)'}</div>
+            </div>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setNewAccountDialogOpen(false)}
               disabled={newAccountCreating}
-            />
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleCreateNewAccount}
+              disabled={newAccountCreating || !newAccountName.trim() || !newAccountPhone.trim()}
+            >
+              {newAccountCreating ? 'Creating...' : 'Create Account'}
+            </Button>
           </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="newAccountPhone">Phone Number *</Label>
-            <Input
-              id="newAccountPhone"
-              placeholder="Enter phone number"
-              type="tel"
-              value={newAccountPhone || ''}
-              onChange={(e) => setNewAccountPhone(e.target.value)}
-              disabled={newAccountCreating}
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="newAccountEmail">Email (Optional)</Label>
-            <Input
-              id="newAccountEmail"
-              placeholder="Enter email address"
-              type="email"
-              value={newAccountEmail || ''}
-              onChange={(e) => setNewAccountEmail(e.target.value)}
-              disabled={newAccountCreating}
-            />
-          </div>
-
-          <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm">
-            <div className="font-medium text-amber-900">Initial Status: Unpaid (In Debt)</div>
-            <div className="text-amber-800">Starting balance: ₦0 (will increase when charges are added)</div>
-          </div>
-        </div>
-
-        <div className="flex justify-end gap-2">
-          <Button
-            variant="outline"
-            onClick={() => setNewAccountDialogOpen(false)}
-            disabled={newAccountCreating}
-          >
-            Cancel
-          </Button>
-          <Button
-            onClick={handleCreateNewAccount}
-            disabled={newAccountCreating || !newAccountName.trim() || !newAccountPhone.trim()}
-          >
-            {newAccountCreating ? 'Creating...' : 'Create Account'}
-          </Button>
-        </div>
-      </DialogContent>
-    </Dialog>
+        </DialogContent>
+      </Dialog>
+    )}
     </>
   )
 }
