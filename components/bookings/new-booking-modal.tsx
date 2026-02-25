@@ -354,9 +354,9 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
           rate_per_night: pricePerNight,
           total_charges: total,
           balance: total,
-          payment_method: paymentMethod,
           payment_status: 'pending',
           status: 'confirmed',
+          guest_type: paymentMethod === 'ledger' ? 'organization' : 'walkin',
           created_by: (await supabase.auth.getUser()).data.user?.id,
         }])
         .select()
