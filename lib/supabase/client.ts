@@ -11,6 +11,19 @@ export function createClient() {
     return null
   }
 
-  return createBrowserClient(url, key)
+  const client = createBrowserClient(url, key, {
+    auth: {
+      autoRefreshToken: true,
+      persistSession: true,
+      detectSessionInUrl: true,
+    },
+  })
+
+  // Disable verbose logging to reduce network requests
+  if (process.env.NODE_ENV === 'production') {
+    client.removeAllChannels()
+  }
+
+  return client
 }
 
