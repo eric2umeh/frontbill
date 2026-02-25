@@ -27,52 +27,55 @@ const statusConfig = {
 export function RoomStatusGrid() {
   const [rooms, setRooms] = useState<Room[]>([])
   const [loading, setLoading] = useState(true)
+  const fetchTimeoutRef = useEffect === null ? { current: null } : { current: null as any }
 
   useEffect(() => {
-    fetchRooms()
-  }, [])
+    let isMounted = true
+    
+    const fetchRooms = async () => {
+      try {
+        setLoading(true)
+        const supabase = createClient()
+        
+        if (!supabase) {
+          if (isMounted) setRooms([])
+          return
+        }
 
-  const fetchRooms = async () => {
-    try {
-      setLoading(true)
-      const supabase = createClient()
-      
-      if (!supabase) {
-        setRooms([])
-        setLoading(false)
-        return
+        const { data: { user } } = await supabase.auth.getUser()
+        if (!user || !isMounted) return
+
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('organization_id')
+          .eq('id', user.id)
+          .single()
+
+        if (!profile || !isMounted) return
+
+        const { data, error } = await supabase
+          .from('rooms')
+          .select('*')
+          .eq('organization_id', profile.organization_id)
+          .order('room_number', { ascending: true })
+          .limit(12)
+
+        if (error) throw error
+        if (isMounted) setRooms(data || [])
+      } catch (error: any) {
+        console.error('[v0] Error fetching rooms:', error)
+        if (isMounted) setRooms([])
+      } finally {
+        if (isMounted) setLoading(false)
       }
-
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
-
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('organization_id')
-        .eq('id', user.id)
-        .single()
-
-      if (!profile) {
-        setRooms([])
-        return
-      }
-
-      const { data, error } = await supabase
-        .from('rooms')
-        .select('*')
-        .eq('organization_id', profile.organization_id)
-        .order('room_number', { ascending: true })
-        .limit(12)
-
-      if (error) throw error
-      setRooms(data || [])
-    } catch (error: any) {
-      console.error('Error fetching rooms:', error)
-      setRooms([])
-    } finally {
-      setLoading(false)
     }
-  }
+
+    fetchRooms()
+
+    return () => {
+      isMounted = false
+    }
+  }, [])
 
   return (
     <Card>

@@ -79,6 +79,13 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
   const [ledgerAccounts, setLedgerAccounts] = useState<any[]>([])
   const [ledgerOpen, setLedgerOpen] = useState(false)
   const [filteredLedgerAccounts, setFilteredLedgerAccounts] = useState<any[]>([])
+  
+  // New account creation
+  const [newAccountDialogOpen, setNewAccountDialogOpen] = useState(false)
+  const [newAccountName, setNewAccountName] = useState('')
+  const [newAccountPhone, setNewAccountPhone] = useState('')
+  const [newAccountEmail, setNewAccountEmail] = useState('')
+  const [newAccountCreating, setNewAccountCreating] = useState(false)
 
   // Load initial data
   useEffect(() => {
@@ -138,8 +145,51 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
   const selectLedgerAccount = (account: any) => {
     setLedgerAccount(account.id)
     setLedgerSearch(account.name || account.full_name || '')
-    setLedgerOpen(false)
-    setFilteredLedgerAccounts([])
+  }
+
+  const handleCreateNewAccount = async () => {
+    if (!newAccountName.trim() || !newAccountPhone.trim()) {
+      toast.error('Please enter name and phone number')
+      return
+    }
+
+    try {
+      setNewAccountCreating(true)
+      const supabase = createClient()
+
+      // Create new guest with balance = 0 (will be updated when booking is created)
+      const { data: newGuest, error } = await supabase
+        .from('guests')
+        .insert([{
+          organization_id: organizationId,
+          name: newAccountName.trim(),
+          phone: newAccountPhone.trim(),
+          email: newAccountEmail.trim() || null,
+          balance: 0,
+        }])
+        .select()
+        .single()
+
+      if (error) throw error
+
+      // Auto-select the new account
+      setLedgerAccount(newGuest.id)
+      setLedgerSearch(newGuest.name)
+      setNewAccountDialogOpen(false)
+      setNewAccountName('')
+      setNewAccountPhone('')
+      setNewAccountEmail('')
+
+      // Refresh guests list
+      await loadData()
+
+      toast.success(`New guest account "${newGuest.name}" created and selected for city ledger`)
+    } catch (error: any) {
+      console.error('[v0] Error creating new account:', error)
+      toast.error(error.message || 'Failed to create new account')
+    } finally {
+      setNewAccountCreating(false)
+    }
   }
 
   const loadData = async () => {
@@ -454,7 +504,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>New Booking - Step {step} of 3</DialogTitle>
           <DialogDescription>
@@ -763,10 +813,10 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
                         {filteredLedgerAccounts.map(account => (
                           <button
                             key={account.id}
-                            className="w-full text-left px-4 py-3 hover:bg-accent border-b last:border-b-0 transition-colors"
+                            className="w-full text-left px-3 py-2 hover:bg-accent border-b last:border-b-0 transition-colors text-sm"
                             onMouseDown={(e) => { e.preventDefault(); selectLedgerAccount(account) }}
                           >
-                            <div className="font-medium text-sm">{account.name || account.full_name}</div>
+                            <div className="font-medium">{account.name || account.full_name}</div>
                             <div className="text-xs text-muted-foreground">
                               Balance: {formatNaira(
                                 ledgerType === 'individual'
@@ -776,6 +826,20 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
                             </div>
                           </button>
                         ))}
+                        {ledgerType === 'individual' && (
+                          <>
+                            <div className="border-t border-input" />
+                            <button
+                              className="w-full text-left px-3 py-2 hover:bg-primary/10 text-primary text-sm font-medium"
+                              onMouseDown={(e) => {
+                                e.preventDefault()
+                                setNewAccountDialogOpen(true)
+                              }}
+                            >
+                              + Add New Guest Account
+                            </button>
+                          </>
+                        )}
                       </div>
                     )}
                     {ledgerOpen && ledgerSearch.length > 0 && filteredLedgerAccounts.length === 0 && (
@@ -820,6 +884,76 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
               {loading ? 'Creating...' : 'Create Booking'}
             </Button>
           )}
+        </div>
+      </DialogContent>
+    </Dialog>
+
+    {/* New Account Creation Dialog */}
+    <Dialog open={newAccountDialogOpen} onOpenChange={setNewAccountDialogOpen}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Create New Guest Account</DialogTitle>
+          <DialogDescription>
+            Add a new guest account to the city ledger with initial balance of 0 (unpaid status).
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4 py-4">
+          <div className="space-y-2">
+            <Label htmlFor="newAccountName">Guest Name *</Label>
+            <Input
+              id="newAccountName"
+              placeholder="Enter guest name"
+              value={newAccountName}
+              onChange={(e) => setNewAccountName(e.target.value)}
+              disabled={newAccountCreating}
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="newAccountPhone">Phone Number *</Label>
+            <Input
+              id="newAccountPhone"
+              placeholder="Enter phone number"
+              type="tel"
+              value={newAccountPhone}
+              onChange={(e) => setNewAccountPhone(e.target.value)}
+              disabled={newAccountCreating}
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="newAccountEmail">Email (Optional)</Label>
+            <Input
+              id="newAccountEmail"
+              placeholder="Enter email address"
+              type="email"
+              value={newAccountEmail}
+              onChange={(e) => setNewAccountEmail(e.target.value)}
+              disabled={newAccountCreating}
+            />
+          </div>
+
+          <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm">
+            <div className="font-medium text-amber-900">Initial Status: Unpaid (In Debt)</div>
+            <div className="text-amber-800">Starting balance: ₦0 (will increase when charges are added)</div>
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-2">
+          <Button
+            variant="outline"
+            onClick={() => setNewAccountDialogOpen(false)}
+            disabled={newAccountCreating}
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={handleCreateNewAccount}
+            disabled={newAccountCreating || !newAccountName.trim() || !newAccountPhone.trim()}
+          >
+            {newAccountCreating ? 'Creating...' : 'Create Account'}
+          </Button>
         </div>
       </DialogContent>
     </Dialog>

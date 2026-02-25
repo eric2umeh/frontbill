@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
@@ -14,14 +14,7 @@ import { toast } from 'sonner'
 import { CalendarIcon, CreditCard, ChevronRight, Search, Check } from 'lucide-react'
 import { format, differenceInDays } from 'date-fns'
 import { cn } from '@/lib/utils'
-
-// Mock organizations
-const mockOrganizations = [
-  { id: '1', name: 'Hilton Hotels', balance: 5000000 },
-  { id: '2', name: 'Marriott International', balance: 3500000 },
-  { id: '3', name: 'Accor Hotels', balance: 2800000 },
-  { id: '4', name: 'IHG Hotels', balance: 1900000 },
-]
+import { createClient } from '@/lib/supabase/client'
 
 interface ExtendStayModalProps {
   open: boolean
@@ -32,6 +25,8 @@ interface ExtendStayModalProps {
     room: string
     currentCheckOut: string
     ratePerNight: number
+    guestId: string
+    guestBalance?: number
   }
 }
 
@@ -40,8 +35,47 @@ export function ExtendStayModal({ open, onClose, booking }: ExtendStayModalProps
   const [newCheckOutDate, setNewCheckOutDate] = useState<Date | undefined>()
   const [paymentMethod, setPaymentMethod] = useState('')
   const [loading, setLoading] = useState(false)
+  const [ledgerType, setLedgerType] = useState('individual')
   const [showOrgSearch, setShowOrgSearch] = useState(false)
-  const [selectedOrganization, setSelectedOrganization] = useState<typeof mockOrganizations[0] | null>(null)
+  const [selectedLedger, setSelectedLedger] = useState<any>(null)
+  const [organizations, setOrganizations] = useState<any[]>([])
+  const [filteredOrganizations, setFilteredOrganizations] = useState<any[]>([])
+  const [orgSearchTerm, setOrgSearchTerm] = useState('')
+
+  useEffect(() => {
+    if (open && paymentMethod === 'city_ledger') {
+      fetchOrganizations()
+    }
+  }, [open, paymentMethod])
+
+  const fetchOrganizations = async () => {
+    try {
+      const supabase = createClient()
+      const { data, error } = await supabase
+        .from('organizations')
+        .select('id, name, current_balance')
+        .order('name')
+
+      if (error) throw error
+      setOrganizations(data || [])
+      setFilteredOrganizations(data || [])
+    } catch (error: any) {
+      console.error('[v0] Error fetching organizations:', error)
+      toast.error('Failed to load organizations')
+    }
+  }
+
+  const handleOrgSearch = (value: string) => {
+    setOrgSearchTerm(value)
+    if (value.trim()) {
+      const filtered = organizations.filter(org =>
+        org.name.toLowerCase().includes(value.toLowerCase())
+      )
+      setFilteredOrganizations(filtered)
+    } else {
+      setFilteredOrganizations(organizations)
+    }
+  }
 
   const currentCheckOut = new Date(booking.currentCheckOut)
   const additionalNights = newCheckOutDate ? differenceInDays(newCheckOutDate, currentCheckOut) : 0
@@ -53,23 +87,57 @@ export function ExtendStayModal({ open, onClose, booking }: ExtendStayModalProps
       return
     }
 
-    if (paymentMethod === 'city_ledger' && !selectedOrganization) {
+    if (paymentMethod === 'city_ledger' && !selectedLedger) {
       toast.error('Please select an account for City Ledger')
       return
     }
 
     setLoading(true)
     try {
-      await new Promise(resolve => setTimeout(resolve, 1000))
+      const supabase = createClient()
       
-      const accountInfo = paymentMethod === 'city_ledger' && selectedOrganization 
-        ? ` to ${selectedOrganization.name}`
+      // Add charge to folio_charges
+      const chargeData = {
+        booking_id: booking.guestId, // This should be the booking ID, not guest ID
+        description: `Extended Stay - ${additionalNights} night${additionalNights !== 1 ? 's' : ''}`,
+        amount: additionalAmount,
+        charge_type: 'extended_stay',
+        payment_method: paymentMethod,
+        ledger_account_id: paymentMethod === 'city_ledger' ? selectedLedger.id : null,
+        ledger_account_type: paymentMethod === 'city_ledger' ? ledgerType : null,
+        payment_status: paymentMethod === 'city_ledger' ? 'pending' : 'paid',
+      }
+
+      const { error: chargeError } = await supabase
+        .from('folio_charges')
+        .insert([chargeData])
+
+      if (chargeError) throw chargeError
+
+      // Update ledger balance if city ledger
+      if (paymentMethod === 'city_ledger') {
+        if (ledgerType === 'individual') {
+          await supabase
+            .from('guests')
+            .update({ balance: (selectedLedger.balance || 0) + additionalAmount })
+            .eq('id', selectedLedger.id)
+        } else {
+          await supabase
+            .from('organizations')
+            .update({ current_balance: (selectedLedger.current_balance || 0) + additionalAmount })
+            .eq('id', selectedLedger.id)
+        }
+      }
+
+      const accountInfo = paymentMethod === 'city_ledger' && selectedLedger 
+        ? ` to ${selectedLedger.name}`
         : ''
       
       toast.success(`Stay extended to ${format(newCheckOutDate, 'PPP')}${accountInfo}`)
       onClose()
       resetForm()
     } catch (error: any) {
+      console.error('[v0] Error extending stay:', error)
       toast.error(error.message || 'Failed to extend stay')
     } finally {
       setLoading(false)
@@ -80,8 +148,10 @@ export function ExtendStayModal({ open, onClose, booking }: ExtendStayModalProps
     setStep(1)
     setNewCheckOutDate(undefined)
     setPaymentMethod('')
+    setLedgerType('individual')
     setShowOrgSearch(false)
-    setSelectedOrganization(null)
+    setSelectedLedger(null)
+    setOrgSearchTerm('')
   }
 
   return (
@@ -204,84 +274,104 @@ export function ExtendStayModal({ open, onClose, booking }: ExtendStayModalProps
 
               {paymentMethod === 'city_ledger' && (
                 <div className="space-y-3">
-                  <Card className="bg-muted">
-                    <CardContent className="p-3">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <div className="text-sm font-medium">{booking.guestName}</div>
-                          <div className="text-sm text-muted-foreground">
-                            Personal Account
+                  {/* Ledger Type Selector */}
+                  <div className="space-y-2">
+                    <Label>Bill to Account Type *</Label>
+                    <Select value={ledgerType} onValueChange={setLedgerType}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="individual">Individual (Guest)</SelectItem>
+                        <SelectItem value="organization">Organization</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* Individual Guest Account */}
+                  {ledgerType === 'individual' && (
+                    <Card className="bg-muted">
+                      <CardContent className="p-3">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <div className="text-sm font-medium">{booking.guestName}</div>
+                            <div className="text-sm text-muted-foreground">
+                              Balance: {formatNaira(booking.guestBalance || 0)}
+                            </div>
                           </div>
+                          <Badge variant="default">Current Guest</Badge>
                         </div>
-                        {!showOrgSearch && !selectedOrganization && (
-                          <Badge variant="outline">Default</Badge>
+                      </CardContent>
+                    </Card>
+                  )}
+
+                  {/* Organization Search */}
+                  {ledgerType === 'organization' && (
+                    <div className="space-y-2">
+                      <Label>Search Organization</Label>
+                      <div className="space-y-2">
+                        <div className="relative">
+                          <CommandInput
+                            placeholder="Search organization by name..."
+                            value={orgSearchTerm}
+                            onValueChange={handleOrgSearch}
+                            className="rounded-md border px-3 py-2"
+                          />
+                        </div>
+
+                        {orgSearchTerm && filteredOrganizations.length > 0 && (
+                          <div className="border rounded-md max-h-64 overflow-y-auto">
+                            {filteredOrganizations.map((org) => (
+                              <button
+                                key={org.id}
+                                onClick={() => {
+                                  setSelectedLedger(org)
+                                  setOrgSearchTerm('')
+                                  setFilteredOrganizations([])
+                                }}
+                                className="w-full text-left px-3 py-2 hover:bg-accent border-b last:border-b-0 transition-colors flex items-center justify-between"
+                              >
+                                <div>
+                                  <div className="font-medium text-sm">{org.name}</div>
+                                  <div className="text-xs text-muted-foreground">
+                                    Balance: {formatNaira(org.current_balance || 0)}
+                                  </div>
+                                </div>
+                                {selectedLedger?.id === org.id && (
+                                  <Check className="h-4 w-4 text-green-600" />
+                                )}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+
+                        {orgSearchTerm && filteredOrganizations.length === 0 && (
+                          <div className="text-sm text-muted-foreground p-3 border rounded-md text-center">
+                            No organizations found
+                          </div>
                         )}
                       </div>
-                    </CardContent>
-                  </Card>
+                    </div>
+                  )}
 
-                  <div className="flex items-center gap-2">
-                    <div className="h-px flex-1 bg-border" />
-                    <span className="text-xs text-muted-foreground">OR</span>
-                    <div className="h-px flex-1 bg-border" />
-                  </div>
-
-                  <div>
-                    <Button
-                      variant="outline"
-                      className="w-full"
-                      onClick={() => setShowOrgSearch(!showOrgSearch)}
-                    >
-                      <Search className="mr-2 h-4 w-4" />
-                      {showOrgSearch ? 'Hide' : 'Search'} Organization
-                    </Button>
-
-                    {showOrgSearch && (
-                      <Card className="mt-2">
-                        <CardContent className="p-2">
-                          <Command>
-                            <CommandInput placeholder="Search organization..." />
-                            <CommandEmpty>No organization found.</CommandEmpty>
-                            <CommandGroup>
-                              {mockOrganizations.map((org) => (
-                                <CommandItem
-                                  key={org.id}
-                                  onSelect={() => {
-                                    setSelectedOrganization(org)
-                                    setShowOrgSearch(false)
-                                  }}
-                                >
-                                  <div className="flex-1">
-                                    <div className="font-medium">{org.name}</div>
-                                    <div className="text-sm text-muted-foreground">
-                                      Balance: {formatNaira(org.balance)}
-                                    </div>
-                                  </div>
-                                  <Check className={cn('ml-2 h-4 w-4', selectedOrganization?.id === org.id ? 'opacity-100' : 'opacity-0')} />
-                                </CommandItem>
-                              ))}
-                            </CommandGroup>
-                          </Command>
-                        </CardContent>
-                      </Card>
-                    )}
-
-                    {selectedOrganization && (
-                      <Card className="mt-2 bg-primary/10 border-primary">
-                        <CardContent className="p-3">
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <div className="text-sm font-medium">{selectedOrganization.name}</div>
-                              <div className="text-sm text-muted-foreground">
-                                Balance: {formatNaira(selectedOrganization.balance)}
-                              </div>
+                  {/* Selected Organization Display */}
+                  {selectedLedger && ledgerType === 'organization' && (
+                    <Card className="mt-2 bg-primary/10 border-primary">
+                      <CardContent className="p-3">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <div className="text-sm font-medium">{selectedLedger.name}</div>
+                            <div className="text-sm text-muted-foreground">
+                              Balance: {formatNaira(selectedLedger.current_balance || 0)}
                             </div>
-                            <Badge variant="default">Selected</Badge>
                           </div>
-                        </CardContent>
-                      </Card>
-                    )}
-                  </div>
+                          <Badge variant="default">Selected</Badge>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
+                </div>
+              )}
                 </div>
               )}
 

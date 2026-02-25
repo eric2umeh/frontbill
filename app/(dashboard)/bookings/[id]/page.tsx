@@ -49,7 +49,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
       // Fetch booking with related data
       const { data: bookingData, error: bookingError } = await supabase
         .from('bookings')
-        .select('*, guests(name, phone, email, address), rooms(room_number, room_type, price_per_night)')
+        .select('*, guests(name, phone, email, address, balance), rooms(room_number, room_type, price_per_night)')
         .eq('id', id)
         .single()
 
@@ -77,33 +77,23 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
         setUpdatedByUser(userData)
       }
 
-      // Initialize folio charges - only show room charges based on nights
-      const charges = []
-      const checkInDate = new Date(bookingData.check_in)
-      const nightsCount = bookingData.number_of_nights
+      // Fetch folio charges from database
+      const { data: chargesData, error: chargesError } = await supabase
+        .from('folio_charges')
+        .select('*')
+        .eq('booking_id', id)
+        .order('created_at', { ascending: true })
 
-      for (let i = 0; i < nightsCount; i++) {
-        const chargeDate = new Date(checkInDate)
-        chargeDate.setDate(chargeDate.getDate() + i)
-        charges.push({
-          id: `room-${i}`,
-          date: chargeDate.toISOString().split('T')[0],
-          description: `Room Charge (Night ${i + 1})`,
-          amount: bookingData.rate_per_night,
-          type: 'room'
-        })
-      }
+      if (chargesError) throw chargesError
 
-      // Add payment if fully paid
-      if (bookingData.payment_status === 'paid' && bookingData.deposit > 0) {
-        charges.push({
-          id: 'payment-1',
-          date: bookingData.created_at?.split('T')[0],
-          description: 'Payment Received - Full Amount',
-          amount: -bookingData.total_amount,
-          type: 'payment'
-        })
-      }
+      // Format charges for display
+      const charges = chargesData.map(charge => ({
+        id: charge.id,
+        date: charge.created_at?.split('T')[0],
+        description: charge.description,
+        amount: charge.amount,
+        type: charge.charge_type,
+      }))
 
       setFolioCharges(charges)
       setLoading(false)
@@ -122,7 +112,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
     }
   }
 
-  const handleAddCharge = () => {
+  const handleAddCharge = async () => {
     if (!chargeAmount) {
       toast.error('Please enter amount')
       return
@@ -138,29 +128,76 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
       return
     }
 
-    const newCharge = {
-      id: Date.now().toString(),
-      date: new Date().toISOString().split('T')[0],
-      description: chargeType === 'payment' 
-        ? `Payment Received - ${paymentMethod}`
-        : chargeDescription,
-      amount: chargeType === 'payment' ? -Number(chargeAmount) : Number(chargeAmount),
-      type: chargeType,
-    }
+    try {
+      const supabase = createClient()
+      const chargeData = {
+        booking_id: bookingId,
+        description: chargeType === 'payment' 
+          ? `Payment Received - ${paymentMethod}`
+          : chargeDescription,
+        amount: chargeType === 'payment' ? -Number(chargeAmount) : Number(chargeAmount),
+        charge_type: chargeType,
+        payment_method: paymentMethod || null,
+        ledger_account_id: paymentMethod === 'city_ledger' ? booking?.guest_id : null,
+        ledger_account_type: paymentMethod === 'city_ledger' ? 'guest' : null,
+        payment_status: chargeType === 'payment' ? 'paid' : 'pending',
+      }
 
-    setFolioCharges([...folioCharges, newCharge])
-    
-    if (chargeType === 'payment') {
-      toast.success(`Payment of ${formatNaira(Number(chargeAmount))} recorded`)
-    } else {
-      toast.success(`Charge of ${formatNaira(Number(chargeAmount))} added`)
+      // Save charge to database
+      const { data: newCharge, error } = await supabase
+        .from('folio_charges')
+        .insert([chargeData])
+        .select()
+        .single()
+
+      if (error) throw error
+
+      // Update booking balance if it's a payment
+      if (chargeType === 'payment') {
+        const newBalance = Math.max(0, booking.balance - Number(chargeAmount))
+        await supabase
+          .from('bookings')
+          .update({ 
+            balance: newBalance,
+            deposit: booking.deposit + Number(chargeAmount),
+            payment_status: newBalance === 0 ? 'paid' : 'partial'
+          })
+          .eq('id', bookingId)
+
+        // If using ledger, update guest balance
+        if (paymentMethod === 'city_ledger') {
+          await supabase
+            .from('guests')
+            .update({ 
+              balance: booking.guests.balance ? booking.guests.balance - Number(chargeAmount) : -Number(chargeAmount)
+            })
+            .eq('id', booking.guest_id)
+        }
+      } else {
+        // Update booking balance with new charge
+        const newBalance = booking.balance + Number(chargeAmount)
+        await supabase
+          .from('bookings')
+          .update({ balance: newBalance })
+          .eq('id', bookingId)
+      }
+
+      // Refresh folio charges
+      await fetchBookingDetails(bookingId)
+
+      toast.success(chargeType === 'payment' 
+        ? `Payment of ${formatNaira(Number(chargeAmount))} recorded`
+        : `Charge of ${formatNaira(Number(chargeAmount))} added`)
+      
+      setAddChargeModalOpen(false)
+      setChargeAmount('')
+      setChargeDescription('')
+      setChargeType('payment')
+      setPaymentMethod('')
+    } catch (error: any) {
+      console.error('[v0] Error adding charge:', error)
+      toast.error(error.message || 'Failed to add charge')
     }
-    
-    setAddChargeModalOpen(false)
-    setChargeAmount('')
-    setChargeDescription('')
-    setChargeType('payment')
-    setPaymentMethod('')
   }
 
   const handleDelete = () => {
@@ -291,6 +328,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                       <SelectItem value="card">Card</SelectItem>
                       <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
                       <SelectItem value="cheque">Cheque</SelectItem>
+                      <SelectItem value="city_ledger">City Ledger</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
