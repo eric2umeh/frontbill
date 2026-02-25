@@ -140,7 +140,8 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
       toast.error('Please enter a valid amount')
       return
     }
-    if (!chargeDescription) {
+    // Only require description for ADD CHARGE tab, not for RECORD PAYMENT tab
+    if (chargeType === 'charge' && !chargeDescription) {
       toast.error('Please enter a description')
       return
     }
@@ -246,12 +247,31 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                 toast.dismiss(t)
                 try {
                   const supabase = createClient()
+                  
+                  // Get the charge to check its payment status
+                  const { data: chargeData } = await supabase
+                    .from('folio_charges')
+                    .select('payment_status, amount')
+                    .eq('id', chargeId)
+                    .single()
+                  
+                  // Delete the charge
                   const { error: deleteError } = await supabase
                     .from('folio_charges')
                     .delete()
                     .eq('id', chargeId)
                   if (deleteError) throw deleteError
-                  // Recalculate balance from remaining charges after deletion
+                  
+                  // If this was a pending/city-ledger charge, reduce the booking balance
+                  if (chargeData?.payment_status === 'pending') {
+                    const newBalance = Math.max(0, (booking.balance || 0) - Math.abs(chargeData.amount))
+                    await supabase
+                      .from('bookings')
+                      .update({ balance: newBalance })
+                      .eq('id', bookingId)
+                  }
+                  // If this was a paid charge, don't touch balance
+                  
                   await fetchBookingDetails(bookingId)
                   toast.success('Charge deleted')
                 } catch (error: any) {
