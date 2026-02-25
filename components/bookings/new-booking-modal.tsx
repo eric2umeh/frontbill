@@ -114,15 +114,12 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
       : (ledgerAccounts?.organizations || [])
     
     if (value.trim().length > 0) {
-      const filtered = toSearch.filter(acc => {
-        const name = (acc.name || acc.full_name || '').toLowerCase()
-        const matches = name.includes(value.toLowerCase())
-        return matches
-      })
+      const filtered = toSearch.filter(acc =>
+        (acc.account_name || '').toLowerCase().includes(value.toLowerCase())
+      )
       setFilteredLedgerAccounts(filtered)
-      setLedgerOpen(true) // Keep dropdown open while filtering
+      setLedgerOpen(true)
     } else {
-      // When input is cleared, show all accounts but keep dropdown open for user to see them
       setFilteredLedgerAccounts(toSearch)
       setLedgerOpen(toSearch.length > 0)
     }
@@ -130,7 +127,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
 
   const selectLedgerAccount = (account: any) => {
     setLedgerAccount(account.id)
-    setLedgerSearch(account.name || account.full_name || '')
+    setLedgerSearch(account.account_name || '')
     setLedgerOpen(false)
   }
 
@@ -144,14 +141,15 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
       setNewAccountCreating(true)
       const supabase = createClient()
 
-      // Create new guest with balance = 0 (will be updated when booking is created)
+      // Create new city ledger account
       const { data: newGuest, error } = await supabase
-        .from('guests')
+        .from('city_ledger_accounts')
         .insert([{
           organization_id: organizationId,
-          name: newAccountName.trim(),
-          phone: newAccountPhone.trim(),
-          email: newAccountEmail.trim() || null,
+          account_name: newAccountName.trim(),
+          account_type: 'individual',
+          contact_phone: newAccountPhone.trim(),
+          contact_email: newAccountEmail.trim() || null,
           balance: 0,
         }])
         .select()
@@ -161,7 +159,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
 
       // Auto-select the new account
       setLedgerAccount(newGuest.id)
-      setLedgerSearch(newGuest.name)
+      setLedgerSearch(newGuest.account_name)
       setNewAccountDialogOpen(false)
       setNewAccountName('')
       setNewAccountPhone('')
@@ -217,39 +215,32 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
         .eq('status', 'available')
         .order('room_number')
 
-      // Load city ledger accounts
-      // For individuals: load all guests with balance info
-      // For organizations: load organizations
-      const { data: guestLedgerData, error: guestError } = await supabase
-        .from('guests')
-        .select('id, name, phone, balance')
-        .eq('organization_id', organizationId)
-        .order('name')
+      // Load city ledger accounts from city_ledger_accounts table
+      const { data: individualLedgerData } = await supabase
+        .from('city_ledger_accounts')
+        .select('id, account_name, account_type, contact_phone, balance')
+        .eq('organization_id', profile.organization_id)
+        .eq('account_type', 'individual')
+        .order('account_name')
 
-      const { data: orgLedgerData, error: orgError } = await supabase
-        .from('organizations')
-        .select('id, name, org_type, email, phone, current_balance')
-        .eq('parent_id', organizationId)
-        .order('name')
-
-      console.log('[v0] Loaded ledger accounts:', { 
-        guests: guestLedgerData, 
-        organizations: orgLedgerData,
-        guestError,
-        orgError
-      })
+      const { data: orgLedgerData } = await supabase
+        .from('city_ledger_accounts')
+        .select('id, account_name, account_type, contact_phone, balance')
+        .eq('organization_id', profile.organization_id)
+        .eq('account_type', 'organization')
+        .order('account_name')
 
       setGuests(guestData || [])
       setRooms(roomData || [])
       setLedgerAccounts({
-        guests: guestLedgerData || [],
+        guests: individualLedgerData || [],
         organizations: orgLedgerData || []
       })
       setFilteredGuests([])
       
-      // Initialize filtered ledger accounts - show all initially so user can see what's available
+      // Initialize filtered ledger accounts
       if (ledgerType === 'individual') {
-        setFilteredLedgerAccounts(guestLedgerData || [])
+        setFilteredLedgerAccounts(individualLedgerData || [])
       } else {
         setFilteredLedgerAccounts(orgLedgerData || [])
       }
@@ -369,7 +360,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
         return
       }
 
-      if (paymentMethod === 'ledger' && !ledgerAccount) {
+      if (paymentMethod === 'city_ledger' && !ledgerAccount) {
         toast.error('Ledger account is required')
         return
       }
@@ -401,8 +392,8 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
       // Calculate total
       const total = effectiveRate * nights
 
-      // Selecting a payment method means booking is paid in full
-      const isPaidUpfront = paymentMethod !== 'ledger'
+      // City ledger means charge is billed; other methods are paid upfront
+      const isPaidUpfront = paymentMethod !== 'city_ledger'
 
       // Generate folio ID
       const folioId = `FOL-${Date.now().toString(36).toUpperCase()}`
@@ -433,29 +424,19 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
 
       if (bookingError) throw bookingError
 
-      // If payment method is ledger, add the charge to the ledger account
-      if (paymentMethod === 'ledger' && ledgerAccount) {
-        if (ledgerType === 'individual') {
-          // Add charge to guest's balance
-          const guestToUpdate = guests.find(g => g.id === ledgerAccount)
-          if (guestToUpdate) {
-            const newBalance = (guestToUpdate.balance || 0) + total
-            await supabase
-              .from('guests')
-              .update({ balance: newBalance })
-              .eq('id', ledgerAccount)
-          }
-        } else {
-          // Add charge to organization's balance
-          const orgToUpdate = ledgerAccounts.find(o => o.id === ledgerAccount)
-          if (orgToUpdate) {
-            const newBalance = (orgToUpdate.current_balance || 0) + total
-            await supabase
-              .from('organizations')
-              .update({ current_balance: newBalance })
-              .eq('id', ledgerAccount)
-          }
-        }
+      // If payment method is city ledger, update the ledger account balance
+      if (paymentMethod === 'city_ledger' && ledgerAccount) {
+        const { data: ledgerRow } = await supabase
+          .from('city_ledger_accounts')
+          .select('balance')
+          .eq('id', ledgerAccount)
+          .single()
+        
+        const newBalance = (ledgerRow?.balance || 0) + total
+        await supabase
+          .from('city_ledger_accounts')
+          .update({ balance: newBalance })
+          .eq('id', ledgerAccount)
       }
 
       // Update room status
@@ -502,7 +483,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
       return checkInDate && checkOutDate && nights > 0
     }
     if (step === 3) {
-      return selectedRoom && (paymentMethod !== 'ledger' || ledgerAccount)
+      return selectedRoom && (paymentMethod !== 'city_ledger' || ledgerAccount)
     }
     return false
   }
@@ -775,16 +756,16 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
                   <SelectItem value="cash">Cash</SelectItem>
                   <SelectItem value="transfer">Transfer</SelectItem>
                   <SelectItem value="pos">POS</SelectItem>
-                  <SelectItem value="ledger">Ledger</SelectItem>
+                  <SelectItem value="city_ledger">City Ledger</SelectItem>
                 </SelectContent>
               </Select>
             </div>
 
-            {paymentMethod === 'ledger' && (
+            {paymentMethod === 'city_ledger' && (
               <>
                 <div className="space-y-2">
                   <Label>Ledger Account Type *</Label>
-                  <Select value={ledgerType || ''} onValueChange={setLedgerType}>
+                  <Select value={ledgerType || ''} onValueChange={handleLedgerTypeChange}>
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
@@ -822,13 +803,9 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
                             className="w-full text-left px-3 py-2 hover:bg-accent border-b last:border-b-0 transition-colors text-sm"
                             onMouseDown={(e) => { e.preventDefault(); selectLedgerAccount(account) }}
                           >
-                            <div className="font-medium">{account.name || account.full_name}</div>
+                            <div className="font-medium">{account.account_name}</div>
                             <div className="text-xs text-muted-foreground">
-                              Balance: {formatNaira(
-                                ledgerType === 'individual'
-                                  ? (account.balance || 0)
-                                  : (account.current_balance || 0)
-                              )}
+                              Balance: {formatNaira(account.balance || 0)}
                             </div>
                           </button>
                         ))}
@@ -848,9 +825,25 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
                         )}
                       </div>
                     )}
-                    {ledgerOpen && ledgerSearch.length > 0 && filteredLedgerAccounts.length === 0 && (
-                      <div className="absolute top-full left-0 right-0 mt-1 bg-background border border-input rounded-md shadow-lg z-50 p-4 text-sm text-muted-foreground text-center">
-                        No {ledgerType === 'individual' ? 'guests' : 'organizations'} found
+                    {ledgerOpen && filteredLedgerAccounts.length === 0 && (
+                      <div className="absolute top-full left-0 right-0 mt-1 bg-background border border-input rounded-md shadow-lg z-50 z-50 overflow-hidden">
+                        <div className="px-3 py-3 text-sm text-muted-foreground text-center">
+                          No {ledgerType === 'individual' ? 'individual accounts' : 'organization accounts'} found
+                        </div>
+                        {ledgerType === 'individual' && (
+                          <>
+                            <div className="border-t border-input" />
+                            <button
+                              className="w-full text-left px-3 py-2 hover:bg-primary/10 text-primary text-sm font-medium"
+                              onMouseDown={(e) => {
+                                e.preventDefault()
+                                setNewAccountDialogOpen(true)
+                              }}
+                            >
+                              + Add New Guest Account
+                            </button>
+                          </>
+                        )}
                       </div>
                     )}
                   </div>
