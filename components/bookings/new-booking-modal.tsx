@@ -115,17 +115,47 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
       const orgId = profile.organization_id
       setOrganizationId(orgId)
 
-      const [{ data: guestData }, { data: roomData }, { data: ledgerData }] = await Promise.all([
+      // Load guests, rooms, and ledger accounts (individual guests + organizations)
+      const [
+        { data: guestData },
+        { data: roomData },
+        { data: guestLedgerData },
+        { data: orgLedgerData }
+      ] = await Promise.all([
         supabase.from('guests').select('id, name, phone, email, address').eq('organization_id', orgId).order('name'),
         supabase.from('rooms').select('id, room_number, room_type, price_per_night').eq('organization_id', orgId).eq('status', 'available').order('room_number'),
-        supabase.from('city_ledger_accounts').select('id, account_name, account_type, contact_phone, balance').eq('organization_id', orgId).order('account_name'),
+        // Load guests as individual ledger accounts (those with balance > 0 or unpaid bookings)
+        supabase.from('guests').select('id, name, phone, balance').eq('organization_id', orgId).order('name'),
+        // Load organizations as ledger accounts
+        supabase.from('organizations').select('id, name, phone, current_balance').eq('parent_id', orgId).order('name'),
       ])
 
       setGuests(guestData || [])
       setRooms(roomData || [])
-      setAllLedgerAccounts(ledgerData || [])
-      setFilteredLedgerAccounts(ledgerData || [])
+
+      // Combine guest and organization ledger accounts
+      const combinedLedger: LedgerAccount[] = [
+        ...(guestLedgerData || []).map(g => ({
+          id: g.id,
+          account_name: g.name,
+          account_type: 'individual',
+          contact_phone: g.phone || '',
+          balance: g.balance || 0,
+        })),
+        ...(orgLedgerData || []).map(o => ({
+          id: o.id,
+          account_name: o.name,
+          account_type: 'organization',
+          contact_phone: o.phone || '',
+          balance: o.current_balance || 0,
+        }))
+      ]
+
+      console.log('[v0] Loaded ledger accounts:', combinedLedger)
+      setAllLedgerAccounts(combinedLedger)
+      setFilteredLedgerAccounts(combinedLedger)
     } catch (err: any) {
+      console.error('[v0] Error loading data:', err)
       toast.error('Failed to load data')
     }
   }
@@ -196,22 +226,41 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
     try {
       setNewAccountCreating(true)
       const supabase = createClient()
-      const { data: newAcc, error } = await supabase
-        .from('city_ledger_accounts')
-        .insert([{
-          organization_id: organizationId,
-          account_name: newAccountName.trim(),
-          account_type: newAccountType,
-          contact_phone: newAccountPhone.trim(),
-          contact_email: newAccountEmail.trim() || null,
-          balance: 0,
-        }])
-        .select()
-        .single()
+      
+      let newAcc: any
+      if (newAccountType === 'individual') {
+        // Create as a guest
+        const { data, error } = await supabase
+          .from('guests')
+          .insert([{
+            organization_id: organizationId,
+            name: newAccountName.trim(),
+            phone: newAccountPhone.trim(),
+            email: newAccountEmail.trim() || null,
+            balance: 0,
+          }])
+          .select()
+          .single()
+        if (error) throw error
+        newAcc = { ...data, account_type: 'individual' }
+      } else {
+        // Create as an organization
+        const { data, error } = await supabase
+          .from('organizations')
+          .insert([{
+            parent_id: organizationId,
+            name: newAccountName.trim(),
+            phone: newAccountPhone.trim(),
+            email: newAccountEmail.trim() || null,
+            current_balance: 0,
+          }])
+          .select()
+          .single()
+        if (error) throw error
+        newAcc = { ...data, account_type: 'organization' }
+      }
 
-      if (error) throw error
-
-      toast.success(`Account "${newAcc.account_name}" created`)
+      toast.success(`Account "${newAcc.name}" created`)
       setNewAccountDialogOpen(false)
       setNewAccountName('')
       setNewAccountPhone('')
@@ -221,9 +270,10 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
       // Reload and auto-select
       await loadData()
       setLedgerAccount(newAcc.id)
-      setLedgerAccountName(newAcc.account_name)
-      setLedgerSearch(newAcc.account_name)
+      setLedgerAccountName(newAcc.name)
+      setLedgerSearch(newAcc.name)
     } catch (err: any) {
+      console.error('[v0] Error creating account:', err)
       toast.error(err.message || 'Failed to create account')
     } finally {
       setNewAccountCreating(false)
@@ -321,15 +371,32 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
       if (be) throw be
 
       if (paymentMethod === 'city_ledger' && ledgerAccount) {
-        const { data: row } = await supabase
-          .from('city_ledger_accounts')
-          .select('balance')
-          .eq('id', ledgerAccount)
-          .single()
-        await supabase
-          .from('city_ledger_accounts')
-          .update({ balance: (row?.balance || 0) + total })
-          .eq('id', ledgerAccount)
+        const account = allLedgerAccounts.find(a => a.id === ledgerAccount)
+        if (account) {
+          if (account.account_type === 'individual') {
+            // Update guest balance
+            const { data: guest } = await supabase
+              .from('guests')
+              .select('balance')
+              .eq('id', ledgerAccount)
+              .single()
+            await supabase
+              .from('guests')
+              .update({ balance: (guest?.balance || 0) + total })
+              .eq('id', ledgerAccount)
+          } else {
+            // Update organization balance
+            const { data: org } = await supabase
+              .from('organizations')
+              .select('current_balance')
+              .eq('id', ledgerAccount)
+              .single()
+            await supabase
+              .from('organizations')
+              .update({ current_balance: (org?.current_balance || 0) + total })
+              .eq('id', ledgerAccount)
+          }
+        }
       }
 
       await supabase.from('rooms').update({ status: 'occupied' }).eq('id', selectedRoom.id)
