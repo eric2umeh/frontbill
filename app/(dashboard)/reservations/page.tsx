@@ -74,7 +74,7 @@ export default function ReservationsPage() {
         .select('*, guests(name, phone), rooms(room_number, room_type), created_by, updated_by')
         .eq('organization_id', profile.organization_id)
         .eq('status', 'reserved')
-        .order('check_in_date', { ascending: true })
+        .order('check_in', { ascending: true })
 
       if (error) throw error
       
