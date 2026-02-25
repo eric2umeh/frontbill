@@ -164,8 +164,8 @@ export function ExtendStayModal({ open, onClose, booking }: ExtendStayModalProps
       <DialogContent className="sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>Extend Stay - {booking.folioId}</DialogTitle>
-          <DialogDescription>
-            <div className="flex items-center gap-2 mt-2">
+          <DialogDescription asChild>
+            <div className="flex items-center gap-2 mt-2 text-sm text-muted-foreground">
               <Badge variant={step === 1 ? 'default' : 'secondary'}>1. New Checkout Date</Badge>
               <ChevronRight className="h-4 w-4 text-muted-foreground" />
               <Badge variant={step === 2 ? 'default' : 'secondary'}>2. Payment</Badge>
