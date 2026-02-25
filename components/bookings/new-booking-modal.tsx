@@ -795,11 +795,16 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
                     Search {ledgerType === 'individual' ? 'Guest' : 'Organization'} Account *
                   </Label>
                   <div className="relative">
-                  <Input
-                    placeholder="Search for available rooms..."
-                    value={roomSearch || ''}
-                    onChange={(e) => handleRoomSearch(e.target.value)}
-                  />
+                    <Input
+                      placeholder={ledgerType === 'individual' ? 'Search guest by name...' : 'Search organization by name...'}
+                      value={ledgerSearch || ''}
+                      onChange={(e) => handleLedgerSearch(e.target.value)}
+                      onFocus={() => {
+                        if (ledgerSearch.length > 0 && filteredLedgerAccounts.length > 0) {
+                          setLedgerOpen(true)
+                        }
+                      }}
+                    />
                     {ledgerAccount && (
                       <button
                         className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
