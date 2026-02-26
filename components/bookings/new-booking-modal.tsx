@@ -43,6 +43,7 @@ interface LedgerAccount {
   account_type: 'individual' | 'organization'
   contact_phone: string
   balance: number
+  source: 'guests' | 'organizations' // which table the record lives in
 }
 
 export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalProps) {
@@ -90,6 +91,10 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
   const [newAccountName, setNewAccountName] = useState('')
   const [newAccountPhone, setNewAccountPhone] = useState('')
   const [newAccountEmail, setNewAccountEmail] = useState('')
+  // Extra org fields (mirrors the Organization menu form)
+  const [newAccountAddress, setNewAccountAddress] = useState('')
+  const [newAccountCity, setNewAccountCity] = useState('')
+  const [newAccountType, setNewAccountType] = useState('')
   const [newAccountCreating, setNewAccountCreating] = useState(false)
 
   useEffect(() => {
@@ -119,23 +124,42 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
       const [
         { data: guestData },
         { data: roomData },
-        { data: individualLedger },
-        { data: orgLedger },
+        { data: orgData },
       ] = await Promise.all([
+        // Guests table → individual ledger accounts
         supabase.from('guests').select('id, name, phone, email, address').eq('organization_id', orgId).order('name'),
+        // Available rooms
         supabase.from('rooms').select('id, room_number, room_type, price_per_night').eq('organization_id', orgId).eq('status', 'available').order('room_number'),
-        // Individual accounts from city_ledger_accounts
-        supabase.from('city_ledger_accounts').select('id, account_name, account_type, contact_phone, balance').eq('organization_id', orgId).eq('account_type', 'individual').order('account_name'),
-        // Organization accounts from city_ledger_accounts
-        supabase.from('city_ledger_accounts').select('id, account_name, account_type, contact_phone, balance').eq('organization_id', orgId).eq('account_type', 'organization').order('account_name'),
+        // Organizations table → organization ledger accounts (all except current org)
+        supabase.from('organizations').select('id, name, phone, email').neq('id', orgId).order('name'),
       ])
 
       setGuests(guestData || [])
       setRooms(roomData || [])
-      setIndividualAccounts(individualLedger || [])
-      setOrganizationAccounts(orgLedger || [])
-      // Default filtered list based on current tab
-      setFilteredLedgerAccounts(ledgerTab === 'individual' ? (individualLedger || []) : (orgLedger || []))
+
+      // Map guests → LedgerAccount shape
+      const individualLedger: LedgerAccount[] = (guestData || []).map(g => ({
+        id: g.id,
+        account_name: g.name,
+        account_type: 'individual',
+        contact_phone: g.phone || '',
+        balance: 0, // guests table has no balance column; balance tracked via bookings
+        source: 'guests',
+      }))
+
+      // Map organizations → LedgerAccount shape
+      const orgLedger: LedgerAccount[] = (orgData || []).map(o => ({
+        id: o.id,
+        account_name: o.name,
+        account_type: 'organization',
+        contact_phone: o.phone || '',
+        balance: 0,
+        source: 'organizations',
+      }))
+
+      setIndividualAccounts(individualLedger)
+      setOrganizationAccounts(orgLedger)
+      setFilteredLedgerAccounts(ledgerTab === 'individual' ? individualLedger : orgLedger)
     } catch (err: any) {
       toast.error('Failed to load booking data')
     }
@@ -212,67 +236,90 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
     setLedgerOpen(false)
   }
 
-  // Create new city ledger account
+  // Create new ledger account — inserts into guests or organizations table (not city_ledger_accounts)
   const handleCreateNewAccount = async () => {
-    if (!newAccountName.trim() || !newAccountPhone.trim()) {
-      toast.error('Please enter name and phone number')
+    if (!newAccountName.trim()) {
+      toast.error('Please enter a name')
+      return
+    }
+    if (ledgerTab === 'individual' && !newAccountPhone.trim()) {
+      toast.error('Please enter a phone number')
+      return
+    }
+    if (ledgerTab === 'organization' && !newAccountEmail.trim()) {
+      toast.error('Please enter an email for the organization')
       return
     }
     try {
       setNewAccountCreating(true)
       const supabase = createClient()
 
-      // If this is an individual account AND we're coming from a guest in Step 1,
-      // check if this guest already has a city_ledger_accounts entry
-      if (ledgerTab === 'individual' && fullName.trim() === newAccountName.trim() && phone.trim() === newAccountPhone.trim()) {
-        // This is the same guest from Step 1 — check if it already exists in city_ledger_accounts
-        const { data: existing } = await supabase
-          .from('city_ledger_accounts')
-          .select('id, account_name, balance')
-          .eq('account_name', newAccountName.trim())
-          .eq('account_type', 'individual')
-          .single()
-
+      if (ledgerTab === 'individual') {
+        // Check if a guest with this name+phone already exists (from Step 1)
+        const existing = guests.find(
+          g => g.name.toLowerCase() === newAccountName.trim().toLowerCase() &&
+               g.phone === newAccountPhone.trim()
+        )
         if (existing) {
-          // Link to existing account instead of creating duplicate
-          toast.success(`Linked to existing account "${existing.account_name}"`)
+          // Reuse the existing guest — no duplicate created
+          toast.success(`Linked to existing guest "${existing.name}"`)
+          const acct: LedgerAccount = { id: existing.id, account_name: existing.name, account_type: 'individual', contact_phone: existing.phone || '', balance: 0, source: 'guests' }
           setLedgerAccount(existing.id)
-          setLedgerAccountName(existing.account_name)
-          setLedgerSearch(existing.account_name)
+          setLedgerAccountName(existing.name)
+          setLedgerSearch(existing.name)
+          setIndividualAccounts(prev => prev.some(a => a.id === existing.id) ? prev : [acct, ...prev])
           setNewAccountDialogOpen(false)
-          setNewAccountName('')
-          setNewAccountPhone('')
-          setNewAccountEmail('')
+          setNewAccountName(''); setNewAccountPhone(''); setNewAccountEmail('')
           return
         }
+
+        // Create new guest record
+        const { data: newGuest, error } = await supabase
+          .from('guests')
+          .insert([{
+            organization_id: organizationId,
+            name: newAccountName.trim(),
+            phone: newAccountPhone.trim(),
+            email: newAccountEmail.trim() || null,
+            address: null,
+          }])
+          .select()
+          .single()
+        if (error) throw error
+
+        const acct: LedgerAccount = { id: newGuest.id, account_name: newGuest.name, account_type: 'individual', contact_phone: newGuest.phone || '', balance: 0, source: 'guests' }
+        setIndividualAccounts(prev => [acct, ...prev])
+        setLedgerAccount(newGuest.id)
+        setLedgerAccountName(newGuest.name)
+        setLedgerSearch(newGuest.name)
+        toast.success(`Guest account "${newGuest.name}" created`)
+
+      } else {
+        // Create new organization record (same fields as Organization menu)
+        const { data: newOrg, error } = await supabase
+          .from('organizations')
+          .insert([{
+            name: newAccountName.trim(),
+            email: newAccountEmail.trim(),
+            phone: newAccountPhone.trim() || null,
+            address: newAccountAddress.trim() || null,
+            city: newAccountCity.trim() || null,
+          }])
+          .select()
+          .single()
+        if (error) throw error
+
+        const acct: LedgerAccount = { id: newOrg.id, account_name: newOrg.name, account_type: 'organization', contact_phone: newOrg.phone || '', balance: 0, source: 'organizations' }
+        setOrganizationAccounts(prev => [acct, ...prev])
+        setLedgerAccount(newOrg.id)
+        setLedgerAccountName(newOrg.name)
+        setLedgerSearch(newOrg.name)
+        toast.success(`Organization "${newOrg.name}" created`)
       }
 
-      // Create new account (individual or organization)
-      const { data, error } = await supabase
-        .from('city_ledger_accounts')
-        .insert([{
-          organization_id: organizationId,
-          account_name: newAccountName.trim(),
-          account_type: ledgerTab,
-          contact_phone: newAccountPhone.trim(),
-          contact_email: newAccountEmail.trim() || null,
-          balance: 0,
-        }])
-        .select()
-        .single()
-
-      if (error) throw error
-
-      toast.success(`Account "${data.account_name}" created`)
       setNewAccountDialogOpen(false)
-      setNewAccountName('')
-      setNewAccountPhone('')
-      setNewAccountEmail('')
-
-      await loadData()
-      setLedgerAccount(data.id)
-      setLedgerAccountName(data.account_name)
-      setLedgerSearch(data.account_name)
+      setNewAccountName(''); setNewAccountPhone(''); setNewAccountEmail('')
+      setNewAccountAddress(''); setNewAccountCity(''); setNewAccountType('')
     } catch (err: any) {
       toast.error(err.message || 'Failed to create account')
     } finally {
@@ -418,6 +465,8 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
     setPaymentMethod('cash')
     setLedgerSearch(''); setLedgerAccount(''); setLedgerAccountName('')
     setLedgerTab('individual')
+    setNewAccountName(''); setNewAccountPhone(''); setNewAccountEmail('')
+    setNewAccountAddress(''); setNewAccountCity(''); setNewAccountType('')
   }
 
   const activeLedgerSource = ledgerTab === 'individual' ? individualAccounts : organizationAccounts
@@ -625,7 +674,22 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
                       size="sm"
                       variant="outline"
                       className="h-7 text-xs"
-                      onClick={() => setNewAccountDialogOpen(true)}
+                      onClick={() => {
+                        // Pre-populate with Step 1 data for individual, empty for org
+                        if (ledgerTab === 'individual') {
+                          setNewAccountName(fullName)
+                          setNewAccountPhone(phone)
+                          setNewAccountEmail(email)
+                        } else {
+                          setNewAccountName('')
+                          setNewAccountPhone('')
+                          setNewAccountEmail('')
+                        }
+                        setNewAccountAddress('')
+                        setNewAccountCity('')
+                        setNewAccountType('')
+                        setNewAccountDialogOpen(true)
+                      }}
                     >
                       + New Account
                     </Button>
@@ -735,25 +799,79 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
       <Dialog open={newAccountDialogOpen} onOpenChange={setNewAccountDialogOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Add New {ledgerTab === 'individual' ? 'Guest' : 'Organization'} Account</DialogTitle>
+            <DialogTitle>
+              {ledgerTab === 'individual' ? 'New Guest Ledger Account' : 'New Organization Ledger Account'}
+            </DialogTitle>
             <DialogDescription>
-              Create a new {ledgerTab === 'individual' ? 'individual guest' : 'organization'} city ledger account.
+              {ledgerTab === 'individual'
+                ? 'Creates a new guest record (same as the guest database). Pre-filled from Step 1 if available.'
+                : 'Creates a new organization (same as the Organization menu). Fill in the details below.'}
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label>Account Name *</Label>
-              <Input placeholder={ledgerTab === 'individual' ? 'Guest full name' : 'Organization name'} value={newAccountName} onChange={(e) => setNewAccountName(e.target.value)} />
-            </div>
-            <div className="space-y-2">
-              <Label>Phone Number *</Label>
-              <Input placeholder="Phone number" value={newAccountPhone} onChange={(e) => setNewAccountPhone(e.target.value)} />
-            </div>
-            <div className="space-y-2">
-              <Label>Email (optional)</Label>
-              <Input type="email" placeholder="Email address" value={newAccountEmail} onChange={(e) => setNewAccountEmail(e.target.value)} />
-            </div>
-            <div className="flex gap-3 justify-end">
+          <div className="space-y-4 py-2">
+
+            {/* Individual: same fields as Step 1 guest form */}
+            {ledgerTab === 'individual' && (
+              <>
+                {fullName && newAccountName === fullName && (
+                  <div className="bg-blue-50 border border-blue-200 text-blue-800 text-xs rounded px-3 py-2">
+                    Pre-filled from Step 1. If this is the same guest, just click Create.
+                  </div>
+                )}
+                <div className="space-y-2">
+                  <Label>Full Name *</Label>
+                  <Input placeholder="Guest full name" value={newAccountName} onChange={(e) => setNewAccountName(e.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Phone Number *</Label>
+                  <Input placeholder="Phone number" value={newAccountPhone} onChange={(e) => setNewAccountPhone(e.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Email (optional)</Label>
+                  <Input type="email" placeholder="Email address" value={newAccountEmail} onChange={(e) => setNewAccountEmail(e.target.value)} />
+                </div>
+              </>
+            )}
+
+            {/* Organization: same fields as Organization menu */}
+            {ledgerTab === 'organization' && (
+              <>
+                <div className="space-y-2">
+                  <Label>Organization Name *</Label>
+                  <Input placeholder="e.g. Federal Ministry of Health" value={newAccountName} onChange={(e) => setNewAccountName(e.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Email *</Label>
+                  <Input type="email" placeholder="organization@email.com" value={newAccountEmail} onChange={(e) => setNewAccountEmail(e.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Phone (optional)</Label>
+                  <Input placeholder="Phone number" value={newAccountPhone} onChange={(e) => setNewAccountPhone(e.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Address (optional)</Label>
+                  <Input placeholder="Street address" value={newAccountAddress} onChange={(e) => setNewAccountAddress(e.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label>City (optional)</Label>
+                  <Input placeholder="City" value={newAccountCity} onChange={(e) => setNewAccountCity(e.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Organization Type (optional)</Label>
+                  <Select value={newAccountType} onValueChange={setNewAccountType}>
+                    <SelectTrigger><SelectValue placeholder="Select type" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="government">Government</SelectItem>
+                      <SelectItem value="ngo">NGO / Non-profit</SelectItem>
+                      <SelectItem value="private">Private Company</SelectItem>
+                      <SelectItem value="other">Other</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </>
+            )}
+
+            <div className="flex gap-3 justify-end pt-2">
               <Button variant="outline" onClick={() => setNewAccountDialogOpen(false)}>Cancel</Button>
               <Button onClick={handleCreateNewAccount} disabled={newAccountCreating}>
                 {newAccountCreating ? 'Creating...' : 'Create Account'}
