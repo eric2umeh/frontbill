@@ -45,6 +45,10 @@ export default function ReservationsPage() {
     try {
       setLoading(true)
       const supabase = createClient()
+      if (!supabase) {
+        setReservations([])
+        return
+      }
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
 

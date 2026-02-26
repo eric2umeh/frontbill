@@ -50,6 +50,7 @@ export default function GuestDatabasePage() {
     try {
       setLoading(true)
       const supabase = createClient()
+      if (!supabase) { setGuests([]); setLoading(false); return }
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) { router.push('/auth/login'); return }
 
