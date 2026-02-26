@@ -11,7 +11,8 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { toast } from 'sonner'
 import { createClient } from '@/lib/supabase/client'
-import { AlertCircle, X } from 'lucide-react'
+import { formatNaira } from '@/lib/utils/currency'
+import { AlertCircle, X, ArrowLeft, Edit, Trash2, Users, DollarSign, MapPin } from 'lucide-react'
 
 const ROOM_TYPES = [
   'Deluxe', 'Royal', 'Kings', 'Mini Suite', 'Executive Suite', 'Diplomatic Suite',
