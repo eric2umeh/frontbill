@@ -1,5 +1,6 @@
 'use client'
 
+// Cache bust marker: 2025-02-25-final-fix
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -7,10 +8,11 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Calendar } from '@/components/ui/calendar'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { format, addDays } from 'date-fns'
-import { Calendar as CalendarIcon, ChevronRight, ChevronLeft, X } from 'lucide-react'
+import { Calendar as CalendarIcon, ChevronRight, ChevronLeft, X, Users, Building2 } from 'lucide-react'
 import { formatNaira } from '@/lib/utils/currency'
 import { toast } from 'sonner'
 
@@ -38,9 +40,10 @@ interface Room {
 interface LedgerAccount {
   id: string
   account_name: string
-  account_type: string
+  account_type: 'individual' | 'organization'
   contact_phone: string
   balance: number
+  source: 'guests' | 'organizations' // which table the record lives in
 }
 
 export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalProps) {
@@ -48,7 +51,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
   const [loading, setLoading] = useState(false)
   const [organizationId, setOrganizationId] = useState('')
 
-  // Step 1: Guest Data
+  // Step 1: Guest
   const [fullName, setFullName] = useState('')
   const [phone, setPhone] = useState('')
   const [email, setEmail] = useState('')
@@ -73,26 +76,29 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
   const [customPrice, setCustomPrice] = useState(0)
   const [paymentMethod, setPaymentMethod] = useState('cash')
 
-  // City Ledger
+  // City Ledger — split into individual and organization tabs
+  const [ledgerTab, setLedgerTab] = useState<'individual' | 'organization'>('individual')
   const [ledgerSearch, setLedgerSearch] = useState('')
   const [ledgerAccount, setLedgerAccount] = useState('')
   const [ledgerAccountName, setLedgerAccountName] = useState('')
   const [ledgerOpen, setLedgerOpen] = useState(false)
-  const [allLedgerAccounts, setAllLedgerAccounts] = useState<LedgerAccount[]>([])
+  const [individualAccounts, setIndividualAccounts] = useState<LedgerAccount[]>([])
+  const [organizationAccounts, setOrganizationAccounts] = useState<LedgerAccount[]>([])
   const [filteredLedgerAccounts, setFilteredLedgerAccounts] = useState<LedgerAccount[]>([])
 
-  // New ledger account creation
+  // New ledger account dialog
   const [newAccountDialogOpen, setNewAccountDialogOpen] = useState(false)
   const [newAccountName, setNewAccountName] = useState('')
   const [newAccountPhone, setNewAccountPhone] = useState('')
   const [newAccountEmail, setNewAccountEmail] = useState('')
-  const [newAccountType, setNewAccountType] = useState('individual')
+  // Extra org fields (mirrors the Organization menu form)
+  const [newAccountAddress, setNewAccountAddress] = useState('')
+  const [newAccountCity, setNewAccountCity] = useState('')
+  const [newAccountType, setNewAccountType] = useState('')
   const [newAccountCreating, setNewAccountCreating] = useState(false)
 
   useEffect(() => {
-    if (open) {
-      loadData()
-    }
+    if (open) loadData()
   }, [open])
 
   const loadData = async () => {
@@ -115,48 +121,47 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
       const orgId = profile.organization_id
       setOrganizationId(orgId)
 
-      // Load guests, rooms, and ledger accounts (individual guests + organizations)
       const [
         { data: guestData },
         { data: roomData },
-        { data: guestLedgerData },
-        { data: orgLedgerData }
+        { data: orgData },
       ] = await Promise.all([
+        // Guests table → individual ledger accounts
         supabase.from('guests').select('id, name, phone, email, address').eq('organization_id', orgId).order('name'),
+        // Available rooms
         supabase.from('rooms').select('id, room_number, room_type, price_per_night').eq('organization_id', orgId).eq('status', 'available').order('room_number'),
-        // Load guests as individual ledger accounts
-        supabase.from('guests').select('id, name, phone, balance').eq('organization_id', orgId).order('name'),
-        // Load other organizations as ledger accounts (all organizations except current one)
+        // Organizations table → organization ledger accounts (all except current org)
         supabase.from('organizations').select('id, name, phone, email').neq('id', orgId).order('name'),
       ])
 
       setGuests(guestData || [])
       setRooms(roomData || [])
 
-      // Combine guest and organization ledger accounts
-      const combinedLedger: LedgerAccount[] = [
-        ...(guestLedgerData || []).map(g => ({
-          id: g.id,
-          account_name: g.name,
-          account_type: 'individual',
-          contact_phone: g.phone || '',
-          balance: g.balance || 0,
-        })),
-        ...(orgLedgerData || []).map(o => ({
-          id: o.id,
-          account_name: o.name,
-          account_type: 'organization',
-          contact_phone: o.phone || '',
-          balance: 0, // Organizations don't have a pre-existing balance in the current schema
-        }))
-      ]
+      // Map guests → LedgerAccount shape
+      const individualLedger: LedgerAccount[] = (guestData || []).map(g => ({
+        id: g.id,
+        account_name: g.name,
+        account_type: 'individual',
+        contact_phone: g.phone || '',
+        balance: 0, // guests table has no balance column; balance tracked via bookings
+        source: 'guests',
+      }))
 
-      console.log('[v0] Loaded ledger accounts:', combinedLedger)
-      setAllLedgerAccounts(combinedLedger)
-      setFilteredLedgerAccounts(combinedLedger)
+      // Map organizations → LedgerAccount shape
+      const orgLedger: LedgerAccount[] = (orgData || []).map(o => ({
+        id: o.id,
+        account_name: o.name,
+        account_type: 'organization',
+        contact_phone: o.phone || '',
+        balance: 0,
+        source: 'organizations',
+      }))
+
+      setIndividualAccounts(individualLedger)
+      setOrganizationAccounts(orgLedger)
+      setFilteredLedgerAccounts(ledgerTab === 'individual' ? individualLedger : orgLedger)
     } catch (err: any) {
-      console.error('[v0] Error loading data:', err)
-      toast.error('Failed to load data')
+      toast.error('Failed to load booking data')
     }
   }
 
@@ -186,20 +191,32 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
     setGuestSearchOpen(false)
   }
 
+  // Ledger tab switch
+  const handleLedgerTabChange = (tab: string) => {
+    const t = tab as 'individual' | 'organization'
+    setLedgerTab(t)
+    setLedgerSearch('')
+    setLedgerAccount('')
+    setLedgerAccountName('')
+    setFilteredLedgerAccounts(t === 'individual' ? individualAccounts : organizationAccounts)
+    setLedgerOpen(false)
+  }
+
   // Ledger search
   const handleLedgerSearch = (value: string) => {
     setLedgerSearch(value)
     setLedgerAccount('')
     setLedgerAccountName('')
+    const source = ledgerTab === 'individual' ? individualAccounts : organizationAccounts
     if (value.trim().length > 0) {
-      const filtered = allLedgerAccounts.filter(acc =>
-        acc.account_name.toLowerCase().includes(value.toLowerCase())
+      const filtered = source.filter(a =>
+        a.account_name.toLowerCase().includes(value.toLowerCase())
       )
       setFilteredLedgerAccounts(filtered)
       setLedgerOpen(true)
     } else {
-      setFilteredLedgerAccounts(allLedgerAccounts)
-      setLedgerOpen(allLedgerAccounts.length > 0)
+      setFilteredLedgerAccounts(source)
+      setLedgerOpen(source.length > 0)
     }
   }
 
@@ -214,71 +231,109 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
     setLedgerAccount('')
     setLedgerAccountName('')
     setLedgerSearch('')
-    setFilteredLedgerAccounts(allLedgerAccounts)
+    const source = ledgerTab === 'individual' ? individualAccounts : organizationAccounts
+    setFilteredLedgerAccounts(source)
+    setLedgerOpen(false)
   }
 
-  // Create new ledger account
+  // Create new ledger account — inserts into guests or organizations table (not city_ledger_accounts)
   const handleCreateNewAccount = async () => {
-    if (!newAccountName.trim() || !newAccountPhone.trim()) {
-      toast.error('Please enter name and phone number')
+    if (!newAccountName.trim()) {
+      toast.error('Please enter a name')
+      return
+    }
+    if (ledgerTab === 'individual' && !newAccountPhone.trim()) {
+      toast.error('Please enter a phone number')
+      return
+    }
+    if (ledgerTab === 'organization' && !newAccountEmail.trim()) {
+      toast.error('Please enter an email for the organization')
       return
     }
     try {
       setNewAccountCreating(true)
       const supabase = createClient()
-      
-      let newAcc: any
-      if (newAccountType === 'individual') {
-        // Create as a guest
-        const { data, error } = await supabase
+
+      if (ledgerTab === 'individual') {
+        // Check if a guest with this name+phone already exists (from Step 1)
+        const existing = guests.find(
+          g => g.name.toLowerCase() === newAccountName.trim().toLowerCase() &&
+               g.phone === newAccountPhone.trim()
+        )
+        if (existing) {
+          // Reuse the existing guest — no duplicate created
+          toast.success(`Linked to existing guest "${existing.name}"`)
+          const acct: LedgerAccount = { id: existing.id, account_name: existing.name, account_type: 'individual', contact_phone: existing.phone || '', balance: 0, source: 'guests' }
+          setLedgerAccount(existing.id)
+          setLedgerAccountName(existing.name)
+          setLedgerSearch(existing.name)
+          setIndividualAccounts(prev => prev.some(a => a.id === existing.id) ? prev : [acct, ...prev])
+          setNewAccountDialogOpen(false)
+          setNewAccountName(''); setNewAccountPhone(''); setNewAccountEmail('')
+          return
+        }
+
+        // Create new guest record
+        const { data: newGuest, error } = await supabase
           .from('guests')
           .insert([{
             organization_id: organizationId,
             name: newAccountName.trim(),
             phone: newAccountPhone.trim(),
             email: newAccountEmail.trim() || null,
-            balance: 0,
+            address: null,
           }])
           .select()
           .single()
         if (error) throw error
-        newAcc = { ...data, account_type: 'individual' }
+
+        const acct: LedgerAccount = { id: newGuest.id, account_name: newGuest.name, account_type: 'individual', contact_phone: newGuest.phone || '', balance: 0, source: 'guests' }
+        setIndividualAccounts(prev => [acct, ...prev])
+        setLedgerAccount(newGuest.id)
+        setLedgerAccountName(newGuest.name)
+        setLedgerSearch(newGuest.name)
+        toast.success(`Guest account "${newGuest.name}" created`)
+
       } else {
-        // Create as a new organization
-        const { data, error } = await supabase
+        // Create new organization record (same fields as Organization menu)
+        const { data: newOrg, error } = await supabase
           .from('organizations')
           .insert([{
             name: newAccountName.trim(),
-            phone: newAccountPhone.trim(),
-            email: newAccountEmail.trim() || `org-${Date.now()}@noemail.com`,
+            email: newAccountEmail.trim(),
+            phone: newAccountPhone.trim() || null,
+            address: newAccountAddress.trim() || null,
+            city: newAccountCity.trim() || null,
           }])
           .select()
           .single()
         if (error) throw error
-        newAcc = { ...data, account_type: 'organization' }
+
+        const acct: LedgerAccount = { id: newOrg.id, account_name: newOrg.name, account_type: 'organization', contact_phone: newOrg.phone || '', balance: 0, source: 'organizations' }
+        setOrganizationAccounts(prev => [acct, ...prev])
+        setLedgerAccount(newOrg.id)
+        setLedgerAccountName(newOrg.name)
+        setLedgerSearch(newOrg.name)
+        toast.success(`Organization "${newOrg.name}" created`)
       }
 
-      toast.success(`Account "${newAcc.name}" created`)
       setNewAccountDialogOpen(false)
-      setNewAccountName('')
-      setNewAccountPhone('')
-      setNewAccountEmail('')
-      setNewAccountType('individual')
-
-      // Reload and auto-select
-      await loadData()
-      setLedgerAccount(newAcc.id)
-      setLedgerAccountName(newAcc.name)
-      setLedgerSearch(newAcc.name)
+      setNewAccountName(''); setNewAccountPhone(''); setNewAccountEmail('')
+      setNewAccountAddress(''); setNewAccountCity(''); setNewAccountType('')
     } catch (err: any) {
-      console.error('[v0] Error creating account:', err)
       toast.error(err.message || 'Failed to create account')
     } finally {
       setNewAccountCreating(false)
     }
   }
 
-  // Date handlers
+  // Format a local date as YYYY-MM-DD without timezone conversion
+  const toLocalDateStr = (date: Date) => {
+    const y = date.getFullYear()
+    const m = String(date.getMonth() + 1).padStart(2, '0')
+    const d = String(date.getDate()).padStart(2, '0')
+    return `${y}-${m}-${d}`
+  }
   const handleCheckInChange = (date: Date | undefined) => {
     if (!date) return
     setCheckInDate(date)
@@ -298,9 +353,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
   const handleNightsChange = (value: number) => {
     const n = Math.max(1, value || 1)
     setNights(n)
-    if (checkInDate) {
-      setCheckOutDate(addDays(checkInDate, n))
-    }
+    if (checkInDate) setCheckOutDate(addDays(checkInDate, n))
   }
 
   // Room selection
@@ -310,6 +363,9 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
     if (room) {
       setSelectedRoom(room)
       setPricePerNight(room.price_per_night)
+    } else {
+      setSelectedRoom(null)
+      setPricePerNight(0)
     }
   }
 
@@ -353,8 +409,8 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
           guest_id: finalGuestId,
           room_id: selectedRoom.id,
           folio_id: folioId,
-          check_in: checkInDate.toISOString(),
-          check_out: checkOutDate.toISOString(),
+          check_in: toLocalDateStr(checkInDate),
+          check_out: toLocalDateStr(checkOutDate),
           number_of_nights: nights,
           rate_per_night: effectiveRate,
           total_amount: total,
@@ -368,27 +424,33 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
         .single()
       if (be) throw be
 
+      // If city ledger, increment the ledger account balance
       if (paymentMethod === 'city_ledger' && ledgerAccount) {
-        const account = allLedgerAccounts.find(a => a.id === ledgerAccount)
-        if (account) {
-          if (account.account_type === 'individual') {
-            // Update guest balance
-            const { data: guest } = await supabase
-              .from('guests')
-              .select('balance')
-              .eq('id', ledgerAccount)
-              .single()
-            await supabase
-              .from('guests')
-              .update({ balance: (guest?.balance || 0) + total })
-              .eq('id', ledgerAccount)
-          }
-          // For organizations, balance tracking would use city_ledger_accounts table
-          // For now, we just record the transaction in the folio_charges
-        }
+        const { data: acc } = await supabase
+          .from('city_ledger_accounts')
+          .select('balance')
+          .eq('id', ledgerAccount)
+          .single()
+        await supabase
+          .from('city_ledger_accounts')
+          .update({ balance: (acc?.balance || 0) + total })
+          .eq('id', ledgerAccount)
       }
 
       await supabase.from('rooms').update({ status: 'occupied' }).eq('id', selectedRoom.id)
+
+      // Record transaction
+      await supabase.from('transactions').insert([{
+        organization_id: organizationId,
+        booking_id: booking.id,
+        transaction_id: `TXN-${Date.now().toString(36).toUpperCase()}`,
+        guest_name: fullName,
+        room: selectedRoom.room_number,
+        amount: total,
+        payment_method: paymentMethod,
+        status: isPaid ? 'completed' : 'pending',
+        description: `Booking created - Folio ${folioId}`,
+      }])
 
       toast.success(`Booking created! Ref: ${booking.folio_id}`)
       onSuccess?.()
@@ -408,14 +470,19 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
     setSelectedRoomType(''); setSelectedRoom(null); setPricePerNight(0); setCustomPrice(0)
     setPaymentMethod('cash')
     setLedgerSearch(''); setLedgerAccount(''); setLedgerAccountName('')
+    setLedgerTab('individual')
+    setNewAccountName(''); setNewAccountPhone(''); setNewAccountEmail('')
+    setNewAccountAddress(''); setNewAccountCity(''); setNewAccountType('')
   }
+
+  const activeLedgerSource = ledgerTab === 'individual' ? individualAccounts : organizationAccounts
 
   return (
     <>
       <Dialog open={open} onOpenChange={onClose}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>New Booking - Step {step} of 3</DialogTitle>
+            <DialogTitle>New Booking — Step {step} of 3</DialogTitle>
             <DialogDescription>
               {step === 1 ? 'Enter guest information' : step === 2 ? 'Select stay dates' : 'Choose room and payment'}
             </DialogDescription>
@@ -428,12 +495,9 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
                 <Label>Full Name *</Label>
                 <div className="relative">
                   <Input
-                    placeholder="Type guest name (existing guests will appear)"
+                    placeholder="Type guest name — existing guests will appear"
                     value={fullName}
                     onChange={(e) => handleGuestSearch(e.target.value)}
-                    onFocus={() => {
-                      if (filteredGuests.length > 0) setGuestSearchOpen(true)
-                    }}
                     onBlur={() => setTimeout(() => setGuestSearchOpen(false), 150)}
                   />
                   {guestSearchOpen && filteredGuests.length > 0 && (
@@ -451,37 +515,32 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
                     </div>
                   )}
                 </div>
-                {filteredGuests.length > 0 && guestSearchOpen && (
-                  <p className="text-xs text-muted-foreground">Select a suggestion or keep typing to create a new guest</p>
+                {!guestId && fullName.trim() && (
+                  <p className="text-xs text-amber-600">New guest will be created: <strong>{fullName}</strong></p>
                 )}
               </div>
 
               <div className="space-y-2">
-                <Label>Phone Number * {guestId && <span className="text-xs text-green-600">(from existing guest)</span>}</Label>
+                <Label>Phone Number *</Label>
                 <Input placeholder="Phone number" value={phone} onChange={(e) => setPhone(e.target.value)} disabled={!!guestId} />
               </div>
 
               <div className="space-y-2">
-                <Label>Email {guestId && <span className="text-xs text-green-600">(from existing guest)</span>}</Label>
+                <Label>Email</Label>
                 <Input type="email" placeholder="Email address" value={email} onChange={(e) => setEmail(e.target.value)} disabled={!!guestId} />
               </div>
 
               <div className="space-y-2">
-                <Label>Address {guestId && <span className="text-xs text-green-600">(from existing guest)</span>}</Label>
+                <Label>Address</Label>
                 <Input placeholder="Street address" value={address} onChange={(e) => setAddress(e.target.value)} disabled={!!guestId} />
               </div>
 
               {guestId && (
                 <div className="flex items-center justify-between bg-blue-50 border border-blue-200 rounded p-3">
-                  <p className="text-sm text-blue-900">Guest details populated from existing record</p>
+                  <p className="text-sm text-blue-900">Details populated from existing guest record</p>
                   <Button size="sm" variant="ghost" onClick={() => { setGuestId(''); setFullName(''); setPhone(''); setEmail(''); setAddress('') }}>
                     <X className="h-4 w-4" />
                   </Button>
-                </div>
-              )}
-              {!guestId && fullName.trim() && (
-                <div className="bg-amber-50 border border-amber-200 rounded p-3">
-                  <p className="text-sm text-amber-900">New guest will be created: <strong>{fullName}</strong></p>
                 </div>
               )}
             </div>
@@ -501,7 +560,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
                       </Button>
                     </PopoverTrigger>
                     <PopoverContent className="w-auto p-0" align="start">
-                      <Calendar mode="single" selected={checkInDate} onSelect={handleCheckInChange} disabled={(date) => date < new Date()} />
+                      <Calendar mode="single" selected={checkInDate} onSelect={handleCheckInChange} disabled={(d) => d < new Date(new Date().setHours(0,0,0,0))} />
                     </PopoverContent>
                   </Popover>
                 </div>
@@ -516,7 +575,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
                       </Button>
                     </PopoverTrigger>
                     <PopoverContent className="w-auto p-0" align="start">
-                      <Calendar mode="single" selected={checkOutDate} onSelect={handleCheckOutChange} disabled={(date) => !checkInDate || date <= checkInDate} />
+                      <Calendar mode="single" selected={checkOutDate} onSelect={handleCheckOutChange} disabled={(d) => !checkInDate || d <= checkInDate} />
                     </PopoverContent>
                   </Popover>
                 </div>
@@ -530,11 +589,11 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
                   placeholder="1"
                   value={nights || ''}
                   onChange={(e) => {
-                    const num = parseInt(e.target.value)
-                    if (!isNaN(num) && num >= 1) handleNightsChange(num)
+                    const n = parseInt(e.target.value)
+                    if (!isNaN(n) && n >= 1) handleNightsChange(n)
                   }}
                 />
-                <p className="text-xs text-muted-foreground">Changing nights will update the checkout date automatically</p>
+                <p className="text-xs text-muted-foreground">Changing nights will update checkout date automatically</p>
               </div>
             </div>
           )}
@@ -575,16 +634,16 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
                 <>
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
-                      <Label>Standard Price Per Night</Label>
-                      <div className="px-3 py-2 bg-muted rounded border border-input">
-                        <p className="text-sm font-medium">{formatNaira(pricePerNight)}</p>
+                      <Label>Standard Rate / Night</Label>
+                      <div className="px-3 py-2 bg-muted rounded border border-input text-sm font-medium">
+                        {formatNaira(pricePerNight)}
                       </div>
                     </div>
                     <div className="space-y-2">
-                      <Label>Custom Price Per Night (Optional)</Label>
+                      <Label>Custom Rate / Night (optional)</Label>
                       <Input
                         type="number"
-                        placeholder="Leave empty for standard price"
+                        placeholder="Leave empty for standard"
                         value={customPrice || ''}
                         onChange={(e) => setCustomPrice(parseFloat(e.target.value) || 0)}
                       />
@@ -593,7 +652,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
                   <div className="bg-blue-50 border border-blue-200 p-3 rounded-lg">
                     <p className="text-sm font-medium text-blue-900">Total: {formatNaira((customPrice || pricePerNight) * nights)}</p>
                     <p className="text-xs text-blue-700 mt-1">
-                      {customPrice ? `${nights} nights x ${formatNaira(customPrice)} (custom)` : `${nights} nights x ${formatNaira(pricePerNight)}`}
+                      {nights} nights × {formatNaira(customPrice || pricePerNight)}{customPrice ? ' (custom rate)' : ''}
                     </p>
                   </div>
                 </>
@@ -613,29 +672,64 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
               </div>
 
               {paymentMethod === 'city_ledger' && (
-                <div className="space-y-2">
+                <div className="space-y-3 rounded-lg border border-input p-4">
                   <div className="flex items-center justify-between">
-                    <Label>Search Ledger Account *</Label>
+                    <Label className="text-sm font-semibold">City Ledger Account *</Label>
                     <Button
                       type="button"
                       size="sm"
                       variant="outline"
-                      className="text-xs h-8"
-                      onClick={() => setNewAccountDialogOpen(true)}
+                      className="h-7 text-xs"
+                      onClick={() => {
+                        // Pre-populate with Step 1 data for individual, empty for org
+                        if (ledgerTab === 'individual') {
+                          setNewAccountName(fullName)
+                          setNewAccountPhone(phone)
+                          setNewAccountEmail(email)
+                        } else {
+                          setNewAccountName('')
+                          setNewAccountPhone('')
+                          setNewAccountEmail('')
+                        }
+                        setNewAccountAddress('')
+                        setNewAccountCity('')
+                        setNewAccountType('')
+                        setNewAccountDialogOpen(true)
+                      }}
                     >
-                      + Add New Account
+                      + New Account
                     </Button>
                   </div>
+
+                  {/* Individual / Organization tabs */}
+                  <Tabs value={ledgerTab} onValueChange={handleLedgerTabChange}>
+                    <TabsList className="grid w-full grid-cols-2 h-9">
+                      <TabsTrigger value="individual" className="text-xs gap-1.5">
+                        <Users className="h-3.5 w-3.5" />
+                        Individual Guest
+                      </TabsTrigger>
+                      <TabsTrigger value="organization" className="text-xs gap-1.5">
+                        <Building2 className="h-3.5 w-3.5" />
+                        Organization
+                      </TabsTrigger>
+                    </TabsList>
+                  </Tabs>
+
+                  {/* Search input */}
                   <div className="relative">
                     <Input
-                      placeholder="Type to search guest or organization accounts..."
+                      placeholder={
+                        ledgerTab === 'individual'
+                          ? 'Search individual guest accounts...'
+                          : 'Search organization accounts...'
+                      }
                       value={ledgerSearch}
                       onChange={(e) => handleLedgerSearch(e.target.value)}
                       onFocus={() => {
                         setFilteredLedgerAccounts(
                           ledgerSearch.trim()
-                            ? allLedgerAccounts.filter(a => a.account_name.toLowerCase().includes(ledgerSearch.toLowerCase()))
-                            : allLedgerAccounts
+                            ? activeLedgerSource.filter(a => a.account_name.toLowerCase().includes(ledgerSearch.toLowerCase()))
+                            : activeLedgerSource
                         )
                         setLedgerOpen(true)
                       }}
@@ -650,36 +744,37 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
                       </button>
                     )}
                     {ledgerOpen && (
-                      <div className="absolute top-full left-0 right-0 mt-1 bg-background border border-input rounded-md shadow-lg z-50 max-h-56 overflow-y-auto">
+                      <div className="absolute top-full left-0 right-0 mt-1 bg-background border border-input rounded-md shadow-lg z-50 max-h-52 overflow-y-auto">
                         {filteredLedgerAccounts.length > 0 ? (
                           filteredLedgerAccounts.map(account => (
                             <button
                               key={account.id}
-                              className="w-full text-left px-3 py-2 hover:bg-accent border-b last:border-b-0 transition-colors text-sm"
+                              className="w-full text-left px-3 py-2.5 hover:bg-accent border-b last:border-b-0 transition-colors text-sm"
                               onMouseDown={(e) => { e.preventDefault(); selectLedgerAccount(account) }}
                             >
                               <div className="font-medium">{account.account_name}</div>
-                              <div className="text-xs text-muted-foreground flex gap-3">
-                                <span className="capitalize">{account.account_type}</span>
-                                <span>Balance: {formatNaira(account.balance || 0)}</span>
+                              <div className="text-xs text-muted-foreground">
+                                {account.contact_phone && <span className="mr-3">{account.contact_phone}</span>}
+                                Balance: {formatNaira(account.balance || 0)}
                               </div>
                             </button>
                           ))
                         ) : (
-                          <div className="px-3 py-2 text-sm text-muted-foreground text-center">
-                            {allLedgerAccounts.length === 0 
-                              ? 'No accounts yet. Click "Add New Account" to create one.' 
+                          <div className="px-3 py-3 text-sm text-muted-foreground text-center">
+                            {activeLedgerSource.length === 0
+                              ? `No ${ledgerTab} accounts yet. Click "+ New Account" to create one.`
                               : 'No matching accounts found'}
                           </div>
                         )}
                       </div>
                     )}
                   </div>
+
                   {ledgerAccount && (
-                    <p className="text-xs text-green-600 font-medium">Selected: {ledgerAccountName}</p>
-                  )}
-                  {allLedgerAccounts.length === 0 && (
-                    <p className="text-xs text-amber-600">No ledger accounts found. Click "Add New Account" above to create one.</p>
+                    <div className="flex items-center gap-2 text-xs text-green-700 bg-green-50 border border-green-200 rounded px-3 py-2">
+                      {ledgerTab === 'individual' ? <Users className="h-3.5 w-3.5 flex-shrink-0" /> : <Building2 className="h-3.5 w-3.5 flex-shrink-0" />}
+                      <span>Selected: <strong>{ledgerAccountName}</strong></span>
+                    </div>
                   )}
                 </div>
               )}
@@ -688,12 +783,12 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
 
           {/* Navigation */}
           <div className="flex justify-between gap-2 pt-4 border-t">
-            <Button variant="outline" onClick={() => setStep(step - 1)} disabled={step === 1 || loading}>
+            <Button variant="outline" onClick={() => setStep(s => s - 1)} disabled={step === 1 || loading}>
               <ChevronLeft className="mr-2 h-4 w-4" />
               Previous
             </Button>
             {step < 3 ? (
-              <Button onClick={() => setStep(step + 1)} disabled={!canGoToNextStep() || loading}>
+              <Button onClick={() => setStep(s => s + 1)} disabled={!canGoToNextStep() || loading}>
                 Next
                 <ChevronRight className="ml-2 h-4 w-4" />
               </Button>
@@ -710,66 +805,84 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
       <Dialog open={newAccountDialogOpen} onOpenChange={setNewAccountDialogOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Add New Ledger Account</DialogTitle>
+            <DialogTitle>
+              {ledgerTab === 'individual' ? 'New Guest Ledger Account' : 'New Organization Ledger Account'}
+            </DialogTitle>
             <DialogDescription>
-              Create a new city ledger account for a guest or organization.
+              {ledgerTab === 'individual'
+                ? 'Creates a new guest record (same as the guest database). Pre-filled from Step 1 if available.'
+                : 'Creates a new organization (same as the Organization menu). Fill in the details below.'}
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label>Account Type *</Label>
-              <Select value={newAccountType} onValueChange={setNewAccountType}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="individual">Individual (Guest)</SelectItem>
-                  <SelectItem value="organization">Organization / Company</SelectItem>
-                </SelectContent>
-              </Select>
+          <div className="space-y-4 py-2">
+
+            {/* Individual: same fields as Step 1 guest form */}
+            {ledgerTab === 'individual' && (
+              <>
+                {fullName && newAccountName === fullName && (
+                  <div className="bg-blue-50 border border-blue-200 text-blue-800 text-xs rounded px-3 py-2">
+                    Pre-filled from Step 1. If this is the same guest, just click Create.
+                  </div>
+                )}
+                <div className="space-y-2">
+                  <Label>Full Name *</Label>
+                  <Input placeholder="Guest full name" value={newAccountName} onChange={(e) => setNewAccountName(e.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Phone Number *</Label>
+                  <Input placeholder="Phone number" value={newAccountPhone} onChange={(e) => setNewAccountPhone(e.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Email (optional)</Label>
+                  <Input type="email" placeholder="Email address" value={newAccountEmail} onChange={(e) => setNewAccountEmail(e.target.value)} />
+                </div>
+              </>
+            )}
+
+            {/* Organization: same fields as Organization menu */}
+            {ledgerTab === 'organization' && (
+              <>
+                <div className="space-y-2">
+                  <Label>Organization Name *</Label>
+                  <Input placeholder="e.g. Federal Ministry of Health" value={newAccountName} onChange={(e) => setNewAccountName(e.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Email *</Label>
+                  <Input type="email" placeholder="organization@email.com" value={newAccountEmail} onChange={(e) => setNewAccountEmail(e.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Phone (optional)</Label>
+                  <Input placeholder="Phone number" value={newAccountPhone} onChange={(e) => setNewAccountPhone(e.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Address (optional)</Label>
+                  <Input placeholder="Street address" value={newAccountAddress} onChange={(e) => setNewAccountAddress(e.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label>City (optional)</Label>
+                  <Input placeholder="City" value={newAccountCity} onChange={(e) => setNewAccountCity(e.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Organization Type (optional)</Label>
+                  <Select value={newAccountType} onValueChange={setNewAccountType}>
+                    <SelectTrigger><SelectValue placeholder="Select type" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="government">Government</SelectItem>
+                      <SelectItem value="ngo">NGO / Non-profit</SelectItem>
+                      <SelectItem value="private">Private Company</SelectItem>
+                      <SelectItem value="other">Other</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </>
+            )}
+
+            <div className="flex gap-3 justify-end pt-2">
+              <Button variant="outline" onClick={() => setNewAccountDialogOpen(false)}>Cancel</Button>
+              <Button onClick={handleCreateNewAccount} disabled={newAccountCreating}>
+                {newAccountCreating ? 'Creating...' : 'Create Account'}
+              </Button>
             </div>
-            <div className="space-y-2">
-              <Label>Account Name *</Label>
-              <Input
-                placeholder={newAccountType === 'individual' ? 'Guest full name' : 'Company / organization name'}
-                value={newAccountName}
-                onChange={(e) => setNewAccountName(e.target.value)}
-                disabled={newAccountCreating}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Phone Number *</Label>
-              <Input
-                type="tel"
-                placeholder="Contact phone number"
-                value={newAccountPhone}
-                onChange={(e) => setNewAccountPhone(e.target.value)}
-                disabled={newAccountCreating}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Email (Optional)</Label>
-              <Input
-                type="email"
-                placeholder="Contact email address"
-                value={newAccountEmail}
-                onChange={(e) => setNewAccountEmail(e.target.value)}
-                disabled={newAccountCreating}
-              />
-            </div>
-            <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm">
-              <div className="font-medium text-amber-900">Starting Balance: {formatNaira(0)}</div>
-              <div className="text-amber-700 text-xs mt-1">Balance will increase as charges are added to this account.</div>
-            </div>
-          </div>
-          <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => setNewAccountDialogOpen(false)} disabled={newAccountCreating}>
-              Cancel
-            </Button>
-            <Button
-              onClick={handleCreateNewAccount}
-              disabled={newAccountCreating || !newAccountName.trim() || !newAccountPhone.trim()}
-            >
-              {newAccountCreating ? 'Creating...' : 'Create Account'}
-            </Button>
           </div>
         </DialogContent>
       </Dialog>
