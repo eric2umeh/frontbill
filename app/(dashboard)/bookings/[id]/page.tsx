@@ -26,12 +26,19 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
   const [extendStayModalOpen, setExtendStayModalOpen] = useState(false)
   const [chargeAmount, setChargeAmount] = useState('')
   const [chargeDescription, setChargeDescription] = useState('')
-  const [chargeType, setChargeType] = useState('payment')
+  const [chargeType, setChargeType] = useState('charge')
+  const [chargePaymentMethod, setChargePaymentMethod] = useState('')
   const [paymentMethod, setPaymentMethod] = useState('')
   const [deleteLoading, setDeleteLoading] = useState(false)
   const [folioCharges, setFolioCharges] = useState<any[]>([])
   const [createdByUser, setCreatedByUser] = useState<any>(null)
   const [updatedByUser, setUpdatedByUser] = useState<any>(null)
+  // Edit charge state
+  const [editChargeModalOpen, setEditChargeModalOpen] = useState(false)
+  const [editingCharge, setEditingCharge] = useState<any>(null)
+  const [editChargeAmount, setEditChargeAmount] = useState('')
+  const [editChargeDescription, setEditChargeDescription] = useState('')
+  const [editChargeLoading, setEditChargeLoading] = useState(false)
 
   useEffect(() => {
     const getParamsAndFetch = async () => {
@@ -129,117 +136,211 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
   }
 
   const handleAddCharge = async () => {
-    if (!chargeAmount) {
-      toast.error('Please enter amount')
+    if (!chargeAmount || Number(chargeAmount) <= 0) {
+      toast.error('Please enter a valid amount')
+      return
+    }
+    // Only require description for ADD CHARGE tab, not for RECORD PAYMENT tab
+    if (chargeType === 'charge' && !chargeDescription) {
+      toast.error('Please enter a description')
       return
     }
 
-    if (chargeType === 'payment' && !paymentMethod) {
-      toast.error('Please select payment method')
-      return
-    }
-
-    if (chargeType !== 'payment' && !chargeDescription) {
-      toast.error('Please enter charge description')
-      return
-    }
+    // Determine if this charge goes onto the city ledger (unpaid bill) or is settled immediately
+    const isCityLedger = chargePaymentMethod === 'city_ledger'
+    const isDeferred = chargePaymentMethod === 'deferred'
+    const isSettledImmediately = chargePaymentMethod !== '' && chargePaymentMethod !== 'city_ledger' && chargePaymentMethod !== 'deferred'
 
     try {
       const supabase = createClient()
-      const chargeData = {
-        booking_id: bookingId,
-        description: chargeType === 'payment' 
-          ? `Payment Received - ${paymentMethod}`
-          : chargeDescription,
-        amount: chargeType === 'payment' ? -Number(chargeAmount) : Number(chargeAmount),
-        charge_type: chargeType,
-        payment_method: paymentMethod || null,
-        ledger_account_id: paymentMethod === 'city_ledger' ? booking?.guest_id : null,
-        ledger_account_type: paymentMethod === 'city_ledger' ? 'guest' : null,
-        payment_status: chargeType === 'payment' ? 'paid' : 'pending',
-      }
 
-      // Save charge to database
-      const { data: newCharge, error } = await supabase
-        .from('folio_charges')
-        .insert([chargeData])
-        .select()
-        .single()
+      // -- ADD CHARGE tab --
+      if (chargeType === 'charge') {
+        const paymentStatus = isSettledImmediately ? 'paid' : 'pending'
 
-      if (error) throw error
+        await supabase.from('folio_charges').insert([{
+          booking_id: bookingId,
+          description: chargeDescription,
+          amount: Number(chargeAmount),
+          charge_type: 'charge',
+          payment_method: isSettledImmediately ? chargePaymentMethod : (isCityLedger || isDeferred ? null : chargePaymentMethod),
+          payment_status: paymentStatus,
+        }])
 
-      // Update booking balance if it's a payment
-      if (chargeType === 'payment') {
-        const newBalance = Math.max(0, booking.balance - Number(chargeAmount))
+        if (isCityLedger || isDeferred) {
+          // Add to the unpaid bill balance (both city ledger and deferred charges accrue)
+          await supabase
+            .from('bookings')
+            .update({ balance: (booking.balance || 0) + Number(chargeAmount) })
+            .eq('id', bookingId)
+        }
+        // Cash/card/pos/bank_transfer charges are paid on-spot — do NOT touch balance or deposit
+
+        toast.success(
+          isSettledImmediately
+            ? `Charge of ${formatNaira(Number(chargeAmount))} recorded as paid (${chargePaymentMethod.replace('_', ' ')})`
+            : isCityLedger
+              ? `${formatNaira(Number(chargeAmount))} added to city ledger — Bill Balance updated`
+              : isDeferred
+                ? `${formatNaira(Number(chargeAmount))} deferred — Bill Balance updated`
+                : `Charge of ${formatNaira(Number(chargeAmount))} added (payment pending)`
+        )
+
+      // -- RECORD PAYMENT tab: reduces existing Bill Balance --
+      } else {
+        if (!paymentMethod) {
+          toast.error('Please select a payment method')
+          return
+        }
+
+        const paymentEntry = {
+          booking_id: bookingId,
+          description: `Payment Received — ${paymentMethod.replace('_', ' ')}`,
+          amount: -Number(chargeAmount), // negative = money coming in
+          charge_type: 'payment',
+          payment_method: paymentMethod,
+          payment_status: 'paid',
+        }
+
+        await supabase.from('folio_charges').insert([paymentEntry])
+
+        const newBalance = Math.max(0, (booking.balance || 0) - Number(chargeAmount))
+        const newDeposit = (booking.deposit || 0) + Number(chargeAmount)
         await supabase
           .from('bookings')
-          .update({ 
+          .update({
             balance: newBalance,
-            deposit: booking.deposit + Number(chargeAmount),
-            payment_status: newBalance === 0 ? 'paid' : 'partial'
+            deposit: newDeposit,
+            payment_status: newBalance === 0 ? 'paid' : 'partial',
           })
           .eq('id', bookingId)
 
-        // If using ledger, update guest balance
-        if (paymentMethod === 'city_ledger') {
-          await supabase
-            .from('guests')
-            .update({ 
-              balance: booking.guests.balance ? booking.guests.balance - Number(chargeAmount) : -Number(chargeAmount)
-            })
-            .eq('id', booking.guest_id)
-        }
-      } else {
-        // Update booking balance with new charge
-        const newBalance = booking.balance + Number(chargeAmount)
-        await supabase
-          .from('bookings')
-          .update({ balance: newBalance })
-          .eq('id', bookingId)
+        toast.success(`Payment of ${formatNaira(Number(chargeAmount))} recorded`)
       }
 
-      // Refresh folio charges
       await fetchBookingDetails(bookingId)
-
-      toast.success(chargeType === 'payment' 
-        ? `Payment of ${formatNaira(Number(chargeAmount))} recorded`
-        : `Charge of ${formatNaira(Number(chargeAmount))} added`)
-      
       setAddChargeModalOpen(false)
       setChargeAmount('')
       setChargeDescription('')
-      setChargeType('payment')
+      setChargeType('charge')
+      setChargePaymentMethod('')
       setPaymentMethod('')
     } catch (error: any) {
-      console.error('[v0] Error adding charge:', error)
-      toast.error(error.message || 'Failed to add charge')
+      toast.error(error.message || 'Failed to save')
     }
   }
 
-  const handleDeleteCharge = async (chargeId: string, chargeAmount: number) => {
+  const handleDeleteCharge = (chargeId: string, chargeAmount: number) => {
+    toast(
+      (t) => (
+        <div className="flex flex-col gap-3">
+          <div className="flex gap-2 items-start">
+            <AlertCircle className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" />
+            <div>
+              <p className="font-semibold">Delete this charge?</p>
+              <p className="text-sm text-muted-foreground">Amount: {formatNaira(chargeAmount)}. This cannot be undone.</p>
+            </div>
+          </div>
+          <div className="flex gap-2 justify-end">
+            <Button variant="outline" size="sm" onClick={() => toast.dismiss(t)}>Cancel</Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={async () => {
+                toast.dismiss(t)
+                try {
+                  const supabase = createClient()
+                  
+                  // Get the charge to check its payment status
+                  const { data: chargeData } = await supabase
+                    .from('folio_charges')
+                    .select('payment_status, amount')
+                    .eq('id', chargeId)
+                    .single()
+                  
+                  // Delete the charge
+                  const { error: deleteError } = await supabase
+                    .from('folio_charges')
+                    .delete()
+                    .eq('id', chargeId)
+                  if (deleteError) throw deleteError
+                  
+                  // If this was a pending/city-ledger charge, reduce the booking balance
+                  if (chargeData?.payment_status === 'pending') {
+                    const newBalance = Math.max(0, (booking.balance || 0) - Math.abs(chargeData.amount))
+                    await supabase
+                      .from('bookings')
+                      .update({ balance: newBalance })
+                      .eq('id', bookingId)
+                  }
+                  // If this was a paid charge, don't touch balance
+                  
+                  await fetchBookingDetails(bookingId)
+                  toast.success('Charge deleted')
+                } catch (error: any) {
+                  toast.error(error.message || 'Failed to delete charge')
+                }
+              }}
+            >
+              Delete
+            </Button>
+          </div>
+        </div>
+      ),
+      { duration: Infinity }
+    )
+  }
+
+  const openEditCharge = (charge: any) => {
+    setEditingCharge(charge)
+    setEditChargeAmount(String(Math.abs(charge.amount)))
+    setEditChargeDescription(charge.description)
+    setEditChargeModalOpen(true)
+  }
+
+  const handleUpdateCharge = async () => {
+    if (!editingCharge || !editChargeAmount) {
+      toast.error('Please enter an amount')
+      return
+    }
     try {
+      setEditChargeLoading(true)
       const supabase = createClient()
-      
-      // Delete charge
-      const { error: deleteError } = await supabase
+      // Preserve sign: payments are stored as negative
+      const newAmount = editingCharge.amount < 0
+        ? -Math.abs(Number(editChargeAmount))
+        : Math.abs(Number(editChargeAmount))
+
+      const { error } = await supabase
         .from('folio_charges')
-        .delete()
-        .eq('id', chargeId)
+        .update({ description: editChargeDescription, amount: newAmount })
+        .eq('id', editingCharge.id)
 
-      if (deleteError) throw deleteError
+      if (error) throw error
 
-      // Update booking balance
-      const newBalance = booking.balance - chargeAmount
+      // Recalculate booking balance from all charges
+      const { data: allCharges } = await supabase
+        .from('folio_charges')
+        .select('amount, payment_status')
+        .eq('booking_id', bookingId)
+
+      const unpaidTotal = (allCharges || [])
+        .filter(c => c.payment_status !== 'paid')
+        .reduce((sum, c) => sum + Number(c.amount), 0)
+
       await supabase
         .from('bookings')
-        .update({ balance: newBalance })
+        .update({ balance: Math.max(0, unpaidTotal) })
         .eq('id', bookingId)
 
-      toast.success('Charge deleted successfully')
+      toast.success('Charge updated successfully')
+      setEditChargeModalOpen(false)
+      setEditingCharge(null)
       await fetchBookingDetails(bookingId)
     } catch (error: any) {
-      console.error('[v0] Error deleting charge:', error)
-      toast.error(error.message || 'Failed to delete charge')
+      toast.error(error.message || 'Failed to update charge')
+    } finally {
+      setEditChargeLoading(false)
     }
   }
 
@@ -287,6 +388,20 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
 
   const totalCharges = folioCharges.reduce((sum, charge) => sum + charge.amount, 0)
 
+  // Pending (city ledger / deferred) additional charges — excludes cash/card/pos paid charges
+  const pendingAdditionalCharges = folioCharges
+    .filter(c => c.paymentStatus === 'pending' && c.amount > 0)
+    .reduce((sum, c) => sum + c.amount, 0)
+
+  // Paid additional charges (cash/card/pos/bank_transfer on the spot) — for folio display only
+  const paidAdditionalCharges = folioCharges
+    .filter(c => c.paymentStatus === 'paid' && c.amount > 0 && c.type === 'charge')
+    .reduce((sum, c) => sum + c.amount, 0)
+
+  // Bill Balance = original room balance (from booking) + pending/city-ledger additional charges
+  // Paid-on-spot charges do NOT inflate this number
+  const totalBillBalance = booking ? (booking.balance || 0) + pendingAdditionalCharges : 0
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -324,17 +439,19 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
             <DialogDescription>Add additional charges or record payments to the folio</DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
-            <Tabs value={chargeType} onValueChange={(value) => setChargeType(value)}>
+            <Tabs value={chargeType} onValueChange={(v) => { setChargeType(v); setChargeAmount(''); setChargeDescription(''); setChargePaymentMethod(''); setPaymentMethod('') }}>
               <TabsList className="grid w-full grid-cols-2">
                 <TabsTrigger value="charge">Add Charge</TabsTrigger>
                 <TabsTrigger value="payment">Record Payment</TabsTrigger>
               </TabsList>
-              
+
+              {/* ── ADD CHARGE tab ── */}
               <TabsContent value="charge" className="space-y-4 mt-4">
                 <div className="space-y-2">
-                  <Label>Charge Amount</Label>
+                  <Label>Amount</Label>
                   <Input
                     type="number"
+                    min="0"
                     placeholder="Enter amount"
                     value={chargeAmount}
                     onChange={(e) => setChargeAmount(e.target.value)}
@@ -343,18 +460,47 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                 <div className="space-y-2">
                   <Label>Description</Label>
                   <Input
-                    placeholder="e.g., Restaurant - Dinner"
+                    placeholder="e.g., Restaurant — Dinner, Laundry"
                     value={chargeDescription}
                     onChange={(e) => setChargeDescription(e.target.value)}
                   />
                 </div>
+                <div className="space-y-2">
+                  <Label>How is this charge being settled?</Label>
+                  <Select value={chargePaymentMethod} onValueChange={setChargePaymentMethod}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select settlement method" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="cash">Cash (paid now — not added to Bill Balance)</SelectItem>
+                      <SelectItem value="pos">POS (paid now — not added to Bill Balance)</SelectItem>
+                      <SelectItem value="card">Card (paid now — not added to Bill Balance)</SelectItem>
+                      <SelectItem value="bank_transfer">Bank Transfer (paid now — not added to Bill Balance)</SelectItem>
+                      <SelectItem value="city_ledger">City Ledger (bill to account — adds to Bill Balance)</SelectItem>
+                      <SelectItem value="deferred">Defer / Not yet paid (adds to Bill Balance)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                {(chargePaymentMethod === 'city_ledger' || chargePaymentMethod === 'deferred') && (
+                  <p className="text-xs text-orange-600 bg-orange-50 border border-orange-200 rounded px-3 py-2">
+                    This charge will be added to the Bill Balance (Unpaid).
+                  </p>
+                )}
+                {chargePaymentMethod !== '' && chargePaymentMethod !== 'city_ledger' && (
+                  <p className="text-xs text-green-600 bg-green-50 border border-green-200 rounded px-3 py-2">
+                    Paid on the spot — this will be recorded in the folio but will NOT affect the Bill Balance.
+                  </p>
+                )}
               </TabsContent>
-              
+
+              {/* ── RECORD PAYMENT tab ── */}
               <TabsContent value="payment" className="space-y-4 mt-4">
+                <p className="text-sm text-muted-foreground">Record a payment that reduces the current Bill Balance (Unpaid).</p>
                 <div className="space-y-2">
                   <Label>Payment Amount</Label>
                   <Input
                     type="number"
+                    min="0"
                     placeholder="Enter amount"
                     value={chargeAmount}
                     onChange={(e) => setChargeAmount(e.target.value)}
@@ -368,10 +514,10 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="cash">Cash</SelectItem>
+                      <SelectItem value="pos">POS</SelectItem>
                       <SelectItem value="card">Card</SelectItem>
                       <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
                       <SelectItem value="cheque">Cheque</SelectItem>
-                      <SelectItem value="city_ledger">City Ledger</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -381,6 +527,42 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
             <Button onClick={handleAddCharge} className="w-full">
               {chargeType === 'payment' ? 'Record Payment' : 'Add Charge'}
             </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Charge Dialog */}
+      <Dialog open={editChargeModalOpen} onOpenChange={(o) => { if (!o) { setEditChargeModalOpen(false); setEditingCharge(null) } }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Edit Charge</DialogTitle>
+            <DialogDescription>Update the amount or description for this folio entry.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label>Amount</Label>
+              <Input
+                type="number"
+                min="0"
+                placeholder="Enter amount"
+                value={editChargeAmount}
+                onChange={(e) => setEditChargeAmount(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Description</Label>
+              <Input
+                placeholder="Charge description"
+                value={editChargeDescription}
+                onChange={(e) => setEditChargeDescription(e.target.value)}
+              />
+            </div>
+            <div className="flex gap-3 justify-end">
+              <Button variant="outline" onClick={() => { setEditChargeModalOpen(false); setEditingCharge(null) }}>Cancel</Button>
+              <Button onClick={handleUpdateCharge} disabled={editChargeLoading}>
+                {editChargeLoading ? 'Saving...' : 'Save Changes'}
+              </Button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>
@@ -457,26 +639,37 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
               <div className="space-y-2">
                 {folioCharges.map((charge) => (
                   <div key={charge.id} className="flex items-start justify-between p-3 border rounded-lg hover:bg-accent/50 transition-colors">
-                    <div className="flex-1">
-                      <div className="font-medium">{charge.description}</div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-medium">{charge.description}</span>
+                        {charge.type === 'charge' && charge.paymentStatus === 'paid' && (
+                          <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200">Paid on Spot</Badge>
+                        )}
+                        {charge.type === 'charge' && charge.paymentStatus === 'pending' && charge.paymentMethod === 'city_ledger' && (
+                          <Badge variant="outline" className="text-xs bg-orange-50 text-orange-700 border-orange-200">City Ledger</Badge>
+                        )}
+                        {charge.type === 'charge' && charge.paymentStatus === 'pending' && !charge.paymentMethod && (
+                          <Badge variant="outline" className="text-xs bg-yellow-50 text-yellow-700 border-yellow-200">Pending</Badge>
+                        )}
+                        {charge.type === 'payment' && (
+                          <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200">Payment</Badge>
+                        )}
+                      </div>
                       <div className="text-xs text-muted-foreground mt-1 space-y-0.5">
-                        <div>{new Date(charge.timestamp).toLocaleString('en-GB')} · {charge.type}</div>
-                        <div>Created by {charge.createdBy}</div>
-                        {charge.paymentStatus && <div>Status: {charge.paymentStatus}</div>}
+                        <div>{new Date(charge.timestamp).toLocaleString('en-GB')} {charge.paymentMethod ? `· ${charge.paymentMethod.replace('_', ' ')}` : ''}</div>
+                        <div>By {charge.createdBy}</div>
                       </div>
                     </div>
                     <div className="flex items-center gap-3 ml-4">
-                      <div className={`font-semibold text-right min-w-[100px] ${charge.amount < 0 ? 'text-green-600' : 'text-foreground'}`}>
-                        {charge.amount < 0 ? '' : '+'}{formatNaira(charge.amount)}
+                      <div className={`font-semibold text-right min-w-[100px] ${charge.amount < 0 ? 'text-green-600' : charge.paymentStatus === 'paid' && charge.type === 'charge' ? 'text-muted-foreground' : 'text-foreground'}`}>
+                        {charge.amount < 0 ? '-' : '+'}{formatNaira(Math.abs(charge.amount))}
                       </div>
                       <div className="flex gap-1">
                         <Button
                           size="sm"
                           variant="ghost"
-                          onClick={() => {
-                            // TODO: Implement edit charge modal
-                            toast.info('Edit charge feature coming soon')
-                          }}
+                          onClick={() => openEditCharge(charge)}
+                          title="Edit charge"
                         >
                           <Edit className="h-4 w-4" />
                         </Button>
@@ -484,11 +677,8 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                           size="sm"
                           variant="ghost"
                           className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                          onClick={() => {
-                            if (confirm('Delete this charge?')) {
-                              handleDeleteCharge(charge.id, charge.amount)
-                            }
-                          }}
+                          onClick={() => handleDeleteCharge(charge.id, charge.amount)}
+                          title="Delete charge"
                         >
                           <Trash2 className="h-4 w-4" />
                         </Button>
@@ -508,50 +698,32 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="flex justify-between">
-                <span className="text-muted-foreground">Total Amount</span>
+                <span className="text-muted-foreground">Room Charge</span>
                 <span className="font-semibold">{formatNaira(booking.total_amount)}</span>
               </div>
-              
-              {/* Check if there are city ledger charges */}
-              {folioCharges.some(c => c.paymentMethod === 'city_ledger' && c.paymentStatus === 'pending') ? (
-                <>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Amount Billed (City Ledger)</span>
-                    <span className="font-semibold">
-                      {formatNaira(folioCharges.filter(c => c.paymentMethod === 'city_ledger' && c.paymentStatus === 'pending').reduce((sum, c) => sum + c.amount, 0))}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Amount Paid</span>
-                    <span className="font-semibold text-green-600">
-                      {formatNaira(booking.deposit)}
-                    </span>
-                  </div>
-                  <Separator />
-                  <div className="flex justify-between text-lg">
-                    <span className="font-semibold">Bill Balance (Unpaid)</span>
-                    <span className="font-bold text-red-600">
-                      {formatNaira(folioCharges.filter(c => c.paymentMethod === 'city_ledger' && c.paymentStatus === 'pending').reduce((sum, c) => sum + c.amount, 0) - booking.deposit)}
-                    </span>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Amount Paid</span>
-                    <span className="font-semibold text-green-600">
-                      {formatNaira(booking.deposit)}
-                    </span>
-                  </div>
-                  <Separator />
-                  <div className="flex justify-between text-lg">
-                    <span className="font-semibold">Balance</span>
-                    <span className={`font-bold ${booking.balance > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                      {formatNaira(booking.balance)}
-                    </span>
-                  </div>
-                </>
+              {paidAdditionalCharges > 0 && (
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Other Charges (Paid on Spot)</span>
+                  <span className="font-semibold text-green-600">+{formatNaira(paidAdditionalCharges)}</span>
+                </div>
               )}
+              {pendingAdditionalCharges > 0 && (
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">City Ledger / Deferred Charges</span>
+                  <span className="font-semibold text-orange-600">+{formatNaira(pendingAdditionalCharges)}</span>
+                </div>
+              )}
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Amount Paid</span>
+                <span className="font-semibold text-green-600">{formatNaira(booking.deposit)}</span>
+              </div>
+              <Separator />
+              <div className="flex justify-between text-lg">
+                <span className="font-semibold">Bill Balance (Unpaid)</span>
+                <span className={`font-bold ${totalBillBalance > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                  {formatNaira(totalBillBalance)}
+                </span>
+              </div>
             </CardContent>
           </Card>
 

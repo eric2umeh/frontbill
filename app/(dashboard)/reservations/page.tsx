@@ -10,11 +10,11 @@ import { CardContent } from '@/components/ui/card'
 import { formatNaira } from '@/lib/utils/currency'
 import { Plus, Users, Loader2 } from 'lucide-react'
 import { BulkBookingModal } from '@/components/reservations/bulk-booking-modal'
-import { NewBookingModal } from '@/components/bookings/new-booking-modal'
+import { NewReservationModal } from '@/components/reservations/new-reservation-modal'
 
 interface Reservation {
   id: string
-  booking_reference: string
+  folio_id: string
   guest_id: string
   room_id: string
   check_in: string
@@ -45,18 +45,12 @@ export default function ReservationsPage() {
     try {
       setLoading(true)
       const supabase = createClient()
-      
       if (!supabase) {
         setReservations([])
-        setLoading(false)
         return
       }
-
       const { data: { user } } = await supabase.auth.getUser()
-      if (!user) {
-        router.push('/auth/login')
-        return
-      }
+      if (!user) return
 
       const { data: profile } = await supabase
         .from('profiles')
@@ -64,74 +58,31 @@ export default function ReservationsPage() {
         .eq('id', user.id)
         .single()
 
-      if (!profile) {
-        setReservations([])
-        return
-      }
+      if (!profile?.organization_id) return
 
+      // Use single query with joins to fetch all related data at once
       const { data, error } = await supabase
         .from('bookings')
-        .select('id, booking_reference, guest_id, room_id, check_in, check_out, status, payment_status, rate_per_night, created_by, updated_by')
+        .select(`
+          id, folio_id, guest_id, room_id, check_in, check_out, status, payment_status, rate_per_night, created_by, updated_by,
+          guests:guest_id(id, name, phone),
+          rooms:room_id(id, room_number, room_type),
+          created_by_profile:profiles!created_by(full_name),
+          updated_by_profile:profiles!updated_by(full_name)
+        `)
         .eq('organization_id', profile.organization_id)
         .eq('status', 'reserved')
         .order('check_in', { ascending: true })
 
       if (error) throw error
       
-      // Fetch guests data
-      const guestIds = Array.from(new Set((data || []).map((r: any) => r.guest_id).filter(Boolean)))
-      let guestMap: { [key: string]: any } = {}
-      
-      if (guestIds.length > 0) {
-        const { data: guestsData } = await supabase
-          .from('guests')
-          .select('id, name, phone')
-          .in('id', guestIds)
-        
-        guestsData?.forEach(guest => {
-          guestMap[guest.id] = guest
-        })
-      }
-
-      // Fetch rooms data
-      const roomIds = Array.from(new Set((data || []).map((r: any) => r.room_id).filter(Boolean)))
-      let roomMap: { [key: string]: any } = {}
-      
-      if (roomIds.length > 0) {
-        const { data: roomsData } = await supabase
-          .from('rooms')
-          .select('id, room_number, room_type')
-          .in('id', roomIds)
-        
-        roomsData?.forEach(room => {
-          roomMap[room.id] = room
-        })
-      }
-      
-      // Fetch creator and updater profiles for all reservations
-      const userIds = Array.from(new Set(
-        [...(data || []).map((r: any) => r.created_by), ...(data || []).map((r: any) => r.updated_by)].filter(Boolean)
-      ))
-      let userMap: { [key: string]: string } = {}
-      
-      if (userIds.length > 0) {
-        const { data: profiles } = await supabase
-          .from('profiles')
-          .select('id, full_name')
-          .in('id', userIds)
-        
-        profiles?.forEach(profile => {
-          userMap[profile.id] = profile.full_name || 'Unknown User'
-        })
-      }
-      
-      // Add guest, room, and user data to each reservation
+      // Map data to match interface
       const reservationsWithData = (data || []).map((reservation: any) => ({
         ...reservation,
-        guests: guestMap[reservation.guest_id],
-        rooms: roomMap[reservation.room_id],
-        created_by_name: reservation.created_by ? userMap[reservation.created_by] || 'Unknown User' : 'System',
-        updated_by_name: reservation.updated_by ? userMap[reservation.updated_by] || 'Unknown User' : null
+        guests: reservation.guests ? (Array.isArray(reservation.guests) ? reservation.guests[0] : reservation.guests) : null,
+        rooms: reservation.rooms ? (Array.isArray(reservation.rooms) ? reservation.rooms[0] : reservation.rooms) : null,
+        created_by_name: reservation.created_by_profile?.full_name || 'System',
+        updated_by_name: reservation.updated_by_profile?.full_name || null,
       }))
       
       setReservations(reservationsWithData)
@@ -165,8 +116,8 @@ export default function ReservationsPage() {
 
   return (
     <div className="space-y-6">
-      <BulkBookingModal open={bulkModalOpen} onClose={() => { setBulkModalOpen(false); fetchReservations() }} />
-      <NewBookingModal open={newReservationOpen} onClose={() => { setNewReservationOpen(false); fetchReservations() }} />
+      <BulkBookingModal open={bulkModalOpen} onClose={() => setBulkModalOpen(false)} onSuccess={() => { setBulkModalOpen(false); fetchReservations() }} />
+      <NewReservationModal open={newReservationOpen} onClose={() => setNewReservationOpen(false)} onSuccess={() => { setNewReservationOpen(false); fetchReservations() }} />
       
       <div className="flex items-center justify-between">
         <div>
@@ -187,7 +138,7 @@ export default function ReservationsPage() {
 
       <EnhancedDataTable
         data={reservations}
-        searchKeys={['booking_reference', 'guests.name', 'rooms.room_number']}
+        searchKeys={['folio_id', 'guests.name', 'rooms.room_number']}
         dateField="check_in"
         filters={[
           {
@@ -202,14 +153,14 @@ export default function ReservationsPage() {
         ]}
         columns={[
           {
-            key: 'booking_reference',
-            label: 'Booking Ref',
+            key: 'folio_id',
+            label: 'Folio Ref',
             render: (res) => (
               <div 
                 className="font-mono text-sm cursor-pointer hover:text-primary"
                 onClick={() => router.push(`/reservations/${res.id}`)}
               >
-                {res.booking_reference}
+                {res.folio_id}
               </div>
             ),
           },
@@ -246,11 +197,11 @@ export default function ReservationsPage() {
             ),
           },
           {
-            key: 'check_out_date',
+            key: 'check_out',
             label: 'Check-out Date',
             render: (res) => (
               <div className="text-sm">
-                {new Date(res.check_out_date).toLocaleDateString('en-GB')}
+                {new Date(res.check_out).toLocaleDateString('en-GB')}
               </div>
             ),
           },

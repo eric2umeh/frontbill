@@ -56,6 +56,12 @@ export default function OrganizationsPage() {
       setLoading(true)
       const supabase = createClient()
       
+      if (!supabase) {
+        setOrganizations([])
+        setLoading(false)
+        return
+      }
+
       // Fetch organizations
       const { data, error } = await supabase
         .from('organizations')
@@ -105,6 +111,7 @@ export default function OrganizationsPage() {
     try {
       setSubmitting(true)
       const supabase = createClient()
+      if (!supabase) { toast.error('Database not configured'); setSubmitting(false); return }
       const { data: { user } } = await supabase.auth.getUser()
 
       const { error } = await supabase
