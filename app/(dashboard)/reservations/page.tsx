@@ -14,7 +14,7 @@ import { NewReservationModal } from '@/components/reservations/new-reservation-m
 
 interface Reservation {
   id: string
-  booking_reference: string
+  folio_id: string
   guest_id: string
   room_id: string
   check_in: string
@@ -71,7 +71,7 @@ export default function ReservationsPage() {
 
       const { data, error } = await supabase
         .from('bookings')
-        .select('id, booking_reference, guest_id, room_id, check_in, check_out, status, payment_status, rate_per_night, created_by, updated_by')
+        .select('id, folio_id, guest_id, room_id, check_in, check_out, status, payment_status, rate_per_night, created_by, updated_by')
         .eq('organization_id', profile.organization_id)
         .eq('status', 'reserved')
         .order('check_in', { ascending: true })
@@ -187,7 +187,7 @@ export default function ReservationsPage() {
 
       <EnhancedDataTable
         data={reservations}
-        searchKeys={['booking_reference', 'guests.name', 'rooms.room_number']}
+        searchKeys={['folio_id', 'guests.name', 'rooms.room_number']}
         dateField="check_in"
         filters={[
           {
@@ -202,14 +202,14 @@ export default function ReservationsPage() {
         ]}
         columns={[
           {
-            key: 'booking_reference',
-            label: 'Booking Ref',
+            key: 'folio_id',
+            label: 'Folio Ref',
             render: (res) => (
               <div 
                 className="font-mono text-sm cursor-pointer hover:text-primary"
                 onClick={() => router.push(`/reservations/${res.id}`)}
               >
-                {res.booking_reference}
+                {res.folio_id}
               </div>
             ),
           },
