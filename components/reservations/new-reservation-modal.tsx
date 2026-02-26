@@ -9,8 +9,10 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Calendar } from '@/components/ui/calendar'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Badge } from '@/components/ui/badge'
+import { Separator } from '@/components/ui/separator'
 import { format, addDays, differenceInDays } from 'date-fns'
-import { Calendar as CalendarIcon, ChevronRight, ChevronLeft } from 'lucide-react'
+import { Calendar as CalendarIcon, ChevronRight, ChevronLeft, Search } from 'lucide-react'
 import { formatNaira } from '@/lib/utils/currency'
 import { toast } from 'sonner'
 
@@ -31,10 +33,17 @@ const toLocalDateStr = (date: Date) => {
   return `${y}-${m}-${d}`
 }
 
+const today = () => {
+  const d = new Date()
+  d.setHours(0, 0, 0, 0)
+  return d
+}
+
 export function NewReservationModal({ open, onClose, onSuccess }: NewReservationModalProps) {
   const [step, setStep] = useState(1)
   const [loading, setLoading] = useState(false)
   const [orgId, setOrgId] = useState('')
+  const [currentUserId, setCurrentUserId] = useState('')
 
   // Step 1: Guest
   const [fullName, setFullName] = useState('')
@@ -58,12 +67,21 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
   const [selectedRoomType, setSelectedRoomType] = useState('')
   const [selectedRoom, setSelectedRoom] = useState<any>(null)
   const [pricePerNight, setPricePerNight] = useState(0)
-  const [customPrice, setCustomPrice] = useState(0)
-  const [paymentStatus, setPaymentStatus] = useState<'paid' | 'unpaid'>('unpaid')
-  const [paymentMethod, setPaymentMethod] = useState('cash')
+  const [customPrice, setCustomPrice] = useState<number | ''>('')
+  // Payment
+  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'pos' | 'card' | 'bank_transfer' | 'city_ledger'>('cash')
+  const [paymentStatus, setPaymentStatus] = useState<'paid' | 'partial' | 'unpaid'>('unpaid')
+  const [partialAmount, setPartialAmount] = useState<number | ''>('')
+  // City Ledger sub-fields
+  const [ledgerType, setLedgerType] = useState<'individual' | 'organization'>('individual')
+  const [ledgerSearch, setLedgerSearch] = useState('')
+  const [ledgerResults, setLedgerResults] = useState<any[]>([])
+  const [ledgerSearchOpen, setLedgerSearchOpen] = useState(false)
+  const [selectedLedger, setSelectedLedger] = useState<any>(null)
 
   useEffect(() => {
     if (open) loadData()
+    else resetForm()
   }, [open])
 
   const loadData = async () => {
@@ -71,6 +89,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
       const supabase = createClient()
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
+      setCurrentUserId(user.id)
       const { data: profile } = await supabase.from('profiles').select('organization_id').eq('id', user.id).single()
       if (!profile?.organization_id) return
       setOrgId(profile.organization_id)
@@ -86,6 +105,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
     }
   }
 
+  // Guest search in Step 1
   const handleGuestSearch = (value: string) => {
     setFullName(value)
     setGuestId('')
@@ -94,29 +114,71 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
       setFilteredGuests(filtered)
       setGuestSearchOpen(filtered.length > 0)
     } else {
-      setFilteredGuests([]); setGuestSearchOpen(false)
+      setFilteredGuests([])
+      setGuestSearchOpen(false)
     }
   }
 
   const selectGuest = (guest: any) => {
-    setGuestId(guest.id); setFullName(guest.name)
-    setPhone(guest.phone || ''); setEmail(guest.email || ''); setAddress(guest.address || '')
+    setGuestId(guest.id)
+    setFullName(guest.name)
+    setPhone(guest.phone || '')
+    setEmail(guest.email || '')
+    setAddress(guest.address || '')
     setGuestSearchOpen(false)
   }
 
+  // City Ledger account search
+  const searchLedger = async (term: string) => {
+    setLedgerSearch(term)
+    setSelectedLedger(null)
+    if (!term.trim()) { setLedgerResults([]); setLedgerSearchOpen(false); return }
+    const supabase = createClient()
+    if (ledgerType === 'individual') {
+      const filtered = guests.filter(g =>
+        g.name.toLowerCase().includes(term.toLowerCase()) || (g.phone || '').includes(term)
+      )
+      setLedgerResults(filtered.slice(0, 8))
+      setLedgerSearchOpen(filtered.length > 0)
+    } else {
+      // Search city_ledger_accounts for organization type
+      const { data: cla } = await supabase
+        .from('city_ledger_accounts')
+        .select('id, account_name, contact_phone, balance')
+        .eq('organization_id', orgId)
+        .eq('account_type', 'organization')
+        .ilike('account_name', `%${term}%`)
+        .limit(8)
+      setLedgerResults(cla || [])
+      setLedgerSearchOpen((cla || []).length > 0)
+    }
+  }
+
+  const selectLedger = (acct: any) => {
+    setSelectedLedger(acct)
+    setLedgerSearch(acct.account_name || acct.name)
+    setLedgerSearchOpen(false)
+  }
+
+  // Dates
   const handleCheckInChange = (date: Date | undefined) => {
     if (!date) return
-    setCheckInDate(date); setCheckInOpen(false); setCheckOutDate(undefined); setNights(0)
+    setCheckInDate(date)
+    setCheckInOpen(false)
+    setCheckOutDate(undefined)
+    setNights(0)
   }
 
   const handleCheckOutChange = (date: Date | undefined) => {
     if (!date || !checkInDate) return
-    setCheckOutDate(date); setCheckOutOpen(false)
+    setCheckOutDate(date)
+    setCheckOutOpen(false)
     setNights(Math.max(0, differenceInDays(date, checkInDate)))
   }
 
   const handleNightsChange = (value: number) => {
-    const n = Math.max(1, value || 1); setNights(n)
+    const n = Math.max(1, value || 1)
+    setNights(n)
     if (checkInDate) setCheckOutDate(addDays(checkInDate, n))
   }
 
@@ -134,14 +196,26 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
     return false
   }
 
+  const effectiveRate = (customPrice !== '' ? Number(customPrice) : pricePerNight) || 0
+  const totalAmount = effectiveRate * nights
+  const depositAmount = paymentStatus === 'paid' ? totalAmount : paymentStatus === 'partial' ? (Number(partialAmount) || 0) : 0
+  const balanceAmount = totalAmount - depositAmount
+
   const handleSubmit = async () => {
+    if (!checkInDate || !checkOutDate) { toast.error('Dates required'); return }
+    if (!selectedRoom) { toast.error('Room required'); return }
+    if (paymentMethod === 'city_ledger' && !selectedLedger) {
+      toast.error('Please select a city ledger account')
+      return
+    }
+    if (paymentStatus === 'partial' && (!partialAmount || Number(partialAmount) <= 0)) {
+      toast.error('Please enter a partial payment amount')
+      return
+    }
+
     try {
       setLoading(true)
-      if (!checkInDate || !checkOutDate) { toast.error('Dates required'); return }
-      if (!selectedRoom) { toast.error('Room required'); return }
-
       const supabase = createClient()
-      const { data: { user } } = await supabase.auth.getUser()
 
       let finalGuestId = guestId
       if (!guestId) {
@@ -153,10 +227,9 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
         finalGuestId = newGuest.id
       }
 
-      const effectiveRate = customPrice > 0 ? customPrice : pricePerNight
-      const total = effectiveRate * nights
-      const isPaid = paymentStatus === 'paid'
+      const isCityLedger = paymentMethod === 'city_ledger'
       const folioId = `RES-${Date.now().toString(36).toUpperCase()}`
+      const bookingPaymentStatus = paymentStatus === 'paid' ? 'paid' : paymentStatus === 'partial' ? 'partial' : 'pending'
 
       const { data: booking, error: be } = await supabase
         .from('bookings')
@@ -169,17 +242,17 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
           check_out: toLocalDateStr(checkOutDate),
           number_of_nights: nights,
           rate_per_night: effectiveRate,
-          total_amount: total,
-          deposit: isPaid ? total : 0,
-          balance: isPaid ? 0 : total,
-          payment_status: isPaid ? 'paid' : 'pending',
+          total_amount: totalAmount,
+          deposit: depositAmount,
+          balance: balanceAmount,
+          payment_status: bookingPaymentStatus,
           status: 'reserved',
-          created_by: user?.id,
+          created_by: currentUserId,
+          notes: isCityLedger ? `City Ledger: ${selectedLedger?.account_name || selectedLedger?.name}` : null,
         }])
         .select().single()
       if (be) throw be
 
-      // Mark room as reserved
       await supabase.from('rooms').update({ status: 'reserved' }).eq('id', selectedRoom.id)
 
       // Record transaction
@@ -189,14 +262,22 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
         transaction_id: `TXN-${Date.now().toString(36).toUpperCase()}`,
         guest_name: fullName,
         room: selectedRoom.room_number,
-        amount: total,
-        payment_method: isPaid ? paymentMethod : 'pending',
-        status: isPaid ? 'completed' : 'pending',
-        description: `Reservation created - Ref ${folioId}`,
-        received_by: user?.id,
+        amount: totalAmount,
+        payment_method: isCityLedger ? 'city_ledger' : paymentMethod,
+        status: bookingPaymentStatus,
+        description: `Reservation — ${folioId}`,
+        received_by: currentUserId,
       }])
 
-      toast.success(`Reservation created! Ref: ${folioId}`)
+      // If city ledger organization, update their balance
+      if (isCityLedger && ledgerType === 'organization' && selectedLedger?.id) {
+        await supabase
+          .from('city_ledger_accounts')
+          .update({ balance: (selectedLedger.balance || 0) + balanceAmount })
+          .eq('id', selectedLedger.id)
+      }
+
+      toast.success(`Reservation created — Ref: ${folioId}`)
       onSuccess?.()
       onClose()
       resetForm()
@@ -211,12 +292,11 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
     setStep(1)
     setFullName(''); setPhone(''); setEmail(''); setAddress(''); setGuestId('')
     setCheckInDate(undefined); setCheckOutDate(undefined); setNights(0)
-    setSelectedRoomType(''); setSelectedRoom(null); setPricePerNight(0); setCustomPrice(0)
-    setPaymentStatus('unpaid'); setPaymentMethod('cash')
+    setSelectedRoomType(''); setSelectedRoom(null); setPricePerNight(0); setCustomPrice('')
+    setPaymentMethod('cash'); setPaymentStatus('unpaid'); setPartialAmount('')
+    setLedgerType('individual'); setLedgerSearch(''); setLedgerResults([])
+    setSelectedLedger(null); setLedgerSearchOpen(false)
   }
-
-  const effectiveRate = customPrice > 0 ? customPrice : pricePerNight
-  const totalAmount = effectiveRate * nights
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
@@ -224,13 +304,20 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
         <DialogHeader>
           <DialogTitle>New Reservation — Step {step} of 3</DialogTitle>
           <DialogDescription>
-            {step === 1 ? 'Enter guest information' : step === 2 ? 'Select stay dates' : 'Choose room and payment status'}
+            {step === 1 ? 'Enter guest information' : step === 2 ? 'Select stay dates (today or future only)' : 'Choose room and payment details'}
           </DialogDescription>
         </DialogHeader>
 
-        {/* Step 1: Guest */}
+        {/* Step indicator */}
+        <div className="flex items-center gap-2 pb-2">
+          {[1,2,3].map(s => (
+            <div key={s} className={`flex-1 h-1.5 rounded-full transition-colors ${s <= step ? 'bg-primary' : 'bg-muted'}`} />
+          ))}
+        </div>
+
+        {/* ── STEP 1: Guest ── */}
         {step === 1 && (
-          <div className="space-y-4 py-4">
+          <div className="space-y-4 py-2">
             <div className="space-y-2">
               <Label>Full Name *</Label>
               <div className="relative">
@@ -251,6 +338,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
                   </div>
                 )}
               </div>
+              {guestId && <p className="text-xs text-green-600">Existing guest selected: <strong>{fullName}</strong></p>}
               {!guestId && fullName.trim() && <p className="text-xs text-amber-600">New guest will be created: <strong>{fullName}</strong></p>}
             </div>
             <div className="space-y-2">
@@ -268,9 +356,9 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
           </div>
         )}
 
-        {/* Step 2: Dates */}
+        {/* ── STEP 2: Dates ── */}
         {step === 2 && (
-          <div className="space-y-4 py-4">
+          <div className="space-y-4 py-2">
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>Check-in *</Label>
@@ -282,7 +370,13 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="w-auto p-0">
-                    <Calendar mode="single" selected={checkInDate} onSelect={handleCheckInChange} initialFocus />
+                    <Calendar
+                      mode="single"
+                      selected={checkInDate}
+                      onSelect={handleCheckInChange}
+                      disabled={(d) => d < today()}
+                      initialFocus
+                    />
                   </PopoverContent>
                 </Popover>
               </div>
@@ -296,37 +390,45 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="w-auto p-0">
-                    <Calendar mode="single" selected={checkOutDate} onSelect={handleCheckOutChange} disabled={(d) => checkInDate ? d <= checkInDate : false} initialFocus />
+                    <Calendar
+                      mode="single"
+                      selected={checkOutDate}
+                      onSelect={handleCheckOutChange}
+                      disabled={(d) => checkInDate ? d <= checkInDate : d < today()}
+                      initialFocus
+                    />
                   </PopoverContent>
                 </Popover>
               </div>
             </div>
             <div className="space-y-2">
               <Label>Number of Nights</Label>
-              <Input type="number" min={1} value={nights || ''} onChange={(e) => handleNightsChange(parseInt(e.target.value))} placeholder="e.g., 2" />
+              <Input
+                type="number"
+                min={1}
+                value={nights || ''}
+                onChange={(e) => handleNightsChange(parseInt(e.target.value))}
+                placeholder="e.g., 2"
+              />
             </div>
             {checkInDate && checkOutDate && (
-              <div className="p-3 rounded-lg bg-muted text-sm">
-                <span className="text-muted-foreground">Duration: </span>
-                <span className="font-semibold">{nights} night(s)</span>
-                <span className="text-muted-foreground"> · Check-in: </span>
-                <span className="font-semibold">{format(checkInDate, 'EEE, dd MMM yyyy')}</span>
-                <span className="text-muted-foreground"> · Check-out: </span>
-                <span className="font-semibold">{format(checkOutDate, 'EEE, dd MMM yyyy')}</span>
+              <div className="p-3 rounded-lg bg-muted text-sm space-y-1">
+                <div><span className="text-muted-foreground">Duration: </span><span className="font-semibold">{nights} night(s)</span></div>
+                <div><span className="text-muted-foreground">Check-in: </span><span className="font-semibold">{format(checkInDate, 'EEE, dd MMM yyyy')}</span></div>
+                <div><span className="text-muted-foreground">Check-out: </span><span className="font-semibold">{format(checkOutDate, 'EEE, dd MMM yyyy')}</span></div>
               </div>
             )}
           </div>
         )}
 
-        {/* Step 3: Room & Payment */}
+        {/* ── STEP 3: Room + Payment ── */}
         {step === 3 && (
-          <div className="space-y-4 py-4">
+          <div className="space-y-4 py-2">
+            {/* Room selection */}
             <div className="space-y-2">
               <Label>Room Type *</Label>
               <Select value={selectedRoomType} onValueChange={handleRoomTypeSelect}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select room type" />
-                </SelectTrigger>
+                <SelectTrigger><SelectValue placeholder="Select room type" /></SelectTrigger>
                 <SelectContent>
                   {ROOM_TYPES.map(rt => {
                     const count = rooms.filter(r => r.room_type === rt).length
@@ -348,9 +450,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
                     const r = rooms.find(x => x.id === id)
                     if (r) { setSelectedRoom(r); setPricePerNight(r.price_per_night) }
                   }}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select room" />
-                    </SelectTrigger>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
                       {rooms.filter(r => r.room_type === selectedRoomType).map(r => (
                         <SelectItem key={r.id} value={r.id}>Room {r.room_number}</SelectItem>
@@ -359,60 +459,143 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <Label>Rate/Night (auto)</Label>
+                  <Label>Rate / Night</Label>
                   <Input value={formatNaira(pricePerNight)} readOnly className="bg-muted" />
                 </div>
               </div>
             )}
 
             <div className="space-y-2">
-              <Label>Custom Rate (optional)</Label>
-              <Input type="number" placeholder="Leave blank to use room rate" value={customPrice || ''} onChange={(e) => setCustomPrice(Number(e.target.value))} />
+              <Label>Custom Rate (optional — overrides room rate)</Label>
+              <Input
+                type="number"
+                placeholder="Leave blank to use room rate"
+                value={customPrice}
+                onChange={(e) => setCustomPrice(e.target.value === '' ? '' : Number(e.target.value))}
+              />
             </div>
 
+            <Separator />
+
+            {/* Payment Method */}
             <div className="space-y-2">
-              <Label>Payment Status *</Label>
-              <Select value={paymentStatus} onValueChange={(v: any) => setPaymentStatus(v)}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
+              <Label>Payment Method</Label>
+              <Select value={paymentMethod} onValueChange={(v: any) => { setPaymentMethod(v); if (v !== 'city_ledger') setSelectedLedger(null) }}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="unpaid">Unpaid (pay at check-in)</SelectItem>
-                  <SelectItem value="paid">Paid in advance</SelectItem>
+                  <SelectItem value="cash">Cash</SelectItem>
+                  <SelectItem value="pos">POS</SelectItem>
+                  <SelectItem value="card">Card</SelectItem>
+                  <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
+                  <SelectItem value="city_ledger">City Ledger (bill to account)</SelectItem>
                 </SelectContent>
               </Select>
             </div>
 
-            {paymentStatus === 'paid' && (
-              <div className="space-y-2">
-                <Label>Payment Method</Label>
-                <Select value={paymentMethod} onValueChange={setPaymentMethod}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="cash">Cash</SelectItem>
-                    <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
-                    <SelectItem value="card">Card</SelectItem>
-                    <SelectItem value="pos">POS</SelectItem>
-                  </SelectContent>
-                </Select>
+            {/* City Ledger account picker */}
+            {paymentMethod === 'city_ledger' && (
+              <div className="space-y-3 p-3 border rounded-lg bg-muted/30">
+                <Label className="text-sm font-medium">City Ledger Account</Label>
+                <div className="flex gap-2">
+                  <Button
+                    type="button" size="sm"
+                    variant={ledgerType === 'individual' ? 'default' : 'outline'}
+                    onClick={() => { setLedgerType('individual'); setLedgerSearch(''); setLedgerResults([]); setSelectedLedger(null) }}
+                  >Individual</Button>
+                  <Button
+                    type="button" size="sm"
+                    variant={ledgerType === 'organization' ? 'default' : 'outline'}
+                    onClick={() => { setLedgerType('organization'); setLedgerSearch(''); setLedgerResults([]); setSelectedLedger(null) }}
+                  >Organization</Button>
+                </div>
+                <div className="relative">
+                  <Input
+                    placeholder={`Search ${ledgerType === 'individual' ? 'guest' : 'organization'} from database...`}
+                    value={ledgerSearch}
+                    onChange={(e) => searchLedger(e.target.value)}
+                    onBlur={() => setTimeout(() => setLedgerSearchOpen(false), 150)}
+                  />
+                  {ledgerSearchOpen && ledgerResults.length > 0 && (
+                    <div className="absolute top-full left-0 right-0 mt-1 bg-background border rounded-md shadow-lg z-50 max-h-48 overflow-y-auto">
+                      {ledgerResults.map((r: any) => (
+                        <button
+                          key={r.id}
+                          className="w-full text-left px-4 py-2 hover:bg-accent border-b last:border-b-0 text-sm"
+                          onMouseDown={(e) => { e.preventDefault(); selectLedger(r) }}
+                        >
+                          <div className="font-medium">{r.account_name || r.name}</div>
+                          <div className="text-xs text-muted-foreground">{r.contact_phone || r.phone}</div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                {selectedLedger && (
+                  <div className="flex items-center justify-between p-2 rounded border bg-background text-sm">
+                    <div>
+                      <span className="font-medium">{selectedLedger.account_name || selectedLedger.name}</span>
+                      {selectedLedger.balance !== undefined && (
+                        <span className="ml-2 text-xs text-muted-foreground">Balance: {formatNaira(selectedLedger.balance)}</span>
+                      )}
+                    </div>
+                    <Button variant="ghost" size="sm" className="text-destructive h-6 text-xs" onClick={() => { setSelectedLedger(null); setLedgerSearch('') }}>Remove</Button>
+                  </div>
+                )}
+                <p className="text-xs text-orange-600">City Ledger is billed to the account — reservation balance will be outstanding until paid.</p>
               </div>
             )}
 
+            {/* Payment Status */}
+            <div className="space-y-2">
+              <Label>Payment Status</Label>
+              <Select value={paymentStatus} onValueChange={(v: any) => setPaymentStatus(v)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="unpaid">Unpaid — pay at check-in</SelectItem>
+                  <SelectItem value="partial">Partial payment now</SelectItem>
+                  <SelectItem value="paid">Fully paid in advance</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {paymentStatus === 'partial' && (
+              <div className="space-y-2">
+                <Label>Part Payment Amount</Label>
+                <Input
+                  type="number"
+                  min={1}
+                  placeholder="Enter amount paid now"
+                  value={partialAmount}
+                  onChange={(e) => setPartialAmount(e.target.value === '' ? '' : Number(e.target.value))}
+                />
+              </div>
+            )}
+
+            {/* Summary */}
             {selectedRoom && nights > 0 && (
-              <div className="p-4 rounded-lg bg-muted space-y-2 text-sm">
+              <div className="p-4 rounded-lg bg-muted space-y-2 text-sm border">
                 <div className="flex justify-between">
-                  <span className="text-muted-foreground">Room {selectedRoom.room_number} · {nights} night(s)</span>
-                  <span>{formatNaira(effectiveRate)} / night</span>
+                  <span className="text-muted-foreground">Room {selectedRoom.room_number} · {nights} night(s) @ {formatNaira(effectiveRate)}/night</span>
                 </div>
-                <div className="flex justify-between font-semibold text-base border-t pt-2">
+                <div className="flex justify-between font-semibold">
                   <span>Total Amount</span>
                   <span>{formatNaira(totalAmount)}</span>
                 </div>
-                <div className={`flex justify-between text-xs font-medium ${paymentStatus === 'paid' ? 'text-green-600' : 'text-orange-600'}`}>
-                  <span>Payment Status</span>
-                  <span>{paymentStatus === 'paid' ? 'Paid in advance' : 'To be paid at check-in'}</span>
+                {depositAmount > 0 && (
+                  <div className="flex justify-between text-green-700">
+                    <span>Amount Paid</span>
+                    <span>{formatNaira(depositAmount)}</span>
+                  </div>
+                )}
+                {balanceAmount > 0 && (
+                  <div className="flex justify-between text-orange-700 font-medium border-t pt-2">
+                    <span>Balance Due</span>
+                    <span>{formatNaira(balanceAmount)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between items-center pt-1">
+                  <span className="text-muted-foreground">Payment Method</span>
+                  <Badge variant="outline">{paymentMethod.replace('_', ' ')}</Badge>
                 </div>
               </div>
             )}
