@@ -9,10 +9,10 @@ import { createClient } from '@/lib/supabase/client'
 
 interface Payment {
   id: string
-  guest_name: string
+  description: string
   amount: number
-  method: string
-  payment_date: string
+  payment_status: string
+  created_at: string
 }
 
 const methodColors = {
@@ -56,10 +56,10 @@ export function RecentPayments() {
       }
 
       const { data, error } = await supabase
-        .from('payments')
-        .select('*')
-        .eq('organization_id', profile.organization_id)
-        .order('payment_date', { ascending: false })
+        .from('folio_charges')
+        .select('id, description, amount, payment_status, created_at')
+        .eq('payment_status', 'paid')
+        .order('created_at', { ascending: false })
         .limit(5)
 
       if (error) throw error
@@ -88,14 +88,14 @@ export function RecentPayments() {
           payments.map(p => (
             <div key={p.id} className="flex justify-between items-center border-b pb-3 last:border-0">
               <div>
-                <p className="font-medium text-sm">{p.guest_name}</p>
-                <p className="text-xs text-muted-foreground">{new Date(p.payment_date).toLocaleDateString('en-GB')}</p>
+                <p className="font-medium text-sm">{p.description}</p>
+                <p className="text-xs text-muted-foreground">{new Date(p.created_at).toLocaleDateString('en-GB')}</p>
               </div>
               <div className="flex gap-3 items-center">
-                <Badge className={methodColors[p.method as keyof typeof methodColors]}>
-                  {p.method.replace('_', ' ').toUpperCase()}
+                <Badge variant={p.payment_status === 'paid' ? 'default' : 'secondary'}>
+                  {p.payment_status.replace('_', ' ').toUpperCase()}
                 </Badge>
-                <p className="font-semibold text-green-600">{formatNaira(p.amount)}</p>
+                <p className="font-semibold text-green-600">{formatNaira(Math.abs(p.amount))}</p>
               </div>
             </div>
           ))

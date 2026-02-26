@@ -17,13 +17,17 @@ interface Reservation {
   booking_reference: string
   guest_id: string
   room_id: string
-  check_in_date: string
-  check_out_date: string
+  check_in: string
+  check_out: string
   status: string
   payment_status: string
   rate_per_night: number
-  guests?: { full_name: string; phone: string }
-  rooms?: { number: string; type: string }
+  created_by?: string
+  created_by_name?: string
+  updated_by?: string
+  updated_by_name?: string
+  guests?: { name: string; phone: string }
+  rooms?: { room_number: string; room_type: string }
 }
 
 export default function ReservationsPage() {
@@ -67,13 +71,70 @@ export default function ReservationsPage() {
 
       const { data, error } = await supabase
         .from('bookings')
-        .select('*, guests(full_name, phone), rooms(number, type)')
+        .select('id, booking_reference, guest_id, room_id, check_in, check_out, status, payment_status, rate_per_night, created_by, updated_by')
         .eq('organization_id', profile.organization_id)
         .eq('status', 'reserved')
-        .order('check_in_date', { ascending: true })
+        .order('check_in', { ascending: true })
 
       if (error) throw error
-      setReservations(data || [])
+      
+      // Fetch guests data
+      const guestIds = Array.from(new Set((data || []).map((r: any) => r.guest_id).filter(Boolean)))
+      let guestMap: { [key: string]: any } = {}
+      
+      if (guestIds.length > 0) {
+        const { data: guestsData } = await supabase
+          .from('guests')
+          .select('id, name, phone')
+          .in('id', guestIds)
+        
+        guestsData?.forEach(guest => {
+          guestMap[guest.id] = guest
+        })
+      }
+
+      // Fetch rooms data
+      const roomIds = Array.from(new Set((data || []).map((r: any) => r.room_id).filter(Boolean)))
+      let roomMap: { [key: string]: any } = {}
+      
+      if (roomIds.length > 0) {
+        const { data: roomsData } = await supabase
+          .from('rooms')
+          .select('id, room_number, room_type')
+          .in('id', roomIds)
+        
+        roomsData?.forEach(room => {
+          roomMap[room.id] = room
+        })
+      }
+      
+      // Fetch creator and updater profiles for all reservations
+      const userIds = Array.from(new Set(
+        [...(data || []).map((r: any) => r.created_by), ...(data || []).map((r: any) => r.updated_by)].filter(Boolean)
+      ))
+      let userMap: { [key: string]: string } = {}
+      
+      if (userIds.length > 0) {
+        const { data: profiles } = await supabase
+          .from('profiles')
+          .select('id, full_name')
+          .in('id', userIds)
+        
+        profiles?.forEach(profile => {
+          userMap[profile.id] = profile.full_name || 'Unknown User'
+        })
+      }
+      
+      // Add guest, room, and user data to each reservation
+      const reservationsWithData = (data || []).map((reservation: any) => ({
+        ...reservation,
+        guests: guestMap[reservation.guest_id],
+        rooms: roomMap[reservation.room_id],
+        created_by_name: reservation.created_by ? userMap[reservation.created_by] || 'Unknown User' : 'System',
+        updated_by_name: reservation.updated_by ? userMap[reservation.updated_by] || 'Unknown User' : null
+      }))
+      
+      setReservations(reservationsWithData)
     } catch (error: any) {
       console.error('Error fetching reservations:', error)
       setReservations([])
@@ -126,8 +187,8 @@ export default function ReservationsPage() {
 
       <EnhancedDataTable
         data={reservations}
-        searchKeys={['booking_reference', 'guests.full_name', 'rooms.number']}
-        dateField="check_in_date"
+        searchKeys={['booking_reference', 'guests.name', 'rooms.room_number']}
+        dateField="check_in"
         filters={[
           {
             key: 'payment_status',
@@ -160,7 +221,7 @@ export default function ReservationsPage() {
                 className="cursor-pointer hover:text-primary"
                 onClick={() => router.push(`/reservations/${res.id}`)}
               >
-                <div className="font-medium">{res.guests?.full_name}</div>
+                <div className="font-medium">{res.guests?.name}</div>
                 <div className="text-xs text-muted-foreground">{res.guests?.phone}</div>
               </div>
             ),
@@ -170,17 +231,17 @@ export default function ReservationsPage() {
             label: 'Room',
             render: (res) => (
               <div className="cursor-pointer" onClick={() => router.push(`/reservations/${res.id}`)}>
-                <div className="font-medium">Room {res.rooms?.number}</div>
-                <div className="text-xs text-muted-foreground">{res.rooms?.type}</div>
+                <div className="font-medium">Room {res.rooms?.room_number}</div>
+                <div className="text-xs text-muted-foreground">{res.rooms?.room_type}</div>
               </div>
             ),
           },
           {
-            key: 'check_in_date',
+            key: 'check_in',
             label: 'Check-in Date',
             render: (res) => (
               <div className="text-sm">
-                {new Date(res.check_in_date).toLocaleDateString('en-GB')}
+                {new Date(res.check_in).toLocaleDateString('en-GB')}
               </div>
             ),
           },
@@ -203,6 +264,30 @@ export default function ReservationsPage() {
             ),
           },
           {
+            key: 'created_by_name',
+            label: 'Created By',
+            render: (res) => (
+              <div className="text-sm text-muted-foreground">
+                {res.created_by_name}
+              </div>
+            ),
+          },
+          {
+            key: 'updated_by_name',
+            label: 'Last Updated',
+            render: (res) => (
+              <div className="text-sm">
+                {res.updated_by_name ? (
+                  <div className="text-muted-foreground">
+                    {res.updated_by_name}
+                  </div>
+                ) : (
+                  <span className="text-muted-foreground">—</span>
+                )}
+              </div>
+            ),
+          },
+          {
             key: 'actions',
             label: 'Actions',
             render: (res) => (
@@ -221,7 +306,7 @@ export default function ReservationsPage() {
             <div className="space-y-3">
               <div className="flex items-start justify-between">
                 <div>
-                  <div className="font-semibold">{res.guests?.full_name}</div>
+                  <div className="font-semibold">{res.guests?.name}</div>
                   <div className="text-sm text-muted-foreground">{res.guests?.phone}</div>
                 </div>
                 <Badge variant="outline" className={paymentColors[res.payment_status]}>
@@ -231,11 +316,11 @@ export default function ReservationsPage() {
               <div className="grid grid-cols-2 gap-2 text-sm">
                 <div>
                   <div className="text-muted-foreground">Room</div>
-                  <div className="font-medium">Room {res.rooms?.number}</div>
+                  <div className="font-medium">Room {res.rooms?.room_number}</div>
                 </div>
                 <div>
                   <div className="text-muted-foreground">Check-in</div>
-                  <div className="font-medium">{new Date(res.check_in_date).toLocaleDateString('en-GB')}</div>
+                  <div className="font-medium">{new Date(res.check_in).toLocaleDateString('en-GB')}</div>
                 </div>
               </div>
             </div>

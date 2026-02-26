@@ -1,35 +1,52 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { createClient } from '@/lib/supabase/client'
+import { ArrowLeft, Plus } from 'lucide-react'
 import { useRouter } from 'next/navigation'
-import { EnhancedDataTable } from '@/components/shared/enhanced-data-table'
-import { AddOrganizationModal } from '@/components/organizations/add-organization-modal'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { CardContent } from '@/components/ui/card'
-import { formatNaira } from '@/lib/utils/currency'
-import { Building2, Plus, Loader2 } from 'lucide-react'
+import { Card, CardContent } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
+import { Textarea } from '@/components/ui/textarea'
 import { toast } from 'sonner'
+import { createClient } from '@/lib/supabase/client'
+import { formatNaira } from '@/lib/utils/currency'
+import { EnhancedDataTable } from '@/components/shared/enhanced-data-table'
+import { Badge } from '@/components/ui/badge'
+import { format } from 'date-fns'
 
 interface Organization {
   id: string
   name: string
-  type: string
-  contact_person: string
-  email: string
-  phone: string
-  balance: number
-  status: string
-  credit_limit: number
+  org_type: 'ngo' | 'government' | 'private' | 'other'
+  email?: string
+  phone?: string
+  contact_person?: string
+  address?: string
+  current_balance: number
+  created_at: string
+  created_by_name?: string
 }
 
 export default function OrganizationsPage() {
+  const router = useRouter()
   const [organizations, setOrganizations] = useState<Organization[]>([])
   const [loading, setLoading] = useState(true)
   const [addOrgModalOpen, setAddOrgModalOpen] = useState(false)
-  const router = useRouter()
-  
+
+  // Form states
+  const [formData, setFormData] = useState({
+    name: '',
+    org_type: 'ngo' as 'ngo' | 'government' | 'private' | 'other',
+    email: '',
+    phone: '',
+    contact_person: '',
+    address: '',
+  })
+  const [submitting, setSubmitting] = useState(false)
+
   useEffect(() => {
     fetchOrganizations()
   }, [])
@@ -39,186 +56,333 @@ export default function OrganizationsPage() {
       setLoading(true)
       const supabase = createClient()
       
-      if (!supabase) {
-        setOrganizations([])
-        setLoading(false)
-        return
-      }
-
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) {
-        router.push('/auth/login')
-        return
-      }
-
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('organization_id')
-        .eq('id', user.id)
-        .single()
-
-      if (!profile) {
-        setOrganizations([])
-        return
-      }
-
+      // Fetch organizations
       const { data, error } = await supabase
         .from('organizations')
-        .select('*')
-        .eq('organization_id', profile.organization_id)
+        .select('id, name, org_type, email, phone, contact_person, address, current_balance, created_at, created_by')
+        .not('name', 'like', '%Hotel%')
         .order('created_at', { ascending: false })
 
       if (error) throw error
-      setOrganizations(data || [])
+      
+      // Fetch creator profiles for all organizations
+      const creatorIds = Array.from(new Set((data || []).map(org => org.created_by).filter(Boolean)))
+      let creatorMap: { [key: string]: string } = {}
+      
+      if (creatorIds.length > 0) {
+        const { data: profiles } = await supabase
+          .from('profiles')
+          .select('id, full_name')
+          .in('id', creatorIds)
+        
+        profiles?.forEach(profile => {
+          creatorMap[profile.id] = profile.full_name || 'Unknown User'
+        })
+      }
+      
+      // Transform the data to flatten the creator name
+      const transformed = (data || []).map((org: any) => ({
+        ...org,
+        created_by_name: org.created_by ? creatorMap[org.created_by] || 'Unknown User' : 'System'
+      }))
+      
+      setOrganizations(transformed)
     } catch (error: any) {
-      console.error('Error fetching organizations:', error)
-      setOrganizations([])
+      toast.error(error.message || 'Failed to load organizations')
     } finally {
       setLoading(false)
     }
   }
-  
-  const typeColors = {
-    government: 'bg-blue-500/10 text-blue-700 border-blue-200',
-    private: 'bg-green-500/10 text-green-700 border-green-200',
-    ngo: 'bg-purple-500/10 text-purple-700 border-purple-200',
+
+  const handleAddOrganization = async (e: React.FormEvent) => {
+    e.preventDefault()
+    
+    if (!formData.name.trim()) {
+      toast.error('Please fill in organization name')
+      return
+    }
+
+    try {
+      setSubmitting(true)
+      const supabase = createClient()
+      const { data: { user } } = await supabase.auth.getUser()
+
+      const { error } = await supabase
+        .from('organizations')
+        .insert([{
+          name: formData.name,
+          org_type: formData.org_type,
+          email: formData.email || null,
+          phone: formData.phone || null,
+          contact_person: formData.contact_person || null,
+          address: formData.address || null,
+          current_balance: 0,
+          created_by: user?.id,
+        }])
+
+      if (error) throw error
+
+      toast.success(`${formData.org_type.charAt(0).toUpperCase() + formData.org_type.slice(1)} "${formData.name}" created successfully`)
+      setFormData({ name: '', org_type: 'ngo', email: '', phone: '', contact_person: '', address: '' })
+      setAddOrgModalOpen(false)
+      fetchOrganizations()
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to create organization')
+    } finally {
+      setSubmitting(false)
+    }
   }
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-96">
-        <Loader2 className="h-8 w-8 animate-spin" />
-      </div>
-    )
+  const getOrgTypeLabel = (type: string) => {
+    const labels = {
+      ngo: 'NGO',
+      government: 'Government',
+      private: 'Private Company',
+      other: 'Other',
+    }
+    return labels[type as keyof typeof labels] || type
+  }
+
+  const getOrgTypeColor = (type: string) => {
+    const colors = {
+      ngo: 'bg-blue-100 text-blue-800',
+      government: 'bg-purple-100 text-purple-800',
+      private: 'bg-green-100 text-green-800',
+      other: 'bg-gray-100 text-gray-800',
+    }
+    return colors[type as keyof typeof colors] || 'bg-gray-100 text-gray-800'
   }
 
   return (
     <div className="space-y-6">
-      <AddOrganizationModal 
-        open={addOrgModalOpen} 
-        onClose={() => { setAddOrgModalOpen(false); fetchOrganizations() }}
-      />
-
+      {/* Header */}
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Organizations</h1>
-          <p className="text-muted-foreground">
-            Manage corporate, government, and NGO accounts with city ledger
-          </p>
+        <div className="flex items-center gap-4">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => router.back()}
+          >
+            <ArrowLeft className="w-4 h-4" />
+          </Button>
+          <div>
+            <h1 className="text-3xl font-bold">Organizations</h1>
+            <p className="text-muted-foreground">Manage NGOs, Government, and Private organizations for city ledger billing</p>
+          </div>
         </div>
-        <Button onClick={() => setAddOrgModalOpen(true)}>
-          <Plus className="mr-2 h-4 w-4" />
-          Add Organization
-        </Button>
+        <Dialog open={addOrgModalOpen} onOpenChange={setAddOrgModalOpen}>
+          <DialogTrigger asChild>
+            <Button>
+              <Plus className="mr-2 h-4 w-4" />
+              Add Organization
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>Create New Organization</DialogTitle>
+            </DialogHeader>
+            <form onSubmit={handleAddOrganization} className="space-y-4 max-h-[80vh] overflow-y-auto">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Organization Name *</Label>
+                  <Input
+                    placeholder="e.g., Red Cross Nigeria"
+                    value={formData.name}
+                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    required
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Organization Type *</Label>
+                  <Select value={formData.org_type} onValueChange={(value: any) => setFormData({ ...formData, org_type: value })}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="ngo">NGO</SelectItem>
+                      <SelectItem value="government">Government</SelectItem>
+                      <SelectItem value="private">Private Company</SelectItem>
+                      <SelectItem value="other">Other</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Contact Person</Label>
+                  <Input
+                    placeholder="Name of contact person"
+                    value={formData.contact_person}
+                    onChange={(e) => setFormData({ ...formData, contact_person: e.target.value })}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Email Address</Label>
+                  <Input
+                    type="email"
+                    placeholder="contact@organization.com"
+                    value={formData.email}
+                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Phone Number</Label>
+                  <Input
+                    placeholder="+234 800 000 0000"
+                    value={formData.phone}
+                    onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Address</Label>
+                <Textarea
+                  placeholder="Street address, city, state"
+                  value={formData.address}
+                  onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+                  rows={3}
+                />
+              </div>
+
+              <div className="flex gap-2 justify-end pt-4 border-t">
+                <Button
+                  variant="outline"
+                  onClick={() => setAddOrgModalOpen(false)}
+                >
+                  Cancel
+                </Button>
+                <Button disabled={submitting}>
+                  {submitting ? 'Creating...' : 'Create Organization'}
+                </Button>
+              </div>
+            </form>
+          </DialogContent>
+        </Dialog>
       </div>
 
-      <EnhancedDataTable
-        data={organizations}
-        searchKeys={['name', 'contact_person', 'email']}
-        filters={[
-          {
-            key: 'type',
-            label: 'Type',
-            options: [
-              { value: 'government', label: 'Government' },
-              { value: 'private', label: 'Private' },
-              { value: 'ngo', label: 'NGO' },
-            ],
-          },
-          {
-            key: 'status',
-            label: 'Status',
-            options: [
-              { value: 'active', label: 'Active' },
-              { value: 'inactive', label: 'Inactive' },
-            ],
-          },
-        ]}
-        columns={[
-          {
-            key: 'name',
-            label: 'Organization',
-            render: (org) => (
-              <div 
-                className="cursor-pointer hover:text-primary"
-                onClick={() => router.push(`/organizations/${org.id}`)}
-              >
-                <div className="font-semibold">{org.name}</div>
-                <div className="text-xs text-muted-foreground">{org.contact_person}</div>
-              </div>
-            ),
-          },
-          {
-            key: 'type',
-            label: 'Type',
-            render: (org) => (
-              <Badge variant="outline" className={typeColors[org.type as keyof typeof typeColors]}>
-                {org.type.toUpperCase()}
-              </Badge>
-            ),
-          },
-          {
-            key: 'email',
-            label: 'Contact',
-            render: (org) => (
-              <div className="text-sm">
-                <div>{org.email}</div>
-                <div className="text-muted-foreground">{org.phone}</div>
-              </div>
-            ),
-          },
-          {
-            key: 'balance',
-            label: 'Balance',
-            render: (org) => (
-              <div 
-                className={`font-semibold cursor-pointer ${org.balance > 0 ? 'text-green-600' : org.balance < 0 ? 'text-red-600' : ''}`}
-                onClick={() => router.push(`/organizations/${org.id}`)}
-              >
-                {org.balance < 0 ? 'Debt: ' : org.balance > 0 ? 'Credit: ' : ''}{formatNaira(Math.abs(org.balance))}
-              </div>
-            ),
-          },
-        ]}
-        renderCard={(org) => (
-          <CardContent 
-            className="p-4 cursor-pointer hover:bg-accent"
-            onClick={() => router.push(`/organizations/${org.id}`)}
-          >
-            <div className="space-y-3">
-              <div className="flex items-start justify-between">
-                <div>
-                  <div className="font-semibold flex items-center gap-2">
-                    <Building2 className="h-4 w-4" />
-                    {org.name}
-                  </div>
-                  <div className="text-sm text-muted-foreground">{org.contact_person}</div>
+      {/* Data Table */}
+      {loading ? (
+        <div className="text-center py-12">
+          <p className="text-muted-foreground">Loading organizations...</p>
+        </div>
+      ) : (
+        <EnhancedDataTable
+          data={organizations}
+          searchKeys={['name', 'email', 'contact_person', 'phone']}
+          filters={[
+            {
+              key: 'org_type',
+              label: 'Organization Type',
+              options: [
+                { value: 'ngo', label: 'NGO' },
+                { value: 'government', label: 'Government' },
+                { value: 'private', label: 'Private Company' },
+                { value: 'other', label: 'Other' },
+              ],
+            },
+          ]}
+          columns={[
+            {
+              key: 'name',
+              label: 'Name',
+              render: (org) => (
+                <div 
+                  className="cursor-pointer hover:text-primary font-medium"
+                  onClick={() => router.push(`/organizations/${org.id}`)}
+                >
+                  {org.name}
                 </div>
-                <Badge variant="outline" className={typeColors[org.type as keyof typeof typeColors]}>
-                  {org.type.toUpperCase()}
+              ),
+            },
+            {
+              key: 'org_type',
+              label: 'Type',
+              render: (org) => (
+                <Badge className={getOrgTypeColor(org.org_type)}>
+                  {getOrgTypeLabel(org.org_type)}
                 </Badge>
-              </div>
-              <div className="grid grid-cols-2 gap-2 text-sm">
+              ),
+            },
+            {
+              key: 'contact_person',
+              label: 'Contact',
+              render: (org) => (
+                <div className="text-sm">
+                  <div>{org.contact_person || '—'}</div>
+                  <div className="text-muted-foreground">{org.phone || '—'}</div>
+                </div>
+              ),
+            },
+            {
+              key: 'current_balance',
+              label: 'Balance',
+              render: (org) => (
+                <div className="font-semibold text-blue-600">
+                  {formatNaira(org.current_balance)}
+                </div>
+              ),
+            },
+            {
+              key: 'created_at',
+              label: 'Created',
+              render: (org) => (
+                <div className="text-sm">
+                  <div>{format(new Date(org.created_at), 'MMM dd, yyyy')}</div>
+                  <div className="text-muted-foreground text-xs">{org.created_by_name}</div>
+                </div>
+              ),
+            },
+          ]}
+          renderCard={(org) => (
+            <Card
+              className="cursor-pointer hover:shadow-lg transition-shadow h-full"
+              onClick={() => router.push(`/organizations/${org.id}`)}
+            >
+              <CardContent className="p-4 space-y-3">
                 <div>
-                  <div className="text-muted-foreground">Balance</div>
-                  <div className={`font-semibold ${org.balance > 0 ? 'text-green-600' : org.balance < 0 ? 'text-red-600' : ''}`}>
-                    {formatNaira(org.balance)}
+                  <div className="font-semibold text-lg">{org.name}</div>
+                  <Badge className={`mt-2 ${getOrgTypeColor(org.org_type)}`}>
+                    {getOrgTypeLabel(org.org_type)}
+                  </Badge>
+                </div>
+                {org.contact_person && (
+                  <div>
+                    <p className="text-xs text-muted-foreground">Contact Person</p>
+                    <p className="text-sm font-medium">{org.contact_person}</p>
                   </div>
+                )}
+                {org.email && (
+                  <div>
+                    <p className="text-xs text-muted-foreground">Email</p>
+                    <p className="text-sm break-all">{org.email}</p>
+                  </div>
+                )}
+                {org.phone && (
+                  <div>
+                    <p className="text-xs text-muted-foreground">Phone</p>
+                    <p className="text-sm">{org.phone}</p>
+                  </div>
+                )}
+                <div className="pt-3 border-t">
+                  <p className="text-xs text-muted-foreground">City Ledger Balance</p>
+                  <p className="text-lg font-bold text-blue-600">{formatNaira(org.current_balance)}</p>
                 </div>
-                <div>
-                  <div className="text-muted-foreground">Credit Limit</div>
-                  <div className="font-semibold">{formatNaira(org.credit_limit)}</div>
+                <div className="pt-2 text-xs text-muted-foreground">
+                  Created by {org.created_by_name}
                 </div>
-              </div>
-              <div className="pt-2 border-t text-sm text-muted-foreground">
-                <div>{org.email}</div>
-                <div>{org.phone}</div>
-              </div>
-            </div>
-          </CardContent>
-        )}
-        itemsPerPage={10}
-      />
+              </CardContent>
+            </Card>
+          )}
+          itemsPerPage={10}
+        />
+      )}
     </div>
   )
 }
