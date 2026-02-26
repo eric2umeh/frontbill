@@ -46,9 +46,9 @@ const makeEntry = (): RoomEntry => ({
   guestSearch: '', guestSearchOpen: false, filteredGuests: [],
 })
 
-interface BulkBookingModalProps { open: boolean; onClose: () => void }
+interface BulkBookingModalProps { open: boolean; onClose: () => void; onSuccess?: () => void }
 
-export function BulkBookingModal({ open, onClose }: BulkBookingModalProps) {
+export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalProps) {
   const [step, setStep] = useState(1)
   const [loading, setLoading] = useState(false)
   const [orgId, setOrgId] = useState('')
@@ -380,6 +380,7 @@ export function BulkBookingModal({ open, onClose }: BulkBookingModalProps) {
       }
 
       toast.success(`${createdCount} reservation(s) created`)
+      onSuccess?.()
       handleClose()
     } catch (err: any) {
       toast.error(err.message || 'Failed to create reservations')

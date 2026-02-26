@@ -45,12 +45,50 @@ export default function ReservationsPage() {
     try {
       setLoading(true)
       const supabase = createClient()
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('organization_id')
+        .eq('id', user.id)
+        .single()
+
+      if (!profile?.organization_id) return
+
+      // Use single query with joins to fetch all related data at once
+      const { data, error } = await supabase
+        .from('bookings')
+        .select(`
+          id, folio_id, guest_id, room_id, check_in, check_out, status, payment_status, rate_per_night, created_by, updated_by,
+          guests:guest_id(id, name, phone),
+          rooms:room_id(id, room_number, room_type),
+          created_by_profile:profiles!created_by(full_name),
+          updated_by_profile:profiles!updated_by(full_name)
+        `)
+        .eq('organization_id', profile.organization_id)
+        .eq('status', 'reserved')
+        .order('check_in', { ascending: true })
+
+      if (error) throw error
       
-      if (!supabase) {
-        setReservations([])
-        setLoading(false)
-        return
-      }
+      // Map data to match interface
+      const reservationsWithData = (data || []).map((reservation: any) => ({
+        ...reservation,
+        guests: reservation.guests ? (Array.isArray(reservation.guests) ? reservation.guests[0] : reservation.guests) : null,
+        rooms: reservation.rooms ? (Array.isArray(reservation.rooms) ? reservation.rooms[0] : reservation.rooms) : null,
+        created_by_name: reservation.created_by_profile?.full_name || 'System',
+        updated_by_name: reservation.updated_by_profile?.full_name || null,
+      }))
+      
+      setReservations(reservationsWithData)
+    } catch (error: any) {
+      console.error('Error fetching reservations:', error)
+      setReservations([])
+    } finally {
+      setLoading(false)
+    }
+  }
 
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) {
@@ -165,8 +203,8 @@ export default function ReservationsPage() {
 
   return (
     <div className="space-y-6">
-      <BulkBookingModal open={bulkModalOpen} onClose={() => { setBulkModalOpen(false); fetchReservations() }} />
-      <NewReservationModal open={newReservationOpen} onClose={() => { setNewReservationOpen(false); fetchReservations() }} />
+      <BulkBookingModal open={bulkModalOpen} onClose={() => setBulkModalOpen(false)} onSuccess={() => { setBulkModalOpen(false); fetchReservations() }} />
+      <NewReservationModal open={newReservationOpen} onClose={() => setNewReservationOpen(false)} onSuccess={() => { setNewReservationOpen(false); fetchReservations() }} />
       
       <div className="flex items-center justify-between">
         <div>
