@@ -290,14 +290,6 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
         received_by: currentUserId,
       }])
 
-      // If city ledger organization, update their balance
-      if (isCityLedger && ledgerType === 'organization' && selectedLedger?.id) {
-        await supabase
-          .from('city_ledger_accounts')
-          .update({ balance: (selectedLedger.balance || 0) + balanceAmount })
-          .eq('id', selectedLedger.id)
-      }
-
       toast.success(`Reservation created — Ref: ${folioId}`)
       onSuccess?.()
       onClose()
