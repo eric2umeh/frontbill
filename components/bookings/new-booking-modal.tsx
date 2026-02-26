@@ -221,6 +221,33 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
     try {
       setNewAccountCreating(true)
       const supabase = createClient()
+
+      // If this is an individual account AND we're coming from a guest in Step 1,
+      // check if this guest already has a city_ledger_accounts entry
+      if (ledgerTab === 'individual' && fullName.trim() === newAccountName.trim() && phone.trim() === newAccountPhone.trim()) {
+        // This is the same guest from Step 1 — check if it already exists in city_ledger_accounts
+        const { data: existing } = await supabase
+          .from('city_ledger_accounts')
+          .select('id, account_name, balance')
+          .eq('account_name', newAccountName.trim())
+          .eq('account_type', 'individual')
+          .single()
+
+        if (existing) {
+          // Link to existing account instead of creating duplicate
+          toast.success(`Linked to existing account "${existing.account_name}"`)
+          setLedgerAccount(existing.id)
+          setLedgerAccountName(existing.account_name)
+          setLedgerSearch(existing.account_name)
+          setNewAccountDialogOpen(false)
+          setNewAccountName('')
+          setNewAccountPhone('')
+          setNewAccountEmail('')
+          return
+        }
+      }
+
+      // Create new account (individual or organization)
       const { data, error } = await supabase
         .from('city_ledger_accounts')
         .insert([{

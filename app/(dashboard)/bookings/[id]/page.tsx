@@ -400,7 +400,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
 
   // Bill Balance = original room balance (from booking) + pending/city-ledger additional charges
   // Paid-on-spot charges do NOT inflate this number
-  const totalBillBalance = booking ? (booking.balance || 0) : 0
+  const totalBillBalance = booking ? (booking.balance || 0) + pendingAdditionalCharges : 0
 
   if (loading) {
     return (

@@ -265,7 +265,7 @@ export function ExtendStayModal({ open, onClose, booking }: ExtendStayModalProps
                         setPaymentMethod(method)
                         if (method !== 'city_ledger') {
                           setShowOrgSearch(false)
-                          setSelectedOrganization(null)
+                          setSelectedLedger(null)
                         }
                       }}
                     >
@@ -295,15 +295,25 @@ export function ExtendStayModal({ open, onClose, booking }: ExtendStayModalProps
                   {ledgerType === 'individual' && (
                     <Card className="bg-muted">
                       <CardContent className="p-3">
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <div className="text-sm font-medium">{booking.guestName}</div>
-                            <div className="text-sm text-muted-foreground">
-                              Balance: {formatNaira(booking.guestBalance || 0)}
+                        <button
+                          onClick={() => setSelectedLedger({ id: booking.guestId, name: booking.guestName, balance: booking.guestBalance || 0 })}
+                          className="w-full text-left hover:opacity-80 transition-opacity"
+                        >
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <div className="text-sm font-medium">{booking.guestName}</div>
+                              <div className="text-sm text-muted-foreground">
+                                Balance: {formatNaira(booking.guestBalance || 0)}
+                              </div>
                             </div>
+                            {selectedLedger?.id === booking.guestId && (
+                              <Badge variant="default">Selected</Badge>
+                            )}
+                            {!selectedLedger && (
+                              <Badge variant="secondary">Click to Select</Badge>
+                            )}
                           </div>
-                          <Badge variant="default">Current Guest</Badge>
-                        </div>
+                        </button>
                       </CardContent>
                     </Card>
                   )}
