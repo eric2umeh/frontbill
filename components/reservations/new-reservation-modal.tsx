@@ -12,7 +12,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { format, addDays, differenceInDays } from 'date-fns'
-import { Calendar as CalendarIcon, ChevronRight, ChevronLeft, Search } from 'lucide-react'
+import { Calendar as CalendarIcon, ChevronRight, ChevronLeft, Search, Plus, X, Loader2 } from 'lucide-react'
 import { formatNaira } from '@/lib/utils/currency'
 import { toast } from 'sonner'
 
@@ -78,6 +78,13 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
   const [ledgerResults, setLedgerResults] = useState<any[]>([])
   const [ledgerSearchOpen, setLedgerSearchOpen] = useState(false)
   const [selectedLedger, setSelectedLedger] = useState<any>(null)
+  // Inline new org form for city ledger
+  const [showNewLedgerOrgForm, setShowNewLedgerOrgForm] = useState(false)
+  const [newLedgerOrgName, setNewLedgerOrgName] = useState('')
+  const [newLedgerOrgEmail, setNewLedgerOrgEmail] = useState('')
+  const [newLedgerOrgPhone, setNewLedgerOrgPhone] = useState('')
+  const [newLedgerOrgAddress, setNewLedgerOrgAddress] = useState('')
+  const [creatingLedgerOrg, setCreatingLedgerOrg] = useState(false)
 
   useEffect(() => {
     if (open) loadData()
@@ -128,12 +135,11 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
     setGuestSearchOpen(false)
   }
 
-  // City Ledger account search
+  // City Ledger account search: individual → guests table, organization → organizations table
   const searchLedger = async (term: string) => {
     setLedgerSearch(term)
     setSelectedLedger(null)
     if (!term.trim()) { setLedgerResults([]); setLedgerSearchOpen(false); return }
-    const supabase = createClient()
     if (ledgerType === 'individual') {
       const filtered = guests.filter(g =>
         g.name.toLowerCase().includes(term.toLowerCase()) || (g.phone || '').includes(term)
@@ -141,23 +147,38 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
       setLedgerResults(filtered.slice(0, 8))
       setLedgerSearchOpen(filtered.length > 0)
     } else {
-      // Search city_ledger_accounts for organization type
-      const { data: cla } = await supabase
-        .from('city_ledger_accounts')
-        .select('id, account_name, contact_phone, balance')
-        .eq('organization_id', orgId)
-        .eq('account_type', 'organization')
-        .ilike('account_name', `%${term}%`)
+      // Search organizations table (same source as Organization menu)
+      const supabase = createClient()
+      const { data } = await supabase
+        .from('organizations')
+        .select('id, name, phone, email')
+        .ilike('name', `%${term}%`)
         .limit(8)
-      setLedgerResults(cla || [])
-      setLedgerSearchOpen((cla || []).length > 0)
+      setLedgerResults((data || []).map(d => ({ ...d, source: 'organizations' })))
+      setLedgerSearchOpen((data || []).length > 0)
     }
   }
 
-  const selectLedger = (acct: any) => {
-    setSelectedLedger(acct)
-    setLedgerSearch(acct.account_name || acct.name)
-    setLedgerSearchOpen(false)
+  const createNewLedgerOrg = async () => {
+    if (!newLedgerOrgName.trim()) { toast.error('Organization name required'); return }
+    setCreatingLedgerOrg(true)
+    try {
+      const supabase = createClient()
+      const { data, error } = await supabase
+        .from('organizations')
+        .insert([{ name: newLedgerOrgName.trim(), email: newLedgerOrgEmail.trim() || null, phone: newLedgerOrgPhone.trim() || null, address: newLedgerOrgAddress.trim() || null }])
+        .select().single()
+      if (error) throw error
+      setSelectedLedger({ ...data, source: 'organizations' })
+      setLedgerSearch(data.name)
+      setShowNewLedgerOrgForm(false)
+      setNewLedgerOrgName(''); setNewLedgerOrgEmail(''); setNewLedgerOrgPhone(''); setNewLedgerOrgAddress('')
+      toast.success(`Organization "${data.name}" created and selected`)
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to create organization')
+    } finally {
+      setCreatingLedgerOrg(false)
+    }
   }
 
   // Dates
@@ -296,6 +317,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
     setPaymentMethod('cash'); setPaymentStatus('unpaid'); setPartialAmount('')
     setLedgerType('individual'); setLedgerSearch(''); setLedgerResults([])
     setSelectedLedger(null); setLedgerSearchOpen(false)
+    setShowNewLedgerOrgForm(false); setNewLedgerOrgName(''); setNewLedgerOrgEmail(''); setNewLedgerOrgPhone(''); setNewLedgerOrgAddress('')
   }
 
   return (
@@ -497,46 +519,69 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
               <div className="space-y-3 p-3 border rounded-lg bg-muted/30">
                 <Label className="text-sm font-medium">City Ledger Account</Label>
                 <div className="flex gap-2">
-                  <Button
-                    type="button" size="sm"
-                    variant={ledgerType === 'individual' ? 'default' : 'outline'}
-                    onClick={() => { setLedgerType('individual'); setLedgerSearch(''); setLedgerResults([]); setSelectedLedger(null) }}
-                  >Individual</Button>
-                  <Button
-                    type="button" size="sm"
-                    variant={ledgerType === 'organization' ? 'default' : 'outline'}
-                    onClick={() => { setLedgerType('organization'); setLedgerSearch(''); setLedgerResults([]); setSelectedLedger(null) }}
-                  >Organization</Button>
+                  <Button type="button" size="sm" variant={ledgerType === 'individual' ? 'default' : 'outline'}
+                    onClick={() => { setLedgerType('individual'); setLedgerSearch(''); setLedgerResults([]); setSelectedLedger(null); setShowNewLedgerOrgForm(false) }}>Individual</Button>
+                  <Button type="button" size="sm" variant={ledgerType === 'organization' ? 'default' : 'outline'}
+                    onClick={() => { setLedgerType('organization'); setLedgerSearch(''); setLedgerResults([]); setSelectedLedger(null); setShowNewLedgerOrgForm(false) }}>Organization</Button>
                 </div>
-                <div className="relative">
-                  <Input
-                    placeholder={`Search ${ledgerType === 'individual' ? 'guest' : 'organization'} from database...`}
-                    value={ledgerSearch}
-                    onChange={(e) => searchLedger(e.target.value)}
-                    onBlur={() => setTimeout(() => setLedgerSearchOpen(false), 150)}
-                  />
-                  {ledgerSearchOpen && ledgerResults.length > 0 && (
-                    <div className="absolute top-full left-0 right-0 mt-1 bg-background border rounded-md shadow-lg z-50 max-h-48 overflow-y-auto">
-                      {ledgerResults.map((r: any) => (
-                        <button
-                          key={r.id}
-                          className="w-full text-left px-4 py-2 hover:bg-accent border-b last:border-b-0 text-sm"
-                          onMouseDown={(e) => { e.preventDefault(); selectLedger(r) }}
-                        >
-                          <div className="font-medium">{r.account_name || r.name}</div>
-                          <div className="text-xs text-muted-foreground">{r.contact_phone || r.phone}</div>
-                        </button>
-                      ))}
-                    </div>
+
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <Input
+                      placeholder={ledgerType === 'individual' ? 'Search guest from database...' : 'Search organization from database...'}
+                      value={ledgerSearch}
+                      onChange={(e) => searchLedger(e.target.value)}
+                      onBlur={() => setTimeout(() => setLedgerSearchOpen(false), 150)}
+                    />
+                    {ledgerSearchOpen && ledgerResults.length > 0 && (
+                      <div className="absolute top-full left-0 right-0 mt-1 bg-background border rounded-md shadow-lg z-50 max-h-48 overflow-y-auto">
+                        {ledgerResults.map((r: any) => (
+                          <button key={r.id} className="w-full text-left px-4 py-2 hover:bg-accent border-b last:border-b-0 text-sm"
+                            onMouseDown={(e) => { e.preventDefault(); setSelectedLedger(r); setLedgerSearch(r.name || r.account_name); setLedgerSearchOpen(false) }}>
+                            <div className="font-medium">{r.name || r.account_name}</div>
+                            <div className="text-xs text-muted-foreground">{r.phone || r.contact_phone}</div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {ledgerSearch.trim() && ledgerResults.length === 0 && !ledgerSearchOpen && (
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {ledgerType === 'individual' ? 'No guest found.' : 'No organization found. Use the New button to create one.'}
+                      </p>
+                    )}
+                  </div>
+                  {ledgerType === 'organization' && (
+                    <Button type="button" size="sm" variant="outline" className="gap-1 whitespace-nowrap" onClick={() => setShowNewLedgerOrgForm(v => !v)}>
+                      <Plus className="h-3 w-3" /> New
+                    </Button>
                   )}
                 </div>
+
+                {/* Inline new org form */}
+                {showNewLedgerOrgForm && ledgerType === 'organization' && (
+                  <div className="border rounded-md p-3 space-y-2 bg-background">
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-medium text-muted-foreground">Create new organization</p>
+                      <button onClick={() => setShowNewLedgerOrgForm(false)}><X className="h-3.5 w-3.5 text-muted-foreground" /></button>
+                    </div>
+                    <Input placeholder="Organization name *" value={newLedgerOrgName} onChange={(e) => setNewLedgerOrgName(e.target.value)} />
+                    <div className="grid grid-cols-2 gap-2">
+                      <Input type="email" placeholder="Email" value={newLedgerOrgEmail} onChange={(e) => setNewLedgerOrgEmail(e.target.value)} />
+                      <Input placeholder="Phone" value={newLedgerOrgPhone} onChange={(e) => setNewLedgerOrgPhone(e.target.value)} />
+                    </div>
+                    <Input placeholder="Address (optional)" value={newLedgerOrgAddress} onChange={(e) => setNewLedgerOrgAddress(e.target.value)} />
+                    <Button size="sm" className="w-full" onClick={createNewLedgerOrg} disabled={creatingLedgerOrg}>
+                      {creatingLedgerOrg ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                      {creatingLedgerOrg ? 'Creating...' : 'Create & Select Organization'}
+                    </Button>
+                  </div>
+                )}
+
                 {selectedLedger && (
                   <div className="flex items-center justify-between p-2 rounded border bg-background text-sm">
                     <div>
-                      <span className="font-medium">{selectedLedger.account_name || selectedLedger.name}</span>
-                      {selectedLedger.balance !== undefined && (
-                        <span className="ml-2 text-xs text-muted-foreground">Balance: {formatNaira(selectedLedger.balance)}</span>
-                      )}
+                      <span className="font-medium">{selectedLedger.name || selectedLedger.account_name}</span>
+                      {selectedLedger.phone && <span className="ml-2 text-xs text-muted-foreground">{selectedLedger.phone}</span>}
                     </div>
                     <Button variant="ghost" size="sm" className="text-destructive h-6 text-xs" onClick={() => { setSelectedLedger(null); setLedgerSearch('') }}>Remove</Button>
                   </div>
