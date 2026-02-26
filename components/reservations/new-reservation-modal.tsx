@@ -1,0 +1,661 @@
+'use client'
+
+import { useState, useEffect } from 'react'
+import { createClient } from '@/lib/supabase/client'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Calendar } from '@/components/ui/calendar'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Badge } from '@/components/ui/badge'
+import { Separator } from '@/components/ui/separator'
+import { format, addDays, differenceInDays } from 'date-fns'
+import { Calendar as CalendarIcon, ChevronRight, ChevronLeft, Search, Plus, X, Loader2 } from 'lucide-react'
+import { formatNaira } from '@/lib/utils/currency'
+import { toast } from 'sonner'
+
+const ROOM_TYPES = [
+  'Deluxe', 'Royal', 'Kings', 'Mini Suite', 'Executive Suite', 'Diplomatic Suite',
+]
+
+interface NewReservationModalProps {
+  open: boolean
+  onClose: () => void
+  onSuccess?: () => void
+}
+
+const toLocalDateStr = (date: Date) => {
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, '0')
+  const d = String(date.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
+
+const today = () => {
+  const d = new Date()
+  d.setHours(0, 0, 0, 0)
+  return d
+}
+
+export function NewReservationModal({ open, onClose, onSuccess }: NewReservationModalProps) {
+  const [step, setStep] = useState(1)
+  const [loading, setLoading] = useState(false)
+  const [orgId, setOrgId] = useState('')
+  const [currentUserId, setCurrentUserId] = useState('')
+
+  // Step 1: Guest
+  const [fullName, setFullName] = useState('')
+  const [phone, setPhone] = useState('')
+  const [email, setEmail] = useState('')
+  const [address, setAddress] = useState('')
+  const [guestId, setGuestId] = useState('')
+  const [guests, setGuests] = useState<any[]>([])
+  const [filteredGuests, setFilteredGuests] = useState<any[]>([])
+  const [guestSearchOpen, setGuestSearchOpen] = useState(false)
+
+  // Step 2: Dates
+  const [checkInDate, setCheckInDate] = useState<Date>()
+  const [checkOutDate, setCheckOutDate] = useState<Date>()
+  const [nights, setNights] = useState(0)
+  const [checkInOpen, setCheckInOpen] = useState(false)
+  const [checkOutOpen, setCheckOutOpen] = useState(false)
+
+  // Step 3: Room & Payment
+  const [rooms, setRooms] = useState<any[]>([])
+  const [selectedRoomType, setSelectedRoomType] = useState('')
+  const [selectedRoom, setSelectedRoom] = useState<any>(null)
+  const [pricePerNight, setPricePerNight] = useState(0)
+  const [customPrice, setCustomPrice] = useState<number | ''>('')
+  // Payment
+  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'pos' | 'card' | 'bank_transfer' | 'city_ledger'>('cash')
+  const [paymentStatus, setPaymentStatus] = useState<'paid' | 'partial' | 'unpaid'>('unpaid')
+  const [partialAmount, setPartialAmount] = useState<number | ''>('')
+  // City Ledger sub-fields
+  const [ledgerType, setLedgerType] = useState<'individual' | 'organization'>('individual')
+  const [ledgerSearch, setLedgerSearch] = useState('')
+  const [ledgerResults, setLedgerResults] = useState<any[]>([])
+  const [ledgerSearchOpen, setLedgerSearchOpen] = useState(false)
+  const [selectedLedger, setSelectedLedger] = useState<any>(null)
+  // Inline new org form for city ledger
+  const [showNewLedgerOrgForm, setShowNewLedgerOrgForm] = useState(false)
+  const [newLedgerOrgName, setNewLedgerOrgName] = useState('')
+  const [newLedgerOrgEmail, setNewLedgerOrgEmail] = useState('')
+  const [newLedgerOrgPhone, setNewLedgerOrgPhone] = useState('')
+  const [newLedgerOrgAddress, setNewLedgerOrgAddress] = useState('')
+  const [creatingLedgerOrg, setCreatingLedgerOrg] = useState(false)
+
+  useEffect(() => {
+    if (open) loadData()
+    else resetForm()
+  }, [open])
+
+  const loadData = async () => {
+    try {
+      const supabase = createClient()
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+      setCurrentUserId(user.id)
+      const { data: profile } = await supabase.from('profiles').select('organization_id').eq('id', user.id).single()
+      if (!profile?.organization_id) return
+      setOrgId(profile.organization_id)
+
+      const [{ data: guestData }, { data: roomData }] = await Promise.all([
+        supabase.from('guests').select('id, name, phone, email, address').eq('organization_id', profile.organization_id).order('name'),
+        supabase.from('rooms').select('id, room_number, room_type, price_per_night').eq('organization_id', profile.organization_id).in('status', ['available', 'reserved']).order('room_number'),
+      ])
+      setGuests(guestData || [])
+      setRooms(roomData || [])
+    } catch {
+      toast.error('Failed to load data')
+    }
+  }
+
+  // Guest search in Step 1
+  const handleGuestSearch = (value: string) => {
+    setFullName(value)
+    setGuestId('')
+    if (value.trim()) {
+      const filtered = guests.filter(g => g.name.toLowerCase().includes(value.toLowerCase()) || (g.phone || '').includes(value))
+      setFilteredGuests(filtered)
+      setGuestSearchOpen(filtered.length > 0)
+    } else {
+      setFilteredGuests([])
+      setGuestSearchOpen(false)
+    }
+  }
+
+  const selectGuest = (guest: any) => {
+    setGuestId(guest.id)
+    setFullName(guest.name)
+    setPhone(guest.phone || '')
+    setEmail(guest.email || '')
+    setAddress(guest.address || '')
+    setGuestSearchOpen(false)
+  }
+
+  // City Ledger account search: individual → guests table, organization → organizations table
+  const searchLedger = async (term: string) => {
+    setLedgerSearch(term)
+    setSelectedLedger(null)
+    if (!term.trim()) { setLedgerResults([]); setLedgerSearchOpen(false); return }
+    if (ledgerType === 'individual') {
+      const filtered = guests.filter(g =>
+        g.name.toLowerCase().includes(term.toLowerCase()) || (g.phone || '').includes(term)
+      )
+      setLedgerResults(filtered.slice(0, 8))
+      setLedgerSearchOpen(filtered.length > 0)
+    } else {
+      // Search organizations table (same source as Organization menu)
+      const supabase = createClient()
+      const { data } = await supabase
+        .from('organizations')
+        .select('id, name, phone, email')
+        .ilike('name', `%${term}%`)
+        .limit(8)
+      setLedgerResults((data || []).map(d => ({ ...d, source: 'organizations' })))
+      setLedgerSearchOpen((data || []).length > 0)
+    }
+  }
+
+  const createNewLedgerOrg = async () => {
+    if (!newLedgerOrgName.trim()) { toast.error('Organization name required'); return }
+    setCreatingLedgerOrg(true)
+    try {
+      const supabase = createClient()
+      const { data, error } = await supabase
+        .from('organizations')
+        .insert([{ name: newLedgerOrgName.trim(), email: newLedgerOrgEmail.trim() || null, phone: newLedgerOrgPhone.trim() || null, address: newLedgerOrgAddress.trim() || null }])
+        .select().single()
+      if (error) throw error
+      setSelectedLedger({ ...data, source: 'organizations' })
+      setLedgerSearch(data.name)
+      setShowNewLedgerOrgForm(false)
+      setNewLedgerOrgName(''); setNewLedgerOrgEmail(''); setNewLedgerOrgPhone(''); setNewLedgerOrgAddress('')
+      toast.success(`Organization "${data.name}" created and selected`)
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to create organization')
+    } finally {
+      setCreatingLedgerOrg(false)
+    }
+  }
+
+  // Dates
+  const handleCheckInChange = (date: Date | undefined) => {
+    if (!date) return
+    setCheckInDate(date)
+    setCheckInOpen(false)
+    setCheckOutDate(undefined)
+    setNights(0)
+  }
+
+  const handleCheckOutChange = (date: Date | undefined) => {
+    if (!date || !checkInDate) return
+    setCheckOutDate(date)
+    setCheckOutOpen(false)
+    setNights(Math.max(0, differenceInDays(date, checkInDate)))
+  }
+
+  const handleNightsChange = (value: number) => {
+    const n = Math.max(1, value || 1)
+    setNights(n)
+    if (checkInDate) setCheckOutDate(addDays(checkInDate, n))
+  }
+
+  const handleRoomTypeSelect = (roomType: string) => {
+    setSelectedRoomType(roomType)
+    const room = rooms.find(r => r.room_type === roomType)
+    if (room) { setSelectedRoom(room); setPricePerNight(room.price_per_night) }
+    else { setSelectedRoom(null); setPricePerNight(0) }
+  }
+
+  const canGoNext = () => {
+    if (step === 1) return !!(guestId || fullName.trim()) && !!phone.trim()
+    if (step === 2) return !!(checkInDate && checkOutDate && nights > 0)
+    if (step === 3) return !!(selectedRoom)
+    return false
+  }
+
+  const effectiveRate = (customPrice !== '' ? Number(customPrice) : pricePerNight) || 0
+  const totalAmount = effectiveRate * nights
+  const depositAmount = paymentStatus === 'paid' ? totalAmount : paymentStatus === 'partial' ? (Number(partialAmount) || 0) : 0
+  const balanceAmount = totalAmount - depositAmount
+
+  const handleSubmit = async () => {
+    if (!checkInDate || !checkOutDate) { toast.error('Dates required'); return }
+    if (!selectedRoom) { toast.error('Room required'); return }
+    if (paymentMethod === 'city_ledger' && !selectedLedger) {
+      toast.error('Please select a city ledger account')
+      return
+    }
+    if (paymentStatus === 'partial' && (!partialAmount || Number(partialAmount) <= 0)) {
+      toast.error('Please enter a partial payment amount')
+      return
+    }
+
+    try {
+      setLoading(true)
+      const supabase = createClient()
+
+      let finalGuestId = guestId
+      if (!guestId) {
+        const { data: newGuest, error: ge } = await supabase
+          .from('guests')
+          .insert([{ organization_id: orgId, name: fullName, phone, email: email || null, address: address || null }])
+          .select().single()
+        if (ge) throw ge
+        finalGuestId = newGuest.id
+      }
+
+      const isCityLedger = paymentMethod === 'city_ledger'
+      const folioId = `RES-${Date.now().toString(36).toUpperCase()}`
+      const bookingPaymentStatus = paymentStatus === 'paid' ? 'paid' : paymentStatus === 'partial' ? 'partial' : 'pending'
+
+      const { data: booking, error: be } = await supabase
+        .from('bookings')
+        .insert([{
+          organization_id: orgId,
+          guest_id: finalGuestId,
+          room_id: selectedRoom.id,
+          folio_id: folioId,
+          check_in: toLocalDateStr(checkInDate),
+          check_out: toLocalDateStr(checkOutDate),
+          number_of_nights: nights,
+          rate_per_night: effectiveRate,
+          total_amount: totalAmount,
+          deposit: depositAmount,
+          balance: balanceAmount,
+          payment_status: bookingPaymentStatus,
+          status: 'reserved',
+          created_by: currentUserId,
+          notes: isCityLedger ? `City Ledger: ${selectedLedger?.account_name || selectedLedger?.name}` : null,
+        }])
+        .select().single()
+      if (be) throw be
+
+      await supabase.from('rooms').update({ status: 'reserved' }).eq('id', selectedRoom.id)
+
+      // Record transaction
+      await supabase.from('transactions').insert([{
+        organization_id: orgId,
+        booking_id: booking.id,
+        transaction_id: `TXN-${Date.now().toString(36).toUpperCase()}`,
+        guest_name: fullName,
+        room: selectedRoom.room_number,
+        amount: totalAmount,
+        payment_method: isCityLedger ? 'city_ledger' : paymentMethod,
+        status: bookingPaymentStatus,
+        description: `Reservation — ${folioId}`,
+        received_by: currentUserId,
+      }])
+
+      toast.success(`Reservation created — Ref: ${folioId}`)
+      onSuccess?.()
+      onClose()
+      resetForm()
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to create reservation')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const resetForm = () => {
+    setStep(1)
+    setFullName(''); setPhone(''); setEmail(''); setAddress(''); setGuestId('')
+    setCheckInDate(undefined); setCheckOutDate(undefined); setNights(0)
+    setSelectedRoomType(''); setSelectedRoom(null); setPricePerNight(0); setCustomPrice('')
+    setPaymentMethod('cash'); setPaymentStatus('unpaid'); setPartialAmount('')
+    setLedgerType('individual'); setLedgerSearch(''); setLedgerResults([])
+    setSelectedLedger(null); setLedgerSearchOpen(false)
+    setShowNewLedgerOrgForm(false); setNewLedgerOrgName(''); setNewLedgerOrgEmail(''); setNewLedgerOrgPhone(''); setNewLedgerOrgAddress('')
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>New Reservation — Step {step} of 3</DialogTitle>
+          <DialogDescription>
+            {step === 1 ? 'Enter guest information' : step === 2 ? 'Select stay dates (today or future only)' : 'Choose room and payment details'}
+          </DialogDescription>
+        </DialogHeader>
+
+        {/* Step indicator */}
+        <div className="flex items-center gap-2 pb-2">
+          {[1,2,3].map(s => (
+            <div key={s} className={`flex-1 h-1.5 rounded-full transition-colors ${s <= step ? 'bg-primary' : 'bg-muted'}`} />
+          ))}
+        </div>
+
+        {/* ── STEP 1: Guest ── */}
+        {step === 1 && (
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label>Full Name *</Label>
+              <div className="relative">
+                <Input
+                  placeholder="Type guest name — existing guests will appear"
+                  value={fullName}
+                  onChange={(e) => handleGuestSearch(e.target.value)}
+                  onBlur={() => setTimeout(() => setGuestSearchOpen(false), 150)}
+                />
+                {guestSearchOpen && filteredGuests.length > 0 && (
+                  <div className="absolute top-full left-0 right-0 mt-1 bg-background border rounded-md shadow-lg z-50 max-h-56 overflow-y-auto">
+                    {filteredGuests.map(g => (
+                      <button key={g.id} className="w-full text-left px-4 py-3 hover:bg-accent border-b last:border-b-0" onMouseDown={(e) => { e.preventDefault(); selectGuest(g) }}>
+                        <div className="font-medium text-sm">{g.name}</div>
+                        <div className="text-xs text-muted-foreground">{g.phone}</div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              {guestId && <p className="text-xs text-green-600">Existing guest selected: <strong>{fullName}</strong></p>}
+              {!guestId && fullName.trim() && <p className="text-xs text-amber-600">New guest will be created: <strong>{fullName}</strong></p>}
+            </div>
+            <div className="space-y-2">
+              <Label>Phone *</Label>
+              <Input placeholder="Phone number" value={phone} onChange={(e) => setPhone(e.target.value)} disabled={!!guestId} />
+            </div>
+            <div className="space-y-2">
+              <Label>Email</Label>
+              <Input type="email" placeholder="Email address" value={email} onChange={(e) => setEmail(e.target.value)} disabled={!!guestId} />
+            </div>
+            <div className="space-y-2">
+              <Label>Address</Label>
+              <Input placeholder="Street address" value={address} onChange={(e) => setAddress(e.target.value)} disabled={!!guestId} />
+            </div>
+          </div>
+        )}
+
+        {/* ── STEP 2: Dates ── */}
+        {step === 2 && (
+          <div className="space-y-4 py-2">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Check-in *</Label>
+                <Popover open={checkInOpen} onOpenChange={setCheckInOpen}>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" className="w-full justify-start text-left font-normal">
+                      <CalendarIcon className="mr-2 h-4 w-4" />
+                      {checkInDate ? format(checkInDate, 'dd MMM yyyy') : 'Select date'}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0">
+                    <Calendar
+                      mode="single"
+                      selected={checkInDate}
+                      onSelect={handleCheckInChange}
+                      disabled={(d) => d < today()}
+                      initialFocus
+                    />
+                  </PopoverContent>
+                </Popover>
+              </div>
+              <div className="space-y-2">
+                <Label>Check-out *</Label>
+                <Popover open={checkOutOpen} onOpenChange={setCheckOutOpen}>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" className="w-full justify-start text-left font-normal">
+                      <CalendarIcon className="mr-2 h-4 w-4" />
+                      {checkOutDate ? format(checkOutDate, 'dd MMM yyyy') : 'Select date'}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0">
+                    <Calendar
+                      mode="single"
+                      selected={checkOutDate}
+                      onSelect={handleCheckOutChange}
+                      disabled={(d) => checkInDate ? d <= checkInDate : d < today()}
+                      initialFocus
+                    />
+                  </PopoverContent>
+                </Popover>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Number of Nights</Label>
+              <Input
+                type="number"
+                min={1}
+                value={nights || ''}
+                onChange={(e) => handleNightsChange(parseInt(e.target.value))}
+                placeholder="e.g., 2"
+              />
+            </div>
+            {checkInDate && checkOutDate && (
+              <div className="p-3 rounded-lg bg-muted text-sm space-y-1">
+                <div><span className="text-muted-foreground">Duration: </span><span className="font-semibold">{nights} night(s)</span></div>
+                <div><span className="text-muted-foreground">Check-in: </span><span className="font-semibold">{format(checkInDate, 'EEE, dd MMM yyyy')}</span></div>
+                <div><span className="text-muted-foreground">Check-out: </span><span className="font-semibold">{format(checkOutDate, 'EEE, dd MMM yyyy')}</span></div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── STEP 3: Room + Payment ── */}
+        {step === 3 && (
+          <div className="space-y-4 py-2">
+            {/* Room selection */}
+            <div className="space-y-2">
+              <Label>Room Type *</Label>
+              <Select value={selectedRoomType} onValueChange={handleRoomTypeSelect}>
+                <SelectTrigger><SelectValue placeholder="Select room type" /></SelectTrigger>
+                <SelectContent>
+                  {ROOM_TYPES.map(rt => {
+                    const count = rooms.filter(r => r.room_type === rt).length
+                    return (
+                      <SelectItem key={rt} value={rt} disabled={count === 0}>
+                        {rt} {count === 0 ? '(none available)' : `(${count} available)`}
+                      </SelectItem>
+                    )
+                  })}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {selectedRoom && (
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Room Number</Label>
+                  <Select value={selectedRoom?.id} onValueChange={(id) => {
+                    const r = rooms.find(x => x.id === id)
+                    if (r) { setSelectedRoom(r); setPricePerNight(r.price_per_night) }
+                  }}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {rooms.filter(r => r.room_type === selectedRoomType).map(r => (
+                        <SelectItem key={r.id} value={r.id}>Room {r.room_number}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Rate / Night</Label>
+                  <Input value={formatNaira(pricePerNight)} readOnly className="bg-muted" />
+                </div>
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <Label>Custom Rate (optional — overrides room rate)</Label>
+              <Input
+                type="number"
+                placeholder="Leave blank to use room rate"
+                value={customPrice}
+                onChange={(e) => setCustomPrice(e.target.value === '' ? '' : Number(e.target.value))}
+              />
+            </div>
+
+            <Separator />
+
+            {/* Payment Method */}
+            <div className="space-y-2">
+              <Label>Payment Method</Label>
+              <Select value={paymentMethod} onValueChange={(v: any) => { setPaymentMethod(v); if (v !== 'city_ledger') setSelectedLedger(null) }}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="cash">Cash</SelectItem>
+                  <SelectItem value="pos">POS</SelectItem>
+                  <SelectItem value="card">Card</SelectItem>
+                  <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
+                  <SelectItem value="city_ledger">City Ledger (bill to account)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* City Ledger account picker */}
+            {paymentMethod === 'city_ledger' && (
+              <div className="space-y-3 p-3 border rounded-lg bg-muted/30">
+                <Label className="text-sm font-medium">City Ledger Account</Label>
+                <div className="flex gap-2">
+                  <Button type="button" size="sm" variant={ledgerType === 'individual' ? 'default' : 'outline'}
+                    onClick={() => { setLedgerType('individual'); setLedgerSearch(''); setLedgerResults([]); setSelectedLedger(null); setShowNewLedgerOrgForm(false) }}>Individual</Button>
+                  <Button type="button" size="sm" variant={ledgerType === 'organization' ? 'default' : 'outline'}
+                    onClick={() => { setLedgerType('organization'); setLedgerSearch(''); setLedgerResults([]); setSelectedLedger(null); setShowNewLedgerOrgForm(false) }}>Organization</Button>
+                </div>
+
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <Input
+                      placeholder={ledgerType === 'individual' ? 'Search guest from database...' : 'Search organization from database...'}
+                      value={ledgerSearch}
+                      onChange={(e) => searchLedger(e.target.value)}
+                      onBlur={() => setTimeout(() => setLedgerSearchOpen(false), 150)}
+                    />
+                    {ledgerSearchOpen && ledgerResults.length > 0 && (
+                      <div className="absolute top-full left-0 right-0 mt-1 bg-background border rounded-md shadow-lg z-50 max-h-48 overflow-y-auto">
+                        {ledgerResults.map((r: any) => (
+                          <button key={r.id} className="w-full text-left px-4 py-2 hover:bg-accent border-b last:border-b-0 text-sm"
+                            onMouseDown={(e) => { e.preventDefault(); setSelectedLedger(r); setLedgerSearch(r.name || r.account_name); setLedgerSearchOpen(false) }}>
+                            <div className="font-medium">{r.name || r.account_name}</div>
+                            <div className="text-xs text-muted-foreground">{r.phone || r.contact_phone}</div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {ledgerSearch.trim() && ledgerResults.length === 0 && !ledgerSearchOpen && (
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {ledgerType === 'individual' ? 'No guest found.' : 'No organization found. Use the New button to create one.'}
+                      </p>
+                    )}
+                  </div>
+                  {ledgerType === 'organization' && (
+                    <Button type="button" size="sm" variant="outline" className="gap-1 whitespace-nowrap" onClick={() => setShowNewLedgerOrgForm(v => !v)}>
+                      <Plus className="h-3 w-3" /> New
+                    </Button>
+                  )}
+                </div>
+
+                {/* Inline new org form */}
+                {showNewLedgerOrgForm && ledgerType === 'organization' && (
+                  <div className="border rounded-md p-3 space-y-2 bg-background">
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-medium text-muted-foreground">Create new organization</p>
+                      <button onClick={() => setShowNewLedgerOrgForm(false)}><X className="h-3.5 w-3.5 text-muted-foreground" /></button>
+                    </div>
+                    <Input placeholder="Organization name *" value={newLedgerOrgName} onChange={(e) => setNewLedgerOrgName(e.target.value)} />
+                    <div className="grid grid-cols-2 gap-2">
+                      <Input type="email" placeholder="Email" value={newLedgerOrgEmail} onChange={(e) => setNewLedgerOrgEmail(e.target.value)} />
+                      <Input placeholder="Phone" value={newLedgerOrgPhone} onChange={(e) => setNewLedgerOrgPhone(e.target.value)} />
+                    </div>
+                    <Input placeholder="Address (optional)" value={newLedgerOrgAddress} onChange={(e) => setNewLedgerOrgAddress(e.target.value)} />
+                    <Button size="sm" className="w-full" onClick={createNewLedgerOrg} disabled={creatingLedgerOrg}>
+                      {creatingLedgerOrg ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                      {creatingLedgerOrg ? 'Creating...' : 'Create & Select Organization'}
+                    </Button>
+                  </div>
+                )}
+
+                {selectedLedger && (
+                  <div className="flex items-center justify-between p-2 rounded border bg-background text-sm">
+                    <div>
+                      <span className="font-medium">{selectedLedger.name || selectedLedger.account_name}</span>
+                      {selectedLedger.phone && <span className="ml-2 text-xs text-muted-foreground">{selectedLedger.phone}</span>}
+                    </div>
+                    <Button variant="ghost" size="sm" className="text-destructive h-6 text-xs" onClick={() => { setSelectedLedger(null); setLedgerSearch('') }}>Remove</Button>
+                  </div>
+                )}
+                <p className="text-xs text-orange-600">City Ledger is billed to the account — reservation balance will be outstanding until paid.</p>
+              </div>
+            )}
+
+            {/* Payment Status */}
+            <div className="space-y-2">
+              <Label>Payment Status</Label>
+              <Select value={paymentStatus} onValueChange={(v: any) => setPaymentStatus(v)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="unpaid">Unpaid — pay at check-in</SelectItem>
+                  <SelectItem value="partial">Partial payment now</SelectItem>
+                  <SelectItem value="paid">Fully paid in advance</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {paymentStatus === 'partial' && (
+              <div className="space-y-2">
+                <Label>Part Payment Amount</Label>
+                <Input
+                  type="number"
+                  min={1}
+                  placeholder="Enter amount paid now"
+                  value={partialAmount}
+                  onChange={(e) => setPartialAmount(e.target.value === '' ? '' : Number(e.target.value))}
+                />
+              </div>
+            )}
+
+            {/* Summary */}
+            {selectedRoom && nights > 0 && (
+              <div className="p-4 rounded-lg bg-muted space-y-2 text-sm border">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Room {selectedRoom.room_number} · {nights} night(s) @ {formatNaira(effectiveRate)}/night</span>
+                </div>
+                <div className="flex justify-between font-semibold">
+                  <span>Total Amount</span>
+                  <span>{formatNaira(totalAmount)}</span>
+                </div>
+                {depositAmount > 0 && (
+                  <div className="flex justify-between text-green-700">
+                    <span>Amount Paid</span>
+                    <span>{formatNaira(depositAmount)}</span>
+                  </div>
+                )}
+                {balanceAmount > 0 && (
+                  <div className="flex justify-between text-orange-700 font-medium border-t pt-2">
+                    <span>Balance Due</span>
+                    <span>{formatNaira(balanceAmount)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between items-center pt-1">
+                  <span className="text-muted-foreground">Payment Method</span>
+                  <Badge variant="outline">{paymentMethod.replace('_', ' ')}</Badge>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Navigation */}
+        <div className="flex justify-between pt-4 border-t">
+          <Button variant="outline" onClick={() => step > 1 ? setStep(step - 1) : onClose()} disabled={loading}>
+            <ChevronLeft className="mr-2 h-4 w-4" />
+            {step > 1 ? 'Back' : 'Cancel'}
+          </Button>
+          {step < 3 ? (
+            <Button onClick={() => setStep(step + 1)} disabled={!canGoNext()}>
+              Next <ChevronRight className="ml-2 h-4 w-4" />
+            </Button>
+          ) : (
+            <Button onClick={handleSubmit} disabled={loading || !canGoNext()}>
+              {loading ? 'Creating...' : 'Create Reservation'}
+            </Button>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
