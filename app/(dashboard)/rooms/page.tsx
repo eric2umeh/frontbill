@@ -252,6 +252,9 @@ export default function RoomsPage() {
               </div>
             ),
           },
+          {
+            key: 'created_by_name',
+            label: 'Created By',
             render: (room) => (
               <div className="text-sm text-muted-foreground">
                 {room.created_by_name}
