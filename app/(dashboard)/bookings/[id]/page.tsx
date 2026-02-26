@@ -148,7 +148,8 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
 
     // Determine if this charge goes onto the city ledger (unpaid bill) or is settled immediately
     const isCityLedger = chargePaymentMethod === 'city_ledger'
-    const isSettledImmediately = chargePaymentMethod !== '' && chargePaymentMethod !== 'city_ledger'
+    const isDeferred = chargePaymentMethod === 'deferred'
+    const isSettledImmediately = chargePaymentMethod !== '' && chargePaymentMethod !== 'city_ledger' && chargePaymentMethod !== 'deferred'
 
     try {
       const supabase = createClient()
@@ -162,12 +163,12 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
           description: chargeDescription,
           amount: Number(chargeAmount),
           charge_type: 'charge',
-          payment_method: chargePaymentMethod || null,
+          payment_method: isSettledImmediately ? chargePaymentMethod : (isCityLedger || isDeferred ? null : chargePaymentMethod),
           payment_status: paymentStatus,
         }])
 
-        if (isCityLedger) {
-          // Add to the unpaid bill balance
+        if (isCityLedger || isDeferred) {
+          // Add to the unpaid bill balance (both city ledger and deferred charges accrue)
           await supabase
             .from('bookings')
             .update({ balance: (booking.balance || 0) + Number(chargeAmount) })
@@ -180,7 +181,9 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
             ? `Charge of ${formatNaira(Number(chargeAmount))} recorded as paid (${chargePaymentMethod.replace('_', ' ')})`
             : isCityLedger
               ? `${formatNaira(Number(chargeAmount))} added to city ledger — Bill Balance updated`
-              : `Charge of ${formatNaira(Number(chargeAmount))} added (payment pending)`
+              : isDeferred
+                ? `${formatNaira(Number(chargeAmount))} deferred — Bill Balance updated`
+                : `Charge of ${formatNaira(Number(chargeAmount))} added (payment pending)`
         )
 
       // -- RECORD PAYMENT tab: reduces existing Bill Balance --
@@ -474,11 +477,11 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                       <SelectItem value="card">Card (paid now — not added to Bill Balance)</SelectItem>
                       <SelectItem value="bank_transfer">Bank Transfer (paid now — not added to Bill Balance)</SelectItem>
                       <SelectItem value="city_ledger">City Ledger (bill to account — adds to Bill Balance)</SelectItem>
-                      <SelectItem value="">Defer / Not yet paid (adds to Bill Balance)</SelectItem>
+                      <SelectItem value="deferred">Defer / Not yet paid (adds to Bill Balance)</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
-                {(chargePaymentMethod === 'city_ledger' || chargePaymentMethod === '') && (
+                {(chargePaymentMethod === 'city_ledger' || chargePaymentMethod === 'deferred') && (
                   <p className="text-xs text-orange-600 bg-orange-50 border border-orange-200 rounded px-3 py-2">
                     This charge will be added to the Bill Balance (Unpaid).
                   </p>
