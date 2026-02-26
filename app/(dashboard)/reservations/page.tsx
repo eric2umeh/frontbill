@@ -10,7 +10,7 @@ import { CardContent } from '@/components/ui/card'
 import { formatNaira } from '@/lib/utils/currency'
 import { Plus, Users, Loader2 } from 'lucide-react'
 import { BulkBookingModal } from '@/components/reservations/bulk-booking-modal'
-import { NewBookingModal } from '@/components/bookings/new-booking-modal'
+import { NewReservationModal } from '@/components/reservations/new-reservation-modal'
 
 interface Reservation {
   id: string
@@ -166,7 +166,7 @@ export default function ReservationsPage() {
   return (
     <div className="space-y-6">
       <BulkBookingModal open={bulkModalOpen} onClose={() => { setBulkModalOpen(false); fetchReservations() }} />
-      <NewBookingModal open={newReservationOpen} onClose={() => { setNewReservationOpen(false); fetchReservations() }} />
+      <NewReservationModal open={newReservationOpen} onClose={() => { setNewReservationOpen(false); fetchReservations() }} />
       
       <div className="flex items-center justify-between">
         <div>
@@ -246,11 +246,11 @@ export default function ReservationsPage() {
             ),
           },
           {
-            key: 'check_out_date',
+            key: 'check_out',
             label: 'Check-out Date',
             render: (res) => (
               <div className="text-sm">
-                {new Date(res.check_out_date).toLocaleDateString('en-GB')}
+                {new Date(res.check_out).toLocaleDateString('en-GB')}
               </div>
             ),
           },

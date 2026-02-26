@@ -12,22 +12,21 @@ import { toast } from 'sonner'
 import { X } from 'lucide-react'
 
 const availableAmenities = [
-  'Jacuzzi',
-  'Spacious',
-  'Lounge',
-  'King Bed',
-  'Twin Beds',
-  'Balcony',
-  'City View',
-  'Ocean View',
-  'Mini Bar',
-  'Smart TV',
   'Work Desk',
+  'Smart TV',
+  'Jacuzzi',
+  'Lounge',
+  'Spacious',
   'Sofa',
-  'Bathtub',
-  'Walk-in Closet',
-  'Safe Box',
-  'Coffee Maker',
+]
+
+const ROOM_TYPES = [
+  { value: 'Deluxe', label: 'Deluxe' },
+  { value: 'Royal', label: 'Royal' },
+  { value: 'Kings', label: 'Kings' },
+  { value: 'Mini Suite', label: 'Mini Suite' },
+  { value: 'Executive Suite', label: 'Executive Suite' },
+  { value: 'Diplomatic Suite', label: 'Diplomatic Suite' },
 ]
 
 interface AddRoomModalProps {
@@ -39,7 +38,7 @@ interface AddRoomModalProps {
 export function AddRoomModal({ open, onClose, onSuccess }: AddRoomModalProps) {
   const [formData, setFormData] = useState({
     number: '',
-    type: 'deluxe',
+    type: 'Deluxe',
     floor: '1',
     capacity: 2,
     rate: 25000,
@@ -152,21 +151,19 @@ export function AddRoomModal({ open, onClose, onSuccess }: AddRoomModalProps) {
               />
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="floor">Floor *</Label>
-              <Select value={formData.floor} onValueChange={(value) => setFormData({ ...formData, floor: value })}>
-                <SelectTrigger id="floor">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="1">Floor 1</SelectItem>
-                  <SelectItem value="2">Floor 2</SelectItem>
-                  <SelectItem value="3">Floor 3</SelectItem>
-                  <SelectItem value="4">Floor 4</SelectItem>
-                  <SelectItem value="5">Floor 5</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+          <div className="space-y-2">
+            <Label htmlFor="floor">Floor *</Label>
+            <Select value={formData.floor} onValueChange={(value) => setFormData({ ...formData, floor: value })}>
+              <SelectTrigger id="floor">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="1">Floor 1</SelectItem>
+                <SelectItem value="2">Floor 2</SelectItem>
+                <SelectItem value="3">Floor 3</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
           </div>
 
           <div className="space-y-2">
@@ -176,12 +173,9 @@ export function AddRoomModal({ open, onClose, onSuccess }: AddRoomModalProps) {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="deluxe">Deluxe</SelectItem>
-                <SelectItem value="royal">Royal Suite</SelectItem>
-                <SelectItem value="king">King Suite</SelectItem>
-                <SelectItem value="mini">Mini Suite</SelectItem>
-                <SelectItem value="executive">Executive</SelectItem>
-                <SelectItem value="diplomatic">Diplomatic</SelectItem>
+                {ROOM_TYPES.map(rt => (
+                  <SelectItem key={rt.value} value={rt.value}>{rt.label}</SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>

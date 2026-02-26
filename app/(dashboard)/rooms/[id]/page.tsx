@@ -5,15 +5,17 @@ import { useRouter, useParams } from 'next/navigation'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { ArrowLeft, Edit, Trash2, Users, DollarSign, MapPin } from 'lucide-react'
-import { formatNaira } from '@/lib/utils/currency'
 import { toast } from 'sonner'
 import { createClient } from '@/lib/supabase/client'
 import { AlertCircle } from 'lucide-react'
+
+const ROOM_TYPES = [
+  'Deluxe', 'Royal', 'Kings', 'Mini Suite', 'Executive Suite', 'Diplomatic Suite',
+]
+
+const AVAILABLE_AMENITIES = [
+  'Work Desk', 'Smart TV', 'Jacuzzi', 'Lounge', 'Spacious', 'Sofa',
+]
 
 interface Room {
   id: string
@@ -212,20 +214,29 @@ export default function RoomDetailPage() {
           <div className="space-y-4 py-4">
             <div className="space-y-2">
               <Label>Room Type</Label>
-              <Input
-                value={formData.room_type}
-                onChange={(e) => setFormData({ ...formData, room_type: e.target.value })}
-                placeholder="e.g., Deluxe"
-              />
+              <Select value={formData.room_type} onValueChange={(value) => setFormData({ ...formData, room_type: value })}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select room type" />
+                </SelectTrigger>
+                <SelectContent>
+                  {ROOM_TYPES.map(rt => (
+                    <SelectItem key={rt} value={rt}>{rt}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="space-y-2">
               <Label>Floor</Label>
-              <Input
-                type="number"
-                value={formData.floor_number}
-                onChange={(e) => setFormData({ ...formData, floor_number: e.target.value })}
-                placeholder="e.g., 1"
-              />
+              <Select value={String(formData.floor_number)} onValueChange={(value) => setFormData({ ...formData, floor_number: value })}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="1">Floor 1</SelectItem>
+                  <SelectItem value="2">Floor 2</SelectItem>
+                  <SelectItem value="3">Floor 3</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
             <div className="space-y-2">
               <Label>Capacity</Label>
@@ -237,7 +248,7 @@ export default function RoomDetailPage() {
               />
             </div>
             <div className="space-y-2">
-              <Label>Rate Per Night</Label>
+              <Label>Rate Per Night (₦)</Label>
               <Input
                 type="number"
                 value={formData.price_per_night}
@@ -259,6 +270,35 @@ export default function RoomDetailPage() {
                   <SelectItem value="reserved">Reserved</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Amenities</Label>
+              <Select onValueChange={(val) => {
+                if (!formData.amenities.includes(val)) {
+                  setFormData({ ...formData, amenities: [...formData.amenities, val] })
+                }
+              }}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Add amenity..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {AVAILABLE_AMENITIES.filter(a => !formData.amenities.includes(a)).map(a => (
+                    <SelectItem key={a} value={a}>{a}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {formData.amenities.length > 0 && (
+                <div className="flex flex-wrap gap-2 mt-2">
+                  {formData.amenities.map(a => (
+                    <Badge key={a} variant="secondary" className="gap-1">
+                      {a}
+                      <button type="button" onClick={() => setFormData({ ...formData, amenities: formData.amenities.filter(x => x !== a) })} className="ml-1 hover:bg-secondary-foreground/20 rounded-full p-0.5">
+                        <X className="h-3 w-3" />
+                      </button>
+                    </Badge>
+                  ))}
+                </div>
+              )}
             </div>
             <Button onClick={handleSaveChanges} className="w-full" disabled={saveLoading}>
               {saveLoading ? 'Saving...' : 'Save Changes'}

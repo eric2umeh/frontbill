@@ -327,7 +327,13 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
     }
   }
 
-  // Date handlers
+  // Format a local date as YYYY-MM-DD without timezone conversion
+  const toLocalDateStr = (date: Date) => {
+    const y = date.getFullYear()
+    const m = String(date.getMonth() + 1).padStart(2, '0')
+    const d = String(date.getDate()).padStart(2, '0')
+    return `${y}-${m}-${d}`
+  }
   const handleCheckInChange = (date: Date | undefined) => {
     if (!date) return
     setCheckInDate(date)
@@ -403,8 +409,8 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
           guest_id: finalGuestId,
           room_id: selectedRoom.id,
           folio_id: folioId,
-          check_in: checkInDate.toISOString(),
-          check_out: checkOutDate.toISOString(),
+          check_in: toLocalDateStr(checkInDate),
+          check_out: toLocalDateStr(checkOutDate),
           number_of_nights: nights,
           rate_per_night: effectiveRate,
           total_amount: total,

@@ -228,8 +228,30 @@ export default function RoomsPage() {
             ),
           },
           {
-            key: 'created_by_name',
-            label: 'Created By',
+            key: 'amenities',
+            label: 'Amenities',
+            render: (room) => (
+              <div className="flex flex-wrap gap-1 cursor-pointer" onClick={() => router.push(`/rooms/${room.id}`)}>
+                {room.amenities && room.amenities.length > 0 ? (
+                  room.amenities.slice(0, 3).map((a: string) => (
+                    <Badge key={a} variant="secondary" className="text-xs py-0">{a}</Badge>
+                  ))
+                ) : <span className="text-muted-foreground text-sm">—</span>}
+                {room.amenities && room.amenities.length > 3 && (
+                  <Badge variant="secondary" className="text-xs py-0">+{room.amenities.length - 3}</Badge>
+                )}
+              </div>
+            ),
+          },
+          {
+            key: 'updated_at',
+            label: 'Updated',
+            render: (room) => (
+              <div className="text-sm text-muted-foreground cursor-pointer" onClick={() => router.push(`/rooms/${room.id}`)}>
+                {room.updated_at ? new Date(room.updated_at).toLocaleDateString('en-GB') : '—'}
+              </div>
+            ),
+          },
             render: (room) => (
               <div className="text-sm text-muted-foreground">
                 {room.created_by_name}
