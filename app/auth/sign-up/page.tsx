@@ -57,7 +57,6 @@ export default function SignUpPage() {
         email,
         password,
         options: {
-          emailRedirectTo: `${window.location.origin}/dashboard`,
           data: {
             full_name: fullName,
             role: role,
@@ -79,8 +78,26 @@ export default function SignUpPage() {
         throw error
       }
 
-      toast.success('Account created! Please check your email to verify your account.')
-      router.push('/auth/sign-up-success')
+      // For MVP: skip email verification and auto-login
+      if (data.user) {
+        toast.success('Account created successfully!')
+        // Auto-login by signing in with the same credentials
+        const { error: signInError } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        })
+        if (signInError) throw signInError
+        // Create user profile
+        const { error: profileError } = await supabase.from('profiles').insert([
+          {
+            id: data.user.id,
+            full_name: fullName,
+            role: role,
+          },
+        ])
+        if (profileError && !profileError.message?.includes('duplicate')) throw profileError
+        router.push('/dashboard')
+      }
     } catch (error: any) {
       toast.error(error.message || 'Failed to create account')
     } finally {
