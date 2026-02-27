@@ -8,6 +8,8 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Calendar } from '@/components/ui/calendar'
 import { formatNaira } from '@/lib/utils/currency'
 import {
   BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
@@ -18,9 +20,9 @@ import {
   AlertCircle, Download, Loader2, CalendarDays, Banknote,
   Smartphone, ArrowRightLeft, Clock, CheckCircle2, XCircle
 } from 'lucide-react'
-import { format, subDays, startOfMonth, endOfMonth, startOfWeek, endOfWeek, eachDayOfInterval, parseISO } from 'date-fns'
+import { format, subDays, startOfMonth, endOfMonth, startOfWeek, endOfWeek, eachDayOfInterval, parseISO, startOfDay, endOfDay } from 'date-fns'
 
-type Period = '7d' | '30d' | 'this_month' | 'this_week'
+type Period = '7d' | '30d' | 'this_month' | 'this_week' | 'today' | 'custom'
 
 const METHOD_COLORS: Record<string, string> = {
   cash: '#16a34a',
@@ -38,17 +40,22 @@ export default function AnalyticsPage() {
   const [cityLedger, setCityLedger] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [period, setPeriod] = useState<Period>('30d')
+  const [customDate, setCustomDate] = useState<Date>(new Date())
+  const [calOpen, setCalOpen] = useState(false)
+  const [paymentMethodFilter, setPaymentMethodFilter] = useState<string>('')
   const router = useRouter()
 
   const dateRange = useMemo(() => {
     const now = new Date()
     switch (period) {
-      case '7d':       return { from: subDays(now, 7), to: now }
-      case '30d':      return { from: subDays(now, 30), to: now }
+      case 'today':     return { from: startOfDay(now), to: endOfDay(now) }
+      case '7d':        return { from: subDays(now, 7), to: now }
+      case '30d':       return { from: subDays(now, 30), to: now }
       case 'this_month': return { from: startOfMonth(now), to: endOfMonth(now) }
       case 'this_week':  return { from: startOfWeek(now, { weekStartsOn: 1 }), to: endOfWeek(now, { weekStartsOn: 1 }) }
+      case 'custom':    return { from: startOfDay(customDate), to: endOfDay(customDate) }
     }
-  }, [period])
+  }, [period, customDate])
 
   useEffect(() => { fetchData() }, [dateRange])
 
@@ -95,11 +102,20 @@ export default function AnalyticsPage() {
   }
 
   // ---- computed metrics ----
-  const totalRevenue = useMemo(() => payments.reduce((s, p) => s + p.amount, 0), [payments])
+  // Filter payments by method if selected
+  const filteredPayments = useMemo(() => {
+    if (!paymentMethodFilter) return payments
+    return payments.filter(p => {
+      if (paymentMethodFilter === 'transfer') return ['transfer', 'bank_transfer'].includes(p.payment_method)
+      return p.payment_method === paymentMethodFilter
+    })
+  }, [payments, paymentMethodFilter])
+
+  const totalRevenue = useMemo(() => filteredPayments.reduce((s, p) => s + p.amount, 0), [filteredPayments])
   const today = new Date()
   const todayRevenue = useMemo(() =>
-    payments.filter(p => format(parseISO(p.payment_date), 'yyyy-MM-dd') === format(today, 'yyyy-MM-dd'))
-      .reduce((s, p) => s + p.amount, 0), [payments])
+    filteredPayments.filter(p => format(parseISO(p.payment_date), 'yyyy-MM-dd') === format(today, 'yyyy-MM-dd'))
+      .reduce((s, p) => s + p.amount, 0), [filteredPayments])
   const outstandingBalance = useMemo(() =>
     cityLedger.reduce((s, a) => s + (a.balance || 0), 0), [cityLedger])
   const totalBookings = bookings.length
@@ -110,7 +126,7 @@ export default function AnalyticsPage() {
   // Revenue by method
   const revenueByMethod = useMemo(() => {
     const map: Record<string, number> = {}
-    payments.forEach(p => {
+    filteredPayments.forEach(p => {
       const m = p.payment_method === 'bank_transfer' ? 'transfer' : p.payment_method
       map[m] = (map[m] || 0) + p.amount
     })
@@ -119,14 +135,14 @@ export default function AnalyticsPage() {
       amount,
       fill: METHOD_COLORS[method] || '#6b7280',
     }))
-  }, [payments])
+  }, [filteredPayments])
 
   // Daily revenue trend
   const dailyRevenue = useMemo(() => {
     const days = eachDayOfInterval({ start: dateRange.from, end: dateRange.to })
     return days.map(day => {
       const key = format(day, 'yyyy-MM-dd')
-      const dayPayments = payments.filter(p => format(parseISO(p.payment_date), 'yyyy-MM-dd') === key)
+      const dayPayments = filteredPayments.filter(p => format(parseISO(p.payment_date), 'yyyy-MM-dd') === key)
       const cash = dayPayments.filter(p => p.payment_method === 'cash').reduce((s, p) => s + p.amount, 0)
       const pos = dayPayments.filter(p => p.payment_method === 'pos').reduce((s, p) => s + p.amount, 0)
       const transfer = dayPayments.filter(p => ['transfer', 'bank_transfer'].includes(p.payment_method)).reduce((s, p) => s + p.amount, 0)
@@ -137,12 +153,12 @@ export default function AnalyticsPage() {
         Total: cash + pos + transfer + ledger,
       }
     })
-  }, [payments, dateRange, period])
+  }, [filteredPayments, dateRange, period])
 
   // Folio-level breakdown for audit trail
   const folioBreakdown = useMemo(() => {
     const map: Record<string, { folio_id: string; guest_name: string; total_paid: number; payment_status: string; check_in: string }> = {}
-    payments.forEach(p => {
+    filteredPayments.forEach(p => {
       const folio = p.bookings?.folio_id || '—'
       const guestName = p.guests?.name || 'Unknown'
       if (!map[folio]) {
@@ -181,17 +197,51 @@ export default function AnalyticsPage() {
           <h1 className="text-3xl font-bold tracking-tight">Revenue Analytics</h1>
           <p className="text-muted-foreground">Comprehensive financial overview — every naira accounted for</p>
         </div>
-        <Select value={period} onValueChange={(v) => setPeriod(v as Period)}>
-          <SelectTrigger className="w-40">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="7d">Last 7 Days</SelectItem>
-            <SelectItem value="this_week">This Week</SelectItem>
-            <SelectItem value="30d">Last 30 Days</SelectItem>
-            <SelectItem value="this_month">This Month</SelectItem>
-          </SelectContent>
-        </Select>
+        <div className="flex gap-2 flex-wrap">
+          <Select value={period} onValueChange={(v) => setPeriod(v as Period)}>
+            <SelectTrigger className="w-40">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="today">Today</SelectItem>
+              <SelectItem value="7d">Last 7 Days</SelectItem>
+              <SelectItem value="this_week">This Week</SelectItem>
+              <SelectItem value="30d">Last 30 Days</SelectItem>
+              <SelectItem value="this_month">This Month</SelectItem>
+              <SelectItem value="custom">Custom Date</SelectItem>
+            </SelectContent>
+          </Select>
+          {period === 'custom' && (
+            <Popover open={calOpen} onOpenChange={setCalOpen}>
+              <PopoverTrigger asChild>
+                <Button variant="outline" className="gap-2">
+                  <CalendarIcon className="h-4 w-4" />
+                  {format(customDate, 'dd MMM yyyy')}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="end">
+                <Calendar
+                  mode="single"
+                  selected={customDate}
+                  onSelect={(d) => { if (d) { setCustomDate(d); setCalOpen(false) } }}
+                />
+              </PopoverContent>
+            </Popover>
+          )}
+          <Select value={paymentMethodFilter} onValueChange={setPaymentMethodFilter}>
+            <SelectTrigger className="w-40">
+              <SelectValue placeholder="All Methods" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="">All Payment Methods</SelectItem>
+              <SelectItem value="cash">Cash</SelectItem>
+              <SelectItem value="pos">POS</SelectItem>
+              <SelectItem value="transfer">Transfer</SelectItem>
+              <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
+              <SelectItem value="city_ledger">City Ledger</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
       {/* KPI Cards */}
@@ -253,10 +303,10 @@ export default function AnalyticsPage() {
           { key: 'transfer', label: 'Transfer', icon: <ArrowRightLeft className="h-4 w-4" />, color: 'text-purple-700', bg: 'bg-purple-50 border-purple-200' },
           { key: 'city_ledger', label: 'City Ledger', icon: <Building2 className="h-4 w-4" />, color: 'text-orange-700', bg: 'bg-orange-50 border-orange-200' },
         ].map(m => {
-          const amt = payments
+          const amt = filteredPayments
             .filter(p => m.key === 'transfer' ? ['transfer', 'bank_transfer'].includes(p.payment_method) : p.payment_method === m.key)
             .reduce((s, p) => s + p.amount, 0)
-          const count = payments.filter(p => m.key === 'transfer' ? ['transfer', 'bank_transfer'].includes(p.payment_method) : p.payment_method === m.key).length
+          const count = filteredPayments.filter(p => m.key === 'transfer' ? ['transfer', 'bank_transfer'].includes(p.payment_method) : p.payment_method === m.key).length
           return (
             <Card key={m.key} className={`border ${m.bg}`}>
               <CardContent className="p-4">
