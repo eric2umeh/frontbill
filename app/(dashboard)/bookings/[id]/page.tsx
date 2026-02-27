@@ -424,11 +424,13 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
         open={extendStayModalOpen}
         onClose={() => setExtendStayModalOpen(false)}
         booking={{
+          id: booking.id,
           folioId: booking.folio_id,
           guestName: booking.guests?.name,
           room: `Room ${booking.rooms?.room_number}`,
           currentCheckOut: booking.check_out,
           ratePerNight: booking.rate_per_night,
+          guestId: booking.guest_id,
         }}
       />
       

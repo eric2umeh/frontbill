@@ -20,6 +20,7 @@ interface ExtendStayModalProps {
   open: boolean
   onClose: () => void
   booking: {
+    id: string
     folioId: string
     guestName: string
     room: string
@@ -102,7 +103,7 @@ export function ExtendStayModal({ open, onClose, booking }: ExtendStayModalProps
       
       // Add charge to folio_charges
       const chargeData = {
-        booking_id: booking.guestId, // This should be the booking ID, not guest ID
+        booking_id: booking.id,
         description: `Extended Stay - ${additionalNights} night${additionalNights !== 1 ? 's' : ''}`,
         amount: additionalAmount,
         charge_type: 'extended_stay',

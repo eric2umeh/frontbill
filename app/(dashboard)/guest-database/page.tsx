@@ -24,6 +24,7 @@ interface Guest {
   id_type: string
   id_number: string
   created_at: string
+  total_balance?: number
 }
 
 interface GuestSummary {
@@ -65,7 +66,19 @@ export default function GuestDatabasePage() {
         .order('created_at', { ascending: false })
 
       if (error) throw error
-      setGuests(data || [])
+      
+      // Fetch all bookings for each guest to calculate total balance
+      const guestsWithBalance = await Promise.all((data || []).map(async (guest) => {
+        const { data: bookings } = await supabase
+          .from('bookings')
+          .select('balance')
+          .eq('guest_id', guest.id)
+        
+        const totalBalance = bookings?.reduce((sum, b) => sum + Number(b.balance || 0), 0) || 0
+        return { ...guest, total_balance: totalBalance }
+      }))
+      
+      setGuests(guestsWithBalance)
     } catch (error: any) {
       setGuests([])
     } finally {
@@ -185,6 +198,19 @@ export default function GuestDatabasePage() {
                 {guest.created_at ? format(new Date(guest.created_at), 'dd MMM yyyy') : '—'}
               </div>
             ),
+          },
+          {
+            key: 'balance',
+            label: 'Outstanding Balance',
+            render: (guest) => {
+              // Calculate balance from guest data if available
+              const balance = (guest as any).total_balance || 0
+              return (
+                <div className={`text-sm font-medium cursor-pointer ${balance > 0 ? 'text-red-600' : 'text-green-600'}`} onClick={() => openGuestDetail(guest)}>
+                  {formatNaira(balance)}
+                </div>
+              )
+            },
           },
           {
             key: 'actions',

@@ -87,8 +87,18 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
   const [creatingLedgerOrg, setCreatingLedgerOrg] = useState(false)
 
   useEffect(() => {
-    if (open) loadData()
-    else resetForm()
+    if (open) {
+      loadData()
+      // Set default dates: today for check-in, tomorrow for check-out
+      const todayDate = today()
+      setCheckInDate(todayDate)
+      setCheckOutDate(addDays(todayDate, 1))
+      setNights(1)
+    } else {
+      // Reset loading state when modal closes
+      setLoading(false)
+      resetForm()
+    }
   }, [open])
 
   const loadData = async () => {
@@ -181,8 +191,13 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
     }
   }
 
-  // Dates
-  const handleCheckInChange = (date: Date | undefined) => {
+  // Filter available rooms for selected dates
+  const getAvailableRoomsForType = (roomType: string) => {
+    const roomsOfType = rooms.filter(r => r.room_type === roomType)
+    if (!checkInDate || !checkOutDate) return roomsOfType
+    // For now, show all rooms of the type - bookings check happens during booking
+    return roomsOfType
+  }
     if (!date) return
     setCheckInDate(date)
     setCheckInOpen(false)
@@ -211,7 +226,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
   }
 
   const canGoNext = () => {
-    if (step === 1) return !!(guestId || fullName.trim()) && !!phone.trim()
+    if (step === 1) return !!(guestId || fullName.trim())
     if (step === 2) return !!(checkInDate && checkOutDate && nights > 0)
     if (step === 3) return !!(selectedRoom)
     return false
@@ -356,7 +371,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
               {!guestId && fullName.trim() && <p className="text-xs text-amber-600">New guest will be created: <strong>{fullName}</strong></p>}
             </div>
             <div className="space-y-2">
-              <Label>Phone *</Label>
+              <Label>Phone</Label>
               <Input placeholder="Phone number" value={phone} onChange={(e) => setPhone(e.target.value)} disabled={!!guestId} />
             </div>
             <div className="space-y-2">
@@ -445,7 +460,8 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
                 <SelectTrigger><SelectValue placeholder="Select room type" /></SelectTrigger>
                 <SelectContent>
                   {ROOM_TYPES.map(rt => {
-                    const count = rooms.filter(r => r.room_type === rt).length
+                    const availableRooms = getAvailableRoomsForType(rt)
+                    const count = availableRooms.length
                     return (
                       <SelectItem key={rt} value={rt} disabled={count === 0}>
                         {rt} {count === 0 ? '(none available)' : `(${count} available)`}
