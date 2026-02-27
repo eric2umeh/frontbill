@@ -98,5 +98,10 @@ async function clearDatabase() {
     console.log('')
     console.log('[v0] Database is now ready for MVP testing from a clean slate!')
     process.exit(0)
+  } catch (err) {
+    console.error('[v0] Critical error:', err.message)
+    process.exit(1)
+  }
+}
 
 clearDatabase()
