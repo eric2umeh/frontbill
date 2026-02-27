@@ -18,7 +18,7 @@ import {
 import {
   TrendingUp, DollarSign, CreditCard, Users, Building2,
   AlertCircle, Download, Loader2, CalendarDays, Banknote,
-  Smartphone, ArrowRightLeft, Clock, CheckCircle2, XCircle
+  Smartphone, ArrowRightLeft, Clock, CheckCircle2, XCircle, CalendarIcon
 } from 'lucide-react'
 import { format, subDays, startOfMonth, endOfMonth, startOfWeek, endOfWeek, eachDayOfInterval, parseISO, startOfDay, endOfDay } from 'date-fns'
 
@@ -90,7 +90,7 @@ export default function AnalyticsPage() {
         .limit(200),
       supabase
         .from('city_ledger_accounts')
-        .select('id, account_name, account_type, balance, credit_limit, contact_phone')
+        .select('id, account_name, account_type, balance, contact_phone')
         .eq('organization_id', orgId)
         .order('balance', { ascending: false }),
     ])
@@ -508,12 +508,6 @@ export default function AnalyticsPage() {
                         )}
                       </div>
                       <div className="flex items-center gap-4 shrink-0 text-sm">
-                        {account.credit_limit && (
-                          <div className="text-right">
-                            <div className="text-xs text-muted-foreground">Credit Limit</div>
-                            <div className="font-medium">{formatNaira(account.credit_limit)}</div>
-                          </div>
-                        )}
                         <div className="text-right">
                           <div className="text-xs text-muted-foreground">Outstanding</div>
                           <div className={`font-bold ${account.balance > 0 ? 'text-red-600' : 'text-green-600'}`}>
