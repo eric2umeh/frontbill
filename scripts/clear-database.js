@@ -11,9 +11,33 @@ if (!supabaseUrl || !supabaseServiceKey) {
 const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
 async function clearDatabase() {
-  console.log('[v0] Starting database cleanup...')
+  console.log('[v0] Starting complete database cleanup for MVP testing...')
   
   try {
+    // First, clear all auth users via admin API
+    console.log('[v0] Clearing all auth users...')
+    try {
+      // Get all users
+      const { data: { users }, error: listError } = await supabase.auth.admin.listUsers()
+      
+      if (!listError && users && users.length > 0) {
+        for (const user of users) {
+          const { error: deleteError } = await supabase.auth.admin.deleteUser(user.id)
+          if (deleteError) {
+            console.log(`[v0] ⊘ Could not delete user ${user.email}`)
+          } else {
+            console.log(`[v0] ✓ Deleted auth user: ${user.email}`)
+          }
+        }
+      } else if (listError) {
+        console.log('[v0] ⊘ Could not list auth users (may need manual cleanup in Supabase dashboard)')
+      } else {
+        console.log('[v0] ✓ No auth users to clear')
+      }
+    } catch (authErr) {
+      console.log('[v0] ⊘ Auth user deletion skipped (manual cleanup may be needed)')
+    }
+    
     // Tables to clear in reverse dependency order (dependent tables first)
     const tablesToClear = [
       { name: 'payments', exists: true },
@@ -26,7 +50,7 @@ async function clearDatabase() {
       { name: 'city_ledger_accounts', exists: true },
     ]
 
-    console.log('[v0] Clearing all data while preserving schema...')
+    console.log('[v0] Clearing all database tables...')
     
     for (const table of tablesToClear) {
       try {
@@ -61,13 +85,18 @@ async function clearDatabase() {
       }
     }
     
-    console.log('[v0] ✅ Database cleared successfully!')
+    console.log('')
+    console.log('[v0] ✅ Database cleanup complete!')
     console.log('[v0] 🚀 Schema preserved. Ready for fresh MVP testing.')
+    console.log('')
+    console.log('[v0] NEXT STEPS TO SWITCH TO TEST MODE:')
+    console.log('[v0] 1. Go to your Supabase Dashboard: https://app.supabase.com')
+    console.log('[v0] 2. Select your project')
+    console.log('[v0] 3. Go to Settings → Project Settings')
+    console.log('[v0] 4. Under "Project Status", switch to "Development" mode (if available)')
+    console.log('[v0] 5. Alternatively, create a new Supabase project specifically for testing')
+    console.log('')
+    console.log('[v0] Database is now ready for MVP testing from a clean slate!')
     process.exit(0)
-  } catch (err) {
-    console.error('[v0] Fatal error during cleanup:', err.message)
-    process.exit(1)
-  }
-}
 
 clearDatabase()
