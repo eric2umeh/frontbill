@@ -76,11 +76,10 @@ export default function TransactionsPage() {
       const { data, error } = await supabase
         .from('payments')
         .select(`
-          id, booking_id, guest_id, amount, payment_method, payment_date,
-          reference_number, notes, received_by,
+          id, organization_id, booking_id, guest_id, amount, payment_method,
+          payment_date, reference_number, notes, received_by,
           guests:guest_id ( name, phone ),
-          bookings:booking_id ( folio_id ),
-          received_by_profile:profiles!payments_received_by_fkey ( full_name )
+          bookings:booking_id ( folio_id )
         `)
         .eq('organization_id', profile.organization_id)
         .gte('payment_date', dateFilter.from.toISOString())
@@ -94,7 +93,7 @@ export default function TransactionsPage() {
         guest_name: p.guests?.name || 'Walk-in / Unknown',
         guest_phone: p.guests?.phone || '',
         folio_id: p.bookings?.folio_id || '—',
-        received_by_name: p.received_by_profile?.full_name || 'System',
+        received_by_name: p.received_by ? `User: ${p.received_by.slice(0, 8)}` : 'System',
       }))
 
       setPayments(mapped)
