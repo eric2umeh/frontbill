@@ -42,7 +42,7 @@ export default function AnalyticsPage() {
   const [period, setPeriod] = useState<Period>('30d')
   const [customDate, setCustomDate] = useState<Date>(new Date())
   const [calOpen, setCalOpen] = useState(false)
-  const [paymentMethodFilter, setPaymentMethodFilter] = useState<string>('')
+  const [paymentMethodFilter, setPaymentMethodFilter] = useState<string>('all')
   const router = useRouter()
 
   const dateRange = useMemo(() => {
@@ -104,7 +104,7 @@ export default function AnalyticsPage() {
   // ---- computed metrics ----
   // Filter payments by method if selected
   const filteredPayments = useMemo(() => {
-    if (!paymentMethodFilter) return payments
+    if (!paymentMethodFilter || paymentMethodFilter === 'all') return payments
     return payments.filter(p => {
       if (paymentMethodFilter === 'transfer') return ['transfer', 'bank_transfer'].includes(p.payment_method)
       return p.payment_method === paymentMethodFilter
@@ -233,7 +233,7 @@ export default function AnalyticsPage() {
               <SelectValue placeholder="All Methods" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="">All Payment Methods</SelectItem>
+              <SelectItem value="all">All Payment Methods</SelectItem>
               <SelectItem value="cash">Cash</SelectItem>
               <SelectItem value="pos">POS</SelectItem>
               <SelectItem value="transfer">Transfer</SelectItem>
