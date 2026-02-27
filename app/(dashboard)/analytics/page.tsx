@@ -18,7 +18,7 @@ import {
 import {
   TrendingUp, DollarSign, CreditCard, Users, Building2,
   AlertCircle, Download, Loader2, CalendarDays, Banknote,
-  Smartphone, ArrowRightLeft, Clock, CheckCircle2, XCircle
+  Smartphone, ArrowRightLeft, Clock, CheckCircle2, XCircle, CalendarIcon
 } from 'lucide-react'
 import { format, subDays, startOfMonth, endOfMonth, startOfWeek, endOfWeek, eachDayOfInterval, parseISO, startOfDay, endOfDay } from 'date-fns'
 
@@ -42,7 +42,7 @@ export default function AnalyticsPage() {
   const [period, setPeriod] = useState<Period>('30d')
   const [customDate, setCustomDate] = useState<Date>(new Date())
   const [calOpen, setCalOpen] = useState(false)
-  const [paymentMethodFilter, setPaymentMethodFilter] = useState<string>('')
+  const [paymentMethodFilter, setPaymentMethodFilter] = useState<string>('all')
   const router = useRouter()
 
   const dateRange = useMemo(() => {
@@ -90,7 +90,7 @@ export default function AnalyticsPage() {
         .limit(200),
       supabase
         .from('city_ledger_accounts')
-        .select('id, account_name, account_type, balance, credit_limit, contact_phone')
+        .select('id, account_name, account_type, balance, contact_phone')
         .eq('organization_id', orgId)
         .order('balance', { ascending: false }),
     ])
@@ -104,7 +104,7 @@ export default function AnalyticsPage() {
   // ---- computed metrics ----
   // Filter payments by method if selected
   const filteredPayments = useMemo(() => {
-    if (!paymentMethodFilter) return payments
+    if (!paymentMethodFilter || paymentMethodFilter === 'all') return payments
     return payments.filter(p => {
       if (paymentMethodFilter === 'transfer') return ['transfer', 'bank_transfer'].includes(p.payment_method)
       return p.payment_method === paymentMethodFilter
@@ -233,7 +233,7 @@ export default function AnalyticsPage() {
               <SelectValue placeholder="All Methods" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="">All Payment Methods</SelectItem>
+              <SelectItem value="all">All Payment Methods</SelectItem>
               <SelectItem value="cash">Cash</SelectItem>
               <SelectItem value="pos">POS</SelectItem>
               <SelectItem value="transfer">Transfer</SelectItem>
@@ -508,12 +508,6 @@ export default function AnalyticsPage() {
                         )}
                       </div>
                       <div className="flex items-center gap-4 shrink-0 text-sm">
-                        {account.credit_limit && (
-                          <div className="text-right">
-                            <div className="text-xs text-muted-foreground">Credit Limit</div>
-                            <div className="font-medium">{formatNaira(account.credit_limit)}</div>
-                          </div>
-                        )}
                         <div className="text-right">
                           <div className="text-xs text-muted-foreground">Outstanding</div>
                           <div className={`font-bold ${account.balance > 0 ? 'text-red-600' : 'text-green-600'}`}>
