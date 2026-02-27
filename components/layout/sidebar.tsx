@@ -23,6 +23,7 @@ import {
   ChevronRight,
   X,
   Moon,
+  ShieldCheck,
 } from 'lucide-react'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
@@ -84,6 +85,11 @@ const routes = [
     label: 'Reports',
     icon: FileBarChart,
     href: '/reports',
+  },
+  {
+    label: 'Users & Roles',
+    icon: ShieldCheck,
+    href: '/users-roles',
   },
   {
     label: 'Settings',
