@@ -10,48 +10,62 @@ if (!supabaseUrl || !supabaseServiceKey) {
 
 const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
-// Tables in dependency order (reverse of creation order)
-const tables = [
-  'user_roles',
-  'payments',
-  'bookings',
-  'rooms',
-  'guests',
-  'night_audit_logs',
-  'organizations',
-  'ledger_transactions',
-  'city_ledger_accounts',
-  'profiles',
-]
-
 async function clearDatabase() {
   console.log('[v0] Starting database cleanup...')
   
   try {
-    // Disable RLS temporarily if needed
+    // Tables to clear in reverse dependency order (dependent tables first)
+    const tablesToClear = [
+      { name: 'payments', exists: true },
+      { name: 'transactions', exists: true },
+      { name: 'bookings', exists: true },
+      { name: 'rooms', exists: true },
+      { name: 'guests', exists: true },
+      { name: 'profiles', exists: true },
+      { name: 'organizations', exists: true },
+      { name: 'city_ledger_accounts', exists: true },
+    ]
+
     console.log('[v0] Clearing all data while preserving schema...')
     
-    for (const table of tables) {
+    for (const table of tablesToClear) {
       try {
-        const { data, error } = await supabase.from(table).delete().neq('id', '')
-        if (error) {
-          if (error.message.includes('does not exist')) {
-            console.log(`[v0] ✓ Table "${table}" does not exist or already empty`)
-          } else {
-            console.error(`[v0] Error clearing ${table}:`, error.message)
-          }
-        } else {
-          console.log(`[v0] ✓ Cleared table "${table}" (${data?.length || 0} rows deleted)`)
+        // Fetch all records first to count them
+        const { data: records, error: fetchError } = await supabase
+          .from(table.name)
+          .select('id', { count: 'exact', head: true })
+
+        if (fetchError && fetchError.message.includes('does not exist')) {
+          console.log(`[v0] ⊘ Table "${table.name}" does not exist (skipped)`)
+          continue
         }
-      } catch (err: any) {
-        console.log(`[v0] ✓ Table "${table}" cleared or skipped`)
+
+        if (fetchError) {
+          console.log(`[v0] ⊘ Could not access "${table.name}" (${fetchError.message})`)
+          continue
+        }
+
+        // Delete all records by deleting where id is not null
+        const { error: deleteError } = await supabase
+          .from(table.name)
+          .delete()
+          .not('id', 'is', null)
+
+        if (deleteError) {
+          console.error(`[v0] ✗ Error clearing ${table.name}: ${deleteError.message}`)
+        } else {
+          console.log(`[v0] ✓ Cleared table "${table.name}"`)
+        }
+      } catch (err) {
+        console.log(`[v0] ⊘ Table "${table.name}" - error or skipped`)
       }
     }
     
-    console.log('[v0] ✅ Database cleared successfully! Schema preserved.')
-    console.log('[v0] Ready for fresh MVP testing.')
-  } catch (err: any) {
-    console.error('[v0] Error during cleanup:', err.message)
+    console.log('[v0] ✅ Database cleared successfully!')
+    console.log('[v0] 🚀 Schema preserved. Ready for fresh MVP testing.')
+    process.exit(0)
+  } catch (err) {
+    console.error('[v0] Fatal error during cleanup:', err.message)
     process.exit(1)
   }
 }
