@@ -308,7 +308,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
 
       await supabase.from('rooms').update({ status: 'reserved' }).eq('id', selectedRoom.id)
 
-      // Record transaction
+      // Record in transactions table
       await supabase.from('transactions').insert([{
         organization_id: orgId,
         booking_id: booking.id,
@@ -321,6 +321,23 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
         description: `Reservation — ${folioId}`,
         received_by: currentUserId,
       }])
+
+      // Also insert into payments table so Transactions page shows it
+      if (bookingPaymentStatus !== 'unpaid' && bookingPaymentStatus !== 'pending') {
+        const paidAmount = paymentStatus === 'paid' ? totalAmount : (Number(partialAmount) || 0)
+        if (paidAmount > 0) {
+          await supabase.from('payments').insert([{
+            organization_id: orgId,
+            booking_id: booking.id,
+            guest_id: finalGuestId,
+            amount: paidAmount,
+            payment_method: isCityLedger ? 'city_ledger' : paymentMethod,
+            payment_date: new Date().toISOString(),
+            notes: `Reservation payment — Folio ${folioId}`,
+            received_by: currentUserId || null,
+          }])
+        }
+      }
 
       toast.success(`Reservation created — Ref: ${folioId}`)
       onSuccess?.()

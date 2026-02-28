@@ -73,7 +73,9 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
   const [checkOutOpen, setCheckOutOpen] = useState(false)
 
   // Step 3: Room & Payment
-  const [rooms, setRooms] = useState<Room[]>([])
+  const [rooms, setRooms] = useState<Room[]>([]) // date-filtered available rooms
+  const [allRooms, setAllRooms] = useState<Room[]>([]) // all non-maintenance rooms
+  const [allBookingsForRooms, setAllBookingsForRooms] = useState<any[]>([]) // active bookings for date check
   const [selectedRoomType, setSelectedRoomType] = useState('')
   const [selectedRoom, setSelectedRoom] = useState<Room | null>(null)
   const [pricePerNight, setPricePerNight] = useState(0)
@@ -131,18 +133,38 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
       const [
         { data: guestData },
         { data: roomData },
+        { data: bookingData },
         { data: orgData },
       ] = await Promise.all([
-        // Guests table → individual ledger accounts
+        // Guests table
         supabase.from('guests').select('id, name, phone, email, address').eq('organization_id', orgId).order('name'),
-        // Available rooms
-        supabase.from('rooms').select('id, room_number, room_type, price_per_night').eq('organization_id', orgId).eq('status', 'available').order('room_number'),
-        // Organizations table → organization ledger accounts (all except current org)
+        // All non-maintenance rooms — availability is checked by date range, not status
+        supabase.from('rooms').select('id, room_number, room_type, price_per_night').eq('organization_id', orgId).neq('status', 'maintenance').order('room_number'),
+        // Active bookings to check date conflicts
+        supabase.from('bookings').select('room_id, check_in, check_out').eq('organization_id', orgId).in('status', ['confirmed', 'reserved', 'checked_in']),
+        // Organizations table for city ledger
         supabase.from('organizations').select('id, name, phone, email').neq('id', orgId).order('name'),
       ])
 
       setGuests(guestData || [])
-      setRooms(roomData || [])
+
+      // Store bookings for date-based availability filtering
+      const activeBookings = bookingData || []
+      setAllRooms(roomData || [])
+      setAllBookingsForRooms(activeBookings)
+
+      // Filter rooms that are NOT booked for the selected dates
+      const toStr = (d: Date) => {
+        const y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,'0'), dd = String(d.getDate()).padStart(2,'0')
+        return `${y}-${m}-${dd}`
+      }
+      const ciStr = toStr(checkInDate), coStr = toStr(checkOutDate)
+      const bookedRoomIds = new Set(
+        activeBookings
+          .filter(b => b.check_in < coStr && b.check_out > ciStr)
+          .map(b => b.room_id)
+      )
+      setRooms((roomData || []).filter(r => !bookedRoomIds.has(r.id)))
 
       // Map guests → LedgerAccount shape
       const individualLedger: LedgerAccount[] = (guestData || []).map(g => ({
@@ -341,6 +363,27 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
     const d = String(date.getDate()).padStart(2, '0')
     return `${y}-${m}-${d}`
   }
+  const filterRoomsForDates = (ci: Date, co: Date) => {
+    const toStr = (d: Date) => {
+      const y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,'0'), dd = String(d.getDate()).padStart(2,'0')
+      return `${y}-${m}-${dd}`
+    }
+    const ciStr = toStr(ci), coStr = toStr(co)
+    const bookedRoomIds = new Set(
+      allBookingsForRooms
+        .filter(b => b.check_in < coStr && b.check_out > ciStr)
+        .map(b => b.room_id)
+    )
+    setRooms(allRooms.filter(r => !bookedRoomIds.has(r.id)))
+    // Clear selected room if it's no longer available
+    setSelectedRoom(prev => prev && bookedRoomIds.has(prev.id) ? null : prev)
+    setSelectedRoomType(prev => {
+      if (!prev) return prev
+      const stillAvail = allRooms.some(r => r.room_type === prev && !bookedRoomIds.has(r.id))
+      return stillAvail ? prev : ''
+    })
+  }
+
   const handleCheckInChange = (date: Date | undefined) => {
     if (!date) return
     setCheckInDate(date)
@@ -355,6 +398,8 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
     setCheckOutOpen(false)
     const n = Math.ceil((date.getTime() - checkInDate.getTime()) / (1000 * 60 * 60 * 24))
     setNights(Math.max(0, n))
+    // Re-filter available rooms for the newly selected dates
+    filterRoomsForDates(checkInDate, date)
   }
 
   const handleNightsChange = (value: number) => {
@@ -363,7 +408,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
     if (checkInDate) setCheckOutDate(addDays(checkInDate, n))
   }
 
-  // Room selection
+  // Room selection — rooms list is already filtered for the selected dates
   const handleRoomTypeSelect = (roomType: string) => {
     setSelectedRoomType(roomType)
     const room = rooms.find(r => r.room_type === roomType)
@@ -446,7 +491,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
 
       await supabase.from('rooms').update({ status: 'occupied' }).eq('id', selectedRoom.id)
 
-      // Record transaction
+      // Record in transactions table (legacy)
       await supabase.from('transactions').insert([{
         organization_id: organizationId,
         booking_id: booking.id,
@@ -458,6 +503,19 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
         status: isPaid ? 'completed' : 'pending',
         description: `Booking created - Folio ${folioId}`,
       }])
+
+      // Also record in payments table so Transactions page shows it
+      if (isPaid) {
+        await supabase.from('payments').insert([{
+          organization_id: organizationId,
+          booking_id: booking.id,
+          guest_id: finalGuestId,
+          amount: total,
+          payment_method: paymentMethod,
+          payment_date: new Date().toISOString(),
+          notes: `Booking payment — Folio ${folioId}`,
+        }])
+      }
 
       toast.success(`Booking created! Ref: ${booking.folio_id}`)
       onSuccess?.()
