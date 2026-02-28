@@ -77,8 +77,6 @@ export default function TransactionsPage() {
         .from('profiles').select('organization_id').eq('id', user.id).single()
       if (!profile) { setPayments([]); return }
 
-      console.log('[v0] Fetching payments for org:', profile.organization_id)
-
       // Fetch from payments table with joins
       const { data: paymentsData, error: paymentsError } = await supabase
         .from('payments')
@@ -91,10 +89,7 @@ export default function TransactionsPage() {
         .eq('organization_id', profile.organization_id)
         .order('payment_date', { ascending: false })
 
-      console.log('[v0] Payments query error:', paymentsError)
-      console.log('[v0] Payments data received:', paymentsData?.length, 'items')
-      
-      if (paymentsError) console.error('[v0] Payments error:', paymentsError)
+      if (paymentsError) console.error('Payments error:', paymentsError)
 
       // Fetch from transactions table
       const { data: transactionsData, error: transactionsError } = await supabase
@@ -103,16 +98,13 @@ export default function TransactionsPage() {
         .eq('organization_id', profile.organization_id)
         .order('created_at', { ascending: false })
 
-      console.log('[v0] Transactions query error:', transactionsError)
-      console.log('[v0] Transactions data received:', transactionsData?.length, 'items')
-      
-      if (transactionsError) console.error('[v0] Transactions error:', transactionsError)
+      if (transactionsError) console.error('Transactions error:', transactionsError)
 
       // Combine both data sources
-      const allTransactions: Payment[] = []
+      const allTransactions: Payment[] = [];
 
       // Map payments
-      (paymentsData || []).forEach((p: any) => {
+      ;(paymentsData || []).forEach((p: any) => {
         allTransactions.push({
           id: p.id,
           booking_id: p.booking_id,
@@ -132,7 +124,7 @@ export default function TransactionsPage() {
       })
 
       // Map transactions
-      (transactionsData || []).forEach((t: any) => {
+      ;(transactionsData || []).forEach((t: any) => {
         allTransactions.push({
           id: t.id,
           booking_id: t.booking_id,
@@ -163,9 +155,6 @@ export default function TransactionsPage() {
         return pDate >= dateFilter.from && pDate <= dateFilter.to
       })
       
-      console.log('[v0] Total transactions after combining:', allTransactions.length)
-      console.log('[v0] Filtered by date range:', filtered.length)
-
       setPayments(filtered)
     } catch (err: any) {
       console.error('[v0] Error fetching payments:', err)

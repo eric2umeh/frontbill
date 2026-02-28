@@ -62,9 +62,13 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
   const [filteredGuests, setFilteredGuests] = useState<Guest[]>([])
 
   // Step 2: Dates
-  const [checkInDate, setCheckInDate] = useState<Date>()
-  const [checkOutDate, setCheckOutDate] = useState<Date>()
-  const [nights, setNights] = useState(0)
+  const [checkInDate, setCheckInDate] = useState<Date>(() => {
+    const d = new Date(); d.setHours(0, 0, 0, 0); return d
+  })
+  const [checkOutDate, setCheckOutDate] = useState<Date>(() => {
+    const d = new Date(); d.setHours(0, 0, 0, 0); return new Date(d.getTime() + 86400000)
+  })
+  const [nights, setNights] = useState(1)
   const [checkInOpen, setCheckInOpen] = useState(false)
   const [checkOutOpen, setCheckOutOpen] = useState(false)
 
@@ -99,6 +103,9 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
 
   useEffect(() => {
     if (open) loadData()
+    else {
+      setLoading(false)
+    }
   }, [open])
 
   const loadData = async () => {
@@ -370,7 +377,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
   }
 
   const canGoToNextStep = () => {
-    if (step === 1) return !!(guestId || fullName.trim()) && !!phone.trim()
+    if (step === 1) return !!(guestId || fullName.trim())
     if (step === 2) return !!(checkInDate && checkOutDate && nights > 0)
     if (step === 3) return !!(selectedRoom && (paymentMethod !== 'city_ledger' || ledgerAccount))
     return false
@@ -466,7 +473,8 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
   const resetForm = () => {
     setStep(1)
     setFullName(''); setPhone(''); setEmail(''); setAddress(''); setGuestId('')
-    setCheckInDate(undefined); setCheckOutDate(undefined); setNights(0)
+    const d = new Date(); d.setHours(0, 0, 0, 0)
+    setCheckInDate(d); setCheckOutDate(new Date(d.getTime() + 86400000)); setNights(1)
     setSelectedRoomType(''); setSelectedRoom(null); setPricePerNight(0); setCustomPrice(0)
     setPaymentMethod('cash')
     setLedgerSearch(''); setLedgerAccount(''); setLedgerAccountName('')
@@ -479,7 +487,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
 
   return (
     <>
-      <Dialog open={open} onOpenChange={onClose}>
+      <Dialog open={open} onOpenChange={(o) => { if (!o) { setLoading(false); onClose() } }}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>New Booking — Step {step} of 3</DialogTitle>
@@ -521,8 +529,8 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
               </div>
 
               <div className="space-y-2">
-                <Label>Phone Number *</Label>
-                <Input placeholder="Phone number" value={phone} onChange={(e) => setPhone(e.target.value)} disabled={!!guestId} />
+                <Label>Phone Number</Label>
+                <Input placeholder="Phone number (optional)" value={phone} onChange={(e) => setPhone(e.target.value)} disabled={!!guestId} />
               </div>
 
               <div className="space-y-2">

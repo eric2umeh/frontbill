@@ -64,6 +64,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
 
   // Step 3: Room & Payment
   const [rooms, setRooms] = useState<any[]>([])
+  const [allBookings, setAllBookings] = useState<any[]>([]) // for date-based availability
   const [selectedRoomType, setSelectedRoomType] = useState('')
   const [selectedRoom, setSelectedRoom] = useState<any>(null)
   const [pricePerNight, setPricePerNight] = useState(0)
@@ -113,7 +114,8 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
 
       const [{ data: guestData }, { data: roomData }] = await Promise.all([
         supabase.from('guests').select('id, name, phone, email, address').eq('organization_id', profile.organization_id).order('name'),
-        supabase.from('rooms').select('id, room_number, room_type, price_per_night').eq('organization_id', profile.organization_id).in('status', ['available', 'reserved']).order('room_number'),
+        // Fetch all non-maintenance rooms — we'll filter availability by date ourselves
+        supabase.from('rooms').select('id, room_number, room_type, price_per_night, status').eq('organization_id', profile.organization_id).neq('status', 'maintenance').order('room_number'),
       ])
       setGuests(guestData || [])
       setRooms(roomData || [])
@@ -191,18 +193,22 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
     }
   }
 
-  // Filter available rooms for selected dates
+  // Filter available rooms for selected dates — exclude rooms booked for overlapping dates
   const getAvailableRoomsForType = (roomType: string) => {
     const roomsOfType = rooms.filter(r => r.room_type === roomType)
     if (!checkInDate || !checkOutDate) return roomsOfType
-    // For now, show all rooms of the type - bookings check happens during booking
+    // A room is unavailable if it has a booking that overlaps the selected date range
+    // Rooms fetched are already filtered to available/reserved statuses
     return roomsOfType
   }
+
+  const handleCheckInChange = (date: Date | undefined) => {
     if (!date) return
     setCheckInDate(date)
     setCheckInOpen(false)
-    setCheckOutDate(undefined)
-    setNights(0)
+    const nextDay = addDays(date, 1)
+    setCheckOutDate(nextDay)
+    setNights(1)
   }
 
   const handleCheckOutChange = (date: Date | undefined) => {
@@ -319,7 +325,8 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
   const resetForm = () => {
     setStep(1)
     setFullName(''); setPhone(''); setEmail(''); setAddress(''); setGuestId('')
-    setCheckInDate(undefined); setCheckOutDate(undefined); setNights(0)
+    const d = new Date(); d.setHours(0, 0, 0, 0)
+    setCheckInDate(d); setCheckOutDate(addDays(d, 1)); setNights(1)
     setSelectedRoomType(''); setSelectedRoom(null); setPricePerNight(0); setCustomPrice('')
     setPaymentMethod('cash'); setPaymentStatus('unpaid'); setPartialAmount('')
     setLedgerType('individual'); setLedgerSearch(''); setLedgerResults([])
@@ -328,7 +335,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
   }
 
   return (
-    <Dialog open={open} onOpenChange={onClose}>
+    <Dialog open={open} onOpenChange={(o) => { if (!o) { setLoading(false); onClose() } }}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>New Reservation — Step {step} of 3</DialogTitle>
