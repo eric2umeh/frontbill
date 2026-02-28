@@ -64,6 +64,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
 
   // Step 3: Room & Payment
   const [rooms, setRooms] = useState<any[]>([])
+  const [allBookings, setAllBookings] = useState<any[]>([]) // for date-based availability
   const [selectedRoomType, setSelectedRoomType] = useState('')
   const [selectedRoom, setSelectedRoom] = useState<any>(null)
   const [pricePerNight, setPricePerNight] = useState(0)
@@ -87,8 +88,18 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
   const [creatingLedgerOrg, setCreatingLedgerOrg] = useState(false)
 
   useEffect(() => {
-    if (open) loadData()
-    else resetForm()
+    if (open) {
+      loadData()
+      // Set default dates: today for check-in, tomorrow for check-out
+      const todayDate = today()
+      setCheckInDate(todayDate)
+      setCheckOutDate(addDays(todayDate, 1))
+      setNights(1)
+    } else {
+      // Reset loading state when modal closes
+      setLoading(false)
+      resetForm()
+    }
   }, [open])
 
   const loadData = async () => {
@@ -101,12 +112,16 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
       if (!profile?.organization_id) return
       setOrgId(profile.organization_id)
 
-      const [{ data: guestData }, { data: roomData }] = await Promise.all([
+      const [{ data: guestData }, { data: roomData }, { data: bookingData }] = await Promise.all([
         supabase.from('guests').select('id, name, phone, email, address').eq('organization_id', profile.organization_id).order('name'),
-        supabase.from('rooms').select('id, room_number, room_type, price_per_night').eq('organization_id', profile.organization_id).in('status', ['available', 'reserved']).order('room_number'),
+        // Fetch all non-maintenance rooms — we'll filter availability by date ourselves
+        supabase.from('rooms').select('id, room_number, room_type, price_per_night, status').eq('organization_id', profile.organization_id).neq('status', 'maintenance').order('room_number'),
+        // Fetch active bookings to check date availability
+        supabase.from('bookings').select('room_id, check_in, check_out').eq('organization_id', profile.organization_id).in('status', ['confirmed', 'reserved', 'checked_in']),
       ])
       setGuests(guestData || [])
       setRooms(roomData || [])
+      setAllBookings(bookingData || [])
     } catch {
       toast.error('Failed to load data')
     }
@@ -181,13 +196,29 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
     }
   }
 
-  // Dates
+  // Filter available rooms for selected dates — exclude rooms booked for overlapping dates
+  const getAvailableRoomsForType = (roomType: string) => {
+    const roomsOfType = rooms.filter(r => r.room_type === roomType)
+    if (!checkInDate || !checkOutDate) return roomsOfType
+    const cin = toLocalDateStr(checkInDate)
+    const cout = toLocalDateStr(checkOutDate)
+    // A room is booked if any existing booking overlaps: existing.check_in < newCheckOut AND existing.check_out > newCheckIn
+    const bookedRoomIds = new Set(
+      allBookings
+        .filter(b => b.check_in < cout && b.check_out > cin)
+        .map(b => b.room_id)
+    )
+    return roomsOfType.filter(r => !bookedRoomIds.has(r.id))
+  }
+
   const handleCheckInChange = (date: Date | undefined) => {
     if (!date) return
     setCheckInDate(date)
     setCheckInOpen(false)
-    setCheckOutDate(undefined)
-    setNights(0)
+    const nextDay = addDays(date, 1)
+    setCheckOutDate(nextDay)
+    setNights(1)
+    setSelectedRoom(null); setSelectedRoomType('')
   }
 
   const handleCheckOutChange = (date: Date | undefined) => {
@@ -195,6 +226,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
     setCheckOutDate(date)
     setCheckOutOpen(false)
     setNights(Math.max(0, differenceInDays(date, checkInDate)))
+    setSelectedRoom(null); setSelectedRoomType('')
   }
 
   const handleNightsChange = (value: number) => {
@@ -211,7 +243,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
   }
 
   const canGoNext = () => {
-    if (step === 1) return !!(guestId || fullName.trim()) && !!phone.trim()
+    if (step === 1) return !!(guestId || fullName.trim())
     if (step === 2) return !!(checkInDate && checkOutDate && nights > 0)
     if (step === 3) return !!(selectedRoom)
     return false
@@ -276,7 +308,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
 
       await supabase.from('rooms').update({ status: 'reserved' }).eq('id', selectedRoom.id)
 
-      // Record transaction
+      // Record in transactions table
       await supabase.from('transactions').insert([{
         organization_id: orgId,
         booking_id: booking.id,
@@ -289,6 +321,23 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
         description: `Reservation — ${folioId}`,
         received_by: currentUserId,
       }])
+
+      // Also insert into payments table so Transactions page shows it
+      if (bookingPaymentStatus !== 'unpaid' && bookingPaymentStatus !== 'pending') {
+        const paidAmount = paymentStatus === 'paid' ? totalAmount : (Number(partialAmount) || 0)
+        if (paidAmount > 0) {
+          await supabase.from('payments').insert([{
+            organization_id: orgId,
+            booking_id: booking.id,
+            guest_id: finalGuestId,
+            amount: paidAmount,
+            payment_method: isCityLedger ? 'city_ledger' : paymentMethod,
+            payment_date: new Date().toISOString(),
+            notes: `Reservation payment — Folio ${folioId}`,
+            received_by: currentUserId || null,
+          }])
+        }
+      }
 
       toast.success(`Reservation created — Ref: ${folioId}`)
       onSuccess?.()
@@ -304,7 +353,8 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
   const resetForm = () => {
     setStep(1)
     setFullName(''); setPhone(''); setEmail(''); setAddress(''); setGuestId('')
-    setCheckInDate(undefined); setCheckOutDate(undefined); setNights(0)
+    const d = new Date(); d.setHours(0, 0, 0, 0)
+    setCheckInDate(d); setCheckOutDate(addDays(d, 1)); setNights(1)
     setSelectedRoomType(''); setSelectedRoom(null); setPricePerNight(0); setCustomPrice('')
     setPaymentMethod('cash'); setPaymentStatus('unpaid'); setPartialAmount('')
     setLedgerType('individual'); setLedgerSearch(''); setLedgerResults([])
@@ -313,7 +363,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
   }
 
   return (
-    <Dialog open={open} onOpenChange={onClose}>
+    <Dialog open={open} onOpenChange={(o) => { if (!o) { setLoading(false); onClose() } }}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>New Reservation — Step {step} of 3</DialogTitle>
@@ -356,7 +406,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
               {!guestId && fullName.trim() && <p className="text-xs text-amber-600">New guest will be created: <strong>{fullName}</strong></p>}
             </div>
             <div className="space-y-2">
-              <Label>Phone *</Label>
+              <Label>Phone</Label>
               <Input placeholder="Phone number" value={phone} onChange={(e) => setPhone(e.target.value)} disabled={!!guestId} />
             </div>
             <div className="space-y-2">
@@ -445,7 +495,8 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
                 <SelectTrigger><SelectValue placeholder="Select room type" /></SelectTrigger>
                 <SelectContent>
                   {ROOM_TYPES.map(rt => {
-                    const count = rooms.filter(r => r.room_type === rt).length
+                    const availableRooms = getAvailableRoomsForType(rt)
+                    const count = availableRooms.length
                     return (
                       <SelectItem key={rt} value={rt} disabled={count === 0}>
                         {rt} {count === 0 ? '(none available)' : `(${count} available)`}
