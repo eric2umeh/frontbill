@@ -20,6 +20,7 @@ interface ExtendStayModalProps {
   open: boolean
   onClose: () => void
   booking: {
+    id: string
     folioId: string
     guestName: string
     room: string
@@ -60,7 +61,6 @@ export function ExtendStayModal({ open, onClose, booking }: ExtendStayModalProps
       setOrganizations(data || [])
       setFilteredOrganizations(data || [])
     } catch (error: any) {
-      console.error('[v0] Error fetching organizations:', error)
       toast.error('Failed to load organizations')
     }
   }
@@ -91,6 +91,11 @@ export function ExtendStayModal({ open, onClose, booking }: ExtendStayModalProps
       return
     }
 
+    if (!booking.id) {
+      toast.error('Booking ID is missing. Please close and reopen this dialog.')
+      return
+    }
+
     if (paymentMethod === 'city_ledger' && !selectedLedger) {
       toast.error('Please select an account for City Ledger')
       return
@@ -101,22 +106,26 @@ export function ExtendStayModal({ open, onClose, booking }: ExtendStayModalProps
       const supabase = createClient()
       
       // Add charge to folio_charges
-      const chargeData = {
-        booking_id: booking.guestId, // This should be the booking ID, not guest ID
-        description: `Extended Stay - ${additionalNights} night${additionalNights !== 1 ? 's' : ''}`,
-        amount: additionalAmount,
-        charge_type: 'extended_stay',
-        payment_method: paymentMethod,
-        ledger_account_id: paymentMethod === 'city_ledger' ? selectedLedger.id : null,
-        ledger_account_type: paymentMethod === 'city_ledger' ? ledgerType : null,
-        payment_status: paymentMethod === 'city_ledger' ? 'pending' : 'paid',
-      }
-
       const { error: chargeError } = await supabase
         .from('folio_charges')
-        .insert([chargeData])
+        .insert([{
+          booking_id: booking.id,
+          description: `Extended Stay - ${additionalNights} night${additionalNights !== 1 ? 's' : ''}`,
+          amount: additionalAmount,
+          charge_type: 'extended_stay',
+          payment_method: paymentMethod,
+          ledger_account_id: paymentMethod === 'city_ledger' ? selectedLedger?.id : null,
+          ledger_account_type: paymentMethod === 'city_ledger' ? ledgerType : null,
+          payment_status: paymentMethod === 'city_ledger' ? 'pending' : 'paid',
+        }])
 
       if (chargeError) throw chargeError
+
+      // Update booking checkout date
+      await supabase
+        .from('bookings')
+        .update({ check_out: format(newCheckOutDate, 'yyyy-MM-dd') })
+        .eq('id', booking.id)
 
       // Update ledger balance if city ledger
       if (paymentMethod === 'city_ledger') {
@@ -141,7 +150,6 @@ export function ExtendStayModal({ open, onClose, booking }: ExtendStayModalProps
       onClose()
       resetForm()
     } catch (error: any) {
-      console.error('[v0] Error extending stay:', error)
       toast.error(error.message || 'Failed to extend stay')
     } finally {
       setLoading(false)
