@@ -112,13 +112,16 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
       if (!profile?.organization_id) return
       setOrgId(profile.organization_id)
 
-      const [{ data: guestData }, { data: roomData }] = await Promise.all([
+      const [{ data: guestData }, { data: roomData }, { data: bookingData }] = await Promise.all([
         supabase.from('guests').select('id, name, phone, email, address').eq('organization_id', profile.organization_id).order('name'),
         // Fetch all non-maintenance rooms — we'll filter availability by date ourselves
         supabase.from('rooms').select('id, room_number, room_type, price_per_night, status').eq('organization_id', profile.organization_id).neq('status', 'maintenance').order('room_number'),
+        // Fetch active bookings to check date availability
+        supabase.from('bookings').select('room_id, check_in, check_out').eq('organization_id', profile.organization_id).in('status', ['confirmed', 'reserved', 'checked_in']),
       ])
       setGuests(guestData || [])
       setRooms(roomData || [])
+      setAllBookings(bookingData || [])
     } catch {
       toast.error('Failed to load data')
     }
@@ -197,9 +200,15 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
   const getAvailableRoomsForType = (roomType: string) => {
     const roomsOfType = rooms.filter(r => r.room_type === roomType)
     if (!checkInDate || !checkOutDate) return roomsOfType
-    // A room is unavailable if it has a booking that overlaps the selected date range
-    // Rooms fetched are already filtered to available/reserved statuses
-    return roomsOfType
+    const cin = toLocalDateStr(checkInDate)
+    const cout = toLocalDateStr(checkOutDate)
+    // A room is booked if any existing booking overlaps: existing.check_in < newCheckOut AND existing.check_out > newCheckIn
+    const bookedRoomIds = new Set(
+      allBookings
+        .filter(b => b.check_in < cout && b.check_out > cin)
+        .map(b => b.room_id)
+    )
+    return roomsOfType.filter(r => !bookedRoomIds.has(r.id))
   }
 
   const handleCheckInChange = (date: Date | undefined) => {
@@ -209,6 +218,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
     const nextDay = addDays(date, 1)
     setCheckOutDate(nextDay)
     setNights(1)
+    setSelectedRoom(null); setSelectedRoomType('')
   }
 
   const handleCheckOutChange = (date: Date | undefined) => {
@@ -216,6 +226,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
     setCheckOutDate(date)
     setCheckOutOpen(false)
     setNights(Math.max(0, differenceInDays(date, checkInDate)))
+    setSelectedRoom(null); setSelectedRoomType('')
   }
 
   const handleNightsChange = (value: number) => {
