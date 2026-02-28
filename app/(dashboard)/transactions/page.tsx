@@ -21,6 +21,8 @@ interface Payment {
   id: string
   booking_id: string | null
   guest_id: string | null
+  guest_name: string
+  room?: string
   amount: number
   payment_method: string
   payment_date: string
@@ -28,10 +30,12 @@ interface Payment {
   notes: string | null
   received_by: string | null
   // joined
-  guest_name?: string
   guest_phone?: string
   folio_id?: string
   received_by_name?: string
+  status?: string
+  description?: string
+  source: 'payment' | 'transaction'
 }
 
 type DateRange = 'today' | 'yesterday' | 'this_week' | 'this_month' | 'custom'
@@ -39,7 +43,7 @@ type DateRange = 'today' | 'yesterday' | 'this_week' | 'this_month' | 'custom'
 export default function TransactionsPage() {
   const [payments, setPayments] = useState<Payment[]>([])
   const [loading, setLoading] = useState(true)
-  const [dateRange, setDateRange] = useState<DateRange>('today')
+  const [dateRange, setDateRange] = useState<DateRange>('this_month')
   const [customDate, setCustomDate] = useState<Date>(new Date())
   const [calOpen, setCalOpen] = useState(false)
   const router = useRouter()
@@ -73,7 +77,8 @@ export default function TransactionsPage() {
         .from('profiles').select('organization_id').eq('id', user.id).single()
       if (!profile) { setPayments([]); return }
 
-      const { data, error } = await supabase
+      // Fetch from payments table with joins
+      const { data: paymentsData, error: paymentsError } = await supabase
         .from('payments')
         .select(`
           id, organization_id, booking_id, guest_id, amount, payment_method,
@@ -82,21 +87,78 @@ export default function TransactionsPage() {
           bookings:booking_id ( folio_id )
         `)
         .eq('organization_id', profile.organization_id)
-        .gte('payment_date', dateFilter.from.toISOString())
-        .lte('payment_date', dateFilter.to.toISOString())
         .order('payment_date', { ascending: false })
 
-      if (error) throw error
+      if (paymentsError) console.error('Payments error:', paymentsError)
 
-      const mapped: Payment[] = (data || []).map((p: any) => ({
-        ...p,
-        guest_name: p.guests?.name || 'Walk-in / Unknown',
-        guest_phone: p.guests?.phone || '',
-        folio_id: p.bookings?.folio_id || '—',
-        received_by_name: p.received_by ? `User: ${p.received_by.slice(0, 8)}` : 'System',
-      }))
+      // Fetch from transactions table
+      const { data: transactionsData, error: transactionsError } = await supabase
+        .from('transactions')
+        .select('*')
+        .eq('organization_id', profile.organization_id)
+        .order('created_at', { ascending: false })
 
-      setPayments(mapped)
+      if (transactionsError) console.error('Transactions error:', transactionsError)
+
+      // Combine both data sources
+      const allTransactions: Payment[] = [];
+
+      // Map payments
+      ;(paymentsData || []).forEach((p: any) => {
+        allTransactions.push({
+          id: p.id,
+          booking_id: p.booking_id,
+          guest_id: p.guest_id,
+          guest_name: p.guests?.name || 'Walk-in / Unknown',
+          amount: p.amount,
+          payment_method: p.payment_method,
+          payment_date: p.payment_date,
+          reference_number: p.reference_number,
+          notes: p.notes,
+          received_by: p.received_by,
+          guest_phone: p.guests?.phone || '',
+          folio_id: p.bookings?.folio_id || '—',
+          received_by_name: p.received_by ? `User: ${p.received_by.slice(0, 8)}` : 'System',
+          source: 'payment'
+        })
+      })
+
+      // Map transactions
+      ;(transactionsData || []).forEach((t: any) => {
+        allTransactions.push({
+          id: t.id,
+          booking_id: t.booking_id,
+          guest_id: null,
+          guest_name: t.guest_name,
+          room: t.room,
+          amount: t.amount,
+          payment_method: t.payment_method,
+          payment_date: t.created_at,
+          reference_number: t.transaction_id,
+          notes: t.description,
+          received_by: t.received_by,
+          guest_phone: '',
+          folio_id: '—',
+          received_by_name: t.received_by ? `User: ${t.received_by.slice(0, 8)}` : 'System',
+          status: t.status,
+          description: t.description,
+          source: 'transaction'
+        })
+      })
+
+      // Sort by date descending
+      allTransactions.sort((a, b) => new Date(b.payment_date).getTime() - new Date(a.payment_date).getTime())
+
+      // Filter by date range — compare timestamps directly, handle both UTC and local strings
+      const from = dateFilter.from.getTime()
+      const to = dateFilter.to.getTime()
+      const filtered = allTransactions.filter(p => {
+        if (!p.payment_date) return false
+        const t = new Date(p.payment_date).getTime()
+        return t >= from && t <= to
+      })
+      
+      setPayments(filtered)
     } catch (err: any) {
       console.error('[v0] Error fetching payments:', err)
       setPayments([])
