@@ -11,7 +11,7 @@ import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { ArrowLeft, CreditCard, Trash2, Edit, Plus, Clock, AlertCircle } from 'lucide-react'
+import { ArrowLeft, CreditCard, Trash2, Edit, Plus, Clock, AlertCircle, Loader2 } from 'lucide-react'
 import { formatNaira } from '@/lib/utils/currency'
 import { toast } from 'sonner'
 import { ExtendStayModal } from '@/components/bookings/extend-stay-modal'
@@ -39,6 +39,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
   const [editChargeAmount, setEditChargeAmount] = useState('')
   const [editChargeDescription, setEditChargeDescription] = useState('')
   const [editChargeLoading, setEditChargeLoading] = useState(false)
+  const [addChargeLoading, setAddChargeLoading] = useState(false)
 
   useEffect(() => {
     const getParamsAndFetch = async () => {
@@ -120,11 +121,9 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
 
       setFolioCharges(chargesWithCreator)
       setLoading(false)
-    } catch (error: any) {
-      console.error('[v0] Error fetching booking details:', error)
-      
-      // Check if it's an auth error
-      if (error?.status === 401 || error?.code === 'PGRST') {
+  } catch (error: any) {
+    // Check if it's an auth error
+    if (error?.status === 401 || error?.code === 'PGRST') {
         toast.error('Session expired. Please log in again.')
         router.push('/login')
         return
@@ -218,15 +217,18 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
         toast.success(`Payment of ${formatNaira(Number(chargeAmount))} recorded`)
       }
 
-      await fetchBookingDetails(bookingId)
+      // Close modal immediately, then refresh in background
       setAddChargeModalOpen(false)
       setChargeAmount('')
       setChargeDescription('')
       setChargeType('charge')
       setChargePaymentMethod('')
       setPaymentMethod('')
+      await fetchBookingDetails(bookingId)
     } catch (error: any) {
       toast.error(error.message || 'Failed to save')
+    } finally {
+      setAddChargeLoading(false)
     }
   }
 
@@ -248,8 +250,9 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
               size="sm"
               onClick={async () => {
                 toast.dismiss(t)
-                try {
-                  const supabase = createClient()
+  try {
+    setAddChargeLoading(true)
+    const supabase = createClient()
                   
                   // Get the charge to check its payment status
                   const { data: chargeData } = await supabase
@@ -526,8 +529,12 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
               </TabsContent>
             </Tabs>
             
-            <Button onClick={handleAddCharge} className="w-full">
-              {chargeType === 'payment' ? 'Record Payment' : 'Add Charge'}
+            <Button onClick={handleAddCharge} className="w-full" disabled={addChargeLoading}>
+              {addChargeLoading ? (
+                <><Loader2 className="mr-2 h-4 w-4 animate-spin" />{chargeType === 'payment' ? 'Recording...' : 'Adding...'}</>
+              ) : (
+                chargeType === 'payment' ? 'Record Payment' : 'Add Charge'
+              )}
             </Button>
           </div>
         </DialogContent>

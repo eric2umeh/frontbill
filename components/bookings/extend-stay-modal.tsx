@@ -61,7 +61,6 @@ export function ExtendStayModal({ open, onClose, booking }: ExtendStayModalProps
       setOrganizations(data || [])
       setFilteredOrganizations(data || [])
     } catch (error: any) {
-      console.error('[v0] Error fetching organizations:', error)
       toast.error('Failed to load organizations')
     }
   }

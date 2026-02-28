@@ -43,7 +43,7 @@ type DateRange = 'today' | 'yesterday' | 'this_week' | 'this_month' | 'custom'
 export default function TransactionsPage() {
   const [payments, setPayments] = useState<Payment[]>([])
   const [loading, setLoading] = useState(true)
-  const [dateRange, setDateRange] = useState<DateRange>('today')
+  const [dateRange, setDateRange] = useState<DateRange>('this_month')
   const [customDate, setCustomDate] = useState<Date>(new Date())
   const [calOpen, setCalOpen] = useState(false)
   const router = useRouter()
@@ -149,10 +149,13 @@ export default function TransactionsPage() {
       // Sort by date descending
       allTransactions.sort((a, b) => new Date(b.payment_date).getTime() - new Date(a.payment_date).getTime())
 
-      // Filter by date range in memory
+      // Filter by date range — compare timestamps directly, handle both UTC and local strings
+      const from = dateFilter.from.getTime()
+      const to = dateFilter.to.getTime()
       const filtered = allTransactions.filter(p => {
-        const pDate = new Date(p.payment_date)
-        return pDate >= dateFilter.from && pDate <= dateFilter.to
+        if (!p.payment_date) return false
+        const t = new Date(p.payment_date).getTime()
+        return t >= from && t <= to
       })
       
       setPayments(filtered)
