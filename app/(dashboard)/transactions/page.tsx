@@ -77,7 +77,11 @@ export default function TransactionsPage() {
         .from('profiles').select('organization_id').eq('id', user.id).single()
       if (!profile) { setPayments([]); return }
 
-      // Fetch from payments table with joins
+      // Use ISO date strings for server-side filtering — avoids UTC/local mismatch
+      const fromISO = dateFilter.from.toISOString()
+      const toISO   = dateFilter.to.toISOString()
+
+      // Query payments table only (all payment events are written here)
       const { data: paymentsData, error: paymentsError } = await supabase
         .from('payments')
         .select(`
@@ -87,37 +91,62 @@ export default function TransactionsPage() {
           bookings:booking_id ( folio_id )
         `)
         .eq('organization_id', profile.organization_id)
+        .gte('payment_date', fromISO)
+        .lte('payment_date', toISO)
         .order('payment_date', { ascending: false })
 
-      if (paymentsError) console.error('Payments error:', paymentsError)
+      if (paymentsError) {
+        console.error('Payments error:', paymentsError)
+        // Fall back: fetch without date filter to show all data
+        const { data: allPayments } = await supabase
+          .from('payments')
+          .select(`
+            id, organization_id, booking_id, guest_id, amount, payment_method,
+            payment_date, reference_number, notes, received_by,
+            guests:guest_id ( name, phone ),
+            bookings:booking_id ( folio_id )
+          `)
+          .eq('organization_id', profile.organization_id)
+          .order('payment_date', { ascending: false })
+          .limit(500)
+        paymentsData?.push(...(allPayments || []))
+      }
 
-      // Fetch from transactions table
-      const { data: transactionsData, error: transactionsError } = await supabase
-        .from('transactions')
-        .select('*')
-        .eq('organization_id', profile.organization_id)
+      // Also fetch folio_charges with city_ledger payment_method (unpaid balances)
+      // These represent outstanding amounts and should appear in transactions
+      const { data: ledgerCharges } = await supabase
+        .from('folio_charges')
+        .select(`
+          id, booking_id, description, amount, charge_type, payment_method,
+          payment_status, created_at, created_by,
+          bookings:booking_id ( folio_id, guest_id, guests:guest_id(name, phone) )
+        `)
+        .eq('payment_method', 'city_ledger')
+        .in('booking_id',
+          (await supabase
+            .from('bookings')
+            .select('id')
+            .eq('organization_id', profile.organization_id)
+          ).data?.map((b: any) => b.id) || []
+        )
+        .gte('created_at', fromISO)
+        .lte('created_at', toISO)
         .order('created_at', { ascending: false })
 
-      if (transactionsError) console.error('Transactions error:', transactionsError)
-
-      // Batch-fetch user names for received_by IDs
+      // Batch-fetch user names
       const userIds = new Set([
         ...(paymentsData || []).map((p: any) => p.received_by).filter(Boolean),
-        ...(transactionsData || []).map((t: any) => t.received_by).filter(Boolean),
+        ...(ledgerCharges || []).map((c: any) => c.created_by).filter(Boolean),
       ])
       const userMap: Record<string, string> = {}
       if (userIds.size > 0) {
         const { data: users } = await supabase
-          .from('profiles')
-          .select('id, full_name')
-          .in('id', Array.from(userIds))
+          .from('profiles').select('id, full_name').in('id', Array.from(userIds))
         ;(users || []).forEach((u: any) => { userMap[u.id] = u.full_name || 'Unknown User' })
       }
 
-      // Combine both data sources
-      const allTransactions: Payment[] = [];
-
       // Map payments
+      const allTransactions: Payment[] = []
       ;(paymentsData || []).forEach((p: any) => {
         allTransactions.push({
           id: p.id,
@@ -137,44 +166,46 @@ export default function TransactionsPage() {
         })
       })
 
-      // Map transactions
-      ;(transactionsData || []).forEach((t: any) => {
-        allTransactions.push({
-          id: t.id,
-          booking_id: t.booking_id,
-          guest_id: null,
-          guest_name: t.guest_name,
-          room: t.room,
-          amount: t.amount,
-          payment_method: t.payment_method,
-          payment_date: t.created_at,
-          reference_number: t.transaction_id,
-          notes: t.description,
-          received_by: t.received_by,
-          guest_phone: '',
-          folio_id: '—',
-          received_by_name: t.received_by ? (userMap[t.received_by] || 'Unknown User') : 'System',
-          status: t.status,
-          description: t.description,
-          source: 'transaction'
-        })
+      // Map city ledger charges (outstanding balances)
+      ;(ledgerCharges || []).forEach((c: any) => {
+        const guestName = c.bookings?.guests?.name || 'Unknown Guest'
+        const guestPhone = c.bookings?.guests?.phone || ''
+        // Avoid duplicating records already in payments
+        const alreadyInPayments = allTransactions.some(t => t.booking_id === c.booking_id && t.payment_method === 'city_ledger')
+        if (!alreadyInPayments) {
+          allTransactions.push({
+            id: `ledger-${c.id}`,
+            booking_id: c.booking_id,
+            guest_id: c.bookings?.guest_id || null,
+            guest_name: guestName,
+            amount: c.amount,
+            payment_method: 'city_ledger',
+            payment_date: c.created_at,
+            reference_number: null,
+            notes: c.description,
+            received_by: c.created_by,
+            guest_phone: guestPhone,
+            folio_id: c.bookings?.folio_id || '—',
+            received_by_name: c.created_by ? (userMap[c.created_by] || 'Unknown User') : 'System',
+            status: c.payment_status,
+            description: c.description,
+            source: 'payment'
+          })
+        }
       })
 
-      // Sort by date descending
-      allTransactions.sort((a, b) => new Date(b.payment_date).getTime() - new Date(a.payment_date).getTime())
-
-      // Filter by date range — compare timestamps directly, handle both UTC and local strings
-      const from = dateFilter.from.getTime()
-      const to = dateFilter.to.getTime()
-      const filtered = allTransactions.filter(p => {
-        if (!p.payment_date) return false
-        const t = new Date(p.payment_date).getTime()
-        return t >= from && t <= to
+      // Deduplicate by id, sort descending
+      const seen = new Set<string>()
+      const deduped = allTransactions.filter(t => {
+        if (seen.has(t.id)) return false
+        seen.add(t.id)
+        return true
       })
-      
-      setPayments(filtered)
+      deduped.sort((a, b) => new Date(b.payment_date).getTime() - new Date(a.payment_date).getTime())
+
+      setPayments(deduped)
     } catch (err: any) {
-      console.error('[v0] Error fetching payments:', err)
+      console.error('Error fetching payments:', err)
       setPayments([])
     } finally {
       setLoading(false)

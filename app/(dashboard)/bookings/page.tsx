@@ -61,10 +61,7 @@ export default function BookingsPage() {
       }
 
       const { data: { user } } = await supabase.auth.getUser()
-      if (!user) {
-        router.push('/auth/login')
-        return
-      }
+      if (!user) { router.push('/auth/login'); return }
 
       const { data: profile } = await supabase
         .from('profiles')
@@ -72,10 +69,7 @@ export default function BookingsPage() {
         .eq('id', user.id)
         .single()
 
-      if (!profile) {
-        toast.error('Organization not found')
-        return
-      }
+      if (!profile) { toast.error('Organization not found'); setLoading(false); return }
 
       const { data, error } = await supabase
         .from('bookings')

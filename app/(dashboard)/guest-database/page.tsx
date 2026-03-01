@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 import { EnhancedDataTable } from '@/components/shared/enhanced-data-table'
 import { Button } from '@/components/ui/button'
 import { CardContent } from '@/components/ui/card'
-import { formatNaira } from '@/lib/utils/currency'
+import { calculateGuestBalancesBatch } from '@/lib/balance'
 import { Loader2 } from 'lucide-react'
 import { format } from 'date-fns'
 

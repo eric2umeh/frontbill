@@ -50,7 +50,7 @@ export default function ReservationsPage() {
         return
       }
       const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
+      if (!user) { setLoading(false); return }
 
       const { data: profile } = await supabase
         .from('profiles')
@@ -58,7 +58,7 @@ export default function ReservationsPage() {
         .eq('id', user.id)
         .single()
 
-      if (!profile?.organization_id) return
+      if (!profile?.organization_id) { setLoading(false); return }
 
       // Single query — no FK join on profiles (no FK exists), fetch user names separately
       const { data, error } = await supabase

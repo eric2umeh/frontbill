@@ -147,17 +147,14 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
       ])
 
       setGuests(guestData || [])
-
-      // Store bookings for date-based availability filtering
-      const activeBookings = bookingData || []
-      setAllRooms(roomData || [])
-      setAllBookingsForRooms(activeBookings)
-
-      // Filter rooms that are NOT booked for the selected dates
-      const toStr = (d: Date) => {
-        const y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,'0'), dd = String(d.getDate()).padStart(2,'0')
-        return `${y}-${m}-${dd}`
-      }
+      setRooms(roomData || [])
+      setAllBookings(bookingData || [])
+    } catch {
+      toast.error('Failed to load data')
+    } finally {
+      setLoading(false)
+    }
+  }
       const ciStr = toStr(checkInDate), coStr = toStr(checkOutDate)
       const bookedRoomIds = new Set(
         activeBookings
