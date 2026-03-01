@@ -100,6 +100,20 @@ export default function TransactionsPage() {
 
       if (transactionsError) console.error('Transactions error:', transactionsError)
 
+      // Batch-fetch user names for received_by IDs
+      const userIds = new Set([
+        ...(paymentsData || []).map((p: any) => p.received_by).filter(Boolean),
+        ...(transactionsData || []).map((t: any) => t.received_by).filter(Boolean),
+      ])
+      const userMap: Record<string, string> = {}
+      if (userIds.size > 0) {
+        const { data: users } = await supabase
+          .from('profiles')
+          .select('id, full_name')
+          .in('id', Array.from(userIds))
+        ;(users || []).forEach((u: any) => { userMap[u.id] = u.full_name || 'Unknown User' })
+      }
+
       // Combine both data sources
       const allTransactions: Payment[] = [];
 
@@ -118,7 +132,7 @@ export default function TransactionsPage() {
           received_by: p.received_by,
           guest_phone: p.guests?.phone || '',
           folio_id: p.bookings?.folio_id || '—',
-          received_by_name: p.received_by ? `User: ${p.received_by.slice(0, 8)}` : 'System',
+          received_by_name: p.received_by ? (userMap[p.received_by] || 'Unknown User') : 'System',
           source: 'payment'
         })
       })
@@ -139,7 +153,7 @@ export default function TransactionsPage() {
           received_by: t.received_by,
           guest_phone: '',
           folio_id: '—',
-          received_by_name: t.received_by ? `User: ${t.received_by.slice(0, 8)}` : 'System',
+          received_by_name: t.received_by ? (userMap[t.received_by] || 'Unknown User') : 'System',
           status: t.status,
           description: t.description,
           source: 'transaction'
@@ -297,6 +311,7 @@ export default function TransactionsPage() {
         <EnhancedDataTable
           data={payments}
           searchKeys={['guest_name', 'folio_id', 'reference_number', 'notes']}
+          onRowClick={(payment) => router.push(`/transactions/${payment.id}`)}
           filters={[
             {
               key: 'payment_method',

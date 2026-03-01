@@ -53,13 +53,25 @@ export default function GuestDatabasePage() {
 
       if (error) throw error
 
-      // Fetch outstanding balance for each guest from bookings
+      // Fetch outstanding balance for each guest from folio_charges (unpaid charges)
       const guestsWithBalance = await Promise.all((data || []).map(async (guest) => {
+        // Get all bookings for this guest
         const { data: bookings } = await supabase
           .from('bookings')
-          .select('balance')
+          .select('id')
           .eq('guest_id', guest.id)
-        const totalBalance = bookings?.reduce((sum, b) => sum + Number(b.balance || 0), 0) || 0
+
+        if (!bookings || bookings.length === 0) {
+          return { ...guest, total_balance: 0 }
+        }
+
+        // Get all folio charges for these bookings
+        const { data: charges } = await supabase
+          .from('folio_charges')
+          .select('amount')
+          .in('booking_id', bookings.map(b => b.id))
+
+        const totalBalance = (charges || []).reduce((sum, c) => sum + (c.amount || 0), 0)
         return { ...guest, total_balance: totalBalance }
       }))
 
