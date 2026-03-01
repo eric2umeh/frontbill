@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { use, useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -9,37 +9,51 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { ArrowLeft, UserCheck, Trash2, Edit, CreditCard, AlertCircle } from 'lucide-react'
+import { ArrowLeft, UserCheck, Trash2, Edit, CreditCard, AlertCircle, Loader2 } from 'lucide-react'
 import { formatNaira } from '@/lib/utils/currency'
 import { toast } from 'sonner'
+import { createClient } from '@/lib/supabase/client'
+import { format } from 'date-fns'
 
-export default function ReservationDetailPage({ params }: { params: { id: string } }) {
+export default function ReservationDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = use(params)
   const router = useRouter()
+  const supabase = createClient()
+
+  const [reservation, setReservation] = useState<any>(null)
+  const [loading, setLoading] = useState(true)
+  const [actionLoading, setActionLoading] = useState(false)
   const [paymentModalOpen, setPaymentModalOpen] = useState(false)
   const [paymentAmount, setPaymentAmount] = useState('')
   const [paymentMethod, setPaymentMethod] = useState('')
-  const [actionLoading, setActionLoading] = useState(false)
+  const [paymentLoading, setPaymentLoading] = useState(false)
 
-  // Mock reservation data
-  const reservation = {
-    id: params.id,
-    guestName: 'Mrs. Fatima Bello',
-    phone: '+234 805 234 5678',
-    email: 'fatima.b@email.com',
-    room: '305',
-    roomType: 'Royal Suite',
-    checkIn: '2024-01-20',
-    checkOut: '2024-01-23',
-    nights: 3,
-    ratePerNight: 50000,
-    totalAmount: 150000,
-    amountPaid: 50000,
-    balance: 100000,
-    status: 'reserved',
-    reservationDate: '2024-01-10',
-    paymentMethod: 'Transfer',
-    organization: null,
-  }
+  const fetchReservation = useCallback(async () => {
+    try {
+      setLoading(true)
+      const { data, error } = await supabase
+        .from('bookings')
+        .select(`
+          id, folio_id, check_in, check_out, status, payment_status,
+          rate_per_night, total_amount, deposit, balance, number_of_nights,
+          payment_method, notes, created_at,
+          guests:guest_id(id, name, phone, email, address),
+          rooms:room_id(id, room_number, room_type, price_per_night)
+        `)
+        .eq('id', id)
+        .single()
+
+      if (error) throw error
+      setReservation(data)
+    } catch (err: any) {
+      toast.error('Failed to load reservation')
+      router.push('/reservations')
+    } finally {
+      setLoading(false)
+    }
+  }, [id])
+
+  useEffect(() => { fetchReservation() }, [fetchReservation])
 
   const handleCheckin = () => {
     toast(
@@ -53,44 +67,80 @@ export default function ReservationDetailPage({ params }: { params: { id: string
             </div>
           </div>
           <div className="flex gap-2 justify-end">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => toast.dismiss(t)}
-            >
-              Cancel
-            </Button>
+            <Button variant="outline" size="sm" onClick={() => toast.dismiss(t)}>Cancel</Button>
             <Button
               size="sm"
               disabled={actionLoading}
-              onClick={() => {
-                setActionLoading(true)
-                toast.success('Guest checked in successfully')
-                setTimeout(() => router.push('/bookings'), 500)
+              onClick={async () => {
                 toast.dismiss(t)
+                setActionLoading(true)
+                try {
+                  const { error } = await supabase
+                    .from('bookings')
+                    .update({ status: 'checked_in' })
+                    .eq('id', id)
+                  if (error) throw error
+                  // Mark room as occupied
+                  if (reservation?.rooms?.id) {
+                    await supabase.from('rooms').update({ status: 'occupied' }).eq('id', reservation.rooms.id)
+                  }
+                  toast.success('Guest checked in successfully')
+                  router.push('/bookings')
+                } catch (err: any) {
+                  toast.error(err.message || 'Check-in failed')
+                } finally {
+                  setActionLoading(false)
+                }
               }}
             >
-              Check-in
+              {actionLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Check-in'}
             </Button>
           </div>
         </div>
       ),
-      {
-        duration: Infinity,
-      }
+      { duration: Infinity }
     )
   }
 
-  const handlePaymentUpdate = () => {
+  const handlePaymentUpdate = async () => {
     if (!paymentAmount || !paymentMethod) {
       toast.error('Please enter amount and select payment method')
       return
     }
+    try {
+      setPaymentLoading(true)
+      const amount = Number(paymentAmount)
+      const newDeposit = (reservation?.deposit || 0) + amount
+      const newBalance = Math.max(0, (reservation?.total_amount || 0) - newDeposit)
+      const newStatus = newBalance <= 0 ? 'paid' : newDeposit > 0 ? 'partial' : 'unpaid'
 
-    toast.success(`Payment of ${formatNaira(Number(paymentAmount))} recorded`)
-    setPaymentModalOpen(false)
-    setPaymentAmount('')
-    setPaymentMethod('')
+      await supabase
+        .from('bookings')
+        .update({ deposit: newDeposit, balance: newBalance, payment_status: newStatus })
+        .eq('id', id)
+
+      // Record in payments table
+      const { data: { user } } = await supabase.auth.getUser()
+      await supabase.from('payments').insert([{
+        booking_id: id,
+        guest_id: reservation?.guests?.id || null,
+        amount,
+        payment_method: paymentMethod,
+        payment_date: new Date().toISOString(),
+        notes: `Reservation payment update — Folio ${reservation?.folio_id}`,
+        received_by: user?.id || null,
+      }])
+
+      toast.success(`Payment of ${formatNaira(amount)} recorded`)
+      setPaymentModalOpen(false)
+      setPaymentAmount('')
+      setPaymentMethod('')
+      fetchReservation()
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to record payment')
+    } finally {
+      setPaymentLoading(false)
+    }
   }
 
   const handleDelete = () => {
@@ -105,22 +155,27 @@ export default function ReservationDetailPage({ params }: { params: { id: string
             </div>
           </div>
           <div className="flex gap-2 justify-end">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => toast.dismiss(t)}
-            >
-              Keep
-            </Button>
+            <Button variant="outline" size="sm" onClick={() => toast.dismiss(t)}>Keep</Button>
             <Button
               variant="destructive"
               size="sm"
               disabled={actionLoading}
-              onClick={() => {
-                setActionLoading(true)
-                toast.success('Reservation cancelled')
-                setTimeout(() => router.push('/reservations'), 500)
+              onClick={async () => {
                 toast.dismiss(t)
+                setActionLoading(true)
+                try {
+                  await supabase.from('bookings').update({ status: 'cancelled' }).eq('id', id)
+                  // Free up the room
+                  if (reservation?.rooms?.id) {
+                    await supabase.from('rooms').update({ status: 'available' }).eq('id', reservation.rooms.id)
+                  }
+                  toast.success('Reservation cancelled')
+                  router.push('/reservations')
+                } catch (err: any) {
+                  toast.error(err.message || 'Cancellation failed')
+                } finally {
+                  setActionLoading(false)
+                }
               }}
             >
               Cancel Reservation
@@ -128,11 +183,29 @@ export default function ReservationDetailPage({ params }: { params: { id: string
           </div>
         </div>
       ),
-      {
-        duration: Infinity,
-        className: 'bg-red-50 border-red-200',
-      }
+      { duration: Infinity }
     )
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    )
+  }
+
+  if (!reservation) return null
+
+  const guest = Array.isArray(reservation.guests) ? reservation.guests[0] : reservation.guests
+  const room = Array.isArray(reservation.rooms) ? reservation.rooms[0] : reservation.rooms
+  const balance = reservation.balance ?? (reservation.total_amount - (reservation.deposit || 0))
+  const amountPaid = reservation.deposit || 0
+
+  const statusColors: Record<string, string> = {
+    reserved: 'bg-blue-500/10 text-blue-700',
+    confirmed: 'bg-green-500/10 text-green-700',
+    cancelled: 'bg-red-500/10 text-red-700',
   }
 
   return (
@@ -144,7 +217,7 @@ export default function ReservationDetailPage({ params }: { params: { id: string
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <Label>Amount</Label>
+              <Label>Amount (NGN)</Label>
               <Input
                 type="number"
                 placeholder="Enter amount"
@@ -155,19 +228,18 @@ export default function ReservationDetailPage({ params }: { params: { id: string
             <div className="space-y-2">
               <Label>Payment Method</Label>
               <Select value={paymentMethod} onValueChange={setPaymentMethod}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select method" />
-                </SelectTrigger>
+                <SelectTrigger><SelectValue placeholder="Select method" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="Cash">Cash</SelectItem>
-                  <SelectItem value="POS">POS</SelectItem>
-                  <SelectItem value="Transfer">Transfer</SelectItem>
-                  <SelectItem value="City Ledger">City Ledger</SelectItem>
+                  <SelectItem value="cash">Cash</SelectItem>
+                  <SelectItem value="pos">POS</SelectItem>
+                  <SelectItem value="transfer">Bank Transfer</SelectItem>
+                  <SelectItem value="card">Card</SelectItem>
+                  <SelectItem value="city_ledger">City Ledger</SelectItem>
                 </SelectContent>
               </Select>
             </div>
-            <Button onClick={handlePaymentUpdate} className="w-full">
-              Record Payment
+            <Button onClick={handlePaymentUpdate} className="w-full" disabled={paymentLoading}>
+              {paymentLoading ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Recording...</> : 'Record Payment'}
             </Button>
           </div>
         </DialogContent>
@@ -179,15 +251,11 @@ export default function ReservationDetailPage({ params }: { params: { id: string
           Back to Reservations
         </Button>
         <div className="flex gap-2">
-          <Button variant="default" size="sm" onClick={handleCheckin}>
+          <Button variant="default" size="sm" onClick={handleCheckin} disabled={actionLoading}>
             <UserCheck className="mr-2 h-4 w-4" />
             Check-in Guest
           </Button>
-          <Button variant="outline" size="sm">
-            <Edit className="mr-2 h-4 w-4" />
-            Edit
-          </Button>
-          <Button variant="destructive" size="sm" onClick={handleDelete}>
+          <Button variant="destructive" size="sm" onClick={handleDelete} disabled={actionLoading}>
             <Trash2 className="mr-2 h-4 w-4" />
             Cancel
           </Button>
@@ -199,53 +267,74 @@ export default function ReservationDetailPage({ params }: { params: { id: string
           <CardHeader>
             <div className="flex items-center justify-between">
               <CardTitle>Reservation Details</CardTitle>
-              <Badge variant="outline" className="bg-blue-500/10 text-blue-700">
-                Reserved
-              </Badge>
+              <div className="flex gap-2">
+                <Badge variant="outline" className={statusColors[reservation.status] || 'bg-muted text-muted-foreground'}>
+                  {reservation.status.charAt(0).toUpperCase() + reservation.status.slice(1)}
+                </Badge>
+                <Badge variant="outline" className={
+                  reservation.payment_status === 'paid' ? 'bg-green-500/10 text-green-700' :
+                  reservation.payment_status === 'partial' ? 'bg-yellow-500/10 text-yellow-700' :
+                  'bg-red-500/10 text-red-700'
+                }>
+                  {reservation.payment_status?.charAt(0).toUpperCase() + reservation.payment_status?.slice(1) || 'Unpaid'}
+                </Badge>
+              </div>
             </div>
           </CardHeader>
           <CardContent className="space-y-6">
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <div className="text-sm text-muted-foreground">Guest Name</div>
-                <div className="font-semibold">{reservation.guestName}</div>
+                <div className="font-semibold">{guest?.name || '—'}</div>
               </div>
               <div>
                 <div className="text-sm text-muted-foreground">Phone</div>
-                <div className="font-semibold">{reservation.phone}</div>
+                <div className="font-semibold">{guest?.phone || '—'}</div>
               </div>
               <div>
                 <div className="text-sm text-muted-foreground">Email</div>
-                <div className="font-semibold">{reservation.email}</div>
+                <div className="font-semibold">{guest?.email || '—'}</div>
               </div>
               <div>
                 <div className="text-sm text-muted-foreground">Room</div>
-                <div className="font-semibold">Room {reservation.room} - {reservation.roomType}</div>
+                <div className="font-semibold">
+                  {room ? `Room ${room.room_number} — ${room.room_type}` : '—'}
+                </div>
               </div>
               <div>
-                <div className="text-sm text-muted-foreground">Reservation Date</div>
-                <div className="font-semibold">{new Date(reservation.reservationDate).toLocaleDateString('en-GB')}</div>
+                <div className="text-sm text-muted-foreground">Folio ID</div>
+                <div className="font-semibold font-mono text-sm">{reservation.folio_id || '—'}</div>
               </div>
               <div>
-                <div className="text-sm text-muted-foreground">Rate/Night</div>
-                <div className="font-semibold">{formatNaira(reservation.ratePerNight)}</div>
+                <div className="text-sm text-muted-foreground">Rate / Night</div>
+                <div className="font-semibold">{formatNaira(reservation.rate_per_night || 0)}</div>
               </div>
               <div>
                 <div className="text-sm text-muted-foreground">Check-in</div>
-                <div className="font-semibold">{new Date(reservation.checkIn).toLocaleDateString('en-GB')}</div>
+                <div className="font-semibold">
+                  {reservation.check_in ? format(new Date(reservation.check_in), 'dd MMM yyyy') : '—'}
+                </div>
               </div>
               <div>
                 <div className="text-sm text-muted-foreground">Check-out</div>
-                <div className="font-semibold">{new Date(reservation.checkOut).toLocaleDateString('en-GB')}</div>
+                <div className="font-semibold">
+                  {reservation.check_out ? format(new Date(reservation.check_out), 'dd MMM yyyy') : '—'}
+                </div>
               </div>
               <div>
                 <div className="text-sm text-muted-foreground">Nights</div>
-                <div className="font-semibold">{reservation.nights}</div>
+                <div className="font-semibold">{reservation.number_of_nights || '—'}</div>
               </div>
               <div>
                 <div className="text-sm text-muted-foreground">Payment Method</div>
-                <div className="font-semibold">{reservation.paymentMethod}</div>
+                <div className="font-semibold capitalize">{reservation.payment_method?.replace('_', ' ') || '—'}</div>
               </div>
+              {reservation.notes && (
+                <div className="col-span-2">
+                  <div className="text-sm text-muted-foreground">Notes</div>
+                  <div className="font-semibold">{reservation.notes}</div>
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -258,21 +347,25 @@ export default function ReservationDetailPage({ params }: { params: { id: string
             <CardContent className="space-y-4">
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Total Amount</span>
-                <span className="font-semibold">{formatNaira(reservation.totalAmount)}</span>
+                <span className="font-semibold">{formatNaira(reservation.total_amount || 0)}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Amount Paid</span>
-                <span className="font-semibold text-green-600">{formatNaira(reservation.amountPaid)}</span>
+                <span className="font-semibold text-green-600">{formatNaira(amountPaid)}</span>
               </div>
               <div className="h-px bg-border" />
               <div className="flex justify-between text-lg">
                 <span className="font-semibold">Balance</span>
-                <span className="font-bold text-red-600">{formatNaira(reservation.balance)}</span>
+                <span className={`font-bold ${balance > 0 ? 'text-destructive' : 'text-green-600'}`}>
+                  {formatNaira(balance)}
+                </span>
               </div>
-              <Button className="w-full" onClick={() => setPaymentModalOpen(true)}>
-                <CreditCard className="mr-2 h-4 w-4" />
-                Update Payment
-              </Button>
+              {balance > 0 && (
+                <Button className="w-full" onClick={() => setPaymentModalOpen(true)}>
+                  <CreditCard className="mr-2 h-4 w-4" />
+                  Update Payment
+                </Button>
+              )}
             </CardContent>
           </Card>
 
@@ -281,15 +374,11 @@ export default function ReservationDetailPage({ params }: { params: { id: string
               <CardTitle>Actions</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">
-              <Button className="w-full" variant="default" onClick={handleCheckin}>
+              <Button className="w-full" variant="default" onClick={handleCheckin} disabled={actionLoading}>
                 <UserCheck className="mr-2 h-4 w-4" />
                 Check-in Guest
               </Button>
-              <Button className="w-full" variant="outline">
-                <Edit className="mr-2 h-4 w-4" />
-                Edit Reservation
-              </Button>
-              <Button className="w-full" variant="destructive" onClick={handleDelete}>
+              <Button className="w-full" variant="destructive" onClick={handleDelete} disabled={actionLoading}>
                 <Trash2 className="mr-2 h-4 w-4" />
                 Cancel Reservation
               </Button>
