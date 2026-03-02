@@ -124,6 +124,8 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
       setAllBookings(bookingData || [])
     } catch {
       toast.error('Failed to load data')
+    } finally {
+      setLoading(false)
     }
   }
 
