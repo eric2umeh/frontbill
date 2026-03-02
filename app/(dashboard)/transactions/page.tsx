@@ -71,41 +71,49 @@ export default function TransactionsPage() {
       if (!supabase) { setPayments([]); setLoading(false); return }
 
       const { data: { user } } = await supabase.auth.getUser()
-      if (!user) { router.push('/auth/login'); return }
+      if (!user) { setLoading(false); router.push('/auth/login'); return }
 
       const { data: profile } = await supabase
         .from('profiles').select('organization_id').eq('id', user.id).single()
-      if (!profile) { setPayments([]); return }
+      if (!profile?.organization_id) { setLoading(false); return }
 
-      // Fetch from payments table with joins
+      // Simple robust query: get all payments for this org, ordered by date
       const { data: paymentsData, error: paymentsError } = await supabase
         .from('payments')
         .select(`
           id, organization_id, booking_id, guest_id, amount, payment_method,
           payment_date, reference_number, notes, received_by,
-          guests:guest_id ( name, phone ),
-          bookings:booking_id ( folio_id )
+          guests(id, name, phone),
+          bookings(id, folio_id)
         `)
         .eq('organization_id', profile.organization_id)
         .order('payment_date', { ascending: false })
+        .limit(1000)
 
-      if (paymentsError) console.error('Payments error:', paymentsError)
+      if (paymentsError) {
+        console.error('[v0] Payments query error:', paymentsError)
+        setPayments([])
+        return
+      }
 
-      // Fetch from transactions table
-      const { data: transactionsData, error: transactionsError } = await supabase
-        .from('transactions')
-        .select('*')
-        .eq('organization_id', profile.organization_id)
-        .order('created_at', { ascending: false })
+      // Batch-fetch user names
+      const userIds = new Set(
+        (paymentsData || []).map((p: any) => p.received_by).filter(Boolean)
+      )
+      let userMap: Record<string, string> = {}
+      if (userIds.size > 0) {
+        const { data: users } = await supabase
+          .from('profiles')
+          .select('id, full_name')
+          .in('id', Array.from(userIds))
+        users?.forEach((u: any) => {
+          userMap[u.id] = u.full_name || 'Unknown User'
+        })
+      }
 
-      if (transactionsError) console.error('Transactions error:', transactionsError)
-
-      // Combine both data sources
-      const allTransactions: Payment[] = [];
-
-      // Map payments
-      ;(paymentsData || []).forEach((p: any) => {
-        allTransactions.push({
+      // Map and filter by date range
+      const allTransactions: Payment[] = (paymentsData || [])
+        .map((p: any) => ({
           id: p.id,
           booking_id: p.booking_id,
           guest_id: p.guest_id,
@@ -118,47 +126,18 @@ export default function TransactionsPage() {
           received_by: p.received_by,
           guest_phone: p.guests?.phone || '',
           folio_id: p.bookings?.folio_id || '—',
-          received_by_name: p.received_by ? `User: ${p.received_by.slice(0, 8)}` : 'System',
-          source: 'payment'
+          received_by_name: p.received_by ? (userMap[p.received_by] || 'Unknown User') : 'System',
+          source: 'payment' as const
+        }))
+        .filter(p => {
+          const pDate = new Date(p.payment_date).getTime()
+          const from = dateFilter.from.getTime()
+          const to = dateFilter.to.getTime()
+          return pDate >= from && pDate <= to
         })
-      })
+        .sort((a, b) => new Date(b.payment_date).getTime() - new Date(a.payment_date).getTime())
 
-      // Map transactions
-      ;(transactionsData || []).forEach((t: any) => {
-        allTransactions.push({
-          id: t.id,
-          booking_id: t.booking_id,
-          guest_id: null,
-          guest_name: t.guest_name,
-          room: t.room,
-          amount: t.amount,
-          payment_method: t.payment_method,
-          payment_date: t.created_at,
-          reference_number: t.transaction_id,
-          notes: t.description,
-          received_by: t.received_by,
-          guest_phone: '',
-          folio_id: '—',
-          received_by_name: t.received_by ? `User: ${t.received_by.slice(0, 8)}` : 'System',
-          status: t.status,
-          description: t.description,
-          source: 'transaction'
-        })
-      })
-
-      // Sort by date descending
-      allTransactions.sort((a, b) => new Date(b.payment_date).getTime() - new Date(a.payment_date).getTime())
-
-      // Filter by date range — compare timestamps directly, handle both UTC and local strings
-      const from = dateFilter.from.getTime()
-      const to = dateFilter.to.getTime()
-      const filtered = allTransactions.filter(p => {
-        if (!p.payment_date) return false
-        const t = new Date(p.payment_date).getTime()
-        return t >= from && t <= to
-      })
-      
-      setPayments(filtered)
+      setPayments(allTransactions)
     } catch (err: any) {
       console.error('[v0] Error fetching payments:', err)
       setPayments([])
@@ -297,6 +276,7 @@ export default function TransactionsPage() {
         <EnhancedDataTable
           data={payments}
           searchKeys={['guest_name', 'folio_id', 'reference_number', 'notes']}
+          onRowClick={(payment) => router.push(`/transactions/${payment.id}`)}
           filters={[
             {
               key: 'payment_method',
