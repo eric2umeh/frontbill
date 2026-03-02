@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { EnhancedDataTable } from '@/components/shared/enhanced-data-table'
 import { Button } from '@/components/ui/button'
 import { CardContent } from '@/components/ui/card'
+import { calculateGuestBalancesBatch } from '@/lib/balance'
 import { formatNaira } from '@/lib/utils/currency'
 import { Loader2 } from 'lucide-react'
 import { format } from 'date-fns'
@@ -53,18 +54,19 @@ export default function GuestDatabasePage() {
 
       if (error) throw error
 
-      // Fetch outstanding balance for each guest from bookings
-      const guestsWithBalance = await Promise.all((data || []).map(async (guest) => {
-        const { data: bookings } = await supabase
-          .from('bookings')
-          .select('balance')
-          .eq('guest_id', guest.id)
-        const totalBalance = bookings?.reduce((sum, b) => sum + Number(b.balance || 0), 0) || 0
-        return { ...guest, total_balance: totalBalance }
+      // Batch-fetch balances using optimized utility function
+      const guestIds = (data || []).map((g: any) => g.id)
+      const balanceMap = await calculateGuestBalancesBatch(supabase, guestIds)
+
+      // Attach balances to guests
+      const guestsWithBalance = (data || []).map((guest: any) => ({
+        ...guest,
+        total_balance: balanceMap[guest.id] || 0
       }))
 
       setGuests(guestsWithBalance)
-    } catch {
+    } catch (err: any) {
+      console.error('[v0] Error fetching guests:', err)
       setGuests([])
     } finally {
       setLoading(false)
