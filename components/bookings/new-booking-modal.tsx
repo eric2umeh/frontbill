@@ -147,6 +147,8 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
       ])
 
       setGuests(guestData || [])
+      setRooms(roomData || [])
+      setAllBookings(bookingData || [])
 
       // Store bookings for date-based availability filtering
       const activeBookings = bookingData || []
@@ -190,7 +192,10 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
       setOrganizationAccounts(orgLedger)
       setFilteredLedgerAccounts(ledgerTab === 'individual' ? individualLedger : orgLedger)
     } catch (err: any) {
+      console.error('[v0] Error loading booking data:', err)
       toast.error('Failed to load booking data')
+    } finally {
+      setLoading(false)
     }
   }
 
