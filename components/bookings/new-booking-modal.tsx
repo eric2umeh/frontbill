@@ -149,12 +149,17 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
       setGuests(guestData || [])
       setRooms(roomData || [])
       setAllBookings(bookingData || [])
-    } catch {
-      toast.error('Failed to load data')
-    } finally {
-      setLoading(false)
-    }
-  }
+
+      // Store bookings for date-based availability filtering
+      const activeBookings = bookingData || []
+      setAllRooms(roomData || [])
+      setAllBookingsForRooms(activeBookings)
+
+      // Filter rooms that are NOT booked for the selected dates
+      const toStr = (d: Date) => {
+        const y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,'0'), dd = String(d.getDate()).padStart(2,'0')
+        return `${y}-${m}-${dd}`
+      }
       const ciStr = toStr(checkInDate), coStr = toStr(checkOutDate)
       const bookedRoomIds = new Set(
         activeBookings
@@ -187,7 +192,10 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
       setOrganizationAccounts(orgLedger)
       setFilteredLedgerAccounts(ledgerTab === 'individual' ? individualLedger : orgLedger)
     } catch (err: any) {
+      console.error('[v0] Error loading booking data:', err)
       toast.error('Failed to load booking data')
+    } finally {
+      setLoading(false)
     }
   }
 
