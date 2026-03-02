@@ -12,7 +12,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Textarea } from '@/components/ui/textarea'
 import { toast } from 'sonner'
 import { createClient } from '@/lib/supabase/client'
-import { formatNaira } from '@/lib/utils/currency'
+import { formatNaira } from '@/lib/utils'
+import { calculateOrganizationBalancesBatch } from '@/lib/balance'
 import { EnhancedDataTable } from '@/components/shared/enhanced-data-table'
 import { Badge } from '@/components/ui/badge'
 import { format } from 'date-fns'
@@ -71,6 +72,10 @@ export default function OrganizationsPage() {
 
       if (error) throw error
       
+      // Batch-fetch organization balances from folio_charges
+      const orgIds = (data || []).map((org: any) => org.id)
+      const balanceMap = await calculateOrganizationBalancesBatch(supabase, orgIds)
+      
       // Fetch creator profiles for all organizations
       const creatorIds = Array.from(new Set((data || []).map(org => org.created_by).filter(Boolean)))
       let creatorMap: { [key: string]: string } = {}
@@ -86,14 +91,16 @@ export default function OrganizationsPage() {
         })
       }
       
-      // Transform the data to flatten the creator name
+      // Transform the data with dynamic balance calculation
       const transformed = (data || []).map((org: any) => ({
         ...org,
+        current_balance: balanceMap[org.id] || 0,
         created_by_name: org.created_by ? creatorMap[org.created_by] || 'Unknown User' : 'System'
       }))
       
       setOrganizations(transformed)
     } catch (error: any) {
+      console.error('[v0] Error fetching organizations:', error)
       toast.error(error.message || 'Failed to load organizations')
     } finally {
       setLoading(false)

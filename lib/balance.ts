@@ -66,21 +66,20 @@ export async function calculateGuestBalance(
 
 /**
  * Batch-calculate balances for multiple guests in one set of queries.
+ * Accepts supabase instance (created in the page) to share organization context.
  * Returns a map of guestId → balance.
  */
 export async function calculateGuestBalancesBatch(
-  guestIds: string[],
-  organizationId: string
+  supabase: any,
+  guestIds: string[]
 ): Promise<Record<string, number>> {
   if (!guestIds.length) return {}
-  const supabase = createClient()
 
-  // Get all bookings for these guests
+  // Get all bookings for these guests (across all orgs, will check per guest later)
   const { data: bookings } = await supabase
     .from('bookings')
     .select('id, guest_id, total_amount, deposit, payment_status')
     .in('guest_id', guestIds)
-    .eq('organization_id', organizationId)
     .not('status', 'in', '("cancelled")')
 
   if (!bookings || bookings.length === 0) {
@@ -146,6 +145,62 @@ export async function calculateGuestBalancesBatch(
   })
 
   // Clamp negatives to 0 (credit balance shown elsewhere)
+  Object.keys(balanceMap).forEach(id => {
+    balanceMap[id] = Math.max(0, balanceMap[id] || 0)
+  })
+
+  return balanceMap
+}
+
+/**
+ * Batch-calculate balances for organizations (city ledger entities).
+ * An organization's balance = sum of all unpaid city_ledger charges across their bookings.
+ */
+export async function calculateOrganizationBalancesBatch(
+  supabase: any,
+  organizationIds: string[]
+): Promise<Record<string, number>> {
+  if (!organizationIds.length) return {}
+
+  // Get all folio_charges with payment_method='city_ledger' for bookings belonging to these orgs
+  const { data: allBookings } = await supabase
+    .from('bookings')
+    .select('id, organization_id')
+    .in('organization_id', organizationIds)
+
+  if (!allBookings || allBookings.length === 0) {
+    return Object.fromEntries(organizationIds.map(id => [id, 0]))
+  }
+
+  const { data: charges } = await supabase
+    .from('folio_charges')
+    .select('booking_id, amount, payment_method, payment_status')
+    .in('booking_id', allBookings.map(b => b.id))
+    .eq('payment_method', 'city_ledger')
+
+  // Build org → total balance map
+  const orgBookingMap: Record<string, string[]> = {}
+  organizationIds.forEach(id => { orgBookingMap[id] = [] })
+  allBookings.forEach(b => {
+    if (orgBookingMap[b.organization_id]) {
+      orgBookingMap[b.organization_id].push(b.id)
+    }
+  })
+
+  const balanceMap: Record<string, number> = Object.fromEntries(organizationIds.map(id => [id, 0]))
+
+  // Sum unpaid city ledger charges per organization
+  (charges || []).forEach(c => {
+    const orgId = Object.entries(orgBookingMap).find(([_, bookingIds]) => 
+      bookingIds.includes(c.booking_id)
+    )?.[0]
+    
+    if (orgId && (c.payment_status === 'pending' || c.payment_status === 'unpaid')) {
+      balanceMap[orgId] = (balanceMap[orgId] || 0) + (c.amount || 0)
+    }
+  })
+
+  // Clamp negatives to 0
   Object.keys(balanceMap).forEach(id => {
     balanceMap[id] = Math.max(0, balanceMap[id] || 0)
   })
