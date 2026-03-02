@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Textarea } from '@/components/ui/textarea'
 import { toast } from 'sonner'
 import { createClient } from '@/lib/supabase/client'
-import { formatNaira } from '@/lib/utils'
+import { formatNaira } from '@/lib/utils/currency'
 import { calculateOrganizationBalancesBatch } from '@/lib/balance'
 import { EnhancedDataTable } from '@/components/shared/enhanced-data-table'
 import { Badge } from '@/components/ui/badge'

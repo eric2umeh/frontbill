@@ -7,7 +7,7 @@ import { EnhancedDataTable } from '@/components/shared/enhanced-data-table'
 import { Button } from '@/components/ui/button'
 import { CardContent } from '@/components/ui/card'
 import { calculateGuestBalancesBatch } from '@/lib/balance'
-import { formatNaira } from '@/lib/utils'
+import { formatNaira } from '@/lib/utils/currency'
 import { Loader2 } from 'lucide-react'
 import { format } from 'date-fns'
 
