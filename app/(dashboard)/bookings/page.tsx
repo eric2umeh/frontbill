@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { CardContent } from '@/components/ui/card'
 import { NewBookingModal } from '@/components/bookings/new-booking-modal'
 import { ExtendStayModal } from '@/components/bookings/extend-stay-modal'
+import { AddChargeModal } from '@/components/bookings/add-charge-modal'
 import { formatNaira } from '@/lib/utils/currency'
 import { Plus, Loader2 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
@@ -41,11 +42,14 @@ export default function BookingsPage() {
   const [loading, setLoading] = useState(true)
   const [modalOpen, setModalOpen] = useState(false)
   const [extendModalOpen, setExtendModalOpen] = useState(false)
+  const [addChargeModalOpen, setAddChargeModalOpen] = useState(false)
   const [selectedBooking, setSelectedBooking] = useState<any>(null)
   const router = useRouter()
 
   useEffect(() => {
-    fetchBookings()
+    let isMounted = true
+    if (isMounted) fetchBookings()
+    return () => { isMounted = false }
   }, [])
 
   const fetchBookings = async () => {
@@ -54,14 +58,12 @@ export default function BookingsPage() {
       const supabase = createClient()
       
       if (!supabase) {
-        // No Supabase configured - show empty state
         setBookings([])
-        setLoading(false)
         return
       }
 
       const { data: { user } } = await supabase.auth.getUser()
-      if (!user) { router.push('/auth/login'); return }
+      if (!user) { setLoading(false); router.push('/auth/login'); return }
 
       const { data: profile } = await supabase
         .from('profiles')
@@ -69,7 +71,7 @@ export default function BookingsPage() {
         .eq('id', user.id)
         .single()
 
-      if (!profile) { toast.error('Organization not found'); setLoading(false); return }
+      if (!profile?.organization_id) { setLoading(false); return }
 
       const { data, error } = await supabase
         .from('bookings')
@@ -145,15 +147,24 @@ export default function BookingsPage() {
     <div className="space-y-6">
       <NewBookingModal open={modalOpen} onClose={() => { setModalOpen(false); fetchBookings() }} />
       {selectedBooking && (
-        <ExtendStayModal 
-          open={extendModalOpen} 
-          onClose={() => {
-            setExtendModalOpen(false)
-            setSelectedBooking(null)
-            fetchBookings()
-          }}
-          booking={selectedBooking}
-        />
+        <>
+          <ExtendStayModal 
+            open={extendModalOpen} 
+            onClose={() => {
+              setExtendModalOpen(false)
+              fetchBookings()
+            }}
+            booking={selectedBooking}
+          />
+          <AddChargeModal 
+            open={addChargeModalOpen} 
+            onClose={() => {
+              setAddChargeModalOpen(false)
+              fetchBookings()
+            }}
+            booking={selectedBooking}
+          />
+        </>
       )}
       
       <div className="flex items-center justify-between">
@@ -289,25 +300,51 @@ export default function BookingsPage() {
             key: 'actions',
             label: 'Actions',
             render: (booking) => (
-              <Button 
-                size="sm" 
-                variant="outline"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  const nights = calculateNights(booking.check_in, booking.check_out)
-                  setSelectedBooking({
-                    id: booking.id,
-                    bookingReference: booking.folio_id,
-                    guestName: booking.guests?.name,
-                    room: `Room ${booking.rooms?.room_number}`,
-                    currentCheckOut: booking.check_out,
-                    ratePerNight: booking.rate_per_night,
-                  })
-                  setExtendModalOpen(true)
-                }}
-              >
-                Extend Stay
-              </Button>
+              <div className="flex gap-2">
+                <Button 
+                  size="sm" 
+                  variant="outline"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setSelectedBooking({
+                      id: booking.id,
+                      folioId: booking.folio_id,
+                      guestName: booking.guests?.name,
+                      guestId: booking.guest_id,
+                      room: `Room ${booking.rooms?.room_number}`,
+                      currentCheckOut: booking.check_out,
+                      ratePerNight: booking.rate_per_night,
+                      organization_id: booking.organization_id,
+                      created_by: booking.created_by
+                    })
+                    setAddChargeModalOpen(true)
+                  }}
+                >
+                  Add Charge
+                </Button>
+                <Button 
+                  size="sm" 
+                  variant="outline"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    const nights = calculateNights(booking.check_in, booking.check_out)
+                    setSelectedBooking({
+                      id: booking.id,
+                      folioId: booking.folio_id,
+                      guestName: booking.guests?.name,
+                      guestId: booking.guest_id,
+                      room: `Room ${booking.rooms?.room_number}`,
+                      currentCheckOut: booking.check_out,
+                      ratePerNight: booking.rate_per_night,
+                      organization_id: booking.organization_id,
+                      created_by: booking.created_by
+                    })
+                    setExtendModalOpen(true)
+                  }}
+                >
+                  Extend Stay
+                </Button>
+              </div>
             ),
           },
         ]}

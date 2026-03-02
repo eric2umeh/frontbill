@@ -38,7 +38,9 @@ export default function ReservationsPage() {
   const router = useRouter()
 
   useEffect(() => {
-    fetchReservations()
+    let isMounted = true
+    if (isMounted) fetchReservations()
+    return () => { isMounted = false }
   }, [])
 
   const fetchReservations = async () => {
@@ -88,18 +90,29 @@ export default function ReservationsPage() {
         ;(profiles || []).forEach((p: any) => { profileMap[p.id] = p.full_name || 'Unknown' })
       }
 
-      // Map data to match interface
-      const reservationsWithData = (data || []).map((reservation: any) => ({
-        ...reservation,
-        guests: reservation.guests
-          ? (Array.isArray(reservation.guests) ? reservation.guests[0] : reservation.guests)
-          : null,
-        rooms: reservation.rooms
-          ? (Array.isArray(reservation.rooms) ? reservation.rooms[0] : reservation.rooms)
-          : null,
-        created_by_name: reservation.created_by ? (profileMap[reservation.created_by] || 'Unknown') : 'System',
-        updated_by_name: reservation.updated_by ? (profileMap[reservation.updated_by] || null) : null,
-      }))
+      // Map data to match interface and calculate balance from folio_charges
+      const reservationsWithData = (data || []).map((reservation: any) => {
+        // Calculate balance from folio_charges - sum of unpaid charges
+        let balance = 0
+        // Note: balance calculation will be done in real-time by the balance utility
+        // For now, use the booking's balance field if available
+        if (reservation.balance !== undefined) {
+          balance = reservation.balance
+        }
+        
+        return {
+          ...reservation,
+          guests: reservation.guests
+            ? (Array.isArray(reservation.guests) ? reservation.guests[0] : reservation.guests)
+            : null,
+          rooms: reservation.rooms
+            ? (Array.isArray(reservation.rooms) ? reservation.rooms[0] : reservation.rooms)
+            : null,
+          created_by_name: reservation.created_by ? (profileMap[reservation.created_by] || 'Unknown') : 'System',
+          updated_by_name: reservation.updated_by ? (profileMap[reservation.updated_by] || null) : null,
+          balance: balance
+        }
+      })
       
       setReservations(reservationsWithData)
     } catch (error: any) {
@@ -225,9 +238,16 @@ export default function ReservationsPage() {
             key: 'payment_status',
             label: 'Payment',
             render: (res) => (
-              <Badge variant="outline" className={paymentColors[res.payment_status]}>
-                {res.payment_status}
-              </Badge>
+              <div className="space-y-1">
+                <Badge variant="outline" className={paymentColors[res.payment_status]}>
+                  {res.payment_status}
+                </Badge>
+                {res.balance > 0 && (
+                  <div className="text-xs text-muted-foreground">
+                    Bal: {formatNaira(res.balance)}
+                  </div>
+                )}
+              </div>
             ),
           },
           {

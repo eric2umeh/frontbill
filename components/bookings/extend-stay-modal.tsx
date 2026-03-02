@@ -43,11 +43,17 @@ export function ExtendStayModal({ open, onClose, booking }: ExtendStayModalProps
   const [filteredOrganizations, setFilteredOrganizations] = useState<any[]>([])
   const [orgSearchTerm, setOrgSearchTerm] = useState('')
 
+  // When modal opens with city_ledger, auto-select the current guest
   useEffect(() => {
     if (open && paymentMethod === 'city_ledger') {
-      fetchOrganizations()
+      if (ledgerType === 'individual' && booking.guestId && !selectedLedger) {
+        // Auto-select current guest for city ledger individual
+        setSelectedLedger({ id: booking.guestId, name: booking.guestName })
+      } else if (ledgerType === 'organization') {
+        fetchOrganizations()
+      }
     }
-  }, [open, paymentMethod])
+  }, [open, paymentMethod, ledgerType, booking, selectedLedger])
 
   const fetchOrganizations = async () => {
     try {
@@ -105,18 +111,20 @@ export function ExtendStayModal({ open, onClose, booking }: ExtendStayModalProps
     try {
       const supabase = createClient()
       
-      // Add charge to folio_charges
+      // Add charge to folio_charges with unpaid status
       const { error: chargeError } = await supabase
         .from('folio_charges')
         .insert([{
           booking_id: booking.id,
+          organization_id: booking.organization_id,
           description: `Extended Stay - ${additionalNights} night${additionalNights !== 1 ? 's' : ''}`,
           amount: additionalAmount,
           charge_type: 'extended_stay',
           payment_method: paymentMethod,
           ledger_account_id: paymentMethod === 'city_ledger' ? selectedLedger?.id : null,
           ledger_account_type: paymentMethod === 'city_ledger' ? ledgerType : null,
-          payment_status: paymentMethod === 'city_ledger' ? 'pending' : 'paid',
+          payment_status: 'unpaid',  // Always unpaid for extended stay
+          created_by: booking.created_by
         }])
 
       if (chargeError) throw chargeError
@@ -126,21 +134,6 @@ export function ExtendStayModal({ open, onClose, booking }: ExtendStayModalProps
         .from('bookings')
         .update({ check_out: format(newCheckOutDate, 'yyyy-MM-dd') })
         .eq('id', booking.id)
-
-      // Update ledger balance if city ledger
-      if (paymentMethod === 'city_ledger') {
-        if (ledgerType === 'individual') {
-          await supabase
-            .from('guests')
-            .update({ balance: (selectedLedger.balance || 0) + additionalAmount })
-            .eq('id', selectedLedger.id)
-        } else {
-          await supabase
-            .from('organizations')
-            .update({ current_balance: (selectedLedger.current_balance || 0) + additionalAmount })
-            .eq('id', selectedLedger.id)
-        }
-      }
 
       const accountInfo = paymentMethod === 'city_ledger' && selectedLedger 
         ? ` to ${selectedLedger.name}`
