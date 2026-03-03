@@ -74,31 +74,46 @@ export default function TransactionsPage() {
       if (!user) { setLoading(false); router.push('/auth/login'); return }
 
       const { data: profile } = await supabase
-        .from('profiles').select('organization_id').eq('id', user.id).single()
+        .from('profiles')
+        .select('organization_id')
+        .eq('id', user.id)
+        .single()
+      
       if (!profile?.organization_id) { setLoading(false); return }
 
-      // Simple robust query: get all payments for this org, ordered by date
-      const { data: paymentsData, error: paymentsError } = await supabase
-        .from('payments')
+      // Fetch from folio_charges (where ALL charges are stored: initial booking, extended stay, added charges)
+      const { data: chargesData, error: chargesError } = await supabase
+        .from('folio_charges')
         .select(`
-          id, organization_id, booking_id, guest_id, amount, payment_method,
-          payment_date, reference_number, notes, received_by,
-          guests(id, name, phone),
-          bookings(id, folio_id)
+          id, booking_id, organization_id, description, amount, charge_type,
+          payment_method, payment_status, created_at, created_by,
+          bookings:booking_id(
+            id, folio_id, guest_id, total_amount, check_in, check_out,
+            guests:guest_id(id, name, phone),
+            rooms:room_id(room_number)
+          )
         `)
         .eq('organization_id', profile.organization_id)
-        .order('payment_date', { ascending: false })
+        .order('created_at', { ascending: false })
         .limit(1000)
 
-      if (paymentsError) {
-        console.error('[v0] Payments query error:', paymentsError)
+      if (chargesError) {
+        console.error('[v0] Folio charges error:', chargesError)
         setPayments([])
         return
       }
 
-      // Batch-fetch user names
+      // Also fetch actual payments (for completed/partial payments if any exist)
+      const { data: paymentsData } = await supabase
+        .from('bookings')
+        .select('id, folio_id, guest_id, total_amount, deposit, payment_status, guests(name, phone)')
+        .eq('organization_id', profile.organization_id)
+        .order('created_at', { ascending: false })
+        .limit(500)
+
+      // Batch-fetch user names for created_by
       const userIds = new Set(
-        (paymentsData || []).map((p: any) => p.received_by).filter(Boolean)
+        (chargesData || []).map((c: any) => c.created_by).filter(Boolean)
       )
       let userMap: Record<string, string> = {}
       if (userIds.size > 0) {
@@ -111,23 +126,25 @@ export default function TransactionsPage() {
         })
       }
 
-      // Map and filter by date range
-      const allTransactions: Payment[] = (paymentsData || [])
-        .map((p: any) => ({
-          id: p.id,
-          booking_id: p.booking_id,
-          guest_id: p.guest_id,
-          guest_name: p.guests?.name || 'Walk-in / Unknown',
-          amount: p.amount,
-          payment_method: p.payment_method,
-          payment_date: p.payment_date,
-          reference_number: p.reference_number,
-          notes: p.notes,
-          received_by: p.received_by,
-          guest_phone: p.guests?.phone || '',
-          folio_id: p.bookings?.folio_id || '—',
-          received_by_name: p.received_by ? (userMap[p.received_by] || 'Unknown User') : 'System',
-          source: 'payment' as const
+      // Map folio_charges to payment format
+      const allTransactions: Payment[] = (chargesData || [])
+        .map((charge: any) => ({
+          id: charge.id,
+          booking_id: charge.booking_id,
+          guest_id: charge.bookings?.guest_id,
+          guest_name: charge.bookings?.guests?.name || 'Unknown Guest',
+          amount: charge.amount,
+          payment_method: charge.payment_method,
+          payment_date: charge.created_at,
+          reference_number: null,
+          notes: charge.description,
+          received_by: charge.created_by,
+          guest_phone: charge.bookings?.guests?.phone || '',
+          folio_id: charge.bookings?.folio_id || '—',
+          received_by_name: charge.created_by ? (userMap[charge.created_by] || 'Unknown User') : 'System',
+          status: charge.payment_status,
+          description: charge.description,
+          source: 'transaction' as const
         }))
         .filter(p => {
           const pDate = new Date(p.payment_date).getTime()
@@ -139,7 +156,7 @@ export default function TransactionsPage() {
 
       setPayments(allTransactions)
     } catch (err: any) {
-      console.error('[v0] Error fetching payments:', err)
+      console.error('[v0] Error fetching transactions:', err)
       setPayments([])
     } finally {
       setLoading(false)
