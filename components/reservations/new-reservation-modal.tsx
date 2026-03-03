@@ -310,6 +310,20 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
 
       await supabase.from('rooms').update({ status: 'reserved' }).eq('id', selectedRoom.id)
 
+      // Insert folio charge (this is what the Transactions page reads from)
+      await supabase.from('folio_charges').insert([{
+        booking_id: booking.id,
+        organization_id: orgId,
+        description: `Reservation charge - ${nights} night${nights !== 1 ? 's' : ''}`,
+        amount: totalAmount,
+        charge_type: 'reservation',
+        payment_method: isCityLedger ? 'city_ledger' : paymentMethod,
+        ledger_account_id: isCityLedger && selectedLedger ? selectedLedger.id : null,
+        ledger_account_type: isCityLedger ? ledgerType : null,
+        payment_status: bookingPaymentStatus === 'paid' ? 'paid' : 'unpaid',
+        created_by: currentUserId,
+      }])
+
       // Record in transactions table
       await supabase.from('transactions').insert([{
         organization_id: orgId,

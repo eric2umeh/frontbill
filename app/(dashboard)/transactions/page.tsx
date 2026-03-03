@@ -81,6 +81,8 @@ export default function TransactionsPage() {
       
       if (!profile?.organization_id) { setLoading(false); return }
 
+      console.log('[v0] Fetching transactions for org:', profile.organization_id)
+
       // Fetch from folio_charges (where ALL charges are stored: initial booking, extended stay, added charges)
       const { data: chargesData, error: chargesError } = await supabase
         .from('folio_charges')
@@ -97,6 +99,8 @@ export default function TransactionsPage() {
         .order('created_at', { ascending: false })
         .limit(1000)
 
+      console.log('[v0] Charges query result:', { chargesData, chargesError })
+      
       if (chargesError) {
         console.error('[v0] Folio charges error:', chargesError)
         setPayments([])
