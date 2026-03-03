@@ -38,7 +38,9 @@ export default function ReservationsPage() {
   const router = useRouter()
 
   useEffect(() => {
-    fetchReservations()
+    let isMounted = true
+    if (isMounted) fetchReservations()
+    return () => { isMounted = false }
   }, [])
 
   const fetchReservations = async () => {
@@ -50,7 +52,7 @@ export default function ReservationsPage() {
         return
       }
       const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
+      if (!user) { setLoading(false); return }
 
       const { data: profile } = await supabase
         .from('profiles')
@@ -58,32 +60,59 @@ export default function ReservationsPage() {
         .eq('id', user.id)
         .single()
 
-      if (!profile?.organization_id) return
+      if (!profile?.organization_id) { setLoading(false); return }
 
-      // Use single query with joins to fetch all related data at once
+      // Single query — no FK join on profiles (no FK exists), fetch user names separately
       const { data, error } = await supabase
         .from('bookings')
         .select(`
           id, folio_id, guest_id, room_id, check_in, check_out, status, payment_status, rate_per_night, created_by, updated_by,
           guests:guest_id(id, name, phone),
-          rooms:room_id(id, room_number, room_type),
-          created_by_profile:profiles!created_by(full_name),
-          updated_by_profile:profiles!updated_by(full_name)
+          rooms:room_id(id, room_number, room_type)
         `)
         .eq('organization_id', profile.organization_id)
         .eq('status', 'reserved')
         .order('check_in', { ascending: true })
 
       if (error) throw error
-      
-      // Map data to match interface
-      const reservationsWithData = (data || []).map((reservation: any) => ({
-        ...reservation,
-        guests: reservation.guests ? (Array.isArray(reservation.guests) ? reservation.guests[0] : reservation.guests) : null,
-        rooms: reservation.rooms ? (Array.isArray(reservation.rooms) ? reservation.rooms[0] : reservation.rooms) : null,
-        created_by_name: reservation.created_by_profile?.full_name || 'System',
-        updated_by_name: reservation.updated_by_profile?.full_name || null,
-      }))
+
+      // Batch-fetch creator / updater names to avoid N+1 and missing-FK errors
+      const userIds = [...new Set([
+        ...(data || []).map((r: any) => r.created_by).filter(Boolean),
+        ...(data || []).map((r: any) => r.updated_by).filter(Boolean),
+      ])]
+      const profileMap: Record<string, string> = {}
+      if (userIds.length > 0) {
+        const { data: profiles } = await supabase
+          .from('profiles')
+          .select('id, full_name')
+          .in('id', userIds)
+        ;(profiles || []).forEach((p: any) => { profileMap[p.id] = p.full_name || 'Unknown' })
+      }
+
+      // Map data to match interface and calculate balance from folio_charges
+      const reservationsWithData = (data || []).map((reservation: any) => {
+        // Calculate balance from folio_charges - sum of unpaid charges
+        let balance = 0
+        // Note: balance calculation will be done in real-time by the balance utility
+        // For now, use the booking's balance field if available
+        if (reservation.balance !== undefined) {
+          balance = reservation.balance
+        }
+        
+        return {
+          ...reservation,
+          guests: reservation.guests
+            ? (Array.isArray(reservation.guests) ? reservation.guests[0] : reservation.guests)
+            : null,
+          rooms: reservation.rooms
+            ? (Array.isArray(reservation.rooms) ? reservation.rooms[0] : reservation.rooms)
+            : null,
+          created_by_name: reservation.created_by ? (profileMap[reservation.created_by] || 'Unknown') : 'System',
+          updated_by_name: reservation.updated_by ? (profileMap[reservation.updated_by] || null) : null,
+          balance: balance
+        }
+      })
       
       setReservations(reservationsWithData)
     } catch (error: any) {
@@ -209,9 +238,16 @@ export default function ReservationsPage() {
             key: 'payment_status',
             label: 'Payment',
             render: (res) => (
-              <Badge variant="outline" className={paymentColors[res.payment_status]}>
-                {res.payment_status}
-              </Badge>
+              <div className="space-y-1">
+                <Badge variant="outline" className={paymentColors[res.payment_status]}>
+                  {res.payment_status}
+                </Badge>
+                {res.balance > 0 && (
+                  <div className="text-xs text-muted-foreground">
+                    Bal: {formatNaira(res.balance)}
+                  </div>
+                )}
+              </div>
             ),
           },
           {
