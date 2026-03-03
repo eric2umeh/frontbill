@@ -21,6 +21,8 @@ interface Payment {
   id: string
   booking_id: string | null
   guest_id: string | null
+  guest_name: string
+  room?: string
   amount: number
   payment_method: string
   payment_date: string
@@ -28,10 +30,12 @@ interface Payment {
   notes: string | null
   received_by: string | null
   // joined
-  guest_name?: string
   guest_phone?: string
   folio_id?: string
   received_by_name?: string
+  status?: string
+  description?: string
+  source: 'payment' | 'transaction'
 }
 
 type DateRange = 'today' | 'yesterday' | 'this_week' | 'this_month' | 'custom'
@@ -39,7 +43,7 @@ type DateRange = 'today' | 'yesterday' | 'this_week' | 'this_month' | 'custom'
 export default function TransactionsPage() {
   const [payments, setPayments] = useState<Payment[]>([])
   const [loading, setLoading] = useState(true)
-  const [dateRange, setDateRange] = useState<DateRange>('today')
+  const [dateRange, setDateRange] = useState<DateRange>('this_month')
   const [customDate, setCustomDate] = useState<Date>(new Date())
   const [calOpen, setCalOpen] = useState(false)
   const router = useRouter()
@@ -67,36 +71,73 @@ export default function TransactionsPage() {
       if (!supabase) { setPayments([]); setLoading(false); return }
 
       const { data: { user } } = await supabase.auth.getUser()
-      if (!user) { router.push('/auth/login'); return }
+      if (!user) { setLoading(false); router.push('/auth/login'); return }
 
       const { data: profile } = await supabase
         .from('profiles').select('organization_id').eq('id', user.id).single()
-      if (!profile) { setPayments([]); return }
+      if (!profile?.organization_id) { setLoading(false); return }
 
-      const { data, error } = await supabase
+      // Simple robust query: get all payments for this org, ordered by date
+      const { data: paymentsData, error: paymentsError } = await supabase
         .from('payments')
         .select(`
           id, organization_id, booking_id, guest_id, amount, payment_method,
           payment_date, reference_number, notes, received_by,
-          guests:guest_id ( name, phone ),
-          bookings:booking_id ( folio_id )
+          guests(id, name, phone),
+          bookings(id, folio_id)
         `)
         .eq('organization_id', profile.organization_id)
-        .gte('payment_date', dateFilter.from.toISOString())
-        .lte('payment_date', dateFilter.to.toISOString())
         .order('payment_date', { ascending: false })
+        .limit(1000)
 
-      if (error) throw error
+      if (paymentsError) {
+        console.error('[v0] Payments query error:', paymentsError)
+        setPayments([])
+        return
+      }
 
-      const mapped: Payment[] = (data || []).map((p: any) => ({
-        ...p,
-        guest_name: p.guests?.name || 'Walk-in / Unknown',
-        guest_phone: p.guests?.phone || '',
-        folio_id: p.bookings?.folio_id || '—',
-        received_by_name: p.received_by ? `User: ${p.received_by.slice(0, 8)}` : 'System',
-      }))
+      // Batch-fetch user names
+      const userIds = new Set(
+        (paymentsData || []).map((p: any) => p.received_by).filter(Boolean)
+      )
+      let userMap: Record<string, string> = {}
+      if (userIds.size > 0) {
+        const { data: users } = await supabase
+          .from('profiles')
+          .select('id, full_name')
+          .in('id', Array.from(userIds))
+        users?.forEach((u: any) => {
+          userMap[u.id] = u.full_name || 'Unknown User'
+        })
+      }
 
-      setPayments(mapped)
+      // Map and filter by date range
+      const allTransactions: Payment[] = (paymentsData || [])
+        .map((p: any) => ({
+          id: p.id,
+          booking_id: p.booking_id,
+          guest_id: p.guest_id,
+          guest_name: p.guests?.name || 'Walk-in / Unknown',
+          amount: p.amount,
+          payment_method: p.payment_method,
+          payment_date: p.payment_date,
+          reference_number: p.reference_number,
+          notes: p.notes,
+          received_by: p.received_by,
+          guest_phone: p.guests?.phone || '',
+          folio_id: p.bookings?.folio_id || '—',
+          received_by_name: p.received_by ? (userMap[p.received_by] || 'Unknown User') : 'System',
+          source: 'payment' as const
+        }))
+        .filter(p => {
+          const pDate = new Date(p.payment_date).getTime()
+          const from = dateFilter.from.getTime()
+          const to = dateFilter.to.getTime()
+          return pDate >= from && pDate <= to
+        })
+        .sort((a, b) => new Date(b.payment_date).getTime() - new Date(a.payment_date).getTime())
+
+      setPayments(allTransactions)
     } catch (err: any) {
       console.error('[v0] Error fetching payments:', err)
       setPayments([])
@@ -235,6 +276,7 @@ export default function TransactionsPage() {
         <EnhancedDataTable
           data={payments}
           searchKeys={['guest_name', 'folio_id', 'reference_number', 'notes']}
+          onRowClick={(payment) => router.push(`/transactions/${payment.id}`)}
           filters={[
             {
               key: 'payment_method',

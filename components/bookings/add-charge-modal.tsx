@@ -1,0 +1,283 @@
+'use client'
+
+import { useState, useEffect } from 'react'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
+import { Label } from '@/components/ui/label'
+import { Input } from '@/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Textarea } from '@/components/ui/textarea'
+import { Badge } from '@/components/ui/badge'
+import { Card, CardContent } from '@/components/ui/card'
+import { formatNaira } from '@/lib/utils/currency'
+import { toast } from 'sonner'
+import { CreditCard, ChevronRight } from 'lucide-react'
+import { format } from 'date-fns'
+import { cn } from '@/lib/utils'
+import { createClient } from '@/lib/supabase/client'
+
+interface AddChargeModalProps {
+  open: boolean
+  onClose: () => void
+  booking: {
+    id: string
+    folioId: string
+    guestName: string
+    guestId: string
+    room: string
+    organization_id?: string
+    created_by?: string
+  }
+}
+
+export function AddChargeModal({ open, onClose, booking }: AddChargeModalProps) {
+  const [step, setStep] = useState(1)
+  const [description, setDescription] = useState('')
+  const [amount, setAmount] = useState('')
+  const [paymentMethod, setPaymentMethod] = useState('city_ledger')
+  const [loading, setLoading] = useState(false)
+  const [ledgerType, setLedgerType] = useState('individual')
+  const [selectedLedger, setSelectedLedger] = useState<any>(null)
+  const [organizations, setOrganizations] = useState<any[]>([])
+
+  // When modal opens with city_ledger, auto-select the current guest
+  useEffect(() => {
+    if (open && paymentMethod === 'city_ledger') {
+      if (ledgerType === 'individual' && booking.guestId && !selectedLedger) {
+        setSelectedLedger({ id: booking.guestId, name: booking.guestName })
+      } else if (ledgerType === 'organization') {
+        fetchOrganizations()
+      }
+    }
+  }, [open, paymentMethod, ledgerType, booking, selectedLedger])
+
+  const fetchOrganizations = async () => {
+    try {
+      const supabase = createClient()
+      const { data, error } = await supabase
+        .from('organizations')
+        .select('id, name')
+        .order('name')
+
+      if (error) throw error
+      setOrganizations(data || [])
+    } catch (error: any) {
+      toast.error('Failed to load organizations')
+    }
+  }
+
+  const handleAddCharge = async () => {
+    if (!description.trim() || !amount) {
+      toast.error('Please fill in all fields')
+      return
+    }
+
+    const chargeAmount = parseFloat(amount)
+    if (chargeAmount <= 0) {
+      toast.error('Amount must be greater than 0')
+      return
+    }
+
+    if (paymentMethod === 'city_ledger' && !selectedLedger) {
+      toast.error('Please select an account for City Ledger')
+      return
+    }
+
+    setLoading(true)
+    try {
+      const supabase = createClient()
+      
+      // Add charge to folio_charges with unpaid status
+      const { error: chargeError } = await supabase
+        .from('folio_charges')
+        .insert([{
+          booking_id: booking.id,
+          organization_id: booking.organization_id,
+          description: description,
+          amount: chargeAmount,
+          charge_type: 'additional_charge',
+          payment_method: paymentMethod,
+          ledger_account_id: paymentMethod === 'city_ledger' ? selectedLedger?.id : null,
+          ledger_account_type: paymentMethod === 'city_ledger' ? ledgerType : null,
+          payment_status: 'unpaid',
+          created_by: booking.created_by
+        }])
+
+      if (chargeError) throw chargeError
+
+      toast.success(`Charge of ${formatNaira(chargeAmount)} added successfully`)
+      onClose()
+      resetForm()
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to add charge')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const resetForm = () => {
+    setStep(1)
+    setDescription('')
+    setAmount('')
+    setPaymentMethod('city_ledger')
+    setLedgerType('individual')
+    setSelectedLedger(null)
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(open) => {
+      if (!open) {
+        onClose()
+        resetForm()
+      }
+    }}>
+      <DialogContent className="sm:max-w-xl">
+        <DialogHeader>
+          <DialogTitle>Add Charge - {booking.folioId}</DialogTitle>
+          <DialogDescription className="sr-only">Add miscellaneous charge to booking</DialogDescription>
+          <div className="flex items-center gap-2 mt-2 text-sm text-muted-foreground">
+            <Badge variant={step === 1 ? 'default' : 'secondary'}>1. Charge Details</Badge>
+            <ChevronRight className="h-4 w-4 text-muted-foreground" />
+            <Badge variant={step === 2 ? 'default' : 'secondary'}>2. Payment Method</Badge>
+          </div>
+        </DialogHeader>
+
+        <div className="space-y-4 py-4">
+          {/* Guest Info Summary */}
+          <div className="p-3 bg-muted rounded-lg space-y-1 text-sm">
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Guest:</span>
+              <span className="font-medium">{booking.guestName}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Room:</span>
+              <span className="font-medium">{booking.room}</span>
+            </div>
+          </div>
+
+          {/* Step 1: Charge Details */}
+          {step === 1 && (
+            <div className="space-y-4">
+              <div>
+                <Label htmlFor="description">Charge Description</Label>
+                <Textarea
+                  id="description"
+                  placeholder="e.g., Extra bed, Late checkout, Minibar, etc."
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  className="mt-2 min-h-20"
+                />
+              </div>
+
+              <div>
+                <Label htmlFor="amount">Amount (₦)</Label>
+                <Input
+                  id="amount"
+                  type="number"
+                  placeholder="0.00"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  min="0"
+                  step="0.01"
+                  className="mt-2"
+                />
+              </div>
+
+              <Button onClick={() => setStep(2)} className="w-full">
+                Continue to Payment Method
+              </Button>
+            </div>
+          )}
+
+          {/* Step 2: Payment Method */}
+          {step === 2 && (
+            <div className="space-y-4">
+              <div>
+                <Label>Payment Method</Label>
+                <Select value={paymentMethod} onValueChange={setPaymentMethod}>
+                  <SelectTrigger className="mt-2">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="cash">Cash</SelectItem>
+                    <SelectItem value="pos">POS</SelectItem>
+                    <SelectItem value="card">Card</SelectItem>
+                    <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
+                    <SelectItem value="city_ledger">City Ledger</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {paymentMethod === 'city_ledger' && (
+                <>
+                  <div>
+                    <Label>Account Type</Label>
+                    <Select value={ledgerType} onValueChange={setLedgerType}>
+                      <SelectTrigger className="mt-2">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="individual">Individual (Guest)</SelectItem>
+                        <SelectItem value="organization">Organization</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {ledgerType === 'individual' && (
+                    <Card>
+                      <CardContent className="p-3 text-sm">
+                        <div className="flex justify-between items-center">
+                          <span className="text-muted-foreground">Selected Account:</span>
+                          <span className="font-medium">{selectedLedger?.name || booking.guestName}</span>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
+
+                  {ledgerType === 'organization' && (
+                    <div>
+                      <Label>Select Organization</Label>
+                      <Select value={selectedLedger?.id || ''} onValueChange={(id) => {
+                        const org = organizations.find(o => o.id === id)
+                        setSelectedLedger(org)
+                      }}>
+                        <SelectTrigger className="mt-2">
+                          <SelectValue placeholder="Choose organization..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {organizations.map(org => (
+                            <SelectItem key={org.id} value={org.id}>{org.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+                </>
+              )}
+
+              <div className="p-3 bg-muted rounded-lg">
+                <div className="flex justify-between items-center">
+                  <span className="font-medium">Charge Amount:</span>
+                  <span className="text-lg font-bold">{formatNaira(parseFloat(amount) || 0)}</span>
+                </div>
+              </div>
+
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={() => setStep(1)} className="flex-1">
+                  Back
+                </Button>
+                <Button 
+                  onClick={handleAddCharge} 
+                  disabled={loading || !amount}
+                  className="flex-1"
+                >
+                  {loading ? 'Adding...' : 'Add Charge'}
+                </Button>
+              </div>
+            </div>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
