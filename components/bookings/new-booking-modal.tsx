@@ -510,17 +510,16 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
       }])
 
       // Also record in payments table so Transactions page shows it
-      if (isPaid) {
-        await supabase.from('payments').insert([{
-          organization_id: organizationId,
-          booking_id: booking.id,
-          guest_id: finalGuestId,
-          amount: total,
-          payment_method: paymentMethod,
-          payment_date: new Date().toISOString(),
-          notes: `Booking payment — Folio ${folioId}`,
-        }])
-      }
+      // Record for ALL bookings, regardless of payment status (city_ledger charges still need to appear)
+      await supabase.from('payments').insert([{
+        organization_id: organizationId,
+        booking_id: booking.id,
+        guest_id: finalGuestId,
+        amount: total,
+        payment_method: paymentMethod,
+        payment_date: new Date().toISOString(),
+        notes: `Booking payment — Folio ${folioId}`,
+      }])
 
       toast.success(`Booking created! Ref: ${booking.folio_id}`)
       onSuccess?.()

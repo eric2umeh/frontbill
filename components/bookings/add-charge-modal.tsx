@@ -105,6 +105,17 @@ export function AddChargeModal({ open, onClose, booking }: AddChargeModalProps) 
 
       if (chargeError) throw chargeError
 
+      // Record payment entry for transactions table visibility
+      await supabase.from('payments').insert([{
+        organization_id: booking.organization_id,
+        booking_id: booking.id,
+        guest_id: null,
+        amount: parseFloat(amount),
+        payment_method: paymentMethod,
+        payment_date: new Date().toISOString(),
+        notes: `Charge: ${description}`
+      }])
+
       toast.success(`Charge of ${formatNaira(chargeAmount)} added successfully`)
       onClose()
       resetForm()
