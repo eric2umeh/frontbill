@@ -135,6 +135,17 @@ export function ExtendStayModal({ open, onClose, booking }: ExtendStayModalProps
         .update({ check_out: format(newCheckOutDate, 'yyyy-MM-dd') })
         .eq('id', booking.id)
 
+      // Record payment entry for transactions table visibility
+      await supabase.from('payments').insert([{
+        organization_id: booking.organization_id,
+        booking_id: booking.id,
+        guest_id: null,
+        amount: additionalAmount,
+        payment_method: paymentMethod,
+        payment_date: new Date().toISOString(),
+        notes: `Extended Stay - ${additionalNights} night${additionalNights !== 1 ? 's' : ''}`
+      }])
+
       const accountInfo = paymentMethod === 'city_ledger' && selectedLedger 
         ? ` to ${selectedLedger.name}`
         : ''
