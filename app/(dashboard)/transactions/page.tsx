@@ -74,72 +74,57 @@ export default function TransactionsPage() {
       if (!user) { setLoading(false); router.push('/auth/login'); return }
 
       const { data: profile } = await supabase
-        .from('profiles').select('organization_id').eq('id', user.id).single()
+        .from('profiles')
+        .select('organization_id')
+        .eq('id', user.id)
+        .single()
+
       if (!profile?.organization_id) { setLoading(false); return }
 
-      // Simple robust query: get all payments for this org, ordered by date
-      const { data: paymentsData, error: paymentsError } = await supabase
-        .from('payments')
-        .select(`
-          id, organization_id, booking_id, guest_id, amount, payment_method,
-          payment_date, reference_number, notes, received_by,
-          guests(id, name, phone),
-          bookings(id, folio_id)
-        `)
+      // Query the transactions table directly — this is where booking/reservation
+      // modals write payment records. No joins needed; guest_name, room, etc. are denormalized.
+      const { data: txData, error: txError } = await supabase
+        .from('transactions')
+        .select('*')
         .eq('organization_id', profile.organization_id)
-        .order('payment_date', { ascending: false })
+        .order('created_at', { ascending: false })
         .limit(1000)
 
-      if (paymentsError) {
-        console.error('[v0] Payments query error:', paymentsError)
+      if (txError) {
+        console.error('[v0] Transactions query error:', txError)
         setPayments([])
         return
       }
 
-      // Batch-fetch user names
-      const userIds = new Set(
-        (paymentsData || []).map((p: any) => p.received_by).filter(Boolean)
-      )
-      let userMap: Record<string, string> = {}
-      if (userIds.size > 0) {
-        const { data: users } = await supabase
-          .from('profiles')
-          .select('id, full_name')
-          .in('id', Array.from(userIds))
-        users?.forEach((u: any) => {
-          userMap[u.id] = u.full_name || 'Unknown User'
-        })
-      }
-
-      // Map and filter by date range
-      const allTransactions: Payment[] = (paymentsData || [])
-        .map((p: any) => ({
-          id: p.id,
-          booking_id: p.booking_id,
-          guest_id: p.guest_id,
-          guest_name: p.guests?.name || 'Walk-in / Unknown',
-          amount: p.amount,
-          payment_method: p.payment_method,
-          payment_date: p.payment_date,
-          reference_number: p.reference_number,
-          notes: p.notes,
-          received_by: p.received_by,
-          guest_phone: p.guests?.phone || '',
-          folio_id: p.bookings?.folio_id || '—',
-          received_by_name: p.received_by ? (userMap[p.received_by] || 'Unknown User') : 'System',
-          source: 'payment' as const
+      // Map to Payment interface and apply client-side date filter
+      const all: Payment[] = (txData || [])
+        .map((t: any) => ({
+          id: t.id,
+          booking_id: t.booking_id,
+          guest_id: null,
+          guest_name: t.guest_name || 'Unknown Guest',
+          room: t.room || '',
+          amount: t.amount,
+          payment_method: t.payment_method,
+          payment_date: t.created_at,
+          reference_number: t.transaction_id || null,
+          notes: t.description || null,
+          received_by: null,
+          guest_phone: '',
+          folio_id: t.transaction_id || '—',
+          received_by_name: t.received_by || 'System',
+          status: t.status,
+          description: t.description,
+          source: 'transaction' as const,
         }))
-        .filter(p => {
+        .filter((p) => {
           const pDate = new Date(p.payment_date).getTime()
-          const from = dateFilter.from.getTime()
-          const to = dateFilter.to.getTime()
-          return pDate >= from && pDate <= to
+          return pDate >= dateFilter.from.getTime() && pDate <= dateFilter.to.getTime()
         })
-        .sort((a, b) => new Date(b.payment_date).getTime() - new Date(a.payment_date).getTime())
 
-      setPayments(allTransactions)
+      setPayments(all)
     } catch (err: any) {
-      console.error('[v0] Error fetching payments:', err)
+      console.error('[v0] Error fetching transactions:', err)
       setPayments([])
     } finally {
       setLoading(false)
