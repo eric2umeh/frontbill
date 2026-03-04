@@ -310,6 +310,20 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
 
       await supabase.from('rooms').update({ status: 'reserved' }).eq('id', selectedRoom.id)
 
+      // Insert folio charge (this is what the Transactions page reads from)
+      await supabase.from('folio_charges').insert([{
+        booking_id: booking.id,
+        organization_id: orgId,
+        description: `Reservation charge - ${nights} night${nights !== 1 ? 's' : ''}`,
+        amount: totalAmount,
+        charge_type: 'reservation',
+        payment_method: isCityLedger ? 'city_ledger' : paymentMethod,
+        ledger_account_id: isCityLedger && selectedLedger ? selectedLedger.id : null,
+        ledger_account_type: isCityLedger ? ledgerType : null,
+        payment_status: bookingPaymentStatus === 'paid' ? 'paid' : 'unpaid',
+        created_by: currentUserId,
+      }])
+
       // Record in transactions table
       await supabase.from('transactions').insert([{
         organization_id: orgId,
@@ -324,21 +338,20 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
         received_by: currentUserId,
       }])
 
-      // Also insert into payments table so Transactions page shows it
-      if (bookingPaymentStatus !== 'unpaid' && bookingPaymentStatus !== 'pending') {
-        const paidAmount = paymentStatus === 'paid' ? totalAmount : (Number(partialAmount) || 0)
-        if (paidAmount > 0) {
-          await supabase.from('payments').insert([{
-            organization_id: orgId,
-            booking_id: booking.id,
-            guest_id: finalGuestId,
-            amount: paidAmount,
-            payment_method: isCityLedger ? 'city_ledger' : paymentMethod,
-            payment_date: new Date().toISOString(),
-            notes: `Reservation payment — Folio ${folioId}`,
-            received_by: currentUserId || null,
-          }])
-        }
+      // Always insert into payments table so Transactions page shows ALL transactions
+      // This includes both paid and unpaid/pending reservations
+      const paidAmount = paymentStatus === 'paid' ? totalAmount : (Number(partialAmount) || 0)
+      if (paidAmount > 0 || isCityLedger) {
+        await supabase.from('payments').insert([{
+          organization_id: orgId,
+          booking_id: booking.id,
+          guest_id: finalGuestId,
+          amount: paidAmount || totalAmount,
+          payment_method: isCityLedger ? 'city_ledger' : paymentMethod,
+          payment_date: new Date().toISOString(),
+          notes: `Reservation payment — Folio ${folioId}`,
+          received_by: currentUserId || null,
+        }])
       }
 
       toast.success(`Reservation created — Ref: ${folioId}`)
