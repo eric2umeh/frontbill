@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { CardContent } from '@/components/ui/card'
 import { formatNaira } from '@/lib/utils/currency'
+import { usePageData } from '@/hooks/use-page-data'
 import { Plus, Users, Loader2 } from 'lucide-react'
 import { BulkBookingModal } from '@/components/reservations/bulk-booking-modal'
 import { NewReservationModal } from '@/components/reservations/new-reservation-modal'
@@ -32,9 +33,9 @@ interface Reservation {
 
 export default function ReservationsPage() {
   const [reservations, setReservations] = useState<Reservation[]>([])
-  const [loading, setLoading] = useState(true)
   const [bulkModalOpen, setBulkModalOpen] = useState(false)
   const [newReservationOpen, setNewReservationOpen] = useState(false)
+  const { initialLoading, startFetch, endFetch } = usePageData()
   const router = useRouter()
 
   useEffect(() => {
@@ -45,14 +46,14 @@ export default function ReservationsPage() {
 
   const fetchReservations = async () => {
     try {
-      setLoading(true)
+      startFetch()
       const supabase = createClient()
       if (!supabase) {
         setReservations([])
         return
       }
       const { data: { user } } = await supabase.auth.getUser()
-      if (!user) { setLoading(false); return }
+      if (!user) { endFetch(); return }
 
       const { data: profile } = await supabase
         .from('profiles')
@@ -60,7 +61,7 @@ export default function ReservationsPage() {
         .eq('id', user.id)
         .single()
 
-      if (!profile?.organization_id) { setLoading(false); return }
+      if (!profile?.organization_id) { endFetch(); return }
 
       // Single query — no FK join on profiles (no FK exists), fetch user names separately
       const { data, error } = await supabase
@@ -119,7 +120,7 @@ export default function ReservationsPage() {
       console.error('Error fetching reservations:', error)
       setReservations([])
     } finally {
-      setLoading(false)
+      endFetch()
     }
   }
 
@@ -135,7 +136,7 @@ export default function ReservationsPage() {
     cancelled: 'bg-red-500/10 text-red-700 border-red-200',
   }
 
-  if (loading) {
+  if (initialLoading) {
     return (
       <div className="flex items-center justify-center h-96">
         <Loader2 className="h-8 w-8 animate-spin" />

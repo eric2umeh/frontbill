@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { CardContent } from '@/components/ui/card'
 import { formatNaira } from '@/lib/utils/currency'
+import { usePageData } from '@/hooks/use-page-data'
 import { Plus, Users, Loader2 } from 'lucide-react'
 import { AddRoomModal } from '@/components/rooms/add-room-modal'
 import { toast } from 'sonner'
@@ -30,8 +31,8 @@ interface Room {
 
 export default function RoomsPage() {
   const [rooms, setRooms] = useState<Room[]>([])
-  const [loading, setLoading] = useState(true)
   const [addRoomModalOpen, setAddRoomModalOpen] = useState(false)
+  const { initialLoading, startFetch, endFetch } = usePageData()
   const router = useRouter()
 
   useEffect(() => {
@@ -40,13 +41,12 @@ export default function RoomsPage() {
 
   const fetchRooms = async () => {
     try {
-      setLoading(true)
+      startFetch()
       const supabase = createClient()
       
       if (!supabase) {
-        // No Supabase configured - show empty state
         setRooms([])
-        setLoading(false)
+        endFetch()
         return
       }
 
@@ -104,7 +104,7 @@ export default function RoomsPage() {
       console.error('Error fetching rooms:', error)
       toast.error('Failed to load rooms')
     } finally {
-      setLoading(false)
+      endFetch()
     }
   }
 
@@ -116,7 +116,7 @@ export default function RoomsPage() {
     reserved: 'bg-blue-500/10 text-blue-700 border-blue-200',
   }
 
-  if (loading) {
+  if (initialLoading) {
     return (
       <div className="flex items-center justify-center h-96">
         <Loader2 className="h-8 w-8 animate-spin" />
