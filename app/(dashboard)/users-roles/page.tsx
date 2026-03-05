@@ -11,10 +11,10 @@ import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
 import { toast } from 'sonner'
-import { Loader2, Search, UserCog, ShieldCheck, Check, X, Users, Edit2 } from 'lucide-react'
+import { usePageData } from '@/hooks/use-page-data'
+import { Loader2, Search, ShieldCheck, Check, X, Users, Edit2 } from 'lucide-react'
 
 interface UserProfile {
   id: string
@@ -27,7 +27,7 @@ interface UserProfile {
 
 export default function UsersRolesPage() {
   const [users, setUsers] = useState<UserProfile[]>([])
-  const [loading, setLoading] = useState(true)
+  const { initialLoading, startFetch, endFetch } = usePageData()
   const [currentUserRole, setCurrentUserRole] = useState<string>('')
   const [search, setSearch] = useState('')
   const [editingUser, setEditingUser] = useState<UserProfile | null>(null)
@@ -39,20 +39,19 @@ export default function UsersRolesPage() {
   useEffect(() => { fetchUsers() }, [])
 
   const fetchUsers = async () => {
-    setLoading(true)
+    startFetch()
     const supabase = createClient()
-    if (!supabase) { setLoading(false); return }
+    if (!supabase) { endFetch(); return }
 
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) { router.push('/auth/login'); return }
 
     const { data: myProfile } = await supabase
       .from('profiles').select('role, organization_id').eq('id', user.id).single()
-    if (!myProfile) { setLoading(false); return }
+    if (!myProfile) { endFetch(); return }
 
     setCurrentUserRole(myProfile.role || 'staff')
 
-    // Only admins and managers can see this page
     if (!['admin', 'manager'].includes(myProfile.role || '')) {
       router.push('/dashboard')
       return
@@ -64,10 +63,10 @@ export default function UsersRolesPage() {
       .eq('organization_id', myProfile.organization_id)
       .order('created_at', { ascending: true })
 
-    if (error) { toast.error('Failed to load users'); setLoading(false); return }
+    if (error) { toast.error('Failed to load users'); endFetch(); return }
 
     setUsers(data || [])
-    setLoading(false)
+    endFetch()
   }
 
   const updateUserRole = async () => {
@@ -101,7 +100,7 @@ export default function UsersRolesPage() {
 
   const roleDef = viewingRole ? ROLE_DEFINITIONS.find(r => r.key === viewingRole) : null
 
-  if (loading) {
+  if (initialLoading) {
     return (
       <div className="flex items-center justify-center h-96">
         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />

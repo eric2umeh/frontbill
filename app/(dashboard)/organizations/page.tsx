@@ -17,6 +17,7 @@ import { calculateOrganizationBalancesBatch } from '@/lib/balance'
 import { EnhancedDataTable } from '@/components/shared/enhanced-data-table'
 import { Badge } from '@/components/ui/badge'
 import { format } from 'date-fns'
+import { usePageData } from '@/hooks/use-page-data'
 
 interface Organization {
   id: string
@@ -34,7 +35,7 @@ interface Organization {
 export default function OrganizationsPage() {
   const router = useRouter()
   const [organizations, setOrganizations] = useState<Organization[]>([])
-  const [loading, setLoading] = useState(true)
+  const { initialLoading, startFetch, endFetch } = usePageData()
   const [addOrgModalOpen, setAddOrgModalOpen] = useState(false)
 
   // Form states
@@ -54,14 +55,9 @@ export default function OrganizationsPage() {
 
   const fetchOrganizations = async () => {
     try {
-      setLoading(true)
+      startFetch()
       const supabase = createClient()
-      
-      if (!supabase) {
-        setOrganizations([])
-        setLoading(false)
-        return
-      }
+      if (!supabase) { setOrganizations([]); endFetch(); return }
 
       // Fetch organizations
       const { data, error } = await supabase
@@ -103,7 +99,7 @@ export default function OrganizationsPage() {
       console.error('[v0] Error fetching organizations:', error)
       toast.error(error.message || 'Failed to load organizations')
     } finally {
-      setLoading(false)
+      endFetch()
     }
   }
 
@@ -282,7 +278,7 @@ export default function OrganizationsPage() {
       </div>
 
       {/* Data Table */}
-      {loading ? (
+      {initialLoading ? (
         <div className="text-center py-12">
           <p className="text-muted-foreground">Loading organizations...</p>
         </div>
