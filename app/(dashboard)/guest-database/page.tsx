@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { CardContent } from '@/components/ui/card'
 import { calculateGuestBalancesBatch } from '@/lib/balance'
 import { formatNaira } from '@/lib/utils/currency'
+import { usePageData } from '@/hooks/use-page-data'
 import { Loader2 } from 'lucide-react'
 import { format } from 'date-fns'
 
@@ -27,7 +28,7 @@ interface Guest {
 
 export default function GuestDatabasePage() {
   const [guests, setGuests] = useState<Guest[]>([])
-  const [loading, setLoading] = useState(true)
+  const { initialLoading, startFetch, endFetch } = usePageData()
   const router = useRouter()
 
   useEffect(() => {
@@ -36,9 +37,9 @@ export default function GuestDatabasePage() {
 
   const fetchGuests = async () => {
     try {
-      setLoading(true)
+      startFetch()
       const supabase = createClient()
-      if (!supabase) { setGuests([]); setLoading(false); return }
+      if (!supabase) { setGuests([]); endFetch(); return }
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) { router.push('/auth/login'); return }
 
@@ -69,13 +70,13 @@ export default function GuestDatabasePage() {
       console.error('[v0] Error fetching guests:', err)
       setGuests([])
     } finally {
-      setLoading(false)
+      endFetch()
     }
   }
 
   const goToGuest = (guest: Guest) => router.push(`/guest-database/${guest.id}`)
 
-  if (loading) {
+  if (initialLoading) {
     return (
       <div className="flex items-center justify-center h-96">
         <Loader2 className="h-8 w-8 animate-spin" />
