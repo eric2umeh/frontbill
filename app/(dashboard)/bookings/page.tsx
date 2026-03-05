@@ -10,6 +10,7 @@ import { NewBookingModal } from '@/components/bookings/new-booking-modal'
 import { ExtendStayModal } from '@/components/bookings/extend-stay-modal'
 import { AddChargeModal } from '@/components/bookings/add-charge-modal'
 import { formatNaira } from '@/lib/utils/currency'
+import { usePageData } from '@/hooks/use-page-data'
 import { Plus, Loader2 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
@@ -39,11 +40,11 @@ interface Booking {
 
 export default function BookingsPage() {
   const [bookings, setBookings] = useState<Booking[]>([])
-  const [loading, setLoading] = useState(true)
   const [modalOpen, setModalOpen] = useState(false)
   const [extendModalOpen, setExtendModalOpen] = useState(false)
   const [addChargeModalOpen, setAddChargeModalOpen] = useState(false)
   const [selectedBooking, setSelectedBooking] = useState<any>(null)
+  const { initialLoading, startFetch, endFetch } = usePageData()
   const router = useRouter()
 
   useEffect(() => {
@@ -54,7 +55,7 @@ export default function BookingsPage() {
 
   const fetchBookings = async () => {
     try {
-      setLoading(true)
+      startFetch()
       const supabase = createClient()
       
       if (!supabase) {
@@ -63,7 +64,7 @@ export default function BookingsPage() {
       }
 
       const { data: { user } } = await supabase.auth.getUser()
-      if (!user) { setLoading(false); router.push('/auth/login'); return }
+      if (!user) { endFetch(); router.push('/auth/login'); return }
 
       const { data: profile } = await supabase
         .from('profiles')
@@ -71,7 +72,7 @@ export default function BookingsPage() {
         .eq('id', user.id)
         .single()
 
-      if (!profile?.organization_id) { setLoading(false); return }
+      if (!profile?.organization_id) { endFetch(); return }
 
       const { data, error } = await supabase
         .from('bookings')
@@ -110,7 +111,7 @@ export default function BookingsPage() {
       console.error('Error fetching bookings:', error)
       toast.error('Failed to load bookings')
     } finally {
-      setLoading(false)
+      endFetch()
     }
   }
 
@@ -135,7 +136,7 @@ export default function BookingsPage() {
     return Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24))
   }
 
-  if (loading) {
+  if (initialLoading) {
     return (
       <div className="flex items-center justify-center h-96">
         <Loader2 className="h-8 w-8 animate-spin" />
