@@ -294,9 +294,16 @@ export default function TransactionsPage() {
             render: (p) => {
               const cfg = methodConfig[p.payment_method] || { label: p.payment_method, color: 'text-gray-700', bg: 'bg-gray-50 border-gray-200', icon: null }
               return (
-                <Badge variant="outline" className={`${cfg.bg} ${cfg.color} gap-1`}>
-                  {cfg.icon}{cfg.label}
-                </Badge>
+                <div className="space-y-1">
+                  <Badge variant="outline" className={`${cfg.bg} ${cfg.color} gap-1`}>
+                    {cfg.icon}{cfg.label}
+                  </Badge>
+                  {p.payment_method === 'city_ledger' && p.notes && (
+                    <div className="text-xs text-muted-foreground truncate max-w-[130px]">
+                      {p.notes.replace(/^City Ledger:\s*/, '')}
+                    </div>
+                  )}
+                </div>
               )
             },
           },
