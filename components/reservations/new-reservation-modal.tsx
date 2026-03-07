@@ -16,16 +16,6 @@ import { Calendar as CalendarIcon, ChevronRight, ChevronLeft, Search, Plus, X, L
 import { formatNaira } from '@/lib/utils/currency'
 import { toast } from 'sonner'
 
-const ROOM_TYPES = [
-  'Deluxe', 'Royal', 'Kings', 'Mini Suite', 'Executive Suite', 'Diplomatic Suite',
-]
-
-interface NewReservationModalProps {
-  open: boolean
-  onClose: () => void
-  onSuccess?: () => void
-}
-
 const toLocalDateStr = (date: Date) => {
   const y = date.getFullYear()
   const m = String(date.getMonth() + 1).padStart(2, '0')
@@ -509,15 +499,19 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
               <Select value={selectedRoomType} onValueChange={handleRoomTypeSelect}>
                 <SelectTrigger><SelectValue placeholder="Select room type" /></SelectTrigger>
                 <SelectContent>
-                  {ROOM_TYPES.map(rt => {
-                    const availableRooms = getAvailableRoomsForType(rt)
-                    const count = availableRooms.length
-                    return (
-                      <SelectItem key={rt} value={rt} disabled={count === 0}>
-                        {rt} {count === 0 ? '(none available)' : `(${count} available)`}
-                      </SelectItem>
-                    )
-                  })}
+                  {Array.from(new Set(rooms.map(r => r.room_type))).length === 0 ? (
+                    <SelectItem value="__none__" disabled>No rooms in your organization yet</SelectItem>
+                  ) : (
+                    Array.from(new Set(rooms.map(r => r.room_type))).map(rt => {
+                      const availableRooms = getAvailableRoomsForType(rt)
+                      const count = availableRooms.length
+                      return (
+                        <SelectItem key={rt} value={rt} disabled={count === 0}>
+                          {rt} {count === 0 ? '(none available)' : `(${count} available)`}
+                        </SelectItem>
+                      )
+                    })
+                  )}
                 </SelectContent>
               </Select>
             </div>
