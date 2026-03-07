@@ -17,7 +17,7 @@ import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 import { formatNaira } from '@/lib/utils/currency'
 
-const ROOM_TYPES = ['Deluxe', 'Royal', 'Kings', 'Mini Suite', 'Executive Suite', 'Diplomatic Suite']
+const ROOM_TYPES_FALLBACK = ['Deluxe', 'Royal', 'Kings', 'Mini Suite', 'Executive Suite', 'Diplomatic Suite']
 
 const toLocalDateStr = (date: Date) => {
   const y = date.getFullYear()
@@ -54,8 +54,14 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
   const [orgId, setOrgId] = useState('')
   const [currentUserId, setCurrentUserId] = useState('')
   const [allGuests, setAllGuests] = useState<any[]>([])
+  const [allRooms, setAllRooms] = useState<any[]>([]) // all non-maintenance rooms from DB
+  const [allActiveBookings, setAllActiveBookings] = useState<any[]>([]) // for date overlap checks
   const [availableRooms, setAvailableRooms] = useState<any[]>([])
   const [roomAvailabilityChecked, setRoomAvailabilityChecked] = useState(false)
+  // Derived room types from actual DB rooms
+  const roomTypes = allRooms.length > 0
+    ? Array.from(new Set(allRooms.map((r: any) => r.room_type)))
+    : ROOM_TYPES_FALLBACK
 
   // Step 1: Booking type + contact
   const [bookingType, setBookingType] = useState<'organization' | 'individual'>('organization')
@@ -121,8 +127,14 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
     const { data: profile } = await supabase.from('profiles').select('organization_id').eq('id', user.id).single()
     if (!profile) return
     setOrgId(profile.organization_id)
-    const { data: guestData } = await supabase.from('guests').select('id, name, phone, email').eq('organization_id', profile.organization_id).order('name')
+    const [{ data: guestData }, { data: roomData }, { data: bookingData }] = await Promise.all([
+      supabase.from('guests').select('id, name, phone, email').eq('organization_id', profile.organization_id).order('name'),
+      supabase.from('rooms').select('id, room_number, room_type, price_per_night, status').eq('organization_id', profile.organization_id).neq('status', 'maintenance').order('room_number'),
+      supabase.from('bookings').select('room_id, check_in, check_out').eq('organization_id', profile.organization_id).in('status', ['confirmed', 'reserved', 'checked_in']),
+    ])
     setAllGuests(guestData || [])
+    setAllRooms(roomData || [])
+    setAllActiveBookings(bookingData || [])
   }
 
   // Search organizations from organizations table (not city_ledger_accounts)
@@ -221,21 +233,20 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
     }
   }
 
-  // Check room availability for selected dates
-  const checkRoomAvailability = async () => {
+  // Check room availability using date-overlap logic (same as booking modal)
+  const checkRoomAvailability = () => {
     if (!checkIn || !checkOut || nights <= 0) { toast.error('Select valid check-in and check-out dates'); return }
-    setRoomAvailabilityChecked(false)
-    try {
-      const supabase = createClient()
-      const { data } = await supabase
-        .from('rooms')
-        .select('id, room_number, room_type, price_per_night, status')
-        .eq('organization_id', orgId)
-        .in('status', ['available'])
-        .order('room_type')
-      setAvailableRooms(data || [])
-      setRoomAvailabilityChecked(true)
-    } catch { toast.error('Failed to check availability') }
+    const cin = toLocalDateStr(checkIn)
+    const cout = toLocalDateStr(checkOut)
+    // A room is booked if any existing booking overlaps: existing.check_in < newCheckOut AND existing.check_out > newCheckIn
+    const bookedRoomIds = new Set(
+      allActiveBookings
+        .filter(b => b.check_in < cout && b.check_out > cin)
+        .map(b => b.room_id)
+    )
+    const available = allRooms.filter(r => !bookedRoomIds.has(r.id))
+    setAvailableRooms(available)
+    setRoomAvailabilityChecked(true)
   }
 
   // Per-room guest search
@@ -290,9 +301,13 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
     if (!checkIn || !checkOut) { toast.error('Dates required'); return }
     if (!canSubmit()) { toast.error('Complete payment details'); return }
 
-    // Validate entries only if not filling later
-    if (!fillLater && entries.some(e => !e.guestName.trim() || !e.roomType)) {
-      toast.error('Fill in all room entries or enable "Fill Room Details Later"'); return
+    // Validate entries — only first entry guest name is required
+    if (!fillLater && entries.length > 0 && !entries[0].guestName.trim()) {
+      toast.error('First room entry must have a guest name'); return
+    }
+    // Room type must be set for all entries
+    if (!fillLater && entries.some(e => !e.roomType)) {
+      toast.error('Select a room type for each entry'); return
     }
 
     setLoading(true)
@@ -328,15 +343,24 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
       } else {
         for (const entry of entries) {
           const totalRoomSlots = entry.numberOfRooms || 1
-          const { data: available } = await supabase
-            .from('rooms').select('id, room_number, price_per_night')
-            .eq('organization_id', orgId).eq('room_type', entry.roomType).eq('status', 'available')
-            .limit(totalRoomSlots)
+          const cin = toLocalDateStr(checkIn)
+          const cout = toLocalDateStr(checkOut)
+          // Use date-overlap logic — not status='available' — to find truly free rooms
+          const bookedIds = new Set(
+            allActiveBookings
+              .filter(b => b.check_in < cout && b.check_out > cin)
+              .map(b => b.room_id)
+          )
+          const available = allRooms
+            .filter(r => r.room_type === entry.roomType && !bookedIds.has(r.id))
+            .slice(0, totalRoomSlots)
 
           if (!available || available.length === 0) {
             toast.error(`No available ${entry.roomType} rooms — skipped`); continue
           }
 
+          // Use entry guest name if provided, otherwise create a placeholder guest name
+          const guestName = entry.guestName.trim() || `Guest (${entry.roomType})`
           let finalGuestId = entry.guestId
           if (!finalGuestId && entry.guestName.trim()) {
             const { data: ng, error: ge } = await supabase.from('guests')
@@ -622,7 +646,7 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
                 {roomAvailabilityChecked && (
                   <div className="border rounded-lg p-3 space-y-2">
                     <p className="text-sm font-medium">Available Rooms ({availableRooms.length} total)</p>
-                    {ROOM_TYPES.map(rt => {
+                        {roomTypes.map(rt => {
                       const count = availableRooms.filter(r => r.room_type === rt).length
                       return (
                         <div key={rt} className="flex items-center justify-between text-sm">
@@ -774,7 +798,7 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
                       <Select value={quickRoomType} onValueChange={setQuickRoomType}>
                         <SelectTrigger><SelectValue placeholder="Select type" /></SelectTrigger>
                         <SelectContent>
-                          {ROOM_TYPES.map(rt => <SelectItem key={rt} value={rt}>{rt}</SelectItem>)}
+                          {roomTypes.map(rt => <SelectItem key={rt} value={rt}>{rt}</SelectItem>)}
                         </SelectContent>
                       </Select>
                     </div>
@@ -786,7 +810,11 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
                     {entries.map((entry, i) => (
                       <div key={entry.id} className="border rounded-lg p-3 space-y-2 bg-background">
                         <div className="flex items-center justify-between">
-                          <span className="text-xs font-medium text-muted-foreground">Room Entry {i + 1}</span>
+                          <span className="text-xs font-medium text-muted-foreground">
+                            Room Entry {i + 1}
+                            {i === 0 && <span className="ml-1 text-destructive">*</span>}
+                            {i > 0 && <span className="ml-1 text-muted-foreground/60">(optional)</span>}
+                          </span>
                           {entries.length > 1 && (
                             <button onClick={() => setEntries(entries.filter(r => r.id !== entry.id))} className="text-destructive hover:opacity-80">
                               <Trash2 className="h-3.5 w-3.5" />
@@ -796,7 +824,7 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
                         <div className="grid grid-cols-2 gap-2">
                           <div className="relative">
                             <Input
-                              placeholder="Guest name (search or type)"
+                              placeholder={i === 0 ? "Guest / org name (required)" : "Guest name (optional)"}
                               value={entry.guestSearch}
                               onChange={(e) => handleRoomGuestSearch(i, e.target.value)}
                               onBlur={() => setTimeout(() => {
@@ -816,7 +844,7 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
                           </div>
                           <Select value={entry.roomType} onValueChange={(v) => { const u = [...entries]; u[i].roomType = v; setEntries(u) }}>
                             <SelectTrigger><SelectValue placeholder="Room type" /></SelectTrigger>
-                            <SelectContent>{ROOM_TYPES.map(rt => <SelectItem key={rt} value={rt}>{rt}</SelectItem>)}</SelectContent>
+                            <SelectContent>{roomTypes.map(rt => <SelectItem key={rt} value={rt}>{rt}</SelectItem>)}</SelectContent>
                           </Select>
                           <Input placeholder="Phone (optional)" value={entry.phone} onChange={(e) => { const u = [...entries]; u[i].phone = e.target.value; setEntries(u) }} disabled={!!entry.guestId} />
                           <div className="flex items-center gap-2">
