@@ -218,6 +218,22 @@ export default function ReservationsPage() {
             ),
           },
           {
+            key: 'payment_method',
+            label: 'Method',
+            render: (res) => (
+              <div className="space-y-1">
+                <Badge variant="outline" className="text-xs capitalize">
+                  {res.payment_method ? res.payment_method.replace('_', ' ') : 'cash'}
+                </Badge>
+                {res.payment_method === 'city_ledger' && res.notes && (
+                  <div className="text-xs text-muted-foreground truncate max-w-[120px]">
+                    {res.notes.replace(/^City Ledger:\s*/, '')}
+                  </div>
+                )}
+              </div>
+            ),
+          },
+          {
             key: 'check_in',
             label: 'Check-in Date',
             render: (res) => (
