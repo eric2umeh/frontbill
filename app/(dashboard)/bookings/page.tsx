@@ -240,6 +240,22 @@ export default function BookingsPage() {
             ),
           },
           {
+            key: 'payment_method',
+            label: 'Method',
+            render: (booking) => (
+              <div className="space-y-1">
+                <Badge variant="outline" className="text-xs capitalize">
+                  {booking.payment_method ? booking.payment_method.replace('_', ' ') : 'cash'}
+                </Badge>
+                {booking.payment_method === 'city_ledger' && booking.notes && (
+                  <div className="text-xs text-muted-foreground truncate max-w-[120px]">
+                    {booking.notes.replace(/^City Ledger:\s*/, '')}
+                  </div>
+                )}
+              </div>
+            ),
+          },
+          {
             key: 'check_in',
             label: 'Check-in',
             render: (booking) => (
