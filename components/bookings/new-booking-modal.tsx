@@ -147,26 +147,10 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
       ])
 
       setGuests(guestData || [])
-      setRooms(roomData || [])
-      setAllBookings(bookingData || [])
-
-      // Store bookings for date-based availability filtering
-      const activeBookings = bookingData || []
       setAllRooms(roomData || [])
-      setAllBookingsForRooms(activeBookings)
-
-      // Filter rooms that are NOT booked for the selected dates
-      const toStr = (d: Date) => {
-        const y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,'0'), dd = String(d.getDate()).padStart(2,'0')
-        return `${y}-${m}-${dd}`
-      }
-      const ciStr = toStr(checkInDate), coStr = toStr(checkOutDate)
-      const bookedRoomIds = new Set(
-        activeBookings
-          .filter(b => b.check_in < coStr && b.check_out > ciStr)
-          .map(b => b.room_id)
-      )
-      setRooms((roomData || []).filter(r => !bookedRoomIds.has(r.id)))
+      setAllBookingsForRooms(bookingData || [])
+      // On initial load: show all rooms (no dates selected yet) — they'll be filtered when user picks dates
+      setRooms(roomData || [])
 
       // Map guests → LedgerAccount shape
       const individualLedger: LedgerAccount[] = (guestData || []).map(g => ({
@@ -690,9 +674,13 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
                 <Select value={selectedRoomType} onValueChange={handleRoomTypeSelect}>
                   <SelectTrigger><SelectValue placeholder="Select room type" /></SelectTrigger>
                   <SelectContent>
-                    {Array.from(new Set(rooms.map(r => r.room_type))).map(type => (
-                      <SelectItem key={type} value={type}>{type}</SelectItem>
-                    ))}
+                    {Array.from(new Set(rooms.map(r => r.room_type))).length === 0 ? (
+                      <SelectItem value="__none__" disabled>No rooms available for selected dates</SelectItem>
+                    ) : (
+                      Array.from(new Set(rooms.map(r => r.room_type))).map(type => (
+                        <SelectItem key={type} value={type}>{type}</SelectItem>
+                      ))
+                    )}
                   </SelectContent>
                 </Select>
               </div>
