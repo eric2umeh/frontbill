@@ -281,7 +281,16 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
     const count = Number(quickRoomCount)
     if (!count || count < 1) { toast.error('Enter a valid room count'); return }
     if (!quickRoomType) { toast.error('Select a room type'); return }
-    setEntries(Array.from({ length: count }, () => ({ ...makeEntry(), roomType: quickRoomType })))
+    // Pre-fill the contact name from step 1 into the first entry
+    const contactName = bookingType === 'organization'
+      ? (selectedOrg?.name || '')
+      : (selectedGroupGuest?.name || '')
+    setEntries(Array.from({ length: count }, (_, i) => ({
+      ...makeEntry(),
+      roomType: quickRoomType,
+      guestName: i === 0 ? contactName : '',
+      guestSearch: i === 0 ? contactName : '',
+    })))
     toast.success(`${count} room entries added`)
   }
 
@@ -336,7 +345,9 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
             payment_status: 'pending',
             status: 'reserved',
             created_by: currentUserId,
-            notes: `Bulk reservation (fill later) — ${bookingType === 'organization' ? selectedOrg?.name : selectedGroupGuest?.name}${isCityLedger && selectedLedger ? ` — City Ledger: ${selectedLedger.name || selectedLedger.account_name}` : ''}`,
+            notes: isCityLedger && selectedLedger
+              ? `City Ledger: ${selectedLedger.name || selectedLedger.account_name}`
+              : `payment_method: ${paymentMethod}`,
           }])
           createdCount++
         }
@@ -384,7 +395,9 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
               total_amount: total, deposit: depositAmt, balance: balanceAmt,
               payment_status: paymentStatus === 'paid' ? 'paid' : paymentStatus === 'partial' ? 'partial' : 'pending',
               status: 'reserved', created_by: currentUserId,
-              notes: isCityLedger && selectedLedger ? `City Ledger: ${selectedLedger.name || selectedLedger.account_name}` : null,
+              notes: isCityLedger && selectedLedger
+                ? `City Ledger: ${selectedLedger.name || selectedLedger.account_name}`
+                : `payment_method: ${paymentMethod}`,
             }]).select().single()
             if (be) throw be
 

@@ -99,12 +99,31 @@ export default function BookingsPage() {
         })
       }
       
-      // Add created_by_name and updated_by_name to each booking
-      const bookingsWithUsers = (data || []).map((booking: any) => ({
-        ...booking,
-        created_by_name: booking.created_by ? userMap[booking.created_by] || 'Unknown User' : 'System',
-        updated_by_name: booking.updated_by ? userMap[booking.updated_by] || 'Unknown User' : null
-      }))
+      // Derive payment_method from notes field (since there's no payment_method column on bookings)
+      const bookingsWithUsers = (data || []).map((booking: any) => {
+        let payment_method = 'cash'
+        let ledger_account_name = ''
+        if (booking.notes) {
+          if (booking.notes.startsWith('city_ledger:')) {
+            payment_method = 'city_ledger'
+            ledger_account_name = booking.notes.replace(/^city_ledger:\s*/i, '')
+          } else if (booking.notes.startsWith('City Ledger:')) {
+            payment_method = 'city_ledger'
+            ledger_account_name = booking.notes.replace(/^City Ledger:\s*/, '')
+          } else if (booking.notes.startsWith('payment_method:')) {
+            payment_method = booking.notes.replace(/^payment_method:\s*/, '').split('|')[0].trim()
+            const match = booking.notes.match(/\|ledger:(.+)/)
+            if (match) ledger_account_name = match[1].trim()
+          }
+        }
+        return {
+          ...booking,
+          payment_method,
+          ledger_account_name,
+          created_by_name: booking.created_by ? userMap[booking.created_by] || 'Unknown User' : 'System',
+          updated_by_name: booking.updated_by ? userMap[booking.updated_by] || 'Unknown User' : null,
+        }
+      })
       
       setBookings(bookingsWithUsers)
     } catch (error: any) {
@@ -245,11 +264,11 @@ export default function BookingsPage() {
             render: (booking) => (
               <div className="space-y-1">
                 <Badge variant="outline" className="text-xs capitalize">
-                  {booking.payment_method ? booking.payment_method.replace('_', ' ') : 'cash'}
+                  {(booking.payment_method || 'cash').replace(/_/g, ' ')}
                 </Badge>
-                {booking.payment_method === 'city_ledger' && booking.notes && (
+                {booking.payment_method === 'city_ledger' && booking.ledger_account_name && (
                   <div className="text-xs text-muted-foreground truncate max-w-[120px]">
-                    {booking.notes.replace(/^City Ledger:\s*/, '')}
+                    {booking.ledger_account_name}
                   </div>
                 )}
               </div>

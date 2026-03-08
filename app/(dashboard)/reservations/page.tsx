@@ -93,16 +93,29 @@ export default function ReservationsPage() {
 
       // Map data to match interface and calculate balance from folio_charges
       const reservationsWithData = (data || []).map((reservation: any) => {
-        // Calculate balance from folio_charges - sum of unpaid charges
-        let balance = 0
-        // Note: balance calculation will be done in real-time by the balance utility
-        // For now, use the booking's balance field if available
-        if (reservation.balance !== undefined) {
-          balance = reservation.balance
+        let balance = reservation.balance !== undefined ? reservation.balance : 0
+
+        // Derive payment_method + ledger_account_name from notes (no payment_method column on bookings table)
+        let payment_method = 'cash'
+        let ledger_account_name = ''
+        if (reservation.notes) {
+          if (/^city_ledger:/i.test(reservation.notes)) {
+            payment_method = 'city_ledger'
+            ledger_account_name = reservation.notes.replace(/^city_ledger:\s*/i, '')
+          } else if (reservation.notes.startsWith('City Ledger:')) {
+            payment_method = 'city_ledger'
+            ledger_account_name = reservation.notes.replace(/^City Ledger:\s*/, '')
+          } else if (reservation.notes.startsWith('payment_method:')) {
+            payment_method = reservation.notes.replace(/^payment_method:\s*/, '').split('|')[0].trim()
+            const match = reservation.notes.match(/\|ledger:(.+)/)
+            if (match) ledger_account_name = match[1].trim()
+          }
         }
-        
+
         return {
           ...reservation,
+          payment_method,
+          ledger_account_name,
           guests: reservation.guests
             ? (Array.isArray(reservation.guests) ? reservation.guests[0] : reservation.guests)
             : null,
@@ -223,11 +236,11 @@ export default function ReservationsPage() {
             render: (res) => (
               <div className="space-y-1">
                 <Badge variant="outline" className="text-xs capitalize">
-                  {res.payment_method ? res.payment_method.replace('_', ' ') : 'cash'}
+                  {(res.payment_method || 'cash').replace(/_/g, ' ')}
                 </Badge>
-                {res.payment_method === 'city_ledger' && res.notes && (
+                {res.payment_method === 'city_ledger' && res.ledger_account_name && (
                   <div className="text-xs text-muted-foreground truncate max-w-[120px]">
-                    {res.notes.replace(/^City Ledger:\s*/, '')}
+                    {res.ledger_account_name}
                   </div>
                 )}
               </div>

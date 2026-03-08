@@ -134,7 +134,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
         { data: guestData },
         { data: roomData },
         { data: bookingData },
-        { data: orgData },
+        { data: cityLedgerData },
       ] = await Promise.all([
         // Guests table
         supabase.from('guests').select('id, name, phone, email, address').eq('organization_id', orgId).order('name'),
@@ -142,8 +142,8 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
         supabase.from('rooms').select('id, room_number, room_type, price_per_night').eq('organization_id', orgId).neq('status', 'maintenance').order('room_number'),
         // Active bookings to check date conflicts
         supabase.from('bookings').select('room_id, check_in, check_out').eq('organization_id', orgId).in('status', ['confirmed', 'reserved', 'checked_in']),
-        // Organizations table for city ledger
-        supabase.from('organizations').select('id, name, phone, email').neq('id', orgId).order('name'),
+        // City ledger accounts with real balances
+        supabase.from('city_ledger_accounts').select('id, account_name, account_type, contact_phone, balance').eq('organization_id', orgId).order('account_name'),
       ])
 
       setGuests(guestData || [])
@@ -152,15 +152,29 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
       // On initial load: show all rooms (no dates selected yet) — they'll be filtered when user picks dates
       setRooms(roomData || [])
 
-      // Map guests → LedgerAccount shape
-      const individualLedger: LedgerAccount[] = (guestData || []).map(g => ({
-        id: g.id,
-        account_name: g.name,
-        account_type: 'individual',
-        contact_phone: g.phone || '',
-        balance: 0, // guests table has no balance column; balance tracked via bookings
-        source: 'guests',
-      }))
+      // Map guests → LedgerAccount shape (individuals from city_ledger_accounts)
+      const individualLedger: LedgerAccount[] = (cityLedgerData || [])
+        .filter(a => a.account_type === 'individual' || a.account_type === 'guest')
+        .map(a => ({
+          id: a.id,
+          account_name: a.account_name,
+          account_type: 'individual',
+          contact_phone: a.contact_phone || '',
+          balance: a.balance || 0,
+          source: 'city_ledger',
+        }))
+
+      // Map organizations → LedgerAccount shape (orgs from city_ledger_accounts)
+      const orgLedger: LedgerAccount[] = (cityLedgerData || [])
+        .filter(a => a.account_type === 'organization' || a.account_type === 'corporate')
+        .map(a => ({
+          id: a.id,
+          account_name: a.account_name,
+          account_type: 'organization',
+          contact_phone: a.contact_phone || '',
+          balance: a.balance || 0,
+          source: 'city_ledger',
+        }))
 
       // Map organizations → LedgerAccount shape
       const orgLedger: LedgerAccount[] = (orgData || []).map(o => ({
@@ -460,6 +474,10 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
           payment_status: isPaid ? 'paid' : 'pending',
           status: 'confirmed',
           created_by: user?.id,
+          // Store payment method in notes (no payment_method column on bookings table)
+          notes: paymentMethod === 'city_ledger'
+            ? `City Ledger: ${ledgerAccountName}`
+            : `payment_method: ${paymentMethod}`,
         }])
         .select()
         .single()
