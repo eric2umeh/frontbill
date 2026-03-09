@@ -176,16 +176,6 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
           source: 'city_ledger',
         }))
 
-      // Map organizations → LedgerAccount shape
-      const orgLedger: LedgerAccount[] = (orgData || []).map(o => ({
-        id: o.id,
-        account_name: o.name,
-        account_type: 'organization',
-        contact_phone: o.phone || '',
-        balance: 0,
-        source: 'organizations',
-      }))
-
       setIndividualAccounts(individualLedger)
       setOrganizationAccounts(orgLedger)
       setFilteredLedgerAccounts(ledgerTab === 'individual' ? individualLedger : orgLedger)
