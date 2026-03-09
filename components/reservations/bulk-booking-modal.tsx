@@ -319,11 +319,62 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
       toast.error('Select a room type for each entry'); return
     }
 
+    // Pre-submit: warn if fewer available rooms than requested (but allow proceeding)
+    if (!fillLater) {
+      const cin = toLocalDateStr(checkIn)
+      const cout = toLocalDateStr(checkOut)
+      const bookedIds = new Set(
+        allActiveBookings
+          .filter(b => b.check_in < cout && b.check_out > cin)
+          .map(b => b.room_id)
+      )
+      let totalRequested = 0
+      let totalAvailable = 0
+      for (const entry of entries) {
+        const requested = entry.numberOfRooms || 1
+        totalRequested += requested
+        const avail = allRooms.filter(r => r.room_type === entry.roomType && !bookedIds.has(r.id)).length
+        totalAvailable += Math.min(avail, requested)
+      }
+      if (totalAvailable < totalRequested) {
+        toast.warning(`Only ${totalAvailable} of ${totalRequested} requested rooms are available. ${totalRequested - totalAvailable} will be skipped.`)
+      }
+    }
+
     setLoading(true)
     try {
       const supabase = createClient()
       let createdCount = 0
       const totalRooms = fillLater ? (Number(totalRoomsCount) || 1) : entries.length
+
+      // Resolve step-1 contact as fallback guest for entries with no name
+      let fallbackGuestId: string | null = null
+      if (!fillLater) {
+        const contactName = bookingType === 'organization'
+          ? (selectedOrg?.name || 'Bulk Guest')
+          : (selectedGroupGuest?.name || 'Bulk Guest')
+        const contactPhone = bookingType === 'organization'
+          ? (selectedOrg?.phone || null)
+          : (selectedGroupGuest?.phone || null)
+        // Check if guest already exists
+        const { data: existingGuest } = await supabase
+          .from('guests')
+          .select('id')
+          .eq('organization_id', orgId)
+          .ilike('name', contactName)
+          .limit(1)
+          .maybeSingle()
+        if (existingGuest) {
+          fallbackGuestId = existingGuest.id
+        } else {
+          const { data: newFallback } = await supabase
+            .from('guests')
+            .insert([{ organization_id: orgId, name: contactName, phone: contactPhone }])
+            .select('id')
+            .single()
+          fallbackGuestId = newFallback?.id || null
+        }
+      }
 
       if (fillLater) {
         // Create placeholder reservations — no guest/room assigned yet
@@ -372,6 +423,7 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
 
           // Use entry guest name if provided, otherwise create a placeholder guest name
           const guestName = entry.guestName.trim() || `Guest (${entry.roomType})`
+          // Resolve guest: use entry's guest if provided, fallback to step-1 contact
           let finalGuestId = entry.guestId
           if (!finalGuestId && entry.guestName.trim()) {
             const { data: ng, error: ge } = await supabase.from('guests')
@@ -380,6 +432,8 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
             if (ge) throw ge
             finalGuestId = ng.id
           }
+          // Always ensure a non-null guest_id (use step-1 contact fallback)
+          if (!finalGuestId) finalGuestId = fallbackGuestId
 
           for (const room of available) {
             const total = room.price_per_night * nights

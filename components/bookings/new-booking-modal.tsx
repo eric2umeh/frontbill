@@ -142,7 +142,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
         supabase.from('rooms').select('id, room_number, room_type, price_per_night').eq('organization_id', orgId).neq('status', 'maintenance').order('room_number'),
         // Active bookings to check date conflicts
         supabase.from('bookings').select('room_id, check_in, check_out').eq('organization_id', orgId).in('status', ['confirmed', 'reserved', 'checked_in']),
-        // City ledger accounts with real balances
+        // City ledger accounts — load ALL, split by type client-side (no filter so we don't miss any)
         supabase.from('city_ledger_accounts').select('id, account_name, account_type, contact_phone, balance').eq('organization_id', orgId).order('account_name'),
       ])
 
@@ -158,19 +158,19 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
         .map(a => ({
           id: a.id,
           account_name: a.account_name,
-          account_type: 'individual',
+          account_type: 'individual' as const,
           contact_phone: a.contact_phone || '',
           balance: a.balance || 0,
           source: 'city_ledger',
         }))
 
-      // Map organizations → LedgerAccount shape (orgs from city_ledger_accounts)
+      // Map organizations — anything not individual/guest goes to org tab
       const orgLedger: LedgerAccount[] = (cityLedgerData || [])
-        .filter(a => a.account_type === 'organization' || a.account_type === 'corporate')
+        .filter(a => a.account_type !== 'individual' && a.account_type !== 'guest')
         .map(a => ({
           id: a.id,
           account_name: a.account_name,
-          account_type: 'organization',
+          account_type: 'organization' as const,
           contact_phone: a.contact_phone || '',
           balance: a.balance || 0,
           source: 'city_ledger',
