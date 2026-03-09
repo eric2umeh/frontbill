@@ -287,66 +287,62 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
       const supabase = createClient()
 
       if (ledgerTab === 'individual') {
-        // Check if a guest with this name+phone already exists (from Step 1)
-        const existing = guests.find(
-          g => g.name.toLowerCase() === newAccountName.trim().toLowerCase() &&
-               g.phone === newAccountPhone.trim()
+        // Check if an account with this name already exists in city_ledger_accounts
+        const existing = individualAccounts.find(
+          a => a.account_name.toLowerCase() === newAccountName.trim().toLowerCase()
         )
         if (existing) {
-          // Reuse the existing guest — no duplicate created
-          toast.success(`Linked to existing guest "${existing.name}"`)
-          const acct: LedgerAccount = { id: existing.id, account_name: existing.name, account_type: 'individual', contact_phone: existing.phone || '', balance: 0, source: 'guests' }
+          toast.success(`Linked to existing account "${existing.account_name}"`)
           setLedgerAccount(existing.id)
-          setLedgerAccountName(existing.name)
-          setLedgerSearch(existing.name)
-          setIndividualAccounts(prev => prev.some(a => a.id === existing.id) ? prev : [acct, ...prev])
+          setLedgerAccountName(existing.account_name)
+          setLedgerSearch(existing.account_name)
           setNewAccountDialogOpen(false)
           setNewAccountName(''); setNewAccountPhone(''); setNewAccountEmail('')
           return
         }
 
-        // Create new guest record
-        const { data: newGuest, error } = await supabase
-          .from('guests')
+        // Create new city_ledger_accounts record (individual)
+        const { data: newAcct, error } = await supabase
+          .from('city_ledger_accounts')
           .insert([{
             organization_id: organizationId,
-            name: newAccountName.trim(),
-            phone: newAccountPhone.trim(),
-            email: newAccountEmail.trim() || null,
-            address: null,
+            account_name: newAccountName.trim(),
+            account_type: 'individual',
+            contact_phone: newAccountPhone.trim() || null,
+            balance: 0,
           }])
           .select()
           .single()
         if (error) throw error
 
-        const acct: LedgerAccount = { id: newGuest.id, account_name: newGuest.name, account_type: 'individual', contact_phone: newGuest.phone || '', balance: 0, source: 'guests' }
+        const acct: LedgerAccount = { id: newAcct.id, account_name: newAcct.account_name, account_type: 'individual', contact_phone: newAcct.contact_phone || '', balance: 0, source: 'city_ledger' }
         setIndividualAccounts(prev => [acct, ...prev])
-        setLedgerAccount(newGuest.id)
-        setLedgerAccountName(newGuest.name)
-        setLedgerSearch(newGuest.name)
-        toast.success(`Guest account "${newGuest.name}" created`)
+        setLedgerAccount(newAcct.id)
+        setLedgerAccountName(newAcct.account_name)
+        setLedgerSearch(newAcct.account_name)
+        toast.success(`Account "${newAcct.account_name}" created`)
 
       } else {
-        // Create new organization record (same fields as Organization menu)
+        // Create new city_ledger_accounts record (organization)
         const { data: newOrg, error } = await supabase
-          .from('organizations')
+          .from('city_ledger_accounts')
           .insert([{
-            name: newAccountName.trim(),
-            email: newAccountEmail.trim(),
-            phone: newAccountPhone.trim() || null,
-            address: newAccountAddress.trim() || null,
-            city: newAccountCity.trim() || null,
+            organization_id: organizationId,
+            account_name: newAccountName.trim(),
+            account_type: 'organization',
+            contact_phone: newAccountPhone.trim() || null,
+            balance: 0,
           }])
           .select()
           .single()
         if (error) throw error
 
-        const acct: LedgerAccount = { id: newOrg.id, account_name: newOrg.name, account_type: 'organization', contact_phone: newOrg.phone || '', balance: 0, source: 'organizations' }
+        const acct: LedgerAccount = { id: newOrg.id, account_name: newOrg.account_name, account_type: 'organization', contact_phone: newOrg.contact_phone || '', balance: 0, source: 'city_ledger' }
         setOrganizationAccounts(prev => [acct, ...prev])
         setLedgerAccount(newOrg.id)
-        setLedgerAccountName(newOrg.name)
-        setLedgerSearch(newOrg.name)
-        toast.success(`Organization "${newOrg.name}" created`)
+        setLedgerAccountName(newOrg.account_name)
+        setLedgerSearch(newOrg.account_name)
+        toast.success(`Organization "${newOrg.account_name}" created`)
       }
 
       setNewAccountDialogOpen(false)

@@ -142,47 +142,46 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
     setGuestSearchOpen(false)
   }
 
-  // City Ledger account search: individual → guests table, organization → organizations table
+  // City Ledger account search — always queries city_ledger_accounts table
   const searchLedger = async (term: string) => {
     setLedgerSearch(term)
     setSelectedLedger(null)
     if (!term.trim()) { setLedgerResults([]); setLedgerSearchOpen(false); return }
-    if (ledgerType === 'individual') {
-      const filtered = guests.filter(g =>
-        g.name.toLowerCase().includes(term.toLowerCase()) || (g.phone || '').includes(term)
-      )
-      setLedgerResults(filtered.slice(0, 8))
-      setLedgerSearchOpen(filtered.length > 0)
-    } else {
-      // Search organizations table (same source as Organization menu)
-      const supabase = createClient()
-      const { data } = await supabase
-        .from('organizations')
-        .select('id, name, phone, email')
-        .ilike('name', `%${term}%`)
-        .limit(8)
-      setLedgerResults((data || []).map(d => ({ ...d, source: 'organizations' })))
-      setLedgerSearchOpen((data || []).length > 0)
-    }
+    const supabase = createClient()
+    const { data } = await supabase
+      .from('city_ledger_accounts')
+      .select('id, account_name, account_type, contact_phone, balance')
+      .eq('organization_id', orgId)
+      .eq('account_type', ledgerType === 'individual' ? 'individual' : 'organization')
+      .ilike('account_name', `%${term}%`)
+      .limit(8)
+    setLedgerResults((data || []).map(d => ({ ...d, name: d.account_name, source: 'city_ledger' })))
+    setLedgerSearchOpen((data || []).length > 0)
   }
 
   const createNewLedgerOrg = async () => {
-    if (!newLedgerOrgName.trim()) { toast.error('Organization name required'); return }
+    if (!newLedgerOrgName.trim()) { toast.error('Name required'); return }
     setCreatingLedgerOrg(true)
     try {
       const supabase = createClient()
       const { data, error } = await supabase
-        .from('organizations')
-        .insert([{ name: newLedgerOrgName.trim(), email: newLedgerOrgEmail.trim() || null, phone: newLedgerOrgPhone.trim() || null, address: newLedgerOrgAddress.trim() || null }])
+        .from('city_ledger_accounts')
+        .insert([{
+          organization_id: orgId,
+          account_name: newLedgerOrgName.trim(),
+          account_type: ledgerType === 'individual' ? 'individual' : 'organization',
+          contact_phone: newLedgerOrgPhone.trim() || null,
+          balance: 0,
+        }])
         .select().single()
       if (error) throw error
-      setSelectedLedger({ ...data, source: 'organizations' })
-      setLedgerSearch(data.name)
+      setSelectedLedger({ ...data, name: data.account_name, source: 'city_ledger' })
+      setLedgerSearch(data.account_name)
       setShowNewLedgerOrgForm(false)
       setNewLedgerOrgName(''); setNewLedgerOrgEmail(''); setNewLedgerOrgPhone(''); setNewLedgerOrgAddress('')
-      toast.success(`Organization "${data.name}" created and selected`)
+      toast.success(`"${data.account_name}" created and selected`)
     } catch (err: any) {
-      toast.error(err.message || 'Failed to create organization')
+      toast.error(err.message || 'Failed to create account')
     } finally {
       setCreatingLedgerOrg(false)
     }
@@ -293,7 +292,9 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
           payment_status: bookingPaymentStatus,
           status: 'reserved',
           created_by: currentUserId,
-          notes: isCityLedger ? `City Ledger: ${selectedLedger?.account_name || selectedLedger?.name}` : null,
+          notes: isCityLedger
+            ? `City Ledger: ${selectedLedger?.account_name || selectedLedger?.name}`
+            : `payment_method: ${paymentMethod}`,
         }])
         .select().single()
       if (be) throw be
@@ -591,29 +592,36 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
                           <button key={r.id} className="w-full text-left px-4 py-2 hover:bg-accent border-b last:border-b-0 text-sm"
                             onMouseDown={(e) => { e.preventDefault(); setSelectedLedger(r); setLedgerSearch(r.name || r.account_name); setLedgerSearchOpen(false) }}>
                             <div className="font-medium">{r.name || r.account_name}</div>
-                            <div className="text-xs text-muted-foreground">{r.phone || r.contact_phone}</div>
+                            <div className="text-xs text-muted-foreground flex items-center gap-2">
+                              {(r.phone || r.contact_phone) && <span>{r.phone || r.contact_phone}</span>}
+                              {r.balance !== undefined && (
+                                <span className={r.balance > 0 ? 'text-orange-600' : 'text-green-600'}>
+                                  Balance: {formatNaira(r.balance || 0)}
+                                </span>
+                              )}
+                            </div>
                           </button>
                         ))}
                       </div>
                     )}
                     {ledgerSearch.trim() && ledgerResults.length === 0 && !ledgerSearchOpen && (
                       <p className="text-xs text-muted-foreground mt-1">
-                        {ledgerType === 'individual' ? 'No guest found.' : 'No organization found. Use the New button to create one.'}
+                        No account found. Use the New button to create one.
                       </p>
                     )}
                   </div>
-                  {ledgerType === 'organization' && (
-                    <Button type="button" size="sm" variant="outline" className="gap-1 whitespace-nowrap" onClick={() => setShowNewLedgerOrgForm(v => !v)}>
-                      <Plus className="h-3 w-3" /> New
-                    </Button>
-                  )}
+                  <Button type="button" size="sm" variant="outline" className="gap-1 whitespace-nowrap" onClick={() => setShowNewLedgerOrgForm(v => !v)}>
+                    <Plus className="h-3 w-3" /> New
+                  </Button>
                 </div>
 
-                {/* Inline new org form */}
-                {showNewLedgerOrgForm && ledgerType === 'organization' && (
+                {/* Inline new account form */}
+                {showNewLedgerOrgForm && (
                   <div className="border rounded-md p-3 space-y-2 bg-background">
                     <div className="flex items-center justify-between">
-                      <p className="text-xs font-medium text-muted-foreground">Create new organization</p>
+                      <p className="text-xs font-medium text-muted-foreground">
+                        Create new {ledgerType === 'individual' ? 'individual' : 'organization'} account
+                      </p>
                       <button onClick={() => setShowNewLedgerOrgForm(false)}><X className="h-3.5 w-3.5 text-muted-foreground" /></button>
                     </div>
                     <Input placeholder="Organization name *" value={newLedgerOrgName} onChange={(e) => setNewLedgerOrgName(e.target.value)} />
