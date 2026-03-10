@@ -43,7 +43,7 @@ interface LedgerAccount {
   account_type: 'individual' | 'organization'
   contact_phone: string
   balance: number
-  source: 'guests' | 'organizations' // which table the record lives in
+  source: 'city_ledger'
 }
 
 export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalProps) {
@@ -224,22 +224,46 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
     setLedgerOpen(false)
   }
 
-  // Ledger search
-  const handleLedgerSearch = (value: string) => {
+  // Ledger search — searches all city_ledger_accounts live so nothing is missed
+  const handleLedgerSearch = async (value: string) => {
     setLedgerSearch(value)
     setLedgerAccount('')
     setLedgerAccountName('')
-    const source = ledgerTab === 'individual' ? individualAccounts : organizationAccounts
-    if (value.trim().length > 0) {
-      const filtered = source.filter(a =>
-        a.account_name.toLowerCase().includes(value.toLowerCase())
-      )
-      setFilteredLedgerAccounts(filtered)
-      setLedgerOpen(true)
-    } else {
+    if (!value.trim()) {
+      const source = ledgerTab === 'individual' ? individualAccounts : organizationAccounts
       setFilteredLedgerAccounts(source)
       setLedgerOpen(source.length > 0)
+      return
     }
+    // First filter from preloaded list
+    const allLoaded = [...individualAccounts, ...organizationAccounts]
+    const fromCache = allLoaded.filter(a =>
+      a.account_name.toLowerCase().includes(value.toLowerCase())
+    )
+    if (fromCache.length > 0) {
+      setFilteredLedgerAccounts(fromCache)
+      setLedgerOpen(true)
+      return
+    }
+    // Fallback: live search in case account was created after modal opened
+    const supabase = createClient()
+    const { data } = await supabase
+      .from('city_ledger_accounts')
+      .select('id, account_name, account_type, contact_phone, balance')
+      .eq('organization_id', organizationId)
+      .ilike('account_name', `%${value}%`)
+      .limit(10)
+    const results: LedgerAccount[] = (data || []).map(a => ({
+      id: a.id,
+      account_name: a.account_name,
+      account_type: (a.account_type === 'individual' || a.account_type === 'guest')
+        ? 'individual' : 'organization',
+      contact_phone: a.contact_phone || '',
+      balance: a.balance || 0,
+      source: 'city_ledger' as const,
+    }))
+    setFilteredLedgerAccounts(results)
+    setLedgerOpen(results.length > 0)
   }
 
   const selectLedgerAccount = (account: LedgerAccount) => {
@@ -258,18 +282,10 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
     setLedgerOpen(false)
   }
 
-  // Create new ledger account — inserts into guests or organizations table (not city_ledger_accounts)
+  // Create new ledger account — inserts into city_ledger_accounts
   const handleCreateNewAccount = async () => {
     if (!newAccountName.trim()) {
       toast.error('Please enter a name')
-      return
-    }
-    if (ledgerTab === 'individual' && !newAccountPhone.trim()) {
-      toast.error('Please enter a phone number')
-      return
-    }
-    if (ledgerTab === 'organization' && !newAccountEmail.trim()) {
-      toast.error('Please enter an email for the organization')
       return
     }
     try {

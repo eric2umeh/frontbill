@@ -421,8 +421,6 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
             toast.error(`No available ${entry.roomType} rooms — skipped`); continue
           }
 
-          // Use entry guest name if provided, otherwise create a placeholder guest name
-          const guestName = entry.guestName.trim() || `Guest (${entry.roomType})`
           // Resolve guest: use entry's guest if provided, fallback to step-1 contact
           let finalGuestId = entry.guestId
           if (!finalGuestId && entry.guestName.trim()) {
