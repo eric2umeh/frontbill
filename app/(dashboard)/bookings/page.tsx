@@ -10,6 +10,7 @@ import { NewBookingModal } from '@/components/bookings/new-booking-modal'
 import { ExtendStayModal } from '@/components/bookings/extend-stay-modal'
 import { AddChargeModal } from '@/components/bookings/add-charge-modal'
 import { formatNaira } from '@/lib/utils/currency'
+import { usePageData } from '@/hooks/use-page-data'
 import { Plus, Loader2 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
@@ -39,11 +40,11 @@ interface Booking {
 
 export default function BookingsPage() {
   const [bookings, setBookings] = useState<Booking[]>([])
-  const [loading, setLoading] = useState(true)
   const [modalOpen, setModalOpen] = useState(false)
   const [extendModalOpen, setExtendModalOpen] = useState(false)
   const [addChargeModalOpen, setAddChargeModalOpen] = useState(false)
   const [selectedBooking, setSelectedBooking] = useState<any>(null)
+  const { initialLoading, startFetch, endFetch } = usePageData()
   const router = useRouter()
 
   useEffect(() => {
@@ -54,7 +55,7 @@ export default function BookingsPage() {
 
   const fetchBookings = async () => {
     try {
-      setLoading(true)
+      startFetch()
       const supabase = createClient()
       
       if (!supabase) {
@@ -63,7 +64,7 @@ export default function BookingsPage() {
       }
 
       const { data: { user } } = await supabase.auth.getUser()
-      if (!user) { setLoading(false); router.push('/auth/login'); return }
+      if (!user) { endFetch(); router.push('/auth/login'); return }
 
       const { data: profile } = await supabase
         .from('profiles')
@@ -71,7 +72,7 @@ export default function BookingsPage() {
         .eq('id', user.id)
         .single()
 
-      if (!profile?.organization_id) { setLoading(false); return }
+      if (!profile?.organization_id) { endFetch(); return }
 
       const { data, error } = await supabase
         .from('bookings')
@@ -98,19 +99,38 @@ export default function BookingsPage() {
         })
       }
       
-      // Add created_by_name and updated_by_name to each booking
-      const bookingsWithUsers = (data || []).map((booking: any) => ({
-        ...booking,
-        created_by_name: booking.created_by ? userMap[booking.created_by] || 'Unknown User' : 'System',
-        updated_by_name: booking.updated_by ? userMap[booking.updated_by] || 'Unknown User' : null
-      }))
+      // Derive payment_method from notes field (since there's no payment_method column on bookings)
+      const bookingsWithUsers = (data || []).map((booking: any) => {
+        let payment_method = 'cash'
+        let ledger_account_name = ''
+        if (booking.notes) {
+          if (booking.notes.startsWith('city_ledger:')) {
+            payment_method = 'city_ledger'
+            ledger_account_name = booking.notes.replace(/^city_ledger:\s*/i, '')
+          } else if (booking.notes.startsWith('City Ledger:')) {
+            payment_method = 'city_ledger'
+            ledger_account_name = booking.notes.replace(/^City Ledger:\s*/, '')
+          } else if (booking.notes.startsWith('payment_method:')) {
+            payment_method = booking.notes.replace(/^payment_method:\s*/, '').split('|')[0].trim()
+            const match = booking.notes.match(/\|ledger:(.+)/)
+            if (match) ledger_account_name = match[1].trim()
+          }
+        }
+        return {
+          ...booking,
+          payment_method,
+          ledger_account_name,
+          created_by_name: booking.created_by ? userMap[booking.created_by] || 'Unknown User' : 'System',
+          updated_by_name: booking.updated_by ? userMap[booking.updated_by] || 'Unknown User' : null,
+        }
+      })
       
       setBookings(bookingsWithUsers)
     } catch (error: any) {
       console.error('Error fetching bookings:', error)
       toast.error('Failed to load bookings')
     } finally {
-      setLoading(false)
+      endFetch()
     }
   }
 
@@ -135,7 +155,7 @@ export default function BookingsPage() {
     return Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24))
   }
 
-  if (loading) {
+  if (initialLoading) {
     return (
       <div className="flex items-center justify-center h-96">
         <Loader2 className="h-8 w-8 animate-spin" />
@@ -239,6 +259,22 @@ export default function BookingsPage() {
             ),
           },
           {
+            key: 'payment_method',
+            label: 'Method',
+            render: (booking) => (
+              <div className="space-y-1">
+                <Badge variant="outline" className="text-xs capitalize">
+                  {(booking.payment_method || 'cash').replace(/_/g, ' ')}
+                </Badge>
+                {booking.payment_method === 'city_ledger' && booking.ledger_account_name && (
+                  <div className="text-xs text-muted-foreground truncate max-w-[120px]">
+                    {booking.ledger_account_name}
+                  </div>
+                )}
+              </div>
+            ),
+          },
+          {
             key: 'check_in',
             label: 'Check-in',
             render: (booking) => (
@@ -259,18 +295,24 @@ export default function BookingsPage() {
           {
             key: 'payment_status',
             label: 'Payment',
-            render: (booking) => (
-              <div className="space-y-1">
-                <Badge variant="outline" className={paymentColors[booking.payment_status]}>
-                  {booking.payment_status}
-                </Badge>
-                {booking.balance > 0 && (
-                  <div className="text-xs text-muted-foreground">
-                    Bal: {formatNaira(booking.balance)}
-                  </div>
-                )}
-              </div>
-            ),
+            render: (booking) => {
+              // City ledger bookings should always show as pending (balance owed to ledger account)
+              const effectiveStatus = booking.payment_method === 'city_ledger' && booking.payment_status === 'paid'
+                ? 'pending'
+                : booking.payment_status
+              return (
+                <div className="space-y-1">
+                  <Badge variant="outline" className={paymentColors[effectiveStatus]}>
+                    {effectiveStatus}
+                  </Badge>
+                  {booking.balance > 0 && (
+                    <div className="text-xs text-muted-foreground">
+                      Bal: {formatNaira(booking.balance)}
+                    </div>
+                  )}
+                </div>
+              )
+            },
           },
           {
             key: 'created_by_name',

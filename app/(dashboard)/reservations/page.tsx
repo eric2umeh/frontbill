@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { CardContent } from '@/components/ui/card'
 import { formatNaira } from '@/lib/utils/currency'
+import { usePageData } from '@/hooks/use-page-data'
 import { Plus, Users, Loader2 } from 'lucide-react'
 import { BulkBookingModal } from '@/components/reservations/bulk-booking-modal'
 import { NewReservationModal } from '@/components/reservations/new-reservation-modal'
@@ -21,7 +22,12 @@ interface Reservation {
   check_out: string
   status: string
   payment_status: string
+  payment_method?: string
+  ledger_account_name?: string
   rate_per_night: number
+  balance: number
+  deposit: number
+  notes?: string
   created_by?: string
   created_by_name?: string
   updated_by?: string
@@ -32,9 +38,9 @@ interface Reservation {
 
 export default function ReservationsPage() {
   const [reservations, setReservations] = useState<Reservation[]>([])
-  const [loading, setLoading] = useState(true)
   const [bulkModalOpen, setBulkModalOpen] = useState(false)
   const [newReservationOpen, setNewReservationOpen] = useState(false)
+  const { initialLoading, startFetch, endFetch } = usePageData()
   const router = useRouter()
 
   useEffect(() => {
@@ -45,14 +51,14 @@ export default function ReservationsPage() {
 
   const fetchReservations = async () => {
     try {
-      setLoading(true)
+      startFetch()
       const supabase = createClient()
       if (!supabase) {
         setReservations([])
         return
       }
       const { data: { user } } = await supabase.auth.getUser()
-      if (!user) { setLoading(false); return }
+      if (!user) { endFetch(); return }
 
       const { data: profile } = await supabase
         .from('profiles')
@@ -60,13 +66,14 @@ export default function ReservationsPage() {
         .eq('id', user.id)
         .single()
 
-      if (!profile?.organization_id) { setLoading(false); return }
+      if (!profile?.organization_id) { endFetch(); return }
 
       // Single query — no FK join on profiles (no FK exists), fetch user names separately
       const { data, error } = await supabase
         .from('bookings')
         .select(`
-          id, folio_id, guest_id, room_id, check_in, check_out, status, payment_status, rate_per_night, created_by, updated_by,
+          id, folio_id, guest_id, room_id, check_in, check_out, status, payment_status,
+          rate_per_night, balance, deposit, notes, created_by, updated_by,
           guests:guest_id(id, name, phone),
           rooms:room_id(id, room_number, room_type)
         `)
@@ -92,16 +99,29 @@ export default function ReservationsPage() {
 
       // Map data to match interface and calculate balance from folio_charges
       const reservationsWithData = (data || []).map((reservation: any) => {
-        // Calculate balance from folio_charges - sum of unpaid charges
-        let balance = 0
-        // Note: balance calculation will be done in real-time by the balance utility
-        // For now, use the booking's balance field if available
-        if (reservation.balance !== undefined) {
-          balance = reservation.balance
+        let balance = reservation.balance !== undefined ? reservation.balance : 0
+
+        // Derive payment_method + ledger_account_name from notes (no payment_method column on bookings table)
+        let payment_method = 'cash'
+        let ledger_account_name = ''
+        if (reservation.notes) {
+          if (/^city_ledger:/i.test(reservation.notes)) {
+            payment_method = 'city_ledger'
+            ledger_account_name = reservation.notes.replace(/^city_ledger:\s*/i, '')
+          } else if (reservation.notes.startsWith('City Ledger:')) {
+            payment_method = 'city_ledger'
+            ledger_account_name = reservation.notes.replace(/^City Ledger:\s*/, '')
+          } else if (reservation.notes.startsWith('payment_method:')) {
+            payment_method = reservation.notes.replace(/^payment_method:\s*/, '').split('|')[0].trim()
+            const match = reservation.notes.match(/\|ledger:(.+)/)
+            if (match) ledger_account_name = match[1].trim()
+          }
         }
-        
+
         return {
           ...reservation,
+          payment_method,
+          ledger_account_name,
           guests: reservation.guests
             ? (Array.isArray(reservation.guests) ? reservation.guests[0] : reservation.guests)
             : null,
@@ -119,7 +139,7 @@ export default function ReservationsPage() {
       console.error('Error fetching reservations:', error)
       setReservations([])
     } finally {
-      setLoading(false)
+      endFetch()
     }
   }
 
@@ -135,7 +155,7 @@ export default function ReservationsPage() {
     cancelled: 'bg-red-500/10 text-red-700 border-red-200',
   }
 
-  if (loading) {
+  if (initialLoading) {
     return (
       <div className="flex items-center justify-center h-96">
         <Loader2 className="h-8 w-8 animate-spin" />
@@ -217,6 +237,22 @@ export default function ReservationsPage() {
             ),
           },
           {
+            key: 'payment_method',
+            label: 'Method',
+            render: (res) => (
+              <div className="space-y-1">
+                <Badge variant="outline" className="text-xs capitalize">
+                  {(res.payment_method || 'cash').replace(/_/g, ' ')}
+                </Badge>
+                {res.payment_method === 'city_ledger' && res.ledger_account_name && (
+                  <div className="text-xs text-muted-foreground truncate max-w-[120px]">
+                    {res.ledger_account_name}
+                  </div>
+                )}
+              </div>
+            ),
+          },
+          {
             key: 'check_in',
             label: 'Check-in Date',
             render: (res) => (
@@ -237,18 +273,23 @@ export default function ReservationsPage() {
           {
             key: 'payment_status',
             label: 'Payment',
-            render: (res) => (
-              <div className="space-y-1">
-                <Badge variant="outline" className={paymentColors[res.payment_status]}>
-                  {res.payment_status}
-                </Badge>
-                {res.balance > 0 && (
-                  <div className="text-xs text-muted-foreground">
-                    Bal: {formatNaira(res.balance)}
-                  </div>
-                )}
-              </div>
-            ),
+            render: (res) => {
+              const effectiveStatus = res.payment_method === 'city_ledger' && res.payment_status === 'paid'
+                ? 'pending'
+                : res.payment_status
+              return (
+                <div className="space-y-1">
+                  <Badge variant="outline" className={paymentColors[effectiveStatus]}>
+                    {effectiveStatus}
+                  </Badge>
+                  {res.balance > 0 && (
+                    <div className="text-xs text-muted-foreground">
+                      Bal: {formatNaira(res.balance)}
+                    </div>
+                  )}
+                </div>
+              )
+            },
           },
           {
             key: 'created_by_name',

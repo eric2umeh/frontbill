@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Plus, Download, Loader2 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { formatNaira } from '@/lib/utils/currency'
+import { usePageData } from '@/hooks/use-page-data'
 import { toast } from 'sonner'
 
 interface Payment {
@@ -21,40 +22,23 @@ interface Payment {
 
 export default function PaymentsPage() {
   const [payments, setPayments] = useState<Payment[]>([])
-  const [loading, setLoading] = useState(true)
+  const { initialLoading, startFetch, endFetch } = usePageData()
   const router = useRouter()
 
-  useEffect(() => {
-    fetchPayments()
-  }, [])
+  useEffect(() => { fetchPayments() }, [])
 
   const fetchPayments = async () => {
     try {
-      setLoading(true)
+      startFetch()
       const supabase = createClient()
-      
-      if (!supabase) {
-        setPayments([])
-        setLoading(false)
-        return
-      }
+      if (!supabase) { setPayments([]); endFetch(); return }
 
       const { data: { user } } = await supabase.auth.getUser()
-      if (!user) {
-        router.push('/auth/login')
-        return
-      }
+      if (!user) { router.push('/auth/login'); return }
 
       const { data: profile } = await supabase
-        .from('profiles')
-        .select('organization_id')
-        .eq('id', user.id)
-        .single()
-
-      if (!profile) {
-        toast.error('Organization not found')
-        return
-      }
+        .from('profiles').select('organization_id').eq('id', user.id).single()
+      if (!profile) { toast.error('Organization not found'); return }
 
       const { data, error } = await supabase
         .from('payments')
@@ -68,7 +52,7 @@ export default function PaymentsPage() {
       console.error('Error fetching payments:', error)
       toast.error('Failed to load payments')
     } finally {
-      setLoading(false)
+      endFetch()
     }
   }
 
@@ -77,7 +61,7 @@ export default function PaymentsPage() {
   const posPayments = payments.filter(p => p.method === 'pos').reduce((sum, p) => sum + Number(p.amount), 0)
   const transferPayments = payments.filter(p => p.method === 'transfer').reduce((sum, p) => sum + Number(p.amount), 0)
 
-  if (loading) {
+  if (initialLoading) {
     return (
       <div className="flex items-center justify-center h-96">
         <Loader2 className="h-8 w-8 animate-spin" />
