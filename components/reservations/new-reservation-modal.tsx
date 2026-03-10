@@ -142,7 +142,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
     setGuestSearchOpen(false)
   }
 
-  // City Ledger account search — always queries city_ledger_accounts table
+  // City Ledger account search — searches all accounts without type filter
   const searchLedger = async (term: string) => {
     setLedgerSearch(term)
     setSelectedLedger(null)
@@ -152,7 +152,6 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
       .from('city_ledger_accounts')
       .select('id, account_name, account_type, contact_phone, balance')
       .eq('organization_id', orgId)
-      .eq('account_type', ledgerType === 'individual' ? 'individual' : 'organization')
       .ilike('account_name', `%${term}%`)
       .limit(8)
     setLedgerResults((data || []).map(d => ({ ...d, name: d.account_name, source: 'city_ledger' })))
@@ -622,57 +621,12 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
                       <p className="text-xs font-medium text-muted-foreground">
                         Create new {ledgerType === 'individual' ? 'individual' : 'organization'} account
                       </p>
-                      <button onClick={() => setShowNewLedgerOrgForm(false)}><X className="h-3.5 w-3.5 text-muted-foreground" /></button>
-                    </div>
-                    <Input placeholder="Organization name *" value={newLedgerOrgName} onChange={(e) => setNewLedgerOrgName(e.target.value)} />
-                    <div className="grid grid-cols-2 gap-2">
-                      <Input type="email" placeholder="Email" value={newLedgerOrgEmail} onChange={(e) => setNewLedgerOrgEmail(e.target.value)} />
-                      <Input placeholder="Phone" value={newLedgerOrgPhone} onChange={(e) => setNewLedgerOrgPhone(e.target.value)} />
-                    </div>
-                    <Input placeholder="Address (optional)" value={newLedgerOrgAddress} onChange={(e) => setNewLedgerOrgAddress(e.target.value)} />
-                    <Button size="sm" className="w-full" onClick={createNewLedgerOrg} disabled={creatingLedgerOrg}>
-                      {creatingLedgerOrg ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-                      {creatingLedgerOrg ? 'Creating...' : 'Create & Select Organization'}
-                    </Button>
-                  </div>
-                )}
-
-                {selectedLedger && (
-                  <div className="flex items-center justify-between p-2 rounded border bg-background text-sm">
-                    <div>
-                      <span className="font-medium">{selectedLedger.name || selectedLedger.account_name}</span>
-                      {selectedLedger.phone && <span className="ml-2 text-xs text-muted-foreground">{selectedLedger.phone}</span>}
-                    </div>
-                    <Button variant="ghost" size="sm" className="text-destructive h-6 text-xs" onClick={() => { setSelectedLedger(null); setLedgerSearch('') }}>Remove</Button>
-                  </div>
-                )}
-                <p className="text-xs text-orange-600">City Ledger is billed to the account — reservation balance will be outstanding until paid.</p>
-              </div>
-            )}
-
-            {/* Payment Status */}
-            <div className="space-y-2">
-              <Label>Payment Status</Label>
-              <Select value={paymentStatus} onValueChange={(v: any) => setPaymentStatus(v)}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="unpaid">Unpaid — pay at check-in</SelectItem>
-                  <SelectItem value="partial">Partial payment now</SelectItem>
-                  <SelectItem value="paid">Fully paid in advance</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            {paymentStatus === 'partial' && (
-              <div className="space-y-2">
-                <Label>Part Payment Amount</Label>
-                <Input
-                  type="number"
-                  min={1}
-                  placeholder="Enter amount paid now"
-                  value={partialAmount}
-                  onChange={(e) => setPartialAmount(e.target.value === '' ? '' : Number(e.target.value))}
-                />
+                      <Input
+                        placeholder={ledgerType === 'individual' ? 'Individual name' : 'Organization name'}
+                        value={newLedgerOrgName}
+                        onChange={(e) => setNewLedgerOrgName(e.target.value)}
+                        className="mt-2"
+                      />
               </div>
             )}
 
