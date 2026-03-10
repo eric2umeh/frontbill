@@ -120,18 +120,22 @@ export function AddChargeModal({ open, onClose, booking }: AddChargeModalProps) 
           .eq('id', booking.id)
       }
 
-      // Write to transactions table so it shows up in the transaction history
-      await supabase.from('transactions').insert([{
-        organization_id: booking.organization_id || null,
-        booking_id: booking.id,
-        guest_id: booking.guestId || null,
-        amount: chargeAmount,
-        type: 'charge',
-        payment_method: paymentMethod,
-        payment_status: isPaidNow ? 'paid' : 'pending',
-        description: description,
-        transaction_date: new Date().toISOString(),
-      }])
+      // Write to transactions table with correct schema columns
+      // Errors here are non-fatal — we swallow them so the charge still saves
+      try {
+        await supabase.from('transactions').insert([{
+          organization_id: booking.organization_id || null,
+          booking_id: booking.id,
+          transaction_id: `CHG-${booking.id}-${Date.now()}`,
+          guest_name: booking.guestName || 'Guest',
+          room: booking.room || null,
+          amount: chargeAmount,
+          payment_method: paymentMethod,
+          status: isPaidNow ? 'paid' : 'pending',
+          description: description,
+          received_by: null,
+        }])
+      } catch (_) { /* non-fatal */ }
 
       // If city ledger: also increment the ledger account balance
       if (paymentMethod === 'city_ledger' && selectedLedger?.id) {

@@ -164,24 +164,32 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
         }])
         if (chargeInsertError) throw chargeInsertError
 
-        // Also write to transactions table for visibility in transaction history
-        await supabase.from('transactions').insert([{
-          organization_id: booking.organization_id || null,
-          booking_id: bookingId,
-          guest_id: booking.guest_id || null,
-          amount: Number(chargeAmount),
-          type: 'charge',
-          payment_method: chargePaymentMethod || null,
-          payment_status: paymentStatus,
-          description: chargeDescription,
-          transaction_date: new Date().toISOString(),
-        }])
+        // Also write to transactions table (non-fatal if it fails)
+        try {
+          await supabase.from('transactions').insert([{
+            organization_id: booking.organization_id || null,
+            booking_id: bookingId,
+            transaction_id: `CHG-${bookingId}-${Date.now()}`,
+            guest_name: booking.guests?.name || booking.guestName || 'Guest',
+            room: booking.rooms?.room_number || null,
+            amount: Number(chargeAmount),
+            payment_method: chargePaymentMethod || 'pending',
+            status: paymentStatus,
+            description: chargeDescription,
+            received_by: null,
+          }])
+        } catch (_) { /* non-fatal */ }
 
         if (!isPaidNow) {
-          // Deferred / city-ledger: bump booking balance
+          // Fetch current balance from DB (not stale state) then increment
+          const { data: freshBk } = await supabase
+            .from('bookings')
+            .select('balance')
+            .eq('id', bookingId)
+            .single()
           await supabase
             .from('bookings')
-            .update({ balance: (booking.balance || 0) + Number(chargeAmount) })
+            .update({ balance: (freshBk?.balance || 0) + Number(chargeAmount) })
             .eq('id', bookingId)
         }
 
@@ -211,8 +219,14 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
 
         await supabase.from('folio_charges').insert([paymentEntry])
 
-        const newBalance = Math.max(0, (booking.balance || 0) - Number(chargeAmount))
-        const newDeposit = (booking.deposit || 0) + Number(chargeAmount)
+        // Fetch fresh balance from DB before reducing it
+        const { data: freshBk2 } = await supabase
+          .from('bookings')
+          .select('balance, deposit')
+          .eq('id', bookingId)
+          .single()
+        const newBalance = Math.max(0, (freshBk2?.balance || 0) - Number(chargeAmount))
+        const newDeposit = (freshBk2?.deposit || 0) + Number(chargeAmount)
         await supabase
           .from('bookings')
           .update({
@@ -221,6 +235,22 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
             payment_status: newBalance === 0 ? 'paid' : 'partial',
           })
           .eq('id', bookingId)
+
+        // Log to transactions table (non-fatal)
+        try {
+          await supabase.from('transactions').insert([{
+            organization_id: booking.organization_id || null,
+            booking_id: bookingId,
+            transaction_id: `PAY-${bookingId}-${Date.now()}`,
+            guest_name: booking.guests?.name || 'Guest',
+            room: booking.rooms?.room_number || null,
+            amount: Number(chargeAmount),
+            payment_method: paymentMethod,
+            status: 'paid',
+            description: `Payment received — ${paymentMethod.replace(/_/g, ' ')}`,
+            received_by: null,
+          }])
+        } catch (_) { /* non-fatal */ }
 
         toast.success(`Payment of ${formatNaira(Number(chargeAmount))} recorded`)
       }

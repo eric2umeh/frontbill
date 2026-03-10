@@ -157,16 +157,34 @@ export function ExtendStayModal({ open, onClose, booking }: ExtendStayModalProps
         .update({ check_out: format(newCheckOutDate, 'yyyy-MM-dd') })
         .eq('id', booking.id)
 
-      // Record payment entry for transactions table visibility
-      await supabase.from('payments').insert([{
-        organization_id: booking.organization_id,
-        booking_id: booking.id,
-        guest_id: null,
-        amount: additionalAmount,
-        payment_method: paymentMethod,
-        payment_date: new Date().toISOString(),
-        notes: `Extended Stay - ${additionalNights} night${additionalNights !== 1 ? 's' : ''}`
-      }])
+      // Bump booking balance for unpaid / city-ledger extended stay
+      if (paymentMethod !== 'cash' && paymentMethod !== 'card' && paymentMethod !== 'pos' && paymentMethod !== 'bank_transfer') {
+        const { data: freshBk } = await supabase
+          .from('bookings')
+          .select('balance')
+          .eq('id', booking.id)
+          .single()
+        await supabase
+          .from('bookings')
+          .update({ balance: (freshBk?.balance || 0) + additionalAmount, payment_status: 'pending' })
+          .eq('id', booking.id)
+      }
+
+      // Write to transactions table (non-fatal)
+      try {
+        await supabase.from('transactions').insert([{
+          organization_id: booking.organization_id || null,
+          booking_id: booking.id,
+          transaction_id: `EXT-${booking.id}-${Date.now()}`,
+          guest_name: booking.guestName || 'Guest',
+          room: booking.room || null,
+          amount: additionalAmount,
+          payment_method: paymentMethod,
+          status: paymentMethod === 'city_ledger' ? 'pending' : 'paid',
+          description: `Extended Stay — ${additionalNights} night${additionalNights !== 1 ? 's' : ''}`,
+          received_by: null,
+        }])
+      } catch (_) { /* non-fatal */ }
 
       const accountInfo = paymentMethod === 'city_ledger' && selectedLedger 
         ? ` to ${selectedLedger.name}`
