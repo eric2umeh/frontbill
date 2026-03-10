@@ -58,14 +58,17 @@ export function ExtendStayModal({ open, onClose, booking }: ExtendStayModalProps
   const fetchOrganizations = async () => {
     try {
       const supabase = createClient()
+      // Fetch from city_ledger_accounts for organizations (exclude individuals)
       const { data, error } = await supabase
-        .from('organizations')
-        .select('id, name, current_balance')
-        .order('name')
+        .from('city_ledger_accounts')
+        .select('id, account_name, balance')
+        .neq('account_type', 'individual')
+        .neq('account_type', 'guest')
+        .order('account_name')
 
       if (error) throw error
-      setOrganizations(data || [])
-      setFilteredOrganizations(data || [])
+      setOrganizations((data || []).map(d => ({ id: d.id, name: d.account_name, current_balance: d.balance || 0 })))
+      setFilteredOrganizations((data || []).map(d => ({ id: d.id, name: d.account_name, current_balance: d.balance || 0 })))
     } catch (error: any) {
       toast.error('Failed to load organizations')
     }
@@ -112,22 +115,41 @@ export function ExtendStayModal({ open, onClose, booking }: ExtendStayModalProps
       const supabase = createClient()
       
       // Add charge to folio_charges with unpaid status
+      // Note: organization_id column may not exist yet, so we try with it first, then fall back without it
+      const chargeData: any = {
+        booking_id: booking.id,
+        description: `Extended Stay - ${additionalNights} night${additionalNights !== 1 ? 's' : ''}`,
+        amount: additionalAmount,
+        charge_type: 'extended_stay',
+        payment_method: paymentMethod,
+        ledger_account_id: paymentMethod === 'city_ledger' ? selectedLedger?.id : null,
+        ledger_account_type: paymentMethod === 'city_ledger' ? ledgerType : null,
+        payment_status: 'unpaid',
+        created_by: booking.created_by
+      }
+      
+      // Try to include organization_id if column exists
+      if (booking.organization_id) {
+        chargeData.organization_id = booking.organization_id
+      }
+      
       const { error: chargeError } = await supabase
         .from('folio_charges')
-        .insert([{
-          booking_id: booking.id,
-          organization_id: booking.organization_id,
-          description: `Extended Stay - ${additionalNights} night${additionalNights !== 1 ? 's' : ''}`,
-          amount: additionalAmount,
-          charge_type: 'extended_stay',
-          payment_method: paymentMethod,
-          ledger_account_id: paymentMethod === 'city_ledger' ? selectedLedger?.id : null,
-          ledger_account_type: paymentMethod === 'city_ledger' ? ledgerType : null,
-          payment_status: 'unpaid',  // Always unpaid for extended stay
-          created_by: booking.created_by
-        }])
+        .insert([chargeData])
 
-      if (chargeError) throw chargeError
+      if (chargeError) {
+        // If error includes "organization_id", try again without it
+        if (chargeError.message?.includes('organization_id')) {
+          const fallbackData = { ...chargeData }
+          delete fallbackData.organization_id
+          const { error: retryError } = await supabase
+            .from('folio_charges')
+            .insert([fallbackData])
+          if (retryError) throw retryError
+        } else {
+          throw chargeError
+        }
+      }
 
       // Update booking checkout date
       await supabase

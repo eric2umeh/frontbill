@@ -88,20 +88,42 @@ export function AddChargeModal({ open, onClose, booking }: AddChargeModalProps) 
       const supabase = createClient()
       
       // Add charge to folio_charges with unpaid status
-      const { error: chargeError } = await supabase
+      // Note: organization_id column may not exist yet, so we try with it first, then fall back without it
+      const chargeData: any = {
+        booking_id: booking.id,
+        description: description,
+        amount: chargeAmount,
+        charge_type: 'additional_charge',
+        payment_method: paymentMethod,
+        ledger_account_id: paymentMethod === 'city_ledger' ? selectedLedger?.id : null,
+        ledger_account_type: paymentMethod === 'city_ledger' ? ledgerType : null,
+        payment_status: 'unpaid',
+        created_by: booking.created_by
+      }
+      
+      // Try to include organization_id if column exists
+      if (booking.organization_id) {
+        chargeData.organization_id = booking.organization_id
+      }
+      
+      let chargeError: any = null
+      const { error: insertError } = await supabase
         .from('folio_charges')
-        .insert([{
-          booking_id: booking.id,
-          organization_id: booking.organization_id,
-          description: description,
-          amount: chargeAmount,
-          charge_type: 'additional_charge',
-          payment_method: paymentMethod,
-          ledger_account_id: paymentMethod === 'city_ledger' ? selectedLedger?.id : null,
-          ledger_account_type: paymentMethod === 'city_ledger' ? ledgerType : null,
-          payment_status: 'unpaid',
-          created_by: booking.created_by
-        }])
+        .insert([chargeData])
+
+      if (insertError) {
+        // If error includes "organization_id", try again without it
+        if (insertError.message?.includes('organization_id')) {
+          const fallbackData = { ...chargeData }
+          delete fallbackData.organization_id
+          const { error: retryError } = await supabase
+            .from('folio_charges')
+            .insert([fallbackData])
+          chargeError = retryError
+        } else {
+          chargeError = insertError
+        }
+      }
 
       if (chargeError) throw chargeError
 
