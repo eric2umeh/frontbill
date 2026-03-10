@@ -649,6 +649,8 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
                     </div>
                   </div>
                 )}
+              </div>
+            )}
 
             {/* Summary */}
             {selectedRoom && nights > 0 && (
