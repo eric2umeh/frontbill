@@ -43,7 +43,7 @@ interface LedgerAccount {
   account_type: 'individual' | 'organization'
   contact_phone: string
   balance: number
-  source: 'city_ledger'
+  source: 'city_ledger' | 'organizations'
 }
 
 export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalProps) {
@@ -135,6 +135,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
         { data: roomData },
         { data: bookingData },
         { data: cityLedgerData },
+        { data: orgsData },
       ] = await Promise.all([
         // Guests table
         supabase.from('guests').select('id, name, phone, email, address').eq('organization_id', orgId).order('name'),
@@ -142,17 +143,18 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
         supabase.from('rooms').select('id, room_number, room_type, price_per_night').eq('organization_id', orgId).neq('status', 'maintenance').order('room_number'),
         // Active bookings to check date conflicts
         supabase.from('bookings').select('room_id, check_in, check_out').eq('organization_id', orgId).in('status', ['confirmed', 'reserved', 'checked_in']),
-        // City ledger accounts — load ALL, split by type client-side (no filter so we don't miss any)
+        // City ledger accounts — load ALL, split by type client-side
         supabase.from('city_ledger_accounts').select('id, account_name, account_type, contact_phone, balance').eq('organization_id', orgId).order('account_name'),
+        // Also load from organizations table as fallback (legacy orgs may live there)
+        supabase.from('organizations').select('id, name, phone, email').order('name'),
       ])
 
       setGuests(guestData || [])
       setAllRooms(roomData || [])
       setAllBookingsForRooms(bookingData || [])
-      // On initial load: show all rooms (no dates selected yet) — they'll be filtered when user picks dates
       setRooms(roomData || [])
 
-      // Map guests → LedgerAccount shape (individuals from city_ledger_accounts)
+      // Individuals: city_ledger_accounts with type individual/guest
       const individualLedger: LedgerAccount[] = (cityLedgerData || [])
         .filter(a => a.account_type === 'individual' || a.account_type === 'guest')
         .map(a => ({
@@ -164,8 +166,8 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
           source: 'city_ledger',
         }))
 
-      // Map organizations — anything not individual/guest goes to org tab
-      const orgLedger: LedgerAccount[] = (cityLedgerData || [])
+      // Organizations: city_ledger_accounts non-individual + organizations table (legacy), deduped by name
+      const orgFromLedger: LedgerAccount[] = (cityLedgerData || [])
         .filter(a => a.account_type !== 'individual' && a.account_type !== 'guest')
         .map(a => ({
           id: a.id,
@@ -175,6 +177,21 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
           balance: a.balance || 0,
           source: 'city_ledger',
         }))
+
+      const orgNames = new Set(orgFromLedger.map(o => o.account_name.toLowerCase()))
+      const orgFromTable: LedgerAccount[] = (orgsData || [])
+        .filter(o => !orgNames.has(o.name.toLowerCase()))
+        .map(o => ({
+          id: o.id,
+          account_name: o.name,
+          account_type: 'organization' as const,
+          contact_phone: o.phone || '',
+          balance: 0,
+          source: 'organizations',
+        }))
+
+      const orgLedger: LedgerAccount[] = [...orgFromLedger, ...orgFromTable]
+        .sort((a, b) => a.account_name.localeCompare(b.account_name))
 
       setIndividualAccounts(individualLedger)
       setOrganizationAccounts(orgLedger)
@@ -247,21 +264,39 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
     }
     // Fallback: live search in case account was created after modal opened
     const supabase = createClient()
-    const { data } = await supabase
-      .from('city_ledger_accounts')
-      .select('id, account_name, account_type, contact_phone, balance')
-      .eq('organization_id', organizationId)
-      .ilike('account_name', `%${value}%`)
-      .limit(10)
-    const results: LedgerAccount[] = (data || []).map(a => ({
+    const [{ data: ledgerData }, { data: orgSearchData }] = await Promise.all([
+      supabase
+        .from('city_ledger_accounts')
+        .select('id, account_name, account_type, contact_phone, balance')
+        .eq('organization_id', organizationId)
+        .ilike('account_name', `%${value}%`)
+        .limit(10),
+      supabase
+        .from('organizations')
+        .select('id, name, phone')
+        .ilike('name', `%${value}%`)
+        .limit(10),
+    ])
+    const fromLedger: LedgerAccount[] = (ledgerData || []).map(a => ({
       id: a.id,
       account_name: a.account_name,
-      account_type: (a.account_type === 'individual' || a.account_type === 'guest')
-        ? 'individual' : 'organization',
+      account_type: (a.account_type === 'individual' || a.account_type === 'guest') ? 'individual' : 'organization',
       contact_phone: a.contact_phone || '',
       balance: a.balance || 0,
       source: 'city_ledger' as const,
     }))
+    const ledgerNames = new Set(fromLedger.map(a => a.account_name.toLowerCase()))
+    const fromOrgs: LedgerAccount[] = (orgSearchData || [])
+      .filter(o => !ledgerNames.has(o.name.toLowerCase()))
+      .map(o => ({
+        id: o.id,
+        account_name: o.name,
+        account_type: 'organization' as const,
+        contact_phone: o.phone || '',
+        balance: 0,
+        source: 'organizations' as const,
+      }))
+    const results = [...fromLedger, ...fromOrgs]
     setFilteredLedgerAccounts(results)
     setLedgerOpen(results.length > 0)
   }
