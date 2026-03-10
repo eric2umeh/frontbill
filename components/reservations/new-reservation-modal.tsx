@@ -300,6 +300,33 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
 
       await supabase.from('rooms').update({ status: 'reserved' }).eq('id', selectedRoom.id)
 
+      // If city ledger: update account + guest/org profile balance
+      if (isCityLedger && selectedLedger?.id) {
+        const { data: acc } = await supabase
+          .from('city_ledger_accounts').select('balance, account_type').eq('id', selectedLedger.id).single()
+        await supabase
+          .from('city_ledger_accounts')
+          .update({ balance: (acc?.balance || 0) + balanceAmount })
+          .eq('id', selectedLedger.id)
+
+        const acctType = acc?.account_type || ledgerType
+        if (acctType === 'individual' || acctType === 'guest') {
+          if (finalGuestId) {
+            const { data: guestRow } = await supabase.from('guests').select('balance').eq('id', finalGuestId).single()
+            await supabase.from('guests')
+              .update({ balance: ((guestRow?.balance as number) || 0) + balanceAmount })
+              .eq('id', finalGuestId)
+          }
+        } else {
+          const { data: orgRow } = await supabase.from('organizations').select('current_balance').eq('id', selectedLedger.id).single()
+          if (orgRow) {
+            await supabase.from('organizations')
+              .update({ current_balance: ((orgRow.current_balance as number) || 0) + balanceAmount })
+              .eq('id', selectedLedger.id)
+          }
+        }
+      }
+
       // Insert folio charge (this is what the Transactions page reads from)
       await supabase.from('folio_charges').insert([{
         booking_id: booking.id,

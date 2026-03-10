@@ -28,6 +28,8 @@ interface ExtendStayModalProps {
     ratePerNight: number
     guestId: string
     guestBalance?: number
+    organization_id?: string
+    created_by?: string
   }
 }
 
@@ -185,6 +187,46 @@ export function ExtendStayModal({ open, onClose, booking }: ExtendStayModalProps
           received_by: null,
         }])
       } catch (_) { /* non-fatal */ }
+
+      // City ledger: update account balance + guest/org profile balance
+      if (paymentMethod === 'city_ledger' && selectedLedger?.id) {
+        // Always update city_ledger_accounts.balance
+        const { data: acct } = await supabase
+          .from('city_ledger_accounts')
+          .select('balance')
+          .eq('id', selectedLedger.id)
+          .single()
+        await supabase
+          .from('city_ledger_accounts')
+          .update({ balance: (acct?.balance || 0) + additionalAmount })
+          .eq('id', selectedLedger.id)
+
+        if (ledgerType === 'individual' && booking.guestId) {
+          // Bump guests.balance so guest profile shows outstanding debt
+          const { data: guestRow } = await supabase
+            .from('guests')
+            .select('balance')
+            .eq('id', booking.guestId)
+            .single()
+          await supabase
+            .from('guests')
+            .update({ balance: ((guestRow?.balance as number) || 0) + additionalAmount })
+            .eq('id', booking.guestId)
+        } else if (ledgerType === 'organization') {
+          // Bump organizations.current_balance
+          const { data: orgRow } = await supabase
+            .from('organizations')
+            .select('current_balance')
+            .eq('id', selectedLedger.id)
+            .single()
+          if (orgRow) {
+            await supabase
+              .from('organizations')
+              .update({ current_balance: ((orgRow.current_balance as number) || 0) + additionalAmount })
+              .eq('id', selectedLedger.id)
+          }
+        }
+      }
 
       const accountInfo = paymentMethod === 'city_ledger' && selectedLedger 
         ? ` to ${selectedLedger.name}`

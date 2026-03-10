@@ -520,17 +520,41 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
         .single()
       if (be) throw be
 
-      // If city ledger, increment the ledger account balance
+      // If city ledger, increment the ledger account balance + update guest/org profile
       if (paymentMethod === 'city_ledger' && ledgerAccount) {
         const { data: acc } = await supabase
           .from('city_ledger_accounts')
-          .select('balance')
+          .select('balance, account_type')
           .eq('id', ledgerAccount)
           .single()
         await supabase
           .from('city_ledger_accounts')
           .update({ balance: (acc?.balance || 0) + total })
           .eq('id', ledgerAccount)
+
+        // Also bump the guest or org profile's outstanding balance
+        const acctType = acc?.account_type || (ledgerTab === 'individual' ? 'individual' : 'organization')
+        if (acctType === 'individual' || acctType === 'guest') {
+          // Bump guests.balance so guest profile shows outstanding debt
+          if (finalGuestId) {
+            const { data: guestRow } = await supabase
+              .from('guests').select('balance').eq('id', finalGuestId).single()
+            await supabase
+              .from('guests')
+              .update({ balance: ((guestRow?.balance as number) || 0) + total })
+              .eq('id', finalGuestId)
+          }
+        } else {
+          // Org account — bump organizations.current_balance
+          const { data: orgRow } = await supabase
+            .from('organizations').select('current_balance').eq('id', ledgerAccount).single()
+          if (orgRow) {
+            await supabase
+              .from('organizations')
+              .update({ current_balance: ((orgRow.current_balance as number) || 0) + total })
+              .eq('id', ledgerAccount)
+          }
+        }
       }
 
       await supabase.from('rooms').update({ status: 'occupied' }).eq('id', selectedRoom.id)
