@@ -617,18 +617,38 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
                 {/* Inline new account form */}
                 {showNewLedgerOrgForm && (
                   <div className="border rounded-md p-3 space-y-2 bg-background">
-                    <div className="flex items-center justify-between">
-                      <p className="text-xs font-medium text-muted-foreground">
-                        Create new {ledgerType === 'individual' ? 'individual' : 'organization'} account
-                      </p>
-                      <Input
-                        placeholder={ledgerType === 'individual' ? 'Individual name' : 'Organization name'}
-                        value={newLedgerOrgName}
-                        onChange={(e) => setNewLedgerOrgName(e.target.value)}
-                        className="mt-2"
-                      />
-              </div>
-            )}
+                    <p className="text-xs font-medium text-muted-foreground">
+                      Create new {ledgerType === 'individual' ? 'individual' : 'organization'} account
+                    </p>
+                    <Input
+                      placeholder={ledgerType === 'individual' ? 'Individual name' : 'Organization name'}
+                      value={newLedgerOrgName}
+                      onChange={(e) => setNewLedgerOrgName(e.target.value)}
+                      className="mt-2"
+                    />
+                    <Input
+                      placeholder="Phone (optional)"
+                      value={newLedgerOrgPhone}
+                      onChange={(e) => setNewLedgerOrgPhone(e.target.value)}
+                    />
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        onClick={createNewLedgerOrg}
+                        disabled={creatingLedgerOrg || !newLedgerOrgName.trim()}
+                      >
+                        {creatingLedgerOrg ? 'Creating...' : 'Create'}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setShowNewLedgerOrgForm(false)}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  </div>
+                )}
 
             {/* Summary */}
             {selectedRoom && nights > 0 && (
