@@ -267,17 +267,24 @@ export default function ReservationsPage() {
           {
             key: 'payment_status',
             label: 'Payment',
-            render: (res) => (
-              <div className="space-y-1">
-                <Badge variant="outline" className={paymentColors[res.payment_status]}>
-                  {res.payment_status}
-                </Badge>
-                {res.balance > 0 && (
-                  <div className="text-xs text-muted-foreground">
-                    Bal: {formatNaira(res.balance)}
-                  </div>
-                )}
-              </div>
+            render: (res) => {
+              const effectiveStatus = res.payment_method === 'city_ledger' && res.payment_status === 'paid'
+                ? 'pending'
+                : res.payment_status
+              return (
+                <div className="space-y-1">
+                  <Badge variant="outline" className={paymentColors[effectiveStatus]}>
+                    {effectiveStatus}
+                  </Badge>
+                  {res.balance > 0 && (
+                    <div className="text-xs text-muted-foreground">
+                      Bal: {formatNaira(res.balance)}
+                    </div>
+                  )}
+                </div>
+              )
+            },
+          },
             ),
           },
           {

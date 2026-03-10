@@ -295,18 +295,24 @@ export default function BookingsPage() {
           {
             key: 'payment_status',
             label: 'Payment',
-            render: (booking) => (
-              <div className="space-y-1">
-                <Badge variant="outline" className={paymentColors[booking.payment_status]}>
-                  {booking.payment_status}
-                </Badge>
-                {booking.balance > 0 && (
-                  <div className="text-xs text-muted-foreground">
-                    Bal: {formatNaira(booking.balance)}
-                  </div>
-                )}
-              </div>
-            ),
+            render: (booking) => {
+              // City ledger bookings should always show as pending (balance owed to ledger account)
+              const effectiveStatus = booking.payment_method === 'city_ledger' && booking.payment_status === 'paid'
+                ? 'pending'
+                : booking.payment_status
+              return (
+                <div className="space-y-1">
+                  <Badge variant="outline" className={paymentColors[effectiveStatus]}>
+                    {effectiveStatus}
+                  </Badge>
+                  {booking.balance > 0 && (
+                    <div className="text-xs text-muted-foreground">
+                      Bal: {formatNaira(booking.balance)}
+                    </div>
+                  )}
+                </div>
+              )
+            },
           },
           {
             key: 'created_by_name',

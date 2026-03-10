@@ -55,14 +55,15 @@ export function AddChargeModal({ open, onClose, booking }: AddChargeModalProps) 
     try {
       const supabase = createClient()
       const { data, error } = await supabase
-        .from('organizations')
-        .select('id, name')
-        .order('name')
+        .from('city_ledger_accounts')
+        .select('id, account_name, balance')
+        .eq('organization_id', booking.organization_id!)
+        .order('account_name')
 
       if (error) throw error
-      setOrganizations(data || [])
+      setOrganizations((data || []).map(d => ({ id: d.id, name: d.account_name, balance: d.balance })))
     } catch (error: any) {
-      toast.error('Failed to load organizations')
+      toast.error('Failed to load accounts')
     }
   }
 
@@ -86,59 +87,66 @@ export function AddChargeModal({ open, onClose, booking }: AddChargeModalProps) 
     setLoading(true)
     try {
       const supabase = createClient()
-      
-      // Add charge to folio_charges with unpaid status
-      // Note: organization_id column may not exist yet, so we try with it first, then fall back without it
+      const isPaidNow = paymentMethod !== 'city_ledger' && paymentMethod !== 'deferred'
+
+      // Build folio_charges insert — without organization_id (column may not exist)
       const chargeData: any = {
         booking_id: booking.id,
         description: description,
         amount: chargeAmount,
         charge_type: 'additional_charge',
-        payment_method: paymentMethod,
-        ledger_account_id: paymentMethod === 'city_ledger' ? selectedLedger?.id : null,
-        ledger_account_type: paymentMethod === 'city_ledger' ? ledgerType : null,
-        payment_status: 'unpaid',
-        created_by: booking.created_by
+        payment_method: isPaidNow ? paymentMethod : null,
+        payment_status: isPaidNow ? 'paid' : 'pending',
+        created_by: booking.created_by || null,
       }
-      
-      // Try to include organization_id if column exists
-      if (booking.organization_id) {
-        chargeData.organization_id = booking.organization_id
-      }
-      
-      let chargeError: any = null
-      const { error: insertError } = await supabase
+
+      const { error: chargeError } = await supabase
         .from('folio_charges')
         .insert([chargeData])
 
-      if (insertError) {
-        // If error includes "organization_id", try again without it
-        if (insertError.message?.includes('organization_id')) {
-          const fallbackData = { ...chargeData }
-          delete fallbackData.organization_id
-          const { error: retryError } = await supabase
-            .from('folio_charges')
-            .insert([fallbackData])
-          chargeError = retryError
-        } else {
-          chargeError = insertError
-        }
-      }
-
       if (chargeError) throw chargeError
 
-      // Record payment entry for transactions table visibility
-      await supabase.from('payments').insert([{
-        organization_id: booking.organization_id,
+      // For unpaid / city-ledger charges: bump the booking's balance
+      if (!isPaidNow) {
+        const { data: bk } = await supabase
+          .from('bookings')
+          .select('balance, payment_status')
+          .eq('id', booking.id)
+          .single()
+        const newBalance = (bk?.balance || 0) + chargeAmount
+        await supabase
+          .from('bookings')
+          .update({ balance: newBalance, payment_status: 'pending' })
+          .eq('id', booking.id)
+      }
+
+      // Write to transactions table so it shows up in the transaction history
+      await supabase.from('transactions').insert([{
+        organization_id: booking.organization_id || null,
         booking_id: booking.id,
-        guest_id: null,
-        amount: parseFloat(amount),
+        guest_id: booking.guestId || null,
+        amount: chargeAmount,
+        type: 'charge',
         payment_method: paymentMethod,
-        payment_date: new Date().toISOString(),
-        notes: `Charge: ${description}`
+        payment_status: isPaidNow ? 'paid' : 'pending',
+        description: description,
+        transaction_date: new Date().toISOString(),
       }])
 
-      toast.success(`Charge of ${formatNaira(chargeAmount)} added successfully`)
+      // If city ledger: also increment the ledger account balance
+      if (paymentMethod === 'city_ledger' && selectedLedger?.id) {
+        const { data: acct } = await supabase
+          .from('city_ledger_accounts')
+          .select('balance')
+          .eq('id', selectedLedger.id)
+          .single()
+        await supabase
+          .from('city_ledger_accounts')
+          .update({ balance: (acct?.balance || 0) + chargeAmount })
+          .eq('id', selectedLedger.id)
+      }
+
+      toast.success(`Charge of ${formatNaira(chargeAmount)} added${isPaidNow ? ' (paid)' : ' — added to Bill Balance'}`)
       onClose()
       resetForm()
     } catch (error: any) {
