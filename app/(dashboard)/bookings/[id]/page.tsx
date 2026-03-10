@@ -62,7 +62,6 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
         .single()
 
       if (bookingError) throw bookingError
-
       setBooking(bookingData)
 
       // Fetch user info for created_by
@@ -120,6 +119,23 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
       }))
 
       setFolioCharges(chargesWithCreator)
+
+      // Sync bookings.balance from folio_charges so the table always shows an accurate Bal:
+      // balance = original debt (total_amount - deposit) + all pending folio charges
+      const unpaid = (chargesData || [])
+        .filter((c: any) => (c.payment_status === 'pending' || c.payment_status === 'unpaid') && c.amount > 0)
+        .reduce((s: number, c: any) => s + Number(c.amount), 0)
+      const roomDebt = Math.max(0, (bookingData.total_amount || 0) - (bookingData.deposit || 0))
+      const computedBalance = roomDebt + unpaid
+      // Only write if materially different (> ₦1 drift) to avoid unnecessary writes
+      if (Math.abs((bookingData.balance || 0) - computedBalance) > 1) {
+        await supabase
+          .from('bookings')
+          .update({ balance: computedBalance })
+          .eq('id', id)
+        setBooking((prev: any) => prev ? { ...prev, balance: computedBalance } : prev)
+      }
+
       setLoading(false)
   } catch (error: any) {
     // Check if it's an auth error
@@ -451,9 +467,18 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
     .filter(c => c.paymentStatus === 'paid' && c.amount > 0 && c.type === 'charge')
     .reduce((sum, c) => sum + c.amount, 0)
 
-  // Bill Balance = the balance stored on the booking record (already includes all pending charges)
-  // We do NOT add pendingAdditionalCharges again — they are already in booking.balance
-  const totalBillBalance = booking ? (booking.balance || 0) : 0
+  // Bill Balance (Unpaid) = original room balance + all unpaid/pending folio charges
+  // Compute from folio_charges (live, re-fetched on every load) so it always reflects latest charges
+  // Room base: total_amount minus what's been deposited/paid
+  const roomBase = booking ? Math.max(0, (booking.total_amount || 0) - (booking.deposit || 0)) : 0
+  // Add all pending/unpaid additional charges (city-ledger, deferred, extend-stay)
+  const unpaidFolioCharges = folioCharges
+    .filter(c => (c.paymentStatus === 'pending' || c.paymentStatus === 'unpaid') && c.amount > 0)
+    .reduce((sum, c) => sum + c.amount, 0)
+  // Use whichever is larger: DB balance (updated by charge handlers) or computed from folio
+  const totalBillBalance = booking
+    ? Math.max(booking.balance || 0, roomBase > 0 ? roomBase + unpaidFolioCharges : unpaidFolioCharges)
+    : 0
 
   if (loading) {
     return (

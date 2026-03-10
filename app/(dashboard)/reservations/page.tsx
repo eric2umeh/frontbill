@@ -22,7 +22,12 @@ interface Reservation {
   check_out: string
   status: string
   payment_status: string
+  payment_method?: string
+  ledger_account_name?: string
   rate_per_night: number
+  balance: number
+  deposit: number
+  notes?: string
   created_by?: string
   created_by_name?: string
   updated_by?: string
@@ -67,7 +72,8 @@ export default function ReservationsPage() {
       const { data, error } = await supabase
         .from('bookings')
         .select(`
-          id, folio_id, guest_id, room_id, check_in, check_out, status, payment_status, rate_per_night, created_by, updated_by,
+          id, folio_id, guest_id, room_id, check_in, check_out, status, payment_status,
+          rate_per_night, balance, deposit, notes, created_by, updated_by,
           guests:guest_id(id, name, phone),
           rooms:room_id(id, room_number, room_type)
         `)
@@ -284,8 +290,6 @@ export default function ReservationsPage() {
                 </div>
               )
             },
-          },
-            ),
           },
           {
             key: 'created_by_name',
