@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -119,17 +119,21 @@ export default function ReservationDetailPage({ params }: { params: Promise<{ id
         .update({ deposit: newDeposit, balance: newBalance, payment_status: newStatus })
         .eq('id', id)
 
-      // Record in payments table
-      const { data: { user } } = await supabase.auth.getUser()
-      await supabase.from('payments').insert([{
-        booking_id: id,
-        guest_id: reservation?.guests?.id || null,
-        amount,
-        payment_method: paymentMethod,
-        payment_date: new Date().toISOString(),
-        notes: `Reservation payment update — Folio ${reservation?.folio_id}`,
-        received_by: user?.id || null,
-      }])
+      // Record in transactions table (non-fatal)
+      try {
+        const { data: { user } } = await supabase.auth.getUser()
+        await supabase.from('transactions').insert([{
+          booking_id: id,
+          transaction_id: `PAY-${id}-${Date.now()}`,
+          guest_name: reservation?.guests?.name || guest?.name || 'Guest',
+          room: reservation?.rooms?.room_number || room?.room_number || null,
+          amount,
+          payment_method: paymentMethod,
+          status: 'paid',
+          description: `Reservation payment — Folio ${reservation?.folio_id}`,
+          received_by: null,
+        }])
+      } catch (_) { /* non-fatal */ }
 
       toast.success(`Payment of ${formatNaira(amount)} recorded`)
       setPaymentModalOpen(false)
@@ -214,6 +218,7 @@ export default function ReservationDetailPage({ params }: { params: Promise<{ id
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Update Payment</DialogTitle>
+            <DialogDescription className="sr-only">Record a payment for this reservation</DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">

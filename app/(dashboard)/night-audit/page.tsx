@@ -8,23 +8,17 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { EnhancedDataTable } from '@/components/shared/enhanced-data-table'
 import { formatNaira } from '@/lib/utils/currency'
+import { usePageData } from '@/hooks/use-page-data'
 import { 
-  CheckCircle2, 
-  AlertTriangle, 
-  TrendingUp, 
-  Users, 
-  Bed,
-  DollarSign,
-  Clock,
-  Play,
-  Loader2
+  CheckCircle2, AlertTriangle, TrendingUp, Users,
+  Bed, DollarSign, Clock, Play, Loader2
 } from 'lucide-react'
 import { toast } from 'sonner'
 
 export default function NightAuditPage() {
   const [auditRunning, setAuditRunning] = useState(false)
   const [auditComplete, setAuditComplete] = useState(false)
-  const [loading, setLoading] = useState(true)
+  const { initialLoading, startFetch, endFetch } = usePageData()
   const [auditData, setAuditData] = useState<any>(null)
   const router = useRouter()
 
@@ -34,49 +28,21 @@ export default function NightAuditPage() {
 
   const fetchAuditData = async () => {
     try {
-      setLoading(true)
+      startFetch()
       const supabase = createClient()
-      
-      if (!supabase) {
-        setAuditData({
-          occupancyRate: 0,
-          totalRooms: 0,
-          occupiedRooms: 0,
-          totalRevenue: 0,
-          revenues: { cash: 0, pos: 0, transfer: 0, cityLedger: 0 },
-          pendingCheckouts: [],
-          expectedArrivals: [],
-          anomalies: []
-        })
-        setLoading(false)
-        return
+      const emptyData = {
+        occupancyRate: 0, totalRooms: 0, occupiedRooms: 0, totalRevenue: 0,
+        revenues: { cash: 0, pos: 0, transfer: 0, cityLedger: 0 },
+        pendingCheckouts: [], expectedArrivals: [], anomalies: []
       }
+      if (!supabase) { setAuditData(emptyData); endFetch(); return }
 
       const { data: { user } } = await supabase.auth.getUser()
-      if (!user) {
-        router.push('/auth/login')
-        return
-      }
+      if (!user) { router.push('/auth/login'); return }
 
       const { data: profile } = await supabase
-        .from('profiles')
-        .select('organization_id')
-        .eq('id', user.id)
-        .single()
-
-      if (!profile) {
-        setAuditData({
-          occupancyRate: 0,
-          totalRooms: 0,
-          occupiedRooms: 0,
-          totalRevenue: 0,
-          revenues: { cash: 0, pos: 0, transfer: 0, cityLedger: 0 },
-          pendingCheckouts: [],
-          expectedArrivals: [],
-          anomalies: []
-        })
-        return
-      }
+        .from('profiles').select('organization_id').eq('id', user.id).single()
+      if (!profile) { setAuditData(emptyData); return }
 
       // Fetch audit data
       const { data: bookings } = await supabase
@@ -108,18 +74,9 @@ export default function NightAuditPage() {
       })
     } catch (error: any) {
       console.error('Error fetching audit data:', error)
-      setAuditData({
-        occupancyRate: 0,
-        totalRooms: 0,
-        occupiedRooms: 0,
-        totalRevenue: 0,
-        revenues: { cash: 0, pos: 0, transfer: 0, cityLedger: 0 },
-        pendingCheckouts: [],
-        expectedArrivals: [],
-        anomalies: []
-      })
+      setAuditData({ occupancyRate: 0, totalRooms: 0, occupiedRooms: 0, totalRevenue: 0, revenues: { cash: 0, pos: 0, transfer: 0, cityLedger: 0 }, pendingCheckouts: [], expectedArrivals: [], anomalies: [] })
     } finally {
-      setLoading(false)
+      endFetch()
     }
   }
 
@@ -134,7 +91,7 @@ export default function NightAuditPage() {
     }, 3000)
   }
 
-  if (loading) {
+  if (initialLoading) {
     return (
       <div className="flex items-center justify-center h-96">
         <Loader2 className="h-8 w-8 animate-spin" />

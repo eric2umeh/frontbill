@@ -28,6 +28,8 @@ interface ExtendStayModalProps {
     ratePerNight: number
     guestId: string
     guestBalance?: number
+    organization_id?: string
+    created_by?: string
   }
 }
 
@@ -58,14 +60,17 @@ export function ExtendStayModal({ open, onClose, booking }: ExtendStayModalProps
   const fetchOrganizations = async () => {
     try {
       const supabase = createClient()
+      // Fetch from city_ledger_accounts for organizations (exclude individuals)
       const { data, error } = await supabase
-        .from('organizations')
-        .select('id, name, current_balance')
-        .order('name')
+        .from('city_ledger_accounts')
+        .select('id, account_name, balance')
+        .neq('account_type', 'individual')
+        .neq('account_type', 'guest')
+        .order('account_name')
 
       if (error) throw error
-      setOrganizations(data || [])
-      setFilteredOrganizations(data || [])
+      setOrganizations((data || []).map(d => ({ id: d.id, name: d.account_name, current_balance: d.balance || 0 })))
+      setFilteredOrganizations((data || []).map(d => ({ id: d.id, name: d.account_name, current_balance: d.balance || 0 })))
     } catch (error: any) {
       toast.error('Failed to load organizations')
     }
@@ -112,28 +117,116 @@ export function ExtendStayModal({ open, onClose, booking }: ExtendStayModalProps
       const supabase = createClient()
       
       // Add charge to folio_charges with unpaid status
+      // Note: organization_id column may not exist yet, so we try with it first, then fall back without it
+      const chargeData: any = {
+        booking_id: booking.id,
+        description: `Extended Stay - ${additionalNights} night${additionalNights !== 1 ? 's' : ''}`,
+        amount: additionalAmount,
+        charge_type: 'extended_stay',
+        payment_method: paymentMethod,
+        ledger_account_id: paymentMethod === 'city_ledger' ? selectedLedger?.id : null,
+        ledger_account_type: paymentMethod === 'city_ledger' ? ledgerType : null,
+        payment_status: 'unpaid',
+        created_by: booking.created_by
+      }
+      
+      // Try to include organization_id if column exists
+      if (booking.organization_id) {
+        chargeData.organization_id = booking.organization_id
+      }
+      
       const { error: chargeError } = await supabase
         .from('folio_charges')
-        .insert([{
-          booking_id: booking.id,
-          organization_id: booking.organization_id,
-          description: `Extended Stay - ${additionalNights} night${additionalNights !== 1 ? 's' : ''}`,
-          amount: additionalAmount,
-          charge_type: 'extended_stay',
-          payment_method: paymentMethod,
-          ledger_account_id: paymentMethod === 'city_ledger' ? selectedLedger?.id : null,
-          ledger_account_type: paymentMethod === 'city_ledger' ? ledgerType : null,
-          payment_status: 'unpaid',  // Always unpaid for extended stay
-          created_by: booking.created_by
-        }])
+        .insert([chargeData])
 
-      if (chargeError) throw chargeError
+      if (chargeError) {
+        // If error includes "organization_id", try again without it
+        if (chargeError.message?.includes('organization_id')) {
+          const fallbackData = { ...chargeData }
+          delete fallbackData.organization_id
+          const { error: retryError } = await supabase
+            .from('folio_charges')
+            .insert([fallbackData])
+          if (retryError) throw retryError
+        } else {
+          throw chargeError
+        }
+      }
 
       // Update booking checkout date
       await supabase
         .from('bookings')
         .update({ check_out: format(newCheckOutDate, 'yyyy-MM-dd') })
         .eq('id', booking.id)
+
+      // Bump booking balance for unpaid / city-ledger extended stay
+      if (paymentMethod !== 'cash' && paymentMethod !== 'card' && paymentMethod !== 'pos' && paymentMethod !== 'bank_transfer') {
+        const { data: freshBk } = await supabase
+          .from('bookings')
+          .select('balance')
+          .eq('id', booking.id)
+          .single()
+        await supabase
+          .from('bookings')
+          .update({ balance: (freshBk?.balance || 0) + additionalAmount, payment_status: 'pending' })
+          .eq('id', booking.id)
+      }
+
+      // Write to transactions table (non-fatal)
+      try {
+        await supabase.from('transactions').insert([{
+          organization_id: booking.organization_id || null,
+          booking_id: booking.id,
+          transaction_id: `EXT-${booking.id}-${Date.now()}`,
+          guest_name: booking.guestName || 'Guest',
+          room: booking.room || null,
+          amount: additionalAmount,
+          payment_method: paymentMethod,
+          status: paymentMethod === 'city_ledger' ? 'pending' : 'paid',
+          description: `Extended Stay — ${additionalNights} night${additionalNights !== 1 ? 's' : ''}`,
+          received_by: null,
+        }])
+      } catch (_) { /* non-fatal */ }
+
+      // City ledger: update account balance + guest/org profile balance
+      if (paymentMethod === 'city_ledger' && selectedLedger?.id) {
+        // Always update city_ledger_accounts.balance
+        const { data: acct } = await supabase
+          .from('city_ledger_accounts')
+          .select('balance')
+          .eq('id', selectedLedger.id)
+          .single()
+        await supabase
+          .from('city_ledger_accounts')
+          .update({ balance: (acct?.balance || 0) + additionalAmount })
+          .eq('id', selectedLedger.id)
+
+        if (ledgerType === 'individual' && booking.guestId) {
+          // Bump guests.balance so guest profile shows outstanding debt
+          const { data: guestRow } = await supabase
+            .from('guests')
+            .select('balance')
+            .eq('id', booking.guestId)
+            .single()
+          await supabase
+            .from('guests')
+            .update({ balance: ((guestRow?.balance as number) || 0) + additionalAmount })
+            .eq('id', booking.guestId)
+        } else if (ledgerType === 'organization') {
+          // Bump organizations.current_balance
+          const { data: orgRow } = await supabase
+            .from('organizations')
+            .select('current_balance')
+            .eq('id', selectedLedger.id)
+            .single()
+          if (orgRow) {
+            await supabase
+              .from('organizations')
+              .update({ current_balance: ((orgRow.current_balance as number) || 0) + additionalAmount })
+              .eq('id', selectedLedger.id)
+          }
+        }
+      }
 
       const accountInfo = paymentMethod === 'city_ledger' && selectedLedger 
         ? ` to ${selectedLedger.name}`
