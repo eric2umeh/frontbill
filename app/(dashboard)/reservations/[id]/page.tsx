@@ -18,7 +18,6 @@ import { format } from 'date-fns'
 export default function ReservationDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
   const router = useRouter()
-  const supabase = createClient()
 
   const [reservation, setReservation] = useState<any>(null)
   const [loading, setLoading] = useState(true)
@@ -37,6 +36,7 @@ export default function ReservationDetailPage({ params }: { params: Promise<{ id
         return
       }
 
+      const supabase = createClient()
       const { data, error } = await supabase
         .from('bookings')
         .select(`
@@ -87,6 +87,7 @@ export default function ReservationDetailPage({ params }: { params: Promise<{ id
                 toast.dismiss(t)
                 setActionLoading(true)
                 try {
+                  const supabase = createClient()
                   const { error } = await supabase
                     .from('bookings')
                     .update({ status: 'checked_in' })
@@ -121,10 +122,19 @@ export default function ReservationDetailPage({ params }: { params: Promise<{ id
     }
     try {
       setPaymentLoading(true)
+      const supabase = createClient()
       const amount = Number(paymentAmount)
       const newDeposit = (reservation?.deposit || 0) + amount
       const newBalance = Math.max(0, (reservation?.total_amount || 0) - newDeposit)
       const newStatus = newBalance <= 0 ? 'paid' : newDeposit > 0 ? 'partial' : 'unpaid'
+
+      // Get organization_id from profile for transactions
+      const { data: { user } } = await supabase.auth.getUser()
+      let orgId: string | null = null
+      if (user) {
+        const { data: profile } = await supabase.from('profiles').select('organization_id').eq('id', user.id).single()
+        orgId = profile?.organization_id || null
+      }
 
       await supabase
         .from('bookings')
@@ -140,6 +150,7 @@ export default function ReservationDetailPage({ params }: { params: Promise<{ id
           ? reservation.rooms[0]?.room_number
           : reservation?.rooms?.room_number
         await supabase.from('transactions').insert([{
+          organization_id: orgId,
           booking_id: id,
           transaction_id: `PAY-${id}-${Date.now()}`,
           guest_name: guestName || 'Guest',
@@ -185,6 +196,7 @@ export default function ReservationDetailPage({ params }: { params: Promise<{ id
                 toast.dismiss(t)
                 setActionLoading(true)
                 try {
+                  const supabase = createClient()
                   await supabase.from('bookings').update({ status: 'cancelled' }).eq('id', id)
                   // Free up the room
                   if (reservation?.rooms?.id) {
