@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { EnhancedDataTable } from '@/components/shared/enhanced-data-table'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -206,35 +207,35 @@ export default function ReservationsPage() {
             key: 'folio_id',
             label: 'Folio Ref',
             render: (res) => (
-              <div 
+              <Link 
+                href={`/reservations/${res.id}`}
                 className="font-mono text-sm cursor-pointer hover:text-primary"
-                onClick={() => router.push(`/reservations/${res.id}`)}
               >
                 {res.folio_id}
-              </div>
+              </Link>
             ),
           },
           {
             key: 'guest',
             label: 'Guest',
             render: (res) => (
-              <div 
-                className="cursor-pointer hover:text-primary"
-                onClick={() => router.push(`/reservations/${res.id}`)}
+              <Link 
+                href={`/reservations/${res.id}`}
+                className="cursor-pointer hover:text-primary block"
               >
                 <div className="font-medium">{res.guests?.name}</div>
                 <div className="text-xs text-muted-foreground">{res.guests?.phone}</div>
-              </div>
+              </Link>
             ),
           },
           {
             key: 'room',
             label: 'Room',
             render: (res) => (
-              <div className="cursor-pointer" onClick={() => router.push(`/reservations/${res.id}`)}>
+              <Link href={`/reservations/${res.id}`} className="cursor-pointer block">
                 <div className="font-medium">Room {res.rooms?.room_number}</div>
                 <div className="text-xs text-muted-foreground">{res.rooms?.room_type}</div>
-              </div>
+              </Link>
             ),
           },
           {
@@ -320,12 +321,8 @@ export default function ReservationsPage() {
             key: 'actions',
             label: 'Actions',
             render: (res) => (
-              <Button 
-                size="sm" 
-                variant="outline"
-                onClick={() => router.push(`/reservations/${res.id}`)}
-              >
-                View
+              <Button asChild size="sm" variant="outline">
+                <Link href={`/reservations/${res.id}`}>View</Link>
               </Button>
             ),
           },
