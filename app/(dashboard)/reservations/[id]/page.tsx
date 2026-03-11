@@ -51,6 +51,17 @@ export default function ReservationDetailPage({
       setLoading(true)
       const supabase = createClient()
       console.log('[v0] supabase client created')
+      
+      // Check auth status first
+      const { data: { session }, error: authError } = await supabase.auth.getSession()
+      console.log('[v0] auth check - session:', !!session, 'error:', authError)
+      if (authError || !session) {
+        console.log('[v0] no valid session, redirecting to login')
+        toast.error('Session expired. Please log in again.')
+        router.push('/auth/login')
+        return
+      }
+
       const { data, error } = await supabase
         .from('bookings')
         .select(
