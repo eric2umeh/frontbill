@@ -47,8 +47,10 @@ export default function ReservationDetailPage({
 
   async function loadReservation(bookingId: string) {
     try {
+      console.log('[v0] loadReservation called with bookingId:', bookingId)
       setLoading(true)
       const supabase = createClient()
+      console.log('[v0] supabase client created')
       const { data, error } = await supabase
         .from('bookings')
         .select(
@@ -61,14 +63,18 @@ export default function ReservationDetailPage({
         .eq('id', bookingId)
         .single()
 
+      console.log('[v0] query response - error:', error, 'data:', data)
       if (error) throw error
       if (!data) {
+        console.log('[v0] no data returned from query')
         toast.error('Reservation not found')
         router.push('/reservations')
         return
       }
+      console.log('[v0] setting reservation data:', data)
       setReservation(data)
-    } catch {
+    } catch (err: any) {
+      console.log('[v0] loadReservation error:', err.message || err)
       toast.error('Failed to load reservation')
       router.push('/reservations')
     } finally {
