@@ -31,6 +31,12 @@ export default function ReservationDetailPage({ params }: { params: Promise<{ id
   const fetchReservation = useCallback(async () => {
     try {
       setLoading(true)
+      if (!id) {
+        toast.error('Invalid reservation ID')
+        router.push('/reservations')
+        return
+      }
+
       const { data, error } = await supabase
         .from('bookings')
         .select(`
@@ -44,8 +50,14 @@ export default function ReservationDetailPage({ params }: { params: Promise<{ id
         .single()
 
       if (error) throw error
+      if (!data) {
+        toast.error('Reservation not found')
+        router.push('/reservations')
+        return
+      }
       setReservation(data)
     } catch (err: any) {
+      console.log('[v0] Failed to load reservation:', err.message || err)
       toast.error('Failed to load reservation')
       router.push('/reservations')
     } finally {

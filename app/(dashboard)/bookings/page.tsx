@@ -78,6 +78,8 @@ export default function BookingsPage() {
         .from('bookings')
         .select('*, guests(name, phone), rooms(room_number, room_type), created_by, updated_by, updated_at')
         .eq('organization_id', profile.organization_id)
+        .in('status', ['confirmed', 'checked_in'])
+        .lte('check_in', new Date().toISOString().split('T')[0])
         .order('check_in', { ascending: false })
 
       if (error) throw error
