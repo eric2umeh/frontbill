@@ -24,6 +24,7 @@ export default function ReservationDetailPage({
   const [rid, setRid] = useState('')
   const [reservation, setReservation] = useState<any>(null)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [actionLoading, setActionLoading] = useState(false)
   const [paymentModalOpen, setPaymentModalOpen] = useState(false)
   const [paymentAmount, setPaymentAmount] = useState('')
@@ -47,20 +48,9 @@ export default function ReservationDetailPage({
 
   async function loadReservation(bookingId: string) {
     try {
-      console.log('[v0] loadReservation called with bookingId:', bookingId)
       setLoading(true)
+      setError(null)
       const supabase = createClient()
-      console.log('[v0] supabase client created')
-      
-      // Check auth status first
-      const { data: { session }, error: authError } = await supabase.auth.getSession()
-      console.log('[v0] auth check - session:', !!session, 'error:', authError)
-      if (authError || !session) {
-        console.log('[v0] no valid session, redirecting to login')
-        toast.error('Session expired. Please log in again.')
-        router.push('/auth/login')
-        return
-      }
 
       const { data, error } = await supabase
         .from('bookings')
@@ -74,20 +64,17 @@ export default function ReservationDetailPage({
         .eq('id', bookingId)
         .single()
 
-      console.log('[v0] query response - error:', error, 'data:', data)
-      if (error) throw error
-      if (!data) {
-        console.log('[v0] no data returned from query')
-        toast.error('Reservation not found')
-        router.push('/reservations')
+      if (error) {
+        setError(error.message || 'Failed to load reservation')
         return
       }
-      console.log('[v0] setting reservation data:', data)
+      if (!data) {
+        setError('Reservation not found')
+        return
+      }
       setReservation(data)
     } catch (err: any) {
-      console.log('[v0] loadReservation error:', err.message || err)
-      toast.error('Failed to load reservation')
-      router.push('/reservations')
+      setError(err.message || 'Failed to load reservation')
     } finally {
       setLoading(false)
     }
@@ -285,6 +272,25 @@ export default function ReservationDetailPage({
     return (
       <div className="flex items-center justify-center h-64">
         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="space-y-6">
+        <Button variant="ghost" onClick={() => router.push('/reservations')}>
+          <ArrowLeft className="h-4 w-4 mr-2" />
+          Back to Reservations
+        </Button>
+        <Card>
+          <CardContent className="flex flex-col items-center justify-center py-12">
+            <AlertCircle className="h-12 w-12 text-destructive mb-4" />
+            <h2 className="text-xl font-semibold mb-2">Failed to Load Reservation</h2>
+            <p className="text-muted-foreground mb-4">{error}</p>
+            <Button onClick={() => rid && loadReservation(rid)}>Try Again</Button>
+          </CardContent>
+        </Card>
       </div>
     )
   }
