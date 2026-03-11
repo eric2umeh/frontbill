@@ -15,10 +15,13 @@ import { toast } from 'sonner'
 import { createClient } from '@/lib/supabase/client'
 import { format } from 'date-fns'
 
-export default function ReservationDetailPage({ params }: { params: Promise<{ id: string }> | { id: string } }) {
+export default function ReservationDetailPage({
+  params,
+}: {
+  params: Promise<{ id: string }> | { id: string }
+}) {
   const router = useRouter()
-
-  const [reservationId, setReservationId] = useState<string>('')
+  const [rid, setRid] = useState('')
   const [reservation, setReservation] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState(false)
@@ -27,20 +30,35 @@ export default function ReservationDetailPage({ params }: { params: Promise<{ id
   const [paymentMethod, setPaymentMethod] = useState('')
   const [paymentLoading, setPaymentLoading] = useState(false)
 
-  const fetchReservation = async (id: string) => {
+  useEffect(() => {
+    let cancelled = false
+    const init = async () => {
+      const resolved = await Promise.resolve(params)
+      if (cancelled) return
+      setRid(resolved.id)
+      loadReservation(resolved.id)
+    }
+    init()
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  async function loadReservation(bookingId: string) {
     try {
       setLoading(true)
       const supabase = createClient()
       const { data, error } = await supabase
         .from('bookings')
-        .select(`
-          id, folio_id, check_in, check_out, status, payment_status,
-          rate_per_night, total_amount, deposit, balance, number_of_nights,
-          payment_method, notes, created_at,
-          guests:guest_id(id, name, phone, email, address),
-          rooms:room_id(id, room_number, room_type, price_per_night)
-        `)
-        .eq('id', id)
+        .select(
+          `id, folio_id, check_in, check_out, status, payment_status,
+           rate_per_night, total_amount, deposit, balance, number_of_nights,
+           payment_method, notes, created_at,
+           guests:guest_id(id, name, phone, email, address),
+           rooms:room_id(id, room_number, room_type, price_per_night)`
+        )
+        .eq('id', bookingId)
         .single()
 
       if (error) throw error
@@ -50,7 +68,7 @@ export default function ReservationDetailPage({ params }: { params: Promise<{ id
         return
       }
       setReservation(data)
-    } catch (err: any) {
+    } catch {
       toast.error('Failed to load reservation')
       router.push('/reservations')
     } finally {
@@ -58,28 +76,23 @@ export default function ReservationDetailPage({ params }: { params: Promise<{ id
     }
   }
 
-  useEffect(() => {
-    const resolveAndFetch = async () => {
-      const resolvedParams = await Promise.resolve(params)
-      setReservationId(resolvedParams.id)
-      await fetchReservation(resolvedParams.id)
-    }
-    resolveAndFetch()
-  }, [])
-
-  const handleCheckin = () => {
+  function handleCheckin() {
     toast(
       (t) => (
         <div className="flex flex-col gap-3">
           <div className="flex gap-2 items-start">
-            <AlertCircle className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
+            <AlertCircle className="w-5 h-5 text-blue-600 mt-0.5 shrink-0" />
             <div>
               <p className="font-semibold">Check in Guest?</p>
-              <p className="text-sm text-muted-foreground">The guest will be moved to active bookings.</p>
+              <p className="text-sm text-muted-foreground">
+                The guest will be moved to active bookings.
+              </p>
             </div>
           </div>
           <div className="flex gap-2 justify-end">
-            <Button variant="outline" size="sm" onClick={() => toast.dismiss(t)}>Cancel</Button>
+            <Button variant="outline" size="sm" onClick={() => toast.dismiss(t)}>
+              Cancel
+            </Button>
             <Button
               size="sm"
               disabled={actionLoading}
@@ -91,11 +104,13 @@ export default function ReservationDetailPage({ params }: { params: Promise<{ id
                   const { error } = await supabase
                     .from('bookings')
                     .update({ status: 'checked_in' })
-                    .eq('id', reservationId)
+                    .eq('id', rid)
                   if (error) throw error
-                  // Mark room as occupied
                   if (reservation?.rooms?.id) {
-                    await supabase.from('rooms').update({ status: 'occupied' }).eq('id', reservation.rooms.id)
+                    await supabase
+                      .from('rooms')
+                      .update({ status: 'occupied' })
+                      .eq('id', reservation.rooms.id)
                   }
                   toast.success('Guest checked in successfully')
                   router.push('/bookings')
@@ -106,7 +121,11 @@ export default function ReservationDetailPage({ params }: { params: Promise<{ id
                 }
               }}
             >
-              {actionLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Check-in'}
+              {actionLoading ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                'Check-in'
+              )}
             </Button>
           </div>
         </div>
@@ -115,7 +134,7 @@ export default function ReservationDetailPage({ params }: { params: Promise<{ id
     )
   }
 
-  const handlePaymentUpdate = async () => {
+  async function handlePaymentUpdate() {
     if (!paymentAmount || !paymentMethod) {
       toast.error('Please enter amount and select payment method')
       return
@@ -125,49 +144,67 @@ export default function ReservationDetailPage({ params }: { params: Promise<{ id
       const supabase = createClient()
       const amount = Number(paymentAmount)
       const newDeposit = (reservation?.deposit || 0) + amount
-      const newBalance = Math.max(0, (reservation?.total_amount || 0) - newDeposit)
-      const newStatus = newBalance <= 0 ? 'paid' : newDeposit > 0 ? 'partial' : 'unpaid'
+      const newBalance = Math.max(
+        0,
+        (reservation?.total_amount || 0) - newDeposit
+      )
+      const newStatus =
+        newBalance <= 0 ? 'paid' : newDeposit > 0 ? 'partial' : 'unpaid'
 
-      // Get organization_id from profile for transactions
-      const { data: { user } } = await supabase.auth.getUser()
+      // Get organization_id from profile
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
       let orgId: string | null = null
       if (user) {
-        const { data: profile } = await supabase.from('profiles').select('organization_id').eq('id', user.id).single()
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('organization_id')
+          .eq('id', user.id)
+          .single()
         orgId = profile?.organization_id || null
       }
 
       await supabase
         .from('bookings')
-        .update({ deposit: newDeposit, balance: newBalance, payment_status: newStatus })
-        .eq('id', reservationId)
+        .update({
+          deposit: newDeposit,
+          balance: newBalance,
+          payment_status: newStatus,
+        })
+        .eq('id', rid)
 
       // Record in transactions table (non-fatal)
       try {
-        const guestName = Array.isArray(reservation?.guests)
+        const gName = Array.isArray(reservation?.guests)
           ? reservation.guests[0]?.name
           : reservation?.guests?.name
-        const roomNumber = Array.isArray(reservation?.rooms)
+        const rNum = Array.isArray(reservation?.rooms)
           ? reservation.rooms[0]?.room_number
           : reservation?.rooms?.room_number
-        await supabase.from('transactions').insert([{
-          organization_id: orgId,
-          booking_id: reservationId,
-          transaction_id: `PAY-${reservationId}-${Date.now()}`,
-          guest_name: guestName || 'Guest',
-          room: roomNumber || null,
-          amount,
-          payment_method: paymentMethod,
-          status: 'paid',
-          description: `Reservation payment — Folio ${reservation?.folio_id}`,
-          received_by: null,
-        }])
-      } catch (_) { /* non-fatal */ }
+        await supabase.from('transactions').insert([
+          {
+            organization_id: orgId,
+            booking_id: rid,
+            transaction_id: `PAY-${rid}-${Date.now()}`,
+            guest_name: gName || 'Guest',
+            room: rNum || null,
+            amount,
+            payment_method: paymentMethod,
+            status: 'paid',
+            description: `Reservation payment — Folio ${reservation?.folio_id}`,
+            received_by: null,
+          },
+        ])
+      } catch {
+        /* non-fatal */
+      }
 
       toast.success(`Payment of ${formatNaira(amount)} recorded`)
       setPaymentModalOpen(false)
       setPaymentAmount('')
       setPaymentMethod('')
-      fetchReservation(reservationId)
+      loadReservation(rid)
     } catch (err: any) {
       toast.error(err.message || 'Failed to record payment')
     } finally {
@@ -175,19 +212,23 @@ export default function ReservationDetailPage({ params }: { params: Promise<{ id
     }
   }
 
-  const handleDelete = () => {
+  function handleDelete() {
     toast(
       (t) => (
         <div className="flex flex-col gap-3">
           <div className="flex gap-2 items-start">
-            <AlertCircle className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" />
+            <AlertCircle className="w-5 h-5 text-red-600 mt-0.5 shrink-0" />
             <div>
               <p className="font-semibold">Cancel Reservation?</p>
-              <p className="text-sm text-muted-foreground">This action cannot be undone.</p>
+              <p className="text-sm text-muted-foreground">
+                This action cannot be undone.
+              </p>
             </div>
           </div>
           <div className="flex gap-2 justify-end">
-            <Button variant="outline" size="sm" onClick={() => toast.dismiss(t)}>Keep</Button>
+            <Button variant="outline" size="sm" onClick={() => toast.dismiss(t)}>
+              Keep
+            </Button>
             <Button
               variant="destructive"
               size="sm"
@@ -197,10 +238,15 @@ export default function ReservationDetailPage({ params }: { params: Promise<{ id
                 setActionLoading(true)
                 try {
                   const supabase = createClient()
-                  await supabase.from('bookings').update({ status: 'cancelled' }).eq('id', reservationId)
-                  // Free up the room
+                  await supabase
+                    .from('bookings')
+                    .update({ status: 'cancelled' })
+                    .eq('id', rid)
                   if (reservation?.rooms?.id) {
-                    await supabase.from('rooms').update({ status: 'available' }).eq('id', reservation.rooms.id)
+                    await supabase
+                      .from('rooms')
+                      .update({ status: 'available' })
+                      .eq('id', reservation.rooms.id)
                   }
                   toast.success('Reservation cancelled')
                   router.push('/reservations')
@@ -230,9 +276,15 @@ export default function ReservationDetailPage({ params }: { params: Promise<{ id
 
   if (!reservation) return null
 
-  const guest = Array.isArray(reservation.guests) ? reservation.guests[0] : reservation.guests
-  const room = Array.isArray(reservation.rooms) ? reservation.rooms[0] : reservation.rooms
-  const balance = reservation.balance ?? (reservation.total_amount - (reservation.deposit || 0))
+  const guest = Array.isArray(reservation.guests)
+    ? reservation.guests[0]
+    : reservation.guests
+  const room = Array.isArray(reservation.rooms)
+    ? reservation.rooms[0]
+    : reservation.rooms
+  const balance =
+    reservation.balance ??
+    (reservation.total_amount || 0) - (reservation.deposit || 0)
   const amountPaid = reservation.deposit || 0
 
   const statusColors: Record<string, string> = {
@@ -247,7 +299,9 @@ export default function ReservationDetailPage({ params }: { params: Promise<{ id
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Update Payment</DialogTitle>
-            <DialogDescription className="sr-only">Record a payment for this reservation</DialogDescription>
+            <DialogDescription className="sr-only">
+              Record a payment for this reservation
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
@@ -262,7 +316,9 @@ export default function ReservationDetailPage({ params }: { params: Promise<{ id
             <div className="space-y-2">
               <Label>Payment Method</Label>
               <Select value={paymentMethod} onValueChange={setPaymentMethod}>
-                <SelectTrigger><SelectValue placeholder="Select method" /></SelectTrigger>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select method" />
+                </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="cash">Cash</SelectItem>
                   <SelectItem value="pos">POS</SelectItem>
@@ -272,8 +328,19 @@ export default function ReservationDetailPage({ params }: { params: Promise<{ id
                 </SelectContent>
               </Select>
             </div>
-            <Button onClick={handlePaymentUpdate} className="w-full" disabled={paymentLoading}>
-              {paymentLoading ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Recording...</> : 'Record Payment'}
+            <Button
+              onClick={handlePaymentUpdate}
+              className="w-full"
+              disabled={paymentLoading}
+            >
+              {paymentLoading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Recording...
+                </>
+              ) : (
+                'Record Payment'
+              )}
             </Button>
           </div>
         </DialogContent>
@@ -285,11 +352,21 @@ export default function ReservationDetailPage({ params }: { params: Promise<{ id
           Back to Reservations
         </Button>
         <div className="flex gap-2">
-          <Button variant="default" size="sm" onClick={handleCheckin} disabled={actionLoading}>
+          <Button
+            variant="default"
+            size="sm"
+            onClick={handleCheckin}
+            disabled={actionLoading}
+          >
             <UserCheck className="mr-2 h-4 w-4" />
             Check-in Guest
           </Button>
-          <Button variant="destructive" size="sm" onClick={handleDelete} disabled={actionLoading}>
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={handleDelete}
+            disabled={actionLoading}
+          >
             <Trash2 className="mr-2 h-4 w-4" />
             Cancel
           </Button>
@@ -302,15 +379,28 @@ export default function ReservationDetailPage({ params }: { params: Promise<{ id
             <div className="flex items-center justify-between">
               <CardTitle>Reservation Details</CardTitle>
               <div className="flex gap-2">
-                <Badge variant="outline" className={statusColors[reservation.status] || 'bg-muted text-muted-foreground'}>
-                  {reservation.status.charAt(0).toUpperCase() + reservation.status.slice(1)}
+                <Badge
+                  variant="outline"
+                  className={
+                    statusColors[reservation.status] ||
+                    'bg-muted text-muted-foreground'
+                  }
+                >
+                  {reservation.status.charAt(0).toUpperCase() +
+                    reservation.status.slice(1)}
                 </Badge>
-                <Badge variant="outline" className={
-                  reservation.payment_status === 'paid' ? 'bg-green-500/10 text-green-700' :
-                  reservation.payment_status === 'partial' ? 'bg-yellow-500/10 text-yellow-700' :
-                  'bg-red-500/10 text-red-700'
-                }>
-                  {reservation.payment_status?.charAt(0).toUpperCase() + reservation.payment_status?.slice(1) || 'Unpaid'}
+                <Badge
+                  variant="outline"
+                  className={
+                    reservation.payment_status === 'paid'
+                      ? 'bg-green-500/10 text-green-700'
+                      : reservation.payment_status === 'partial'
+                        ? 'bg-yellow-500/10 text-yellow-700'
+                        : 'bg-red-500/10 text-red-700'
+                  }
+                >
+                  {reservation.payment_status?.charAt(0).toUpperCase() +
+                    reservation.payment_status?.slice(1) || 'Unpaid'}
                 </Badge>
               </div>
             </div>
@@ -319,49 +409,67 @@ export default function ReservationDetailPage({ params }: { params: Promise<{ id
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <div className="text-sm text-muted-foreground">Guest Name</div>
-                <div className="font-semibold">{guest?.name || '—'}</div>
+                <div className="font-semibold">{guest?.name || '\u2014'}</div>
               </div>
               <div>
                 <div className="text-sm text-muted-foreground">Phone</div>
-                <div className="font-semibold">{guest?.phone || '—'}</div>
+                <div className="font-semibold">{guest?.phone || '\u2014'}</div>
               </div>
               <div>
                 <div className="text-sm text-muted-foreground">Email</div>
-                <div className="font-semibold">{guest?.email || '—'}</div>
+                <div className="font-semibold">{guest?.email || '\u2014'}</div>
               </div>
               <div>
                 <div className="text-sm text-muted-foreground">Room</div>
                 <div className="font-semibold">
-                  {room ? `Room ${room.room_number} — ${room.room_type}` : '—'}
+                  {room
+                    ? `Room ${room.room_number} \u2014 ${room.room_type}`
+                    : '\u2014'}
                 </div>
               </div>
               <div>
                 <div className="text-sm text-muted-foreground">Folio ID</div>
-                <div className="font-semibold font-mono text-sm">{reservation.folio_id || '—'}</div>
+                <div className="font-semibold font-mono text-sm">
+                  {reservation.folio_id || '\u2014'}
+                </div>
               </div>
               <div>
-                <div className="text-sm text-muted-foreground">Rate / Night</div>
-                <div className="font-semibold">{formatNaira(reservation.rate_per_night || 0)}</div>
+                <div className="text-sm text-muted-foreground">
+                  Rate / Night
+                </div>
+                <div className="font-semibold">
+                  {formatNaira(reservation.rate_per_night || 0)}
+                </div>
               </div>
               <div>
                 <div className="text-sm text-muted-foreground">Check-in</div>
                 <div className="font-semibold">
-                  {reservation.check_in ? format(new Date(reservation.check_in), 'dd MMM yyyy') : '—'}
+                  {reservation.check_in
+                    ? format(new Date(reservation.check_in), 'dd MMM yyyy')
+                    : '\u2014'}
                 </div>
               </div>
               <div>
                 <div className="text-sm text-muted-foreground">Check-out</div>
                 <div className="font-semibold">
-                  {reservation.check_out ? format(new Date(reservation.check_out), 'dd MMM yyyy') : '—'}
+                  {reservation.check_out
+                    ? format(new Date(reservation.check_out), 'dd MMM yyyy')
+                    : '\u2014'}
                 </div>
               </div>
               <div>
                 <div className="text-sm text-muted-foreground">Nights</div>
-                <div className="font-semibold">{reservation.number_of_nights || '—'}</div>
+                <div className="font-semibold">
+                  {reservation.number_of_nights || '\u2014'}
+                </div>
               </div>
               <div>
-                <div className="text-sm text-muted-foreground">Payment Method</div>
-                <div className="font-semibold capitalize">{reservation.payment_method?.replace('_', ' ') || '—'}</div>
+                <div className="text-sm text-muted-foreground">
+                  Payment Method
+                </div>
+                <div className="font-semibold capitalize">
+                  {reservation.payment_method?.replace('_', ' ') || '\u2014'}
+                </div>
               </div>
               {reservation.notes && (
                 <div className="col-span-2">
@@ -381,21 +489,30 @@ export default function ReservationDetailPage({ params }: { params: Promise<{ id
             <CardContent className="space-y-4">
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Total Amount</span>
-                <span className="font-semibold">{formatNaira(reservation.total_amount || 0)}</span>
+                <span className="font-semibold">
+                  {formatNaira(reservation.total_amount || 0)}
+                </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Amount Paid</span>
-                <span className="font-semibold text-green-600">{formatNaira(amountPaid)}</span>
+                <span className="font-semibold text-green-600">
+                  {formatNaira(amountPaid)}
+                </span>
               </div>
               <div className="h-px bg-border" />
               <div className="flex justify-between text-lg">
                 <span className="font-semibold">Balance</span>
-                <span className={`font-bold ${balance > 0 ? 'text-destructive' : 'text-green-600'}`}>
+                <span
+                  className={`font-bold ${balance > 0 ? 'text-destructive' : 'text-green-600'}`}
+                >
                   {formatNaira(balance)}
                 </span>
               </div>
               {balance > 0 && (
-                <Button className="w-full" onClick={() => setPaymentModalOpen(true)}>
+                <Button
+                  className="w-full"
+                  onClick={() => setPaymentModalOpen(true)}
+                >
                   <CreditCard className="mr-2 h-4 w-4" />
                   Update Payment
                 </Button>
@@ -408,11 +525,21 @@ export default function ReservationDetailPage({ params }: { params: Promise<{ id
               <CardTitle>Actions</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">
-              <Button className="w-full" variant="default" onClick={handleCheckin} disabled={actionLoading}>
+              <Button
+                className="w-full"
+                variant="default"
+                onClick={handleCheckin}
+                disabled={actionLoading}
+              >
                 <UserCheck className="mr-2 h-4 w-4" />
                 Check-in Guest
               </Button>
-              <Button className="w-full" variant="destructive" onClick={handleDelete} disabled={actionLoading}>
+              <Button
+                className="w-full"
+                variant="destructive"
+                onClick={handleDelete}
+                disabled={actionLoading}
+              >
                 <Trash2 className="mr-2 h-4 w-4" />
                 Cancel Reservation
               </Button>
