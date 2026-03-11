@@ -151,7 +151,6 @@ export default function ReservationDetailPage({
       const newStatus =
         newBalance <= 0 ? 'paid' : newDeposit > 0 ? 'partial' : 'unpaid'
 
-      // Get organization_id from profile
       const {
         data: { user },
       } = await supabase.auth.getUser()
@@ -174,7 +173,6 @@ export default function ReservationDetailPage({
         })
         .eq('id', rid)
 
-      // Record in transactions table (non-fatal)
       try {
         const gName = Array.isArray(reservation?.guests)
           ? reservation.guests[0]?.name
@@ -186,21 +184,21 @@ export default function ReservationDetailPage({
           {
             organization_id: orgId,
             booking_id: rid,
-            transaction_id: `PAY-${rid}-${Date.now()}`,
+            transaction_id: 'PAY-' + rid + '-' + Date.now(),
             guest_name: gName || 'Guest',
             room: rNum || null,
             amount,
             payment_method: paymentMethod,
             status: 'paid',
-            description: `Reservation payment — Folio ${reservation?.folio_id}`,
+            description: 'Reservation payment',
             received_by: null,
           },
         ])
       } catch {
-        /* non-fatal */
+        // non-fatal
       }
 
-      toast.success(`Payment of ${formatNaira(amount)} recorded`)
+      toast.success('Payment of ' + formatNaira(amount) + ' recorded')
       setPaymentModalOpen(false)
       setPaymentAmount('')
       setPaymentMethod('')
@@ -283,8 +281,9 @@ export default function ReservationDetailPage({
     ? reservation.rooms[0]
     : reservation.rooms
   const balance =
-    reservation.balance ??
-    (reservation.total_amount || 0) - (reservation.deposit || 0)
+    reservation.balance != null
+      ? reservation.balance
+      : (reservation.total_amount || 0) - (reservation.deposit || 0)
   const amountPaid = reservation.deposit || 0
 
   const statusColors: Record<string, string> = {
@@ -336,7 +335,7 @@ export default function ReservationDetailPage({
               {paymentLoading ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Recording...
+                  {'Recording...'}
                 </>
               ) : (
                 'Record Payment'
@@ -349,7 +348,7 @@ export default function ReservationDetailPage({
       <div className="flex items-center justify-between">
         <Button variant="ghost" onClick={() => router.back()}>
           <ArrowLeft className="mr-2 h-4 w-4" />
-          Back to Reservations
+          {'Back to Reservations'}
         </Button>
         <div className="flex gap-2">
           <Button
@@ -359,7 +358,7 @@ export default function ReservationDetailPage({
             disabled={actionLoading}
           >
             <UserCheck className="mr-2 h-4 w-4" />
-            Check-in Guest
+            {'Check-in Guest'}
           </Button>
           <Button
             variant="destructive"
@@ -368,7 +367,7 @@ export default function ReservationDetailPage({
             disabled={actionLoading}
           >
             <Trash2 className="mr-2 h-4 w-4" />
-            Cancel
+            {'Cancel'}
           </Button>
         </div>
       </div>
@@ -386,8 +385,8 @@ export default function ReservationDetailPage({
                     'bg-muted text-muted-foreground'
                   }
                 >
-                  {reservation.status.charAt(0).toUpperCase() +
-                    reservation.status.slice(1)}
+                  {String(reservation.status || '').charAt(0).toUpperCase() +
+                    String(reservation.status || '').slice(1)}
                 </Badge>
                 <Badge
                   variant="outline"
@@ -399,8 +398,8 @@ export default function ReservationDetailPage({
                         : 'bg-red-500/10 text-red-700'
                   }
                 >
-                  {reservation.payment_status?.charAt(0).toUpperCase() +
-                    reservation.payment_status?.slice(1) || 'Unpaid'}
+                  {String(reservation.payment_status || 'unpaid').charAt(0).toUpperCase() +
+                    String(reservation.payment_status || 'unpaid').slice(1)}
                 </Badge>
               </div>
             </div>
@@ -409,33 +408,33 @@ export default function ReservationDetailPage({
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <div className="text-sm text-muted-foreground">Guest Name</div>
-                <div className="font-semibold">{guest?.name || '\u2014'}</div>
+                <div className="font-semibold">{guest?.name || '-'}</div>
               </div>
               <div>
                 <div className="text-sm text-muted-foreground">Phone</div>
-                <div className="font-semibold">{guest?.phone || '\u2014'}</div>
+                <div className="font-semibold">{guest?.phone || '-'}</div>
               </div>
               <div>
                 <div className="text-sm text-muted-foreground">Email</div>
-                <div className="font-semibold">{guest?.email || '\u2014'}</div>
+                <div className="font-semibold">{guest?.email || '-'}</div>
               </div>
               <div>
                 <div className="text-sm text-muted-foreground">Room</div>
                 <div className="font-semibold">
                   {room
-                    ? `Room ${room.room_number} \u2014 ${room.room_type}`
-                    : '\u2014'}
+                    ? 'Room ' + room.room_number + ' - ' + room.room_type
+                    : '-'}
                 </div>
               </div>
               <div>
                 <div className="text-sm text-muted-foreground">Folio ID</div>
                 <div className="font-semibold font-mono text-sm">
-                  {reservation.folio_id || '\u2014'}
+                  {reservation.folio_id || '-'}
                 </div>
               </div>
               <div>
                 <div className="text-sm text-muted-foreground">
-                  Rate / Night
+                  {'Rate / Night'}
                 </div>
                 <div className="font-semibold">
                   {formatNaira(reservation.rate_per_night || 0)}
@@ -446,7 +445,7 @@ export default function ReservationDetailPage({
                 <div className="font-semibold">
                   {reservation.check_in
                     ? format(new Date(reservation.check_in), 'dd MMM yyyy')
-                    : '\u2014'}
+                    : '-'}
                 </div>
               </div>
               <div>
@@ -454,21 +453,23 @@ export default function ReservationDetailPage({
                 <div className="font-semibold">
                   {reservation.check_out
                     ? format(new Date(reservation.check_out), 'dd MMM yyyy')
-                    : '\u2014'}
+                    : '-'}
                 </div>
               </div>
               <div>
                 <div className="text-sm text-muted-foreground">Nights</div>
                 <div className="font-semibold">
-                  {reservation.number_of_nights || '\u2014'}
+                  {reservation.number_of_nights || '-'}
                 </div>
               </div>
               <div>
                 <div className="text-sm text-muted-foreground">
-                  Payment Method
+                  {'Payment Method'}
                 </div>
                 <div className="font-semibold capitalize">
-                  {reservation.payment_method?.replace('_', ' ') || '\u2014'}
+                  {reservation.payment_method
+                    ? String(reservation.payment_method).replace('_', ' ')
+                    : '-'}
                 </div>
               </div>
               {reservation.notes && (
@@ -503,7 +504,10 @@ export default function ReservationDetailPage({
               <div className="flex justify-between text-lg">
                 <span className="font-semibold">Balance</span>
                 <span
-                  className={`font-bold ${balance > 0 ? 'text-destructive' : 'text-green-600'}`}
+                  className={
+                    'font-bold ' +
+                    (balance > 0 ? 'text-destructive' : 'text-green-600')
+                  }
                 >
                   {formatNaira(balance)}
                 </span>
@@ -514,7 +518,7 @@ export default function ReservationDetailPage({
                   onClick={() => setPaymentModalOpen(true)}
                 >
                   <CreditCard className="mr-2 h-4 w-4" />
-                  Update Payment
+                  {'Update Payment'}
                 </Button>
               )}
             </CardContent>
@@ -532,7 +536,7 @@ export default function ReservationDetailPage({
                 disabled={actionLoading}
               >
                 <UserCheck className="mr-2 h-4 w-4" />
-                Check-in Guest
+                {'Check-in Guest'}
               </Button>
               <Button
                 className="w-full"
@@ -541,7 +545,7 @@ export default function ReservationDetailPage({
                 disabled={actionLoading}
               >
                 <Trash2 className="mr-2 h-4 w-4" />
-                Cancel Reservation
+                {'Cancel Reservation'}
               </Button>
             </CardContent>
           </Card>
