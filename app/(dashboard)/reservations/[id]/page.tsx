@@ -1,6 +1,6 @@
 'use client'
 
-import { use, useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -9,16 +9,16 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { ArrowLeft, UserCheck, Trash2, Edit, CreditCard, AlertCircle, Loader2 } from 'lucide-react'
+import { ArrowLeft, UserCheck, Trash2, CreditCard, AlertCircle, Loader2 } from 'lucide-react'
 import { formatNaira } from '@/lib/utils/currency'
 import { toast } from 'sonner'
 import { createClient } from '@/lib/supabase/client'
 import { format } from 'date-fns'
 
-export default function ReservationDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = use(params)
+export default function ReservationDetailPage({ params }: { params: Promise<{ id: string }> | { id: string } }) {
   const router = useRouter()
 
+  const [reservationId, setReservationId] = useState<string>('')
   const [reservation, setReservation] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState(false)
@@ -27,15 +27,9 @@ export default function ReservationDetailPage({ params }: { params: Promise<{ id
   const [paymentMethod, setPaymentMethod] = useState('')
   const [paymentLoading, setPaymentLoading] = useState(false)
 
-  const fetchReservation = useCallback(async () => {
+  const fetchReservation = async (id: string) => {
     try {
       setLoading(true)
-      if (!id) {
-        toast.error('Invalid reservation ID')
-        router.push('/reservations')
-        return
-      }
-
       const supabase = createClient()
       const { data, error } = await supabase
         .from('bookings')
@@ -57,15 +51,21 @@ export default function ReservationDetailPage({ params }: { params: Promise<{ id
       }
       setReservation(data)
     } catch (err: any) {
-      console.log('[v0] Failed to load reservation:', err.message || err)
       toast.error('Failed to load reservation')
       router.push('/reservations')
     } finally {
       setLoading(false)
     }
-  }, [id])
+  }
 
-  useEffect(() => { fetchReservation() }, [fetchReservation])
+  useEffect(() => {
+    const resolveAndFetch = async () => {
+      const resolvedParams = await Promise.resolve(params)
+      setReservationId(resolvedParams.id)
+      await fetchReservation(resolvedParams.id)
+    }
+    resolveAndFetch()
+  }, [])
 
   const handleCheckin = () => {
     toast(
@@ -91,7 +91,7 @@ export default function ReservationDetailPage({ params }: { params: Promise<{ id
                   const { error } = await supabase
                     .from('bookings')
                     .update({ status: 'checked_in' })
-                    .eq('id', id)
+                    .eq('id', reservationId)
                   if (error) throw error
                   // Mark room as occupied
                   if (reservation?.rooms?.id) {
@@ -139,7 +139,7 @@ export default function ReservationDetailPage({ params }: { params: Promise<{ id
       await supabase
         .from('bookings')
         .update({ deposit: newDeposit, balance: newBalance, payment_status: newStatus })
-        .eq('id', id)
+        .eq('id', reservationId)
 
       // Record in transactions table (non-fatal)
       try {
@@ -151,8 +151,8 @@ export default function ReservationDetailPage({ params }: { params: Promise<{ id
           : reservation?.rooms?.room_number
         await supabase.from('transactions').insert([{
           organization_id: orgId,
-          booking_id: id,
-          transaction_id: `PAY-${id}-${Date.now()}`,
+          booking_id: reservationId,
+          transaction_id: `PAY-${reservationId}-${Date.now()}`,
           guest_name: guestName || 'Guest',
           room: roomNumber || null,
           amount,
@@ -167,7 +167,7 @@ export default function ReservationDetailPage({ params }: { params: Promise<{ id
       setPaymentModalOpen(false)
       setPaymentAmount('')
       setPaymentMethod('')
-      fetchReservation()
+      fetchReservation(reservationId)
     } catch (err: any) {
       toast.error(err.message || 'Failed to record payment')
     } finally {
@@ -197,7 +197,7 @@ export default function ReservationDetailPage({ params }: { params: Promise<{ id
                 setActionLoading(true)
                 try {
                   const supabase = createClient()
-                  await supabase.from('bookings').update({ status: 'cancelled' }).eq('id', id)
+                  await supabase.from('bookings').update({ status: 'cancelled' }).eq('id', reservationId)
                   // Free up the room
                   if (reservation?.rooms?.id) {
                     await supabase.from('rooms').update({ status: 'available' }).eq('id', reservation.rooms.id)
