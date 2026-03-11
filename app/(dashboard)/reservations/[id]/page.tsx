@@ -133,12 +133,17 @@ export default function ReservationDetailPage({ params }: { params: Promise<{ id
 
       // Record in transactions table (non-fatal)
       try {
-        const { data: { user } } = await supabase.auth.getUser()
+        const guestName = Array.isArray(reservation?.guests)
+          ? reservation.guests[0]?.name
+          : reservation?.guests?.name
+        const roomNumber = Array.isArray(reservation?.rooms)
+          ? reservation.rooms[0]?.room_number
+          : reservation?.rooms?.room_number
         await supabase.from('transactions').insert([{
           booking_id: id,
           transaction_id: `PAY-${id}-${Date.now()}`,
-          guest_name: reservation?.guests?.name || guest?.name || 'Guest',
-          room: reservation?.rooms?.room_number || room?.room_number || null,
+          guest_name: guestName || 'Guest',
+          room: roomNumber || null,
           amount,
           payment_method: paymentMethod,
           status: 'paid',
