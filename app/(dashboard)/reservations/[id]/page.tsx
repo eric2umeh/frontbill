@@ -57,7 +57,7 @@ export default function ReservationDetailPage({
         .select(
           `id, folio_id, check_in, check_out, status, payment_status,
            rate_per_night, total_amount, deposit, balance, number_of_nights,
-           payment_method, notes, created_at,
+           notes, created_at,
            guests:guest_id(id, name, phone, email, address),
            rooms:room_id(id, room_number, room_type, price_per_night)`
         )
