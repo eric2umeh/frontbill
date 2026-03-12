@@ -475,6 +475,20 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
       if (!selectedRoom) { toast.error('Room required'); return }
       if (paymentMethod === 'city_ledger' && !ledgerAccount) { toast.error('Select a ledger account'); return }
 
+      // Check for date conflicts one final time before submit
+      const toStr = (d: Date) => {
+        const y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,'0'), dd = String(d.getDate()).padStart(2,'0')
+        return `${y}-${m}-${dd}`
+      }
+      const ciStr = toStr(checkInDate), coStr = toStr(checkOutDate)
+      const hasConflict = allBookingsForRooms.some(
+        b => b.room_id === selectedRoom.id && b.check_in < coStr && b.check_out > ciStr && b.status !== 'cancelled'
+      )
+      if (hasConflict) {
+        toast.error('Selected room is already booked for these dates')
+        return
+      }
+
       const supabase = createClient()
       const { data: { user } } = await supabase.auth.getUser()
 
