@@ -10,9 +10,11 @@ import { Separator } from '@/components/ui/separator'
 import { formatNaira } from '@/lib/utils/currency'
 import {
   Loader2, ArrowLeft, User, Phone, Mail, MapPin,
-  Calendar, CreditCard, TrendingUp, FileText, Building2, Hash
+  Calendar, CreditCard, TrendingUp, FileText, Building2, Hash,
+  Wallet, ArrowDownCircle, ArrowUpCircle, Clock,
 } from 'lucide-react'
 import { format } from 'date-fns'
+import CityLedgerPaymentModal from '@/components/city-ledger/city-ledger-payment-modal'
 
 interface Guest {
   id: string
@@ -41,12 +43,33 @@ interface Booking {
   rooms: { room_number: string; room_type: string } | null
 }
 
+interface LedgerAccount {
+  id: string
+  balance: number
+  account_name: string
+  account_type: string
+}
+
+interface LedgerTransaction {
+  id: string
+  transaction_id: string
+  amount: number
+  payment_method: string
+  status: string
+  description: string
+  created_at: string
+}
+
 export default function GuestDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
   const router = useRouter()
   const [guest, setGuest] = useState<Guest | null>(null)
   const [bookings, setBookings] = useState<Booking[]>([])
+  const [ledgerAccount, setLedgerAccount] = useState<LedgerAccount | null>(null)
+  const [ledgerHistory, setLedgerHistory] = useState<LedgerTransaction[]>([])
+  const [orgId, setOrgId] = useState<string>('')
   const [loading, setLoading] = useState(true)
+  const [paymentModalOpen, setPaymentModalOpen] = useState(false)
 
   useEffect(() => {
     if (id) loadGuest()
@@ -62,6 +85,7 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
       const { data: profile } = await supabase
         .from('profiles').select('organization_id').eq('id', user.id).single()
       if (!profile) return
+      setOrgId(profile.organization_id)
 
       const [{ data: guestData }, { data: bookingData }] = await Promise.all([
         supabase.from('guests').select('*').eq('id', id).eq('organization_id', profile.organization_id).single(),
@@ -74,6 +98,28 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
       if (!guestData) { router.push('/guest-database'); return }
       setGuest(guestData)
       setBookings(bookingData || [])
+
+      // Fetch city ledger account — match by account_name = guest name
+      const { data: ledgerData } = await supabase
+        .from('city_ledger_accounts')
+        .select('id, balance, account_name, account_type')
+        .eq('organization_id', profile.organization_id)
+        .ilike('account_name', guestData.name)
+        .in('account_type', ['individual', 'guest'])
+        .maybeSingle()
+
+      setLedgerAccount(ledgerData || null)
+
+      // Fetch city ledger transaction history for this guest
+      const { data: txData } = await supabase
+        .from('transactions')
+        .select('id, transaction_id, amount, payment_method, status, description, created_at')
+        .eq('organization_id', profile.organization_id)
+        .ilike('guest_name', guestData.name)
+        .order('created_at', { ascending: false })
+        .limit(20)
+
+      setLedgerHistory(txData || [])
     } catch {
       router.push('/guest-database')
     } finally {
@@ -92,8 +138,9 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
   if (!guest) return null
 
   const totalSpent = bookings.reduce((s, b) => s + Number(b.deposit || 0), 0)
-  const totalBalance = bookings.reduce((s, b) => s + Number(b.balance || 0), 0)
+  const totalBookingBalance = bookings.reduce((s, b) => s + Number(b.balance || 0), 0)
   const lastVisit = bookings.length > 0 ? bookings[0].check_in : null
+  const ledgerBalance = ledgerAccount?.balance ?? 0
 
   const statusColor = (status: string) => {
     switch (status) {
@@ -102,6 +149,24 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
       case 'pending': return 'text-orange-700 border-orange-200 bg-orange-50'
       default: return 'text-gray-700 border-gray-200 bg-gray-50'
     }
+  }
+
+  const ledgerStatusBadge = () => {
+    if (ledgerBalance > 0) return { label: 'Debit', color: 'text-red-600', bg: 'bg-red-50 border-red-200' }
+    if (ledgerBalance < 0) return { label: 'Credit', color: 'text-green-600', bg: 'bg-green-50 border-green-200' }
+    return { label: 'Settled', color: 'text-muted-foreground', bg: 'bg-muted/40 border-border' }
+  }
+
+  const ls = ledgerStatusBadge()
+
+  const txIcon = (desc: string) => {
+    if (desc?.toLowerCase().includes('top-up') || desc?.toLowerCase().includes('credit')) {
+      return <ArrowUpCircle className="h-4 w-4 text-blue-500 shrink-0" />
+    }
+    if (desc?.toLowerCase().includes('settlement') || desc?.toLowerCase().includes('payment')) {
+      return <ArrowDownCircle className="h-4 w-4 text-green-500 shrink-0" />
+    }
+    return <CreditCard className="h-4 w-4 text-muted-foreground shrink-0" />
   }
 
   return (
@@ -145,13 +210,13 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
             <p className="text-3xl font-bold text-green-600">{formatNaira(totalSpent)}</p>
           </CardContent>
         </Card>
-        <Card className={totalBalance > 0 ? 'border-red-200' : ''}>
+        <Card className={totalBookingBalance > 0 ? 'border-red-200' : ''}>
           <CardContent className="p-5 flex flex-col gap-1">
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <TrendingUp className="h-4 w-4" /> Outstanding Balance
+              <TrendingUp className="h-4 w-4" /> Booking Balance
             </div>
-            <p className={`text-3xl font-bold ${totalBalance > 0 ? 'text-red-600' : 'text-green-600'}`}>
-              {formatNaira(totalBalance)}
+            <p className={`text-3xl font-bold ${totalBookingBalance > 0 ? 'text-red-600' : 'text-green-600'}`}>
+              {formatNaira(totalBookingBalance)}
             </p>
           </CardContent>
         </Card>
@@ -166,6 +231,57 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
           </CardContent>
         </Card>
       </div>
+
+      {/* City Ledger Account — always shown */}
+      <Card className={`border-2 ${ls.bg}`}>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div className="flex items-center gap-2">
+              <Wallet className="h-5 w-5 text-primary" />
+              <CardTitle className="text-base">City Ledger Account</CardTitle>
+              {ledgerAccount ? (
+                <Badge variant="outline" className={`text-xs ${ledgerBalance > 0 ? 'border-red-200 text-red-700 bg-red-50' : ledgerBalance < 0 ? 'border-green-200 text-green-700 bg-green-50' : ''}`}>
+                  {ls.label}
+                </Badge>
+              ) : (
+                <Badge variant="secondary" className="text-xs">No Account</Badge>
+              )}
+            </div>
+            {ledgerAccount && (
+              <Button size="sm" onClick={() => setPaymentModalOpen(true)}>
+                Settle / Top Up
+              </Button>
+            )}
+          </div>
+        </CardHeader>
+        <CardContent>
+          {!ledgerAccount ? (
+            <p className="text-sm text-muted-foreground">
+              No city ledger account linked to this guest. City ledger accounts are created when a booking is made using City Ledger as the payment method.
+            </p>
+          ) : (
+            <div className="flex items-end gap-6 flex-wrap">
+              <div>
+                <p className="text-xs text-muted-foreground mb-1">Current Balance</p>
+                <p className={`text-4xl font-bold ${ls.color}`}>
+                  {formatNaira(Math.abs(ledgerBalance))}
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {ledgerBalance > 0
+                    ? 'Amount owed to hotel (debit)'
+                    : ledgerBalance < 0
+                    ? `Credit of ${formatNaira(Math.abs(ledgerBalance))} available`
+                    : 'Account fully settled'}
+                </p>
+              </div>
+              <div className="text-sm text-muted-foreground space-y-1">
+                <p>Account: <span className="font-medium text-foreground">{ledgerAccount.account_name}</span></p>
+                <p>Type: <span className="font-medium text-foreground capitalize">{ledgerAccount.account_type}</span></p>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Guest Info */}
@@ -254,6 +370,57 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
           </CardContent>
         </Card>
       </div>
+
+      {/* City Ledger Transaction History */}
+      {ledgerHistory.length > 0 && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <Clock className="h-4 w-4 text-muted-foreground" />
+              <CardTitle className="text-base">City Ledger Transaction History</CardTitle>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {ledgerHistory.map((tx) => (
+                <div key={tx.id} className="flex items-center gap-3 rounded-lg border p-3 text-sm">
+                  {txIcon(tx.description)}
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium truncate">{tx.description || tx.transaction_id}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {format(new Date(tx.created_at), 'dd MMM yyyy, hh:mm a')}
+                      {' · '}
+                      <span className="capitalize">{tx.payment_method?.replace('_', ' ')}</span>
+                    </p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <p className={`font-semibold ${tx.description?.toLowerCase().includes('settlement') || tx.description?.toLowerCase().includes('payment') ? 'text-green-600' : 'text-blue-600'}`}>
+                      {formatNaira(tx.amount)}
+                    </p>
+                    <Badge variant="outline" className="text-xs mt-0.5">
+                      {tx.status}
+                    </Badge>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* City Ledger Payment Modal */}
+      {ledgerAccount && (
+        <CityLedgerPaymentModal
+          open={paymentModalOpen}
+          onClose={() => setPaymentModalOpen(false)}
+          onSuccess={loadGuest}
+          accountType="guest"
+          accountName={guest.name}
+          ledgerAccountId={ledgerAccount.id}
+          currentBalance={ledgerBalance}
+          organizationId={orgId}
+        />
+      )}
     </div>
   )
 }
