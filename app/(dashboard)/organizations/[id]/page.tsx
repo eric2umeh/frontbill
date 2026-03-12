@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter, useParams } from 'next/navigation'
-import { ArrowLeft, Edit, Trash2, Save, X, AlertCircle } from 'lucide-react'
+import { ArrowLeft, Edit, Trash2, Save, X, AlertCircle, Wallet, ArrowDownCircle, ArrowUpCircle, CreditCard, Clock } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -14,6 +14,7 @@ import { toast } from 'sonner'
 import { createClient } from '@/lib/supabase/client'
 import { formatNaira } from '@/lib/utils/currency'
 import { format } from 'date-fns'
+import CityLedgerPaymentModal from '@/components/city-ledger/city-ledger-payment-modal'
 
 interface Organization {
   id: string
@@ -46,6 +47,10 @@ export default function OrganizationDetailPage() {
   const [isEditing, setIsEditing] = useState(false)
   const [saving, setSaving] = useState(false)
   const [deleteLoading, setDeleteLoading] = useState(false)
+  const [paymentModalOpen, setPaymentModalOpen] = useState(false)
+  const [ledgerAccountId, setLedgerAccountId] = useState<string | null>(null)
+  const [ledgerHistory, setLedgerHistory] = useState<any[]>([])
+  const [hotelOrgId, setHotelOrgId] = useState<string>('')
 
   const [formData, setFormData] = useState({
     name: '',
@@ -65,6 +70,13 @@ export default function OrganizationDetailPage() {
       setLoading(true)
       const supabase = createClient()
 
+      // Get hotel org id for scoping
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        const { data: profile } = await supabase.from('profiles').select('organization_id').eq('id', user.id).single()
+        if (profile) setHotelOrgId(profile.organization_id)
+      }
+
       const { data, error } = await supabase
         .from('organizations')
         .select('id, name, org_type, email, phone, contact_person, address, current_balance, created_at, created_by, updated_at, updated_by')
@@ -83,25 +95,34 @@ export default function OrganizationDetailPage() {
         address: data.address || '',
       })
 
-      // Fetch creator profile if created_by exists
-      if (data.created_by) {
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('full_name')
-          .eq('id', data.created_by)
-          .single()
+      // Look up city_ledger_accounts entry for this org by name
+      const { data: ledgerData } = await supabase
+        .from('city_ledger_accounts')
+        .select('id, balance, account_name, account_type')
+        .ilike('account_name', data.name)
+        .in('account_type', ['organization', 'corporate'])
+        .maybeSingle()
+      setLedgerAccountId(ledgerData?.id || null)
 
-        setCreatedByProfile(profile)
+      // Fetch ledger transaction history
+      if (data.name) {
+        const { data: txData } = await supabase
+          .from('transactions')
+          .select('id, transaction_id, amount, payment_method, status, description, created_at')
+          .ilike('guest_name', data.name)
+          .order('created_at', { ascending: false })
+          .limit(20)
+        setLedgerHistory(txData || [])
       }
 
-      // Fetch updater profile if updated_by exists
+      // Fetch creator profile
+      if (data.created_by) {
+        const { data: profile } = await supabase.from('profiles').select('full_name').eq('id', data.created_by).single()
+        setCreatedByProfile(profile)
+      }
+      // Fetch updater profile
       if (data.updated_by) {
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('full_name')
-          .eq('id', data.updated_by)
-          .single()
-
+        const { data: profile } = await supabase.from('profiles').select('full_name').eq('id', data.updated_by).single()
         setUpdatedByProfile(profile)
       }
     } catch (error: any) {
@@ -414,15 +435,41 @@ export default function OrganizationDetailPage() {
         {/* Sidebar */}
         <div className="space-y-6">
           {/* Balance Card */}
-          <Card>
-            <CardHeader>
-              <CardTitle>City Ledger Balance</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold text-blue-600">
-                {formatNaira(organization.current_balance)}
+          <Card className={`border-2 ${organization.current_balance > 0 ? 'border-red-200 bg-red-50/30' : organization.current_balance < 0 ? 'border-green-200 bg-green-50/30' : 'border-border'}`}>
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Wallet className="h-4 w-4 text-primary" />
+                  <CardTitle className="text-base">City Ledger</CardTitle>
+                </div>
+                <Badge
+                  variant="outline"
+                  className={`text-xs ${organization.current_balance > 0 ? 'border-red-200 text-red-700 bg-red-50' : organization.current_balance < 0 ? 'border-green-200 text-green-700 bg-green-50' : ''}`}
+                >
+                  {organization.current_balance > 0 ? 'Debit' : organization.current_balance < 0 ? 'Credit' : 'Settled'}
+                </Badge>
               </div>
-              <p className="text-sm text-muted-foreground mt-2">Current account balance</p>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div>
+                <p className={`text-3xl font-bold ${organization.current_balance > 0 ? 'text-red-600' : organization.current_balance < 0 ? 'text-green-600' : 'text-muted-foreground'}`}>
+                  {formatNaira(Math.abs(organization.current_balance))}
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {organization.current_balance > 0
+                    ? 'Amount owed to hotel (debit)'
+                    : organization.current_balance < 0
+                    ? 'Credit in favour of account'
+                    : 'Account fully settled'}
+                </p>
+              </div>
+              <Button
+                className="w-full"
+                size="sm"
+                onClick={() => setPaymentModalOpen(true)}
+              >
+                Settle / Top Up Account
+              </Button>
             </CardContent>
           </Card>
 
@@ -477,6 +524,59 @@ export default function OrganizationDetailPage() {
           </Card>
         </div>
       </div>
+
+      {/* City Ledger Transaction History */}
+      {ledgerHistory.length > 0 && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <Clock className="h-4 w-4 text-muted-foreground" />
+              <CardTitle className="text-base">City Ledger Transaction History</CardTitle>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {ledgerHistory.map((tx: any) => (
+                <div key={tx.id} className="flex items-center gap-3 rounded-lg border p-3 text-sm">
+                  {tx.description?.toLowerCase().includes('top-up') || tx.description?.toLowerCase().includes('credit')
+                    ? <ArrowUpCircle className="h-4 w-4 text-blue-500 shrink-0" />
+                    : tx.description?.toLowerCase().includes('settlement') || tx.description?.toLowerCase().includes('payment')
+                    ? <ArrowDownCircle className="h-4 w-4 text-green-500 shrink-0" />
+                    : <CreditCard className="h-4 w-4 text-muted-foreground shrink-0" />
+                  }
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium truncate">{tx.description || tx.transaction_id}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {format(new Date(tx.created_at), 'dd MMM yyyy, hh:mm a')}
+                      {' · '}
+                      <span className="capitalize">{tx.payment_method?.replace('_', ' ')}</span>
+                    </p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <p className={`font-semibold ${tx.description?.toLowerCase().includes('settlement') ? 'text-green-600' : 'text-blue-600'}`}>
+                      {formatNaira(tx.amount)}
+                    </p>
+                    <Badge variant="outline" className="text-xs mt-0.5">{tx.status}</Badge>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* City Ledger Payment Modal */}
+      <CityLedgerPaymentModal
+        open={paymentModalOpen}
+        onClose={() => setPaymentModalOpen(false)}
+        onSuccess={fetchOrganization}
+        accountType="organization"
+        accountName={organization.name}
+        ledgerAccountId={ledgerAccountId}
+        currentBalance={organization.current_balance}
+        organizationId={hotelOrgId || orgId}
+        orgId={orgId}
+      />
     </div>
   )
 }
