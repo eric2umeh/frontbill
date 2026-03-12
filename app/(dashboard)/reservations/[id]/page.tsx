@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -279,9 +279,11 @@ export default function ReservationDetailPage({
   if (error) {
     return (
       <div className="space-y-6">
-        <Button variant="ghost" onClick={() => router.push('/reservations')}>
-          <ArrowLeft className="h-4 w-4 mr-2" />
-          Back to Reservations
+        <Button asChild variant="ghost">
+          <Link href="/reservations">
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Back to Reservations
+          </Link>
         </Button>
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12">
