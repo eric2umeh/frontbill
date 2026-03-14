@@ -51,11 +51,14 @@ export default function SignUpPage() {
 
       const fullName = `${firstName} ${lastName}`
       
+      // Use production URL for email redirect, fallback to window.location.origin
+      const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://frontbill-two.vercel.app'
+      
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
         options: {
-          emailRedirectTo: `${window.location.origin}/dashboard`,
+          emailRedirectTo: `${siteUrl}/auth/callback`,
           data: {
             full_name: fullName,
           },
