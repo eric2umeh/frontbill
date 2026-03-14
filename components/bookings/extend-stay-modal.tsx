@@ -116,8 +116,10 @@ export function ExtendStayModal({ open, onClose, booking }: ExtendStayModalProps
     try {
       const supabase = createClient()
       
-      // Add charge to folio_charges with unpaid status
-      // Note: organization_id column may not exist yet, so we try with it first, then fall back without it
+      // Add charge to folio_charges
+      // For immediate payments (cash/pos/transfer): status = 'paid'
+      // For deferred payments (city_ledger): status = 'pending'
+      const isPaidNow = paymentMethod !== 'city_ledger'
       const chargeData: any = {
         booking_id: booking.id,
         description: `Extended Stay - ${additionalNights} night${additionalNights !== 1 ? 's' : ''}`,
@@ -126,7 +128,7 @@ export function ExtendStayModal({ open, onClose, booking }: ExtendStayModalProps
         payment_method: paymentMethod,
         ledger_account_id: paymentMethod === 'city_ledger' ? selectedLedger?.id : null,
         ledger_account_type: paymentMethod === 'city_ledger' ? ledgerType : null,
-        payment_status: 'unpaid',
+        payment_status: isPaidNow ? 'paid' : 'pending',
         created_by: booking.created_by
       }
       
@@ -160,7 +162,8 @@ export function ExtendStayModal({ open, onClose, booking }: ExtendStayModalProps
         .eq('id', booking.id)
 
       // Bump booking balance for unpaid / city-ledger extended stay
-      if (paymentMethod !== 'cash' && paymentMethod !== 'card' && paymentMethod !== 'pos' && paymentMethod !== 'bank_transfer') {
+      // Only bump balance if payment is deferred (city_ledger) - not for immediate payments (cash/pos/transfer)
+      if (paymentMethod === 'city_ledger') {
         const { data: freshBk } = await supabase
           .from('bookings')
           .select('balance')
@@ -182,7 +185,7 @@ export function ExtendStayModal({ open, onClose, booking }: ExtendStayModalProps
           room: booking.room || null,
           amount: additionalAmount,
           payment_method: paymentMethod,
-          status: paymentMethod === 'city_ledger' ? 'pending' : 'paid',
+          status: isPaidNow ? 'paid' : 'pending',
           description: `Extended Stay — ${additionalNights} night${additionalNights !== 1 ? 's' : ''}`,
           received_by: null,
         }])

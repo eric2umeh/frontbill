@@ -808,6 +808,19 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                   {formatNaira(totalBillBalance)}
                 </span>
               </div>
+              {totalBillBalance > 0 && (
+                <Button
+                  className="w-full mt-4"
+                  onClick={() => {
+                    setChargeType('payment')
+                    setChargeAmount(String(totalBillBalance))
+                    setAddChargeModalOpen(true)
+                  }}
+                >
+                  <CreditCard className="mr-2 h-4 w-4" />
+                  Settle Balance
+                </Button>
+              )}
             </CardContent>
           </Card>
 
