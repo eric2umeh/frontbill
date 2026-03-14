@@ -241,18 +241,17 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
 
   const effectiveRate = (customPrice !== '' ? Number(customPrice) : pricePerNight) || 0
   const totalAmount = effectiveRate * nights
-  const depositAmount = paymentStatus === 'paid' ? totalAmount : paymentStatus === 'partial' ? (Number(partialAmount) || 0) : 0
-  const balanceAmount = totalAmount - depositAmount
+  // For cash/POS/card/bank_transfer: full payment received (deposit = total, balance = 0)
+  // For city_ledger: deferred payment (deposit = 0, balance = total)
+  const isCityLedgerPayment = paymentMethod === 'city_ledger'
+  const depositAmount = isCityLedgerPayment ? 0 : totalAmount
+  const balanceAmount = isCityLedgerPayment ? totalAmount : 0
 
   const handleSubmit = async () => {
     if (!checkInDate || !checkOutDate) { toast.error('Dates required'); return }
     if (!selectedRoom) { toast.error('Room required'); return }
     if (paymentMethod === 'city_ledger' && !selectedLedger) {
       toast.error('Please select a city ledger account')
-      return
-    }
-    if (paymentStatus === 'partial' && (!partialAmount || Number(partialAmount) <= 0)) {
-      toast.error('Please enter a partial payment amount')
       return
     }
 
@@ -272,7 +271,9 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
 
       const isCityLedger = paymentMethod === 'city_ledger'
       const folioId = `RES-${Date.now().toString(36).toUpperCase()}`
-      const bookingPaymentStatus = paymentStatus === 'paid' ? 'paid' : paymentStatus === 'partial' ? 'partial' : 'pending'
+      // For cash/POS/card/bank_transfer: payment is received, so status is 'paid'
+      // For city_ledger: payment is deferred, so status is 'pending'
+      const bookingPaymentStatus = isCityLedger ? 'pending' : 'paid'
 
       const { data: booking, error: be } = await supabase
         .from('bookings')

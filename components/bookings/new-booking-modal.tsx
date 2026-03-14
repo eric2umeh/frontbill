@@ -523,7 +523,8 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
           deposit: isPaid ? total : 0,
           balance: isPaid ? 0 : total,
           payment_status: isPaid ? 'paid' : 'pending',
-          status: 'confirmed',
+          // Future check-in dates are reservations, today/past are confirmed bookings
+          status: toLocalDateStr(checkInDate) > new Date().toISOString().split('T')[0] ? 'reserved' : 'confirmed',
           created_by: user?.id,
           // Store payment method in notes (no payment_method column on bookings table)
           notes: paymentMethod === 'city_ledger'
