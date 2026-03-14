@@ -140,6 +140,8 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
   const totalSpent = bookings.reduce((s, b) => s + Number(b.deposit || 0), 0)
   const totalBookingBalance = bookings.reduce((s, b) => s + Number(b.balance || 0), 0)
   const lastVisit = bookings.length > 0 ? bookings[0].check_in : null
+  // City ledger balance only applies if there's a city ledger account AND it has unpaid balance
+  // This is separate from booking balance which includes all unpaid charges
   const ledgerBalance = ledgerAccount?.balance ?? 0
 
   const statusColor = (status: string) => {
