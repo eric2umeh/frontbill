@@ -138,11 +138,13 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
   if (!guest) return null
 
   const totalSpent = bookings.reduce((s, b) => s + Number(b.deposit || 0), 0)
-  const totalBookingBalance = bookings.reduce((s, b) => s + Number(b.balance || 0), 0)
+  // Clamp to 0: a negative balance just means overpaid, display as 0 (settled)
+  const totalBookingBalance = Math.max(0, bookings.reduce((s, b) => s + Number(b.balance || 0), 0))
   const lastVisit = bookings.length > 0 ? bookings[0].check_in : null
   // City ledger balance only applies if there's a city ledger account AND it has unpaid balance
   // This is separate from booking balance which includes all unpaid charges
-  const ledgerBalance = ledgerAccount?.balance ?? 0
+  // Only show a positive debit balance — if balance <= 0 (settled or credit), treat as 0
+  const ledgerBalance = Math.max(0, ledgerAccount?.balance ?? 0)
 
   const statusColor = (status: string) => {
     switch (status) {
@@ -154,8 +156,8 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
   }
 
   const ledgerStatusBadge = () => {
+    if (!ledgerAccount) return { label: 'No Account', color: 'text-muted-foreground', bg: 'bg-muted/40 border-border' }
     if (ledgerBalance > 0) return { label: 'Debit', color: 'text-red-600', bg: 'bg-red-50 border-red-200' }
-    if (ledgerBalance < 0) return { label: 'Credit', color: 'text-green-600', bg: 'bg-green-50 border-green-200' }
     return { label: 'Settled', color: 'text-muted-foreground', bg: 'bg-muted/40 border-border' }
   }
 
@@ -217,8 +219,8 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <TrendingUp className="h-4 w-4" /> Booking Balance
             </div>
-            <p className={`text-3xl font-bold ${totalBookingBalance > 0 ? 'text-red-600' : 'text-green-600'}`}>
-              {formatNaira(totalBookingBalance)}
+            <p className={`text-3xl font-bold ${totalBookingBalance > 0 ? 'text-red-600' : 'text-foreground'}`}>
+              {totalBookingBalance > 0 ? formatNaira(totalBookingBalance) : 'Settled'}
             </p>
           </CardContent>
         </Card>
