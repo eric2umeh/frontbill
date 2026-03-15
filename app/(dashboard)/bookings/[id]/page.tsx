@@ -252,6 +252,49 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
           })
           .eq('id', bookingId)
 
+        // Mark all pending folio_charges as paid (they've now been settled)
+        const { data: pendingCharges } = await supabase
+          .from('folio_charges')
+          .select('id')
+          .eq('booking_id', bookingId)
+          .eq('payment_status', 'pending')
+        if (pendingCharges && pendingCharges.length > 0) {
+          await supabase
+            .from('folio_charges')
+            .update({ payment_status: 'paid' })
+            .eq('booking_id', bookingId)
+            .eq('payment_status', 'pending')
+        }
+
+        // Also decrement guests.balance and city_ledger_accounts.balance so the
+        // guest database shows the correct outstanding amount after settlement
+        const guestId = booking?.guest_id || booking?.guests?.id
+        if (guestId) {
+          const { data: guestRow } = await supabase
+            .from('guests')
+            .select('balance')
+            .eq('id', guestId)
+            .single()
+          if (guestRow && guestRow.balance > 0) {
+            const newGuestBalance = Math.max(0, (guestRow.balance || 0) - Number(chargeAmount))
+            await supabase.from('guests').update({ balance: newGuestBalance }).eq('id', guestId)
+          }
+
+          // Also reduce city_ledger_accounts balance if one exists for this guest
+          const { data: ledgerAcct } = await supabase
+            .from('city_ledger_accounts')
+            .select('id, balance')
+            .ilike('account_name', booking?.guests?.name || '')
+            .maybeSingle()
+          if (ledgerAcct && ledgerAcct.balance > 0) {
+            const newLedgerBalance = Math.max(0, (ledgerAcct.balance || 0) - Number(chargeAmount))
+            await supabase
+              .from('city_ledger_accounts')
+              .update({ balance: newLedgerBalance })
+              .eq('id', ledgerAcct.id)
+          }
+        }
+
         // Log to transactions table (non-fatal)
         try {
           await supabase.from('transactions').insert([{
@@ -467,18 +510,10 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
     .filter(c => c.paymentStatus === 'paid' && c.amount > 0 && c.type === 'charge')
     .reduce((sum, c) => sum + c.amount, 0)
 
-  // Bill Balance (Unpaid) = original room balance + all unpaid/pending folio charges
-  // Compute from folio_charges (live, re-fetched on every load) so it always reflects latest charges
-  // Room base: total_amount minus what's been deposited/paid
-  const roomBase = booking ? Math.max(0, (booking.total_amount || 0) - (booking.deposit || 0)) : 0
-  // Add all pending/unpaid additional charges (city-ledger, deferred, extend-stay)
-  const unpaidFolioCharges = folioCharges
-    .filter(c => (c.paymentStatus === 'pending' || c.paymentStatus === 'unpaid') && c.amount > 0)
-    .reduce((sum, c) => sum + c.amount, 0)
-  // Use whichever is larger: DB balance (updated by charge handlers) or computed from folio
-  const totalBillBalance = booking
-    ? Math.max(booking.balance || 0, roomBase > 0 ? roomBase + unpaidFolioCharges : unpaidFolioCharges)
-    : 0
+  // Bill Balance (Unpaid) = booking.balance from DB (always kept accurate by all handlers)
+  // booking.balance is incremented by add-charge (city_ledger/deferred) and decremented by record-payment
+  // For cash/pos/transfer charges (paid immediately), balance is NOT incremented — so it's already correct
+  const totalBillBalance = booking ? Math.max(0, booking.balance || 0) : 0
 
   if (loading) {
     return (
@@ -555,7 +590,9 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                       <SelectItem value="cash">Cash (paid now — not added to Bill Balance)</SelectItem>
                       <SelectItem value="pos">POS (paid now — not added to Bill Balance)</SelectItem>
                       <SelectItem value="card">Card (paid now — not added to Bill Balance)</SelectItem>
-                      <SelectItem value="bank_transfer">Bank Transfer (paid now — not added to Bill Balance)</SelectItem>
+                      <SelectItem value="transfer">Bank Transfer (paid now — not added to Bill Balance)</SelectItem>
+                      <SelectItem value="bank_transfer">Bank Transfer / Wire (paid now — not added to Bill Balance)</SelectItem>
+                      <SelectItem value="cheque">Cheque (paid now — not added to Bill Balance)</SelectItem>
                       <SelectItem value="city_ledger">City Ledger (bill to account — adds to Bill Balance)</SelectItem>
                       <SelectItem value="deferred">Defer / Not yet paid (adds to Bill Balance)</SelectItem>
                     </SelectContent>
@@ -596,7 +633,8 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                       <SelectItem value="cash">Cash</SelectItem>
                       <SelectItem value="pos">POS</SelectItem>
                       <SelectItem value="card">Card</SelectItem>
-                      <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
+                      <SelectItem value="transfer">Bank Transfer</SelectItem>
+                      <SelectItem value="bank_transfer">Bank Transfer (Wire)</SelectItem>
                       <SelectItem value="cheque">Cheque</SelectItem>
                     </SelectContent>
                   </Select>
@@ -657,7 +695,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
           Back to Bookings
         </Button>
         <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => setExtendStayModalOpen(true)}>
+          <Button variant="outline" size="sm" onClick={() => setExtendStayModalOpen(true)} disabled={addChargeLoading}>
             <Clock className="mr-2 h-4 w-4" />
             Extend Stay
           </Button>
@@ -811,6 +849,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
               {totalBillBalance > 0 && (
                 <Button
                   className="w-full mt-4"
+                  disabled={addChargeLoading}
                   onClick={() => {
                     setChargeType('payment')
                     setChargeAmount(String(totalBillBalance))
