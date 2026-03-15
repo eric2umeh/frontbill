@@ -354,7 +354,7 @@ export function ExtendStayModal({ open, onClose, booking }: ExtendStayModalProps
               <div className="space-y-2">
                 <Label htmlFor="paymentMethod">Payment Method *</Label>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                  {['cash', 'pos', 'transfer', 'city_ledger'].map((method) => (
+                  {['cash', 'pos', 'transfer', 'bank_transfer', 'city_ledger'].map((method) => (
                     <Button
                       key={method}
                       variant={paymentMethod === method ? 'default' : 'outline'}
