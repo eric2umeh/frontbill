@@ -99,7 +99,9 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
       setGuest(guestData)
       setBookings(bookingData || [])
 
-      // Fetch city ledger account — match by account_name = guest name
+      // City ledger account — only used if guest has an active city ledger account
+      // We use guests.balance as the authoritative outstanding city ledger balance
+      // (city_ledger_accounts.balance can get stale; guests.balance is always kept current)
       const { data: ledgerData } = await supabase
         .from('city_ledger_accounts')
         .select('id, balance, account_name, account_type')
@@ -108,7 +110,9 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
         .in('account_type', ['individual', 'guest'])
         .maybeSingle()
 
-      setLedgerAccount(ledgerData || null)
+      // Only show city ledger section if guest has a city_ledger_account
+      // AND guest has a non-zero balance (outstanding debt)
+      setLedgerAccount(ledgerData && guestData.balance > 0 ? ledgerData : null)
 
       // Fetch city ledger transaction history for this guest
       const { data: txData } = await supabase
@@ -138,13 +142,14 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
   if (!guest) return null
 
   const totalSpent = bookings.reduce((s, b) => s + Number(b.deposit || 0), 0)
-  // Clamp to 0: a negative balance just means overpaid, display as 0 (settled)
+  // Clamp to 0 — negative means overpaid, show as settled
   const totalBookingBalance = Math.max(0, bookings.reduce((s, b) => s + Number(b.balance || 0), 0))
   const lastVisit = bookings.length > 0 ? bookings[0].check_in : null
-  // City ledger balance only applies if there's a city ledger account AND it has unpaid balance
-  // This is separate from booking balance which includes all unpaid charges
-  // Only show a positive debit balance — if balance <= 0 (settled or credit), treat as 0
-  const ledgerBalance = Math.max(0, ledgerAccount?.balance ?? 0)
+  // Use guests.balance as the authoritative city ledger outstanding balance.
+  // city_ledger_accounts.balance is only updated when city_ledger payment is used.
+  // guests.balance is decremented when payments are settled, so it's always accurate.
+  const guestOutstandingBalance = Math.max(0, Number((guest as any).balance ?? 0))
+  const ledgerBalance = ledgerAccount ? guestOutstandingBalance : 0
 
   const statusColor = (status: string) => {
     switch (status) {
@@ -421,7 +426,7 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
           accountType="guest"
           accountName={guest.name}
           ledgerAccountId={ledgerAccount.id}
-          currentBalance={ledgerBalance}
+          currentBalance={guestOutstandingBalance}
           organizationId={orgId}
         />
       )}

@@ -266,6 +266,35 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
             .eq('payment_status', 'pending')
         }
 
+        // Also decrement guests.balance and city_ledger_accounts.balance so the
+        // guest database shows the correct outstanding amount after settlement
+        const guestId = booking?.guest_id || booking?.guests?.id
+        if (guestId) {
+          const { data: guestRow } = await supabase
+            .from('guests')
+            .select('balance')
+            .eq('id', guestId)
+            .single()
+          if (guestRow && guestRow.balance > 0) {
+            const newGuestBalance = Math.max(0, (guestRow.balance || 0) - Number(chargeAmount))
+            await supabase.from('guests').update({ balance: newGuestBalance }).eq('id', guestId)
+          }
+
+          // Also reduce city_ledger_accounts balance if one exists for this guest
+          const { data: ledgerAcct } = await supabase
+            .from('city_ledger_accounts')
+            .select('id, balance')
+            .ilike('account_name', booking?.guests?.name || '')
+            .maybeSingle()
+          if (ledgerAcct && ledgerAcct.balance > 0) {
+            const newLedgerBalance = Math.max(0, (ledgerAcct.balance || 0) - Number(chargeAmount))
+            await supabase
+              .from('city_ledger_accounts')
+              .update({ balance: newLedgerBalance })
+              .eq('id', ledgerAcct.id)
+          }
+        }
+
         // Log to transactions table (non-fatal)
         try {
           await supabase.from('transactions').insert([{
@@ -561,7 +590,9 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                       <SelectItem value="cash">Cash (paid now — not added to Bill Balance)</SelectItem>
                       <SelectItem value="pos">POS (paid now — not added to Bill Balance)</SelectItem>
                       <SelectItem value="card">Card (paid now — not added to Bill Balance)</SelectItem>
-                      <SelectItem value="bank_transfer">Bank Transfer (paid now — not added to Bill Balance)</SelectItem>
+                      <SelectItem value="transfer">Bank Transfer (paid now — not added to Bill Balance)</SelectItem>
+                      <SelectItem value="bank_transfer">Bank Transfer / Wire (paid now — not added to Bill Balance)</SelectItem>
+                      <SelectItem value="cheque">Cheque (paid now — not added to Bill Balance)</SelectItem>
                       <SelectItem value="city_ledger">City Ledger (bill to account — adds to Bill Balance)</SelectItem>
                       <SelectItem value="deferred">Defer / Not yet paid (adds to Bill Balance)</SelectItem>
                     </SelectContent>
@@ -602,7 +633,8 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                       <SelectItem value="cash">Cash</SelectItem>
                       <SelectItem value="pos">POS</SelectItem>
                       <SelectItem value="card">Card</SelectItem>
-                      <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
+                      <SelectItem value="transfer">Bank Transfer</SelectItem>
+                      <SelectItem value="bank_transfer">Bank Transfer (Wire)</SelectItem>
                       <SelectItem value="cheque">Cheque</SelectItem>
                     </SelectContent>
                   </Select>
