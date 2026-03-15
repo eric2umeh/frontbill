@@ -87,6 +87,8 @@ export function AddChargeModal({ open, onClose, booking }: AddChargeModalProps) 
     setLoading(true)
     try {
       const supabase = createClient()
+      // Cash, POS, card, transfer, bank_transfer, cheque = paid immediately
+      // city_ledger = deferred (pending)
       const isPaidNow = paymentMethod !== 'city_ledger' && paymentMethod !== 'deferred'
 
       // Build folio_charges insert — without organization_id (column may not exist)
@@ -287,7 +289,9 @@ export function AddChargeModal({ open, onClose, booking }: AddChargeModalProps) 
                     <SelectItem value="cash">Cash</SelectItem>
                     <SelectItem value="pos">POS</SelectItem>
                     <SelectItem value="card">Card</SelectItem>
-                    <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
+                    <SelectItem value="transfer">Bank Transfer</SelectItem>
+                    <SelectItem value="bank_transfer">Bank Transfer (Wire)</SelectItem>
+                    <SelectItem value="cheque">Cheque</SelectItem>
                     <SelectItem value="city_ledger">City Ledger</SelectItem>
                   </SelectContent>
                 </Select>
