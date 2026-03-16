@@ -120,21 +120,8 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
 
       setFolioCharges(chargesWithCreator)
 
-      // Sync bookings.balance from folio_charges so the table always shows an accurate Bal:
-      // balance = original debt (total_amount - deposit) + all pending folio charges
-      const unpaid = (chargesData || [])
-        .filter((c: any) => (c.payment_status === 'pending' || c.payment_status === 'unpaid') && c.amount > 0)
-        .reduce((s: number, c: any) => s + Number(c.amount), 0)
-      const roomDebt = Math.max(0, (bookingData.total_amount || 0) - (bookingData.deposit || 0))
-      const computedBalance = roomDebt + unpaid
-      // Only write if materially different (> ₦1 drift) to avoid unnecessary writes
-      if (Math.abs((bookingData.balance || 0) - computedBalance) > 1) {
-        await supabase
-          .from('bookings')
-          .update({ balance: computedBalance })
-          .eq('id', id)
-        setBooking((prev: any) => prev ? { ...prev, balance: computedBalance } : prev)
-      }
+      // Note: booking.balance is maintained by handlers (add-charge, extend-stay, record-payment)
+      // We no longer sync/recalculate it here to avoid double-counting issues
 
       setLoading(false)
   } catch (error: any) {
