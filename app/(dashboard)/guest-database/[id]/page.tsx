@@ -99,9 +99,7 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
       setGuest(guestData)
       setBookings(bookingData || [])
 
-      // City ledger account — only used if guest has an active city ledger account
-      // We use guests.balance as the authoritative outstanding city ledger balance
-      // (city_ledger_accounts.balance can get stale; guests.balance is always kept current)
+      // City ledger account — fetch if exists, but we use guests.balance as the source of truth
       const { data: ledgerData } = await supabase
         .from('city_ledger_accounts')
         .select('id, balance, account_name, account_type')
@@ -110,9 +108,15 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
         .in('account_type', ['individual', 'guest'])
         .maybeSingle()
 
-      // Only show city ledger section if guest has a city_ledger_account
-      // AND guest has a non-zero balance (outstanding debt)
-      setLedgerAccount(ledgerData && guestData.balance > 0 ? ledgerData : null)
+      // Show city ledger section if guest has outstanding balance (from guests.balance)
+      // Even if no city_ledger_accounts record exists, we can show balance and allow settlement
+      // Use guests.balance as the authoritative outstanding balance (not city_ledger_accounts.balance)
+      if (guestData.balance > 0) {
+        // If ledgerData exists, use it; otherwise create a pseudo-account for display
+        setLedgerAccount(ledgerData || { id: null, balance: guestData.balance, account_name: guestData.name, account_type: 'individual' })
+      } else {
+        setLedgerAccount(null)
+      }
 
       // Fetch city ledger transaction history for this guest
       const { data: txData } = await supabase
@@ -428,6 +432,7 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
           ledgerAccountId={ledgerAccount.id}
           currentBalance={guestOutstandingBalance}
           organizationId={orgId}
+          guestId={guest.id}
         />
       )}
     </div>

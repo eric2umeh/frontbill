@@ -191,42 +191,72 @@ export function ExtendStayModal({ open, onClose, booking }: ExtendStayModalProps
         }])
       } catch (_) { /* non-fatal */ }
 
-      // City ledger: update account balance + guest/org profile balance
-      if (paymentMethod === 'city_ledger' && selectedLedger?.id) {
-        // Always update city_ledger_accounts.balance
-        const { data: acct } = await supabase
-          .from('city_ledger_accounts')
-          .select('balance')
-          .eq('id', selectedLedger.id)
-          .single()
-        await supabase
-          .from('city_ledger_accounts')
-          .update({ balance: (acct?.balance || 0) + additionalAmount })
-          .eq('id', selectedLedger.id)
-
-        if (ledgerType === 'individual' && booking.guestId) {
-          // Bump guests.balance so guest profile shows outstanding debt
+      // City ledger: update guest balance + city_ledger_accounts balance
+      if (paymentMethod === 'city_ledger') {
+        // Always bump guests.balance for the booking's guest
+        if (booking.guestId) {
           const { data: guestRow } = await supabase
             .from('guests')
-            .select('balance')
+            .select('balance, name')
             .eq('id', booking.guestId)
             .single()
-          await supabase
-            .from('guests')
-            .update({ balance: ((guestRow?.balance as number) || 0) + additionalAmount })
-            .eq('id', booking.guestId)
-        } else if (ledgerType === 'organization') {
-          // Bump organizations.current_balance
-          const { data: orgRow } = await supabase
-            .from('organizations')
-            .select('current_balance')
+          if (guestRow) {
+            await supabase
+              .from('guests')
+              .update({ balance: ((guestRow.balance as number) || 0) + additionalAmount })
+              .eq('id', booking.guestId)
+
+            // If no city_ledger_account was selected, create/update one for this guest
+            if (!selectedLedger?.id && guestRow.name) {
+              const { data: existingAcct } = await supabase
+                .from('city_ledger_accounts')
+                .select('id, balance')
+                .eq('organization_id', booking.organization_id)
+                .ilike('account_name', guestRow.name)
+                .maybeSingle()
+
+              if (existingAcct) {
+                await supabase
+                  .from('city_ledger_accounts')
+                  .update({ balance: (existingAcct.balance || 0) + additionalAmount })
+                  .eq('id', existingAcct.id)
+              } else {
+                await supabase.from('city_ledger_accounts').insert([{
+                  organization_id: booking.organization_id,
+                  account_name: guestRow.name,
+                  account_type: 'individual',
+                  balance: additionalAmount,
+                }])
+              }
+            }
+          }
+        }
+
+        // If a specific ledger account was selected, update it
+        if (selectedLedger?.id) {
+          const { data: acct } = await supabase
+            .from('city_ledger_accounts')
+            .select('balance')
             .eq('id', selectedLedger.id)
             .single()
-          if (orgRow) {
-            await supabase
+          await supabase
+            .from('city_ledger_accounts')
+            .update({ balance: (acct?.balance || 0) + additionalAmount })
+            .eq('id', selectedLedger.id)
+
+          // If it's an organization ledger, also bump organizations.current_balance
+          if (ledgerType === 'organization') {
+            const { data: orgRow } = await supabase
               .from('organizations')
-              .update({ current_balance: ((orgRow.current_balance as number) || 0) + additionalAmount })
+              .select('current_balance')
               .eq('id', selectedLedger.id)
+              .single()
+            if (orgRow) {
+              await supabase
+                .from('organizations')
+                .update({ current_balance: ((orgRow.current_balance as number) || 0) + additionalAmount })
+                .eq('id', selectedLedger.id)
+            }
           }
         }
       }
