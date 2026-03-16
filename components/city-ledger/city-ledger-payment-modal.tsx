@@ -34,6 +34,8 @@ interface CityLedgerPaymentModalProps {
   organizationId: string
   /** organizations.id — only provided when accountType === "organization" */
   orgId?: string
+  /** guests.id — only provided when accountType === "guest" */
+  guestId?: string
 }
 
 export default function CityLedgerPaymentModal({
@@ -46,6 +48,7 @@ export default function CityLedgerPaymentModal({
   currentBalance,
   organizationId,
   orgId,
+  guestId,
 }: CityLedgerPaymentModalProps) {
   const [tab, setTab] = useState<'settle' | 'topup'>('settle')
   const [amount, setAmount] = useState('')
@@ -99,6 +102,15 @@ export default function CityLedgerPaymentModal({
           .update({ current_balance: newBalance })
           .eq('id', orgId)
         if (error) console.warn('Org balance update:', error.message)
+      }
+
+      // 3. If guest account, also update guests.balance (the authoritative balance field)
+      if (accountType === 'guest' && guestId) {
+        const { error } = await supabase
+          .from('guests')
+          .update({ balance: Math.max(0, newBalance) })
+          .eq('id', guestId)
+        if (error) console.warn('Guest balance update:', error.message)
       }
 
       // 3. Insert into transactions table
