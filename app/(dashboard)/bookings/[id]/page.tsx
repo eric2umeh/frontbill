@@ -185,15 +185,58 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
 
         if (!isPaidNow) {
           // Fetch current balance from DB (not stale state) then increment
-          const { data: freshBk } = await supabase
+          const { data: freshBk, error: freshBkErr } = await supabase
             .from('bookings')
             .select('balance')
             .eq('id', bookingId)
             .single()
-          await supabase
+          if (freshBkErr) console.log('[v0] freshBk fetch error:', freshBkErr.message)
+          const { error: balUpdateErr } = await supabase
             .from('bookings')
             .update({ balance: (freshBk?.balance || 0) + Number(chargeAmount) })
             .eq('id', bookingId)
+          if (balUpdateErr) console.log('[v0] balance update error:', balUpdateErr.message)
+
+          // If city_ledger payment: also bump guests.balance and create/update city_ledger_accounts
+          if (chargePaymentMethod === 'city_ledger' && booking.guest_id) {
+            const chargeAmt = Number(chargeAmount)
+            // Bump guests.balance
+            const { data: guestRow } = await supabase
+              .from('guests')
+              .select('balance, name')
+              .eq('id', booking.guest_id)
+              .single()
+            if (guestRow) {
+              await supabase
+                .from('guests')
+                .update({ balance: ((guestRow.balance as number) || 0) + chargeAmt })
+                .eq('id', booking.guest_id)
+
+              // Create or update city_ledger_accounts entry for this guest
+              if (guestRow.name) {
+                const { data: existingAcct } = await supabase
+                  .from('city_ledger_accounts')
+                  .select('id, balance')
+                  .eq('organization_id', booking.organization_id)
+                  .ilike('account_name', guestRow.name)
+                  .maybeSingle()
+
+                if (existingAcct) {
+                  await supabase
+                    .from('city_ledger_accounts')
+                    .update({ balance: (existingAcct.balance || 0) + chargeAmt })
+                    .eq('id', existingAcct.id)
+                } else {
+                  await supabase.from('city_ledger_accounts').insert([{
+                    organization_id: booking.organization_id,
+                    account_name: guestRow.name,
+                    account_type: 'individual',
+                    balance: chargeAmt,
+                  }])
+                }
+              }
+            }
+          }
         }
 
         toast.success(
@@ -523,6 +566,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
       <ExtendStayModal 
         open={extendStayModalOpen}
         onClose={() => setExtendStayModalOpen(false)}
+        onSuccess={() => fetchBookingDetails(bookingId)}
         booking={{
           id: booking.id,
           folioId: booking.folio_id,
@@ -531,6 +575,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
           currentCheckOut: booking.check_out,
           ratePerNight: booking.rate_per_night,
           guestId: booking.guest_id,
+          organization_id: booking.organization_id,
         }}
       />
       
