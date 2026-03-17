@@ -185,15 +185,17 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
 
         if (!isPaidNow) {
           // Fetch current balance from DB (not stale state) then increment
-          const { data: freshBk } = await supabase
+          const { data: freshBk, error: freshBkErr } = await supabase
             .from('bookings')
             .select('balance')
             .eq('id', bookingId)
             .single()
-          await supabase
+          if (freshBkErr) console.log('[v0] freshBk fetch error:', freshBkErr.message)
+          const { error: balUpdateErr } = await supabase
             .from('bookings')
             .update({ balance: (freshBk?.balance || 0) + Number(chargeAmount) })
             .eq('id', bookingId)
+          if (balUpdateErr) console.log('[v0] balance update error:', balUpdateErr.message)
 
           // If city_ledger payment: also bump guests.balance and create/update city_ledger_accounts
           if (chargePaymentMethod === 'city_ledger' && booking.guest_id) {
@@ -564,6 +566,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
       <ExtendStayModal 
         open={extendStayModalOpen}
         onClose={() => setExtendStayModalOpen(false)}
+        onSuccess={() => fetchBookingDetails(bookingId)}
         booking={{
           id: booking.id,
           folioId: booking.folio_id,
@@ -572,6 +575,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
           currentCheckOut: booking.check_out,
           ratePerNight: booking.rate_per_night,
           guestId: booking.guest_id,
+          organization_id: booking.organization_id,
         }}
       />
       

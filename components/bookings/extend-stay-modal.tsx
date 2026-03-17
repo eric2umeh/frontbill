@@ -19,6 +19,7 @@ import { createClient } from '@/lib/supabase/client'
 interface ExtendStayModalProps {
   open: boolean
   onClose: () => void
+  onSuccess?: () => void
   booking: {
     id: string
     folioId: string
@@ -33,7 +34,7 @@ interface ExtendStayModalProps {
   }
 }
 
-export function ExtendStayModal({ open, onClose, booking }: ExtendStayModalProps) {
+export function ExtendStayModal({ open, onClose, onSuccess, booking }: ExtendStayModalProps) {
   const [step, setStep] = useState(1)
   const [newCheckOutDate, setNewCheckOutDate] = useState<Date | undefined>()
   const [paymentMethod, setPaymentMethod] = useState('')
@@ -177,7 +178,7 @@ export function ExtendStayModal({ open, onClose, booking }: ExtendStayModalProps
 
       // Write to transactions table (non-fatal)
       try {
-        await supabase.from('transactions').insert([{
+        const { error: txErr } = await supabase.from('transactions').insert([{
           organization_id: booking.organization_id || null,
           booking_id: booking.id,
           transaction_id: `EXT-${booking.id}-${Date.now()}`,
@@ -189,7 +190,8 @@ export function ExtendStayModal({ open, onClose, booking }: ExtendStayModalProps
           description: `Extended Stay — ${additionalNights} night${additionalNights !== 1 ? 's' : ''}`,
           received_by: null,
         }])
-      } catch (_) { /* non-fatal */ }
+        if (txErr) console.log('[v0] extend-stay transaction insert error:', txErr.message)
+      } catch (txCatch) { console.log('[v0] extend-stay transaction catch:', txCatch) }
 
       // City ledger: update guest balance + city_ledger_accounts balance
       if (paymentMethod === 'city_ledger') {
@@ -268,6 +270,7 @@ export function ExtendStayModal({ open, onClose, booking }: ExtendStayModalProps
       toast.success(`Stay extended to ${format(newCheckOutDate, 'PPP')}${accountInfo}`)
       onClose()
       resetForm()
+      onSuccess?.()
     } catch (error: any) {
       toast.error(error.message || 'Failed to extend stay')
     } finally {
