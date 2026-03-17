@@ -194,6 +194,47 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
             .from('bookings')
             .update({ balance: (freshBk?.balance || 0) + Number(chargeAmount) })
             .eq('id', bookingId)
+
+          // If city_ledger payment: also bump guests.balance and create/update city_ledger_accounts
+          if (chargePaymentMethod === 'city_ledger' && booking.guest_id) {
+            const chargeAmt = Number(chargeAmount)
+            // Bump guests.balance
+            const { data: guestRow } = await supabase
+              .from('guests')
+              .select('balance, name')
+              .eq('id', booking.guest_id)
+              .single()
+            if (guestRow) {
+              await supabase
+                .from('guests')
+                .update({ balance: ((guestRow.balance as number) || 0) + chargeAmt })
+                .eq('id', booking.guest_id)
+
+              // Create or update city_ledger_accounts entry for this guest
+              if (guestRow.name) {
+                const { data: existingAcct } = await supabase
+                  .from('city_ledger_accounts')
+                  .select('id, balance')
+                  .eq('organization_id', booking.organization_id)
+                  .ilike('account_name', guestRow.name)
+                  .maybeSingle()
+
+                if (existingAcct) {
+                  await supabase
+                    .from('city_ledger_accounts')
+                    .update({ balance: (existingAcct.balance || 0) + chargeAmt })
+                    .eq('id', existingAcct.id)
+                } else {
+                  await supabase.from('city_ledger_accounts').insert([{
+                    organization_id: booking.organization_id,
+                    account_name: guestRow.name,
+                    account_type: 'individual',
+                    balance: chargeAmt,
+                  }])
+                }
+              }
+            }
+          }
         }
 
         toast.success(
