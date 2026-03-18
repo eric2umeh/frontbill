@@ -184,18 +184,27 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
         } catch (_) { /* non-fatal */ }
 
         if (!isPaidNow) {
-          // Fetch current balance from DB (not stale state) then increment
-          const { data: freshBk, error: freshBkErr } = await supabase
+          // Fetch current balance from DB then increment
+          const { data: freshBk } = await supabase
             .from('bookings')
             .select('balance')
             .eq('id', bookingId)
             .single()
-          if (freshBkErr) console.log('[v0] freshBk fetch error:', freshBkErr.message)
+
+          const newBalance = (Number(freshBk?.balance) || 0) + Number(chargeAmount)
+
           const { error: balUpdateErr } = await supabase
             .from('bookings')
-            .update({ balance: (freshBk?.balance || 0) + Number(chargeAmount) })
+            .update({ balance: newBalance })
             .eq('id', bookingId)
-          if (balUpdateErr) console.log('[v0] balance update error:', balUpdateErr.message)
+
+          if (balUpdateErr) {
+            console.log('[v0] balance update error:', balUpdateErr.message)
+          } else {
+            // Optimistically update local state immediately so UI reflects change
+            // before the full refetch completes
+            setBooking((prev: any) => prev ? { ...prev, balance: newBalance } : prev)
+          }
 
           // If city_ledger payment: also bump guests.balance and create/update city_ledger_accounts
           if (chargePaymentMethod === 'city_ledger' && booking.guest_id) {
