@@ -353,14 +353,33 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
         toast.success(`Payment of ${formatNaira(Number(chargeAmount))} recorded`)
       }
 
-      // Close modal immediately, then refresh in background
+      // Close modal and reset fields
       setAddChargeModalOpen(false)
       setChargeAmount('')
       setChargeDescription('')
       setChargeType('charge')
       setChargePaymentMethod('')
       setPaymentMethod('')
-      await fetchBookingDetails(bookingId)
+
+      // Only refresh the folio charges list — do NOT re-fetch the booking row because
+      // the DB write may not have committed yet and would overwrite our optimistic balance.
+      const { data: refreshedCharges } = await supabase
+        .from('folio_charges')
+        .select('*, created_by_profile:profiles!folio_charges_created_by_fkey(full_name)')
+        .eq('booking_id', bookingId)
+        .order('created_at', { ascending: false })
+      if (refreshedCharges) {
+        setFolioCharges(refreshedCharges.map((c: any) => ({
+          id: c.id,
+          description: c.description,
+          amount: Number(c.amount),
+          chargeType: c.charge_type,
+          paymentMethod: c.payment_method,
+          paymentStatus: c.payment_status,
+          createdAt: c.created_at,
+          createdBy: c.created_by_profile?.full_name || 'System',
+        })))
+      }
     } catch (error: any) {
       toast.error(error.message || 'Failed to save')
     } finally {
