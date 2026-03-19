@@ -199,7 +199,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
             .eq('id', bookingId)
 
           if (balUpdateErr) {
-            console.log('[v0] balance update error:', balUpdateErr.message)
+            toast.error('Failed to update bill balance — please refresh')
           } else {
             // Optimistically update local state immediately so UI reflects change
             // before the full refetch completes
@@ -291,6 +291,9 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
           })
           .eq('id', bookingId)
 
+        // Optimistically update local booking state so UI shows 0 immediately
+        setBooking((prev: any) => prev ? { ...prev, balance: newBalance, deposit: newDeposit, payment_status: newBalance === 0 ? 'paid' : 'partial' } : prev)
+
         // Mark all pending folio_charges as paid (they've now been settled)
         const { data: pendingCharges } = await supabase
           .from('folio_charges')
@@ -361,8 +364,8 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
       setChargePaymentMethod('')
       setPaymentMethod('')
 
-      // Only refresh the folio charges list — do NOT re-fetch the booking row because
-      // the DB write may not have committed yet and would overwrite our optimistic balance.
+      // Refresh only the folio charges list — NOT the booking row, to avoid
+      // overwriting the optimistic balance update with a stale DB read.
       const { data: refreshedCharges } = await supabase
         .from('folio_charges')
         .select('*, created_by_profile:profiles!folio_charges_created_by_fkey(full_name)')
