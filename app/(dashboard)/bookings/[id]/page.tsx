@@ -364,25 +364,21 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
       setChargePaymentMethod('')
       setPaymentMethod('')
 
-      // Refresh only the folio charges list — NOT the booking row, to avoid
-      // overwriting the optimistic balance update with a stale DB read.
-      const { data: refreshedCharges } = await supabase
-        .from('folio_charges')
-        .select('*, created_by_profile:profiles!folio_charges_created_by_fkey(full_name)')
-        .eq('booking_id', bookingId)
-        .order('created_at', { ascending: false })
-      if (refreshedCharges) {
-        setFolioCharges(refreshedCharges.map((c: any) => ({
-          id: c.id,
-          description: c.description,
-          amount: Number(c.amount),
-          chargeType: c.charge_type,
-          paymentMethod: c.payment_method,
-          paymentStatus: c.payment_status,
-          createdAt: c.created_at,
-          createdBy: c.created_by_profile?.full_name || 'System',
-        })))
+      // Append new charge directly to local folio state — no DB re-read needed.
+      // This avoids a stale read race where DB write hasn't propagated yet.
+      const newChargeEntry = {
+        id: `local-${Date.now()}`, // replaced on next full refresh
+        description: chargeType === 'charge' ? chargeDescription : `Payment Received — ${paymentMethod.replace(/_/g, ' ')}`,
+        amount: chargeType === 'charge' ? Number(chargeAmount) : -Number(chargeAmount),
+        chargeType: chargeType === 'charge' ? 'charge' : 'payment',
+        paymentMethod: chargeType === 'charge' ? chargePaymentMethod : paymentMethod,
+        paymentStatus: chargeType === 'charge'
+          ? (chargePaymentMethod === 'city_ledger' || chargePaymentMethod === 'deferred' ? 'pending' : 'paid')
+          : 'paid',
+        createdAt: new Date().toISOString(),
+        createdBy: 'You',
       }
+      setFolioCharges((prev: any[]) => [newChargeEntry, ...prev])
     } catch (error: any) {
       toast.error(error.message || 'Failed to save')
     } finally {
