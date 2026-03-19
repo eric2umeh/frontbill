@@ -199,7 +199,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
             .eq('id', bookingId)
 
           if (balUpdateErr) {
-            console.log('[v0] balance update error:', balUpdateErr.message)
+            toast.error('Failed to update bill balance — please refresh')
           } else {
             // Optimistically update local state immediately so UI reflects change
             // before the full refetch completes
@@ -291,6 +291,9 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
           })
           .eq('id', bookingId)
 
+        // Optimistically update local booking state so UI shows 0 immediately
+        setBooking((prev: any) => prev ? { ...prev, balance: newBalance, deposit: newDeposit, payment_status: newBalance === 0 ? 'paid' : 'partial' } : prev)
+
         // Mark all pending folio_charges as paid (they've now been settled)
         const { data: pendingCharges } = await supabase
           .from('folio_charges')
@@ -353,14 +356,29 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
         toast.success(`Payment of ${formatNaira(Number(chargeAmount))} recorded`)
       }
 
-      // Close modal immediately, then refresh in background
+      // Close modal and reset fields
       setAddChargeModalOpen(false)
       setChargeAmount('')
       setChargeDescription('')
       setChargeType('charge')
       setChargePaymentMethod('')
       setPaymentMethod('')
-      await fetchBookingDetails(bookingId)
+
+      // Append new charge directly to local folio state — no DB re-read needed.
+      // This avoids a stale read race where DB write hasn't propagated yet.
+      const newChargeEntry = {
+        id: `local-${Date.now()}`, // replaced on next full refresh
+        description: chargeType === 'charge' ? chargeDescription : `Payment Received — ${paymentMethod.replace(/_/g, ' ')}`,
+        amount: chargeType === 'charge' ? Number(chargeAmount) : -Number(chargeAmount),
+        chargeType: chargeType === 'charge' ? 'charge' : 'payment',
+        paymentMethod: chargeType === 'charge' ? chargePaymentMethod : paymentMethod,
+        paymentStatus: chargeType === 'charge'
+          ? (chargePaymentMethod === 'city_ledger' || chargePaymentMethod === 'deferred' ? 'pending' : 'paid')
+          : 'paid',
+        createdAt: new Date().toISOString(),
+        createdBy: 'You',
+      }
+      setFolioCharges((prev: any[]) => [newChargeEntry, ...prev])
     } catch (error: any) {
       toast.error(error.message || 'Failed to save')
     } finally {
