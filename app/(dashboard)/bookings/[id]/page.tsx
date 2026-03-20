@@ -205,6 +205,20 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
             // before the full refetch completes
             setBooking((prev: any) => prev ? { ...prev, balance: newBalance } : prev)
           }
+        } else {
+          // Paid immediately — increment bookings.deposit so Amount Paid is accurate
+          const { data: freshBk } = await supabase
+            .from('bookings')
+            .select('deposit')
+            .eq('id', bookingId)
+            .single()
+          const newDeposit = (Number(freshBk?.deposit) || 0) + Number(chargeAmount)
+          await supabase
+            .from('bookings')
+            .update({ deposit: newDeposit })
+            .eq('id', bookingId)
+          setBooking((prev: any) => prev ? { ...prev, deposit: newDeposit } : prev)
+        }
 
           // If city_ledger payment: also bump guests.balance and create/update city_ledger_accounts
           if (chargePaymentMethod === 'city_ledger' && booking.guest_id) {

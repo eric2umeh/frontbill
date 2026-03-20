@@ -162,8 +162,7 @@ export function ExtendStayModal({ open, onClose, onSuccess, booking }: ExtendSta
         .update({ check_out: format(newCheckOutDate, 'yyyy-MM-dd') })
         .eq('id', booking.id)
 
-      // Bump booking balance for unpaid / city-ledger extended stay
-      // Only bump balance if payment is deferred (city_ledger) - not for immediate payments (cash/pos/transfer)
+      // Bump booking balance (city_ledger) OR deposit (paid now)
       if (paymentMethod === 'city_ledger') {
         const { data: freshBk } = await supabase
           .from('bookings')
@@ -174,11 +173,22 @@ export function ExtendStayModal({ open, onClose, onSuccess, booking }: ExtendSta
           .from('bookings')
           .update({ balance: (freshBk?.balance || 0) + additionalAmount, payment_status: 'pending' })
           .eq('id', booking.id)
+      } else {
+        // Immediate payment (cash/pos/transfer/cheque) — increment deposit so Amount Paid is accurate
+        const { data: freshBk } = await supabase
+          .from('bookings')
+          .select('deposit')
+          .eq('id', booking.id)
+          .single()
+        await supabase
+          .from('bookings')
+          .update({ deposit: (Number(freshBk?.deposit) || 0) + additionalAmount })
+          .eq('id', booking.id)
       }
 
       // Write to transactions table (non-fatal)
       try {
-        const { error: txErr } = await supabase.from('transactions').insert([{
+        await supabase.from('transactions').insert([{
           organization_id: booking.organization_id || null,
           booking_id: booking.id,
           transaction_id: `EXT-${booking.id}-${Date.now()}`,
@@ -190,8 +200,7 @@ export function ExtendStayModal({ open, onClose, onSuccess, booking }: ExtendSta
           description: `Extended Stay — ${additionalNights} night${additionalNights !== 1 ? 's' : ''}`,
           received_by: null,
         }])
-        if (txErr) console.log('[v0] extend-stay transaction insert error:', txErr.message)
-      } catch (txCatch) { console.log('[v0] extend-stay transaction catch:', txCatch) }
+      } catch (_) { /* non-fatal */ }
 
       // City ledger: update guest balance + city_ledger_accounts balance
       if (paymentMethod === 'city_ledger') {
