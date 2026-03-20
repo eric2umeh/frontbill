@@ -308,6 +308,27 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
             .eq('payment_status', 'pending')
         }
 
+        // Optimistically mark all pending charges as paid in local state
+        // and append the payment entry — so Bill Balance immediately shows 0
+        setFolioCharges((prev: any[]) => {
+          const updated = prev.map((c: any) =>
+            (c.paymentStatus === 'pending' || c.paymentStatus === 'unpaid') && Number(c.amount) > 0
+              ? { ...c, paymentStatus: 'paid' }
+              : c
+          )
+          const paymentRow = {
+            id: `local-pay-${Date.now()}`,
+            description: `Payment Received — ${paymentMethod.replace(/_/g, ' ')}`,
+            amount: -Number(chargeAmount),
+            chargeType: 'payment',
+            paymentMethod,
+            paymentStatus: 'paid',
+            createdAt: new Date().toISOString(),
+            createdBy: 'You',
+          }
+          return [paymentRow, ...updated]
+        })
+
         // Also decrement guests.balance and city_ledger_accounts.balance so the
         // guest database shows the correct outstanding amount after settlement
         const guestId = booking?.guest_id || booking?.guests?.id
@@ -567,10 +588,12 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
     .filter(c => c.paymentStatus === 'paid' && c.amount > 0 && c.type === 'charge')
     .reduce((sum, c) => sum + c.amount, 0)
 
-  // Bill Balance (Unpaid) = booking.balance from DB (always kept accurate by all handlers)
-  // booking.balance is incremented by add-charge (city_ledger/deferred) and decremented by record-payment
-  // For cash/pos/transfer charges (paid immediately), balance is NOT incremented — so it's already correct
-  const totalBillBalance = booking ? Math.max(0, booking.balance || 0) : 0
+  // Bill Balance (Unpaid) = sum of all pending/unpaid folio charges
+  // Derived entirely from folioCharges state — no reliance on bookings.balance column.
+  // This avoids RLS-blocked DB writes and stale-read race conditions.
+  const totalBillBalance = folioCharges
+    .filter((c: any) => (c.paymentStatus === 'pending' || c.paymentStatus === 'unpaid') && Number(c.amount) > 0)
+    .reduce((sum: number, c: any) => sum + Number(c.amount), 0)
 
   if (loading) {
     return (
