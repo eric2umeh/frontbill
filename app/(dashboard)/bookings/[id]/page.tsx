@@ -184,46 +184,26 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
         } catch (_) { /* non-fatal */ }
 
         if (!isPaidNow) {
-          // Fetch current balance from DB then increment
+          // Deferred / city_ledger — increment booking balance
           const { data: freshBk } = await supabase
             .from('bookings')
             .select('balance')
             .eq('id', bookingId)
             .single()
-
           const newBalance = (Number(freshBk?.balance) || 0) + Number(chargeAmount)
-
           const { error: balUpdateErr } = await supabase
             .from('bookings')
             .update({ balance: newBalance })
             .eq('id', bookingId)
-
           if (balUpdateErr) {
             toast.error('Failed to update bill balance — please refresh')
           } else {
-            // Optimistically update local state immediately so UI reflects change
-            // before the full refetch completes
             setBooking((prev: any) => prev ? { ...prev, balance: newBalance } : prev)
           }
-        } else {
-          // Paid immediately — increment bookings.deposit so Amount Paid is accurate
-          const { data: freshBk } = await supabase
-            .from('bookings')
-            .select('deposit')
-            .eq('id', bookingId)
-            .single()
-          const newDeposit = (Number(freshBk?.deposit) || 0) + Number(chargeAmount)
-          await supabase
-            .from('bookings')
-            .update({ deposit: newDeposit })
-            .eq('id', bookingId)
-          setBooking((prev: any) => prev ? { ...prev, deposit: newDeposit } : prev)
-        }
 
-          // If city_ledger payment: also bump guests.balance and create/update city_ledger_accounts
+          // If city_ledger: also bump guests.balance and create/update city_ledger_accounts
           if (chargePaymentMethod === 'city_ledger' && booking.guest_id) {
             const chargeAmt = Number(chargeAmount)
-            // Bump guests.balance
             const { data: guestRow } = await supabase
               .from('guests')
               .select('balance, name')
@@ -234,8 +214,6 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                 .from('guests')
                 .update({ balance: ((guestRow.balance as number) || 0) + chargeAmt })
                 .eq('id', booking.guest_id)
-
-              // Create or update city_ledger_accounts entry for this guest
               if (guestRow.name) {
                 const { data: existingAcct } = await supabase
                   .from('city_ledger_accounts')
@@ -243,7 +221,6 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                   .eq('organization_id', booking.organization_id)
                   .ilike('account_name', guestRow.name)
                   .maybeSingle()
-
                 if (existingAcct) {
                   await supabase
                     .from('city_ledger_accounts')
@@ -260,14 +237,27 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
               }
             }
           }
+        } else {
+          // Paid immediately (cash/pos/transfer/etc) — increment deposit so Amount Paid is accurate
+          const { data: freshBk } = await supabase
+            .from('bookings')
+            .select('deposit')
+            .eq('id', bookingId)
+            .single()
+          const newDeposit = (Number(freshBk?.deposit) || 0) + Number(chargeAmount)
+          await supabase
+            .from('bookings')
+            .update({ deposit: newDeposit })
+            .eq('id', bookingId)
+          setBooking((prev: any) => prev ? { ...prev, deposit: newDeposit } : prev)
         }
 
         toast.success(
           isPaidNow
             ? `Charge of ${formatNaira(Number(chargeAmount))} recorded as paid (${chargePaymentMethod.replace(/_/g, ' ')})`
             : chargePaymentMethod === 'city_ledger'
-              ? `${formatNaira(Number(chargeAmount))} added to city ledger — Bill Balance updated`
-              : `${formatNaira(Number(chargeAmount))} deferred — Bill Balance updated`
+              ? `${formatNaira(Number(chargeAmount))} added to city ledger - Bill Balance updated`
+              : `${formatNaira(Number(chargeAmount))} deferred - Bill Balance updated`
         )
 
       // -- RECORD PAYMENT tab: reduces existing Bill Balance --
