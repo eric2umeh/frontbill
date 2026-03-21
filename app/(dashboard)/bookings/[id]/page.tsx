@@ -184,7 +184,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
         } catch (_) { /* non-fatal */ }
 
         if (!isPaidNow) {
-          // Deferred / city_ledger — increment booking balance
+          // Deferred / city_ledger - increment booking balance
           const { data: freshBk } = await supabase
             .from('bookings')
             .select('balance')
@@ -196,7 +196,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
             .update({ balance: newBalance })
             .eq('id', bookingId)
           if (balUpdateErr) {
-            toast.error('Failed to update bill balance — please refresh')
+            toast.error('Failed to update bill balance - please refresh')
           } else {
             setBooking((prev: any) => prev ? { ...prev, balance: newBalance } : prev)
           }
@@ -238,7 +238,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
             }
           }
         } else {
-          // Paid immediately (cash/pos/transfer/etc) — increment deposit so Amount Paid is accurate
+          // Paid immediately (cash/pos/transfer/etc) - increment deposit so Amount Paid is accurate
           const { data: freshBk } = await supabase
             .from('bookings')
             .select('deposit')
@@ -269,7 +269,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
 
         const paymentEntry = {
           booking_id: bookingId,
-          description: `Payment Received — ${paymentMethod.replace('_', ' ')}`,
+          description: `Payment Received - ${paymentMethod.replace('_', ' ')}`,
           amount: -Number(chargeAmount), // negative = money coming in
           charge_type: 'payment',
           payment_method: paymentMethod,
@@ -313,7 +313,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
         }
 
         // Optimistically mark all pending charges as paid in local state
-        // and append the payment entry — so Bill Balance immediately shows 0
+          // and append the payment entry - so Bill Balance immediately shows 0
         setFolioCharges((prev: any[]) => {
           const updated = prev.map((c: any) =>
             (c.paymentStatus === 'pending' || c.paymentStatus === 'unpaid') && Number(c.amount) > 0
@@ -322,7 +322,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
           )
           const paymentRow = {
             id: `local-pay-${Date.now()}`,
-            description: `Payment Received — ${paymentMethod.replace(/_/g, ' ')}`,
+            description: `Payment Received - ${paymentMethod.replace(/_/g, ' ')}`,
             amount: -Number(chargeAmount),
             chargeType: 'payment',
             paymentMethod,
@@ -373,7 +373,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
             amount: Number(chargeAmount),
             payment_method: paymentMethod,
             status: 'paid',
-            description: `Payment received — ${paymentMethod.replace(/_/g, ' ')}`,
+            description: `Payment received - ${paymentMethod.replace(/_/g, ' ')}`,
             received_by: null,
           }])
         } catch (_) { /* non-fatal */ }
@@ -389,11 +389,11 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
       setChargePaymentMethod('')
       setPaymentMethod('')
 
-      // Append new charge directly to local folio state — no DB re-read needed.
+      // Append new charge directly to local folio state - no DB re-read needed.
       // This avoids a stale read race where DB write hasn't propagated yet.
       const newChargeEntry = {
         id: `local-${Date.now()}`, // replaced on next full refresh
-        description: chargeType === 'charge' ? chargeDescription : `Payment Received — ${paymentMethod.replace(/_/g, ' ')}`,
+        description: chargeType === 'charge' ? chargeDescription : `Payment Received - ${paymentMethod.replace(/_/g, ' ')}`,
         amount: chargeType === 'charge' ? Number(chargeAmount) : -Number(chargeAmount),
         chargeType: chargeType === 'charge' ? 'charge' : 'payment',
         paymentMethod: chargeType === 'charge' ? chargePaymentMethod : paymentMethod,
@@ -582,18 +582,18 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
 
   const totalCharges = folioCharges.reduce((sum, charge) => sum + charge.amount, 0)
 
-  // Pending (city ledger / deferred) additional charges — excludes cash/card/pos paid charges
+  // Pending (city ledger / deferred) additional charges - excludes cash/card/pos paid charges
   const pendingAdditionalCharges = folioCharges
     .filter(c => c.paymentStatus === 'pending' && c.amount > 0)
     .reduce((sum, c) => sum + c.amount, 0)
 
-  // Paid additional charges (cash/card/pos/bank_transfer on the spot) — for folio display only
+  // Paid additional charges (cash/card/pos/bank_transfer on the spot) - for folio display only
   const paidAdditionalCharges = folioCharges
     .filter(c => c.paymentStatus === 'paid' && c.amount > 0 && c.type === 'charge')
     .reduce((sum, c) => sum + c.amount, 0)
 
   // Bill Balance (Unpaid) = sum of all pending/unpaid folio charges
-  // Derived entirely from folioCharges state — no reliance on bookings.balance column.
+  // Derived entirely from folioCharges state - no reliance on bookings.balance column.
   // This avoids RLS-blocked DB writes and stale-read race conditions.
   const totalBillBalance = folioCharges
     .filter((c: any) => (c.paymentStatus === 'pending' || c.paymentStatus === 'unpaid') && Number(c.amount) > 0)
@@ -661,7 +661,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                 <div className="space-y-2">
                   <Label>Description</Label>
                   <Input
-                    placeholder="e.g., Restaurant — Dinner, Laundry"
+                    placeholder="e.g., Restaurant - Dinner, Laundry"
                     value={chargeDescription}
                     onChange={(e) => setChargeDescription(e.target.value)}
                   />
@@ -673,13 +673,13 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                       <SelectValue placeholder="Select settlement method" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="cash">Cash (paid now — not added to Bill Balance)</SelectItem>
-                      <SelectItem value="pos">POS (paid now — not added to Bill Balance)</SelectItem>
-                      <SelectItem value="card">Card (paid now — not added to Bill Balance)</SelectItem>
-                      <SelectItem value="transfer">Bank Transfer (paid now — not added to Bill Balance)</SelectItem>
-                      <SelectItem value="bank_transfer">Bank Transfer / Wire (paid now — not added to Bill Balance)</SelectItem>
-                      <SelectItem value="cheque">Cheque (paid now — not added to Bill Balance)</SelectItem>
-                      <SelectItem value="city_ledger">City Ledger (bill to account — adds to Bill Balance)</SelectItem>
+                      <SelectItem value="cash">Cash (paid now - not added to Bill Balance)</SelectItem>
+                      <SelectItem value="pos">POS (paid now - not added to Bill Balance)</SelectItem>
+                      <SelectItem value="card">Card (paid now - not added to Bill Balance)</SelectItem>
+                      <SelectItem value="transfer">Bank Transfer (paid now - not added to Bill Balance)</SelectItem>
+                      <SelectItem value="bank_transfer">Bank Transfer / Wire (paid now - not added to Bill Balance)</SelectItem>
+                      <SelectItem value="cheque">Cheque (paid now - not added to Bill Balance)</SelectItem>
+                      <SelectItem value="city_ledger">City Ledger (bill to account - adds to Bill Balance)</SelectItem>
                       <SelectItem value="deferred">Defer / Not yet paid (adds to Bill Balance)</SelectItem>
                     </SelectContent>
                   </Select>
@@ -691,7 +691,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                 )}
                 {chargePaymentMethod !== '' && chargePaymentMethod !== 'city_ledger' && (
                   <p className="text-xs text-green-600 bg-green-50 border border-green-200 rounded px-3 py-2">
-                    Paid on the spot — this will be recorded in the folio but will NOT affect the Bill Balance.
+                      Paid on the spot - this will be recorded in the folio but will NOT affect the Bill Balance.
                   </p>
                 )}
               </TabsContent>
