@@ -599,6 +599,13 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
     .filter((c: any) => (c.paymentStatus === 'pending' || c.paymentStatus === 'unpaid') && Number(c.amount) > 0)
     .reduce((sum: number, c: any) => sum + Number(c.amount), 0)
 
+  // Amount Paid = original deposit + all payments recorded in folio (payments have negative amounts)
+  // Payments recorded via "Record Payment" are negative charges with paymentStatus = 'paid'
+  const paymentsFromFolio = folioCharges
+    .filter((c: any) => c.chargeType === 'payment' && Number(c.amount) < 0)
+    .reduce((sum: number, c: any) => sum + Math.abs(Number(c.amount)), 0)
+  const totalAmountPaid = (booking?.deposit || 0) + paymentsFromFolio
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -923,7 +930,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
               )}
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Amount Paid</span>
-                <span className="font-semibold text-green-600">{formatNaira(booking.deposit)}</span>
+                <span className="font-semibold text-green-600">{formatNaira(totalAmountPaid)}</span>
               </div>
               <Separator />
               <div className="flex justify-between text-lg">

@@ -99,6 +99,24 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
       setGuest(guestData)
       setBookings(bookingData || [])
 
+      // Fetch all folio payment entries for this guest's bookings
+      // This lets us accurately calculate Total Paid even if bookings.deposit is stale
+      const bookingIds = (bookingData || []).map((b: any) => b.id)
+      let folioPaymentsTotal = 0
+      if (bookingIds.length > 0) {
+        const { data: folioPayments } = await supabase
+          .from('folio_charges')
+          .select('amount')
+          .in('booking_id', bookingIds)
+          .eq('charge_type', 'payment')
+          .lt('amount', 0) // payments are negative
+        if (folioPayments) {
+          folioPaymentsTotal = folioPayments.reduce((sum, p) => sum + Math.abs(Number(p.amount)), 0)
+        }
+      }
+      // Store in state for use in totalSpent calculation
+      setFolioPaymentsSum(folioPaymentsTotal)
+
       // City ledger account — fetch if exists, but we use guests.balance as the source of truth
       const { data: ledgerData } = await supabase
         .from('city_ledger_accounts')
