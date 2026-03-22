@@ -143,11 +143,10 @@ export default function BookingsPage() {
               balanceMap[c.booking_id] = (balanceMap[c.booking_id] || 0) + Number(c.amount)
             }
           })
-          // Override booking.balance with the folio-derived value
+          // Override booking.balance with the folio-derived value for ALL bookings
+          // Default to 0 if no pending charges — never fall back to stale DB value
           bookingsWithUsers.forEach((b: any) => {
-            if (balanceMap[b.id] !== undefined) {
-              b.balance = balanceMap[b.id]
-            }
+            b.balance = balanceMap[b.id] ?? 0
           })
         }
       }

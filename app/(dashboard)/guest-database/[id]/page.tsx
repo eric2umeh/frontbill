@@ -70,6 +70,7 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
   const [orgId, setOrgId] = useState<string>('')
   const [loading, setLoading] = useState(true)
   const [paymentModalOpen, setPaymentModalOpen] = useState(false)
+  const [folioPaymentsSum, setFolioPaymentsSum] = useState(0)
 
   useEffect(() => {
     if (id) loadGuest()
@@ -98,6 +99,37 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
       if (!guestData) { router.push('/guest-database'); return }
       setGuest(guestData)
       setBookings(bookingData || [])
+
+      // Fetch all folio charges for this guest's bookings to derive accurate balances
+      const bookingIds = (bookingData || []).map((b: any) => b.id)
+      let folioPaymentsTotal = 0
+      let folioPendingByBooking: { [id: string]: number } = {}
+      if (bookingIds.length > 0) {
+        const { data: allFolioCharges } = await supabase
+          .from('folio_charges')
+          .select('booking_id, amount, payment_status, charge_type')
+          .in('booking_id', bookingIds)
+        if (allFolioCharges) {
+          allFolioCharges.forEach((c: any) => {
+            // Sum pending charges per booking (for Booking Balance)
+            if ((c.payment_status === 'pending' || c.payment_status === 'unpaid') && Number(c.amount) > 0) {
+              folioPendingByBooking[c.booking_id] = (folioPendingByBooking[c.booking_id] || 0) + Number(c.amount)
+            }
+            // Sum payment entries (negative amounts) for Total Paid
+            if (c.charge_type === 'payment' && Number(c.amount) < 0) {
+              folioPaymentsTotal += Math.abs(Number(c.amount))
+            }
+          })
+          // Override each booking's balance with folio-derived value for ALL bookings
+          // Default to 0 if no pending charges — never fall back to stale DB value
+          if (bookingData) {
+            bookingData.forEach((b: any) => {
+              b.balance = folioPendingByBooking[b.id] ?? 0
+            })
+          }
+        }
+      }
+      setFolioPaymentsSum(folioPaymentsTotal)
 
       // City ledger account — fetch if exists, but we use guests.balance as the source of truth
       const { data: ledgerData } = await supabase
@@ -145,7 +177,10 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
 
   if (!guest) return null
 
-  const totalSpent = bookings.reduce((s, b) => s + Number(b.deposit || 0), 0)
+  // Total Paid = sum of original deposits (cash/pos/transfer at booking time)
+  // + any payments recorded via "Record Payment" in folio (which bump deposit in DB)
+  // + any city-ledger charges that were subsequently paid via folio payment entries
+  const totalSpent = bookings.reduce((s, b) => s + Number(b.deposit || 0), 0) + folioPaymentsSum
   // Clamp to 0 — negative means overpaid, show as settled
   const totalBookingBalance = Math.max(0, bookings.reduce((s, b) => s + Number(b.balance || 0), 0))
   const lastVisit = bookings.length > 0 ? bookings[0].check_in : null
