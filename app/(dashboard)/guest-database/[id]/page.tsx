@@ -70,6 +70,7 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
   const [orgId, setOrgId] = useState<string>('')
   const [loading, setLoading] = useState(true)
   const [paymentModalOpen, setPaymentModalOpen] = useState(false)
+  const [folioPaymentsSum, setFolioPaymentsSum] = useState(0)
 
   useEffect(() => {
     if (id) loadGuest()
@@ -163,7 +164,10 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
 
   if (!guest) return null
 
-  const totalSpent = bookings.reduce((s, b) => s + Number(b.deposit || 0), 0)
+  // Total Paid = sum of original deposits (cash/pos/transfer at booking time)
+  // + any payments recorded via "Record Payment" in folio (which bump deposit in DB)
+  // + any city-ledger charges that were subsequently paid via folio payment entries
+  const totalSpent = bookings.reduce((s, b) => s + Number(b.deposit || 0), 0) + folioPaymentsSum
   // Clamp to 0 — negative means overpaid, show as settled
   const totalBookingBalance = Math.max(0, bookings.reduce((s, b) => s + Number(b.balance || 0), 0))
   const lastVisit = bookings.length > 0 ? bookings[0].check_in : null
