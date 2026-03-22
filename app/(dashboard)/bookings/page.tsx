@@ -126,7 +126,32 @@ export default function BookingsPage() {
           updated_by_name: booking.updated_by ? userMap[booking.updated_by] || 'Unknown User' : null,
         }
       })
-      
+
+      // Derive each booking's real balance from folio_charges (pending charges)
+      // This is the authoritative source — bookings.balance can be stale due to RLS timing
+      const bookingIds = bookingsWithUsers.map((b: any) => b.id)
+      if (bookingIds.length > 0) {
+        const { data: allFolioCharges } = await supabase
+          .from('folio_charges')
+          .select('booking_id, amount, payment_status')
+          .in('booking_id', bookingIds)
+        if (allFolioCharges) {
+          // Build a map: booking_id -> sum of pending charges
+          const balanceMap: { [id: string]: number } = {}
+          allFolioCharges.forEach((c: any) => {
+            if ((c.payment_status === 'pending' || c.payment_status === 'unpaid') && Number(c.amount) > 0) {
+              balanceMap[c.booking_id] = (balanceMap[c.booking_id] || 0) + Number(c.amount)
+            }
+          })
+          // Override booking.balance with the folio-derived value
+          bookingsWithUsers.forEach((b: any) => {
+            if (balanceMap[b.id] !== undefined) {
+              b.balance = balanceMap[b.id]
+            }
+          })
+        }
+      }
+
       setBookings(bookingsWithUsers)
     } catch (error: any) {
       console.error('Error fetching bookings:', error)

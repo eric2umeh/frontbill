@@ -100,22 +100,36 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
       setGuest(guestData)
       setBookings(bookingData || [])
 
-      // Fetch all folio payment entries for this guest's bookings
-      // This lets us accurately calculate Total Paid even if bookings.deposit is stale
+      // Fetch all folio charges for this guest's bookings to derive accurate balances
       const bookingIds = (bookingData || []).map((b: any) => b.id)
       let folioPaymentsTotal = 0
+      let folioPendingByBooking: { [id: string]: number } = {}
       if (bookingIds.length > 0) {
-        const { data: folioPayments } = await supabase
+        const { data: allFolioCharges } = await supabase
           .from('folio_charges')
-          .select('amount')
+          .select('booking_id, amount, payment_status, charge_type')
           .in('booking_id', bookingIds)
-          .eq('charge_type', 'payment')
-          .lt('amount', 0) // payments are negative
-        if (folioPayments) {
-          folioPaymentsTotal = folioPayments.reduce((sum, p) => sum + Math.abs(Number(p.amount)), 0)
+        if (allFolioCharges) {
+          allFolioCharges.forEach((c: any) => {
+            // Sum pending charges per booking (for Booking Balance)
+            if ((c.payment_status === 'pending' || c.payment_status === 'unpaid') && Number(c.amount) > 0) {
+              folioPendingByBooking[c.booking_id] = (folioPendingByBooking[c.booking_id] || 0) + Number(c.amount)
+            }
+            // Sum payment entries (negative amounts) for Total Paid
+            if (c.charge_type === 'payment' && Number(c.amount) < 0) {
+              folioPaymentsTotal += Math.abs(Number(c.amount))
+            }
+          })
+          // Override each booking's balance with folio-derived value
+          if (bookingData) {
+            bookingData.forEach((b: any) => {
+              if (folioPendingByBooking[b.id] !== undefined) {
+                b.balance = folioPendingByBooking[b.id]
+              }
+            })
+          }
         }
       }
-      // Store in state for use in totalSpent calculation
       setFolioPaymentsSum(folioPaymentsTotal)
 
       // City ledger account — fetch if exists, but we use guests.balance as the source of truth
