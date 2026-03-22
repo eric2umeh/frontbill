@@ -120,12 +120,11 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
               folioPaymentsTotal += Math.abs(Number(c.amount))
             }
           })
-          // Override each booking's balance with folio-derived value
+          // Override each booking's balance with folio-derived value for ALL bookings
+          // Default to 0 if no pending charges — never fall back to stale DB value
           if (bookingData) {
             bookingData.forEach((b: any) => {
-              if (folioPendingByBooking[b.id] !== undefined) {
-                b.balance = folioPendingByBooking[b.id]
-              }
+              b.balance = folioPendingByBooking[b.id] ?? 0
             })
           }
         }
