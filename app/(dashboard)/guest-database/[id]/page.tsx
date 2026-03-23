@@ -177,10 +177,10 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
 
   if (!guest) return null
 
-  // Total Paid = sum of original deposits (cash/pos/transfer at booking time)
-  // + any payments recorded via "Record Payment" in folio (which bump deposit in DB)
-  // + any city-ledger charges that were subsequently paid via folio payment entries
-  const totalSpent = bookings.reduce((s, b) => s + Number(b.deposit || 0), 0) + folioPaymentsSum
+  // Total Paid = sum of bookings.deposit (includes initial payment + all record-payment increments)
+  // folioPaymentsSum is NOT added here — booking.deposit is already bumped when a payment is recorded,
+  // so adding folio payments would double-count them.
+  const totalSpent = bookings.reduce((s, b) => s + Number(b.deposit || 0), 0)
   // Clamp to 0 — negative means overpaid, show as settled
   const totalBookingBalance = Math.max(0, bookings.reduce((s, b) => s + Number(b.balance || 0), 0))
   const lastVisit = bookings.length > 0 ? bookings[0].check_in : null

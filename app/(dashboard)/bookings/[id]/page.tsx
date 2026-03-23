@@ -138,6 +138,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
   }
 
   const handleAddCharge = async () => {
+    if (addChargeLoading) return // prevent double-submit
     if (!chargeAmount || Number(chargeAmount) <= 0) {
       toast.error('Please enter a valid amount')
       return
@@ -148,6 +149,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
       return
     }
 
+    setAddChargeLoading(true)
     // Determine if this charge goes onto the city ledger (unpaid bill) or is settled immediately
     try {
       const supabase = createClient()
@@ -313,25 +315,15 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
         }
 
         // Optimistically mark all pending charges as paid in local state
-          // and append the payment entry - so Bill Balance immediately shows 0
-        setFolioCharges((prev: any[]) => {
-          const updated = prev.map((c: any) =>
+        // and append the payment entry - so Bill Balance immediately shows 0
+        // NOTE: do NOT append here — the shared block below handles the folio append for both paths.
+        setFolioCharges((prev: any[]) =>
+          prev.map((c: any) =>
             (c.paymentStatus === 'pending' || c.paymentStatus === 'unpaid') && Number(c.amount) > 0
               ? { ...c, paymentStatus: 'paid' }
               : c
           )
-          const paymentRow = {
-            id: `local-pay-${Date.now()}`,
-            description: `Payment Received - ${paymentMethod.replace(/_/g, ' ')}`,
-            amount: -Number(chargeAmount),
-            chargeType: 'payment',
-            paymentMethod,
-            paymentStatus: 'paid',
-            createdAt: new Date().toISOString(),
-            createdBy: 'You',
-          }
-          return [paymentRow, ...updated]
-        })
+        )
 
         // Also decrement guests.balance and city_ledger_accounts.balance so the
         // guest database shows the correct outstanding amount after settlement
@@ -599,11 +591,14 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
     .filter((c: any) => (c.paymentStatus === 'pending' || c.paymentStatus === 'unpaid') && Number(c.amount) > 0)
     .reduce((sum: number, c: any) => sum + Number(c.amount), 0)
 
-  // Amount Paid = original deposit + all payments recorded in folio (payments have negative amounts)
-  // Payments recorded via "Record Payment" are negative charges with paymentStatus = 'paid'
-  const paymentsFromFolio = folioCharges
-    .filter((c: any) => c.chargeType === 'payment' && Number(c.amount) < 0)
-    .reduce((sum: number, c: any) => sum + Math.abs(Number(c.amount)), 0)
+  // Amount Paid = initial booking deposit + all "Record Payment" entries in folio
+  // Using both 'type' (DB-loaded) and 'chargeType' (optimistic) field names.
+  const paymentsFromFolio = folioCharges.reduce((sum: number, c: any) => {
+    const cType = c.chargeType || c.type
+    const amt = Number(c.amount)
+    if (cType === 'payment' && amt < 0) return sum + Math.abs(amt)
+    return sum
+  }, 0)
   const totalAmountPaid = (booking?.deposit || 0) + paymentsFromFolio
 
   if (loading) {
