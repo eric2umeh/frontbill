@@ -34,6 +34,8 @@ interface CityLedgerPaymentModalProps {
   organizationId: string
   /** organizations.id — only provided when accountType === "organization" */
   orgId?: string
+  /** guests.id — only provided when accountType === "guest" */
+  guestId?: string
 }
 
 export default function CityLedgerPaymentModal({
@@ -46,6 +48,7 @@ export default function CityLedgerPaymentModal({
   currentBalance,
   organizationId,
   orgId,
+  guestId,
 }: CityLedgerPaymentModalProps) {
   const [tab, setTab] = useState<'settle' | 'topup'>('settle')
   const [amount, setAmount] = useState('')
@@ -99,6 +102,37 @@ export default function CityLedgerPaymentModal({
           .update({ current_balance: newBalance })
           .eq('id', orgId)
         if (error) console.warn('Org balance update:', error.message)
+      }
+
+      // 3. If guest account, also update guests.balance AND clear booking balances
+      if (accountType === 'guest' && guestId) {
+        const newGuestBalance = Math.max(0, newBalance)
+        const { error: gErr } = await supabase
+          .from('guests')
+          .update({ balance: newGuestBalance })
+          .eq('id', guestId)
+        if (gErr) console.warn('Guest balance update:', gErr.message)
+
+        // If fully settled (balance reaches 0), clear all pending booking balances
+        // and mark pending folio_charges as paid for this guest
+        if (newGuestBalance === 0) {
+          // Get all bookings for this guest that have outstanding balance
+          const { data: pendingBookings } = await supabase
+            .from('bookings')
+            .select('id')
+            .eq('guest_id', guestId)
+            .gt('balance', 0)
+          if (pendingBookings && pendingBookings.length > 0) {
+            for (const bk of pendingBookings) {
+              await supabase.from('bookings').update({ balance: 0, payment_status: 'paid' }).eq('id', bk.id)
+              await supabase
+                .from('folio_charges')
+                .update({ payment_status: 'paid' })
+                .eq('booking_id', bk.id)
+                .eq('payment_status', 'pending')
+            }
+          }
+        }
       }
 
       // 3. Insert into transactions table

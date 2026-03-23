@@ -70,6 +70,7 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
   const [orgId, setOrgId] = useState<string>('')
   const [loading, setLoading] = useState(true)
   const [paymentModalOpen, setPaymentModalOpen] = useState(false)
+  const [folioPaymentsSum, setFolioPaymentsSum] = useState(0)
 
   useEffect(() => {
     if (id) loadGuest()
@@ -99,7 +100,38 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
       setGuest(guestData)
       setBookings(bookingData || [])
 
-      // Fetch city ledger account — match by account_name = guest name
+      // Fetch all folio charges for this guest's bookings to derive accurate balances
+      const bookingIds = (bookingData || []).map((b: any) => b.id)
+      let folioPaymentsTotal = 0
+      let folioPendingByBooking: { [id: string]: number } = {}
+      if (bookingIds.length > 0) {
+        const { data: allFolioCharges } = await supabase
+          .from('folio_charges')
+          .select('booking_id, amount, payment_status, charge_type')
+          .in('booking_id', bookingIds)
+        if (allFolioCharges) {
+          allFolioCharges.forEach((c: any) => {
+            // Sum pending charges per booking (for Booking Balance)
+            if ((c.payment_status === 'pending' || c.payment_status === 'unpaid') && Number(c.amount) > 0) {
+              folioPendingByBooking[c.booking_id] = (folioPendingByBooking[c.booking_id] || 0) + Number(c.amount)
+            }
+            // Sum payment entries (negative amounts) for Total Paid
+            if (c.charge_type === 'payment' && Number(c.amount) < 0) {
+              folioPaymentsTotal += Math.abs(Number(c.amount))
+            }
+          })
+          // Override each booking's balance with folio-derived value for ALL bookings
+          // Default to 0 if no pending charges — never fall back to stale DB value
+          if (bookingData) {
+            bookingData.forEach((b: any) => {
+              b.balance = folioPendingByBooking[b.id] ?? 0
+            })
+          }
+        }
+      }
+      setFolioPaymentsSum(folioPaymentsTotal)
+
+      // City ledger account — fetch if exists, but we use guests.balance as the source of truth
       const { data: ledgerData } = await supabase
         .from('city_ledger_accounts')
         .select('id, balance, account_name, account_type')
@@ -108,7 +140,15 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
         .in('account_type', ['individual', 'guest'])
         .maybeSingle()
 
-      setLedgerAccount(ledgerData || null)
+      // Show city ledger section if guest has outstanding balance (from guests.balance)
+      // Even if no city_ledger_accounts record exists, we can show balance and allow settlement
+      // Use guests.balance as the authoritative outstanding balance (not city_ledger_accounts.balance)
+      if (guestData.balance > 0) {
+        // If ledgerData exists, use it; otherwise create a pseudo-account for display
+        setLedgerAccount(ledgerData || { id: null, balance: guestData.balance, account_name: guestData.name, account_type: 'individual' })
+      } else {
+        setLedgerAccount(null)
+      }
 
       // Fetch city ledger transaction history for this guest
       const { data: txData } = await supabase
@@ -137,12 +177,18 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
 
   if (!guest) return null
 
+  // Total Paid = sum of bookings.deposit (includes initial payment + all record-payment increments)
+  // folioPaymentsSum is NOT added here — booking.deposit is already bumped when a payment is recorded,
+  // so adding folio payments would double-count them.
   const totalSpent = bookings.reduce((s, b) => s + Number(b.deposit || 0), 0)
-  const totalBookingBalance = bookings.reduce((s, b) => s + Number(b.balance || 0), 0)
+  // Clamp to 0 — negative means overpaid, show as settled
+  const totalBookingBalance = Math.max(0, bookings.reduce((s, b) => s + Number(b.balance || 0), 0))
   const lastVisit = bookings.length > 0 ? bookings[0].check_in : null
-  // City ledger balance only applies if there's a city ledger account AND it has unpaid balance
-  // This is separate from booking balance which includes all unpaid charges
-  const ledgerBalance = ledgerAccount?.balance ?? 0
+  // Use guests.balance as the authoritative city ledger outstanding balance.
+  // city_ledger_accounts.balance is only updated when city_ledger payment is used.
+  // guests.balance is decremented when payments are settled, so it's always accurate.
+  const guestOutstandingBalance = Math.max(0, Number((guest as any).balance ?? 0))
+  const ledgerBalance = ledgerAccount ? guestOutstandingBalance : 0
 
   const statusColor = (status: string) => {
     switch (status) {
@@ -154,8 +200,8 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
   }
 
   const ledgerStatusBadge = () => {
+    if (!ledgerAccount) return { label: 'No Account', color: 'text-muted-foreground', bg: 'bg-muted/40 border-border' }
     if (ledgerBalance > 0) return { label: 'Debit', color: 'text-red-600', bg: 'bg-red-50 border-red-200' }
-    if (ledgerBalance < 0) return { label: 'Credit', color: 'text-green-600', bg: 'bg-green-50 border-green-200' }
     return { label: 'Settled', color: 'text-muted-foreground', bg: 'bg-muted/40 border-border' }
   }
 
@@ -217,8 +263,8 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <TrendingUp className="h-4 w-4" /> Booking Balance
             </div>
-            <p className={`text-3xl font-bold ${totalBookingBalance > 0 ? 'text-red-600' : 'text-green-600'}`}>
-              {formatNaira(totalBookingBalance)}
+            <p className={`text-3xl font-bold ${totalBookingBalance > 0 ? 'text-red-600' : 'text-foreground'}`}>
+              {totalBookingBalance > 0 ? formatNaira(totalBookingBalance) : 'Settled'}
             </p>
           </CardContent>
         </Card>
@@ -419,8 +465,9 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
           accountType="guest"
           accountName={guest.name}
           ledgerAccountId={ledgerAccount.id}
-          currentBalance={ledgerBalance}
+          currentBalance={guestOutstandingBalance}
           organizationId={orgId}
+          guestId={guest.id}
         />
       )}
     </div>
