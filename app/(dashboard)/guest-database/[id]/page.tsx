@@ -72,6 +72,7 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
   const [loading, setLoading] = useState(true)
   const [paymentModalOpen, setPaymentModalOpen] = useState(false)
   const [folioPaymentsSum, setFolioPaymentsSum] = useState(0)
+  const [guestPendingBalance, setGuestPendingBalance] = useState(0)
   const [selectedFolioId, setSelectedFolioId] = useState<string>('')
   const [isCheckingOut, setIsCheckingOut] = useState(false)
 
@@ -94,21 +95,17 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
       const [{ data: guestData }, { data: bookingData }] = await Promise.all([
         supabase.from('guests').select('*').eq('id', id).eq('organization_id', profile.organization_id).single(),
         supabase.from('bookings')
-          .select('id, folio_id, check_in, check_out, number_of_nights, total_amount, deposit, balance, payment_status, status, folio_status, rooms(room_number, room_type)')
+          .select('id, folio_id, check_in, check_out, number_of_nights, total_amount, deposit, balance, payment_status, status, rooms(room_number, room_type)')
           .eq('guest_id', id)
           .order('check_in', { ascending: false }),
       ])
 
       if (!guestData) { router.push('/guest-database'); return }
       setGuest(guestData)
-      setBookings(bookingData || [])
-      // Set selected folio to most recent booking's folio
-      if (bookingData && bookingData.length > 0) {
-        setSelectedFolioId(bookingData[0].folio_id)
-      }
 
       // Fetch all folio charges for this guest's bookings to derive accurate balances
-      const bookingIds = (bookingData || []).map((b: any) => b.id)
+      const rawBookings = bookingData || []
+      const bookingIds = rawBookings.map((b: any) => b.id)
       let folioPaymentsTotal = 0
       let folioPendingByBooking: { [id: string]: number } = {}
       if (bookingIds.length > 0) {
@@ -118,27 +115,35 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
           .in('booking_id', bookingIds)
         if (allFolioCharges) {
           allFolioCharges.forEach((c: any) => {
-            // Sum pending charges per booking (for Booking Balance)
             if ((c.payment_status === 'pending' || c.payment_status === 'unpaid') && Number(c.amount) > 0) {
               folioPendingByBooking[c.booking_id] = (folioPendingByBooking[c.booking_id] || 0) + Number(c.amount)
             }
-            // Sum payment entries (negative amounts) for Total Paid
             if (c.charge_type === 'payment' && Number(c.amount) < 0) {
               folioPaymentsTotal += Math.abs(Number(c.amount))
             }
           })
-          // Override each booking's balance with folio-derived value for ALL bookings
-          // Default to 0 if no pending charges — never fall back to stale DB value
-          if (bookingData) {
-            bookingData.forEach((b: any) => {
-              b.balance = folioPendingByBooking[b.id] ?? 0
-            })
-          }
         }
       }
+
+      // Build a NEW array with folio-derived balances (never mutate Supabase frozen objects)
+      const enrichedBookings = rawBookings.map((b: any) => ({
+        ...b,
+        balance: folioPendingByBooking[b.id] ?? 0,
+      }))
+      setBookings(enrichedBookings)
       setFolioPaymentsSum(folioPaymentsTotal)
 
-      // City ledger account — fetch if exists, but we use guests.balance as the source of truth
+      // Set selected folio to most recent booking's folio
+      if (enrichedBookings.length > 0) {
+        setSelectedFolioId(enrichedBookings[0].folio_id)
+      }
+
+      // City ledger outstanding = sum of all pending folio charges across all bookings
+      // This is the authoritative value — avoids stale guests.balance DB writes
+      const pendingTotal = Object.values(folioPendingByBooking).reduce((s, v) => s + v, 0)
+      setGuestPendingBalance(pendingTotal)
+
+      // City ledger account — fetch if exists for display
       const { data: ledgerData } = await supabase
         .from('city_ledger_accounts')
         .select('id, balance, account_name, account_type')
@@ -147,12 +152,8 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
         .in('account_type', ['individual', 'guest'])
         .maybeSingle()
 
-      // Show city ledger section if guest has outstanding balance (from guests.balance)
-      // Even if no city_ledger_accounts record exists, we can show balance and allow settlement
-      // Use guests.balance as the authoritative outstanding balance (not city_ledger_accounts.balance)
-      if (guestData.balance > 0) {
-        // If ledgerData exists, use it; otherwise create a pseudo-account for display
-        setLedgerAccount(ledgerData || { id: null, balance: guestData.balance, account_name: guestData.name, account_type: 'individual' })
+      if (pendingTotal > 0) {
+        setLedgerAccount(ledgerData || { id: null, balance: pendingTotal, account_name: guestData.name, account_type: 'individual' })
       } else {
         setLedgerAccount(null)
       }
@@ -214,10 +215,8 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
   // Clamp to 0 — negative means overpaid, show as settled
   const totalBookingBalance = Math.max(0, bookings.reduce((s, b) => s + Number(b.balance || 0), 0))
   const lastVisit = bookings.length > 0 ? bookings[0].check_in : null
-  // Use guests.balance as the authoritative city ledger outstanding balance.
-  // city_ledger_accounts.balance is only updated when city_ledger payment is used.
-  // guests.balance is decremented when payments are settled, so it's always accurate.
-  const guestOutstandingBalance = Math.max(0, Number((guest as any).balance ?? 0))
+  // Use folio-derived pending total as authoritative outstanding balance
+  const guestOutstandingBalance = guestPendingBalance
   const ledgerBalance = ledgerAccount ? guestOutstandingBalance : 0
 
   const statusColor = (status: string) => {

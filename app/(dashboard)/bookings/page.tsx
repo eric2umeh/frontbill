@@ -226,7 +226,7 @@ export default function BookingsPage() {
 
       <EnhancedDataTable
         data={bookings}
-        searchKeys={['folio_id', 'guests.name', 'rooms.room_number']}
+        searchKeys={['folio_id', 'guestName', 'rooms.room_number']}
         dateField="check_in"
         filters={[
           {
