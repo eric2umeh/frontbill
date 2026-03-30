@@ -11,7 +11,7 @@ import { formatNaira } from '@/lib/utils/currency'
 import {
   Loader2, ArrowLeft, User, Phone, Mail, MapPin,
   Calendar, CreditCard, TrendingUp, FileText, Building2, Hash,
-  Wallet, ArrowDownCircle, ArrowUpCircle, Clock,
+  Wallet, ArrowDownCircle, ArrowUpCircle, Clock, RefreshCw,
 } from 'lucide-react'
 import { format } from 'date-fns'
 import CityLedgerPaymentModal from '@/components/city-ledger/city-ledger-payment-modal'
@@ -78,6 +78,14 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
 
   useEffect(() => {
     if (id) loadGuest()
+
+    // Re-fetch whenever the user returns to this tab/page
+    // so data is always fresh after actions on the booking detail page
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible' && id) loadGuest()
+    }
+    document.addEventListener('visibilitychange', handleVisibility)
+    return () => document.removeEventListener('visibilitychange', handleVisibility)
   }, [id])
 
   const loadGuest = async () => {
@@ -263,9 +271,13 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
           </div>
           <div>
             <h1 className="text-3xl font-bold tracking-tight">{guest.name}</h1>
-            <p className="text-muted-foreground">Guest since {guest.created_at ? format(new Date(guest.created_at), 'MMMM yyyy') : '—'}</p>
+            <p className="text-muted-foreground">Guest since {guest.created_at ? format(new Date(guest.created_at), 'MMMM yyyy') : '-'}</p>
           </div>
         </div>
+        <Button variant="outline" size="sm" onClick={() => loadGuest()} className="gap-2 self-start">
+          <RefreshCw className="h-4 w-4" />
+          Refresh
+        </Button>
       </div>
 
       {/* Summary cards */}
