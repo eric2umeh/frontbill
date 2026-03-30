@@ -40,6 +40,7 @@ interface Booking {
   balance: number
   payment_status: string
   status: string
+  folio_status?: string
   rooms: { room_number: string; room_type: string } | null
 }
 
@@ -71,6 +72,8 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
   const [loading, setLoading] = useState(true)
   const [paymentModalOpen, setPaymentModalOpen] = useState(false)
   const [folioPaymentsSum, setFolioPaymentsSum] = useState(0)
+  const [selectedFolioId, setSelectedFolioId] = useState<string>('')
+  const [isCheckingOut, setIsCheckingOut] = useState(false)
 
   useEffect(() => {
     if (id) loadGuest()
@@ -91,7 +94,7 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
       const [{ data: guestData }, { data: bookingData }] = await Promise.all([
         supabase.from('guests').select('*').eq('id', id).eq('organization_id', profile.organization_id).single(),
         supabase.from('bookings')
-          .select('id, folio_id, check_in, check_out, number_of_nights, total_amount, deposit, balance, payment_status, status, rooms(room_number, room_type)')
+          .select('id, folio_id, check_in, check_out, number_of_nights, total_amount, deposit, balance, payment_status, status, folio_status, rooms(room_number, room_type)')
           .eq('guest_id', id)
           .order('check_in', { ascending: false }),
       ])
@@ -99,6 +102,10 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
       if (!guestData) { router.push('/guest-database'); return }
       setGuest(guestData)
       setBookings(bookingData || [])
+      // Set selected folio to most recent booking's folio
+      if (bookingData && bookingData.length > 0) {
+        setSelectedFolioId(bookingData[0].folio_id)
+      }
 
       // Fetch all folio charges for this guest's bookings to derive accurate balances
       const bookingIds = (bookingData || []).map((b: any) => b.id)
@@ -164,6 +171,29 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
       router.push('/guest-database')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleCheckoutFolio = async () => {
+    if (!selectedFolioId || isCheckingOut) return
+    setIsCheckingOut(true)
+    try {
+      const supabase = createClient()
+      const { error } = await supabase
+        .from('bookings')
+        .update({ folio_status: 'checked_out' })
+        .eq('folio_id', selectedFolioId)
+      if (error) throw error
+      // Update local bookings state to reflect checkout
+      setBookings(bookings.map(b => 
+        b.folio_id === selectedFolioId 
+          ? { ...b, folio_status: 'checked_out' as any } 
+          : b
+      ))
+    } catch (err) {
+      console.error('Checkout error:', err)
+    } finally {
+      setIsCheckingOut(false)
     }
   }
 
@@ -279,6 +309,59 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
           </CardContent>
         </Card>
       </div>
+
+      {/* Folio Selector */}
+      {bookings.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Folio History</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center gap-4 flex-wrap">
+              <div className="flex-1 min-w-xs">
+                <label className="text-sm font-medium mb-2 block">Select a folio to view</label>
+                <select
+                  value={selectedFolioId}
+                  onChange={(e) => setSelectedFolioId(e.target.value)}
+                  className="w-full px-3 py-2 border rounded-md text-sm bg-background"
+                >
+                  {bookings.map((b) => {
+                    const status = (b as any).folio_status || 'active'
+                    return (
+                      <option key={b.folio_id} value={b.folio_id}>
+                        {b.folio_id} - {format(new Date(b.check_in), 'dd MMM yyyy')} ({status})
+                      </option>
+                    )
+                  })}
+                </select>
+              </div>
+              <div className="flex items-center gap-2">
+                {selectedFolioId && bookings.find(b => b.folio_id === selectedFolioId) && (
+                  <>
+                    <Badge variant="outline" className={
+                      ((bookings.find(b => b.folio_id === selectedFolioId) as any)?.folio_status === 'checked_out')
+                        ? 'border-gray-300 text-gray-700 bg-gray-100'
+                        : 'border-blue-300 text-blue-700 bg-blue-50'
+                    }>
+                      {((bookings.find(b => b.folio_id === selectedFolioId) as any)?.folio_status || 'active').replace('_', ' ').toUpperCase()}
+                    </Badge>
+                    {((bookings.find(b => b.folio_id === selectedFolioId) as any)?.folio_status || 'active') === 'active' && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={handleCheckoutFolio}
+                        disabled={isCheckingOut}
+                      >
+                        {isCheckingOut ? 'Checking out...' : 'Check Out Folio'}
+                      </Button>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* City Ledger Account — always shown */}
       <Card className={`border-2 ${ls.bg}`}>
