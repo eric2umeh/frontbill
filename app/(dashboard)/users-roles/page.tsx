@@ -116,6 +116,7 @@ export default function UsersRolesPage() {
       const res = await fetch('/api/admin/users', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify(addForm),
       })
       const json = await res.json()
@@ -165,6 +166,7 @@ export default function UsersRolesPage() {
       const res = await fetch(`/api/admin/users/${editingUser.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify(body),
       })
       const json = await res.json()
@@ -188,7 +190,7 @@ export default function UsersRolesPage() {
     if (!deletingUser) return
     setDeleting(true)
     try {
-      const res = await fetch(`/api/admin/users/${deletingUser.id}`, { method: 'DELETE' })
+      const res = await fetch(`/api/admin/users/${deletingUser.id}`, { method: 'DELETE', credentials: 'include' })
       const json = await res.json()
       if (!res.ok) { toast.error(json.error || 'Failed to delete user'); return }
 
