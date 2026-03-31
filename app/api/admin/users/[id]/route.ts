@@ -18,8 +18,8 @@ export async function PATCH(request: Request, { params }: Params) {
       .eq('id', caller.id)
       .single()
 
-    if (!callerProfile || callerProfile.role !== 'admin') {
-      return NextResponse.json({ error: 'Only admins can update users' }, { status: 403 })
+    if (!callerProfile || !['admin', 'manager'].includes(callerProfile.role)) {
+      return NextResponse.json({ error: 'Only admins or managers can update users' }, { status: 403 })
     }
 
     const body = await request.json()
@@ -82,8 +82,8 @@ export async function DELETE(request: Request, { params }: Params) {
       .eq('id', caller.id)
       .single()
 
-    if (!callerProfile || callerProfile.role !== 'admin') {
-      return NextResponse.json({ error: 'Only admins can delete users' }, { status: 403 })
+    if (!callerProfile || !['admin', 'manager'].includes(callerProfile.role)) {
+      return NextResponse.json({ error: 'Only admins or managers can delete users' }, { status: 403 })
     }
 
     const admin = createAdminClient()

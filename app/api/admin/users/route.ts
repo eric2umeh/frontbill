@@ -15,8 +15,8 @@ export async function POST(request: Request) {
       .eq('id', caller.id)
       .single()
 
-    if (!callerProfile || callerProfile.role !== 'admin') {
-      return NextResponse.json({ error: 'Only admins can create users' }, { status: 403 })
+    if (!callerProfile || !['admin', 'manager'].includes(callerProfile.role)) {
+      return NextResponse.json({ error: 'Only admins or managers can create users' }, { status: 403 })
     }
 
     const { full_name, email, password, role } = await request.json()
