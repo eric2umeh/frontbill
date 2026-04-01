@@ -1,4 +1,5 @@
 import { createAdminClient } from '@/lib/supabase/admin'
+import { sendWelcomeEmail } from '@/lib/email/welcome-user'
 import { NextResponse } from 'next/server'
 
 // POST /api/admin/users — create a new user in the same organization
@@ -28,6 +29,14 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Only admins or managers can create users' }, { status: 403 })
     }
 
+    // Fetch organization name for the welcome email
+    const { data: orgData } = await admin
+      .from('organizations')
+      .select('name')
+      .eq('id', callerProfile.organization_id)
+      .single()
+    const org_name = orgData?.name || 'Your Organization'
+
     // Create auth user with email confirmed (no signup flow needed)
     const { data: newUser, error: createError } = await admin.auth.admin.createUser({
       email,
@@ -56,6 +65,18 @@ export async function POST(request: Request) {
       // Rollback auth user if profile insert fails
       await admin.auth.admin.deleteUser(newUser.user.id)
       return NextResponse.json({ error: profileError.message }, { status: 500 })
+    }
+
+    // Send welcome email with login credentials — fire and forget (don't fail user creation if email fails)
+    const site_url = process.env.NEXT_PUBLIC_SITE_URL || process.env.VERCEL_URL
+      ? `https://${process.env.VERCEL_URL}`
+      : 'http://localhost:3000'
+
+    try {
+      await sendWelcomeEmail({ full_name, email, password, role, site_url, org_name })
+    } catch (emailErr) {
+      // Log but don't fail — user was created successfully
+      console.error('[v0] Welcome email failed (user still created):', emailErr)
     }
 
     return NextResponse.json({

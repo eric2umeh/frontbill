@@ -122,7 +122,7 @@ export default function UsersRolesPage() {
       const json = await res.json()
       if (!res.ok) { toast.error(json.error || 'Failed to create user'); return }
 
-      toast.success(`${addForm.full_name} added successfully`)
+      toast.success(`${addForm.full_name} added — login details sent to ${addForm.email}`)
       setUsers(prev => [...prev, { ...json.user, avatar_url: null }])
       setAddOpen(false)
       setAddForm(EMPTY_ADD_FORM)
