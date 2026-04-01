@@ -57,6 +57,7 @@ export default function UsersRolesPage() {
   const [addForm, setAddForm] = useState<AddUserForm>(EMPTY_ADD_FORM)
   const [showAddPassword, setShowAddPassword] = useState(false)
   const [adding, setAdding] = useState(false)
+  const [newUserCredentials, setNewUserCredentials] = useState<{ email: string; password: string; full_name: string; emailSent: boolean; emailError?: string } | null>(null)
 
   // Delete confirm
   const [deletingUser, setDeletingUser] = useState<UserProfile | null>(null)
@@ -123,7 +124,14 @@ export default function UsersRolesPage() {
       const json = await res.json()
       if (!res.ok) { toast.error(json.error || 'Failed to create user'); return }
 
-      toast.success(`${addForm.full_name} added — login details sent to ${addForm.email}`)
+      // Show credentials modal (whether email was sent or not)
+      setNewUserCredentials({
+        email: addForm.email,
+        password: addForm.password,
+        full_name: addForm.full_name,
+        emailSent: json.emailSent,
+        emailError: json.emailError,
+      })
       setUsers(prev => [...prev, { ...json.user, avatar_url: null }])
       setAddOpen(false)
       setAddForm(EMPTY_ADD_FORM)
@@ -613,6 +621,66 @@ export default function UsersRolesPage() {
               </div>
             ))}
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Credentials Display Modal */}
+      <Dialog open={!!newUserCredentials} onOpenChange={(open) => { if (!open) setNewUserCredentials(null) }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>User Created Successfully</DialogTitle>
+            <DialogDescription>
+              {newUserCredentials?.emailSent
+                ? `Welcome email sent to ${newUserCredentials.email}`
+                : `Email could not be sent — please share these credentials manually`}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            {!newUserCredentials?.emailSent && newUserCredentials?.emailError && (
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+                <p className="text-sm text-yellow-800">
+                  <strong>Email delivery issue:</strong> {newUserCredentials.emailError}
+                </p>
+                <p className="text-xs text-yellow-700 mt-2">
+                  To enable automated emails, verify a domain at <a href="https://resend.com/domains" target="_blank" rel="noopener" className="underline">resend.com/domains</a> and update the RESEND_FROM_EMAIL environment variable.
+                </p>
+              </div>
+            )}
+            <div className="bg-slate-50 border rounded-lg p-4 space-y-3">
+              <div>
+                <p className="text-xs font-semibold text-slate-600 uppercase mb-1">Full Name</p>
+                <p className="text-sm font-medium">{newUserCredentials?.full_name}</p>
+              </div>
+              <div>
+                <p className="text-xs font-semibold text-slate-600 uppercase mb-1">Email</p>
+                <p className="text-sm font-medium break-all">{newUserCredentials?.email}</p>
+              </div>
+              <div>
+                <p className="text-xs font-semibold text-slate-600 uppercase mb-1">Temporary Password</p>
+                <div className="flex items-center gap-2">
+                  <code className="bg-slate-900 text-slate-100 px-3 py-2 rounded text-sm font-mono font-bold flex-1 break-all">
+                    {newUserCredentials?.password}
+                  </code>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      navigator.clipboard.writeText(newUserCredentials?.password || '')
+                      toast.success('Password copied')
+                    }}
+                  >
+                    Copy
+                  </Button>
+                </div>
+              </div>
+            </div>
+            <p className="text-xs text-slate-600 bg-slate-50 p-3 rounded">
+              ⚠️ <strong>Important:</strong> This password is temporary. Ask the user to change it after their first login via profile settings.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button onClick={() => setNewUserCredentials(null)}>Done</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
