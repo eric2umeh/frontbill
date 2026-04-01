@@ -72,11 +72,16 @@ export async function POST(request: Request) {
       ? `https://${process.env.VERCEL_URL}`
       : 'http://localhost:3000'
 
+    let emailSent = false
+    let emailError: string | null = null
     try {
       await sendWelcomeEmail({ full_name, email, password, role, site_url, org_name })
-    } catch (emailErr) {
+      emailSent = true
+    } catch (emailErr: any) {
       // Log but don't fail — user was created successfully
       console.error('[v0] Welcome email failed (user still created):', emailErr)
+      // Return the error message to show the admin
+      emailError = emailErr.message || 'Failed to send email'
     }
 
     return NextResponse.json({
@@ -86,7 +91,9 @@ export async function POST(request: Request) {
         full_name,
         role,
         created_at: newUser.user.created_at,
-      }
+      },
+      emailSent,
+      emailError,
     })
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 })
