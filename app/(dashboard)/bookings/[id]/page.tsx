@@ -148,6 +148,11 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
       toast.error('Please enter a description')
       return
     }
+    // Prevent any charges on checked-out folios
+    if ((booking?.folio_status || 'active') === 'checked_out') {
+      toast.error('This folio has been checked out and cannot accept new charges')
+      return
+    }
 
     setAddChargeLoading(true)
     // Determine if this charge goes onto the city ledger (unpaid bill) or is settled immediately
@@ -782,16 +787,19 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
           <ArrowLeft className="mr-2 h-4 w-4" />
           Back to Bookings
         </Button>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => setExtendStayModalOpen(true)} disabled={addChargeLoading}>
+        <div className="flex gap-2 items-center flex-wrap">
+          {(booking?.folio_status || 'active') === 'checked_out' && (
+            <Badge variant="secondary" className="bg-gray-100 text-gray-700">Folio Checked Out</Badge>
+          )}
+          <Button variant="outline" size="sm" onClick={() => setExtendStayModalOpen(true)} disabled={addChargeLoading || (booking?.folio_status === 'checked_out')}>
             <Clock className="mr-2 h-4 w-4" />
             Extend Stay
           </Button>
-          <Button variant="outline" size="sm">
+          <Button variant="outline" size="sm" disabled={booking?.folio_status === 'checked_out'}>
             <Edit className="mr-2 h-4 w-4" />
             Edit
           </Button>
-          <Button variant="destructive" size="sm" onClick={handleDelete}>
+          <Button variant="destructive" size="sm" onClick={handleDelete} disabled={booking?.folio_status === 'checked_out'}>
             <Trash2 className="mr-2 h-4 w-4" />
             Delete
           </Button>
@@ -841,7 +849,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
             <div>
               <div className="flex items-center justify-between mb-4">
                 <h3 className="font-semibold text-lg">Folio - All Charges & Payments</h3>
-                <Button size="sm" variant="outline" onClick={() => setAddChargeModalOpen(true)}>
+                <Button size="sm" variant="outline" onClick={() => setAddChargeModalOpen(true)} disabled={booking?.folio_status === 'checked_out'}>
                   <Plus className="mr-2 h-4 w-4" />
                   Add Charge
                 </Button>

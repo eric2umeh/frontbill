@@ -113,6 +113,12 @@ export function ExtendStayModal({ open, onClose, onSuccess, booking }: ExtendSta
       return
     }
 
+    // Prevent extending checked-out folios
+    if ((booking?.folio_status || 'active') === 'checked_out') {
+      toast.error('This folio has been checked out and cannot be extended')
+      return
+    }
+
     setLoading(true)
     try {
       const supabase = createClient()

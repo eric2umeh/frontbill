@@ -1,13 +1,16 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { formatNaira } from '@/lib/utils/currency'
-import { AlertCircle, Building2, Loader2 } from 'lucide-react'
+import { AlertCircle, Building2, Loader2, Search, X } from 'lucide-react'
 import { toast } from 'sonner'
+import { format, isWithinInterval, parseISO, startOfDay, endOfDay } from 'date-fns'
 
 interface LedgerAccount {
   id: string
@@ -22,12 +25,16 @@ interface LedgerTransaction {
   amount: number
   type: string
   created_at: string
+  guest_name?: string
 }
 
 export default function CityLedgerPage() {
   const [accounts, setAccounts] = useState<LedgerAccount[]>([])
   const [transactions, setTransactions] = useState<LedgerTransaction[]>([])
   const [loading, setLoading] = useState(true)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
   const router = useRouter()
 
   useEffect(() => {
@@ -94,7 +101,39 @@ export default function CityLedgerPage() {
     }
   }
 
+  const filteredTransactions = useMemo(() => {
+    return transactions.filter((t) => {
+      const matchesSearch = !searchQuery ||
+        t.description?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        t.guest_name?.toLowerCase().includes(searchQuery.toLowerCase())
+
+      let matchesDate = true
+      if (dateFrom || dateTo) {
+        const txDate = parseISO(t.created_at)
+        if (dateFrom && dateTo) {
+          matchesDate = isWithinInterval(txDate, {
+            start: startOfDay(parseISO(dateFrom)),
+            end: endOfDay(parseISO(dateTo)),
+          })
+        } else if (dateFrom) {
+          matchesDate = txDate >= startOfDay(parseISO(dateFrom))
+        } else if (dateTo) {
+          matchesDate = txDate <= endOfDay(parseISO(dateTo))
+        }
+      }
+      return matchesSearch && matchesDate
+    })
+  }, [transactions, searchQuery, dateFrom, dateTo])
+
   const totalOutstanding = accounts.reduce((sum, acc) => sum + Number(acc.balance), 0)
+
+  const clearFilters = () => {
+    setSearchQuery('')
+    setDateFrom('')
+    setDateTo('')
+  }
+
+  const hasActiveFilters = searchQuery || dateFrom || dateTo
 
   if (loading) {
     return (
@@ -131,8 +170,8 @@ export default function CityLedgerPage() {
         </Card>
         <Card>
           <CardContent className="pt-6">
-            <div className="text-sm text-muted-foreground">Recent Transactions</div>
-            <div className="text-2xl font-bold mt-2">{transactions?.length || 0}</div>
+            <div className="text-sm text-muted-foreground">Transactions Shown</div>
+            <div className="text-2xl font-bold mt-2">{filteredTransactions.length}</div>
           </CardContent>
         </Card>
       </div>
@@ -175,21 +214,60 @@ export default function CityLedgerPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Recent Transactions</CardTitle>
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <CardTitle>Transaction History</CardTitle>
+              {hasActiveFilters && (
+                <Button variant="ghost" size="sm" onClick={clearFilters} className="gap-1 text-xs">
+                  <X className="h-3 w-3" /> Clear filters
+                </Button>
+              )}
+            </div>
+            {/* Filter controls */}
+            <div className="space-y-2 pt-1">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+                <Input
+                  placeholder="Search by guest or description..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-9 h-9 text-sm"
+                />
+              </div>
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <label className="text-xs text-muted-foreground block mb-1">From</label>
+                  <Input
+                    type="date"
+                    value={dateFrom}
+                    onChange={(e) => setDateFrom(e.target.value)}
+                    className="h-9 text-sm"
+                  />
+                </div>
+                <div className="flex-1">
+                  <label className="text-xs text-muted-foreground block mb-1">To</label>
+                  <Input
+                    type="date"
+                    value={dateTo}
+                    onChange={(e) => setDateTo(e.target.value)}
+                    className="h-9 text-sm"
+                  />
+                </div>
+              </div>
+            </div>
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              {transactions.length === 0 ? (
+              {filteredTransactions.length === 0 ? (
                 <p className="text-center text-sm text-muted-foreground py-8">
-                  No transactions yet
+                  {hasActiveFilters ? 'No transactions match your filters' : 'No transactions yet'}
                 </p>
               ) : (
-                transactions.map((entry) => (
+                filteredTransactions.map((entry) => (
                   <div key={entry.id} className="flex items-start justify-between border-b pb-3 last:border-0">
                     <div className="space-y-1">
                       <p className="font-medium text-sm">{entry.description}</p>
                       <p className="text-xs text-muted-foreground">
-                        {new Date(entry.created_at).toLocaleDateString('en-GB')}
+                        {format(new Date(entry.created_at), 'dd MMM yyyy, HH:mm')}
                       </p>
                     </div>
                     <div className="text-right">
