@@ -79,6 +79,7 @@ export default function UsersRolesPage() {
 
     setCurrentUserId(user.id)
 
+    // Fetch own profile first to get role (single row — always allowed by RLS)
     const { data: myProfile } = await supabase
       .from('profiles').select('role, organization_id').eq('id', user.id).single()
     if (!myProfile) { endFetch(); return }
@@ -90,14 +91,14 @@ export default function UsersRolesPage() {
       return
     }
 
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('id, full_name, role, avatar_url, created_at')
-      .eq('organization_id', myProfile.organization_id)
-      .order('created_at', { ascending: true })
-
-    if (error) { toast.error('Failed to load users'); endFetch(); return }
-    setUsers(data || [])
+    // Use the admin API route to list all org users — bypasses the restrictive
+    // RLS policy on profiles which only allows each user to see their own row
+    const res = await fetch(`/api/admin/users/list?caller_id=${user.id}`, {
+      credentials: 'include',
+    })
+    const json = await res.json()
+    if (!res.ok) { toast.error(json.error || 'Failed to load users'); endFetch(); return }
+    setUsers(json.users || [])
     endFetch()
   }
 
