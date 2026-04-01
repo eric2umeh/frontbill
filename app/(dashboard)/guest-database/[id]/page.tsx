@@ -11,7 +11,7 @@ import { formatNaira } from '@/lib/utils/currency'
 import {
   Loader2, ArrowLeft, User, Phone, Mail, MapPin,
   Calendar, CreditCard, TrendingUp, FileText, Building2, Hash,
-  Wallet, ArrowDownCircle, ArrowUpCircle, Clock,
+  Wallet, ArrowDownCircle, ArrowUpCircle, Clock, RefreshCw,
 } from 'lucide-react'
 import { format } from 'date-fns'
 import CityLedgerPaymentModal from '@/components/city-ledger/city-ledger-payment-modal'
@@ -40,6 +40,7 @@ interface Booking {
   balance: number
   payment_status: string
   status: string
+  folio_status?: string
   rooms: { room_number: string; room_type: string } | null
 }
 
@@ -71,9 +72,20 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
   const [loading, setLoading] = useState(true)
   const [paymentModalOpen, setPaymentModalOpen] = useState(false)
   const [folioPaymentsSum, setFolioPaymentsSum] = useState(0)
+  const [guestPendingBalance, setGuestPendingBalance] = useState(0)
+  const [selectedFolioId, setSelectedFolioId] = useState<string>('')
+  const [isCheckingOut, setIsCheckingOut] = useState(false)
 
   useEffect(() => {
     if (id) loadGuest()
+
+    // Re-fetch whenever the user returns to this tab/page
+    // so data is always fresh after actions on the booking detail page
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible' && id) loadGuest()
+    }
+    document.addEventListener('visibilitychange', handleVisibility)
+    return () => document.removeEventListener('visibilitychange', handleVisibility)
   }, [id])
 
   const loadGuest = async () => {
@@ -98,10 +110,10 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
 
       if (!guestData) { router.push('/guest-database'); return }
       setGuest(guestData)
-      setBookings(bookingData || [])
 
       // Fetch all folio charges for this guest's bookings to derive accurate balances
-      const bookingIds = (bookingData || []).map((b: any) => b.id)
+      const rawBookings = bookingData || []
+      const bookingIds = rawBookings.map((b: any) => b.id)
       let folioPaymentsTotal = 0
       let folioPendingByBooking: { [id: string]: number } = {}
       if (bookingIds.length > 0) {
@@ -111,27 +123,35 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
           .in('booking_id', bookingIds)
         if (allFolioCharges) {
           allFolioCharges.forEach((c: any) => {
-            // Sum pending charges per booking (for Booking Balance)
             if ((c.payment_status === 'pending' || c.payment_status === 'unpaid') && Number(c.amount) > 0) {
               folioPendingByBooking[c.booking_id] = (folioPendingByBooking[c.booking_id] || 0) + Number(c.amount)
             }
-            // Sum payment entries (negative amounts) for Total Paid
             if (c.charge_type === 'payment' && Number(c.amount) < 0) {
               folioPaymentsTotal += Math.abs(Number(c.amount))
             }
           })
-          // Override each booking's balance with folio-derived value for ALL bookings
-          // Default to 0 if no pending charges — never fall back to stale DB value
-          if (bookingData) {
-            bookingData.forEach((b: any) => {
-              b.balance = folioPendingByBooking[b.id] ?? 0
-            })
-          }
         }
       }
+
+      // Build a NEW array with folio-derived balances (never mutate Supabase frozen objects)
+      const enrichedBookings = rawBookings.map((b: any) => ({
+        ...b,
+        balance: folioPendingByBooking[b.id] ?? 0,
+      }))
+      setBookings(enrichedBookings)
       setFolioPaymentsSum(folioPaymentsTotal)
 
-      // City ledger account — fetch if exists, but we use guests.balance as the source of truth
+      // Set selected folio to most recent booking's folio
+      if (enrichedBookings.length > 0) {
+        setSelectedFolioId(enrichedBookings[0].folio_id)
+      }
+
+      // City ledger outstanding = sum of all pending folio charges across all bookings
+      // This is the authoritative value — avoids stale guests.balance DB writes
+      const pendingTotal = Object.values(folioPendingByBooking).reduce((s, v) => s + v, 0)
+      setGuestPendingBalance(pendingTotal)
+
+      // City ledger account — fetch if exists for display
       const { data: ledgerData } = await supabase
         .from('city_ledger_accounts')
         .select('id, balance, account_name, account_type')
@@ -140,12 +160,8 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
         .in('account_type', ['individual', 'guest'])
         .maybeSingle()
 
-      // Show city ledger section if guest has outstanding balance (from guests.balance)
-      // Even if no city_ledger_accounts record exists, we can show balance and allow settlement
-      // Use guests.balance as the authoritative outstanding balance (not city_ledger_accounts.balance)
-      if (guestData.balance > 0) {
-        // If ledgerData exists, use it; otherwise create a pseudo-account for display
-        setLedgerAccount(ledgerData || { id: null, balance: guestData.balance, account_name: guestData.name, account_type: 'individual' })
+      if (pendingTotal > 0) {
+        setLedgerAccount(ledgerData || { id: null, balance: pendingTotal, account_name: guestData.name, account_type: 'individual' })
       } else {
         setLedgerAccount(null)
       }
@@ -167,6 +183,29 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
     }
   }
 
+  const handleCheckoutFolio = async () => {
+    if (!selectedFolioId || isCheckingOut) return
+    setIsCheckingOut(true)
+    try {
+      const supabase = createClient()
+      const { error } = await supabase
+        .from('bookings')
+        .update({ folio_status: 'checked_out' })
+        .eq('folio_id', selectedFolioId)
+      if (error) throw error
+      // Update local bookings state to reflect checkout
+      setBookings(bookings.map(b => 
+        b.folio_id === selectedFolioId 
+          ? { ...b, folio_status: 'checked_out' as any } 
+          : b
+      ))
+    } catch (err) {
+      console.error('Checkout error:', err)
+    } finally {
+      setIsCheckingOut(false)
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-96">
@@ -182,12 +221,12 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
   // so adding folio payments would double-count them.
   const totalSpent = bookings.reduce((s, b) => s + Number(b.deposit || 0), 0)
   // Clamp to 0 — negative means overpaid, show as settled
-  const totalBookingBalance = Math.max(0, bookings.reduce((s, b) => s + Number(b.balance || 0), 0))
+  // Booking Balance (Outstanding) — use folio-derived pending total, same source as city ledger section
+  // Do NOT use bookings.reduce(b.balance) — that can lag by one render cycle after setBookings
+  const totalBookingBalance = guestPendingBalance
   const lastVisit = bookings.length > 0 ? bookings[0].check_in : null
-  // Use guests.balance as the authoritative city ledger outstanding balance.
-  // city_ledger_accounts.balance is only updated when city_ledger payment is used.
-  // guests.balance is decremented when payments are settled, so it's always accurate.
-  const guestOutstandingBalance = Math.max(0, Number((guest as any).balance ?? 0))
+  // Use folio-derived pending total as authoritative outstanding balance
+  const guestOutstandingBalance = guestPendingBalance
   const ledgerBalance = ledgerAccount ? guestOutstandingBalance : 0
 
   const statusColor = (status: string) => {
@@ -234,9 +273,13 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
           </div>
           <div>
             <h1 className="text-3xl font-bold tracking-tight">{guest.name}</h1>
-            <p className="text-muted-foreground">Guest since {guest.created_at ? format(new Date(guest.created_at), 'MMMM yyyy') : '—'}</p>
+            <p className="text-muted-foreground">Guest since {guest.created_at ? format(new Date(guest.created_at), 'MMMM yyyy') : '-'}</p>
           </div>
         </div>
+        <Button variant="outline" size="sm" onClick={() => loadGuest()} className="gap-2 self-start">
+          <RefreshCw className="h-4 w-4" />
+          Refresh
+        </Button>
       </div>
 
       {/* Summary cards */}
@@ -279,6 +322,59 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
           </CardContent>
         </Card>
       </div>
+
+      {/* Folio Selector */}
+      {bookings.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Folio History</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center gap-4 flex-wrap">
+              <div className="flex-1 min-w-xs">
+                <label className="text-sm font-medium mb-2 block">Select a folio to view</label>
+                <select
+                  value={selectedFolioId}
+                  onChange={(e) => setSelectedFolioId(e.target.value)}
+                  className="w-full px-3 py-2 border rounded-md text-sm bg-background"
+                >
+                  {bookings.map((b) => {
+                    const status = (b as any).folio_status || 'active'
+                    return (
+                      <option key={b.folio_id} value={b.folio_id}>
+                        {b.folio_id} - {format(new Date(b.check_in), 'dd MMM yyyy')} ({status})
+                      </option>
+                    )
+                  })}
+                </select>
+              </div>
+              <div className="flex items-center gap-2">
+                {selectedFolioId && bookings.find(b => b.folio_id === selectedFolioId) && (
+                  <>
+                    <Badge variant="outline" className={
+                      ((bookings.find(b => b.folio_id === selectedFolioId) as any)?.folio_status === 'checked_out')
+                        ? 'border-gray-300 text-gray-700 bg-gray-100'
+                        : 'border-blue-300 text-blue-700 bg-blue-50'
+                    }>
+                      {((bookings.find(b => b.folio_id === selectedFolioId) as any)?.folio_status || 'active').replace('_', ' ').toUpperCase()}
+                    </Badge>
+                    {((bookings.find(b => b.folio_id === selectedFolioId) as any)?.folio_status || 'active') === 'active' && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={handleCheckoutFolio}
+                        disabled={isCheckingOut}
+                      >
+                        {isCheckingOut ? 'Checking out...' : 'Check Out Folio'}
+                      </Button>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* City Ledger Account — always shown */}
       <Card className={`border-2 ${ls.bg}`}>

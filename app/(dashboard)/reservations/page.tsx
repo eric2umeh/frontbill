@@ -124,6 +124,7 @@ export default function ReservationsPage() {
           ...reservation,
           payment_method,
           ledger_account_name,
+          guestName: reservation.guests?.name || '',
           guests: reservation.guests
             ? (Array.isArray(reservation.guests) ? reservation.guests[0] : reservation.guests)
             : null,
@@ -189,7 +190,7 @@ export default function ReservationsPage() {
 
       <EnhancedDataTable
         data={reservations}
-        searchKeys={['folio_id', 'guests.name', 'rooms.room_number']}
+        searchKeys={['folio_id', 'guestName', 'rooms.room_number']}
         dateField="check_in"
         filters={[
           {
