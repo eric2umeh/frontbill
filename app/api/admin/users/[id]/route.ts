@@ -1,29 +1,34 @@
 import { createAdminClient } from '@/lib/supabase/admin'
-import { createClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
 
 type Params = { params: Promise<{ id: string }> }
 
 // PATCH /api/admin/users/[id] — update role, full_name, or password
+// caller_id is passed from the client and validated server-side via admin client
 export async function PATCH(request: Request, { params }: Params) {
   try {
     const { id } = await params
-    const supabaseServer = await createClient()
-    const { data: { user: caller } } = await supabaseServer.auth.getUser()
-    if (!caller) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const body = await request.json()
+    const { caller_id, ...updates } = body
 
-    const { data: callerProfile } = await supabaseServer
+    if (!caller_id) return NextResponse.json({ error: 'caller_id is required' }, { status: 400 })
+
+    const admin = createAdminClient()
+
+    // Verify caller has permission using admin client (bypasses RLS)
+    const { data: callerProfile, error: callerError } = await admin
       .from('profiles')
       .select('role, organization_id')
-      .eq('id', caller.id)
+      .eq('id', caller_id)
       .single()
 
-    if (!callerProfile || !['admin', 'manager'].includes(callerProfile.role)) {
-      return NextResponse.json({ error: 'Only admins or managers can update users' }, { status: 403 })
+    if (callerError || !callerProfile) {
+      return NextResponse.json({ error: 'Caller profile not found' }, { status: 403 })
     }
 
-    const body = await request.json()
-    const admin = createAdminClient()
+    if (!['admin', 'manager'].includes(callerProfile.role)) {
+      return NextResponse.json({ error: 'Only admins or managers can update users' }, { status: 403 })
+    }
 
     // Verify target user belongs to same org
     const { data: targetProfile } = await admin
@@ -38,8 +43,8 @@ export async function PATCH(request: Request, { params }: Params) {
 
     // Update auth user (password and/or metadata)
     const authUpdates: Record<string, any> = {}
-    if (body.password) authUpdates.password = body.password
-    if (body.full_name) authUpdates.user_metadata = { full_name: body.full_name }
+    if (updates.password) authUpdates.password = updates.password
+    if (updates.full_name) authUpdates.user_metadata = { full_name: updates.full_name }
 
     if (Object.keys(authUpdates).length > 0) {
       const { error: authError } = await admin.auth.admin.updateUserById(id, authUpdates)
@@ -48,8 +53,8 @@ export async function PATCH(request: Request, { params }: Params) {
 
     // Update profile row
     const profileUpdates: Record<string, any> = { updated_at: new Date().toISOString() }
-    if (body.role) profileUpdates.role = body.role
-    if (body.full_name) profileUpdates.full_name = body.full_name
+    if (updates.role) profileUpdates.role = updates.role
+    if (updates.full_name) profileUpdates.full_name = updates.full_name
 
     const { error: profileError } = await admin
       .from('profiles')
@@ -65,28 +70,34 @@ export async function PATCH(request: Request, { params }: Params) {
 }
 
 // DELETE /api/admin/users/[id] — permanently remove user
+// caller_id is passed from the client and validated server-side via admin client
 export async function DELETE(request: Request, { params }: Params) {
   try {
     const { id } = await params
-    const supabaseServer = await createClient()
-    const { data: { user: caller } } = await supabaseServer.auth.getUser()
-    if (!caller) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { caller_id } = await request.json().catch(() => ({}))
 
-    if (caller.id === id) {
+    if (!caller_id) return NextResponse.json({ error: 'caller_id is required' }, { status: 400 })
+
+    if (caller_id === id) {
       return NextResponse.json({ error: 'You cannot delete your own account' }, { status: 400 })
     }
 
-    const { data: callerProfile } = await supabaseServer
+    const admin = createAdminClient()
+
+    // Verify caller has permission using admin client (bypasses RLS)
+    const { data: callerProfile, error: callerError } = await admin
       .from('profiles')
       .select('role, organization_id')
-      .eq('id', caller.id)
+      .eq('id', caller_id)
       .single()
 
-    if (!callerProfile || !['admin', 'manager'].includes(callerProfile.role)) {
-      return NextResponse.json({ error: 'Only admins or managers can delete users' }, { status: 403 })
+    if (callerError || !callerProfile) {
+      return NextResponse.json({ error: 'Caller profile not found' }, { status: 403 })
     }
 
-    const admin = createAdminClient()
+    if (!['admin', 'manager'].includes(callerProfile.role)) {
+      return NextResponse.json({ error: 'Only admins or managers can delete users' }, { status: 403 })
+    }
 
     // Verify target belongs to same org
     const { data: targetProfile } = await admin

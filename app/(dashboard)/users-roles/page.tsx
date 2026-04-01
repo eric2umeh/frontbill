@@ -117,7 +117,7 @@ export default function UsersRolesPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify(addForm),
+        body: JSON.stringify({ ...addForm, caller_id: currentUserId }),
       })
       const json = await res.json()
       if (!res.ok) { toast.error(json.error || 'Failed to create user'); return }
@@ -167,7 +167,7 @@ export default function UsersRolesPage() {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify(body),
+        body: JSON.stringify({ ...body, caller_id: currentUserId }),
       })
       const json = await res.json()
       if (!res.ok) { toast.error(json.error || 'Failed to update user'); return }
@@ -190,7 +190,12 @@ export default function UsersRolesPage() {
     if (!deletingUser) return
     setDeleting(true)
     try {
-      const res = await fetch(`/api/admin/users/${deletingUser.id}`, { method: 'DELETE', credentials: 'include' })
+      const res = await fetch(`/api/admin/users/${deletingUser.id}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ caller_id: currentUserId }),
+      })
       const json = await res.json()
       if (!res.ok) { toast.error(json.error || 'Failed to delete user'); return }
 

@@ -1,31 +1,32 @@
 import { createAdminClient } from '@/lib/supabase/admin'
-import { createClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
 
 // POST /api/admin/users — create a new user in the same organization
+// caller_id is passed from the client (already authenticated in browser) and validated server-side
 export async function POST(request: Request) {
   try {
-    const supabaseServer = await createClient()
-    const { data: { user: caller } } = await supabaseServer.auth.getUser()
-    if (!caller) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { full_name, email, password, role, caller_id } = await request.json()
 
-    const { data: callerProfile } = await supabaseServer
-      .from('profiles')
-      .select('role, organization_id')
-      .eq('id', caller.id)
-      .single()
-
-    if (!callerProfile || !['admin', 'manager'].includes(callerProfile.role)) {
-      return NextResponse.json({ error: 'Only admins or managers can create users' }, { status: 403 })
-    }
-
-    const { full_name, email, password, role } = await request.json()
-
-    if (!email || !password || !full_name || !role) {
-      return NextResponse.json({ error: 'full_name, email, password and role are required' }, { status: 400 })
+    if (!email || !password || !full_name || !role || !caller_id) {
+      return NextResponse.json({ error: 'full_name, email, password, role and caller_id are required' }, { status: 400 })
     }
 
     const admin = createAdminClient()
+
+    // Verify caller exists and has the right role/org using the admin client (bypasses RLS)
+    const { data: callerProfile, error: profileFetchError } = await admin
+      .from('profiles')
+      .select('role, organization_id')
+      .eq('id', caller_id)
+      .single()
+
+    if (profileFetchError || !callerProfile) {
+      return NextResponse.json({ error: 'Caller profile not found' }, { status: 403 })
+    }
+
+    if (!['admin', 'manager'].includes(callerProfile.role)) {
+      return NextResponse.json({ error: 'Only admins or managers can create users' }, { status: 403 })
+    }
 
     // Create auth user with email confirmed (no signup flow needed)
     const { data: newUser, error: createError } = await admin.auth.admin.createUser({
