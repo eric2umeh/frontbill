@@ -768,10 +768,10 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
                 <Select value={selectedRoomType} onValueChange={handleRoomTypeSelect}>
                   <SelectTrigger><SelectValue placeholder="Select room type" /></SelectTrigger>
                   <SelectContent>
-                    {Array.from(new Set(rooms.map(r => r.room_type))).length === 0 ? (
+                    {Array.from(new Set(rooms.map(r => r.room_type).filter(Boolean))).length === 0 ? (
                       <SelectItem value="__none__" disabled>No rooms available for selected dates</SelectItem>
                     ) : (
-                      Array.from(new Set(rooms.map(r => r.room_type))).map(type => (
+                      Array.from(new Set(rooms.map(r => r.room_type).filter(Boolean))).map(type => (
                         <SelectItem key={type} value={type}>{type}</SelectItem>
                       ))
                     )}
@@ -788,7 +788,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
                   }}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      {rooms.filter(r => r.room_type === selectedRoomType).map(room => (
+                      {rooms.filter(r => r.room_type === selectedRoomType && r.id).map(room => (
                         <SelectItem key={room.id} value={room.id}>Room {room.room_number}</SelectItem>
                       ))}
                     </SelectContent>
