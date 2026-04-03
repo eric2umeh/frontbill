@@ -89,11 +89,6 @@ export default function AccountDetailPage() {
 
   useEffect(() => {
     if (id) loadAccount()
-    const handleVisibility = () => {
-      if (document.visibilityState === 'visible' && id) loadAccount()
-    }
-    document.addEventListener('visibilitychange', handleVisibility)
-    return () => document.removeEventListener('visibilitychange', handleVisibility)
   }, [id])
 
   const loadAccount = async () => {
