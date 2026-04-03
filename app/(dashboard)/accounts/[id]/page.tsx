@@ -128,7 +128,8 @@ export default function AccountDetailPage() {
             .in('booking_id', bookingIds)
           if (folioCharges) {
             folioCharges.forEach((c: any) => {
-              if ((c.payment_status === 'pending' || c.payment_status === 'unpaid') && Number(c.amount) > 0) {
+              // city_ledger charges are billed to an account — still outstanding debt owed to the hotel
+              if (['pending', 'unpaid', 'city_ledger'].includes(c.payment_status) && Number(c.amount) > 0) {
                 folioPendingByBooking[c.booking_id] = (folioPendingByBooking[c.booking_id] || 0) + Number(c.amount)
               }
               if (c.charge_type === 'payment' && Number(c.amount) < 0) {
@@ -507,10 +508,14 @@ export default function AccountDetailPage() {
                     <div className="text-right space-y-1">
                       <div className="font-semibold">{formatNaira(b.total_amount)}</div>
                       {b.balance > 0 && (
-                        <div className="text-xs text-red-600">Balance: {formatNaira(b.balance)}</div>
+                        <div className="text-xs text-red-600 font-medium">Balance: {formatNaira(b.balance)}</div>
                       )}
-                      <Badge variant="outline" className={`text-xs ${statusColor(b.payment_status)}`}>
-                        {b.payment_status}
+                      <Badge variant="outline" className={`text-xs ${
+                        b.balance > 0
+                          ? 'text-red-700 border-red-200 bg-red-50'
+                          : 'text-green-700 border-green-200 bg-green-50'
+                      }`}>
+                        {b.balance > 0 ? 'Unpaid' : 'Settled'}
                       </Badge>
                     </div>
                   </div>
