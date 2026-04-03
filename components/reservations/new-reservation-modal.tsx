@@ -110,7 +110,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
         supabase.from('bookings').select('room_id, check_in, check_out').eq('organization_id', profile.organization_id).in('status', ['confirmed', 'reserved', 'checked_in']),
       ])
       setGuests(guestData || [])
-      setRooms(roomData || [])
+      setRooms((roomData || []).filter((r: any) => r.id && r.room_type && String(r.room_type).trim() !== '' && r.room_number && String(r.room_number).trim() !== ''))
       setAllBookings(bookingData || [])
     } catch {
       toast.error('Failed to load data')
@@ -142,20 +142,65 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
     setGuestSearchOpen(false)
   }
 
-  // City Ledger account search — searches all accounts without type filter
+  // City Ledger account search — filtered by type (individual / organization)
   const searchLedger = async (term: string) => {
     setLedgerSearch(term)
     setSelectedLedger(null)
     if (!term.trim()) { setLedgerResults([]); setLedgerSearchOpen(false); return }
     const supabase = createClient()
-    const { data } = await supabase
-      .from('city_ledger_accounts')
-      .select('id, account_name, account_type, contact_phone, balance')
-      .eq('organization_id', orgId)
-      .ilike('account_name', `%${term}%`)
-      .limit(8)
-    setLedgerResults((data || []).map(d => ({ ...d, name: d.account_name, source: 'city_ledger' })))
-    setLedgerSearchOpen((data || []).length > 0)
+
+    // Re-fetch orgId from profile in case state hasn't populated yet
+    let effectiveOrgId = orgId
+    if (!effectiveOrgId) {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        const { data: profile } = await supabase.from('profiles').select('organization_id').eq('id', user.id).single()
+        effectiveOrgId = profile?.organization_id || ''
+        if (effectiveOrgId) setOrgId(effectiveOrgId)
+      }
+    }
+    if (!effectiveOrgId) return
+
+    // Query both city_ledger_accounts AND organizations table (same as new-booking-modal)
+    const [{ data: ledgerData }, { data: orgTableData }] = await Promise.all([
+      supabase
+        .from('city_ledger_accounts')
+        .select('id, account_name, account_type, contact_phone, balance')
+        .eq('organization_id', effectiveOrgId)
+        .ilike('account_name', `%${term}%`)
+        .limit(10),
+      ledgerType === 'organization'
+        ? supabase
+            .from('organizations')
+            .select('id, name, phone')
+            .ilike('name', `%${term}%`)
+            .limit(5)
+        : Promise.resolve({ data: [] }),
+    ])
+
+    const fromLedger = (ledgerData || [])
+      .filter(d => ledgerType === 'individual'
+        ? ['individual', 'guest'].includes(d.account_type)
+        : d.account_type === 'organization')
+      .map(d => ({ ...d, name: d.account_name, source: 'city_ledger' as const }))
+
+    const fromOrgs = ledgerType === 'organization'
+      ? (orgTableData || [])
+          .filter(o => !fromLedger.some(l => l.name.toLowerCase() === o.name.toLowerCase()))
+          .map(o => ({
+            id: o.id,
+            name: o.name,
+            account_name: o.name,
+            account_type: 'organization' as const,
+            contact_phone: o.phone || '',
+            balance: 0,
+            source: 'organizations' as const,
+          }))
+      : []
+
+    const combined = [...fromLedger, ...fromOrgs]
+    setLedgerResults(combined)
+    setLedgerSearchOpen(combined.length > 0)
   }
 
   const createNewLedgerOrg = async () => {
