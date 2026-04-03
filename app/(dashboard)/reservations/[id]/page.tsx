@@ -85,6 +85,8 @@ export default function ReservationDetailPage({
   const checkInNotReached = reservation?.check_in
     ? isBefore(startOfDay(new Date()), startOfDay(new Date(reservation.check_in)))
     : false
+
+  function handleCheckin() {
     toast(
       (t) => (
         <div className="flex flex-col gap-3">
