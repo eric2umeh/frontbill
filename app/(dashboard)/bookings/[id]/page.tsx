@@ -589,16 +589,19 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
     .filter(c => c.paymentStatus === 'paid' && c.amount > 0 && c.type === 'charge')
     .reduce((sum, c) => sum + c.amount, 0)
 
-  // Bill Balance (Unpaid) = sum of all pending/unpaid/city_ledger folio charges
-  // city_ledger charges are billed to an account — still an outstanding balance owed to the hotel.
-  console.log('[v0] folioCharges for balance calc:', folioCharges.map((c: any) => ({ id: c.id, amount: c.amount, paymentStatus: c.paymentStatus, payment_status: c.payment_status, type: c.type, chargeType: c.chargeType })))
-  const totalBillBalance = folioCharges
+  // Bill Balance (Unpaid): use booking.balance as the source of truth.
+  // booking.balance is maintained by every handler (new-booking, add-charge,
+  // record-payment, extend-stay, edit-charge, delete-charge). Folio charges
+  // may be empty for city-ledger bookings where the initial room charge has
+  // no folio_charges row, so deriving the balance purely from folio_charges
+  // would incorrectly show ₦0.
+  const folioUnpaidTotal = folioCharges
     .filter((c: any) => {
       const status = c.paymentStatus || c.payment_status
       return ['pending', 'unpaid', 'city_ledger'].includes(status) && Number(c.amount) > 0
     })
     .reduce((sum: number, c: any) => sum + Number(c.amount), 0)
-  console.log('[v0] totalBillBalance:', totalBillBalance)
+  const totalBillBalance = Math.max(folioUnpaidTotal, Number(booking?.balance) || 0)
 
   // Amount Paid = initial booking deposit + all "Record Payment" entries in folio
   // Using both 'type' (DB-loaded) and 'chargeType' (optimistic) field names.
