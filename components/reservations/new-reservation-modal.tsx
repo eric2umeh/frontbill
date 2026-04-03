@@ -110,7 +110,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
         supabase.from('bookings').select('room_id, check_in, check_out').eq('organization_id', profile.organization_id).in('status', ['confirmed', 'reserved', 'checked_in']),
       ])
       setGuests(guestData || [])
-      setRooms(roomData || [])
+      setRooms((roomData || []).filter((r: any) => r.id && r.room_type && String(r.room_type).trim() !== '' && r.room_number && String(r.room_number).trim() !== ''))
       setAllBookings(bookingData || [])
     } catch {
       toast.error('Failed to load data')
