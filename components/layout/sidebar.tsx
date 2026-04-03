@@ -18,7 +18,6 @@ import {
   Briefcase,
   CalendarClock,
   Receipt,
-  Database,
   ChevronLeft,
   ChevronRight,
   X,
@@ -47,9 +46,9 @@ const routes = [
     href: '/reservations',
   },
   {
-    label: 'Guest Database',
-    icon: Database,
-    href: '/guest-database',
+    label: 'Accounts',
+    icon: Users,
+    href: '/accounts',
   },
   {
     label: 'Rooms',
