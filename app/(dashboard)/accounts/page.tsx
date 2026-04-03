@@ -129,58 +129,66 @@ export default function AccountsPage() {
       <EnhancedDataTable
         data={accounts}
         searchKeys={['name', 'phone', 'email']}
-        filters={[]}
+        filters={[
+          {
+            key: 'accountType',
+            label: 'Type',
+            options: [
+              { value: 'guest', label: 'Guest' },
+              { value: 'individual', label: 'Individual' },
+              { value: 'organization', label: 'Organization' },
+            ],
+          },
+        ]}
         columns={[
           {
-            header: 'Name',
-            accessor: 'name',
-            cell: (value: string, row: UnifiedAccount) => (
+            key: 'name',
+            label: 'Name',
+            render: (row: UnifiedAccount) => (
               <div className="flex items-center gap-2">
-                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10">
+                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 shrink-0">
                   {row.accountType === 'guest' ? (
                     <User className="h-4 w-4 text-primary" />
                   ) : (
                     <Building2 className="h-4 w-4 text-primary" />
                   )}
                 </div>
-                <div>
-                  <p className="font-medium">{value}</p>
-                </div>
+                <p className="font-medium">{row.name}</p>
               </div>
             ),
           },
           {
-            header: 'Type',
-            accessor: 'accountType',
-            cell: (value: string) => (
-              <Badge variant="secondary" className="capitalize">
-                {value}
-              </Badge>
+            key: 'accountType',
+            label: 'Type',
+            render: (row: UnifiedAccount) => (
+              <Badge variant="secondary" className="capitalize">{row.accountType}</Badge>
             ),
           },
           {
-            header: 'Phone',
-            accessor: 'phone',
-            cell: (value: string) => value || '-',
+            key: 'phone',
+            label: 'Phone',
+            render: (row: UnifiedAccount) => <span>{row.phone || '-'}</span>,
           },
           {
-            header: 'Email',
-            accessor: 'email',
-            cell: (value: string) => value || '-',
+            key: 'email',
+            label: 'Email',
+            render: (row: UnifiedAccount) => <span className="truncate max-w-[160px] block">{row.email || '-'}</span>,
           },
           {
-            header: 'Balance',
-            accessor: 'balance',
-            cell: (value: number) => (
-              <div className={`font-semibold ${value > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                {formatNaira(value)}
-              </div>
+            key: 'balance',
+            label: 'Balance',
+            render: (row: UnifiedAccount) => (
+              <span className={`font-semibold ${row.balance > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                {formatNaira(row.balance)}
+              </span>
             ),
           },
           {
-            header: 'Created',
-            accessor: 'created_at',
-            cell: (value: string) => format(new Date(value), 'dd MMM yyyy'),
+            key: 'created_at',
+            label: 'Created',
+            render: (row: UnifiedAccount) => (
+              <span>{row.created_at ? format(new Date(row.created_at), 'dd MMM yyyy') : '-'}</span>
+            ),
           },
         ]}
         onRowClick={goToAccount}
