@@ -54,13 +54,13 @@ export function EnhancedDataTable<T extends Record<string, any>>({
     // Search filter
     const matchesSearch = searchKeys.length === 0 || searchKeys.some((key) => {
       const value = item[key]
-      return value?.toString().toLowerCase().includes(searchQuery.toLowerCase())
+      return String(value || '').toLowerCase().includes(searchQuery.toLowerCase())
     })
 
     // Active filters
     const matchesFilters = Object.entries(activeFilters).every(([key, value]) => {
       if (!value || value === 'all') return true
-      return item[key]?.toString().toLowerCase() === value.toLowerCase()
+      return String(item[key] || '').toLowerCase() === value.toLowerCase()
     })
 
     // Date filter
