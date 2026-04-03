@@ -139,7 +139,10 @@ export default function AccountDetailPage() {
           }
         }
 
-        const enrichedBookings = rawBookings.map((b: any) => ({ ...b, balance: folioPendingByBooking[b.id] ?? 0 }))
+        const enrichedBookings = rawBookings.map((b: any) => ({
+          ...b,
+          balance: Math.max(folioPendingByBooking[b.id] ?? 0, Number(b.balance) || 0),
+        }))
         setBookings(enrichedBookings)
         setFolioPaymentsSum(folioPaymentsTotal)
         if (enrichedBookings.length > 0) setSelectedFolioId(enrichedBookings[0].folio_id)
