@@ -377,7 +377,7 @@ export default function ReservationDetailPage({
       </Dialog>
 
       <div className="flex items-center justify-between">
-        <Button variant="ghost" onClick={() => router.back()}>
+        <Button variant="ghost" onClick={() => router.push('/reservations')}>
           <ArrowLeft className="mr-2 h-4 w-4" />
           {'Back to Reservations'}
         </Button>
