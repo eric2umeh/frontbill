@@ -142,18 +142,40 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
     setGuestSearchOpen(false)
   }
 
-  // City Ledger account search — searches all accounts without type filter
+  // City Ledger account search — filtered by type (individual / organization)
   const searchLedger = async (term: string) => {
     setLedgerSearch(term)
     setSelectedLedger(null)
     if (!term.trim()) { setLedgerResults([]); setLedgerSearchOpen(false); return }
     const supabase = createClient()
-    const { data } = await supabase
+
+    // Re-fetch orgId from profile in case state hasn't populated yet
+    let effectiveOrgId = orgId
+    if (!effectiveOrgId) {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        const { data: profile } = await supabase.from('profiles').select('organization_id').eq('id', user.id).single()
+        effectiveOrgId = profile?.organization_id || ''
+        if (effectiveOrgId) setOrgId(effectiveOrgId)
+      }
+    }
+    if (!effectiveOrgId) return
+
+    const query = supabase
       .from('city_ledger_accounts')
       .select('id, account_name, account_type, contact_phone, balance')
-      .eq('organization_id', orgId)
+      .eq('organization_id', effectiveOrgId)
       .ilike('account_name', `%${term}%`)
-      .limit(8)
+      .limit(10)
+
+    // Filter by type
+    if (ledgerType === 'individual') {
+      query.in('account_type', ['individual', 'guest'])
+    } else {
+      query.eq('account_type', 'organization')
+    }
+
+    const { data } = await query
     setLedgerResults((data || []).map(d => ({ ...d, name: d.account_name, source: 'city_ledger' })))
     setLedgerSearchOpen((data || []).length > 0)
   }
