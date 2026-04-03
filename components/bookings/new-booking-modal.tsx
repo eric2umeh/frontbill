@@ -149,10 +149,14 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
         supabase.from('organizations').select('id, name, phone, email').order('name'),
       ])
 
+      // Sanitize rooms — filter out any with empty id, room_type or room_number to prevent SelectItem crashes
+      const sanitizedRooms = (roomData || []).filter(
+        (r: any) => r.id && r.room_type && String(r.room_type).trim() !== '' && r.room_number && String(r.room_number).trim() !== ''
+      )
       setGuests(guestData || [])
-      setAllRooms(roomData || [])
+      setAllRooms(sanitizedRooms)
       setAllBookingsForRooms(bookingData || [])
-      setRooms(roomData || [])
+      setRooms(sanitizedRooms)
 
       // Individuals: city_ledger_accounts with type individual/guest
       const individualLedger: LedgerAccount[] = (cityLedgerData || [])
@@ -414,7 +418,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
         .filter(b => b.check_in < coStr && b.check_out > ciStr)
         .map(b => b.room_id)
     )
-    setRooms(allRooms.filter(r => !bookedRoomIds.has(r.id)))
+    setRooms(allRooms.filter(r => !bookedRoomIds.has(r.id) && r.id && r.room_type && String(r.room_type).trim() !== ''))
     // Clear selected room if it's no longer available
     setSelectedRoom(prev => prev && bookedRoomIds.has(prev.id) ? null : prev)
     setSelectedRoomType(prev => {
