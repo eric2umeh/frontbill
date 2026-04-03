@@ -161,23 +161,46 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
     }
     if (!effectiveOrgId) return
 
-    const query = supabase
-      .from('city_ledger_accounts')
-      .select('id, account_name, account_type, contact_phone, balance')
-      .eq('organization_id', effectiveOrgId)
-      .ilike('account_name', `%${term}%`)
-      .limit(10)
+    // Query both city_ledger_accounts AND organizations table (same as new-booking-modal)
+    const [{ data: ledgerData }, { data: orgTableData }] = await Promise.all([
+      supabase
+        .from('city_ledger_accounts')
+        .select('id, account_name, account_type, contact_phone, balance')
+        .eq('organization_id', effectiveOrgId)
+        .ilike('account_name', `%${term}%`)
+        .limit(10),
+      ledgerType === 'organization'
+        ? supabase
+            .from('organizations')
+            .select('id, name, phone')
+            .ilike('name', `%${term}%`)
+            .limit(5)
+        : Promise.resolve({ data: [] }),
+    ])
 
-    // Filter by type
-    if (ledgerType === 'individual') {
-      query.in('account_type', ['individual', 'guest'])
-    } else {
-      query.eq('account_type', 'organization')
-    }
+    const fromLedger = (ledgerData || [])
+      .filter(d => ledgerType === 'individual'
+        ? ['individual', 'guest'].includes(d.account_type)
+        : d.account_type === 'organization')
+      .map(d => ({ ...d, name: d.account_name, source: 'city_ledger' as const }))
 
-    const { data } = await query
-    setLedgerResults((data || []).map(d => ({ ...d, name: d.account_name, source: 'city_ledger' })))
-    setLedgerSearchOpen((data || []).length > 0)
+    const fromOrgs = ledgerType === 'organization'
+      ? (orgTableData || [])
+          .filter(o => !fromLedger.some(l => l.name.toLowerCase() === o.name.toLowerCase()))
+          .map(o => ({
+            id: o.id,
+            name: o.name,
+            account_name: o.name,
+            account_type: 'organization' as const,
+            contact_phone: o.phone || '',
+            balance: 0,
+            source: 'organizations' as const,
+          }))
+      : []
+
+    const combined = [...fromLedger, ...fromOrgs]
+    setLedgerResults(combined)
+    setLedgerSearchOpen(combined.length > 0)
   }
 
   const createNewLedgerOrg = async () => {
