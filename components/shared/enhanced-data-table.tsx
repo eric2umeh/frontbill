@@ -31,6 +31,7 @@ interface EnhancedDataTableProps<T> {
   itemsPerPage?: number
   dateField?: keyof T
   onDateFilterChange?: (date: Date | undefined) => void
+  onRowClick?: (item: T) => void
 }
 
 export function EnhancedDataTable<T extends Record<string, any>>({
@@ -42,6 +43,7 @@ export function EnhancedDataTable<T extends Record<string, any>>({
   itemsPerPage = 10,
   dateField,
   onDateFilterChange,
+  onRowClick,
 }: EnhancedDataTableProps<T>) {
   const [searchQuery, setSearchQuery] = useState('')
   const [activeFilters, setActiveFilters] = useState<Record<string, string>>({})
@@ -202,7 +204,11 @@ export function EnhancedDataTable<T extends Record<string, any>>({
               </thead>
               <tbody className="divide-y">
                 {paginatedData.map((item, index) => (
-                  <tr key={index} className="hover:bg-muted/50 transition-colors">
+                  <tr
+                    key={index}
+                    className={`hover:bg-muted/50 transition-colors ${onRowClick ? 'cursor-pointer' : ''}`}
+                    onClick={() => onRowClick?.(item)}
+                  >
                     {columns.map((column, colIndex) => (
                       <td 
                         key={column.key.toString()} 
