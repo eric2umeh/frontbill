@@ -60,7 +60,7 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
   const [roomAvailabilityChecked, setRoomAvailabilityChecked] = useState(false)
   // Derived room types from actual DB rooms
   const roomTypes = allRooms.length > 0
-    ? Array.from(new Set(allRooms.map((r: any) => r.room_type)))
+    ? Array.from(new Set(allRooms.map((r: any) => r.room_type).filter((t: any) => t && String(t).trim() !== '')))
     : ROOM_TYPES_FALLBACK
 
   // Step 1: Booking type + contact
@@ -133,7 +133,7 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
       supabase.from('bookings').select('room_id, check_in, check_out').eq('organization_id', profile.organization_id).in('status', ['confirmed', 'reserved', 'checked_in']),
     ])
     setAllGuests(guestData || [])
-    setAllRooms(roomData || [])
+    setAllRooms((roomData || []).filter((r: any) => r.id && r.room_type && String(r.room_type).trim() !== '' && r.room_number && String(r.room_number).trim() !== ''))
     setAllActiveBookings(bookingData || [])
   }
 
