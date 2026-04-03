@@ -122,6 +122,8 @@ export default function BookingsPage() {
           ...booking,
           payment_method,
           ledger_account_name,
+          guestName: booking.guests?.name || '',
+          guestPhone: booking.guests?.phone || '',
           created_by_name: booking.created_by ? userMap[booking.created_by] || 'Unknown User' : 'System',
           updated_by_name: booking.updated_by ? userMap[booking.updated_by] || 'Unknown User' : null,
         }
@@ -226,7 +228,7 @@ export default function BookingsPage() {
 
       <EnhancedDataTable
         data={bookings}
-        searchKeys={['folio_id', 'guestName', 'rooms.room_number']}
+        searchKeys={['folio_id', 'guestName', 'guestPhone', 'ledger_account_name', 'rooms.room_number']}
         dateField="check_in"
         filters={[
           {
