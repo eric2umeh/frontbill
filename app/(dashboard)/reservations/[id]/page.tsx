@@ -14,7 +14,7 @@ import { ArrowLeft, UserCheck, Trash2, CreditCard, AlertCircle, Loader2 } from '
 import { formatNaira } from '@/lib/utils/currency'
 import { toast } from 'sonner'
 import { createClient } from '@/lib/supabase/client'
-import { format } from 'date-fns'
+import { format, isBefore, startOfDay } from 'date-fns'
 
 export default function ReservationDetailPage({
   params,
@@ -80,6 +80,11 @@ export default function ReservationDetailPage({
       setLoading(false)
     }
   }
+
+  // Disable check-in until the check-in date has arrived
+  const checkInNotReached = reservation?.check_in
+    ? isBefore(startOfDay(new Date()), startOfDay(new Date(reservation.check_in)))
+    : false
 
   function handleCheckin() {
     toast(
@@ -372,7 +377,7 @@ export default function ReservationDetailPage({
       </Dialog>
 
       <div className="flex items-center justify-between">
-        <Button variant="ghost" onClick={() => router.back()}>
+        <Button variant="ghost" onClick={() => router.push('/reservations')}>
           <ArrowLeft className="mr-2 h-4 w-4" />
           {'Back to Reservations'}
         </Button>
@@ -381,10 +386,13 @@ export default function ReservationDetailPage({
             variant="default"
             size="sm"
             onClick={handleCheckin}
-            disabled={actionLoading}
+            disabled={actionLoading || checkInNotReached}
+            title={checkInNotReached ? `Check-in available from ${format(new Date(reservation!.check_in), 'dd MMM yyyy')}` : undefined}
           >
             <UserCheck className="mr-2 h-4 w-4" />
-            {'Check-in Guest'}
+            {checkInNotReached
+              ? `Check-in on ${format(new Date(reservation!.check_in), 'dd MMM')}`
+              : 'Check-in Guest'}
           </Button>
           <Button
             variant="destructive"
@@ -559,10 +567,13 @@ export default function ReservationDetailPage({
                 className="w-full"
                 variant="default"
                 onClick={handleCheckin}
-                disabled={actionLoading}
+                disabled={actionLoading || checkInNotReached}
+                title={checkInNotReached ? `Check-in available from ${format(new Date(reservation!.check_in), 'dd MMM yyyy')}` : undefined}
               >
                 <UserCheck className="mr-2 h-4 w-4" />
-                {'Check-in Guest'}
+                {checkInNotReached
+                  ? `Check-in on ${format(new Date(reservation!.check_in), 'dd MMM')}`
+                  : 'Check-in Guest'}
               </Button>
               <Button
                 className="w-full"

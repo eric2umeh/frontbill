@@ -39,7 +39,7 @@ export default function DashboardLayout({
               id: 'placeholder',
               email: 'user@example.com',
               name: 'User',
-              role: 'staff',
+              role: 'admin',
             })
             setLoading(false)
           }
@@ -70,14 +70,14 @@ export default function DashboardLayout({
               id: authUser.id,
               email: authUser.email || '',
               name: profile.full_name || authUser.email?.split('@')[0] || 'User',
-              role: profile.role || 'staff',
+              role: profile.role || 'admin',
             })
           } else {
             setUser({
               id: authUser.id,
               email: authUser.email || '',
               name: authUser.email?.split('@')[0] || 'User',
-              role: 'staff',
+              role: 'admin',
             })
           }
           setLoading(false)

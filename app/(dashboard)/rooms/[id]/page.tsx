@@ -171,7 +171,7 @@ export default function RoomDetailPage() {
       if (error) throw error
       
       toast.success('Room deleted successfully')
-      router.back()
+      router.push('/rooms')
     } catch (error: any) {
       toast.error(error.message || 'Failed to delete room')
     } finally {
@@ -201,7 +201,7 @@ export default function RoomDetailPage() {
       <div className="flex items-center justify-center min-h-screen">
         <div className="text-center">
           <p className="text-muted-foreground">Room not found</p>
-          <Button onClick={() => router.back()} className="mt-4">
+          <Button onClick={() => router.push('/rooms')} className="mt-4">
             Go Back
           </Button>
         </div>
@@ -313,7 +313,7 @@ export default function RoomDetailPage() {
       </Dialog>
 
       <div className="flex items-center justify-between">
-        <Button variant="ghost" onClick={() => router.back()}>
+        <Button variant="ghost" onClick={() => router.push('/rooms')}>
           <ArrowLeft className="mr-2 h-4 w-4" />
           Back to Rooms
         </Button>

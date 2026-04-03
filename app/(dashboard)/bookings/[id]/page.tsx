@@ -589,12 +589,16 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
     .filter(c => c.paymentStatus === 'paid' && c.amount > 0 && c.type === 'charge')
     .reduce((sum, c) => sum + c.amount, 0)
 
-  // Bill Balance (Unpaid) = sum of all pending/unpaid folio charges
-  // Derived entirely from folioCharges state - no reliance on bookings.balance column.
-  // This avoids RLS-blocked DB writes and stale-read race conditions.
+  // Bill Balance (Unpaid) = sum of all pending/unpaid/city_ledger folio charges
+  // city_ledger charges are billed to an account — still an outstanding balance owed to the hotel.
+  console.log('[v0] folioCharges for balance calc:', folioCharges.map((c: any) => ({ id: c.id, amount: c.amount, paymentStatus: c.paymentStatus, payment_status: c.payment_status, type: c.type, chargeType: c.chargeType })))
   const totalBillBalance = folioCharges
-    .filter((c: any) => (c.paymentStatus === 'pending' || c.paymentStatus === 'unpaid') && Number(c.amount) > 0)
+    .filter((c: any) => {
+      const status = c.paymentStatus || c.payment_status
+      return ['pending', 'unpaid', 'city_ledger'].includes(status) && Number(c.amount) > 0
+    })
     .reduce((sum: number, c: any) => sum + Number(c.amount), 0)
+  console.log('[v0] totalBillBalance:', totalBillBalance)
 
   // Amount Paid = initial booking deposit + all "Record Payment" entries in folio
   // Using both 'type' (DB-loaded) and 'chargeType' (optimistic) field names.
@@ -783,7 +787,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
       </Dialog>
 
       <div className="flex items-center justify-between">
-        <Button variant="ghost" onClick={() => router.back()}>
+        <Button variant="ghost" onClick={() => router.push('/bookings')}>
           <ArrowLeft className="mr-2 h-4 w-4" />
           Back to Bookings
         </Button>

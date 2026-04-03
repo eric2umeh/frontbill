@@ -14,9 +14,11 @@ import { format, isWithinInterval, parseISO, startOfDay, endOfDay } from 'date-f
 
 interface LedgerAccount {
   id: string
-  name: string
+  account_name: string
+  account_type?: string
   balance: number
-  status: string
+  contact_phone?: string
+  contact_email?: string
 }
 
 interface LedgerTransaction {
@@ -194,10 +196,15 @@ export default function CityLedgerPage() {
                 accounts.map((acc) => (
                   <div key={acc.id} className="flex items-center justify-between border-b pb-3 last:border-0">
                     <div>
-                      <p className="font-medium">{acc.name}</p>
-                      <Badge variant="secondary" className="mt-1">
-                        {acc.status || 'active'}
-                      </Badge>
+                      <p className="font-medium">{acc.account_name}</p>
+                      <div className="flex items-center gap-2 mt-1">
+                        <Badge variant="secondary" className="capitalize text-xs">
+                          {acc.account_type || 'individual'}
+                        </Badge>
+                        {acc.contact_phone && (
+                          <p className="text-xs text-muted-foreground">{acc.contact_phone}</p>
+                        )}
+                      </div>
                     </div>
                     <div className="text-right">
                       <p className={`font-semibold ${acc.balance > 0 ? 'text-red-600' : 'text-green-600'}`}>
