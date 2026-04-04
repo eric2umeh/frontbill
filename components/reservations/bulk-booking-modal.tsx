@@ -342,6 +342,8 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
     }
 
     setLoading(true)
+    // Yield to browser so the loading spinner renders before heavy DB work
+    await new Promise(resolve => setTimeout(resolve, 0))
     try {
       const supabase = createClient()
       let createdCount = 0
@@ -379,6 +381,7 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
       if (fillLater) {
         // Create placeholder reservations — no guest/room assigned yet
         for (let i = 0; i < totalRooms; i++) {
+          if (i % 5 === 0) await new Promise(r => setTimeout(r, 0))
           const folioId = `BLK-${Date.now().toString(36).toUpperCase()}-${i}`
           const isCityLedger = paymentMethod === 'city_ledger'
           await supabase.from('bookings').insert([{
@@ -433,7 +436,9 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
           // Always ensure a non-null guest_id (use step-1 contact fallback)
           if (!finalGuestId) finalGuestId = fallbackGuestId
 
-          for (const room of available) {
+          for (let ri = 0; ri < available.length; ri++) {
+            if (ri % 3 === 0) await new Promise(r => setTimeout(r, 0))
+            const room = available[ri]
             const total = room.price_per_night * nights
             const depositAmt = paymentStatus === 'paid' ? total : paymentStatus === 'partial' ? (Number(partialAmount) || 0) : 0
             const balanceAmt = total - depositAmt
