@@ -13,6 +13,7 @@ import { Calendar } from '@/components/ui/calendar'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { format, addDays } from 'date-fns'
 import { Calendar as CalendarIcon, ChevronRight, ChevronLeft, X, Users, Building2 } from 'lucide-react'
+import { Separator } from '@/components/ui/separator'
 import { formatNaira } from '@/lib/utils/currency'
 import { toast } from 'sonner'
 
@@ -466,9 +467,8 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
   }
 
   const canGoToNextStep = () => {
-    if (step === 1) return !!(guestId || fullName.trim())
-    if (step === 2) return !!(checkInDate && checkOutDate && nights > 0)
-    if (step === 3) return !!(selectedRoom && (paymentMethod !== 'city_ledger' || ledgerAccount))
+    if (step === 1) return !!(guestId || fullName.trim()) && !!(checkInDate && checkOutDate && nights > 0)
+    if (step === 2) return !!(selectedRoom && (paymentMethod !== 'city_ledger' || ledgerAccount))
     return false
   }
 
@@ -648,13 +648,13 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
       <Dialog open={open} onOpenChange={(o) => { if (!o) { setLoading(false); onClose() } }}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>New Booking — Step {step} of 3</DialogTitle>
+            <DialogTitle>New Booking — Step {step} of 2</DialogTitle>
             <DialogDescription>
-              {step === 1 ? 'Enter guest information' : step === 2 ? 'Select stay dates' : 'Choose room and payment'}
+              {step === 1 ? 'Guest information & stay dates' : 'Choose room and payment'}
             </DialogDescription>
           </DialogHeader>
 
-          {/* Step 1: Guest Information */}
+          {/* Step 1: Guest Information & Dates */}
           {step === 1 && (
             <div className="space-y-4 py-4">
               <div className="space-y-2">
@@ -709,12 +709,9 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
                   </Button>
                 </div>
               )}
-            </div>
-          )}
 
-          {/* Step 2: Dates */}
-          {step === 2 && (
-            <div className="space-y-4 py-4">
+              <Separator />
+
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Check-in Date *</Label>
@@ -764,8 +761,8 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
             </div>
           )}
 
-          {/* Step 3: Room & Payment */}
-          {step === 3 && (
+          {/* Step 2: Room & Payment */}
+          {step === 2 && (
             <div className="space-y-4 py-4">
               <div className="space-y-2">
                 <Label>Room Type *</Label>
@@ -957,7 +954,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
               <ChevronLeft className="mr-2 h-4 w-4" />
               Previous
             </Button>
-            {step < 3 ? (
+            {step < 2 ? (
               <Button onClick={() => setStep(s => s + 1)} disabled={!canGoToNextStep() || loading}>
                 Next
                 <ChevronRight className="ml-2 h-4 w-4" />
