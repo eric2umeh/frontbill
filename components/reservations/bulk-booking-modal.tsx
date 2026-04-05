@@ -496,18 +496,18 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
     onClose()
   }
 
-  const stepLabel = step === 1 ? 'Group Contact & Type' : step === 2 ? 'Dates & Room Availability' : 'Payment & Room Entries'
+  const stepLabel = step === 1 ? 'Group Contact, Type & Dates' : 'Payment & Room Entries'
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="max-w-3xl max-h-[92vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Bulk Reservation — Step {step} of 3</DialogTitle>
+          <DialogTitle>Bulk Reservation — Step {step} of 2</DialogTitle>
           <DialogDescription>{stepLabel}</DialogDescription>
         </DialogHeader>
 
         <div className="flex items-center gap-2 pb-1">
-          {[1,2,3].map(s => (
+          {[1,2].map(s => (
             <div key={s} className={`flex-1 h-1.5 rounded-full transition-colors ${s <= step ? 'bg-primary' : 'bg-muted'}`} />
           ))}
         </div>
@@ -661,17 +661,10 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
                 )}
               </div>
             )}
-          </div>
-        )}
 
-        {/* ── STEP 2: Dates + Room Availability Check ── */}
-        {step === 2 && (
-          <div className="space-y-5 py-2">
-            <div className="p-3 bg-muted rounded-lg text-sm">
-              <span className="text-muted-foreground">Booking for: </span>
-              <span className="font-semibold">{bookingType === 'organization' ? selectedOrg?.name : selectedGroupGuest?.name}</span>
-            </div>
+            <Separator />
 
+            {/* Dates & Room Availability */}
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>Check-in Date *</Label>
@@ -735,8 +728,8 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
           </div>
         )}
 
-        {/* ── STEP 3: Payment + Room Entries ── */}
-        {step === 3 && (
+        {/* ── STEP 2: Payment + Room Entries ── */}
+        {step === 2 && (
           <div className="space-y-5 py-2">
             {/* Payment section */}
             <div className="space-y-4">
@@ -940,10 +933,10 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
             <ChevronLeft className="mr-2 h-4 w-4" />
             {step > 1 ? 'Back' : 'Cancel'}
           </Button>
-          {step < 3 ? (
+          {step < 2 ? (
             <Button
               onClick={() => setStep(step + 1)}
-              disabled={step === 1 ? !canGoStep2() : !canGoStep3()}
+              disabled={!((bookingType === 'organization' ? !!selectedOrg : !!selectedGroupGuest) && checkIn && checkOut && nights > 0)}
             >
               Next <ChevronRight className="ml-2 h-4 w-4" />
             </Button>
