@@ -278,9 +278,8 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
   }
 
   const canGoNext = () => {
-    if (step === 1) return !!(guestId || fullName.trim())
-    if (step === 2) return !!(checkInDate && checkOutDate && nights > 0)
-    if (step === 3) return !!(selectedRoom)
+    if (step === 1) return !!(guestId || fullName.trim()) && !!(checkInDate && checkOutDate && nights > 0)
+    if (step === 2) return !!(selectedRoom)
     return false
   }
 
@@ -444,20 +443,20 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
     <Dialog open={open} onOpenChange={(o) => { if (!o) { setLoading(false); onClose() } }}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>New Reservation — Step {step} of 3</DialogTitle>
+          <DialogTitle>New Reservation — Step {step} of 2</DialogTitle>
           <DialogDescription>
-            {step === 1 ? 'Enter guest information' : step === 2 ? 'Select stay dates (today or future only)' : 'Choose room and payment details'}
+            {step === 1 ? 'Guest information & stay dates' : 'Choose room and payment details'}
           </DialogDescription>
         </DialogHeader>
 
         {/* Step indicator */}
         <div className="flex items-center gap-2 pb-2">
-          {[1,2,3].map(s => (
+          {[1,2].map(s => (
             <div key={s} className={`flex-1 h-1.5 rounded-full transition-colors ${s <= step ? 'bg-primary' : 'bg-muted'}`} />
           ))}
         </div>
 
-        {/* ── STEP 1: Guest ── */}
+        {/* ── STEP 1: Guest & Dates ── */}
         {step === 1 && (
           <div className="space-y-4 py-2">
             <div className="space-y-2">
@@ -495,12 +494,9 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
               <Label>Address</Label>
               <Input placeholder="Street address" value={address} onChange={(e) => setAddress(e.target.value)} disabled={!!guestId} />
             </div>
-          </div>
-        )}
 
-        {/* ── STEP 2: Dates ── */}
-        {step === 2 && (
-          <div className="space-y-4 py-2">
+            <Separator />
+
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>Check-in *</Label>
@@ -563,8 +559,8 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
           </div>
         )}
 
-        {/* ── STEP 3: Room + Payment ── */}
-        {step === 3 && (
+        {/* ── STEP 2: Room + Payment ── */}
+        {step === 2 && (
           <div className="space-y-4 py-2">
             {/* Room selection */}
             <div className="space-y-2">
@@ -762,7 +758,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
             <ChevronLeft className="mr-2 h-4 w-4" />
             {step > 1 ? 'Back' : 'Cancel'}
           </Button>
-          {step < 3 ? (
+          {step < 2 ? (
             <Button onClick={() => setStep(step + 1)} disabled={!canGoNext()}>
               Next <ChevronRight className="ml-2 h-4 w-4" />
             </Button>
