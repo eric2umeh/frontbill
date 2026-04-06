@@ -12,6 +12,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { formatNaira } from '@/lib/utils/currency'
 import { usePageData } from '@/hooks/use-page-data'
+import { useAuth } from '@/lib/auth-context'
 import {
   Calendar as CalendarIcon, TrendingUp, CreditCard, Loader2,
   Banknote, Smartphone, ArrowRightLeft, Building2, Clock
@@ -43,6 +44,7 @@ type DateRange = 'today' | 'yesterday' | 'this_week' | 'this_month' | 'custom'
 export default function TransactionsPage() {
   const [payments, setPayments] = useState<Payment[]>([])
   const { initialLoading, startFetch, endFetch } = usePageData()
+  const { organizationId } = useAuth()
   const [dateRange, setDateRange] = useState<DateRange>('this_month')
   const [customDate, setCustomDate] = useState<Date>(new Date())
   const [calOpen, setCalOpen] = useState(false)
@@ -65,21 +67,10 @@ export default function TransactionsPage() {
       const supabase = createClient()
       if (!supabase) { setPayments([]); endFetch(); return }
 
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) { endFetch(); router.push('/auth/login'); return }
-
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('organization_id')
-        .eq('id', user.id)
-        .single()
-
-      if (!profile?.organization_id) { endFetch(); return }
-
       const { data: txData, error: txError } = await supabase
         .from('transactions')
         .select('*')
-        .eq('organization_id', profile.organization_id)
+        .eq('organization_id', organizationId)
         .order('created_at', { ascending: false })
         .limit(1000)
 
@@ -121,7 +112,7 @@ export default function TransactionsPage() {
     } finally {
       endFetch()
     }
-  }, [dateFilter, router])
+  }, [dateFilter, organizationId])
 
   useEffect(() => { fetchPayments() }, [fetchPayments])
 

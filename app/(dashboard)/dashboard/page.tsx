@@ -1,6 +1,6 @@
 'use client'
 
-import { Suspense, useState, useEffect } from 'react'
+import { Suspense, useState } from 'react'
 import { DashboardStats } from '@/components/dashboard/dashboard-stats'
 import { RoomStatusGrid } from '@/components/dashboard/room-status-grid'
 import { RevenueChart } from '@/components/dashboard/revenue-chart'
@@ -11,8 +11,7 @@ import { NewBookingModal } from '@/components/bookings/new-booking-modal'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { UserCheck } from 'lucide-react'
-import { createClient } from '@/lib/supabase/client'
-import { useRouter } from 'next/navigation'
+import { useAuth } from '@/lib/auth-context'
 
 function StatsLoader() {
   return (
@@ -38,37 +37,7 @@ function GridLoader() {
 
 export default function DashboardPage() {
   const [bookingModalOpen, setBookingModalOpen] = useState(false)
-  const [orgId, setOrgId] = useState<string | null>(null)
-  const router = useRouter()
-
-  useEffect(() => {
-    getOrganization()
-  }, [])
-
-  const getOrganization = async () => {
-    try {
-      const supabase = createClient()
-      if (!supabase) return
-
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) {
-        router.push('/auth/login')
-        return
-      }
-
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('organization_id')
-        .eq('id', user.id)
-        .single()
-
-      if (profile) {
-        setOrgId(profile.organization_id)
-      }
-    } catch (error) {
-      console.error('Error fetching organization:', error)
-    }
-  }
+  const { organizationId } = useAuth()
   
   return (
     <div className="space-y-6">
@@ -94,7 +63,7 @@ export default function DashboardPage() {
       {/* AI Insights Section */}
       <div className="border-t pt-6">
         <h2 className="text-lg font-semibold mb-4">AI-Powered Insights</h2>
-        {orgId && (
+        {organizationId && (
           <AIInsightsPanel bookings={[]} dailyData={{
             checkouts: 0,
             checkIns: 0,

@@ -2,13 +2,13 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { useRouter } from 'next/navigation'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { EnhancedDataTable } from '@/components/shared/enhanced-data-table'
 import { formatNaira } from '@/lib/utils/currency'
 import { usePageData } from '@/hooks/use-page-data'
+import { useAuth } from '@/lib/auth-context'
 import { 
   CheckCircle2, AlertTriangle, TrendingUp, Users,
   Bed, DollarSign, Clock, Play, Loader2
@@ -19,8 +19,8 @@ export default function NightAuditPage() {
   const [auditRunning, setAuditRunning] = useState(false)
   const [auditComplete, setAuditComplete] = useState(false)
   const { initialLoading, startFetch, endFetch } = usePageData()
+  const { organizationId } = useAuth()
   const [auditData, setAuditData] = useState<any>(null)
-  const router = useRouter()
 
   useEffect(() => {
     fetchAuditData()
@@ -37,33 +37,26 @@ export default function NightAuditPage() {
       }
       if (!supabase) { setAuditData(emptyData); endFetch(); return }
 
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) { router.push('/auth/login'); return }
-
-      const { data: profile } = await supabase
-        .from('profiles').select('organization_id').eq('id', user.id).single()
-      if (!profile) { setAuditData(emptyData); return }
-
       const [{ data: bookings }, { data: payments }, { data: allRooms }, { data: arrivals }] = await Promise.all([
         supabase
           .from('bookings')
           .select('*, rooms(id, room_number)')
-          .eq('organization_id', profile.organization_id)
+          .eq('organization_id', organizationId)
           .eq('status', 'checked_in'),
         supabase
           .from('payments')
           .select('*')
-          .eq('organization_id', profile.organization_id)
+          .eq('organization_id', organizationId)
           .gte('payment_date', new Date().toISOString().split('T')[0]),
         supabase
           .from('rooms')
           .select('id')
-          .eq('organization_id', profile.organization_id)
+          .eq('organization_id', organizationId)
           .neq('status', 'maintenance'),
         supabase
           .from('bookings')
           .select('id, folio_id, guests:guest_id(name)')
-          .eq('organization_id', profile.organization_id)
+          .eq('organization_id', organizationId)
           .eq('status', 'reserved')
           .eq('check_in', new Date().toISOString().split('T')[0]),
       ])
