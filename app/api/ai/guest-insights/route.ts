@@ -1,4 +1,5 @@
 import { generateText, Output } from 'ai'
+import { openai } from '@ai-sdk/openai'
 import { z } from 'zod'
 
 const guestInsightSchema = z.object({
@@ -36,7 +37,7 @@ Provide insights about:
 5. Recommendations for improving guest retention and revenue`
 
     const result = await generateText({
-      model: 'openai/gpt-4o-mini',
+      model: openai('gpt-4o-mini'),
       prompt,
       output: Output.object({ schema: guestInsightSchema }),
       system:
