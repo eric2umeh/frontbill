@@ -11,6 +11,7 @@ import { ExtendStayModal } from '@/components/bookings/extend-stay-modal'
 import { AddChargeModal } from '@/components/bookings/add-charge-modal'
 import { formatNaira } from '@/lib/utils/currency'
 import { usePageData } from '@/hooks/use-page-data'
+import { useAuth } from '@/lib/auth-context'
 import { Plus, Loader2 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
@@ -45,6 +46,7 @@ export default function BookingsPage() {
   const [addChargeModalOpen, setAddChargeModalOpen] = useState(false)
   const [selectedBooking, setSelectedBooking] = useState<any>(null)
   const { initialLoading, startFetch, endFetch } = usePageData()
+  const { organizationId } = useAuth()
   const router = useRouter()
 
   useEffect(() => {
@@ -63,21 +65,10 @@ export default function BookingsPage() {
         return
       }
 
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) { endFetch(); router.push('/auth/login'); return }
-
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('organization_id')
-        .eq('id', user.id)
-        .single()
-
-      if (!profile?.organization_id) { endFetch(); return }
-
       const { data, error } = await supabase
         .from('bookings')
         .select('*, guests(name, phone), rooms(room_number, room_type), created_by, updated_by, updated_at')
-        .eq('organization_id', profile.organization_id)
+        .eq('organization_id', organizationId)
         .in('status', ['confirmed', 'checked_in'])
         .lte('check_in', new Date().toISOString().split('T')[0])
         .order('check_in', { ascending: false })

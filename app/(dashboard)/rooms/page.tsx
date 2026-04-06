@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { CardContent } from '@/components/ui/card'
 import { formatNaira } from '@/lib/utils/currency'
 import { usePageData } from '@/hooks/use-page-data'
+import { useAuth } from '@/lib/auth-context'
 import { Plus, Users, Loader2 } from 'lucide-react'
 import { AddRoomModal } from '@/components/rooms/add-room-modal'
 import { toast } from 'sonner'
@@ -33,6 +34,7 @@ export default function RoomsPage() {
   const [rooms, setRooms] = useState<Room[]>([])
   const [addRoomModalOpen, setAddRoomModalOpen] = useState(false)
   const { initialLoading, startFetch, endFetch } = usePageData()
+  const { organizationId } = useAuth()
   const router = useRouter()
 
   useEffect(() => {
@@ -50,27 +52,10 @@ export default function RoomsPage() {
         return
       }
 
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) {
-        router.push('/auth/login')
-        return
-      }
-
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('organization_id')
-        .eq('id', user.id)
-        .single()
-
-      if (!profile) {
-        toast.error('Organization not found')
-        return
-      }
-
       const { data, error } = await supabase
         .from('rooms')
         .select('*, created_by, updated_by, updated_at')
-        .eq('organization_id', profile.organization_id)
+        .eq('organization_id', organizationId)
         .order('room_number', { ascending: true })
 
       if (error) throw error
