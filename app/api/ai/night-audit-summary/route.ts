@@ -1,4 +1,5 @@
 import { generateText, Output } from 'ai'
+import { openai } from '@ai-sdk/openai'
 import { z } from 'zod'
 
 const nightAuditSummarySchema = z.object({
@@ -37,7 +38,7 @@ Please provide:
 7. Staff operational notes for handover`
 
     const result = await generateText({
-      model: 'openai/gpt-4o-mini',
+      model: openai('gpt-4o-mini'),
       prompt,
       output: Output.object({ schema: nightAuditSummarySchema }),
       system:
