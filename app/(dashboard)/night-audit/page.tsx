@@ -44,32 +44,46 @@ export default function NightAuditPage() {
         .from('profiles').select('organization_id').eq('id', user.id).single()
       if (!profile) { setAuditData(emptyData); return }
 
-      // Fetch audit data
-      const { data: bookings } = await supabase
-        .from('bookings')
-        .select('*, rooms(id)')
-        .eq('organization_id', profile.organization_id)
-        .eq('status', 'checked_in')
+      const [{ data: bookings }, { data: payments }, { data: allRooms }, { data: arrivals }] = await Promise.all([
+        supabase
+          .from('bookings')
+          .select('*, rooms(id, room_number)')
+          .eq('organization_id', profile.organization_id)
+          .eq('status', 'checked_in'),
+        supabase
+          .from('payments')
+          .select('*')
+          .eq('organization_id', profile.organization_id)
+          .gte('payment_date', new Date().toISOString().split('T')[0]),
+        supabase
+          .from('rooms')
+          .select('id')
+          .eq('organization_id', profile.organization_id)
+          .neq('status', 'maintenance'),
+        supabase
+          .from('bookings')
+          .select('id, folio_id, guests:guest_id(name)')
+          .eq('organization_id', profile.organization_id)
+          .eq('status', 'reserved')
+          .eq('check_in', new Date().toISOString().split('T')[0]),
+      ])
 
-      const { data: payments } = await supabase
-        .from('payments')
-        .select('*')
-        .eq('organization_id', profile.organization_id)
-        .gte('payment_date', new Date().toISOString().split('T')[0])
+      const totalRooms = allRooms?.length || 0
+      const occupiedRooms = bookings?.length || 0
 
       setAuditData({
-        occupancyRate: bookings?.length || 0,
-        totalRooms: 50,
-        occupiedRooms: bookings?.length || 0,
+        occupancyRate: totalRooms > 0 ? Math.round((occupiedRooms / totalRooms) * 100) : 0,
+        totalRooms,
+        occupiedRooms,
         totalRevenue: payments?.reduce((sum, p) => sum + p.amount, 0) || 0,
         revenues: {
-          cash: payments?.filter(p => p.method === 'cash').reduce((sum, p) => sum + p.amount, 0) || 0,
-          pos: payments?.filter(p => p.method === 'pos').reduce((sum, p) => sum + p.amount, 0) || 0,
-          transfer: payments?.filter(p => p.method === 'transfer').reduce((sum, p) => sum + p.amount, 0) || 0,
-          cityLedger: 0
+          cash: payments?.filter(p => p.payment_method === 'cash').reduce((sum, p) => sum + p.amount, 0) || 0,
+          pos: payments?.filter(p => p.payment_method === 'pos').reduce((sum, p) => sum + p.amount, 0) || 0,
+          transfer: payments?.filter(p => ['transfer', 'bank_transfer'].includes(p.payment_method)).reduce((sum, p) => sum + p.amount, 0) || 0,
+          cityLedger: payments?.filter(p => p.payment_method === 'city_ledger').reduce((sum, p) => sum + p.amount, 0) || 0,
         },
-        pendingCheckouts: bookings?.slice(0, 3) || [],
-        expectedArrivals: [],
+        pendingCheckouts: bookings?.filter((b: any) => b.check_out === new Date().toISOString().split('T')[0]) || [],
+        expectedArrivals: arrivals || [],
         anomalies: []
       })
     } catch (error: any) {
