@@ -18,6 +18,7 @@ import { EnhancedDataTable } from '@/components/shared/enhanced-data-table'
 import { Badge } from '@/components/ui/badge'
 import { format } from 'date-fns'
 import { usePageData } from '@/hooks/use-page-data'
+import { useAuth } from '@/lib/auth-context'
 
 interface Organization {
   id: string
@@ -36,6 +37,7 @@ export default function OrganizationsPage() {
   const router = useRouter()
   const [organizations, setOrganizations] = useState<Organization[]>([])
   const { initialLoading, startFetch, endFetch } = usePageData()
+  const { userId } = useAuth()
   const [addOrgModalOpen, setAddOrgModalOpen] = useState(false)
 
   // Form states
@@ -115,7 +117,6 @@ export default function OrganizationsPage() {
       setSubmitting(true)
       const supabase = createClient()
       if (!supabase) { toast.error('Database not configured'); setSubmitting(false); return }
-      const { data: { user } } = await supabase.auth.getUser()
 
       const { error } = await supabase
         .from('organizations')
@@ -127,7 +128,7 @@ export default function OrganizationsPage() {
           contact_person: formData.contact_person || null,
           address: formData.address || null,
           current_balance: 0,
-          created_by: user?.id,
+          created_by: userId,
         }])
 
       if (error) throw error

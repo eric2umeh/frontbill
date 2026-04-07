@@ -2,12 +2,12 @@
 
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { useRouter } from 'next/navigation'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { formatNaira } from '@/lib/utils/currency'
 import { AlertTriangle, CheckCircle, Clock, Plus, Loader2 } from 'lucide-react'
+import { useAuth } from '@/lib/auth-context'
 import { toast } from 'sonner'
 
 interface Reconciliation {
@@ -25,7 +25,7 @@ interface Reconciliation {
 export default function ReconciliationPage() {
   const [reconciliations, setReconciliations] = useState<Reconciliation[]>([])
   const [loading, setLoading] = useState(true)
-  const router = useRouter()
+  const { organizationId } = useAuth()
 
   useEffect(() => {
     fetchReconciliations()
@@ -42,27 +42,10 @@ export default function ReconciliationPage() {
         return
       }
 
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) {
-        router.push('/auth/login')
-        return
-      }
-
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('organization_id')
-        .eq('id', user.id)
-        .single()
-
-      if (!profile) {
-        setReconciliations([])
-        return
-      }
-
       const { data, error } = await supabase
         .from('reconciliations')
         .select('*')
-        .eq('organization_id', profile.organization_id)
+        .eq('organization_id', organizationId)
         .order('shift_date', { ascending: false })
         .limit(20)
 
