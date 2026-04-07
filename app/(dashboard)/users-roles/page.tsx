@@ -1,7 +1,6 @@
 'use client'
 
 import { useEffect, useState, useMemo } from 'react'
-import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import { ROLE_DEFINITIONS, getPermissionGroups, type RoleKey, type Permission } from '@/lib/permissions'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -15,6 +14,7 @@ import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
 import { toast } from 'sonner'
 import { usePageData } from '@/hooks/use-page-data'
+import { useAuth } from '@/lib/auth-context'
 import {
   Loader2, Search, ShieldCheck, Check, X, Users, Edit2, Plus,
   Trash2, Eye, EyeOff, KeyRound,
@@ -42,8 +42,7 @@ const EMPTY_ADD_FORM: AddUserForm = { full_name: '', email: '', password: '', ro
 export default function UsersRolesPage() {
   const [users, setUsers] = useState<UserProfile[]>([])
   const { initialLoading, startFetch, endFetch } = usePageData()
-  const [currentUserId, setCurrentUserId] = useState<string>('')
-  const [currentUserRole, setCurrentUserRole] = useState<string>('')
+  const { userId: currentUserId, role: currentUserRole } = useAuth()
   const [search, setSearch] = useState('')
 
   // Edit role/name/password dialog
@@ -72,35 +71,21 @@ export default function UsersRolesPage() {
 
   const fetchUsers = async () => {
     startFetch()
-    const supabase = createClient()
-    if (!supabase) { endFetch(); return }
+    try {
+      if (!['admin', 'manager'].includes(currentUserRole || '')) {
+        router.push('/dashboard')
+        return
+      }
 
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) { router.push('/auth/login'); return }
-
-    setCurrentUserId(user.id)
-
-    // Fetch own profile first to get role (single row — always allowed by RLS)
-    const { data: myProfile } = await supabase
-      .from('profiles').select('role, organization_id').eq('id', user.id).single()
-    if (!myProfile) { endFetch(); return }
-
-    setCurrentUserRole(myProfile.role || 'staff')
-
-    if (!['admin', 'manager'].includes(myProfile.role || '')) {
-      router.push('/dashboard')
-      return
+      const res = await fetch(`/api/admin/users/list?caller_id=${currentUserId}`, {
+        credentials: 'include',
+      })
+      const json = await res.json()
+      if (!res.ok) { toast.error(json.error || 'Failed to load users'); return }
+      setUsers(json.users || [])
+    } finally {
+      endFetch()
     }
-
-    // Use the admin API route to list all org users — bypasses the restrictive
-    // RLS policy on profiles which only allows each user to see their own row
-    const res = await fetch(`/api/admin/users/list?caller_id=${user.id}`, {
-      credentials: 'include',
-    })
-    const json = await res.json()
-    if (!res.ok) { toast.error(json.error || 'Failed to load users'); endFetch(); return }
-    setUsers(json.users || [])
-    endFetch()
   }
 
   // ---- Add user ----

@@ -2,7 +2,6 @@
 
 import { useEffect, useState, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { useRouter } from 'next/navigation'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -11,6 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Calendar } from '@/components/ui/calendar'
 import { formatNaira } from '@/lib/utils/currency'
+import { useAuth } from '@/lib/auth-context'
 import {
   BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
@@ -43,7 +43,7 @@ export default function AnalyticsPage() {
   const [customDate, setCustomDate] = useState<Date>(new Date())
   const [calOpen, setCalOpen] = useState(false)
   const [paymentMethodFilter, setPaymentMethodFilter] = useState<string>('all')
-  const router = useRouter()
+  const { organizationId } = useAuth()
 
   const dateRange = useMemo(() => {
     const now = new Date()
@@ -64,34 +64,25 @@ export default function AnalyticsPage() {
     const supabase = createClient()
     if (!supabase) { setLoading(false); return }
 
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) { router.push('/auth/login'); return }
-
-    const { data: profile } = await supabase
-      .from('profiles').select('organization_id').eq('id', user.id).single()
-    if (!profile) { setLoading(false); return }
-
-    const orgId = profile.organization_id
-
     const [paymentsRes, bookingsRes, ledgerRes] = await Promise.all([
       supabase
         .from('payments')
         .select(`id, amount, payment_method, payment_date, booking_id, guest_id,
           guests:guest_id(name), bookings:booking_id(folio_id, check_in, check_out, payment_status)`)
-        .eq('organization_id', orgId)
+        .eq('organization_id', organizationId)
         .gte('payment_date', dateRange.from.toISOString())
         .lte('payment_date', dateRange.to.toISOString())
         .order('payment_date', { ascending: true }),
       supabase
         .from('bookings')
         .select('id, folio_id, payment_status, rate_per_night, check_in, check_out, status,guests:guest_id(name)')
-        .eq('organization_id', orgId)
+        .eq('organization_id', organizationId)
         .order('check_in', { ascending: false })
         .limit(200),
       supabase
         .from('city_ledger_accounts')
         .select('id, account_name, account_type, balance, contact_phone')
-        .eq('organization_id', orgId)
+        .eq('organization_id', organizationId)
         .order('balance', { ascending: false }),
     ])
 

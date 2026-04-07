@@ -6,12 +6,14 @@ import { Sidebar } from '@/components/layout/sidebar'
 import { Header } from '@/components/layout/header'
 import { LoadingScreen } from '@/components/shared/loading-screen'
 import { createClient } from '@/lib/supabase/client'
+import { AuthProvider } from '@/lib/auth-context'
 
 interface DashboardUser {
   id: string
   email: string
   name: string
   role: string
+  organizationId?: string
 }
 
 export default function DashboardLayout({
@@ -57,10 +59,10 @@ export default function DashboardLayout({
           return
         }
 
-        // Get user profile from database
+        // Get user profile from database (include organization_id so pages don't re-fetch)
         const { data: profile, error: profileError } = await supabase
           .from('profiles')
-          .select('full_name, role')
+          .select('full_name, role, organization_id')
           .eq('id', authUser.id)
           .single()
 
@@ -71,6 +73,7 @@ export default function DashboardLayout({
               email: authUser.email || '',
               name: profile.full_name || authUser.email?.split('@')[0] || 'User',
               role: profile.role || 'admin',
+              organizationId: profile.organization_id || '',
             })
           } else {
             setUser({
@@ -108,14 +111,22 @@ export default function DashboardLayout({
   }
 
   return (
-    <div className="flex h-screen overflow-hidden bg-background">
-      <Sidebar mobileOpen={mobileMenuOpen} onMobileClose={() => setMobileMenuOpen(false)} />
-      <div className="flex flex-1 flex-col overflow-hidden">
-        <Header user={user} onMenuClick={() => setMobileMenuOpen(true)} />
-        <main className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8">
-          {children}
-        </main>
+    <AuthProvider value={{
+      userId: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      organizationId: user.organizationId || '',
+    }}>
+      <div className="flex h-screen overflow-hidden bg-background">
+        <Sidebar mobileOpen={mobileMenuOpen} onMobileClose={() => setMobileMenuOpen(false)} />
+        <div className="flex flex-1 flex-col overflow-hidden">
+          <Header user={user} onMenuClick={() => setMobileMenuOpen(true)} />
+          <main className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8">
+            {children}
+          </main>
+        </div>
       </div>
-    </div>
+    </AuthProvider>
   )
 }
