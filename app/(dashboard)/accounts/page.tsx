@@ -7,6 +7,7 @@ import { EnhancedDataTable } from '@/components/shared/enhanced-data-table'
 import { calculateGuestBalancesBatch } from '@/lib/balance'
 import { formatNaira } from '@/lib/utils/currency'
 import { usePageData } from '@/hooks/use-page-data'
+import { useAuth } from '@/lib/auth-context'
 import { Loader2, Building2, User } from 'lucide-react'
 import { format } from 'date-fns'
 import { Badge } from '@/components/ui/badge'
@@ -25,6 +26,7 @@ interface UnifiedAccount {
 export default function AccountsPage() {
   const [accounts, setAccounts] = useState<UnifiedAccount[]>([])
   const { initialLoading, startFetch, endFetch } = usePageData()
+  const { organizationId } = useAuth()
   const router = useRouter()
 
   useEffect(() => {
@@ -36,19 +38,12 @@ export default function AccountsPage() {
       startFetch()
       const supabase = createClient()
       if (!supabase) { setAccounts([]); endFetch(); return }
-      
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) { router.push('/auth/login'); return }
-
-      const { data: profile } = await supabase
-        .from('profiles').select('organization_id').eq('id', user.id).single()
-      if (!profile) return
 
       // Fetch guests
       const { data: guestData, error: guestError } = await supabase
         .from('guests')
         .select('id, name, phone, email, created_at')
-        .eq('organization_id', profile.organization_id)
+        .eq('organization_id', organizationId)
         .order('created_at', { ascending: false })
 
       if (guestError) throw guestError
@@ -57,7 +52,7 @@ export default function AccountsPage() {
       const { data: ledgerData, error: ledgerError } = await supabase
         .from('city_ledger_accounts')
         .select('id, account_name, account_type, contact_phone, contact_email, balance, created_at')
-        .eq('organization_id', profile.organization_id)
+        .eq('organization_id', organizationId)
         .order('created_at', { ascending: false })
 
       if (ledgerError) throw ledgerError
