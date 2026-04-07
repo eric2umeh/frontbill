@@ -61,6 +61,7 @@ export default function ReservationsPage() {
         return
       }
 
+      // Single query — no FK join on profiles (no FK exists), fetch user names separately
       const { data, error } = await supabase
         .from('bookings')
         .select(`
