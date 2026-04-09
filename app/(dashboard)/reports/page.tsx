@@ -291,7 +291,7 @@ function OccupancyReport({ organizationId }: { organizationId: string }) {
           .from('bookings')
           .select('room_id')
           .eq('organization_id', organizationId)
-          .in('status', ['active', 'checked_in'])
+          .in('status', ['active', 'checked_in', 'confirmed'])
           .lte('check_in', dateStr)
           .gte('check_out', dateStr),
       ])
