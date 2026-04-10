@@ -312,6 +312,16 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
           .select().single()
         if (ge) throw ge
         finalGuestId = newGuest.id
+
+        // Auto-create city_ledger_account for this guest to prevent duplicates when city ledger is used later
+        await supabase.from('city_ledger_accounts').insert([{
+          organization_id: orgId,
+          account_name: fullName,
+          account_type: 'individual',
+          contact_phone: phone || null,
+          contact_email: email || null,
+          balance: 0,
+        }])
       }
 
       const isCityLedger = paymentMethod === 'city_ledger'
