@@ -26,6 +26,7 @@ import {
   ChevronLeft,
   ChevronRight,
   X,
+  Hotel,
 } from 'lucide-react'
 
 const routes: Array<{ label: string; icon: any; href: string; permission?: Permission }> = [
