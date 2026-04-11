@@ -4,96 +4,109 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { cn } from '@/lib/utils'
+import { ScrollArea } from '@/components/ui/scroll-area'
+import { Button } from '@/components/ui/button'
+import { useAuth } from '@/lib/auth-context'
+import { hasPermission, type Permission } from '@/lib/permissions'
+import { Sheet, SheetContent, SheetTitle, SheetDescription } from '@/components/ui/sheet'
 import {
   LayoutDashboard,
+  Calendar,
+  CalendarClock,
   Users,
   Bed,
-  Calendar,
-  CreditCard,
+  Receipt,
   Building2,
   TrendingUp,
-  Settings,
-  Hotel,
-  FileBarChart,
   Briefcase,
-  CalendarClock,
-  Receipt,
+  Moon,
+  FileBarChart,
+  ShieldCheck,
+  Settings,
   ChevronLeft,
   ChevronRight,
   X,
-  Moon,
-  ShieldCheck,
+  Hotel,
 } from 'lucide-react'
-import { ScrollArea } from '@/components/ui/scroll-area'
-import { Separator } from '@/components/ui/separator'
-import { Button } from '@/components/ui/button'
-import { Sheet, SheetContent, SheetTitle, SheetDescription } from '@/components/ui/sheet'
 
-const routes = [
+const routes: Array<{ label: string; icon: any; href: string; permission?: Permission }> = [
   {
     label: 'Dashboard',
     icon: LayoutDashboard,
     href: '/dashboard',
+    permission: 'dashboard:view',
   },
   {
     label: 'Bookings',
     icon: Calendar,
     href: '/bookings',
+    permission: 'bookings:view',
   },
   {
     label: 'Reservations',
     icon: CalendarClock,
     href: '/reservations',
+    permission: 'reservations:view',
   },
   {
     label: 'Accounts',
     icon: Users,
     href: '/accounts',
+    permission: 'guests:view', // Guests & city ledger accounts
   },
   {
     label: 'Rooms',
     icon: Bed,
     href: '/rooms',
+    permission: 'rooms:view',
   },
   {
     label: 'Transactions',
     icon: Receipt,
     href: '/transactions',
+    permission: 'transactions:view',
   },
   {
     label: 'Organizations',
     icon: Building2,
     href: '/organizations',
+    permission: 'organizations:view',
   },
   {
     label: 'Analytics',
     icon: TrendingUp,
     href: '/analytics',
+    permission: 'analytics:view',
   },
   {
     label: 'Reconciliation',
     icon: Briefcase,
     href: '/reconciliation',
+    permission: 'reconciliation:view',
   },
   {
     label: 'Night Audit',
     icon: Moon,
     href: '/night-audit',
+    permission: 'night_audit:view',
   },
   {
     label: 'Reports',
     icon: FileBarChart,
     href: '/reports',
+    permission: 'analytics:view',
   },
   {
     label: 'Users & Roles',
     icon: ShieldCheck,
     href: '/users-roles',
+    permission: 'users:view',
   },
   {
     label: 'Settings',
     icon: Settings,
     href: '/settings',
+    permission: 'settings:view',
   },
 ]
 
@@ -105,6 +118,16 @@ interface SidebarProps {
 export function Sidebar({ mobileOpen, onMobileClose }: SidebarProps = {}) {
   const pathname = usePathname()
   const [collapsed, setCollapsed] = useState(false)
+  const authContext = useAuth()
+  const user = authContext?.user
+
+  // Filter routes by permission - only hide if explicitly forbidden
+  // If user is null, show all routes (pages will handle actual permission checks)
+  const visibleRoutes = routes.filter(route => {
+    if (!route.permission) return true
+    if (!user) return true // Show all routes while loading/no user
+    return hasPermission(user.role, route.permission)
+  })
 
   const SidebarContent = ({ isMobile = false }: { isMobile?: boolean }) => (
     <div className={cn(
@@ -136,7 +159,7 @@ export function Sidebar({ mobileOpen, onMobileClose }: SidebarProps = {}) {
 
       <ScrollArea className="flex-1 px-3 py-4">
         <div className="space-y-1">
-          {routes.map((route) => {
+          {visibleRoutes.map((route) => {
             const Icon = route.icon
             const isActive = pathname === route.href || pathname.startsWith(`${route.href}/`)
             
