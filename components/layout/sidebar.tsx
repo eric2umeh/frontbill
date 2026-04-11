@@ -9,6 +9,24 @@ import { Button } from '@/components/ui/button'
 import { useAuth } from '@/lib/auth-context'
 import { hasPermission, type Permission } from '@/lib/permissions'
 import { Sheet, SheetContent, SheetTitle, SheetDescription } from '@/components/ui/sheet'
+import {
+  LayoutDashboard,
+  Calendar,
+  CalendarClock,
+  Users,
+  Bed,
+  Receipt,
+  Building2,
+  TrendingUp,
+  Briefcase,
+  Moon,
+  FileBarChart,
+  ShieldCheck,
+  Settings,
+  ChevronLeft,
+  ChevronRight,
+  X,
+} from 'lucide-react'
 
 const routes: Array<{ label: string; icon: any; href: string; permission?: Permission }> = [
   {
