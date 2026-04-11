@@ -291,7 +291,7 @@ function OccupancyReport({ organizationId }: { organizationId: string }) {
           .from('bookings')
           .select('room_id')
           .eq('organization_id', organizationId)
-          .in('status', ['active', 'checked_in'])
+          .in('status', ['active', 'checked_in', 'confirmed'])
           .lte('check_in', dateStr)
           .gte('check_out', dateStr),
       ])
@@ -401,6 +401,8 @@ function GuestReport({ organizationId }: { organizationId: string }) {
   const [loading, setLoading] = useState(false)
   const [guests, setGuests] = useState<GuestRow[]>([])
   const [fetched, setFetched] = useState(false)
+  const [startDate, setStartDate] = useState<Date | undefined>(undefined)
+  const [endDate, setEndDate] = useState<Date | undefined>(undefined)
 
   const fetchData = useCallback(async () => {
     try {
@@ -462,12 +464,31 @@ function GuestReport({ organizationId }: { organizationId: string }) {
     fetchData()
   }, [fetchData])
 
-  const totalGuests = guests.length
-  const withBalance = guests.filter((g) => g.balance > 0).length
+  // Apply date filter
+  const filteredGuests = guests.filter((g) => {
+    if (!startDate && !endDate) return true
+    if (!g.last_visit) return false
+    const visitDate = new Date(g.last_visit)
+    if (startDate && visitDate < startOfDay(startDate)) return false
+    if (endDate && visitDate > endOfDay(endDate)) return false
+    return true
+  })
+
+  const totalGuests = filteredGuests.length
+  const withBalance = filteredGuests.filter((g) => g.balance > 0).length
 
   return (
     <div className="space-y-4 print-section">
-      <div className="flex justify-end print:hidden">
+      <div className="flex gap-2 items-center justify-between flex-wrap print:hidden mb-4">
+        <div className="flex gap-2 items-center">
+          <DatePicker date={startDate} onSelect={setStartDate} label="From" />
+          <DatePicker date={endDate} onSelect={setEndDate} label="To" />
+          {(startDate || endDate) && (
+            <Button variant="ghost" size="sm" onClick={() => { setStartDate(undefined); setEndDate(undefined) }}>
+              Clear
+            </Button>
+          )}
+        </div>
         <PrintButton />
       </div>
 
@@ -484,15 +505,15 @@ function GuestReport({ organizationId }: { organizationId: string }) {
             <StatCard label="Outstanding Balance" value={withBalance} />
             <StatCard
               label="Total Outstanding"
-              value={formatNaira(guests.reduce((s, g) => s + g.balance, 0))}
+              value={formatNaira(filteredGuests.reduce((s, g) => s + g.balance, 0))}
             />
           </div>
 
-          {fetched && guests.length === 0 && (
-            <p className="text-muted-foreground text-center py-8">No guests found.</p>
+          {fetched && filteredGuests.length === 0 && (
+            <p className="text-muted-foreground text-center py-8">No guests found{(startDate || endDate) ? ' for selected date range' : ''}.</p>
           )}
 
-          {guests.length > 0 && (
+          {filteredGuests.length > 0 && (
             <div className="border rounded-lg overflow-auto">
               <div className="min-w-[640px]">
                 <div className="grid grid-cols-5 gap-2 px-4 py-2 bg-muted text-sm font-medium">
@@ -502,7 +523,7 @@ function GuestReport({ organizationId }: { organizationId: string }) {
                   <div className="text-right">Balance</div>
                   <div>Last Visit</div>
                 </div>
-                {guests.map((g) => (
+                {filteredGuests.map((g) => (
                   <div
                     key={g.id}
                     className="grid grid-cols-5 gap-2 px-4 py-2 border-t text-sm"
@@ -544,6 +565,8 @@ function CityLedgerReport({ organizationId }: { organizationId: string }) {
   const [loading, setLoading] = useState(false)
   const [accounts, setAccounts] = useState<LedgerRow[]>([])
   const [fetched, setFetched] = useState(false)
+  const [startDate, setStartDate] = useState<Date | undefined>(undefined)
+  const [endDate, setEndDate] = useState<Date | undefined>(undefined)
 
   const fetchData = useCallback(async () => {
     try {
@@ -553,7 +576,7 @@ function CityLedgerReport({ organizationId }: { organizationId: string }) {
 
       const { data, error } = await supabase
         .from('city_ledger_accounts')
-        .select('id, account_name, account_type, balance, contact_email, contact_phone')
+        .select('id, account_name, account_type, balance, contact_email, contact_phone, created_at')
         .eq('organization_id', organizationId)
         .order('account_name')
 
@@ -583,11 +606,30 @@ function CityLedgerReport({ organizationId }: { organizationId: string }) {
     fetchData()
   }, [fetchData])
 
-  const totalOutstanding = accounts.reduce((s, a) => s + a.balance, 0)
+  // Apply date filter based on account creation date
+  const filteredAccounts = accounts.filter((a: any) => {
+    if (!startDate && !endDate) return true
+    if (!a.created_at) return false
+    const createdDate = new Date(a.created_at)
+    if (startDate && createdDate < startOfDay(startDate)) return false
+    if (endDate && createdDate > endOfDay(endDate)) return false
+    return true
+  })
+
+  const totalOutstanding = filteredAccounts.reduce((s, a) => s + a.balance, 0)
 
   return (
     <div className="space-y-4 print-section">
-      <div className="flex justify-end print:hidden">
+      <div className="flex gap-2 items-center justify-between flex-wrap print:hidden mb-4">
+        <div className="flex gap-2 items-center">
+          <DatePicker date={startDate} onSelect={setStartDate} label="From" />
+          <DatePicker date={endDate} onSelect={setEndDate} label="To" />
+          {(startDate || endDate) && (
+            <Button variant="ghost" size="sm" onClick={() => { setStartDate(undefined); setEndDate(undefined) }}>
+              Clear
+            </Button>
+          )}
+        </div>
         <PrintButton />
       </div>
 
@@ -600,17 +642,17 @@ function CityLedgerReport({ organizationId }: { organizationId: string }) {
       ) : (
         <>
           <div className="grid gap-3 sm:grid-cols-2">
-            <StatCard label="Total Accounts" value={accounts.length} />
+            <StatCard label="Total Accounts" value={filteredAccounts.length} />
             <StatCard label="Total Outstanding" value={formatNaira(totalOutstanding)} />
           </div>
 
-          {fetched && accounts.length === 0 && (
+          {fetched && filteredAccounts.length === 0 && (
             <p className="text-muted-foreground text-center py-8">
-              No city ledger accounts found.
+              No city ledger accounts found{(startDate || endDate) ? ' for selected date range' : ''}.
             </p>
           )}
 
-          {accounts.length > 0 && (
+          {filteredAccounts.length > 0 && (
             <div className="border rounded-lg overflow-auto">
               <div className="min-w-[640px]">
                 <div className="grid grid-cols-4 gap-2 px-4 py-2 bg-muted text-sm font-medium">
@@ -619,7 +661,7 @@ function CityLedgerReport({ organizationId }: { organizationId: string }) {
                   <div className="text-right">Balance</div>
                   <div>Contact</div>
                 </div>
-                {accounts.map((a) => (
+                {filteredAccounts.map((a) => (
                   <div
                     key={a.id}
                     className="grid grid-cols-4 gap-2 px-4 py-2 border-t text-sm"
