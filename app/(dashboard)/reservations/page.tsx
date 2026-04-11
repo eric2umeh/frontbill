@@ -170,7 +170,7 @@ export default function ReservationsPage() {
           <h1 className="text-3xl font-bold tracking-tight">Reservations</h1>
           <p className="text-muted-foreground">Manage future bookings and reservations</p>
         </div>
-        {hasPermission(user?.role, 'reservations:create') && (
+        {console.log('[v0] Reservations User role:', user?.role, 'Has create permission:', hasPermission(user?.role, 'reservations:create')), hasPermission(user?.role, 'reservations:create') && (
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => setBulkModalOpen(true)}>
               <Users className="mr-2 h-4 w-4" />
