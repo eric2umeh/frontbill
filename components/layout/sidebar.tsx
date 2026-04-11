@@ -117,12 +117,16 @@ interface SidebarProps {
 export function Sidebar({ mobileOpen, onMobileClose }: SidebarProps = {}) {
   const pathname = usePathname()
   const [collapsed, setCollapsed] = useState(false)
-  const { user } = useAuth()
+  const authContext = useAuth()
+  const user = authContext?.user
 
-  // Filter routes by permission
-  const visibleRoutes = routes.filter(route =>
-    !route.permission || hasPermission(user?.role, route.permission)
-  )
+  // Filter routes by permission - only hide if explicitly forbidden
+  // If user is null, show all routes (pages will handle actual permission checks)
+  const visibleRoutes = routes.filter(route => {
+    if (!route.permission) return true
+    if (!user) return true // Show all routes while loading/no user
+    return hasPermission(user.role, route.permission)
+  })
 
   const SidebarContent = ({ isMobile = false }: { isMobile?: boolean }) => (
     <div className={cn(
