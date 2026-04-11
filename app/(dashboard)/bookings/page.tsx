@@ -12,7 +12,6 @@ import { AddChargeModal } from '@/components/bookings/add-charge-modal'
 import { formatNaira } from '@/lib/utils/currency'
 import { usePageData } from '@/hooks/use-page-data'
 import { useAuth } from '@/lib/auth-context'
-import { hasPermission } from '@/lib/permissions'
 import { Plus, Loader2 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
@@ -212,12 +211,10 @@ export default function BookingsPage() {
           <h1 className="text-3xl font-bold tracking-tight">Bookings</h1>
           <p className="text-muted-foreground">Manage active bookings and check-ins</p>
         </div>
-        {hasPermission(user?.role, 'bookings:create') && (
-          <Button onClick={() => setModalOpen(true)}>
-            <Plus className="mr-2 h-4 w-4" />
-            New Booking
-          </Button>
-        )}
+        <Button onClick={() => setModalOpen(true)}>
+          <Plus className="mr-2 h-4 w-4" />
+          New Booking
+        </Button>
       </div>
 
       <EnhancedDataTable
