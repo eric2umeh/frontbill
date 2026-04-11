@@ -11,7 +11,6 @@ import { CardContent } from '@/components/ui/card'
 import { formatNaira } from '@/lib/utils/currency'
 import { usePageData } from '@/hooks/use-page-data'
 import { useAuth } from '@/lib/auth-context'
-import { hasPermission } from '@/lib/permissions'
 import { Plus, Users, Loader2 } from 'lucide-react'
 import { BulkBookingModal } from '@/components/reservations/bulk-booking-modal'
 import { NewReservationModal } from '@/components/reservations/new-reservation-modal'
@@ -170,18 +169,16 @@ export default function ReservationsPage() {
           <h1 className="text-3xl font-bold tracking-tight">Reservations</h1>
           <p className="text-muted-foreground">Manage future bookings and reservations</p>
         </div>
-        {console.log('[v0] Reservations User role:', user?.role, 'Has create permission:', hasPermission(user?.role, 'reservations:create')), hasPermission(user?.role, 'reservations:create') && (
-          <div className="flex gap-2">
-            <Button variant="outline" onClick={() => setBulkModalOpen(true)}>
-              <Users className="mr-2 h-4 w-4" />
-              Bulk Booking
-            </Button>
-            <Button onClick={() => setNewReservationOpen(true)}>
-              <Plus className="mr-2 h-4 w-4" />
-              New Reservation
-            </Button>
-          </div>
-        )}
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => setBulkModalOpen(true)}>
+            <Users className="mr-2 h-4 w-4" />
+            Bulk Booking
+          </Button>
+          <Button onClick={() => setNewReservationOpen(true)}>
+            <Plus className="mr-2 h-4 w-4" />
+            New Reservation
+          </Button>
+        </div>
       </div>
 
       <EnhancedDataTable
