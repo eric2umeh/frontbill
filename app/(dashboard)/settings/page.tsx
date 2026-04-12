@@ -41,7 +41,7 @@ export default function SettingsPage() {
           .from('organizations')
           .select('name, email, address, phone')
           .eq('id', organizationId)
-          .single()
+          .maybeSingle()
 
         if (error) throw error
         if (data) {
