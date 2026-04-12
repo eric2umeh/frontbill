@@ -29,28 +29,28 @@ import { cn } from '@/lib/utils'
 function DatePicker({
   date,
   onSelect,
+  label,
 }: {
-  date: Date
-  onSelect: (d: Date) => void
+  date?: Date
+  onSelect: (d: Date | undefined) => void
+  label?: string
 }) {
   const [open, setOpen] = useState(false)
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <Button variant="outline" className="w-[220px] justify-start text-left font-normal">
+        <Button variant="outline" className={cn('w-[180px] justify-start text-left font-normal', !date && 'text-muted-foreground')}>
           <CalendarIcon className="mr-2 h-4 w-4" />
-          {format(date, 'PPP')}
+          {date ? format(date, 'dd MMM yyyy') : (label || 'Pick date')}
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-auto p-0" align="start">
         <Calendar
           mode="single"
           selected={date}
-          onSelect={(d) => {
-            if (d) {
-              onSelect(d)
-              setOpen(false)
-            }
+          onSelect={(d: Date | undefined) => {
+            onSelect(d)
+            setOpen(false)
           }}
           initialFocus
         />
