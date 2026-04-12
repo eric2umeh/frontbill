@@ -11,6 +11,7 @@ import { CardContent } from '@/components/ui/card'
 import { formatNaira } from '@/lib/utils/currency'
 import { usePageData } from '@/hooks/use-page-data'
 import { useAuth } from '@/lib/auth-context'
+import { hasPermission } from '@/lib/permissions'
 import { Plus, Users, Loader2 } from 'lucide-react'
 import { BulkBookingModal } from '@/components/reservations/bulk-booking-modal'
 import { NewReservationModal } from '@/components/reservations/new-reservation-modal'
@@ -43,7 +44,7 @@ export default function ReservationsPage() {
   const [bulkModalOpen, setBulkModalOpen] = useState(false)
   const [newReservationOpen, setNewReservationOpen] = useState(false)
   const { initialLoading, startFetch, endFetch } = usePageData()
-  const { organizationId, user } = useAuth()
+  const { organizationId, role } = useAuth()
   const router = useRouter()
 
   useEffect(() => {
@@ -169,16 +170,18 @@ export default function ReservationsPage() {
           <h1 className="text-3xl font-bold tracking-tight">Reservations</h1>
           <p className="text-muted-foreground">Manage future bookings and reservations</p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={() => setBulkModalOpen(true)}>
-            <Users className="mr-2 h-4 w-4" />
-            Bulk Booking
-          </Button>
-          <Button onClick={() => setNewReservationOpen(true)}>
-            <Plus className="mr-2 h-4 w-4" />
-            New Reservation
-          </Button>
-        </div>
+        {hasPermission(role, 'reservations:create') && (
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => setBulkModalOpen(true)}>
+              <Users className="mr-2 h-4 w-4" />
+              Bulk Booking
+            </Button>
+            <Button onClick={() => setNewReservationOpen(true)}>
+              <Plus className="mr-2 h-4 w-4" />
+              New Reservation
+            </Button>
+          </div>
+        )}
       </div>
 
       <EnhancedDataTable
