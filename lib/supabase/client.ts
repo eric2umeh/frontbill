@@ -2,9 +2,12 @@ import { createBrowserClient } from '@supabase/ssr'
 import { supabaseConfig, isConfigured } from '@/lib/config'
 
 export function createClient() {
-  // Try environment variables first, fall back to config file
+  // Read directly from process.env every time (not from cached config)
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL || supabaseConfig.url
   const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || supabaseConfig.anonKey
+
+  console.log('[v0] createClient url:', url ? url.substring(0, 30) + '...' : 'EMPTY')
+  console.log('[v0] createClient key:', key ? 'SET (' + key.length + ' chars)' : 'EMPTY')
 
   if (!url || !key) {
     // Create a dummy client that won't crash but will handle errors gracefully
