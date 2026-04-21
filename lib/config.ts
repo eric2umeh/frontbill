@@ -1,5 +1,4 @@
-// Configuration file - Get credentials from environment variables only
-// NEVER hardcode secrets here - they will be exposed in git history
+// Configuration file - credentials loaded from environment variables at runtime
 
 export const supabaseConfig = {
   url: process.env.NEXT_PUBLIC_SUPABASE_URL || '',
