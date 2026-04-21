@@ -4,14 +4,14 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 
 if (!supabaseUrl || !supabaseKey) {
-  console.error('[v0] Missing Supabase environment variables')
+  console.error('Missing Supabase environment variables')
   process.exit(1)
 }
 
 const supabase = createClient(supabaseUrl, supabaseKey)
 
 async function run() {
-  console.log('[v0] Starting roles & permissions migration...')
+  console.log('Starting roles & permissions migration...')
 
   // 1. Create roles table
   const { error: rolesTableErr } = await supabase.rpc('exec_sql', {
@@ -27,8 +27,8 @@ async function run() {
       );
     `
   })
-  if (rolesTableErr) console.log('[v0] roles table:', rolesTableErr.message)
-  else console.log('[v0] roles table ready')
+  if (rolesTableErr) console.log('roles table:', rolesTableErr.message)
+  else console.log('roles table ready')
 
   // 2. Create permissions table
   const { error: permTableErr } = await supabase.rpc('exec_sql', {
@@ -42,8 +42,8 @@ async function run() {
       );
     `
   })
-  if (permTableErr) console.log('[v0] permissions table:', permTableErr.message)
-  else console.log('[v0] permissions table ready')
+  if (permTableErr) console.log('permissions table:', permTableErr.message)
+  else console.log('permissions table ready')
 
   // 3. Create role_permissions join table
   const { error: rpTableErr } = await supabase.rpc('exec_sql', {
@@ -56,8 +56,8 @@ async function run() {
       );
     `
   })
-  if (rpTableErr) console.log('[v0] role_permissions table:', rpTableErr.message)
-  else console.log('[v0] role_permissions table ready')
+  if (rpTableErr) console.log('role_permissions table:', rpTableErr.message)
+  else console.log('role_permissions table ready')
 
   // 4. Create user_roles join table
   const { error: urTableErr } = await supabase.rpc('exec_sql', {
@@ -73,8 +73,8 @@ async function run() {
       );
     `
   })
-  if (urTableErr) console.log('[v0] user_roles table:', urTableErr.message)
-  else console.log('[v0] user_roles table ready')
+  if (urTableErr) console.log('user_roles table:', urTableErr.message)
+  else console.log('user_roles table ready')
 
   // 5. Seed permissions
   const permissions = [
@@ -145,13 +145,13 @@ async function run() {
     const { error } = await supabase
       .from('permissions')
       .upsert(perm, { onConflict: 'resource,action' })
-    if (error) console.log(`[v0] perm ${perm.resource}:${perm.action}:`, error.message)
+    if (error) console.log(`perm ${perm.resource}:${perm.action}:`, error.message)
   }
-  console.log(`[v0] ${permissions.length} permissions seeded`)
-  console.log('[v0] Migration complete!')
+  console.log(`${permissions.length} permissions seeded`)
+  console.log('Migration complete!')
 }
 
 run().catch(err => {
-  console.error('[v0] Fatal:', err.message)
+  console.error('Fatal:', err.message)
   process.exit(1)
 })
