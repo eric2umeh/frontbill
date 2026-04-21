@@ -5,7 +5,7 @@ import { cookies } from 'next/headers'
 export async function POST(request: Request) {
   const { email, password } = await request.json()
 
-  console.log('[v0] API login called:', { email })
+  console.log('API login called:', { email })
 
   try {
     const cookieStore = await cookies()
@@ -17,16 +17,16 @@ export async function POST(request: Request) {
     })
 
     if (error) {
-      console.error('[v0] API login error:', error)
+      console.error('API login error:', error)
       return NextResponse.json({ error: error.message }, { status: 401 })
     }
 
     if (!data.session) {
-      console.error('[v0] No session returned from login')
+      console.error('No session returned from login')
       return NextResponse.json({ error: 'No session created' }, { status: 401 })
     }
 
-    console.log('[v0] API login successful:', data.user?.email)
+    console.log('API login successful:', data.user?.email)
 
     // Session cookies are automatically set by Supabase server client
     return NextResponse.json(
@@ -34,7 +34,7 @@ export async function POST(request: Request) {
       { status: 200 }
     )
   } catch (error: any) {
-    console.error('[v0] API login exception:', error)
+    console.error('API login exception:', error)
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 }

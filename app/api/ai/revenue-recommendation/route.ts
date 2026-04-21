@@ -56,7 +56,7 @@ Provide:
       },
     })
   } catch (error: any) {
-    console.error('[v0] Revenue recommendation error:', error)
+    console.error('Revenue recommendation error:', error)
     return Response.json({ error: error.message }, { status: 500 })
   }
 }

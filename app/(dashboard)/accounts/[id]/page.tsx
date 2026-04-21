@@ -201,7 +201,7 @@ export default function AccountDetailPage() {
         setLedgerHistory(txData || [])
       }
     } catch (err) {
-      console.error('[v0] Error loading account:', err)
+      console.error('Error loading account:', err)
       router.push('/accounts')
     } finally {
       setLoading(false)
