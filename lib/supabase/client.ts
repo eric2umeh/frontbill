@@ -8,7 +8,7 @@ export function createClient() {
 
   if (!url || !key) {
     // Create a dummy client that won't crash but will handle errors gracefully
-    console.warn('[v0] Supabase not configured - returning null for createClient()')
+    console.warn('Supabase not configured - returning null for createClient()')
     return null as any
   }
 
@@ -30,7 +30,7 @@ export function createClient() {
 
     return client
   } catch (error) {
-    console.error('[v0] Failed to create Supabase client:', error)
+    console.error('Failed to create Supabase client:', error)
     return null as any
   }
 }

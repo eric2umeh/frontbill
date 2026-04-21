@@ -201,7 +201,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
       setOrganizationAccounts(orgLedger)
       setFilteredLedgerAccounts(ledgerTab === 'individual' ? individualLedger : orgLedger)
     } catch (err: any) {
-      console.error('[v0] Error loading booking data:', err)
+      console.error('Error loading booking data:', err)
       toast.error('Failed to load booking data')
     } finally {
       setLoading(false)

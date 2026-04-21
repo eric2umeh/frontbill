@@ -98,7 +98,7 @@ export default function OrganizationsPage() {
       
       setOrganizations(transformed)
     } catch (error: any) {
-      console.error('[v0] Error fetching organizations:', error)
+      console.error('Error fetching organizations:', error)
       toast.error(error.message || 'Failed to load organizations')
     } finally {
       endFetch()
