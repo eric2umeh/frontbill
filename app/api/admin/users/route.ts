@@ -79,7 +79,7 @@ export async function POST(request: Request) {
       emailSent = true
     } catch (emailErr: any) {
       // Log but don't fail — user was created successfully
-      console.error('[v0] Welcome email failed (user still created):', emailErr)
+      console.error('Welcome email failed (user still created):', emailErr)
       // Return the error message to show the admin
       emailError = emailErr.message || 'Failed to send email'
     }

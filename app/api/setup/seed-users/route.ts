@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server'
 
 export async function POST(request: Request) {
   try {
-    console.log('[v0] Seeding demo users with admin client...')
+    console.log('Seeding demo users with admin client...')
     const supabase = createAdminClient()
 
     // Create demo admin account
@@ -19,13 +19,12 @@ export async function POST(request: Request) {
     })
 
     if (adminError) {
-      console.error('[v0] Error creating admin:', adminError)
-      // Ignore if user already exists
+      console.error('Error creating admin:', adminError)
       if (!adminError.message.includes('already exists')) {
         throw adminError
       }
     } else {
-      console.log('[v0] Admin user created:', adminData.user?.email)
+      console.log('Admin user created:', adminData.user?.email)
     }
 
     // Create demo front desk account
@@ -41,12 +40,12 @@ export async function POST(request: Request) {
     })
 
     if (deskError) {
-      console.error('[v0] Error creating front desk:', deskError)
+      console.error('Error creating front desk:', deskError)
       if (!deskError.message.includes('already exists')) {
         throw deskError
       }
     } else {
-      console.log('[v0] Front desk user created:', deskData.user?.email)
+      console.log('Front desk user created:', deskData.user?.email)
     }
 
     return NextResponse.json({
@@ -57,7 +56,7 @@ export async function POST(request: Request) {
       ],
     })
   } catch (error: any) {
-    console.error('[v0] Seed users error:', error)
+    console.error('Seed users error:', error)
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 }

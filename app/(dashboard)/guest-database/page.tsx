@@ -63,7 +63,7 @@ export default function GuestDatabasePage() {
 
       setGuests(guestsWithBalance)
     } catch (err: any) {
-      console.error('[v0] Error fetching guests:', err)
+      console.error('Error fetching guests:', err)
       setGuests([])
     } finally {
       endFetch()
