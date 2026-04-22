@@ -54,7 +54,7 @@ Please provide:
       },
     })
   } catch (error: any) {
-    console.error('[v0] Night audit summary error:', error)
+    console.error('Night audit summary error:', error)
     return Response.json({ error: error.message }, { status: 500 })
   }
 }

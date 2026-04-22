@@ -107,7 +107,7 @@ export default function TransactionsPage() {
 
       setPayments(all)
     } catch (err: any) {
-      console.error('[v0] Error fetching transactions:', err)
+      console.error('Error fetching transactions:', err)
       setPayments([])
     } finally {
       endFetch()

@@ -52,7 +52,7 @@ Provide insights about:
       },
     })
   } catch (error: any) {
-    console.error('[v0] Guest insights error:', error)
+    console.error('Guest insights error:', error)
     return Response.json({ error: error.message }, { status: 500 })
   }
 }
