@@ -93,7 +93,7 @@ export default function AccountsPage() {
 
       setAccounts(allAccounts)
     } catch (err: any) {
-      console.error('[v0] Error fetching accounts:', err)
+      console.error('Error fetching accounts:', err)
       setAccounts([])
     } finally {
       endFetch()

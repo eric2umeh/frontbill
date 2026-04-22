@@ -43,7 +43,7 @@ export async function updateSession(request: NextRequest) {
       return NextResponse.redirect(url)
     }
   } catch (error) {
-    console.log('[v0] Session check error (non-critical):', error instanceof Error ? error.message : 'Unknown error')
+    console.log('Session check error (non-critical):', error instanceof Error ? error.message : 'Unknown error')
   }
 
   return supabaseResponse

@@ -83,7 +83,7 @@ export default function RoomDetailPage() {
         amenities: data.amenities || [],
       })
     } catch (error: any) {
-      console.log('[v0] Error fetching room:', error.message)
+      console.error('Error fetching room:', error.message)
       toast.error('Failed to load room')
     } finally {
       setLoading(false)

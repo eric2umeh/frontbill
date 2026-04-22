@@ -591,14 +591,12 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
 
   // Bill Balance (Unpaid) = sum of all pending/unpaid/city_ledger folio charges
   // city_ledger charges are billed to an account — still an outstanding balance owed to the hotel.
-  console.log('[v0] folioCharges for balance calc:', folioCharges.map((c: any) => ({ id: c.id, amount: c.amount, paymentStatus: c.paymentStatus, payment_status: c.payment_status, type: c.type, chargeType: c.chargeType })))
   const totalBillBalance = folioCharges
     .filter((c: any) => {
       const status = c.paymentStatus || c.payment_status
       return ['pending', 'unpaid', 'city_ledger'].includes(status) && Number(c.amount) > 0
     })
     .reduce((sum: number, c: any) => sum + Number(c.amount), 0)
-  console.log('[v0] totalBillBalance:', totalBillBalance)
 
   // Amount Paid = initial booking deposit + all "Record Payment" entries in folio
   // Using both 'type' (DB-loaded) and 'chargeType' (optimistic) field names.

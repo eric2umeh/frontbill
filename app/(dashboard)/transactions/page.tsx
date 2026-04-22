@@ -75,7 +75,7 @@ export default function TransactionsPage() {
         .limit(1000)
 
       if (txError) {
-        console.error('[v0] Transactions query error:', txError)
+        console.error('Transactions query error:', txError)
         setPayments([])
         return
       }
@@ -107,7 +107,7 @@ export default function TransactionsPage() {
 
       setPayments(all)
     } catch (err: any) {
-      console.error('[v0] Error fetching transactions:', err)
+      console.error('Error fetching transactions:', err)
       setPayments([])
     } finally {
       endFetch()

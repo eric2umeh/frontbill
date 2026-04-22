@@ -195,7 +195,7 @@ export async function sendWelcomeEmail({
   })
 
   if (error) {
-    console.error('[v0] Failed to send welcome email:', error)
+    console.error('Failed to send welcome email:', error)
     throw error
   }
 
