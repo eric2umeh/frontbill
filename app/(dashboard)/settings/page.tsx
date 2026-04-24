@@ -116,16 +116,16 @@ export default function SettingsPage() {
         </p>
       </div>
 
-      {/* Hotel Information — Admin Only */}
-      {role === 'admin' && (
-        <Card>
+      {/* Hotel Information */}
+      <Card>
         <CardHeader>
           <div className="flex items-center gap-2">
             <Building2 className="h-5 w-5" />
             <CardTitle>Hotel Information</CardTitle>
+            {role !== 'admin' && <Badge variant="outline" className="ml-auto">View Only</Badge>}
           </div>
           <CardDescription>
-            Update your hotel details for documents and reports
+            {role === 'admin' ? 'Update your hotel details for documents and reports' : 'Hotel details (admins only can edit)'}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -143,6 +143,7 @@ export default function SettingsPage() {
                     placeholder="Grand Hotel"
                     value={hotelName}
                     onChange={(e) => setHotelName(e.target.value)}
+                    disabled={role !== 'admin' || hotelSaving}
                   />
                 </div>
                 <div className="space-y-2">
@@ -153,6 +154,7 @@ export default function SettingsPage() {
                     placeholder="info@hotel.com"
                     value={hotelEmail}
                     onChange={(e) => setHotelEmail(e.target.value)}
+                    disabled={role !== 'admin' || hotelSaving}
                   />
                 </div>
               </div>
@@ -163,6 +165,7 @@ export default function SettingsPage() {
                   placeholder="123 Main Street, Lagos"
                   value={hotelAddress}
                   onChange={(e) => setHotelAddress(e.target.value)}
+                  disabled={role !== 'admin' || hotelSaving}
                 />
               </div>
               <div className="grid gap-4 md:grid-cols-2">
@@ -173,6 +176,7 @@ export default function SettingsPage() {
                     placeholder="+234 800 000 0000"
                     value={hotelPhone}
                     onChange={(e) => setHotelPhone(e.target.value)}
+                    disabled={role !== 'admin' || hotelSaving}
                   />
                 </div>
                 <div className="space-y-2">
@@ -181,15 +185,16 @@ export default function SettingsPage() {
                 </div>
               </div>
               <Separator />
-              <Button onClick={handleSaveHotel} disabled={hotelSaving}>
-                {hotelSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Save Changes
-              </Button>
+              {role === 'admin' && (
+                <Button onClick={handleSaveHotel} disabled={hotelSaving}>
+                  {hotelSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  Save Changes
+                </Button>
+              )}
             </>
           )}
         </CardContent>
       </Card>
-      )}
 
       {/* Profile & Security */}
       <Card>
