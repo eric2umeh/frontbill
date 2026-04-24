@@ -129,7 +129,7 @@ export default function Page() {
                   </div>
                 </div>
               )}
-              
+
               <form onSubmit={handleLogin}>
                 <div className="flex flex-col gap-6">
                   <div className="grid gap-2">
@@ -175,7 +175,7 @@ export default function Page() {
                     </button>
                   </div>
                 </div>
-                <div className="mt-4 text-center text-sm">
+                {/* <div className="mt-4 text-center text-sm">
                   Don&apos;t have an account?{' '}
                   <Link
                     href="/auth/sign-up"
@@ -183,7 +183,7 @@ export default function Page() {
                   >
                     Sign up
                   </Link>
-                </div>
+                </div> */}
               </form>
             </CardContent>
           </Card>
