@@ -168,7 +168,6 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
     description: 'Basic access. Can view dashboard, rooms and their own assigned tasks only.',
     color: 'bg-gray-100 text-gray-800',
     permissions: [
-      'dashboard:view',
       'rooms:view',
       'bookings:view',
     ],
