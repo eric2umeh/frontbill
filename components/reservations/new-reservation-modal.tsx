@@ -10,7 +10,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Calendar } from '@/components/ui/calendar'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Badge } from '@/components/ui/badge'
-import { Separator } from '@/components/ui/separator'
 import { format, addDays, differenceInDays } from 'date-fns'
 import { Calendar as CalendarIcon, Plus, X, Loader2 } from 'lucide-react'
 import { formatNaira } from '@/lib/utils/currency'
