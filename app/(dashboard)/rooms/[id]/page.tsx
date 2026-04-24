@@ -237,9 +237,9 @@ export default function RoomDetailPage() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="1">Floor 1</SelectItem>
-                  <SelectItem value="2">Floor 2</SelectItem>
-                  <SelectItem value="3">Floor 3</SelectItem>
+                  <SelectItem value="0">Ground Floor</SelectItem>
+                  <SelectItem value="1">First Floor</SelectItem>
+                  <SelectItem value="2">Second Floor</SelectItem>
                 </SelectContent>
               </Select>
             </div>
