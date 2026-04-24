@@ -112,7 +112,7 @@ export default function SettingsPage() {
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Settings</h1>
         <p className="text-muted-foreground">
-          Manage hotel information and system preferences
+          Manage your profile and hotel information
         </p>
       </div>
 
@@ -290,28 +290,6 @@ export default function SettingsPage() {
               Update Password
             </Button>
           </div>
-        </CardContent>
-      </Card>
-
-      {/* System Preferences */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <Users className="h-5 w-5" />
-            <CardTitle>System Preferences</CardTitle>
-          </div>
-          <CardDescription>
-            Manage staff accounts and system configuration
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <p className="text-sm text-muted-foreground mb-4">
-            User roles: Admin, Manager, Front Desk, Accountant
-          </p>
-          <Button variant="outline" onClick={() => router.push('/users-roles')}>
-            <Users className="mr-2 h-4 w-4" />
-            Manage Users
-          </Button>
         </CardContent>
       </Card>
     </div>

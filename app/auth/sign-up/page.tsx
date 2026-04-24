@@ -1,83 +1,18 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import Link from 'next/link'
-import { createClient } from '@/lib/supabase/client'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { toast } from 'sonner'
-import { Hotel, Loader2 } from 'lucide-react'
 
 export default function SignUpPage() {
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [firstName, setFirstName] = useState('')
-  const [lastName, setLastName] = useState('')
-  const [loading, setLoading] = useState(false)
   const router = useRouter()
 
-  const handleSignUp = async (e: React.FormEvent) => {
-    e.preventDefault()
-    
-    // Client-side validation
-    if (!email.trim()) {
-      toast.error('Email is required')
-      return
-    }
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      toast.error('Please enter a valid email address')
-      return
-    }
-    if (!firstName.trim() || !lastName.trim()) {
-      toast.error('First and last name are required')
-      return
-    }
-    if (password.length < 6) {
-      toast.error('Password must be at least 6 characters')
-      return
-    }
+  useEffect(() => {
+    // Redirect to login since new users are added from the app by admins
+    router.push('/auth/login')
+  }, [router])
 
-    setLoading(true)
-
-    try {
-      const supabase = createClient()
-      if (!supabase) {
-        toast.error('Supabase not configured. Please add environment variables.')
-        return
-      }
-
-      const fullName = `${firstName} ${lastName}`
-      
-      // Use production URL for email redirect, fallback to window.location.origin
-      const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://frontbill-two.vercel.app'
-      
-      const { data, error } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          emailRedirectTo: `${siteUrl}/auth/callback`,
-          data: {
-            full_name: fullName,
-          },
-        },
-      })
-
-      if (error) {
-        // Handle specific Supabase auth errors
-        if (error.message?.includes('User already registered')) {
-          throw new Error('This email is already registered. Please sign in or use a different email.')
-        }
-        if (error.message?.includes('invalid email')) {
-          throw new Error('Please enter a valid email address.')
-        }
-        throw error
-      }
-
-      toast.success('Account created! Please check your email to verify your account.')
-      router.push('/auth/sign-up-success')
+  return null
+}
     } catch (error: any) {
       toast.error(error.message || 'Failed to create account')
     } finally {
