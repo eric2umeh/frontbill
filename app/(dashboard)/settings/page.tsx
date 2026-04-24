@@ -116,8 +116,9 @@ export default function SettingsPage() {
         </p>
       </div>
 
-      {/* Hotel Information */}
-      <Card>
+      {/* Hotel Information — Admin Only */}
+      {role === 'admin' && (
+        <Card>
         <CardHeader>
           <div className="flex items-center gap-2">
             <Building2 className="h-5 w-5" />
@@ -188,6 +189,7 @@ export default function SettingsPage() {
           )}
         </CardContent>
       </Card>
+      )}
 
       {/* Profile & Security */}
       <Card>
