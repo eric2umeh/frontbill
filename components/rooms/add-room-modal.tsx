@@ -59,7 +59,7 @@ export function AddRoomModal({ open, onClose, onSuccess }: AddRoomModalProps) {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    
+
     if (!formData.number.trim()) {
       toast.error('Please enter room number')
       return
@@ -68,7 +68,7 @@ export function AddRoomModal({ open, onClose, onSuccess }: AddRoomModalProps) {
     setLoading(true)
     try {
       const supabase = createClient()
-      
+
       // Get current user
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) {
@@ -109,9 +109,9 @@ export function AddRoomModal({ open, onClose, onSuccess }: AddRoomModalProps) {
         }])
 
       if (error) throw error
-      
+
       toast.success(`Room ${formData.number} added successfully!`)
-      
+
       // Reset form
       setFormData({
         number: '',
@@ -122,7 +122,7 @@ export function AddRoomModal({ open, onClose, onSuccess }: AddRoomModalProps) {
         status: 'available',
       })
       setSelectedAmenities([])
-      
+
       onClose()
       onSuccess?.()
     } catch (error: any) {
@@ -152,19 +152,19 @@ export function AddRoomModal({ open, onClose, onSuccess }: AddRoomModalProps) {
               />
             </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="floor">Floor *</Label>
-            <Select value={formData.floor} onValueChange={(value) => setFormData({ ...formData, floor: value })}>
-              <SelectTrigger id="floor">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="1">Floor 1</SelectItem>
-                <SelectItem value="2">Floor 2</SelectItem>
-                <SelectItem value="3">Floor 3</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+            <div className="space-y-2">
+              <Label htmlFor="floor">Floor *</Label>
+              <Select value={formData.floor} onValueChange={(value) => setFormData({ ...formData, floor: value })}>
+                <SelectTrigger id="floor">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="0">Ground Floor</SelectItem>
+                  <SelectItem value="1">First Floor</SelectItem>
+                  <SelectItem value="2">Second Floor</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
 
           <div className="space-y-2">
@@ -240,7 +240,7 @@ export function AddRoomModal({ open, onClose, onSuccess }: AddRoomModalProps) {
                   ))}
               </SelectContent>
             </Select>
-            
+
             {selectedAmenities.length > 0 && (
               <div className="flex flex-wrap gap-2 mt-2">
                 {selectedAmenities.map((amenity) => (
