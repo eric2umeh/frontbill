@@ -40,6 +40,9 @@ interface Notification {
   amount: number
   created_at: string
   read: boolean
+  booking_id: string | null
+  guest_id: string | null
+  folio_id: string | null
 }
 
 export function Header({ user, onMenuClick }: HeaderProps) {
@@ -56,7 +59,7 @@ export function Header({ user, onMenuClick }: HeaderProps) {
     try {
       const { data } = await supabase
         .from('transactions')
-        .select('id, description, amount, created_at')
+        .select('id, description, amount, created_at, booking_id, guest_id, folio_id')
         .eq('organization_id', organizationId)
         .order('created_at', { ascending: false })
         .limit(10)
@@ -64,6 +67,9 @@ export function Header({ user, onMenuClick }: HeaderProps) {
       if (data) {
         setNotifications(data.map((t) => ({
           ...t,
+          booking_id: t.booking_id ?? null,
+          guest_id: t.guest_id ?? null,
+          folio_id: t.folio_id ?? null,
           read: readIds.has(t.id),
         })))
       }
@@ -84,6 +90,23 @@ export function Header({ user, onMenuClick }: HeaderProps) {
     const allIds = new Set(notifications.map((n) => n.id))
     setReadIds(allIds)
     setNotifications((prev) => prev.map((n) => ({ ...n, read: true })))
+  }
+
+  const [notifOpen, setNotifOpen] = useState(false)
+
+  const handleNotificationClick = (n: Notification) => {
+    // Mark as read
+    setReadIds((prev) => new Set([...prev, n.id]))
+    setNotifications((prev) => prev.map((x) => x.id === n.id ? { ...x, read: true } : x))
+    setNotifOpen(false)
+    // Navigate to the most specific page
+    if (n.booking_id) {
+      router.push(`/bookings?id=${n.booking_id}`)
+    } else if (n.guest_id) {
+      router.push(`/guests?id=${n.guest_id}`)
+    } else {
+      router.push(`/transactions`)
+    }
   }
 
   const handleLogout = async () => {
@@ -126,7 +149,7 @@ export function Header({ user, onMenuClick }: HeaderProps) {
       </div>
 
       <div className="flex items-center gap-2">
-        <Popover>
+        <Popover open={notifOpen} onOpenChange={setNotifOpen}>
           <PopoverTrigger asChild>
             <Button variant="ghost" size="icon" className="relative">
               <Bell className="h-5 w-5" />
@@ -154,7 +177,11 @@ export function Header({ user, onMenuClick }: HeaderProps) {
               ) : (
                 <div className="divide-y">
                   {notifications.map((n) => (
-                    <div key={n.id} className="flex items-start gap-3 px-4 py-3 hover:bg-muted/50 transition-colors">
+                    <button
+                      key={n.id}
+                      onClick={() => handleNotificationClick(n)}
+                      className="w-full flex items-start gap-3 px-4 py-3 hover:bg-muted/50 transition-colors text-left"
+                    >
                       <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${n.read ? 'bg-gray-300' : 'bg-blue-500'}`} />
                       <div className="flex-1 space-y-1">
                         <p className="text-sm leading-snug">{n.description || 'Transaction recorded'}</p>
@@ -164,8 +191,11 @@ export function Header({ user, onMenuClick }: HeaderProps) {
                             {formatDistanceToNow(new Date(n.created_at), { addSuffix: true })}
                           </span>
                         </div>
+                        <p className="text-xs text-muted-foreground">
+                          {n.booking_id ? 'View booking' : n.guest_id ? 'View guest' : 'View transactions'}
+                        </p>
                       </div>
-                    </div>
+                    </button>
                   ))}
                 </div>
               )}
