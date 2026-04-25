@@ -76,10 +76,10 @@ export function AddRoomModal({ open, onClose, onSuccess }: AddRoomModalProps) {
         return
       }
 
-      // Get user's organization
+      // Get user's organization and name
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
-        .select('organization_id')
+        .select('organization_id, full_name')
         .eq('id', user.id)
         .single()
 
@@ -105,6 +105,7 @@ export function AddRoomModal({ open, onClose, onSuccess }: AddRoomModalProps) {
           max_occupancy: formData.capacity,
           status: formData.status,
           amenities: selectedAmenities,
+          created_by: user.id,
         }])
 
       if (error) throw error
@@ -158,9 +159,9 @@ export function AddRoomModal({ open, onClose, onSuccess }: AddRoomModalProps) {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                  <SelectItem value="0">Ground Floor</SelectItem>
-                  <SelectItem value="1">First Floor</SelectItem>
-                  <SelectItem value="2">Second Floor</SelectItem>
+                <SelectItem value="0">Ground Floor</SelectItem>
+                <SelectItem value="1">First Floor</SelectItem>
+                <SelectItem value="2">Second Floor</SelectItem>
               </SelectContent>
             </Select>
           </div>
