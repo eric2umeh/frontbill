@@ -37,14 +37,14 @@ export default function RoomDetailPage() {
   const router = useRouter()
   const params = useParams()
   const roomId = params.id as string
-  
+
   const [room, setRoom] = useState<Room | null>(null)
   const [loading, setLoading] = useState(true)
   const [editModalOpen, setEditModalOpen] = useState(false)
   const [saveLoading, setSaveLoading] = useState(false)
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
   const [deleteLoading, setDeleteLoading] = useState(false)
-  
+
   const [formData, setFormData] = useState({
     room_type: '',
     floor_number: '',
@@ -94,7 +94,7 @@ export default function RoomDetailPage() {
     try {
       setSaveLoading(true)
       const supabase = createClient()
-      
+
       const { error } = await supabase
         .from('rooms')
         .update({
@@ -108,7 +108,7 @@ export default function RoomDetailPage() {
         .eq('id', roomId)
 
       if (error) throw error
-      
+
       toast.success('Room details updated successfully')
       setEditModalOpen(false)
       fetchRoom()
@@ -169,7 +169,7 @@ export default function RoomDetailPage() {
         .eq('id', roomId)
 
       if (error) throw error
-      
+
       toast.success('Room deleted successfully')
       router.push('/rooms')
     } catch (error: any) {
@@ -237,9 +237,9 @@ export default function RoomDetailPage() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="1">Floor 1</SelectItem>
-                  <SelectItem value="2">Floor 2</SelectItem>
-                  <SelectItem value="3">Floor 3</SelectItem>
+                  <SelectItem value="0">Ground Floor</SelectItem>
+                  <SelectItem value="1">First Floor</SelectItem>
+                  <SelectItem value="2">Second Floor</SelectItem>
                 </SelectContent>
               </Select>
             </div>
