@@ -75,6 +75,15 @@ export default function DashboardLayout({
               role: profile.role || 'admin',
               organizationId: profile.organization_id || '',
             })
+            // Check if role has dashboard access
+            const allowedRoles = ['admin', 'manager', 'front_desk', 'receptionist']
+            if (!allowedRoles.includes(profile.role || 'admin')) {
+              if (isMounted) {
+                setRedirected(true)
+                router.push('/access-denied')
+              }
+              return
+            }
           } else {
             setUser({
               id: authUser.id,
