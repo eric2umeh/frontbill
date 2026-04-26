@@ -12,10 +12,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { toast } from 'sonner'
 import { createClient } from '@/lib/supabase/client'
 import { formatNaira } from '@/lib/utils/currency'
-import { AlertCircle, X, ArrowLeft, Edit, Trash2, Users, DollarSign, MapPin, CalendarDays, Clock } from 'lucide-react'
+import { AlertCircle, X, ArrowLeft, Edit, Trash2, Users, DollarSign, MapPin, CalendarDays, Clock, Search, SlidersHorizontal } from 'lucide-react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Separator } from '@/components/ui/separator'
-import { format } from 'date-fns'
+import { format, isWithinInterval, parseISO, startOfDay, endOfDay } from 'date-fns'
+import { useMemo } from 'react'
 
 const ROOM_TYPES = [
   'Deluxe', 'Royal', 'Kings', 'Mini Suite', 'Executive Suite', 'Diplomatic Suite',
@@ -59,6 +60,50 @@ export default function RoomDetailPage() {
   const [loading, setLoading] = useState(true)
   const [guestHistory, setGuestHistory] = useState<GuestHistory[]>([])
   const [historyLoading, setHistoryLoading] = useState(false)
+
+  // History filters
+  const [filterName, setFilterName] = useState('')
+  const [filterDateFrom, setFilterDateFrom] = useState('')
+  const [filterDateTo, setFilterDateTo] = useState('')
+  const [filterStatus, setFilterStatus] = useState('all')
+  const [filterPayment, setFilterPayment] = useState('all')
+
+  const filteredHistory = useMemo(() => {
+    return guestHistory.filter((entry) => {
+      // Guest name filter
+      if (filterName.trim()) {
+        const name = entry.guests?.name?.toLowerCase() ?? ''
+        if (!name.includes(filterName.trim().toLowerCase())) return false
+      }
+      // Date range filter — check if check-in falls within range
+      if (filterDateFrom) {
+        const from = startOfDay(parseISO(filterDateFrom))
+        const checkIn = parseISO(entry.check_in)
+        if (checkIn < from) return false
+      }
+      if (filterDateTo) {
+        const to = endOfDay(parseISO(filterDateTo))
+        const checkIn = parseISO(entry.check_in)
+        if (checkIn > to) return false
+      }
+      // Booking status filter
+      if (filterStatus !== 'all' && entry.status !== filterStatus) return false
+      // Payment status filter
+      if (filterPayment !== 'all' && entry.payment_status !== filterPayment) return false
+      return true
+    })
+  }, [guestHistory, filterName, filterDateFrom, filterDateTo, filterStatus, filterPayment])
+
+  const hasActiveFilters = filterName || filterDateFrom || filterDateTo || filterStatus !== 'all' || filterPayment !== 'all'
+
+  const clearFilters = () => {
+    setFilterName('')
+    setFilterDateFrom('')
+    setFilterDateTo('')
+    setFilterStatus('all')
+    setFilterPayment('all')
+  }
+
   const [editModalOpen, setEditModalOpen] = useState(false)
   const [saveLoading, setSaveLoading] = useState(false)
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
@@ -471,7 +516,94 @@ export default function RoomDetailPage() {
                 All guests and stays recorded for this room
               </p>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-4">
+
+              {/* Filter Bar */}
+              <div className="rounded-lg border bg-muted/30 p-4 space-y-3">
+                <div className="flex items-center gap-2 text-sm font-medium">
+                  <SlidersHorizontal className="h-4 w-4" />
+                  Filter Folio
+                  {hasActiveFilters && (
+                    <button
+                      onClick={clearFilters}
+                      className="ml-auto flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      <X className="h-3 w-3" />
+                      Clear filters
+                    </button>
+                  )}
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {/* Guest Name */}
+                  <div className="relative">
+                    <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+                    <Input
+                      placeholder="Search guest name..."
+                      value={filterName}
+                      onChange={(e) => setFilterName(e.target.value)}
+                      className="pl-8 h-9 text-sm"
+                    />
+                  </div>
+                  {/* Date From */}
+                  <div className="space-y-0">
+                    <label className="text-xs text-muted-foreground mb-1 block">Check-in from</label>
+                    <Input
+                      type="date"
+                      value={filterDateFrom}
+                      onChange={(e) => setFilterDateFrom(e.target.value)}
+                      className="h-9 text-sm"
+                    />
+                  </div>
+                  {/* Date To */}
+                  <div className="space-y-0">
+                    <label className="text-xs text-muted-foreground mb-1 block">Check-in to</label>
+                    <Input
+                      type="date"
+                      value={filterDateTo}
+                      onChange={(e) => setFilterDateTo(e.target.value)}
+                      className="h-9 text-sm"
+                      min={filterDateFrom || undefined}
+                    />
+                  </div>
+                  {/* Booking Status */}
+                  <Select value={filterStatus} onValueChange={setFilterStatus}>
+                    <SelectTrigger className="h-9 text-sm">
+                      <SelectValue placeholder="All statuses" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All statuses</SelectItem>
+                      <SelectItem value="checked_in">Checked In</SelectItem>
+                      <SelectItem value="checked_out">Checked Out</SelectItem>
+                      <SelectItem value="reserved">Reserved</SelectItem>
+                      <SelectItem value="cancelled">Cancelled</SelectItem>
+                      <SelectItem value="pending">Pending</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {/* Payment Status */}
+                  <Select value={filterPayment} onValueChange={setFilterPayment}>
+                    <SelectTrigger className="h-9 text-sm">
+                      <SelectValue placeholder="All payments" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All payments</SelectItem>
+                      <SelectItem value="paid">Paid</SelectItem>
+                      <SelectItem value="partial">Partial</SelectItem>
+                      <SelectItem value="pending">Pending</SelectItem>
+                      <SelectItem value="arrears">Arrears</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              {/* Results summary */}
+              {!historyLoading && guestHistory.length > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  Showing {filteredHistory.length} of {guestHistory.length} record{guestHistory.length !== 1 ? 's' : ''}
+                  {hasActiveFilters && ' (filtered)'}
+                </p>
+              )}
+
+              {/* List */}
               {historyLoading ? (
                 <div className="flex items-center justify-center py-12 text-muted-foreground">
                   <Clock className="mr-2 h-4 w-4 animate-spin" />
@@ -482,10 +614,18 @@ export default function RoomDetailPage() {
                   <CalendarDays className="h-8 w-8 opacity-40" />
                   <p className="text-sm">No stays recorded for this room yet</p>
                 </div>
+              ) : filteredHistory.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-10 text-muted-foreground gap-2">
+                  <Search className="h-7 w-7 opacity-40" />
+                  <p className="text-sm">No records match your filters</p>
+                  <button onClick={clearFilters} className="text-xs underline hover:text-foreground">
+                    Clear filters
+                  </button>
+                </div>
               ) : (
-                <div className="space-y-0 divide-y">
-                  {guestHistory.map((entry, index) => {
-                    const statusColors: Record<string, string> = {
+                <div className="divide-y">
+                  {filteredHistory.map((entry) => {
+                    const bookingStatusColors: Record<string, string> = {
                       checked_in: 'bg-green-500/10 text-green-700 border-green-200',
                       checked_out: 'bg-gray-100 text-gray-600 border-gray-200',
                       reserved: 'bg-blue-500/10 text-blue-700 border-blue-200',
@@ -509,7 +649,7 @@ export default function RoomDetailPage() {
                               {entry.guests?.phone && (
                                 <span className="text-xs text-muted-foreground">{entry.guests.phone}</span>
                               )}
-                              <Badge variant="outline" className={`text-xs ${statusColors[entry.status] ?? ''}`}>
+                              <Badge variant="outline" className={`text-xs ${bookingStatusColors[entry.status] ?? ''}`}>
                                 {entry.status.replace('_', ' ')}
                               </Badge>
                               <Badge variant="secondary" className={`text-xs ${paymentColors[entry.payment_status] ?? ''}`}>
@@ -518,9 +658,9 @@ export default function RoomDetailPage() {
                             </div>
                             <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                               <CalendarDays className="h-3.5 w-3.5" />
-                              <span>{format(new Date(entry.check_in), 'dd MMM yyyy')}</span>
+                              <span>{format(parseISO(entry.check_in), 'dd MMM yyyy')}</span>
                               <span>—</span>
-                              <span>{format(new Date(entry.check_out), 'dd MMM yyyy')}</span>
+                              <span>{format(parseISO(entry.check_out), 'dd MMM yyyy')}</span>
                               <span className="ml-1 font-medium text-foreground">
                                 ({entry.number_of_nights} night{entry.number_of_nights !== 1 ? 's' : ''})
                               </span>
@@ -534,7 +674,6 @@ export default function RoomDetailPage() {
                             <p className="text-xs text-muted-foreground">{formatNaira(entry.rate_per_night)}/night</p>
                           </div>
                         </div>
-                        {index < guestHistory.length - 1 && <Separator className="mt-4" />}
                       </div>
                     )
                   })}
