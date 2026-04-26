@@ -16,7 +16,6 @@ import { AlertCircle, X, ArrowLeft, Edit, Trash2, Users, DollarSign, MapPin, Cal
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Separator } from '@/components/ui/separator'
 import { format } from 'date-fns'
-import { formatNaira } from '@/lib/utils/currency'
 
 const ROOM_TYPES = [
   'Deluxe', 'Royal', 'Kings', 'Mini Suite', 'Executive Suite', 'Diplomatic Suite',

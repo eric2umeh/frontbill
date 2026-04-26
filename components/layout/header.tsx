@@ -49,6 +49,7 @@ export function Header({ user, onMenuClick }: HeaderProps) {
   const [loggingOut, setLoggingOut] = useState(false)
   const [notifications, setNotifications] = useState<Notification[]>([])
   const [readIds, setReadIds] = useState<Set<string>>(new Set())
+  const [notifOpen, setNotifOpen] = useState(false)
   const router = useRouter()
   const { organizationId } = useAuth()
 
@@ -91,8 +92,6 @@ export function Header({ user, onMenuClick }: HeaderProps) {
     setReadIds(allIds)
     setNotifications((prev) => prev.map((n) => ({ ...n, read: true })))
   }
-
-  const [notifOpen, setNotifOpen] = useState(false)
 
   const handleNotificationClick = (n: Notification) => {
     // Mark as read
