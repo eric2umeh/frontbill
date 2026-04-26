@@ -6,7 +6,7 @@ export type Permission =
   | 'dashboard:view'
   | 'bookings:view' | 'bookings:create' | 'bookings:edit' | 'bookings:delete' | 'bookings:checkin' | 'bookings:checkout'
   | 'reservations:view' | 'reservations:create' | 'reservations:edit' | 'reservations:delete'
-  | 'rooms:view' | 'rooms:create' | 'rooms:edit' | 'rooms:delete'
+  | 'rooms:view' | 'rooms:create' | 'rooms:edit' | 'rooms:delete' | 'rooms:update_status'
   | 'guests:view' | 'guests:create' | 'guests:edit' | 'guests:delete'
   | 'transactions:view' | 'transactions:create' | 'transactions:edit' | 'transactions:delete' | 'transactions:export'
   | 'analytics:view' | 'analytics:export'
@@ -18,8 +18,10 @@ export type Permission =
   | 'users:view' | 'users:create' | 'users:edit' | 'users:delete'
   | 'roles:view' | 'roles:manage'
   | 'settings:view' | 'settings:manage'
+  | 'housekeeping:view' | 'housekeeping:create' | 'housekeeping:edit' | 'housekeeping:assign' | 'housekeeping:report'
+  | 'maintenance:view' | 'maintenance:create' | 'maintenance:edit' | 'maintenance:assign' | 'maintenance:report'
 
-export type RoleKey = 'admin' | 'manager' | 'front_desk' | 'receptionist' | 'accountant' | 'staff'
+export type RoleKey = 'admin' | 'manager' | 'front_desk' | 'receptionist' | 'accountant' | 'staff' | 'housekeeper' | 'maintenance'
 
 export interface RoleDefinition {
   key: RoleKey
@@ -92,6 +94,20 @@ export const ALL_PERMISSIONS: { key: Permission; label: string; group: string }[
   // Settings
   { key: 'settings:view', label: 'View Settings', group: 'Settings' },
   { key: 'settings:manage', label: 'Manage Settings', group: 'Settings' },
+  // Housekeeping
+  { key: 'housekeeping:view', label: 'View Housekeeping', group: 'Housekeeping' },
+  { key: 'housekeeping:create', label: 'Create Housekeeping Tasks', group: 'Housekeeping' },
+  { key: 'housekeeping:edit', label: 'Edit Housekeeping Tasks', group: 'Housekeeping' },
+  { key: 'housekeeping:assign', label: 'Assign Housekeeping Tasks', group: 'Housekeeping' },
+  { key: 'housekeeping:report', label: 'Submit Daily Reports', group: 'Housekeeping' },
+  // Maintenance
+  { key: 'maintenance:view', label: 'View Maintenance', group: 'Maintenance' },
+  { key: 'maintenance:create', label: 'Create Work Orders', group: 'Maintenance' },
+  { key: 'maintenance:edit', label: 'Edit Work Orders', group: 'Maintenance' },
+  { key: 'maintenance:assign', label: 'Assign Work Orders', group: 'Maintenance' },
+  { key: 'maintenance:report', label: 'Submit Maintenance Reports', group: 'Maintenance' },
+  // Rooms status update (for housekeeping/maintenance)
+  { key: 'rooms:update_status', label: 'Update Room Status', group: 'Rooms' },
 ]
 
 const ALL: Permission[] = ALL_PERMISSIONS.map(p => p.key)
@@ -170,6 +186,32 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
     permissions: [
       'rooms:view',
       'bookings:view',
+    ],
+  },
+  {
+    key: 'housekeeper',
+    label: 'Housekeeper',
+    description: 'Can manage housekeeping tasks, update room cleaning status, view bookings/reservations and submit daily reports.',
+    color: 'bg-teal-100 text-teal-800',
+    permissions: [
+      'housekeeping:view', 'housekeeping:create', 'housekeeping:edit', 'housekeeping:report',
+      'rooms:view', 'rooms:update_status',
+      'bookings:view',
+      'reservations:view',
+      'settings:view',
+    ],
+  },
+  {
+    key: 'maintenance',
+    label: 'Maintenance',
+    description: 'Can manage maintenance work orders, update room maintenance status, view bookings/reservations and submit reports.',
+    color: 'bg-orange-100 text-orange-800',
+    permissions: [
+      'maintenance:view', 'maintenance:create', 'maintenance:edit', 'maintenance:report',
+      'rooms:view', 'rooms:update_status',
+      'bookings:view',
+      'reservations:view',
+      'settings:view',
     ],
   },
 ]
