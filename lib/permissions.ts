@@ -161,6 +161,7 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
       'payments:view', 'payments:create',
       'organizations:view',
       'ledger:view',
+      'night_audit:view', 'night_audit:run',
     ],
   },
   {
