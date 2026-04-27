@@ -34,8 +34,11 @@ export default function RoomsPage() {
   const [rooms, setRooms] = useState<Room[]>([])
   const [addRoomModalOpen, setAddRoomModalOpen] = useState(false)
   const { initialLoading, startFetch, endFetch } = usePageData()
-  const { organizationId } = useAuth()
+  const { organizationId, role } = useAuth()
   const router = useRouter()
+
+  // Only admin and manager can add rooms
+  const canAddRoom = role && ['admin', 'manager'].includes(role)
 
   useEffect(() => {
     fetchRooms()
@@ -125,10 +128,12 @@ export default function RoomsPage() {
           <h1 className="text-3xl font-bold tracking-tight">Rooms</h1>
           <p className="text-muted-foreground">Manage room inventory and status</p>
         </div>
-        <Button onClick={() => setAddRoomModalOpen(true)}>
-          <Plus className="mr-2 h-4 w-4" />
+        {canAddRoom && (
+          <Button onClick={() => setAddRoomModalOpen(true)}>
+            <Plus className="mr-2 h-4 w-4" />
           Add Room
         </Button>
+        )}
       </div>
 
       <EnhancedDataTable

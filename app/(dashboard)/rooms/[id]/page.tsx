@@ -12,7 +12,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { toast } from 'sonner'
 import { createClient } from '@/lib/supabase/client'
 import { formatNaira } from '@/lib/utils/currency'
-import { AlertCircle, X, ArrowLeft, Edit, Trash2, Users, DollarSign, MapPin } from 'lucide-react'
+import { AlertCircle, X, ArrowLeft, Edit, Trash2, Users, DollarSign, MapPin, CalendarDays, Clock, Search, SlidersHorizontal } from 'lucide-react'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Separator } from '@/components/ui/separator'
+import { format, isWithinInterval, parseISO, startOfDay, endOfDay } from 'date-fns'
+import { useMemo } from 'react'
 
 const ROOM_TYPES = [
   'Deluxe', 'Royal', 'Kings', 'Mini Suite', 'Executive Suite', 'Diplomatic Suite',
@@ -33,18 +37,78 @@ interface Room {
   amenities: string[]
 }
 
+interface GuestHistory {
+  id: string
+  check_in: string
+  check_out: string
+  number_of_nights: number
+  status: string
+  payment_status: string
+  total_amount: number
+  balance: number
+  rate_per_night: number
+  guests: { name: string; phone: string } | null
+  created_at: string
+}
+
 export default function RoomDetailPage() {
   const router = useRouter()
   const params = useParams()
   const roomId = params.id as string
-  
+
   const [room, setRoom] = useState<Room | null>(null)
   const [loading, setLoading] = useState(true)
+  const [guestHistory, setGuestHistory] = useState<GuestHistory[]>([])
+  const [historyLoading, setHistoryLoading] = useState(false)
+
+  // History filters
+  const [filterName, setFilterName] = useState('')
+  const [filterDateFrom, setFilterDateFrom] = useState('')
+  const [filterDateTo, setFilterDateTo] = useState('')
+  const [filterStatus, setFilterStatus] = useState('all')
+  const [filterPayment, setFilterPayment] = useState('all')
+
+  const filteredHistory = useMemo(() => {
+    return guestHistory.filter((entry) => {
+      // Guest name filter
+      if (filterName.trim()) {
+        const name = entry.guests?.name?.toLowerCase() ?? ''
+        if (!name.includes(filterName.trim().toLowerCase())) return false
+      }
+      // Date range filter — check if check-in falls within range
+      if (filterDateFrom) {
+        const from = startOfDay(parseISO(filterDateFrom))
+        const checkIn = parseISO(entry.check_in)
+        if (checkIn < from) return false
+      }
+      if (filterDateTo) {
+        const to = endOfDay(parseISO(filterDateTo))
+        const checkIn = parseISO(entry.check_in)
+        if (checkIn > to) return false
+      }
+      // Booking status filter
+      if (filterStatus !== 'all' && entry.status !== filterStatus) return false
+      // Payment status filter
+      if (filterPayment !== 'all' && entry.payment_status !== filterPayment) return false
+      return true
+    })
+  }, [guestHistory, filterName, filterDateFrom, filterDateTo, filterStatus, filterPayment])
+
+  const hasActiveFilters = filterName || filterDateFrom || filterDateTo || filterStatus !== 'all' || filterPayment !== 'all'
+
+  const clearFilters = () => {
+    setFilterName('')
+    setFilterDateFrom('')
+    setFilterDateTo('')
+    setFilterStatus('all')
+    setFilterPayment('all')
+  }
+
   const [editModalOpen, setEditModalOpen] = useState(false)
   const [saveLoading, setSaveLoading] = useState(false)
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
   const [deleteLoading, setDeleteLoading] = useState(false)
-  
+
   const [formData, setFormData] = useState({
     room_type: '',
     floor_number: '',
@@ -56,7 +120,34 @@ export default function RoomDetailPage() {
 
   useEffect(() => {
     fetchRoom()
+    fetchGuestHistory()
   }, [roomId])
+
+  const fetchGuestHistory = async () => {
+    try {
+      setHistoryLoading(true)
+      const supabase = createClient()
+      const { data, error } = await supabase
+        .from('bookings')
+        .select(`
+          id, check_in, check_out, number_of_nights, status, payment_status,
+          total_amount, balance, rate_per_night, created_at,
+          guests (name, phone)
+        `)
+        .eq('room_id', roomId)
+        .order('check_in', { ascending: false })
+
+      if (error) throw error
+      setGuestHistory((data || []).map((b: any) => ({
+        ...b,
+        guests: b.guests ?? null,
+      })))
+    } catch (error: any) {
+      console.error('Error fetching room history:', error.message)
+    } finally {
+      setHistoryLoading(false)
+    }
+  }
 
   const fetchRoom = async () => {
     try {
@@ -94,7 +185,7 @@ export default function RoomDetailPage() {
     try {
       setSaveLoading(true)
       const supabase = createClient()
-      
+
       const { error } = await supabase
         .from('rooms')
         .update({
@@ -108,7 +199,7 @@ export default function RoomDetailPage() {
         .eq('id', roomId)
 
       if (error) throw error
-      
+
       toast.success('Room details updated successfully')
       setEditModalOpen(false)
       fetchRoom()
@@ -169,7 +260,7 @@ export default function RoomDetailPage() {
         .eq('id', roomId)
 
       if (error) throw error
-      
+
       toast.success('Room deleted successfully')
       router.push('/rooms')
     } catch (error: any) {
@@ -237,9 +328,9 @@ export default function RoomDetailPage() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="1">Floor 1</SelectItem>
-                  <SelectItem value="2">Floor 2</SelectItem>
-                  <SelectItem value="3">Floor 3</SelectItem>
+                  <SelectItem value="0">Ground Floor</SelectItem>
+                  <SelectItem value="1">First Floor</SelectItem>
+                  <SelectItem value="2">Second Floor</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -258,7 +349,7 @@ export default function RoomDetailPage() {
                 type="number"
                 value={formData.price_per_night}
                 onChange={(e) => setFormData({ ...formData, price_per_night: e.target.value })}
-                placeholder="e.g., 25000"
+                placeholder="e.g., 100,000"
               />
             </div>
             <div className="space-y-2">
@@ -329,73 +420,269 @@ export default function RoomDetailPage() {
         </div>
       </div>
 
-      <Card>
-        <CardHeader>
-          <div className="flex items-start justify-between">
-            <div>
-              <CardTitle className="text-3xl">Room {room.room_number}</CardTitle>
-              <p className="text-muted-foreground mt-1">{room.room_type}</p>
-            </div>
-            <Badge variant="outline" className={statusColors[room.status]}>
-              {room.status}
-            </Badge>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div className="space-y-2">
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <MapPin className="h-4 w-4" />
-                <span className="text-sm">Location</span>
-              </div>
-              <p className="font-semibold">Floor {room.floor_number}</p>
-            </div>
-            <div className="space-y-2">
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <Users className="h-4 w-4" />
-                <span className="text-sm">Capacity</span>
-              </div>
-              <p className="font-semibold">{room.max_occupancy} guests</p>
-            </div>
-            <div className="space-y-2">
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <DollarSign className="h-4 w-4" />
-                <span className="text-sm">Rate/Night</span>
-              </div>
-              <p className="font-semibold">{formatNaira(room.price_per_night)}</p>
-            </div>
-            <div className="space-y-2">
-              <div className="text-sm text-muted-foreground">Status</div>
-              <p className="font-semibold capitalize">{room.status}</p>
-            </div>
-          </div>
+      <Tabs defaultValue="details">
+        <TabsList>
+          <TabsTrigger value="details">Room Details</TabsTrigger>
+          <TabsTrigger value="history">
+            Guest History
+            {guestHistory.length > 0 && (
+              <span className="ml-1.5 rounded-full bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary">
+                {guestHistory.length}
+              </span>
+            )}
+          </TabsTrigger>
+        </TabsList>
 
-          {room.amenities && room.amenities.length > 0 && (
-            <div className="space-y-3 pt-4 border-t">
-              <h3 className="font-semibold">Amenities</h3>
-              <div className="flex flex-wrap gap-2">
-                {room.amenities.map((amenity: string, i: number) => (
-                  <Badge key={i} variant="secondary">{amenity}</Badge>
-                ))}
+        {/* Room Details Tab */}
+        <TabsContent value="details">
+          <Card>
+            <CardHeader>
+              <div className="flex items-start justify-between">
+                <div>
+                  <CardTitle className="text-3xl">Room {room.room_number}</CardTitle>
+                  <p className="text-muted-foreground mt-1">{room.room_type}</p>
+                </div>
+                <Badge variant="outline" className={statusColors[room.status]}>
+                  {room.status}
+                </Badge>
               </div>
-            </div>
-          )}
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 text-muted-foreground">
+                    <MapPin className="h-4 w-4" />
+                    <span className="text-sm">Location</span>
+                  </div>
+                  <p className="font-semibold">Floor {room.floor_number}</p>
+                </div>
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 text-muted-foreground">
+                    <Users className="h-4 w-4" />
+                    <span className="text-sm">Capacity</span>
+                  </div>
+                  <p className="font-semibold">{room.max_occupancy} guests</p>
+                </div>
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 text-muted-foreground">
+                    <DollarSign className="h-4 w-4" />
+                    <span className="text-sm">Rate/Night</span>
+                  </div>
+                  <p className="font-semibold">{formatNaira(room.price_per_night)}</p>
+                </div>
+                <div className="space-y-2">
+                  <div className="text-sm text-muted-foreground">Status</div>
+                  <p className="font-semibold capitalize">{room.status}</p>
+                </div>
+              </div>
 
-          <div className="space-y-3 pt-4 border-t">
-            <h3 className="font-semibold">Room Details</h3>
-            <div className="grid grid-cols-2 gap-4 text-sm">
-              <div>
-                <p className="text-muted-foreground">Room Type</p>
-                <p className="font-medium">{room.room_type}</p>
+              {room.amenities && room.amenities.length > 0 && (
+                <div className="space-y-3 pt-4 border-t">
+                  <h3 className="font-semibold">Amenities</h3>
+                  <div className="flex flex-wrap gap-2">
+                    {room.amenities.map((amenity: string, i: number) => (
+                      <Badge key={i} variant="secondary">{amenity}</Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="space-y-3 pt-4 border-t">
+                <h3 className="font-semibold">Room Details</h3>
+                <div className="grid grid-cols-2 gap-4 text-sm">
+                  <div>
+                    <p className="text-muted-foreground">Room Type</p>
+                    <p className="font-medium">{room.room_type}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Floor</p>
+                    <p className="font-medium">{room.floor_number}</p>
+                  </div>
+                </div>
               </div>
-              <div>
-                <p className="text-muted-foreground">Floor</p>
-                <p className="font-medium">{room.floor_number}</p>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Guest History Folio Tab */}
+        <TabsContent value="history">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Users className="h-5 w-5" />
+                Guest History — Room {room.room_number}
+              </CardTitle>
+              <p className="text-sm text-muted-foreground">
+                All guests and stays recorded for this room
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-4">
+
+              {/* Filter Bar */}
+              <div className="rounded-lg border bg-muted/30 p-4 space-y-3">
+                <div className="flex items-center gap-2 text-sm font-medium">
+                  <SlidersHorizontal className="h-4 w-4" />
+                  Filter Folio
+                  {hasActiveFilters && (
+                    <button
+                      onClick={clearFilters}
+                      className="ml-auto flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      <X className="h-3 w-3" />
+                      Clear filters
+                    </button>
+                  )}
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {/* Guest Name */}
+                  <div className="relative">
+                    <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+                    <Input
+                      placeholder="Search guest name..."
+                      value={filterName}
+                      onChange={(e) => setFilterName(e.target.value)}
+                      className="pl-8 h-9 text-sm"
+                    />
+                  </div>
+                  {/* Date From */}
+                  <div className="space-y-0">
+                    <label className="text-xs text-muted-foreground mb-1 block">Check-in from</label>
+                    <Input
+                      type="date"
+                      value={filterDateFrom}
+                      onChange={(e) => setFilterDateFrom(e.target.value)}
+                      className="h-9 text-sm"
+                    />
+                  </div>
+                  {/* Date To */}
+                  <div className="space-y-0">
+                    <label className="text-xs text-muted-foreground mb-1 block">Check-in to</label>
+                    <Input
+                      type="date"
+                      value={filterDateTo}
+                      onChange={(e) => setFilterDateTo(e.target.value)}
+                      className="h-9 text-sm"
+                      min={filterDateFrom || undefined}
+                    />
+                  </div>
+                  {/* Booking Status */}
+                  <Select value={filterStatus} onValueChange={setFilterStatus}>
+                    <SelectTrigger className="h-9 text-sm">
+                      <SelectValue placeholder="All statuses" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All statuses</SelectItem>
+                      <SelectItem value="checked_in">Checked In</SelectItem>
+                      <SelectItem value="checked_out">Checked Out</SelectItem>
+                      <SelectItem value="reserved">Reserved</SelectItem>
+                      <SelectItem value="cancelled">Cancelled</SelectItem>
+                      <SelectItem value="pending">Pending</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {/* Payment Status */}
+                  <Select value={filterPayment} onValueChange={setFilterPayment}>
+                    <SelectTrigger className="h-9 text-sm">
+                      <SelectValue placeholder="All payments" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All payments</SelectItem>
+                      <SelectItem value="paid">Paid</SelectItem>
+                      <SelectItem value="partial">Partial</SelectItem>
+                      <SelectItem value="pending">Pending</SelectItem>
+                      <SelectItem value="arrears">Arrears</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+
+              {/* Results summary */}
+              {!historyLoading && guestHistory.length > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  Showing {filteredHistory.length} of {guestHistory.length} record{guestHistory.length !== 1 ? 's' : ''}
+                  {hasActiveFilters && ' (filtered)'}
+                </p>
+              )}
+
+              {/* List */}
+              {historyLoading ? (
+                <div className="flex items-center justify-center py-12 text-muted-foreground">
+                  <Clock className="mr-2 h-4 w-4 animate-spin" />
+                  Loading history...
+                </div>
+              ) : guestHistory.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-12 text-muted-foreground gap-2">
+                  <CalendarDays className="h-8 w-8 opacity-40" />
+                  <p className="text-sm">No stays recorded for this room yet</p>
+                </div>
+              ) : filteredHistory.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-10 text-muted-foreground gap-2">
+                  <Search className="h-7 w-7 opacity-40" />
+                  <p className="text-sm">No records match your filters</p>
+                  <button onClick={clearFilters} className="text-xs underline hover:text-foreground">
+                    Clear filters
+                  </button>
+                </div>
+              ) : (
+                <div className="divide-y">
+                  {filteredHistory.map((entry) => {
+                    const bookingStatusColors: Record<string, string> = {
+                      checked_in: 'bg-green-500/10 text-green-700 border-green-200',
+                      checked_out: 'bg-gray-100 text-gray-600 border-gray-200',
+                      reserved: 'bg-blue-500/10 text-blue-700 border-blue-200',
+                      cancelled: 'bg-red-500/10 text-red-600 border-red-200',
+                      pending: 'bg-yellow-500/10 text-yellow-700 border-yellow-200',
+                    }
+                    const paymentColors: Record<string, string> = {
+                      paid: 'bg-green-500/10 text-green-700',
+                      partial: 'bg-yellow-500/10 text-yellow-700',
+                      pending: 'bg-gray-100 text-gray-600',
+                      arrears: 'bg-red-500/10 text-red-600',
+                    }
+                    return (
+                      <div key={entry.id} className="py-4 first:pt-0 last:pb-0">
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="flex-1 space-y-2">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <p className="font-semibold text-sm">
+                                {entry.guests?.name ?? 'Unknown Guest'}
+                              </p>
+                              {entry.guests?.phone && (
+                                <span className="text-xs text-muted-foreground">{entry.guests.phone}</span>
+                              )}
+                              <Badge variant="outline" className={`text-xs ${bookingStatusColors[entry.status] ?? ''}`}>
+                                {entry.status.replace('_', ' ')}
+                              </Badge>
+                              <Badge variant="secondary" className={`text-xs ${paymentColors[entry.payment_status] ?? ''}`}>
+                                {entry.payment_status}
+                              </Badge>
+                            </div>
+                            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                              <CalendarDays className="h-3.5 w-3.5" />
+                              <span>{format(parseISO(entry.check_in), 'dd MMM yyyy')}</span>
+                              <span>—</span>
+                              <span>{format(parseISO(entry.check_out), 'dd MMM yyyy')}</span>
+                              <span className="ml-1 font-medium text-foreground">
+                                ({entry.number_of_nights} night{entry.number_of_nights !== 1 ? 's' : ''})
+                              </span>
+                            </div>
+                          </div>
+                          <div className="text-right space-y-1 shrink-0">
+                            <p className="text-sm font-semibold">{formatNaira(entry.total_amount)}</p>
+                            {entry.balance > 0 && (
+                              <p className="text-xs text-destructive">Balance: {formatNaira(entry.balance)}</p>
+                            )}
+                            <p className="text-xs text-muted-foreground">{formatNaira(entry.rate_per_night)}/night</p>
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }
