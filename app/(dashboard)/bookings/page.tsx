@@ -57,6 +57,7 @@ export default function BookingsPage() {
   const { organizationId, role, userId } = useAuth()
   const router = useRouter()
   const isAdmin = role === 'admin'
+  const canManageFolio = isAdmin || role === 'front_desk'
 
   useEffect(() => {
     let isMounted = true
@@ -360,7 +361,7 @@ export default function BookingsPage() {
           {
             key: 'actions',
             label: 'Actions',
-            render: (booking) => isAdmin ? (
+            render: (booking) => canManageFolio ? (
               <div className="flex gap-2">
                 <Button 
                   size="sm" 
