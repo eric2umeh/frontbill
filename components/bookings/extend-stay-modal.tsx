@@ -15,6 +15,7 @@ import { CreditCard, ChevronRight, Check } from 'lucide-react'
 import { format, differenceInDays } from 'date-fns'
 import { cn } from '@/lib/utils'
 import { createClient } from '@/lib/supabase/client'
+import { isSelectableLedgerName } from '@/lib/utils/ledger-organization'
 
 interface ExtendStayModalProps {
   open: boolean
@@ -65,13 +66,17 @@ export function ExtendStayModal({ open, onClose, onSuccess, booking }: ExtendSta
       const { data, error } = await supabase
         .from('city_ledger_accounts')
         .select('id, account_name, balance')
+        .eq('organization_id', booking.organization_id!)
         .neq('account_type', 'individual')
         .neq('account_type', 'guest')
         .order('account_name')
 
       if (error) throw error
-      setOrganizations((data || []).map(d => ({ id: d.id, name: d.account_name, current_balance: d.balance || 0 })))
-      setFilteredOrganizations((data || []).map(d => ({ id: d.id, name: d.account_name, current_balance: d.balance || 0 })))
+      const accounts = (data || [])
+        .filter((d: any) => isSelectableLedgerName(d.account_name))
+        .map((d: any) => ({ id: d.id, name: d.account_name, current_balance: d.balance || 0 }))
+      setOrganizations(accounts)
+      setFilteredOrganizations(accounts)
     } catch (error: any) {
       toast.error('Failed to load organizations')
     }
@@ -402,7 +407,7 @@ export function ExtendStayModal({ open, onClose, onSuccess, booking }: ExtendSta
               <div className="space-y-2">
                 <Label htmlFor="paymentMethod">Payment Method *</Label>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                  {['cash', 'pos', 'transfer', 'bank_transfer', 'city_ledger'].map((method) => (
+                  {['cash', 'pos', 'transfer', 'city_ledger'].map((method) => (
                     <Button
                       key={method}
                       variant={paymentMethod === method ? 'default' : 'outline'}
