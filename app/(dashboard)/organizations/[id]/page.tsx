@@ -15,6 +15,8 @@ import { createClient } from '@/lib/supabase/client'
 import { formatNaira } from '@/lib/utils/currency'
 import { format } from 'date-fns'
 import CityLedgerPaymentModal from '@/components/city-ledger/city-ledger-payment-modal'
+import { useAuth } from '@/lib/auth-context'
+import { getUserDisplayName } from '@/lib/utils/user-display'
 
 interface Organization {
   id: string
@@ -32,6 +34,7 @@ interface Organization {
 }
 
 interface ProfileInfo {
+  id?: string
   full_name?: string
 }
 
@@ -39,6 +42,8 @@ export default function OrganizationDetailPage() {
   const router = useRouter()
   const params = useParams()
   const orgId = params.id as string
+  const { role } = useAuth()
+  const isAdmin = role === 'admin'
 
   const [organization, setOrganization] = useState<Organization | null>(null)
   const [createdByProfile, setCreatedByProfile] = useState<ProfileInfo | null>(null)
@@ -117,12 +122,12 @@ export default function OrganizationDetailPage() {
 
       // Fetch creator profile
       if (data.created_by) {
-        const { data: profile } = await supabase.from('profiles').select('full_name').eq('id', data.created_by).single()
+        const { data: profile } = await supabase.from('profiles').select('id, full_name').eq('id', data.created_by).single()
         setCreatedByProfile(profile)
       }
       // Fetch updater profile
       if (data.updated_by) {
-        const { data: profile } = await supabase.from('profiles').select('full_name').eq('id', data.updated_by).single()
+        const { data: profile } = await supabase.from('profiles').select('id, full_name').eq('id', data.updated_by).single()
         setUpdatedByProfile(profile)
       }
     } catch (error: any) {
@@ -178,8 +183,8 @@ export default function OrganizationDetailPage() {
   const handleDelete = () => {
     if (!organization) return
 
-    toast(
-      (t) => (
+    toast.custom(
+      (t: string | number) => (
         <div className="flex flex-col gap-3">
           <div className="flex gap-2 items-start">
             <AlertCircle className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" />
@@ -207,10 +212,7 @@ export default function OrganizationDetailPage() {
           </div>
         </div>
       ),
-      {
-        duration: Infinity,
-        className: 'bg-red-50 border-red-200',
-      }
+      { duration: Infinity }
     )
   }
 
@@ -291,7 +293,7 @@ export default function OrganizationDetailPage() {
             </Badge>
           </div>
         </div>
-        <div className="flex gap-2">
+        {isAdmin && <div className="flex gap-2">
           {isEditing ? (
             <>
               <Button
@@ -328,7 +330,7 @@ export default function OrganizationDetailPage() {
               </Button>
             </>
           )}
-        </div>
+        </div>}
       </div>
 
       {/* Content */}
@@ -493,7 +495,7 @@ export default function OrganizationDetailPage() {
                 <div>
                   <p className="text-muted-foreground">Created By</p>
                   <p className="font-medium">
-                    {createdByProfile.full_name || 'Unknown User'}
+                    {getUserDisplayName(createdByProfile, organization.created_by)}
                   </p>
                 </div>
               )}
@@ -514,7 +516,7 @@ export default function OrganizationDetailPage() {
                     <div>
                       <p className="text-muted-foreground">Last Updated By</p>
                       <p className="font-medium">
-                        {updatedByProfile.full_name || 'Unknown User'}
+                        {getUserDisplayName(updatedByProfile, organization.updated_by)}
                       </p>
                     </div>
                   )}
