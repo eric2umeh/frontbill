@@ -167,7 +167,7 @@ export const paymentModes = [
  'Cash',
  'Card',
  'Mobile Money',
- 'Bank Transfer',
+'Transfer',
  'Corporate Account',
  'Voucher',
  'Crypto'
