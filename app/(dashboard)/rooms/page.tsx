@@ -72,11 +72,11 @@ export default function RoomsPage() {
       if (userIds.length > 0) {
         const { data: profiles } = await supabase
           .from('profiles')
-          .select('id, full_name')
+          .select('id, full_name, email')
           .in('id', userIds)
         
-        profiles?.forEach(profile => {
-          userMap[profile.id] = profile.full_name || 'Unknown User'
+        profiles?.forEach((profile: any) => {
+          userMap[profile.id] = profile.full_name || profile.email || 'Unknown User'
         })
       }
       
@@ -96,7 +96,7 @@ export default function RoomsPage() {
     }
   }
 
-  const statusColors = {
+  const statusColors: Record<string, string> = {
     available: 'bg-green-500/10 text-green-700 border-green-200',
     occupied: 'bg-red-500/10 text-red-700 border-red-200',
     cleaning: 'bg-yellow-500/10 text-yellow-700 border-yellow-200',
@@ -162,7 +162,7 @@ export default function RoomsPage() {
                 onClick={() => router.push(`/rooms/${room.id}`)}
               >
                 <div className="font-semibold text-lg">Room {room.room_number}</div>
-                <div className="text-xs text-muted-foreground">Floor {room.floor_number}</div>
+                <div className="text-xs text-muted-foreground">{room.floor_number === 0 ? 'Ground Floor' : `Floor ${room.floor_number}`}</div>
               </div>
             ),
           },
@@ -285,7 +285,7 @@ export default function RoomsPage() {
               <div className="space-y-2">
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-muted-foreground">Floor</span>
-                  <span className="font-medium">{room.floor_number}</span>
+                  <span className="font-medium">{room.floor_number === 0 ? 'Ground Floor' : `Floor ${room.floor_number}`}</span>
                 </div>
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-muted-foreground">Capacity</span>
