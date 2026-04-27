@@ -159,7 +159,7 @@ export function AddRoomModal({ open, onClose, onSuccess }: AddRoomModalProps) {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="0">Ground Floor</SelectItem>
+                  <SelectItem value="Ground Floor">Ground Floor</SelectItem>
                   <SelectItem value="1">First Floor</SelectItem>
                   <SelectItem value="2">Second Floor</SelectItem>
                 </SelectContent>
@@ -204,7 +204,7 @@ export function AddRoomModal({ open, onClose, onSuccess }: AddRoomModalProps) {
                   type="number"
                   value={formData.rate}
                   onChange={(e) => setFormData({ ...formData, rate: Number(e.target.value) })}
-                  placeholder="25,000"
+                  placeholder="100,000"
                 />
               </div>
             </div>
