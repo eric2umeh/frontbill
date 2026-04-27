@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
-import { ArrowLeft, Calendar, User, DollarSign, CreditCard, File } from 'lucide-react'
+import { ArrowLeft, Calendar, User, DollarSign, CreditCard, File, Banknote, ArrowRightLeft, Trash2, AlertCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -20,6 +20,7 @@ export default function TransactionDetailPage() {
   const [loading, setLoading] = useState(true)
   const [booking, setBooking] = useState<any>(null)
   const [guest, setGuest] = useState<any>(null)
+  const [deleteLoading, setDeleteLoading] = useState(false)
 
   useEffect(() => {
     fetchTransactionDetails()
@@ -30,29 +31,29 @@ export default function TransactionDetailPage() {
       setLoading(true)
       const supabase = createClient()
 
-      // First try to find in payments table
+      // The transactions table powers the list view, so prefer it for detail/delete.
       let txData = null
       let source = 'unknown'
 
-      const { data: paymentData } = await supabase
-        .from('payments')
+      const { data: txnData } = await supabase
+        .from('transactions')
         .select('*')
         .eq('id', transactionId)
-        .single()
+        .maybeSingle()
 
-      if (paymentData) {
-        txData = paymentData
-        source = 'payment'
+      if (txnData) {
+        txData = txnData
+        source = 'transaction'
       } else {
-        // Try transactions table
-        const { data: txnData } = await supabase
-          .from('transactions')
+        // Fall back to payments for older links that point directly to a payment row.
+        const { data: paymentData } = await supabase
+          .from('payments')
           .select('*')
           .eq('id', transactionId)
-          .single()
-        if (txnData) {
-          txData = txnData
-          source = 'transaction'
+          .maybeSingle()
+        if (paymentData) {
+          txData = paymentData
+          source = 'payment'
         }
       }
 
@@ -113,10 +114,74 @@ export default function TransactionDetailPage() {
       case 'cash': return <Banknote className="h-4 w-4" />
       case 'pos': return <CreditCard className="h-4 w-4" />
       case 'card': return <CreditCard className="h-4 w-4" />
+      case 'transfer': return <ArrowRightLeft className="h-4 w-4" />
       case 'bank_transfer': return <ArrowRightLeft className="h-4 w-4" />
       case 'city_ledger': return <File className="h-4 w-4" />
       default: return <DollarSign className="h-4 w-4" />
     }
+  }
+
+  const handleDeleteTransaction = () => {
+    toast.custom(
+      (t: string | number) => (
+        <div className="flex flex-col gap-3">
+          <div className="flex gap-2 items-start">
+            <AlertCircle className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" />
+            <div>
+              <p className="font-semibold">Delete Transaction?</p>
+              <p className="text-sm text-muted-foreground">This removes this transaction record permanently.</p>
+            </div>
+          </div>
+          <div className="flex gap-2 justify-end">
+            <Button variant="outline" size="sm" onClick={() => toast.dismiss(t)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              disabled={deleteLoading}
+              onClick={async () => {
+                toast.dismiss(t)
+                setDeleteLoading(true)
+                try {
+                  const supabase = createClient()
+                  const transactionDelete = await supabase
+                    .from('transactions')
+                    .delete()
+                    .eq('id', transaction.id)
+                    .select('id')
+
+                  if (transactionDelete.error) throw transactionDelete.error
+
+                  const paymentDelete = await supabase
+                    .from('payments')
+                    .delete()
+                    .eq('id', transaction.id)
+                    .select('id')
+
+                  if (paymentDelete.error) throw paymentDelete.error
+
+                  if ((transactionDelete.data || []).length === 0 && (paymentDelete.data || []).length === 0) {
+                    throw new Error('Transaction was not found or could not be deleted')
+                  }
+
+                  toast.success('Transaction deleted')
+                  router.replace('/transactions')
+                  router.refresh()
+                } catch (error: any) {
+                  toast.error(error.message || 'Failed to delete transaction')
+                } finally {
+                  setDeleteLoading(false)
+                }
+              }}
+            >
+              Delete
+            </Button>
+          </div>
+        </div>
+      ),
+      { duration: Infinity }
+    )
   }
 
   const transactionDate = transaction.payment_date || transaction.created_at
@@ -232,6 +297,10 @@ export default function TransactionDetailPage() {
           )}
           <Button variant="outline" onClick={() => router.back()}>
             Back
+          </Button>
+          <Button variant="destructive" onClick={handleDeleteTransaction} disabled={deleteLoading}>
+            <Trash2 className="mr-2 h-4 w-4" />
+            {deleteLoading ? 'Deleting...' : 'Delete Transaction'}
           </Button>
         </div>
       </div>

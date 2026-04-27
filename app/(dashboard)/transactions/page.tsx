@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { formatNaira } from '@/lib/utils/currency'
 import { usePageData } from '@/hooks/use-page-data'
 import { useAuth } from '@/lib/auth-context'
+import { fetchUserDisplayNameMap } from '@/lib/utils/fetch-user-display-names'
 import {
   Calendar as CalendarIcon, TrendingUp, CreditCard, Loader2,
   Banknote, Smartphone, ArrowRightLeft, Building2, Clock
@@ -44,7 +45,7 @@ type DateRange = 'today' | 'yesterday' | 'this_week' | 'this_month' | 'custom'
 export default function TransactionsPage() {
   const [payments, setPayments] = useState<Payment[]>([])
   const { initialLoading, startFetch, endFetch } = usePageData()
-  const { organizationId } = useAuth()
+  const { organizationId, userId } = useAuth()
   const [dateRange, setDateRange] = useState<DateRange>('this_month')
   const [customDate, setCustomDate] = useState<Date>(new Date())
   const [calOpen, setCalOpen] = useState(false)
@@ -80,7 +81,36 @@ export default function TransactionsPage() {
         return
       }
 
-      const all: Payment[] = (txData || [])
+      const visibleTxData = (txData || []).filter((t: any) => {
+        const pDate = new Date(t.created_at).getTime()
+        return pDate >= dateFilter.from.getTime() && pDate <= dateFilter.to.getTime()
+      })
+
+      const bookingIds = Array.from(new Set(visibleTxData.map((t: any) => t.booking_id).filter(Boolean)))
+      const bookingCreatorMap: Record<string, string> = {}
+      if (bookingIds.length > 0) {
+        const { data: bookingRows } = await supabase
+          .from('bookings')
+          .select('id, created_by')
+          .in('id', bookingIds)
+        ;(bookingRows || []).forEach((booking: any) => {
+          if (booking.created_by) bookingCreatorMap[booking.id] = booking.created_by
+        })
+      }
+
+      const isUuid = (value: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+      const receivedByIds = Array.from(new Set(
+        visibleTxData
+          .map((t: any) => {
+            const receivedBy = String(t.received_by || '').trim()
+            if (receivedBy && isUuid(receivedBy)) return receivedBy
+            return t.booking_id ? bookingCreatorMap[t.booking_id] : null
+          })
+          .filter(Boolean)
+      ))
+      const receivedByNameMap = await fetchUserDisplayNameMap(receivedByIds as string[], userId)
+
+      const all: Payment[] = visibleTxData
         .map((t: any) => ({
           id: t.id,
           booking_id: t.booking_id,
@@ -92,18 +122,19 @@ export default function TransactionsPage() {
           payment_date: t.created_at,
           reference_number: t.transaction_id || null,
           notes: t.description || null,
-          received_by: null,
+          received_by: t.received_by || bookingCreatorMap[t.booking_id] || null,
           guest_phone: '',
           folio_id: t.transaction_id || '—',
-          received_by_name: t.received_by || 'System',
+          received_by_name: (() => {
+            const receivedBy = String(t.received_by || '').trim()
+            if (receivedBy && !isUuid(receivedBy)) return receivedBy
+            const actorId = receivedBy || (t.booking_id ? bookingCreatorMap[t.booking_id] : null)
+            return actorId ? receivedByNameMap[actorId] || 'System' : 'System'
+          })(),
           status: t.status,
           description: t.description,
           source: 'transaction' as const,
         }))
-        .filter((p) => {
-          const pDate = new Date(p.payment_date).getTime()
-          return pDate >= dateFilter.from.getTime() && pDate <= dateFilter.to.getTime()
-        })
 
       setPayments(all)
     } catch (err: any) {
@@ -112,15 +143,15 @@ export default function TransactionsPage() {
     } finally {
       endFetch()
     }
-  }, [dateFilter, organizationId])
+  }, [dateFilter, organizationId, userId])
 
   useEffect(() => { fetchPayments() }, [fetchPayments])
 
   const summary = useMemo(() => {
-    const cash     = payments.filter(p => p.payment_method === 'cash').reduce((s,p) => s + p.amount, 0)
-    const pos      = payments.filter(p => p.payment_method === 'pos').reduce((s,p) => s + p.amount, 0)
-    const transfer = payments.filter(p => ['transfer','bank_transfer'].includes(p.payment_method)).reduce((s,p) => s + p.amount, 0)
-    const ledger   = payments.filter(p => p.payment_method === 'city_ledger').reduce((s,p) => s + p.amount, 0)
+    const cash     = payments.filter((p: any) => p.payment_method === 'cash').reduce((s: number, p: any) => s + p.amount, 0)
+    const pos      = payments.filter((p: any) => p.payment_method === 'pos').reduce((s: number, p: any) => s + p.amount, 0)
+    const transfer = payments.filter((p: any) => ['transfer','bank_transfer'].includes(p.payment_method)).reduce((s: number, p: any) => s + p.amount, 0)
+    const ledger   = payments.filter((p: any) => p.payment_method === 'city_ledger').reduce((s: number, p: any) => s + p.amount, 0)
     const total    = payments.reduce((s,p) => s + p.amount, 0)
     return { cash, pos, transfer, ledger, total, count: payments.length }
   }, [payments])
@@ -240,7 +271,6 @@ export default function TransactionsPage() {
               { value: 'cash',         label: 'Cash' },
               { value: 'pos',          label: 'POS' },
               { value: 'transfer',     label: 'Transfer' },
-              { value: 'bank_transfer',label: 'Bank Transfer' },
               { value: 'city_ledger',  label: 'City Ledger' },
             ],
           },
@@ -320,6 +350,9 @@ export default function TransactionsPage() {
                   {cfg.icon}{cfg.label}
                 </Badge>
                 <span className="text-muted-foreground">{format(new Date(p.payment_date), 'dd MMM, HH:mm')}</span>
+              </div>
+              <div className="text-xs text-muted-foreground">
+                Received by {p.received_by_name || 'System'}
               </div>
             </CardContent>
           )
