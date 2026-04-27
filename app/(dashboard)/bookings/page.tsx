@@ -17,6 +17,7 @@ import { Plus, Loader2 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { getUserDisplayName } from '@/lib/utils/user-display'
+import { fetchUserDisplayNameMap } from '@/lib/utils/fetch-user-display-names'
 
 interface Booking {
   id: string
@@ -53,7 +54,7 @@ export default function BookingsPage() {
   const [addChargeModalOpen, setAddChargeModalOpen] = useState(false)
   const [selectedBooking, setSelectedBooking] = useState<any>(null)
   const { initialLoading, startFetch, endFetch } = usePageData()
-  const { organizationId, role } = useAuth()
+  const { organizationId, role, userId } = useAuth()
   const router = useRouter()
   const isAdmin = role === 'admin'
 
@@ -87,18 +88,7 @@ export default function BookingsPage() {
       const userIds = Array.from(new Set(
         [...(data || []).map((b: any) => b.created_by), ...(data || []).map((b: any) => b.updated_by)].filter(Boolean)
       ))
-      let userMap: { [key: string]: string } = {}
-      
-      if (userIds.length > 0) {
-        const { data: profiles } = await supabase
-          .from('profiles')
-          .select('id, full_name')
-          .in('id', userIds)
-        
-        profiles?.forEach((profile: any) => {
-          userMap[profile.id] = getUserDisplayName(profile, profile.id)
-        })
-      }
+      const userMap = await fetchUserDisplayNameMap(userIds as string[], userId)
       
       // Derive payment_method from notes field (since there's no payment_method column on bookings)
       const bookingsWithUsers = (data || []).map((booking: any) => {

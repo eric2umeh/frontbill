@@ -16,6 +16,7 @@ import { Plus, Users, Loader2 } from 'lucide-react'
 import { BulkBookingModal } from '@/components/reservations/bulk-booking-modal'
 import { NewReservationModal } from '@/components/reservations/new-reservation-modal'
 import { getUserDisplayName } from '@/lib/utils/user-display'
+import { fetchUserDisplayNameMap } from '@/lib/utils/fetch-user-display-names'
 
 interface Reservation {
   id: string
@@ -47,7 +48,7 @@ export default function ReservationsPage() {
   const [bulkModalOpen, setBulkModalOpen] = useState(false)
   const [newReservationOpen, setNewReservationOpen] = useState(false)
   const { initialLoading, startFetch, endFetch } = usePageData()
-  const { organizationId, role } = useAuth()
+  const { organizationId, role, userId } = useAuth()
   const router = useRouter()
 
   useEffect(() => {
@@ -86,14 +87,7 @@ export default function ReservationsPage() {
         ...(data || []).map((r: any) => r.created_by).filter(Boolean),
         ...(data || []).map((r: any) => r.updated_by).filter(Boolean),
       ])]
-      const profileMap: Record<string, string> = {}
-      if (userIds.length > 0) {
-        const { data: profiles } = await supabase
-          .from('profiles')
-          .select('id, full_name')
-          .in('id', userIds)
-        ;(profiles || []).forEach((p: any) => { profileMap[p.id] = getUserDisplayName(p, p.id) })
-      }
+      const profileMap = await fetchUserDisplayNameMap(userIds as string[], userId)
 
       // Map data to match interface and calculate balance from folio_charges
       const reservationsWithData = (data || []).map((reservation: any) => {

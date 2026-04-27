@@ -17,6 +17,7 @@ import { format } from 'date-fns'
 import CityLedgerPaymentModal from '@/components/city-ledger/city-ledger-payment-modal'
 import { useAuth } from '@/lib/auth-context'
 import { getUserDisplayName } from '@/lib/utils/user-display'
+import { fetchUserDisplayNameMap } from '@/lib/utils/fetch-user-display-names'
 
 interface Organization {
   id: string
@@ -42,7 +43,7 @@ export default function OrganizationDetailPage() {
   const router = useRouter()
   const params = useParams()
   const orgId = params.id as string
-  const { role } = useAuth()
+  const { role, userId } = useAuth()
   const isAdmin = role === 'admin'
 
   const [organization, setOrganization] = useState<Organization | null>(null)
@@ -120,15 +121,16 @@ export default function OrganizationDetailPage() {
         setLedgerHistory(txData || [])
       }
 
+      const profileIds = [data.created_by, data.updated_by].filter(Boolean)
+      const profileMap = await fetchUserDisplayNameMap(profileIds, userId)
+
       // Fetch creator profile
       if (data.created_by) {
-        const { data: profile } = await supabase.from('profiles').select('id, full_name').eq('id', data.created_by).single()
-        setCreatedByProfile(profile)
+        setCreatedByProfile({ id: data.created_by, full_name: profileMap[data.created_by] })
       }
       // Fetch updater profile
       if (data.updated_by) {
-        const { data: profile } = await supabase.from('profiles').select('id, full_name').eq('id', data.updated_by).single()
-        setUpdatedByProfile(profile)
+        setUpdatedByProfile({ id: data.updated_by, full_name: profileMap[data.updated_by] })
       }
     } catch (error: any) {
       toast.error(error.message || 'Organization not found')

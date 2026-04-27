@@ -32,17 +32,52 @@ export async function GET(request: Request) {
     }
 
     // Fetch all profiles in the same org — admin client bypasses RLS
-    const { data: users, error: usersError } = await admin
+    let { data: users, error: usersError } = await admin
       .from('profiles')
-      .select('id, full_name, role, avatar_url, created_at')
+      .select('id, full_name, role, avatar_url, created_at, added_by')
       .eq('organization_id', callerProfile.organization_id)
       .order('created_at', { ascending: true })
+
+    if (usersError && /added_by/i.test(usersError.message || '')) {
+      const retry = await admin
+        .from('profiles')
+        .select('id, full_name, role, avatar_url, created_at')
+        .eq('organization_id', callerProfile.organization_id)
+        .order('created_at', { ascending: true })
+      users = retry.data
+      usersError = retry.error
+    }
 
     if (usersError) {
       return NextResponse.json({ error: usersError.message }, { status: 500 })
     }
 
-    return NextResponse.json({ users: users || [] })
+    const addedByIds = Array.from(new Set((users || []).map((user: any) => user.added_by).filter(Boolean)))
+    const addedByMap: Record<string, string> = {}
+
+    if (addedByIds.length > 0) {
+      const { data: addedByProfiles } = await admin
+        .from('profiles')
+        .select('id, full_name')
+        .in('id', addedByIds)
+
+      ;(addedByProfiles || []).forEach((profile: any) => {
+        if (profile.full_name) addedByMap[profile.id] = profile.full_name
+      })
+    }
+
+    const fallbackCreator = (users || []).find((user: any) => user.role === 'admin' && user.full_name)
+      || (users || []).find((user: any) => user.full_name)
+    const fallbackCreatorName = fallbackCreator?.full_name || 'Unknown User'
+
+    const usersWithAddedBy = (users || []).map((user: any) => ({
+      ...user,
+      added_by_name: user.added_by
+        ? addedByMap[user.added_by] || fallbackCreatorName
+        : fallbackCreatorName,
+    }))
+
+    return NextResponse.json({ users: usersWithAddedBy })
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 })
   }

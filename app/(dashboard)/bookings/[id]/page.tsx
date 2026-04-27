@@ -18,10 +18,11 @@ import { ExtendStayModal } from '@/components/bookings/extend-stay-modal'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/lib/auth-context'
 import { getUserDisplayName } from '@/lib/utils/user-display'
+import { fetchUserDisplayNameMap } from '@/lib/utils/fetch-user-display-names'
 
 export default function BookingDetailPage({ params }: { params: Promise<{ id: string }> | { id: string } }) {
   const router = useRouter()
-  const { role } = useAuth()
+  const { role, userId } = useAuth()
   const isAdmin = role === 'admin'
   const [booking, setBooking] = useState<any>(null)
   const [loading, setLoading] = useState(true)
@@ -68,24 +69,13 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
       if (bookingError) throw bookingError
       setBooking(bookingData)
 
-      // Fetch user info for created_by
+      const bookingUserIds = [bookingData.created_by, bookingData.updated_by].filter(Boolean)
+      const bookingUserMap = await fetchUserDisplayNameMap(bookingUserIds, userId)
       if (bookingData.created_by) {
-        const { data: userData } = await supabase
-          .from('profiles')
-          .select('id, full_name')
-          .eq('id', bookingData.created_by)
-          .single()
-        setCreatedByUser(userData)
+        setCreatedByUser({ id: bookingData.created_by, full_name: bookingUserMap[bookingData.created_by] })
       }
-
-      // Fetch user info for updated_by if exists
       if (bookingData.updated_by) {
-        const { data: userData } = await supabase
-          .from('profiles')
-          .select('id, full_name')
-          .eq('id', bookingData.updated_by)
-          .single()
-        setUpdatedByUser(userData)
+        setUpdatedByUser({ id: bookingData.updated_by, full_name: bookingUserMap[bookingData.updated_by] })
       }
 
       // Fetch folio charges from database
@@ -98,17 +88,11 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
       if (chargesError) throw chargesError
 
       // Fetch creator info for each charge
-      const chargesWithCreator = await Promise.all(chargesData.map(async (charge: any) => {
-        let creatorName = 'System'
-        if (charge.created_by) {
-          const { data: userData } = await supabase
-            .from('profiles')
-            .select('id, full_name')
-            .eq('id', charge.created_by)
-            .single()
-          creatorName = getUserDisplayName(userData, charge.created_by)
-        }
-        
+      const chargeCreatorIds = chargesData.map((charge: any) => charge.created_by).filter(Boolean)
+      const chargeCreatorMap = await fetchUserDisplayNameMap(chargeCreatorIds, userId)
+      const chargesWithCreator = chargesData.map((charge: any) => {
+        const creatorName = charge.created_by ? chargeCreatorMap[charge.created_by] || getUserDisplayName(null, charge.created_by) : 'System'
+
         return {
           id: charge.id,
           date: charge.created_at?.split('T')[0],
@@ -120,7 +104,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
           paymentStatus: charge.payment_status,
           paymentMethod: charge.payment_method,
         }
-      }))
+      })
 
       setFolioCharges(chargesWithCreator)
 
@@ -190,7 +174,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
             payment_method: chargePaymentMethod || 'pending',
             status: paymentStatus,
             description: chargeDescription,
-            received_by: null,
+            received_by: userId,
           }])
         } catch (_) { /* non-fatal */ }
 
@@ -375,7 +359,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
             payment_method: paymentMethod,
             status: 'paid',
             description: `Payment received - ${paymentMethod.replace(/_/g, ' ')}`,
-            received_by: null,
+            received_by: userId,
           }])
         } catch (_) { /* non-fatal */ }
 
@@ -577,6 +561,35 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                     error = retry.error
                   }
                   if (error) throw error
+
+                  if (booking?.guest_id) {
+                    const guestName = booking.guests?.name
+                    const [{ data: otherBookings }, { data: guestPayments }, { data: guestTransactions }, { data: ledgerAccounts }] = await Promise.all([
+                      supabase.from('bookings').select('id').eq('guest_id', booking.guest_id).limit(1),
+                      supabase.from('payments').select('id').eq('guest_id', booking.guest_id).limit(1),
+                      supabase.from('transactions').select('id').eq('guest_id', booking.guest_id).limit(1),
+                      guestName
+                        ? supabase
+                            .from('city_ledger_accounts')
+                            .select('id, balance')
+                            .eq('organization_id', booking.organization_id)
+                            .ilike('account_name', guestName)
+                            .in('account_type', ['individual', 'guest'])
+                        : Promise.resolve({ data: [] }),
+                    ])
+
+                    const hasLedgerBalance = (ledgerAccounts || []).some((account: any) => Number(account.balance || 0) !== 0)
+                    if ((otherBookings || []).length === 0 && (guestPayments || []).length === 0 && (guestTransactions || []).length === 0 && !hasLedgerBalance) {
+                      if (ledgerAccounts?.length) {
+                        await supabase
+                          .from('city_ledger_accounts')
+                          .delete()
+                          .in('id', ledgerAccounts.map((account: any) => account.id))
+                      }
+                      await supabase.from('guests').delete().eq('id', booking.guest_id)
+                    }
+                  }
+
                   toast.success('Booking deleted')
                   router.push('/bookings')
                 } catch (err: any) {

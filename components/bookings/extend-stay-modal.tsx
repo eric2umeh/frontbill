@@ -127,6 +127,8 @@ export function ExtendStayModal({ open, onClose, onSuccess, booking }: ExtendSta
     setLoading(true)
     try {
       const supabase = createClient()
+      const { data: authData } = await supabase.auth.getUser()
+      const currentUserId = authData.user?.id || booking.created_by || null
       
       // Add charge to folio_charges
       // For immediate payments (cash/pos/transfer): status = 'paid'
@@ -209,7 +211,7 @@ export function ExtendStayModal({ open, onClose, onSuccess, booking }: ExtendSta
           payment_method: paymentMethod,
           status: isPaidNow ? 'paid' : 'pending',
           description: `Extended Stay — ${additionalNights} night${additionalNights !== 1 ? 's' : ''}`,
-          received_by: null,
+          received_by: currentUserId,
         }])
       } catch (_) { /* non-fatal */ }
 

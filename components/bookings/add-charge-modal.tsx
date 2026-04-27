@@ -90,6 +90,8 @@ export function AddChargeModal({ open, onClose, booking }: AddChargeModalProps) 
     setLoading(true)
     try {
       const supabase = createClient()
+      const { data: authData } = await supabase.auth.getUser()
+      const currentUserId = authData.user?.id || booking.created_by || null
       // Cash, POS, card, transfer, cheque = paid immediately
       // city_ledger = deferred (pending)
       const isPaidNow = paymentMethod !== 'city_ledger' && paymentMethod !== 'deferred'
@@ -138,7 +140,7 @@ export function AddChargeModal({ open, onClose, booking }: AddChargeModalProps) 
           payment_method: paymentMethod,
           status: isPaidNow ? 'paid' : 'pending',
           description: description,
-          received_by: null,
+          received_by: currentUserId,
         }])
       } catch (_) { /* non-fatal */ }
 

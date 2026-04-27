@@ -23,7 +23,7 @@ export default function ReservationDetailPage({
   params: Promise<{ id: string }> | { id: string }
 }) {
   const router = useRouter()
-  const { role } = useAuth()
+  const { role, userId } = useAuth()
   const isAdmin = role === 'admin'
   const [rid, setRid] = useState('')
   const [reservation, setReservation] = useState<any>(null)
@@ -204,7 +204,7 @@ export default function ReservationDetailPage({
             payment_method: paymentMethod,
             status: 'paid',
             description: 'Reservation payment',
-            received_by: null,
+            received_by: userId,
           },
         ])
       } catch {

@@ -185,6 +185,7 @@ export default function RoomDetailPage() {
     try {
       setSaveLoading(true)
       const supabase = createClient()
+      const { data: { user } } = await supabase.auth.getUser()
 
       const { error } = await supabase
         .from('rooms')
@@ -195,6 +196,8 @@ export default function RoomDetailPage() {
           price_per_night: parseFloat(formData.price_per_night as string),
           status: formData.status,
           amenities: formData.amenities,
+          updated_by: user?.id,
+          updated_at: new Date().toISOString(),
         })
         .eq('id', roomId)
 
@@ -211,8 +214,8 @@ export default function RoomDetailPage() {
   }
 
   const handleDeleteClick = () => {
-    toast(
-      (t) => (
+    toast.custom(
+      (t: string | number) => (
         <div className="flex flex-col gap-3">
           <div className="flex gap-2 items-start">
             <AlertCircle className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" />
@@ -243,10 +246,7 @@ export default function RoomDetailPage() {
           </div>
         </div>
       ),
-      {
-        duration: Infinity,
-        className: 'bg-red-50 border-red-200',
-      }
+      { duration: Infinity }
     )
   }
 
@@ -454,7 +454,7 @@ export default function RoomDetailPage() {
                     <MapPin className="h-4 w-4" />
                     <span className="text-sm">Location</span>
                   </div>
-                  <p className="font-semibold">Floor {room.floor_number}</p>
+                  <p className="font-semibold">{room.floor_number === 0 ? 'Ground Floor' : `Floor ${room.floor_number}`}</p>
                 </div>
                 <div className="space-y-2">
                   <div className="flex items-center gap-2 text-muted-foreground">
@@ -496,7 +496,7 @@ export default function RoomDetailPage() {
                   </div>
                   <div>
                     <p className="text-muted-foreground">Floor</p>
-                    <p className="font-medium">{room.floor_number}</p>
+                    <p className="font-medium">{room.floor_number === 0 ? 'Ground Floor' : `Floor ${room.floor_number}`}</p>
                   </div>
                 </div>
               </div>

@@ -627,6 +627,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
         payment_method: paymentMethod,
         status: balanceAmount <= 0 ? 'completed' : 'pending',
         description: `Booking created - Folio ${folioId}`,
+        received_by: user?.id || null,
       }])
 
       if (paidAmount > 0) {
