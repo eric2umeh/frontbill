@@ -59,7 +59,7 @@ export default function AccessDeniedPage() {
           <div className="rounded-lg bg-muted p-3 text-sm text-muted-foreground space-y-1">
             <p className="font-medium">Your Role: <span className="capitalize text-foreground">{userRole?.replace('_', ' ') || 'Loading...'}</span></p>
             <p className="text-xs">
-              Only Admin, Manager, Front Desk, and Receptionist roles can access the dashboard.
+              Only Admin, Manager, Front Desk, Receptionist, Accountant, Housekeeper, and Maintenance roles can access the app.
             </p>
           </div>
           <div className="flex gap-2 pt-2">
