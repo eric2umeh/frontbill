@@ -7,13 +7,9 @@ import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
-import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { formatNaira } from '@/lib/utils/currency'
 import { toast } from 'sonner'
-import { CreditCard, ChevronRight } from 'lucide-react'
-import { format } from 'date-fns'
-import { cn } from '@/lib/utils'
 import { createClient } from '@/lib/supabase/client'
 import { isSelectableLedgerName } from '@/lib/utils/ledger-organization'
 
@@ -32,7 +28,6 @@ interface AddChargeModalProps {
 }
 
 export function AddChargeModal({ open, onClose, booking }: AddChargeModalProps) {
-  const [step, setStep] = useState(1)
   const [description, setDescription] = useState('')
   const [amount, setAmount] = useState('')
   const [paymentMethod, setPaymentMethod] = useState('city_ledger')
@@ -104,7 +99,7 @@ export function AddChargeModal({ open, onClose, booking }: AddChargeModalProps) 
         charge_type: 'additional_charge',
         payment_method: isPaidNow ? paymentMethod : null,
         payment_status: isPaidNow ? 'paid' : 'pending',
-        created_by: booking.created_by || null,
+        created_by: currentUserId,
       }
 
       const { error: chargeError } = await supabase
@@ -228,7 +223,6 @@ export function AddChargeModal({ open, onClose, booking }: AddChargeModalProps) 
   }
 
   const resetForm = () => {
-    setStep(1)
     setDescription('')
     setAmount('')
     setPaymentMethod('city_ledger')
@@ -247,11 +241,6 @@ export function AddChargeModal({ open, onClose, booking }: AddChargeModalProps) 
         <DialogHeader>
           <DialogTitle>Add Charge - {booking.folioId}</DialogTitle>
           <DialogDescription className="sr-only">Add miscellaneous charge to booking</DialogDescription>
-          <div className="flex items-center gap-2 mt-2 text-sm text-muted-foreground">
-            <Badge variant={step === 1 ? 'default' : 'secondary'}>1. Charge Details</Badge>
-            <ChevronRight className="h-4 w-4 text-muted-foreground" />
-            <Badge variant={step === 2 ? 'default' : 'secondary'}>2. Payment Method</Badge>
-          </div>
         </DialogHeader>
 
         <div className="space-y-4 py-4">
@@ -267,59 +256,48 @@ export function AddChargeModal({ open, onClose, booking }: AddChargeModalProps) 
             </div>
           </div>
 
-          {/* Step 1: Charge Details */}
-          {step === 1 && (
-            <div className="space-y-4">
-              <div>
-                <Label htmlFor="description">Charge Description</Label>
-                <Textarea
-                  id="description"
-                  placeholder="e.g., Extra bed, Late checkout, Minibar, etc."
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  className="mt-2 min-h-20"
-                />
-              </div>
-
-              <div>
-                <Label htmlFor="amount">Amount (₦)</Label>
-                <Input
-                  id="amount"
-                  type="number"
-                  placeholder="0.00"
-                  value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
-                  min="0"
-                  step="0.01"
-                  className="mt-2"
-                />
-              </div>
-
-              <Button onClick={() => setStep(2)} className="w-full">
-                Continue to Payment Method
-              </Button>
+          <div className="space-y-4">
+            <div>
+              <Label htmlFor="description">Charge Description</Label>
+              <Textarea
+                id="description"
+                placeholder="e.g., Extra bed, Late checkout, Minibar, etc."
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                className="mt-2 min-h-20"
+              />
             </div>
-          )}
 
-          {/* Step 2: Payment Method */}
-          {step === 2 && (
-            <div className="space-y-4">
-              <div>
-                <Label>Payment Method</Label>
-                <Select value={paymentMethod} onValueChange={setPaymentMethod}>
-                  <SelectTrigger className="mt-2">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="cash">Cash</SelectItem>
-                    <SelectItem value="pos">POS</SelectItem>
-                    <SelectItem value="card">Card</SelectItem>
-                    <SelectItem value="transfer">Transfer</SelectItem>
-                    <SelectItem value="cheque">Cheque</SelectItem>
-                    <SelectItem value="city_ledger">City Ledger</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+            <div>
+              <Label htmlFor="amount">Amount (₦)</Label>
+              <Input
+                id="amount"
+                type="number"
+                placeholder="0.00"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                min="0"
+                step="0.01"
+                className="mt-2"
+              />
+            </div>
+
+            <div>
+              <Label>Payment Method</Label>
+              <Select value={paymentMethod} onValueChange={setPaymentMethod}>
+                <SelectTrigger className="mt-2">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="cash">Cash</SelectItem>
+                  <SelectItem value="pos">POS</SelectItem>
+                  <SelectItem value="card">Card</SelectItem>
+                  <SelectItem value="transfer">Transfer</SelectItem>
+                  <SelectItem value="cheque">Cheque</SelectItem>
+                  <SelectItem value="city_ledger">City Ledger</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
 
               {paymentMethod === 'city_ledger' && (
                 <>
@@ -375,20 +353,14 @@ export function AddChargeModal({ open, onClose, booking }: AddChargeModalProps) 
                 </div>
               </div>
 
-              <div className="flex gap-2">
-                <Button variant="outline" onClick={() => setStep(1)} className="flex-1">
-                  Back
-                </Button>
-                <Button 
-                  onClick={handleAddCharge} 
-                  disabled={loading || !amount}
-                  className="flex-1"
-                >
-                  {loading ? 'Adding...' : 'Add Charge'}
-                </Button>
-              </div>
-            </div>
-          )}
+            <Button 
+              onClick={handleAddCharge} 
+              disabled={loading || !amount || !description.trim()}
+              className="w-full"
+            >
+              {loading ? 'Adding...' : 'Add Charge'}
+            </Button>
+          </div>
         </div>
       </DialogContent>
     </Dialog>

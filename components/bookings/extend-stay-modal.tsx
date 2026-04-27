@@ -11,9 +11,8 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { formatNaira } from '@/lib/utils/currency'
 import { toast } from 'sonner'
-import { CreditCard, ChevronRight, Check } from 'lucide-react'
+import { CreditCard, Check } from 'lucide-react'
 import { format, differenceInDays } from 'date-fns'
-import { cn } from '@/lib/utils'
 import { createClient } from '@/lib/supabase/client'
 import { isSelectableLedgerName } from '@/lib/utils/ledger-organization'
 
@@ -32,11 +31,11 @@ interface ExtendStayModalProps {
     guestBalance?: number
     organization_id?: string
     created_by?: string
+    folio_status?: string
   }
 }
 
 export function ExtendStayModal({ open, onClose, onSuccess, booking }: ExtendStayModalProps) {
-  const [step, setStep] = useState(1)
   const [newCheckOutDate, setNewCheckOutDate] = useState<Date | undefined>()
   const [paymentMethod, setPaymentMethod] = useState('')
   const [loading, setLoading] = useState(false)
@@ -143,7 +142,7 @@ export function ExtendStayModal({ open, onClose, onSuccess, booking }: ExtendSta
         ledger_account_id: paymentMethod === 'city_ledger' ? selectedLedger?.id : null,
         ledger_account_type: paymentMethod === 'city_ledger' ? ledgerType : null,
         payment_status: isPaidNow ? 'paid' : 'pending',
-        created_by: booking.created_by
+        created_by: currentUserId
       }
       
       // Try to include organization_id if column exists
@@ -301,7 +300,6 @@ export function ExtendStayModal({ open, onClose, onSuccess, booking }: ExtendSta
   }
 
   const resetForm = () => {
-    setStep(1)
     setNewCheckOutDate(undefined)
     setPaymentMethod('')
     setLedgerType('individual')
@@ -321,11 +319,6 @@ export function ExtendStayModal({ open, onClose, onSuccess, booking }: ExtendSta
         <DialogHeader>
           <DialogTitle>Extend Stay - {booking.folioId}</DialogTitle>
           <DialogDescription className="sr-only">Extend guest stay wizard</DialogDescription>
-          <div className="flex items-center gap-2 mt-2 text-sm text-muted-foreground">
-            <Badge variant={step === 1 ? 'default' : 'secondary'}>1. New Checkout Date</Badge>
-            <ChevronRight className="h-4 w-4 text-muted-foreground" />
-            <Badge variant={step === 2 ? 'default' : 'secondary'}>2. Payment</Badge>
-          </div>
         </DialogHeader>
 
         <div className="space-y-4 py-4">
@@ -349,48 +342,21 @@ export function ExtendStayModal({ open, onClose, onSuccess, booking }: ExtendSta
             </div>
           </div>
 
-          {/* Step 1: Select New Checkout Date */}
-          {step === 1 && (
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <Label>New Checkout Date *</Label>
-                <div className="flex justify-center">
-                  <Calendar
-                    mode="single"
-                    selected={newCheckOutDate}
-                    onSelect={setNewCheckOutDate}
-                    disabled={(date) => date < currentCheckOut}
-                    className="rounded-md border"
-                  />
-                </div>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>New Checkout Date *</Label>
+              <div className="flex justify-center">
+                <Calendar
+                  mode="single"
+                  selected={newCheckOutDate}
+                  onSelect={setNewCheckOutDate}
+                  disabled={(date) => date < currentCheckOut}
+                  className="rounded-md border"
+                />
               </div>
-
-              {newCheckOutDate && additionalNights > 0 && (
-                <div className="p-4 bg-primary/5 rounded-lg space-y-2">
-                  <div className="flex justify-between text-sm">
-                    <span>Additional Nights:</span>
-                    <span className="font-semibold">{additionalNights} night{additionalNights !== 1 ? 's' : ''}</span>
-                  </div>
-                  <div className="flex justify-between text-base font-semibold">
-                    <span>Additional Amount:</span>
-                    <span className="text-primary">{formatNaira(additionalAmount)}</span>
-                  </div>
-                </div>
-              )}
-
-              <Button
-                onClick={() => setStep(2)}
-                className="w-full"
-                disabled={!newCheckOutDate || additionalNights <= 0}
-              >
-                Continue to Payment
-              </Button>
             </div>
-          )}
 
-          {/* Step 2: Payment Method */}
-          {step === 2 && (
-            <div className="space-y-4">
+            {newCheckOutDate && additionalNights > 0 && (
               <div className="p-4 bg-muted rounded-lg space-y-2">
                 <div className="flex justify-between text-sm">
                   <span>New Checkout Date:</span>
@@ -405,29 +371,31 @@ export function ExtendStayModal({ open, onClose, onSuccess, booking }: ExtendSta
                   <span className="text-primary">{formatNaira(additionalAmount)}</span>
                 </div>
               </div>
+            )}
 
-              <div className="space-y-2">
-                <Label htmlFor="paymentMethod">Payment Method *</Label>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                  {['cash', 'pos', 'transfer', 'city_ledger'].map((method) => (
-                    <Button
-                      key={method}
-                      variant={paymentMethod === method ? 'default' : 'outline'}
-                      onClick={() => {
-                        setPaymentMethod(method)
-                        if (method !== 'city_ledger') {
-                          setShowOrgSearch(false)
-                          setSelectedLedger(null)
-                        }
-                      }}
-                    >
-                      {method.replace('_', ' ').toUpperCase()}
-                    </Button>
-                  ))}
-                </div>
+            <div className="space-y-2">
+              <Label htmlFor="paymentMethod">Payment Method *</Label>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                {['cash', 'pos', 'transfer', 'city_ledger'].map((method) => (
+                  <Button
+                    key={method}
+                    type="button"
+                    variant={paymentMethod === method ? 'default' : 'outline'}
+                    onClick={() => {
+                      setPaymentMethod(method)
+                      if (method !== 'city_ledger') {
+                        setShowOrgSearch(false)
+                        setSelectedLedger(null)
+                      }
+                    }}
+                  >
+                    {method.replace('_', ' ').toUpperCase()}
+                  </Button>
+                ))}
               </div>
+            </div>
 
-              {paymentMethod === 'city_ledger' && (
+            {paymentMethod === 'city_ledger' && (
                 <div className="space-y-3">
                   {/* Ledger Type Selector */}
                   <div className="space-y-2">
@@ -538,21 +506,15 @@ export function ExtendStayModal({ open, onClose, onSuccess, booking }: ExtendSta
                 </div>
               )}
 
-              <div className="flex gap-2">
-                <Button variant="outline" onClick={() => setStep(1)} className="flex-1">
-                  Back
-                </Button>
-                <Button 
-                  onClick={handleExtend} 
-                  className="flex-1"
-                  disabled={!paymentMethod || loading}
-                >
-                  <CreditCard className="mr-2 h-4 w-4" />
-                  {loading ? 'Processing...' : 'Confirm Extension'}
-                </Button>
-              </div>
-            </div>
-          )}
+            <Button 
+              onClick={handleExtend} 
+              className="w-full"
+              disabled={!paymentMethod || !newCheckOutDate || additionalNights <= 0 || loading}
+            >
+              <CreditCard className="mr-2 h-4 w-4" />
+              {loading ? 'Processing...' : 'Confirm Extension'}
+            </Button>
+          </div>
         </div>
       </DialogContent>
     </Dialog>
