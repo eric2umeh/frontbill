@@ -27,6 +27,8 @@ import {
   ChevronRight,
   X,
   Hotel,
+  Sparkles,
+  Wrench,
 } from 'lucide-react'
 
 const routes: Array<{ label: string; icon: any; href: string; permission?: Permission }> = [
@@ -101,6 +103,18 @@ const routes: Array<{ label: string; icon: any; href: string; permission?: Permi
     icon: ShieldCheck,
     href: '/users-roles',
     permission: 'users:view',
+  },
+  {
+    label: 'Housekeeping',
+    icon: Sparkles,
+    href: '/housekeeping',
+    permission: 'housekeeping:view',
+  },
+  {
+    label: 'Maintenance',
+    icon: Wrench,
+    href: '/maintenance',
+    permission: 'maintenance:view',
   },
   {
     label: 'Settings',
