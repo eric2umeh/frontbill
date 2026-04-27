@@ -14,6 +14,7 @@ import { format, addDays, differenceInDays } from 'date-fns'
 import { Calendar as CalendarIcon, Plus, X, Loader2 } from 'lucide-react'
 import { formatNaira } from '@/lib/utils/currency'
 import { toast } from 'sonner'
+import { isOrganizationMenuRecord, isSelectableLedgerName } from '@/lib/utils/ledger-organization'
 
 const toLocalDateStr = (date: Date) => {
   const y = date.getFullYear()
@@ -26,6 +27,12 @@ const today = () => {
   const d = new Date()
   d.setHours(0, 0, 0, 0)
   return d
+}
+
+interface NewReservationModalProps {
+  open: boolean
+  onClose: () => void
+  onSuccess?: () => void
 }
 
 export function NewReservationModal({ open, onClose, onSuccess }: NewReservationModalProps) {
@@ -58,8 +65,8 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
   const [pricePerNight, setPricePerNight] = useState(0)
   const [customPrice, setCustomPrice] = useState<number | ''>('')
   // Payment
-  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'pos' | 'card' | 'bank_transfer' | 'city_ledger'>('cash')
-  const [paymentStatus, setPaymentStatus] = useState<'paid' | 'partial' | 'unpaid'>('unpaid')
+  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'pos' | 'card' | 'transfer' | 'city_ledger'>('cash')
+  const [paymentStatus, setPaymentStatus] = useState<'paid' | 'partial' | 'unpaid'>('paid')
   const [partialAmount, setPartialAmount] = useState<number | ''>('')
   // City Ledger sub-fields
   const [ledgerType, setLedgerType] = useState<'individual' | 'organization'>('individual')
@@ -103,7 +110,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
       const [{ data: guestData }, { data: roomData }, { data: bookingData }] = await Promise.all([
         supabase.from('guests').select('id, name, phone, email, address').eq('organization_id', profile.organization_id).order('name'),
         // Fetch all non-maintenance rooms — we'll filter availability by date ourselves
-        supabase.from('rooms').select('id, room_number, room_type, price_per_night, status').eq('organization_id', profile.organization_id).neq('status', 'maintenance').order('room_number'),
+        supabase.from('rooms').select('id, room_number, room_type, price_per_night, status').eq('organization_id', profile.organization_id).eq('status', 'available').order('room_number'),
         // Fetch active bookings to check date availability
         supabase.from('bookings').select('room_id, check_in, check_out').eq('organization_id', profile.organization_id).in('status', ['confirmed', 'reserved', 'checked_in']),
       ])
@@ -160,7 +167,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
     if (!effectiveOrgId) return
 
     // Query both city_ledger_accounts AND organizations table (same as new-booking-modal)
-    const [{ data: ledgerData }, { data: orgTableData }] = await Promise.all([
+    const [{ data: ledgerData }, { data: orgTableData }, { data: teamProfiles }] = await Promise.all([
       supabase
         .from('city_ledger_accounts')
         .select('id, account_name, account_type, contact_phone, balance')
@@ -170,22 +177,25 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
       ledgerType === 'organization'
         ? supabase
             .from('organizations')
-            .select('id, name, phone')
+            .select('id, name, phone, org_type, created_by')
+            .neq('id', effectiveOrgId)
             .ilike('name', `%${term}%`)
             .limit(5)
         : Promise.resolve({ data: [] }),
+      supabase.from('profiles').select('id').eq('organization_id', effectiveOrgId),
     ])
+    const teamCreatorIds = new Set((teamProfiles || []).map((profile: any) => profile.id))
 
     const fromLedger = (ledgerData || [])
-      .filter(d => ledgerType === 'individual'
-        ? ['individual', 'guest'].includes(d.account_type)
-        : d.account_type === 'organization')
-      .map(d => ({ ...d, name: d.account_name, source: 'city_ledger' as const }))
+      .filter((d: any) => ledgerType === 'individual'
+        ? ['individual', 'guest'].includes(d.account_type) && isSelectableLedgerName(d.account_name)
+        : false)
+      .map((d: any) => ({ ...d, name: d.account_name, source: 'city_ledger' as const }))
 
     const fromOrgs = ledgerType === 'organization'
       ? (orgTableData || [])
-          .filter(o => !fromLedger.some(l => l.name.toLowerCase() === o.name.toLowerCase()))
-          .map(o => ({
+          .filter((o: any) => isOrganizationMenuRecord(o, teamCreatorIds) && !fromLedger.some((l: any) => l.name.toLowerCase() === o.name.toLowerCase()))
+          .map((o: any) => ({
             id: o.id,
             name: o.name,
             account_name: o.name,
@@ -241,7 +251,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
         .filter(b => b.check_in < cout && b.check_out > cin)
         .map(b => b.room_id)
     )
-    return roomsOfType.filter(r => !bookedRoomIds.has(r.id))
+    return roomsOfType.filter(r => r.status === 'available' && !bookedRoomIds.has(r.id))
   }
 
   const handleCheckInChange = (date: Date | undefined) => {
@@ -285,17 +295,22 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
 
   const effectiveRate = (customPrice !== '' ? Number(customPrice) : pricePerNight) || 0
   const totalAmount = effectiveRate * nights
-  // For cash/POS/card/bank_transfer: full payment received (deposit = total, balance = 0)
+  // For cash/POS/card/transfer: full payment received (deposit = total, balance = 0)
   // For city_ledger: deferred payment (deposit = 0, balance = total)
   const isCityLedgerPayment = paymentMethod === 'city_ledger'
-  const depositAmount = isCityLedgerPayment ? 0 : totalAmount
-  const balanceAmount = isCityLedgerPayment ? totalAmount : 0
+  const depositAmount = isCityLedgerPayment ? 0 : paymentStatus === 'paid' ? totalAmount : paymentStatus === 'partial' ? Math.min(Number(partialAmount) || 0, totalAmount) : 0
+  const balanceAmount = Math.max(0, totalAmount - depositAmount)
 
   const handleSubmit = async () => {
     if (!checkInDate || !checkOutDate) { toast.error('Dates required'); return }
     if (!selectedRoom) { toast.error('Room required'); return }
+    if (selectedRoom.status && selectedRoom.status !== 'available') { toast.error('Selected room is not available'); return }
     if (paymentMethod === 'city_ledger' && !selectedLedger) {
       toast.error('Please select a city ledger account')
+      return
+    }
+    if (paymentStatus === 'partial' && depositAmount <= 0) {
+      toast.error('Please enter the amount paid')
       return
     }
 
@@ -325,9 +340,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
 
       const isCityLedger = paymentMethod === 'city_ledger'
       const folioId = `RES-${Date.now().toString(36).toUpperCase()}`
-      // For cash/POS/card/bank_transfer: payment is received, so status is 'paid'
-      // For city_ledger: payment is deferred, so status is 'pending'
-      const bookingPaymentStatus = isCityLedger ? 'pending' : 'paid'
+      const bookingPaymentStatus = isCityLedger ? 'pending' : balanceAmount <= 0 ? 'paid' : depositAmount > 0 ? 'partial' : 'pending'
 
       const { data: booking, error: be } = await supabase
         .from('bookings')
@@ -353,7 +366,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
         .select().single()
       if (be) throw be
 
-      await supabase.from('rooms').update({ status: 'reserved' }).eq('id', selectedRoom.id)
+      await supabase.from('rooms').update({ status: 'reserved', updated_by: currentUserId, updated_at: new Date().toISOString() }).eq('id', selectedRoom.id)
 
       // If city ledger: update account + guest/org profile balance
       if (isCityLedger && selectedLedger?.id) {
@@ -396,6 +409,19 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
         created_by: currentUserId,
       }])
 
+      if (depositAmount > 0 && balanceAmount > 0) {
+        await supabase.from('folio_charges').insert([{
+          booking_id: booking.id,
+          organization_id: orgId,
+          description: `Reservation payment - ${paymentMethod}`,
+          amount: -depositAmount,
+          charge_type: 'payment',
+          payment_method: paymentMethod,
+          payment_status: 'paid',
+          created_by: currentUserId,
+        }])
+      }
+
       // Record in transactions table
       await supabase.from('transactions').insert([{
         organization_id: orgId,
@@ -412,7 +438,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
 
       // Always insert into payments table so Transactions page shows ALL transactions
       // This includes both paid and unpaid/pending reservations
-      const paidAmount = paymentStatus === 'paid' ? totalAmount : (Number(partialAmount) || 0)
+      const paidAmount = depositAmount
       if (paidAmount > 0 || isCityLedger) {
         await supabase.from('payments').insert([{
           organization_id: orgId,
@@ -442,7 +468,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
     const d = new Date(); d.setHours(0, 0, 0, 0)
     setCheckInDate(d); setCheckOutDate(addDays(d, 1)); setNights(1)
     setSelectedRoomType(''); setSelectedRoom(null); setPricePerNight(0); setCustomPrice('')
-    setPaymentMethod('cash'); setPaymentStatus('unpaid'); setPartialAmount('')
+    setPaymentMethod('cash'); setPaymentStatus('paid'); setPartialAmount('')
     setLedgerType('individual'); setLedgerSearch(''); setLedgerResults([])
     setSelectedLedger(null); setLedgerSearchOpen(false)
     setShowNewLedgerOrgForm(false); setNewLedgerOrgName(''); setNewLedgerOrgEmail(''); setNewLedgerOrgPhone(''); setNewLedgerOrgAddress('')
@@ -454,7 +480,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
     const cin = toLocalDateStr(checkInDate)
     const cout = toLocalDateStr(checkOutDate)
     const bookedIds = new Set(allBookings.filter(b => b.check_in < cout && b.check_out > cin).map(b => b.room_id))
-    return !bookedIds.has(r.id)
+    return r.status === 'available' && !bookedIds.has(r.id)
   })
 
   return (
@@ -601,6 +627,33 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
           {/* Payment */}
           <div className="rounded-lg border p-4 space-y-4">
             <p className="text-sm font-semibold">Payment</p>
+            {paymentMethod !== 'city_ledger' && (
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <Label>Payment Status</Label>
+                  <Select value={paymentStatus} onValueChange={(v: 'paid' | 'partial' | 'unpaid') => setPaymentStatus(v)}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="paid">Full Payment</SelectItem>
+                      <SelectItem value="partial">Partial Payment</SelectItem>
+                      <SelectItem value="unpaid">No Payment Yet</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Amount Paid</Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    max={totalAmount}
+                    value={paymentStatus === 'paid' ? totalAmount || '' : partialAmount}
+                    onChange={(e) => setPartialAmount(e.target.value === '' ? '' : Number(e.target.value))}
+                    disabled={paymentStatus === 'paid' || paymentStatus === 'unpaid'}
+                    placeholder="Enter paid amount"
+                  />
+                </div>
+              </div>
+            )}
             <div className="space-y-2">
               <Label>Payment Method</Label>
               <Select value={paymentMethod} onValueChange={(v: any) => { setPaymentMethod(v); if (v !== 'city_ledger') setSelectedLedger(null) }}>
@@ -609,7 +662,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
                   <SelectItem value="cash">Cash</SelectItem>
                   <SelectItem value="pos">POS</SelectItem>
                   <SelectItem value="card">Card</SelectItem>
-                  <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
+                  <SelectItem value="transfer">Transfer</SelectItem>
                   <SelectItem value="city_ledger">City Ledger (bill to account)</SelectItem>
                 </SelectContent>
               </Select>
@@ -636,10 +689,17 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
                       </div>
                     )}
                   </div>
-                  <Button type="button" size="sm" variant="outline" className="gap-1 whitespace-nowrap" onClick={() => setShowNewLedgerOrgForm(v => !v)}>
-                    <Plus className="h-3 w-3" /> New
-                  </Button>
+                  {ledgerType === 'individual' && (
+                    <Button type="button" size="sm" variant="outline" className="gap-1 whitespace-nowrap" onClick={() => setShowNewLedgerOrgForm(v => !v)}>
+                      <Plus className="h-3 w-3" /> New
+                    </Button>
+                  )}
                 </div>
+                {ledgerType === 'organization' && (
+                  <p className="text-xs text-muted-foreground">
+                    Only organizations created from the Organizations menu are shown here.
+                  </p>
+                )}
                 {showNewLedgerOrgForm && (
                   <div className="border rounded-md p-3 space-y-2 bg-background">
                     <p className="text-xs font-medium text-muted-foreground">Create new {ledgerType} account</p>

@@ -125,7 +125,14 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
     label: 'Manager',
     description: 'Full operational access. Can view analytics, manage bookings, rooms, guests, and transactions. Cannot manage roles.',
     color: 'bg-purple-100 text-purple-800',
-    permissions: ALL.filter(p => !['roles:manage', 'users:delete', 'settings:manage'].includes(p)),
+    permissions: ALL.filter(p => ![
+      'roles:manage',
+      'users:delete',
+      'settings:manage',
+      'rooms:create',
+      'rooms:edit',
+      'rooms:delete',
+    ].includes(p)),
   },
   {
     key: 'accountant',
@@ -161,6 +168,7 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
       'payments:view', 'payments:create',
       'organizations:view',
       'ledger:view',
+      'night_audit:view', 'night_audit:run',
     ],
   },
   {

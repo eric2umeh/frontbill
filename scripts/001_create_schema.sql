@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS profiles (
   full_name TEXT,
   role TEXT DEFAULT 'staff',
   avatar_url TEXT,
+  added_by UUID REFERENCES auth.users(id),
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -90,7 +91,7 @@ CREATE TABLE IF NOT EXISTS bookings (
 CREATE TABLE IF NOT EXISTS payments (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   organization_id UUID NOT NULL REFERENCES organizations(id),
-  booking_id UUID REFERENCES bookings(id),
+  booking_id UUID REFERENCES bookings(id) ON DELETE CASCADE,
   guest_id UUID REFERENCES guests(id),
   amount DECIMAL(12, 2) NOT NULL,
   payment_method TEXT NOT NULL,
@@ -138,7 +139,7 @@ CREATE TABLE IF NOT EXISTS night_audits (
 CREATE TABLE IF NOT EXISTS transactions (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   organization_id UUID NOT NULL REFERENCES organizations(id),
-  booking_id UUID REFERENCES bookings(id),
+  booking_id UUID REFERENCES bookings(id) ON DELETE CASCADE,
   transaction_id TEXT NOT NULL UNIQUE,
   guest_name TEXT NOT NULL,
   room TEXT,

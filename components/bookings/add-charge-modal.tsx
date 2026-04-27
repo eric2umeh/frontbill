@@ -15,6 +15,7 @@ import { CreditCard, ChevronRight } from 'lucide-react'
 import { format } from 'date-fns'
 import { cn } from '@/lib/utils'
 import { createClient } from '@/lib/supabase/client'
+import { isSelectableLedgerName } from '@/lib/utils/ledger-organization'
 
 interface AddChargeModalProps {
   open: boolean
@@ -61,7 +62,9 @@ export function AddChargeModal({ open, onClose, booking }: AddChargeModalProps) 
         .order('account_name')
 
       if (error) throw error
-      setOrganizations((data || []).map(d => ({ id: d.id, name: d.account_name, balance: d.balance })))
+      setOrganizations((data || [])
+        .filter((d: any) => isSelectableLedgerName(d.account_name))
+        .map((d: any) => ({ id: d.id, name: d.account_name, balance: d.balance })))
     } catch (error: any) {
       toast.error('Failed to load accounts')
     }
@@ -87,7 +90,9 @@ export function AddChargeModal({ open, onClose, booking }: AddChargeModalProps) 
     setLoading(true)
     try {
       const supabase = createClient()
-      // Cash, POS, card, transfer, bank_transfer, cheque = paid immediately
+      const { data: authData } = await supabase.auth.getUser()
+      const currentUserId = authData.user?.id || booking.created_by || null
+      // Cash, POS, card, transfer, cheque = paid immediately
       // city_ledger = deferred (pending)
       const isPaidNow = paymentMethod !== 'city_ledger' && paymentMethod !== 'deferred'
 
@@ -135,7 +140,7 @@ export function AddChargeModal({ open, onClose, booking }: AddChargeModalProps) 
           payment_method: paymentMethod,
           status: isPaidNow ? 'paid' : 'pending',
           description: description,
-          received_by: null,
+          received_by: currentUserId,
         }])
       } catch (_) { /* non-fatal */ }
 
@@ -309,8 +314,7 @@ export function AddChargeModal({ open, onClose, booking }: AddChargeModalProps) 
                     <SelectItem value="cash">Cash</SelectItem>
                     <SelectItem value="pos">POS</SelectItem>
                     <SelectItem value="card">Card</SelectItem>
-                    <SelectItem value="transfer">Bank Transfer</SelectItem>
-                    <SelectItem value="bank_transfer">Bank Transfer (Wire)</SelectItem>
+                    <SelectItem value="transfer">Transfer</SelectItem>
                     <SelectItem value="cheque">Cheque</SelectItem>
                     <SelectItem value="city_ledger">City Ledger</SelectItem>
                   </SelectContent>

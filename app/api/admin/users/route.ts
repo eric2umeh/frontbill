@@ -17,7 +17,7 @@ export async function POST(request: Request) {
     // Verify caller exists and has the right role/org using the admin client (bypasses RLS)
     const { data: callerProfile, error: profileFetchError } = await admin
       .from('profiles')
-      .select('role, organization_id')
+      .select('role, organization_id, full_name')
       .eq('id', caller_id)
       .single()
 
@@ -50,16 +50,25 @@ export async function POST(request: Request) {
     }
 
     // Upsert profile row with organization and role
-    const { error: profileError } = await admin
+    const profilePayload = {
+      id: newUser.user.id,
+      organization_id: callerProfile.organization_id,
+      full_name,
+      role,
+      added_by: caller_id,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }
+    let { error: profileError } = await admin
       .from('profiles')
-      .upsert({
-        id: newUser.user.id,
-        organization_id: callerProfile.organization_id,
-        full_name,
-        role,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      })
+      .upsert(profilePayload)
+
+    if (profileError && /added_by/i.test(profileError.message || '')) {
+      const fallbackPayload = { ...profilePayload } as any
+      delete fallbackPayload.added_by
+      const retry = await admin.from('profiles').upsert(fallbackPayload)
+      profileError = retry.error
+    }
 
     if (profileError) {
       // Rollback auth user if profile insert fails
@@ -90,6 +99,8 @@ export async function POST(request: Request) {
         email,
         full_name,
         role,
+        added_by: caller_id,
+        added_by_name: callerProfile.full_name || full_name,
         created_at: newUser.user.created_at,
       },
       emailSent,

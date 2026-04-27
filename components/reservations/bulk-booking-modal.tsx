@@ -16,6 +16,7 @@ import { format, differenceInDays } from 'date-fns'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 import { formatNaira } from '@/lib/utils/currency'
+import { isOrganizationMenuRecord } from '@/lib/utils/ledger-organization'
 
 const ROOM_TYPES_FALLBACK = ['Deluxe', 'Royal', 'Kings', 'Mini Suite', 'Executive Suite', 'Diplomatic Suite']
 
@@ -72,6 +73,7 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
   const [orgSearching, setOrgSearching] = useState(false)
   const [selectedOrg, setSelectedOrg] = useState<any>(null)
   const [orgSearchOpen, setOrgSearchOpen] = useState(false)
+  const [organizationCreatorIds, setOrganizationCreatorIds] = useState<Set<string>>(new Set())
   const [showNewOrgForm, setShowNewOrgForm] = useState(false)
   // Inline new org form fields
   const [newOrgName, setNewOrgName] = useState('')
@@ -93,7 +95,7 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
   const [checkOut, setCheckOut] = useState<Date>()
 
   // Step 3: Payment
-  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'pos' | 'card' | 'bank_transfer' | 'city_ledger'>('cash')
+  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'pos' | 'card' | 'transfer' | 'city_ledger'>('cash')
   const [paymentStatus, setPaymentStatus] = useState<'paid' | 'partial' | 'unpaid'>('unpaid')
   const [partialAmount, setPartialAmount] = useState<number | ''>('')
   // City ledger
@@ -127,11 +129,13 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
     const { data: profile } = await supabase.from('profiles').select('organization_id').eq('id', user.id).single()
     if (!profile) return
     setOrgId(profile.organization_id)
-    const [{ data: guestData }, { data: roomData }, { data: bookingData }] = await Promise.all([
+    const [{ data: guestData }, { data: roomData }, { data: bookingData }, { data: teamProfiles }] = await Promise.all([
       supabase.from('guests').select('id, name, phone, email').eq('organization_id', profile.organization_id).order('name'),
-      supabase.from('rooms').select('id, room_number, room_type, price_per_night, status').eq('organization_id', profile.organization_id).neq('status', 'maintenance').order('room_number'),
+      supabase.from('rooms').select('id, room_number, room_type, price_per_night, status').eq('organization_id', profile.organization_id).eq('status', 'available').order('room_number'),
       supabase.from('bookings').select('room_id, check_in, check_out').eq('organization_id', profile.organization_id).in('status', ['confirmed', 'reserved', 'checked_in']),
+      supabase.from('profiles').select('id').eq('organization_id', profile.organization_id),
     ])
+    setOrganizationCreatorIds(new Set((teamProfiles || []).map((teamProfile: any) => teamProfile.id)))
     setAllGuests(guestData || [])
     setAllRooms((roomData || []).filter((r: any) => r.id && r.room_type && String(r.room_type).trim() !== '' && r.room_number && String(r.room_number).trim() !== ''))
     setAllActiveBookings(bookingData || [])
@@ -147,12 +151,14 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
       const supabase = createClient()
       const { data } = await supabase
         .from('organizations')
-        .select('id, name, email, phone, address')
+        .select('id, name, email, phone, address, org_type, created_by')
+        .neq('id', orgId)
         .ilike('name', `%${term}%`)
         .limit(8)
-      setOrgResults(data || [])
-      setOrgSearchOpen((data || []).length > 0)
-      if (!data || data.length === 0) setShowNewOrgForm(false)
+      const results = (data || []).filter((org: any) => isOrganizationMenuRecord(org, organizationCreatorIds))
+      setOrgResults(results)
+      setOrgSearchOpen(results.length > 0)
+      if (results.length === 0) setShowNewOrgForm(false)
     } finally {
       setOrgSearching(false)
     }
@@ -166,9 +172,13 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
       const supabase = createClient()
       const { data, error } = await supabase.from('organizations').insert([{
         name: newOrgName.trim(),
+        org_type: newOrgType || 'other',
         email: newOrgEmail.trim() || null,
         phone: newOrgPhone.trim() || null,
         address: newOrgAddress.trim() || null,
+        contact_person: newOrgContact.trim() || null,
+        current_balance: 0,
+        created_by: currentUserId,
       }]).select().single()
       if (error) throw error
       setSelectedOrg(data)
@@ -190,8 +200,11 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
       const supabase = createClient()
       const { data, error } = await supabase.from('organizations').insert([{
         name: newLedgerOrgName.trim(),
+        org_type: 'other',
         email: newLedgerOrgEmail.trim() || null,
         phone: newLedgerOrgPhone.trim() || null,
+        current_balance: 0,
+        created_by: currentUserId,
       }]).select().single()
       if (error) throw error
       setSelectedLedger({ id: data.id, name: data.name, phone: data.phone, source: 'organizations' })
@@ -227,9 +240,10 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
       setLedgerSearchOpen(filtered.length > 0)
     } else {
       const supabase = createClient()
-      const { data } = await supabase.from('organizations').select('id, name, phone, email').ilike('name', `%${term}%`).limit(8)
-      setLedgerResults((data || []).map(d => ({ ...d, source: 'organizations' })))
-      setLedgerSearchOpen((data || []).length > 0)
+      const { data } = await supabase.from('organizations').select('id, name, phone, email, org_type, created_by').neq('id', orgId).ilike('name', `%${term}%`).limit(8)
+      const results = (data || []).filter((d: any) => isOrganizationMenuRecord(d, organizationCreatorIds)).map((d: any) => ({ ...d, source: 'organizations' }))
+      setLedgerResults(results)
+      setLedgerSearchOpen(results.length > 0)
     }
   }
 
@@ -244,7 +258,7 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
         .filter(b => b.check_in < cout && b.check_out > cin)
         .map(b => b.room_id)
     )
-    const available = allRooms.filter(r => !bookedRoomIds.has(r.id))
+    const available = allRooms.filter(r => r.status === 'available' && !bookedRoomIds.has(r.id))
     setAvailableRooms(available)
     setRoomAvailabilityChecked(true)
   }
@@ -453,7 +467,7 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
             }]).select().single()
             if (be) throw be
 
-            await supabase.from('rooms').update({ status: 'reserved' }).eq('id', room.id)
+            await supabase.from('rooms').update({ status: 'reserved', updated_by: currentUserId, updated_at: new Date().toISOString() }).eq('id', room.id)
             await supabase.from('transactions').insert([{
               organization_id: orgId, booking_id: booking.id,
               transaction_id: `TXN-${Date.now().toString(36).toUpperCase()}`,
@@ -735,7 +749,7 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
                     <SelectItem value="cash">Cash</SelectItem>
                     <SelectItem value="pos">POS</SelectItem>
                     <SelectItem value="card">Card</SelectItem>
-                    <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
+                    <SelectItem value="transfer">Transfer</SelectItem>
                     <SelectItem value="city_ledger">City Ledger (bill to account)</SelectItem>
                   </SelectContent>
                 </Select>
@@ -771,12 +785,12 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
                         </div>
                       )}
                     </div>
-                    {ledgerType === 'organization' && (
-                      <Button type="button" size="sm" variant="outline" className="gap-1 whitespace-nowrap" onClick={() => setShowNewLedgerOrgForm(v => !v)}>
-                        <Plus className="h-3 w-3" /> New
-                      </Button>
-                    )}
                   </div>
+                  {ledgerType === 'organization' && (
+                    <p className="text-xs text-muted-foreground">
+                      Only organizations created from the Organizations menu are shown here.
+                    </p>
+                  )}
 
                   {showNewLedgerOrgForm && ledgerType === 'organization' && (
                     <div className="border rounded-md p-3 space-y-2 bg-background">

@@ -18,7 +18,6 @@ import {
   Receipt,
   Building2,
   TrendingUp,
-  Briefcase,
   Moon,
   FileBarChart,
   ShieldCheck,
@@ -51,22 +50,10 @@ const routes: Array<{ label: string; icon: any; href: string; permission?: Permi
     permission: 'reservations:view',
   },
   {
-    label: 'Accounts',
+    label: 'Guests',
     icon: Users,
     href: '/accounts',
     permission: 'guests:view', // Guests & city ledger accounts
-  },
-  {
-    label: 'Rooms',
-    icon: Bed,
-    href: '/rooms',
-    permission: 'rooms:view',
-  },
-  {
-    label: 'Transactions',
-    icon: Receipt,
-    href: '/transactions',
-    permission: 'transactions:view',
   },
   {
     label: 'Organizations',
@@ -75,22 +62,10 @@ const routes: Array<{ label: string; icon: any; href: string; permission?: Permi
     permission: 'organizations:view',
   },
   {
-    label: 'Analytics',
-    icon: TrendingUp,
-    href: '/analytics',
-    permission: 'analytics:view',
-  },
-  {
-    label: 'Reconciliation',
-    icon: Briefcase,
-    href: '/reconciliation',
-    permission: 'reconciliation:view',
-  },
-  {
-    label: 'Night Audit',
-    icon: Moon,
-    href: '/night-audit',
-    permission: 'night_audit:view',
+    label: 'Transactions',
+    icon: Receipt,
+    href: '/transactions',
+    permission: 'transactions:view',
   },
   {
     label: 'Reports',
@@ -99,10 +74,10 @@ const routes: Array<{ label: string; icon: any; href: string; permission?: Permi
     permission: 'analytics:view',
   },
   {
-    label: 'Users & Roles',
-    icon: ShieldCheck,
-    href: '/users-roles',
-    permission: 'users:view',
+    label: 'Night Audit',
+    icon: Moon,
+    href: '/night-audit',
+    permission: 'night_audit:view',
   },
   {
     label: 'Housekeeping',
@@ -115,6 +90,24 @@ const routes: Array<{ label: string; icon: any; href: string; permission?: Permi
     icon: Wrench,
     href: '/maintenance',
     permission: 'maintenance:view',
+  },
+  {
+    label: 'Analytics',
+    icon: TrendingUp,
+    href: '/analytics',
+    permission: 'analytics:view',
+  },
+  {
+    label: 'Rooms',
+    icon: Bed,
+    href: '/rooms',
+    permission: 'rooms:view',
+  },
+  {
+    label: 'Users & Roles',
+    icon: ShieldCheck,
+    href: '/users-roles',
+    permission: 'users:view',
   },
   {
     label: 'Settings',
