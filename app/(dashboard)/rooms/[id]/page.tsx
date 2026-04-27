@@ -349,7 +349,7 @@ export default function RoomDetailPage() {
                 type="number"
                 value={formData.price_per_night}
                 onChange={(e) => setFormData({ ...formData, price_per_night: e.target.value })}
-                placeholder="e.g., 25000"
+                placeholder="e.g., 100,000"
               />
             </div>
             <div className="space-y-2">
