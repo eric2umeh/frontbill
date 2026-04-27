@@ -16,9 +16,14 @@ import { formatNaira } from '@/lib/utils/currency'
 import { toast } from 'sonner'
 import { ExtendStayModal } from '@/components/bookings/extend-stay-modal'
 import { createClient } from '@/lib/supabase/client'
+import { useAuth } from '@/lib/auth-context'
+import { getUserDisplayName } from '@/lib/utils/user-display'
+import { fetchUserDisplayNameMap } from '@/lib/utils/fetch-user-display-names'
 
 export default function BookingDetailPage({ params }: { params: Promise<{ id: string }> | { id: string } }) {
   const router = useRouter()
+  const { role, userId } = useAuth()
+  const isAdmin = role === 'admin'
   const [booking, setBooking] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [bookingId, setBookingId] = useState<string>('')
@@ -64,24 +69,13 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
       if (bookingError) throw bookingError
       setBooking(bookingData)
 
-      // Fetch user info for created_by
+      const bookingUserIds = [bookingData.created_by, bookingData.updated_by].filter(Boolean)
+      const bookingUserMap = await fetchUserDisplayNameMap(bookingUserIds, userId)
       if (bookingData.created_by) {
-        const { data: userData } = await supabase
-          .from('users')
-          .select('full_name')
-          .eq('id', bookingData.created_by)
-          .single()
-        setCreatedByUser(userData)
+        setCreatedByUser({ id: bookingData.created_by, full_name: bookingUserMap[bookingData.created_by] })
       }
-
-      // Fetch user info for updated_by if exists
       if (bookingData.updated_by) {
-        const { data: userData } = await supabase
-          .from('users')
-          .select('full_name')
-          .eq('id', bookingData.updated_by)
-          .single()
-        setUpdatedByUser(userData)
+        setUpdatedByUser({ id: bookingData.updated_by, full_name: bookingUserMap[bookingData.updated_by] })
       }
 
       // Fetch folio charges from database
@@ -94,17 +88,11 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
       if (chargesError) throw chargesError
 
       // Fetch creator info for each charge
-      const chargesWithCreator = await Promise.all(chargesData.map(async (charge) => {
-        let creatorName = 'System'
-        if (charge.created_by) {
-          const { data: userData } = await supabase
-            .from('profiles')
-            .select('full_name')
-            .eq('id', charge.created_by)
-            .single()
-          creatorName = userData?.full_name || 'Unknown User'
-        }
-        
+      const chargeCreatorIds = chargesData.map((charge: any) => charge.created_by).filter(Boolean)
+      const chargeCreatorMap = await fetchUserDisplayNameMap(chargeCreatorIds, userId)
+      const chargesWithCreator = chargesData.map((charge: any) => {
+        const creatorName = charge.created_by ? chargeCreatorMap[charge.created_by] || getUserDisplayName(null, charge.created_by) : 'System'
+
         return {
           id: charge.id,
           date: charge.created_at?.split('T')[0],
@@ -116,7 +104,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
           paymentStatus: charge.payment_status,
           paymentMethod: charge.payment_method,
         }
-      }))
+      })
 
       setFolioCharges(chargesWithCreator)
 
@@ -186,7 +174,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
             payment_method: chargePaymentMethod || 'pending',
             status: paymentStatus,
             description: chargeDescription,
-            received_by: null,
+            received_by: userId,
           }])
         } catch (_) { /* non-fatal */ }
 
@@ -371,7 +359,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
             payment_method: paymentMethod,
             status: 'paid',
             description: `Payment received - ${paymentMethod.replace(/_/g, ' ')}`,
-            received_by: null,
+            received_by: userId,
           }])
         } catch (_) { /* non-fatal */ }
 
@@ -409,8 +397,8 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
   }
 
   const handleDeleteCharge = (chargeId: string, chargeAmount: number) => {
-    toast(
-      (t) => (
+    toast.custom(
+      (t: string | number) => (
         <div className="flex flex-col gap-3">
           <div className="flex gap-2 items-start">
             <AlertCircle className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" />
@@ -504,8 +492,8 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
         .eq('booking_id', bookingId)
 
       const unpaidTotal = (allCharges || [])
-        .filter(c => c.payment_status !== 'paid')
-        .reduce((sum, c) => sum + Number(c.amount), 0)
+        .filter((c: any) => c.payment_status !== 'paid')
+        .reduce((sum: number, c: any) => sum + Number(c.amount), 0)
 
       await supabase
         .from('bookings')
@@ -524,8 +512,8 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
   }
 
   const handleDelete = () => {
-    toast(
-      (t) => (
+    toast.custom(
+      (t: string | number) => (
         <div className="flex flex-col gap-3">
           <div className="flex gap-2 items-start">
             <AlertCircle className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" />
@@ -551,11 +539,57 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                 setDeleteLoading(true)
                 try {
                   const supabase = createClient()
-                  const { error } = await supabase
-                    .from('bookings')
-                    .delete()
-                    .eq('id', bookingId)
+                  const clearBookingChildren = async (table: string) => {
+                    const { error: deleteError } = await supabase.from(table).delete().eq('booking_id', bookingId)
+                    if (!deleteError) return
+
+                    // If RLS blocks deleting audit rows, unlink them so the booking FK can be removed.
+                    const { error: unlinkError } = await supabase.from(table).update({ booking_id: null }).eq('booking_id', bookingId)
+                    if (unlinkError) {
+                      throw deleteError
+                    }
+                  }
+
+                  await clearBookingChildren('payments')
+                  await clearBookingChildren('transactions')
+                  await supabase.from('folio_charges').delete().eq('booking_id', bookingId)
+                  let { error } = await supabase.from('bookings').delete().eq('id', bookingId)
+                  if (error && /foreign key constraint/i.test(error.message || '')) {
+                    await supabase.from('payments').update({ booking_id: null }).eq('booking_id', bookingId)
+                    await supabase.from('transactions').update({ booking_id: null }).eq('booking_id', bookingId)
+                    const retry = await supabase.from('bookings').delete().eq('id', bookingId)
+                    error = retry.error
+                  }
                   if (error) throw error
+
+                  if (booking?.guest_id) {
+                    const guestName = booking.guests?.name
+                    const [{ data: otherBookings }, { data: guestPayments }, { data: guestTransactions }, { data: ledgerAccounts }] = await Promise.all([
+                      supabase.from('bookings').select('id').eq('guest_id', booking.guest_id).limit(1),
+                      supabase.from('payments').select('id').eq('guest_id', booking.guest_id).limit(1),
+                      supabase.from('transactions').select('id').eq('guest_id', booking.guest_id).limit(1),
+                      guestName
+                        ? supabase
+                            .from('city_ledger_accounts')
+                            .select('id, balance')
+                            .eq('organization_id', booking.organization_id)
+                            .ilike('account_name', guestName)
+                            .in('account_type', ['individual', 'guest'])
+                        : Promise.resolve({ data: [] }),
+                    ])
+
+                    const hasLedgerBalance = (ledgerAccounts || []).some((account: any) => Number(account.balance || 0) !== 0)
+                    if ((otherBookings || []).length === 0 && (guestPayments || []).length === 0 && (guestTransactions || []).length === 0 && !hasLedgerBalance) {
+                      if (ledgerAccounts?.length) {
+                        await supabase
+                          .from('city_ledger_accounts')
+                          .delete()
+                          .in('id', ledgerAccounts.map((account: any) => account.id))
+                      }
+                      await supabase.from('guests').delete().eq('id', booking.guest_id)
+                    }
+                  }
+
                   toast.success('Booking deleted')
                   router.push('/bookings')
                 } catch (err: any) {
@@ -570,24 +604,21 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
           </div>
         </div>
       ),
-      {
-        duration: Infinity,
-        className: 'bg-red-50 border-red-200',
-      }
+      { duration: Infinity }
     )
   }
 
-  const totalCharges = folioCharges.reduce((sum, charge) => sum + charge.amount, 0)
+  const totalCharges = folioCharges.reduce((sum: number, charge: any) => sum + charge.amount, 0)
 
   // Pending (city ledger / deferred) additional charges - excludes cash/card/pos paid charges
   const pendingAdditionalCharges = folioCharges
-    .filter(c => c.paymentStatus === 'pending' && c.amount > 0)
-    .reduce((sum, c) => sum + c.amount, 0)
+    .filter((c: any) => c.paymentStatus === 'pending' && c.amount > 0)
+    .reduce((sum: number, c: any) => sum + c.amount, 0)
 
-  // Paid additional charges (cash/card/pos/bank_transfer on the spot) - for folio display only
+  // Paid additional charges (cash/card/pos/transfer on the spot) - for folio display only
   const paidAdditionalCharges = folioCharges
-    .filter(c => c.paymentStatus === 'paid' && c.amount > 0 && c.type === 'charge')
-    .reduce((sum, c) => sum + c.amount, 0)
+    .filter((c: any) => c.paymentStatus === 'paid' && c.amount > 0 && c.type === 'charge')
+    .reduce((sum: number, c: any) => sum + c.amount, 0)
 
   // Bill Balance (Unpaid) = sum of all pending/unpaid/city_ledger folio charges
   // city_ledger charges are billed to an account — still an outstanding balance owed to the hotel.
@@ -685,8 +716,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                       <SelectItem value="cash">Cash (paid now - not added to Bill Balance)</SelectItem>
                       <SelectItem value="pos">POS (paid now - not added to Bill Balance)</SelectItem>
                       <SelectItem value="card">Card (paid now - not added to Bill Balance)</SelectItem>
-                      <SelectItem value="transfer">Bank Transfer (paid now - not added to Bill Balance)</SelectItem>
-                      <SelectItem value="bank_transfer">Bank Transfer / Wire (paid now - not added to Bill Balance)</SelectItem>
+                      <SelectItem value="transfer">Transfer (paid now - not added to Bill Balance)</SelectItem>
                       <SelectItem value="cheque">Cheque (paid now - not added to Bill Balance)</SelectItem>
                       <SelectItem value="city_ledger">City Ledger (bill to account - adds to Bill Balance)</SelectItem>
                       <SelectItem value="deferred">Defer / Not yet paid (adds to Bill Balance)</SelectItem>
@@ -728,8 +758,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                       <SelectItem value="cash">Cash</SelectItem>
                       <SelectItem value="pos">POS</SelectItem>
                       <SelectItem value="card">Card</SelectItem>
-                      <SelectItem value="transfer">Bank Transfer</SelectItem>
-                      <SelectItem value="bank_transfer">Bank Transfer (Wire)</SelectItem>
+                      <SelectItem value="transfer">Transfer</SelectItem>
                       <SelectItem value="cheque">Cheque</SelectItem>
                     </SelectContent>
                   </Select>
@@ -793,18 +822,22 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
           {(booking?.folio_status || 'active') === 'checked_out' && (
             <Badge variant="secondary" className="bg-gray-100 text-gray-700">Folio Checked Out</Badge>
           )}
-          <Button variant="outline" size="sm" onClick={() => setExtendStayModalOpen(true)} disabled={addChargeLoading || (booking?.folio_status === 'checked_out')}>
-            <Clock className="mr-2 h-4 w-4" />
-            Extend Stay
-          </Button>
-          <Button variant="outline" size="sm" disabled={booking?.folio_status === 'checked_out'}>
-            <Edit className="mr-2 h-4 w-4" />
-            Edit
-          </Button>
-          <Button variant="destructive" size="sm" onClick={handleDelete} disabled={booking?.folio_status === 'checked_out'}>
-            <Trash2 className="mr-2 h-4 w-4" />
-            Delete
-          </Button>
+          {isAdmin && (
+            <>
+              <Button variant="outline" size="sm" onClick={() => setExtendStayModalOpen(true)} disabled={addChargeLoading || (booking?.folio_status === 'checked_out')}>
+                <Clock className="mr-2 h-4 w-4" />
+                Extend Stay
+              </Button>
+              <Button variant="outline" size="sm" disabled={booking?.folio_status === 'checked_out'}>
+                <Edit className="mr-2 h-4 w-4" />
+                Edit
+              </Button>
+              <Button variant="destructive" size="sm" onClick={handleDelete} disabled={booking?.folio_status === 'checked_out'}>
+                <Trash2 className="mr-2 h-4 w-4" />
+                Delete
+              </Button>
+            </>
+          )}
         </div>
       </div>
 
@@ -884,25 +917,27 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                       <div className={`font-semibold text-right min-w-[100px] ${charge.amount < 0 ? 'text-green-600' : charge.paymentStatus === 'paid' && charge.type === 'charge' ? 'text-muted-foreground' : 'text-foreground'}`}>
                         {charge.amount < 0 ? '-' : '+'}{formatNaira(Math.abs(charge.amount))}
                       </div>
-                      <div className="flex gap-1">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => openEditCharge(charge)}
-                          title="Edit charge"
-                        >
-                          <Edit className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                          onClick={() => handleDeleteCharge(charge.id, charge.amount)}
-                          title="Delete charge"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
+                      {isAdmin && (
+                        <div className="flex gap-1">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => openEditCharge(charge)}
+                            title="Edit charge"
+                          >
+                            <Edit className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                            onClick={() => handleDeleteCharge(charge.id, charge.amount)}
+                            title="Delete charge"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -971,7 +1006,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                   {new Date(booking.created_at).toLocaleDateString('en-GB')}
                 </div>
                 <div>
-                  Booking created by {createdByUser?.full_name || 'System'}
+                  Booking created by {getUserDisplayName(createdByUser, booking.created_by)}
                 </div>
               </div>
               {booking.payment_status === 'paid' && (
@@ -988,7 +1023,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                     {booking.updated_at ? new Date(booking.updated_at).toLocaleDateString('en-GB') : 'N/A'}
                   </div>
                   <div>
-                    Updated by {updatedByUser?.full_name || 'System'}
+                    Updated by {getUserDisplayName(updatedByUser, booking.updated_by)}
                   </div>
                 </div>
               )}

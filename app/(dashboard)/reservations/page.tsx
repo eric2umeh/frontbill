@@ -15,6 +15,8 @@ import { hasPermission } from '@/lib/permissions'
 import { Plus, Users, Loader2 } from 'lucide-react'
 import { BulkBookingModal } from '@/components/reservations/bulk-booking-modal'
 import { NewReservationModal } from '@/components/reservations/new-reservation-modal'
+import { getUserDisplayName } from '@/lib/utils/user-display'
+import { fetchUserDisplayNameMap } from '@/lib/utils/fetch-user-display-names'
 
 interface Reservation {
   id: string
@@ -27,6 +29,8 @@ interface Reservation {
   payment_status: string
   payment_method?: string
   ledger_account_name?: string
+  guestName?: string
+  guestPhone?: string
   rate_per_night: number
   balance: number
   deposit: number
@@ -44,7 +48,7 @@ export default function ReservationsPage() {
   const [bulkModalOpen, setBulkModalOpen] = useState(false)
   const [newReservationOpen, setNewReservationOpen] = useState(false)
   const { initialLoading, startFetch, endFetch } = usePageData()
-  const { organizationId, role } = useAuth()
+  const { organizationId, role, userId } = useAuth()
   const router = useRouter()
 
   useEffect(() => {
@@ -83,14 +87,7 @@ export default function ReservationsPage() {
         ...(data || []).map((r: any) => r.created_by).filter(Boolean),
         ...(data || []).map((r: any) => r.updated_by).filter(Boolean),
       ])]
-      const profileMap: Record<string, string> = {}
-      if (userIds.length > 0) {
-        const { data: profiles } = await supabase
-          .from('profiles')
-          .select('id, full_name')
-          .in('id', userIds)
-        ;(profiles || []).forEach((p: any) => { profileMap[p.id] = p.full_name || 'Unknown' })
-      }
+      const profileMap = await fetchUserDisplayNameMap(userIds as string[], userId)
 
       // Map data to match interface and calculate balance from folio_charges
       const reservationsWithData = (data || []).map((reservation: any) => {
@@ -125,8 +122,8 @@ export default function ReservationsPage() {
           rooms: reservation.rooms
             ? (Array.isArray(reservation.rooms) ? reservation.rooms[0] : reservation.rooms)
             : null,
-          created_by_name: reservation.created_by ? (profileMap[reservation.created_by] || 'Unknown') : 'System',
-          updated_by_name: reservation.updated_by ? (profileMap[reservation.updated_by] || null) : null,
+          created_by_name: reservation.created_by ? (profileMap[reservation.created_by] || getUserDisplayName(null, reservation.created_by)) : 'System',
+          updated_by_name: reservation.updated_by ? (profileMap[reservation.updated_by] || getUserDisplayName(null, reservation.updated_by)) : null,
           balance: balance
         }
       })
@@ -186,7 +183,7 @@ export default function ReservationsPage() {
 
       <EnhancedDataTable
         data={reservations}
-        searchKeys={['folio_id', 'guestName', 'guestPhone', 'ledger_account_name', 'rooms.room_number']}
+        searchKeys={['folio_id', 'guestName', 'guestPhone', 'ledger_account_name', 'rooms.room_number'] as any}
         dateField="check_in"
         filters={[
           {
@@ -278,7 +275,7 @@ export default function ReservationsPage() {
                 : res.payment_status
               return (
                 <div className="space-y-1">
-                  <Badge variant="outline" className={paymentColors[effectiveStatus]}>
+                  <Badge variant="outline" className={(paymentColors as Record<string, string>)[effectiveStatus]}>
                     {effectiveStatus}
                   </Badge>
                   {res.balance > 0 && (
@@ -332,7 +329,7 @@ export default function ReservationsPage() {
                   <div className="font-semibold">{res.guests?.name}</div>
                   <div className="text-sm text-muted-foreground">{res.guests?.phone}</div>
                 </div>
-                <Badge variant="outline" className={paymentColors[res.payment_status]}>
+                <Badge variant="outline" className={(paymentColors as Record<string, string>)[res.payment_status]}>
                   {res.payment_status}
                 </Badge>
               </div>

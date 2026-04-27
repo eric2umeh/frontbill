@@ -17,6 +17,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Separator } from '@/components/ui/separator'
 import { format, isWithinInterval, parseISO, startOfDay, endOfDay } from 'date-fns'
 import { useMemo } from 'react'
+import { useAuth } from '@/lib/auth-context'
 
 const ROOM_TYPES = [
   'Deluxe', 'Royal', 'Kings', 'Mini Suite', 'Executive Suite', 'Diplomatic Suite',
@@ -55,6 +56,8 @@ export default function RoomDetailPage() {
   const router = useRouter()
   const params = useParams()
   const roomId = params.id as string
+  const { role } = useAuth()
+  const isAdmin = role === 'admin'
 
   const [room, setRoom] = useState<Room | null>(null)
   const [loading, setLoading] = useState(true)
@@ -182,9 +185,15 @@ export default function RoomDetailPage() {
   }
 
   const handleSaveChanges = async () => {
+    if (!isAdmin) {
+      toast.error('Only admins can edit rooms')
+      return
+    }
+
     try {
       setSaveLoading(true)
       const supabase = createClient()
+      const { data: { user } } = await supabase.auth.getUser()
 
       const { error } = await supabase
         .from('rooms')
@@ -195,6 +204,8 @@ export default function RoomDetailPage() {
           price_per_night: parseFloat(formData.price_per_night as string),
           status: formData.status,
           amenities: formData.amenities,
+          updated_by: user?.id,
+          updated_at: new Date().toISOString(),
         })
         .eq('id', roomId)
 
@@ -211,8 +222,13 @@ export default function RoomDetailPage() {
   }
 
   const handleDeleteClick = () => {
-    toast(
-      (t) => (
+    if (!isAdmin) {
+      toast.error('Only admins can delete rooms')
+      return
+    }
+
+    toast.custom(
+      (t: string | number) => (
         <div className="flex flex-col gap-3">
           <div className="flex gap-2 items-start">
             <AlertCircle className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" />
@@ -243,14 +259,16 @@ export default function RoomDetailPage() {
           </div>
         </div>
       ),
-      {
-        duration: Infinity,
-        className: 'bg-red-50 border-red-200',
-      }
+      { duration: Infinity }
     )
   }
 
   const handleDeleteConfirm = async () => {
+    if (!isAdmin) {
+      toast.error('Only admins can delete rooms')
+      return
+    }
+
     try {
       setDeleteLoading(true)
       const supabase = createClient()
@@ -302,6 +320,7 @@ export default function RoomDetailPage() {
 
   return (
     <div className="space-y-6">
+      {isAdmin && (
       <Dialog open={editModalOpen} onOpenChange={setEditModalOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
@@ -402,12 +421,14 @@ export default function RoomDetailPage() {
           </div>
         </DialogContent>
       </Dialog>
+      )}
 
       <div className="flex items-center justify-between">
         <Button variant="ghost" onClick={() => router.push('/rooms')}>
           <ArrowLeft className="mr-2 h-4 w-4" />
           Back to Rooms
         </Button>
+        {isAdmin && (
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={() => setEditModalOpen(true)}>
             <Edit className="mr-2 h-4 w-4" />
@@ -418,6 +439,7 @@ export default function RoomDetailPage() {
             Delete
           </Button>
         </div>
+        )}
       </div>
 
       <Tabs defaultValue="details">
@@ -454,7 +476,7 @@ export default function RoomDetailPage() {
                     <MapPin className="h-4 w-4" />
                     <span className="text-sm">Location</span>
                   </div>
-                  <p className="font-semibold">Floor {room.floor_number}</p>
+                  <p className="font-semibold">{room.floor_number === 0 ? 'Ground Floor' : `Floor ${room.floor_number}`}</p>
                 </div>
                 <div className="space-y-2">
                   <div className="flex items-center gap-2 text-muted-foreground">
@@ -496,7 +518,7 @@ export default function RoomDetailPage() {
                   </div>
                   <div>
                     <p className="text-muted-foreground">Floor</p>
-                    <p className="font-medium">{room.floor_number}</p>
+                    <p className="font-medium">{room.floor_number === 0 ? 'Ground Floor' : `Floor ${room.floor_number}`}</p>
                   </div>
                 </div>
               </div>

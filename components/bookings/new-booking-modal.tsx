@@ -15,6 +15,7 @@ import { format, addDays } from 'date-fns'
 import { Calendar as CalendarIcon, X, Users, Building2 } from 'lucide-react'
 import { formatNaira } from '@/lib/utils/currency'
 import { toast } from 'sonner'
+import { isOrganizationMenuRecord, isSelectableLedgerName } from '@/lib/utils/ledger-organization'
 
 interface NewBookingModalProps {
   open: boolean
@@ -35,6 +36,7 @@ interface Room {
   room_number: string
   room_type: string
   price_per_night: number
+  status?: string
 }
 
 interface LedgerAccount {
@@ -64,7 +66,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
   const [checkInDate, setCheckInDate] = useState<Date>(() => {
     const d = new Date(); d.setHours(0, 0, 0, 0); return d
   })
-  const [checkOutDate, setCheckOutDate] = useState<Date>(() => {
+  const [checkOutDate, setCheckOutDate] = useState<Date | undefined>(() => {
     const d = new Date(); d.setHours(0, 0, 0, 0); return new Date(d.getTime() + 86400000)
   })
   const [nights, setNights] = useState(1)
@@ -80,6 +82,8 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
   const [pricePerNight, setPricePerNight] = useState(0)
   const [customPrice, setCustomPrice] = useState(0)
   const [paymentMethod, setPaymentMethod] = useState('cash')
+  const [paymentStatus, setPaymentStatus] = useState<'paid' | 'partial'>('paid')
+  const [amountPaid, setAmountPaid] = useState<number | ''>('')
 
   // City Ledger — split into individual and organization tabs
   const [ledgerTab, setLedgerTab] = useState<'individual' | 'organization'>('individual')
@@ -90,6 +94,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
   const [individualAccounts, setIndividualAccounts] = useState<LedgerAccount[]>([])
   const [organizationAccounts, setOrganizationAccounts] = useState<LedgerAccount[]>([])
   const [filteredLedgerAccounts, setFilteredLedgerAccounts] = useState<LedgerAccount[]>([])
+  const [organizationCreatorIds, setOrganizationCreatorIds] = useState<Set<string>>(new Set())
 
   // New ledger account dialog
   const [newAccountDialogOpen, setNewAccountDialogOpen] = useState(false)
@@ -135,18 +140,22 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
         { data: bookingData },
         { data: cityLedgerData },
         { data: orgsData },
+        { data: teamProfiles },
       ] = await Promise.all([
         // Guests table
         supabase.from('guests').select('id, name, phone, email, address').eq('organization_id', orgId).order('name'),
         // All non-maintenance rooms — availability is checked by date range, not status
-        supabase.from('rooms').select('id, room_number, room_type, price_per_night').eq('organization_id', orgId).neq('status', 'maintenance').order('room_number'),
+        supabase.from('rooms').select('id, room_number, room_type, price_per_night, status').eq('organization_id', orgId).eq('status', 'available').order('room_number'),
         // Active bookings to check date conflicts
         supabase.from('bookings').select('room_id, check_in, check_out').eq('organization_id', orgId).in('status', ['confirmed', 'reserved', 'checked_in']),
         // City ledger accounts — load ALL, split by type client-side
         supabase.from('city_ledger_accounts').select('id, account_name, account_type, contact_phone, balance').eq('organization_id', orgId).order('account_name'),
         // Also load from organizations table as fallback (legacy orgs may live there)
-        supabase.from('organizations').select('id, name, phone, email').order('name'),
+        supabase.from('organizations').select('id, name, phone, email, org_type, created_by').neq('id', orgId).order('name'),
+        supabase.from('profiles').select('id').eq('organization_id', orgId),
       ])
+      const teamCreatorIds = new Set((teamProfiles || []).map((profile: any) => profile.id))
+      setOrganizationCreatorIds(teamCreatorIds)
 
       // Sanitize rooms — filter out any with empty id, room_type or room_number to prevent SelectItem crashes
       const sanitizedRooms = (roomData || []).filter(
@@ -159,8 +168,8 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
 
       // Individuals: city_ledger_accounts with type individual/guest
       const individualLedger: LedgerAccount[] = (cityLedgerData || [])
-        .filter(a => a.account_type === 'individual' || a.account_type === 'guest')
-        .map(a => ({
+        .filter((a: any) => (a.account_type === 'individual' || a.account_type === 'guest') && isSelectableLedgerName(a.account_name))
+        .map((a: any) => ({
           id: a.id,
           account_name: a.account_name,
           account_type: 'individual' as const,
@@ -169,22 +178,11 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
           source: 'city_ledger',
         }))
 
-      // Organizations: city_ledger_accounts non-individual + organizations table (legacy), deduped by name
-      const orgFromLedger: LedgerAccount[] = (cityLedgerData || [])
-        .filter(a => a.account_type !== 'individual' && a.account_type !== 'guest')
-        .map(a => ({
-          id: a.id,
-          account_name: a.account_name,
-          account_type: 'organization' as const,
-          contact_phone: a.contact_phone || '',
-          balance: a.balance || 0,
-          source: 'city_ledger',
-        }))
-
-      const orgNames = new Set(orgFromLedger.map(o => o.account_name.toLowerCase()))
+      // Organizations must come from the Organizations menu, not generated hotel tenant records.
+      const orgNames = new Set<string>()
       const orgFromTable: LedgerAccount[] = (orgsData || [])
-        .filter(o => !orgNames.has(o.name.toLowerCase()))
-        .map(o => ({
+        .filter((o: any) => isOrganizationMenuRecord(o, teamCreatorIds) && !orgNames.has(o.name.toLowerCase()))
+        .map((o: any) => ({
           id: o.id,
           account_name: o.name,
           account_type: 'organization' as const,
@@ -193,7 +191,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
           source: 'organizations',
         }))
 
-      const orgLedger: LedgerAccount[] = [...orgFromLedger, ...orgFromTable]
+      const orgLedger: LedgerAccount[] = orgFromTable
         .sort((a, b) => a.account_name.localeCompare(b.account_name))
 
       setIndividualAccounts(individualLedger)
@@ -256,7 +254,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
       return
     }
     // First filter from preloaded list
-    const allLoaded = [...individualAccounts, ...organizationAccounts]
+    const allLoaded = ledgerTab === 'individual' ? individualAccounts : organizationAccounts
     const fromCache = allLoaded.filter(a =>
       a.account_name.toLowerCase().includes(value.toLowerCase())
     )
@@ -276,22 +274,27 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
         .limit(10),
       supabase
         .from('organizations')
-        .select('id, name, phone')
+        .select('id, name, phone, org_type, created_by')
+        .neq('id', organizationId)
         .ilike('name', `%${value}%`)
         .limit(10),
     ])
-    const fromLedger: LedgerAccount[] = (ledgerData || []).map(a => ({
+    const fromLedger: LedgerAccount[] = ledgerTab === 'individual'
+      ? (ledgerData || [])
+        .filter((a: any) => (a.account_type === 'individual' || a.account_type === 'guest') && isSelectableLedgerName(a.account_name))
+        .map((a: any) => ({
       id: a.id,
       account_name: a.account_name,
-      account_type: (a.account_type === 'individual' || a.account_type === 'guest') ? 'individual' : 'organization',
+      account_type: 'individual',
       contact_phone: a.contact_phone || '',
       balance: a.balance || 0,
       source: 'city_ledger' as const,
-    }))
+        }))
+      : []
     const ledgerNames = new Set(fromLedger.map(a => a.account_name.toLowerCase()))
     const fromOrgs: LedgerAccount[] = (orgSearchData || [])
-      .filter(o => !ledgerNames.has(o.name.toLowerCase()))
-      .map(o => ({
+      .filter((o: any) => ledgerTab === 'organization' && isOrganizationMenuRecord(o, organizationCreatorIds) && !ledgerNames.has(o.name.toLowerCase()))
+      .map((o: any) => ({
         id: o.id,
         account_name: o.name,
         account_type: 'organization' as const,
@@ -417,7 +420,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
         .filter(b => b.check_in < coStr && b.check_out > ciStr)
         .map(b => b.room_id)
     )
-    setRooms(allRooms.filter(r => !bookedRoomIds.has(r.id) && r.id && r.room_type && String(r.room_type).trim() !== ''))
+    setRooms(allRooms.filter(r => r.status === 'available' && !bookedRoomIds.has(r.id) && r.id && r.room_type && String(r.room_type).trim() !== ''))
     // Clear selected room if it's no longer available
     setSelectedRoom(prev => prev && bookedRoomIds.has(prev.id) ? null : prev)
     setSelectedRoomType(prev => {
@@ -477,6 +480,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
       setLoading(true)
       if (!checkInDate || !checkOutDate) { toast.error('Dates required'); return }
       if (!selectedRoom) { toast.error('Room required'); return }
+      if (selectedRoom.status && selectedRoom.status !== 'available') { toast.error('Selected room is not available'); return }
       if (paymentMethod === 'city_ledger' && !ledgerAccount) { toast.error('Select a ledger account'); return }
 
       // Check for date conflicts one final time before submit
@@ -506,20 +510,17 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
         if (ge) throw ge
         finalGuestId = newGuest.id
 
-        // Auto-create city_ledger_account for this guest to prevent duplicates when city ledger is used later
-        await supabase.from('city_ledger_accounts').insert([{
-          organization_id: organizationId,
-          account_name: fullName,
-          account_type: 'individual',
-          contact_phone: phone || null,
-          contact_email: email || null,
-          balance: 0,
-        }])
       }
 
       const effectiveRate = customPrice > 0 ? customPrice : pricePerNight
       const total = effectiveRate * nights
-      const isPaid = paymentMethod !== 'city_ledger'
+      const isCityLedger = paymentMethod === 'city_ledger'
+      const paidAmount = isCityLedger ? 0 : paymentStatus === 'paid' ? total : Math.min(Number(amountPaid) || 0, total)
+      const balanceAmount = total - paidAmount
+      if (!isCityLedger && paymentStatus === 'partial' && paidAmount <= 0) {
+        toast.error('Please enter the amount paid')
+        return
+      }
       const folioId = `FOL-${Date.now().toString(36).toUpperCase()}`
 
       const { data: booking, error: be } = await supabase
@@ -534,9 +535,9 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
           number_of_nights: nights,
           rate_per_night: effectiveRate,
           total_amount: total,
-          deposit: isPaid ? total : 0,
-          balance: isPaid ? 0 : total,
-          payment_status: isPaid ? 'paid' : 'pending',
+          deposit: paidAmount,
+          balance: balanceAmount,
+          payment_status: isCityLedger ? 'pending' : balanceAmount <= 0 ? 'paid' : 'partial',
           // Future check-in dates are reservations, today/past are confirmed bookings
           status: toLocalDateStr(checkInDate) > new Date().toISOString().split('T')[0] ? 'reserved' : 'confirmed',
           created_by: user?.id,
@@ -586,7 +587,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
         }
       }
 
-      await supabase.from('rooms').update({ status: 'occupied' }).eq('id', selectedRoom.id)
+      await supabase.from('rooms').update({ status: 'occupied', updated_by: user?.id, updated_at: new Date().toISOString() }).eq('id', selectedRoom.id)
 
       // Insert folio charge (this is what the Transactions page reads from)
       await supabase.from('folio_charges').insert([{
@@ -598,9 +599,22 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
         payment_method: paymentMethod,
         ledger_account_id: ledgerAccount || null,
         ledger_account_type: paymentMethod === 'city_ledger' ? 'organization' : null,
-        payment_status: isPaid ? 'paid' : 'unpaid',
+        payment_status: balanceAmount <= 0 ? 'paid' : 'unpaid',
         created_by: user?.id,
       }])
+
+      if (paidAmount > 0 && balanceAmount > 0) {
+        await supabase.from('folio_charges').insert([{
+          booking_id: booking.id,
+          organization_id: organizationId,
+          description: `Initial payment - ${paymentMethod}`,
+          amount: -paidAmount,
+          charge_type: 'payment',
+          payment_method: paymentMethod,
+          payment_status: 'paid',
+          created_by: user?.id,
+        }])
+      }
 
       // Record in transactions table (legacy)
       await supabase.from('transactions').insert([{
@@ -609,23 +623,24 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
         transaction_id: `TXN-${Date.now().toString(36).toUpperCase()}`,
         guest_name: fullName,
         room: selectedRoom.room_number,
-        amount: total,
+        amount: paidAmount || total,
         payment_method: paymentMethod,
-        status: isPaid ? 'completed' : 'pending',
+        status: balanceAmount <= 0 ? 'completed' : 'pending',
         description: `Booking created - Folio ${folioId}`,
+        received_by: user?.id || null,
       }])
 
-      // Also record in payments table so Transactions page shows it
-      // Record for ALL bookings, regardless of payment status (city_ledger charges still need to appear)
-      await supabase.from('payments').insert([{
-        organization_id: organizationId,
-        booking_id: booking.id,
-        guest_id: finalGuestId,
-        amount: total,
-        payment_method: paymentMethod,
-        payment_date: new Date().toISOString(),
-        notes: `Booking payment — Folio ${folioId}`,
-      }])
+      if (paidAmount > 0) {
+        await supabase.from('payments').insert([{
+          organization_id: organizationId,
+          booking_id: booking.id,
+          guest_id: finalGuestId,
+          amount: paidAmount,
+          payment_method: paymentMethod,
+          payment_date: new Date().toISOString(),
+          notes: `Booking payment — Folio ${folioId}`,
+        }])
+      }
 
       toast.success(`Booking created! Ref: ${booking.folio_id}`)
       onSuccess?.()
@@ -643,7 +658,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
     const d = new Date(); d.setHours(0, 0, 0, 0)
     setCheckInDate(d); setCheckOutDate(new Date(d.getTime() + 86400000)); setNights(1)
     setSelectedRoomType(''); setSelectedRoom(null); setPricePerNight(0); setCustomPrice(0)
-    setPaymentMethod('cash')
+    setPaymentMethod('cash'); setPaymentStatus('paid'); setAmountPaid('')
     setLedgerSearch(''); setLedgerAccount(''); setLedgerAccountName('')
     setLedgerTab('individual')
     setNewAccountName(''); setNewAccountPhone(''); setNewAccountEmail('')
@@ -834,8 +849,35 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
 
             {/* Payment */}
             <div className="rounded-lg border p-4 space-y-4">
-              <p className="text-sm font-semibold">Payment Method</p>
+              <p className="text-sm font-semibold">Payment</p>
+              {paymentMethod !== 'city_ledger' && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label>Payment Status</Label>
+                    <Select value={paymentStatus} onValueChange={(v: 'paid' | 'partial') => setPaymentStatus(v)}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="paid">Full Payment</SelectItem>
+                        <SelectItem value="partial">Partial Payment</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Amount Paid</Label>
+                    <Input
+                      type="number"
+                      min="0"
+                      max={(customPrice || pricePerNight) * nights}
+                      value={paymentStatus === 'paid' ? ((customPrice || pricePerNight) * nights) || '' : amountPaid}
+                      onChange={(e) => setAmountPaid(e.target.value === '' ? '' : Number(e.target.value))}
+                      disabled={paymentStatus === 'paid'}
+                      placeholder="Enter paid amount"
+                    />
+                  </div>
+                </div>
+              )}
               <div className="space-y-2">
+                <Label>Payment Method</Label>
                 <Select value={paymentMethod} onValueChange={(v) => { setPaymentMethod(v); setLedgerAccount(''); setLedgerSearch(''); setLedgerAccountName('') }}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
@@ -851,25 +893,23 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
                 <div className="space-y-3 rounded-lg border border-input p-3">
                   <div className="flex items-center justify-between">
                     <Label className="text-sm font-semibold">City Ledger Account *</Label>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      className="h-7 text-xs"
-                      onClick={() => {
-                        if (ledgerTab === 'individual') {
+                    {ledgerTab === 'individual' && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-xs"
+                        onClick={() => {
                           setNewAccountName(fullName)
                           setNewAccountPhone(phone)
                           setNewAccountEmail(email)
-                        } else {
-                          setNewAccountName(''); setNewAccountPhone(''); setNewAccountEmail('')
-                        }
-                        setNewAccountAddress(''); setNewAccountCity(''); setNewAccountType('')
-                        setNewAccountDialogOpen(true)
-                      }}
-                    >
-                      + New Account
-                    </Button>
+                          setNewAccountAddress(''); setNewAccountCity(''); setNewAccountType('')
+                          setNewAccountDialogOpen(true)
+                        }}
+                      >
+                        + New Account
+                      </Button>
+                    )}
                   </div>
                   <Tabs value={ledgerTab} onValueChange={handleLedgerTabChange}>
                     <TabsList className="grid w-full grid-cols-2 h-9">
@@ -917,6 +957,11 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
                       </div>
                     )}
                   </div>
+                  {ledgerTab === 'organization' && (
+                    <p className="text-xs text-muted-foreground">
+                      Only organizations created from the Organizations menu are shown here.
+                    </p>
+                  )}
                   {ledgerAccount && (
                     <div className="flex items-center gap-2 text-xs text-green-700 bg-green-50 border border-green-200 rounded px-3 py-2">
                       {ledgerTab === 'individual' ? <Users className="h-3.5 w-3.5 flex-shrink-0" /> : <Building2 className="h-3.5 w-3.5 flex-shrink-0" />}
