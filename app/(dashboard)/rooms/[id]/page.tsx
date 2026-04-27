@@ -17,6 +17,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Separator } from '@/components/ui/separator'
 import { format, isWithinInterval, parseISO, startOfDay, endOfDay } from 'date-fns'
 import { useMemo } from 'react'
+import { useAuth } from '@/lib/auth-context'
 
 const ROOM_TYPES = [
   'Deluxe', 'Royal', 'Kings', 'Mini Suite', 'Executive Suite', 'Diplomatic Suite',
@@ -55,6 +56,8 @@ export default function RoomDetailPage() {
   const router = useRouter()
   const params = useParams()
   const roomId = params.id as string
+  const { role } = useAuth()
+  const isAdmin = role === 'admin'
 
   const [room, setRoom] = useState<Room | null>(null)
   const [loading, setLoading] = useState(true)
@@ -182,6 +185,11 @@ export default function RoomDetailPage() {
   }
 
   const handleSaveChanges = async () => {
+    if (!isAdmin) {
+      toast.error('Only admins can edit rooms')
+      return
+    }
+
     try {
       setSaveLoading(true)
       const supabase = createClient()
@@ -214,6 +222,11 @@ export default function RoomDetailPage() {
   }
 
   const handleDeleteClick = () => {
+    if (!isAdmin) {
+      toast.error('Only admins can delete rooms')
+      return
+    }
+
     toast.custom(
       (t: string | number) => (
         <div className="flex flex-col gap-3">
@@ -251,6 +264,11 @@ export default function RoomDetailPage() {
   }
 
   const handleDeleteConfirm = async () => {
+    if (!isAdmin) {
+      toast.error('Only admins can delete rooms')
+      return
+    }
+
     try {
       setDeleteLoading(true)
       const supabase = createClient()
@@ -302,6 +320,7 @@ export default function RoomDetailPage() {
 
   return (
     <div className="space-y-6">
+      {isAdmin && (
       <Dialog open={editModalOpen} onOpenChange={setEditModalOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
@@ -402,12 +421,14 @@ export default function RoomDetailPage() {
           </div>
         </DialogContent>
       </Dialog>
+      )}
 
       <div className="flex items-center justify-between">
         <Button variant="ghost" onClick={() => router.push('/rooms')}>
           <ArrowLeft className="mr-2 h-4 w-4" />
           Back to Rooms
         </Button>
+        {isAdmin && (
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={() => setEditModalOpen(true)}>
             <Edit className="mr-2 h-4 w-4" />
@@ -418,6 +439,7 @@ export default function RoomDetailPage() {
             Delete
           </Button>
         </div>
+        )}
       </div>
 
       <Tabs defaultValue="details">
