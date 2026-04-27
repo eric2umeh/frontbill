@@ -39,7 +39,7 @@ export default function AnalyticsPage() {
   const [bookings, setBookings] = useState<any[]>([])
   const [cityLedger, setCityLedger] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
-  const [period, setPeriod] = useState<Period>('30d')
+  const [period, setPeriod] = useState<Period>('today')
   const [customDate, setCustomDate] = useState<Date>(new Date())
   const [calOpen, setCalOpen] = useState(false)
   const [paymentMethodFilter, setPaymentMethodFilter] = useState<string>('all')
