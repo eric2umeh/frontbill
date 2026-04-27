@@ -15,6 +15,7 @@ import { formatNaira } from '@/lib/utils/currency'
 import { toast } from 'sonner'
 import { createClient } from '@/lib/supabase/client'
 import { format, isBefore, startOfDay } from 'date-fns'
+import { useAuth } from '@/lib/auth-context'
 
 export default function ReservationDetailPage({
   params,
@@ -22,6 +23,8 @@ export default function ReservationDetailPage({
   params: Promise<{ id: string }> | { id: string }
 }) {
   const router = useRouter()
+  const { role, userId } = useAuth()
+  const isAdmin = role === 'admin'
   const [rid, setRid] = useState('')
   const [reservation, setReservation] = useState<any>(null)
   const [loading, setLoading] = useState(true)
@@ -87,8 +90,8 @@ export default function ReservationDetailPage({
     : false
 
   function handleCheckin() {
-    toast(
-      (t) => (
+    toast.custom(
+      (t: string | number) => (
         <div className="flex flex-col gap-3">
           <div className="flex gap-2 items-start">
             <AlertCircle className="w-5 h-5 text-blue-600 mt-0.5 shrink-0" />
@@ -201,7 +204,7 @@ export default function ReservationDetailPage({
             payment_method: paymentMethod,
             status: 'paid',
             description: 'Reservation payment',
-            received_by: null,
+            received_by: userId,
           },
         ])
       } catch {
@@ -221,8 +224,8 @@ export default function ReservationDetailPage({
   }
 
   function handleDelete() {
-    toast(
-      (t) => (
+    toast.custom(
+      (t: string | number) => (
         <div className="flex flex-col gap-3">
           <div className="flex gap-2 items-start">
             <AlertCircle className="w-5 h-5 text-red-600 mt-0.5 shrink-0" />
@@ -253,7 +256,7 @@ export default function ReservationDetailPage({
                   if (reservation?.rooms?.id) {
                     await supabase
                       .from('rooms')
-                      .update({ status: 'available' })
+                      .update({ status: 'available', updated_at: new Date().toISOString() })
                       .eq('id', reservation.rooms.id)
                   }
                   toast.success('Reservation cancelled')
@@ -352,7 +355,7 @@ export default function ReservationDetailPage({
                 <SelectContent>
                   <SelectItem value="cash">Cash</SelectItem>
                   <SelectItem value="pos">POS</SelectItem>
-                  <SelectItem value="transfer">Bank Transfer</SelectItem>
+                  <SelectItem value="transfer">Transfer</SelectItem>
                   <SelectItem value="card">Card</SelectItem>
                   <SelectItem value="city_ledger">City Ledger</SelectItem>
                 </SelectContent>
@@ -394,15 +397,17 @@ export default function ReservationDetailPage({
               ? `Check-in on ${format(new Date(reservation!.check_in), 'dd MMM')}`
               : 'Check-in Guest'}
           </Button>
-          <Button
-            variant="destructive"
-            size="sm"
-            onClick={handleDelete}
-            disabled={actionLoading}
-          >
-            <Trash2 className="mr-2 h-4 w-4" />
-            {'Cancel'}
-          </Button>
+          {isAdmin && (
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={handleDelete}
+              disabled={actionLoading}
+            >
+              <Trash2 className="mr-2 h-4 w-4" />
+              {'Cancel'}
+            </Button>
+          )}
         </div>
       </div>
 
@@ -575,15 +580,17 @@ export default function ReservationDetailPage({
                   ? `Check-in on ${format(new Date(reservation!.check_in), 'dd MMM')}`
                   : 'Check-in Guest'}
               </Button>
-              <Button
-                className="w-full"
-                variant="destructive"
-                onClick={handleDelete}
-                disabled={actionLoading}
-              >
-                <Trash2 className="mr-2 h-4 w-4" />
-                {'Cancel Reservation'}
-              </Button>
+              {isAdmin && (
+                <Button
+                  className="w-full"
+                  variant="destructive"
+                  onClick={handleDelete}
+                  disabled={actionLoading}
+                >
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  {'Cancel Reservation'}
+                </Button>
+              )}
             </CardContent>
           </Card>
         </div>

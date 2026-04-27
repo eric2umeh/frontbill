@@ -16,7 +16,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { toast } from 'sonner'
 import { format, parseISO } from 'date-fns'
 import {
-  Wrench, Plus, Search, CheckCircle2, Clock, AlertCircle,
+  Wrench, Search, CheckCircle2, Clock, AlertCircle,
   User, Bed, CalendarDays, ClipboardList, RefreshCw, ChevronDown, Zap,
   Droplets, Flame, Wind, Package, AlertTriangle,
 } from 'lucide-react'
@@ -112,6 +112,7 @@ export default function MaintenancePage() {
   const [newOrderOpen, setNewOrderOpen] = useState(false)
   const [reportOpen, setReportOpen] = useState(false)
   const [statusChangeRoom, setStatusChangeRoom] = useState<Room | null>(null)
+  const [statusComment, setStatusComment] = useState('')
 
   // New work order form
   const [orderForm, setOrderForm] = useState({
@@ -213,7 +214,7 @@ export default function MaintenancePage() {
 
       // Auto-set room to 'maintenance' status if critical or high priority
       if (['critical', 'high'].includes(orderForm.priority)) {
-        await supabase.from('rooms').update({ status: 'maintenance' }).eq('id', orderForm.room_id)
+        await supabase.from('rooms').update({ status: 'maintenance', updated_by: userId, updated_at: new Date().toISOString() }).eq('id', orderForm.room_id)
         setRooms(prev => prev.map(r => r.id === orderForm.room_id ? { ...r, status: 'maintenance' } : r))
       }
 
@@ -241,11 +242,32 @@ export default function MaintenancePage() {
 
   const handleRoomStatusChange = async (roomId: string, newStatus: string) => {
     const supabase = createClient()
-    const { error } = await supabase.from('rooms').update({ status: newStatus }).eq('id', roomId)
+    const room = rooms.find(r => r.id === roomId)
+    const { error } = await supabase
+      .from('rooms')
+      .update({ status: newStatus, updated_by: userId, updated_at: new Date().toISOString() })
+      .eq('id', roomId)
     if (error) return toast.error(error.message)
+    if (statusComment.trim() && room) {
+      await supabase.from('maintenance_tasks').insert([{
+        organization_id: organizationId,
+        room_id: roomId,
+        room_number: room.room_number,
+        issue_type: 'general',
+        description: `Room status changed to ${newStatus}`,
+        priority: 'normal',
+        notes: statusComment.trim(),
+        created_by: userId,
+        created_by_name: currentUserName,
+        scheduled_date: filterDate,
+        status: 'resolved',
+        resolved_at: new Date().toISOString(),
+      }])
+    }
     toast.success('Room status updated')
     setRooms(prev => prev.map(r => r.id === roomId ? { ...r, status: newStatus } : r))
     setStatusChangeRoom(null)
+    setStatusComment('')
   }
 
   const handleSubmitReport = async () => {
@@ -290,12 +312,6 @@ export default function MaintenancePage() {
             <Button variant="outline" onClick={() => setReportOpen(true)}>
               <ClipboardList className="mr-2 h-4 w-4" />
               Daily Report
-            </Button>
-          )}
-          {canCreate && (
-            <Button onClick={() => setNewOrderOpen(true)}>
-              <Plus className="mr-2 h-4 w-4" />
-              New Work Order
             </Button>
           )}
         </div>
@@ -571,6 +587,16 @@ export default function MaintenancePage() {
             <DialogHeader>
               <DialogTitle>Update Room {statusChangeRoom.room_number} Status</DialogTitle>
             </DialogHeader>
+            <div className="space-y-2 mb-3">
+              <Label>Comment</Label>
+              <Textarea
+                placeholder="Add note for this room status change..."
+                value={statusComment}
+                onChange={(e) => setStatusComment(e.target.value)}
+                rows={2}
+              />
+              <p className="text-xs text-muted-foreground">Created by {currentUserName}. Last updated by {currentUserName}.</p>
+            </div>
             <div className="grid grid-cols-2 gap-2">
               {ROOM_STATUS_OPTIONS.map(opt => (
                 <button
