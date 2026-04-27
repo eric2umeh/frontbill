@@ -204,7 +204,7 @@ export function AddRoomModal({ open, onClose, onSuccess }: AddRoomModalProps) {
                   type="number"
                   value={formData.rate}
                   onChange={(e) => setFormData({ ...formData, rate: Number(e.target.value) })}
-                  placeholder="25,000"
+                  placeholder="100,000"
                 />
               </div>
             </div>
