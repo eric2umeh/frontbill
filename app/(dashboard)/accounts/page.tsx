@@ -11,6 +11,7 @@ import { useAuth } from '@/lib/auth-context'
 import { Loader2, Building2, User } from 'lucide-react'
 import { format } from 'date-fns'
 import { Badge } from '@/components/ui/badge'
+import { isSelectableLedgerName } from '@/lib/utils/ledger-organization'
 
 interface UnifiedAccount {
   id: string
@@ -58,13 +59,13 @@ export default function AccountsPage() {
       if (ledgerError) throw ledgerError
 
       // Calculate guest balances
-      const guestIds = (guestData || []).map(g => g.id)
+      const guestIds = (guestData || []).map((g: any) => g.id)
       const balanceMap = guestIds.length > 0 
         ? await calculateGuestBalancesBatch(supabase, guestIds)
         : {}
 
       // Normalize guests to unified account format
-      const unifiedGuests: UnifiedAccount[] = (guestData || []).map(guest => ({
+      const unifiedGuests: UnifiedAccount[] = (guestData || []).map((guest: any) => ({
         id: guest.id,
         displayId: `guest-${guest.id}`,
         name: guest.name,
@@ -76,16 +77,32 @@ export default function AccountsPage() {
       }))
 
       // Normalize ledger accounts to unified format
-      const unifiedLedger: UnifiedAccount[] = (ledgerData || []).map(account => ({
-        id: account.id,
-        displayId: `ledger-${account.id}`,
-        name: account.account_name,
-        phone: account.contact_phone,
-        email: account.contact_email,
-        accountType: (account.account_type as 'individual' | 'organization') || 'individual',
-        balance: account.balance || 0,
-        created_at: account.created_at,
-      }))
+      const guestKeys = new Set((guestData || []).flatMap((guest: any) => [
+        `name:${String(guest.name || '').trim().toLowerCase()}`,
+        guest.phone ? `phone:${String(guest.phone).trim()}` : '',
+        guest.email ? `email:${String(guest.email).trim().toLowerCase()}` : '',
+      ].filter(Boolean)))
+      const unifiedLedger: UnifiedAccount[] = (ledgerData || [])
+        .filter((account: any) => isSelectableLedgerName(account.account_name))
+        .filter((account: any) => {
+          const type = account.account_type || 'individual'
+          if (type === 'organization') return true
+          return ![
+            `name:${String(account.account_name || '').trim().toLowerCase()}`,
+            account.contact_phone ? `phone:${String(account.contact_phone).trim()}` : '',
+            account.contact_email ? `email:${String(account.contact_email).trim().toLowerCase()}` : '',
+          ].some((key) => key && guestKeys.has(key))
+        })
+        .map((account: any) => ({
+          id: account.id,
+          displayId: `ledger-${account.id}`,
+          name: account.account_name,
+          phone: account.contact_phone,
+          email: account.contact_email,
+          accountType: (account.account_type as 'individual' | 'organization') || 'individual',
+          balance: account.balance || 0,
+          created_at: account.created_at,
+        }))
 
       // Merge and sort by created_at descending
       const allAccounts = [...unifiedGuests, ...unifiedLedger]
