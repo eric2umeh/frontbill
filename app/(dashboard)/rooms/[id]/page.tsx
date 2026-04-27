@@ -15,8 +15,7 @@ import { formatNaira } from '@/lib/utils/currency'
 import { AlertCircle, X, ArrowLeft, Edit, Trash2, Users, DollarSign, MapPin, CalendarDays, Clock, Search, SlidersHorizontal } from 'lucide-react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Separator } from '@/components/ui/separator'
-import { format, isWithinInterval, parseISO, startOfDay, endOfDay } from 'date-fns'
-import { useMemo } from 'react'
+import { format, parseISO } from 'date-fns'
 import { useAuth } from '@/lib/auth-context'
 
 const ROOM_TYPES = [
@@ -40,12 +39,14 @@ interface Room {
 
 interface GuestHistory {
   id: string
+  folio_id: string
   check_in: string
   check_out: string
   number_of_nights: number
   status: string
   payment_status: string
   total_amount: number
+  deposit: number
   balance: number
   rate_per_night: number
   guests: { name: string; phone: string } | null
@@ -56,8 +57,9 @@ export default function RoomDetailPage() {
   const router = useRouter()
   const params = useParams()
   const roomId = params.id as string
-  const { role } = useAuth()
+  const { role, organizationId } = useAuth()
   const isAdmin = role === 'admin'
+  const canViewRoomFolio = ['admin', 'manager', 'front_desk', 'accountant'].includes(role)
 
   const [room, setRoom] = useState<Room | null>(null)
   const [loading, setLoading] = useState(true)
@@ -71,32 +73,6 @@ export default function RoomDetailPage() {
   const [filterStatus, setFilterStatus] = useState('all')
   const [filterPayment, setFilterPayment] = useState('all')
 
-  const filteredHistory = useMemo(() => {
-    return guestHistory.filter((entry) => {
-      // Guest name filter
-      if (filterName.trim()) {
-        const name = entry.guests?.name?.toLowerCase() ?? ''
-        if (!name.includes(filterName.trim().toLowerCase())) return false
-      }
-      // Date range filter — check if check-in falls within range
-      if (filterDateFrom) {
-        const from = startOfDay(parseISO(filterDateFrom))
-        const checkIn = parseISO(entry.check_in)
-        if (checkIn < from) return false
-      }
-      if (filterDateTo) {
-        const to = endOfDay(parseISO(filterDateTo))
-        const checkIn = parseISO(entry.check_in)
-        if (checkIn > to) return false
-      }
-      // Booking status filter
-      if (filterStatus !== 'all' && entry.status !== filterStatus) return false
-      // Payment status filter
-      if (filterPayment !== 'all' && entry.payment_status !== filterPayment) return false
-      return true
-    })
-  }, [guestHistory, filterName, filterDateFrom, filterDateTo, filterStatus, filterPayment])
-
   const hasActiveFilters = filterName || filterDateFrom || filterDateTo || filterStatus !== 'all' || filterPayment !== 'all'
 
   const clearFilters = () => {
@@ -105,6 +81,13 @@ export default function RoomDetailPage() {
     setFilterDateTo('')
     setFilterStatus('all')
     setFilterPayment('all')
+    fetchGuestHistory({
+      name: '',
+      dateFrom: '',
+      dateTo: '',
+      status: 'all',
+      payment: 'all',
+    })
   }
 
   const [editModalOpen, setEditModalOpen] = useState(false)
@@ -123,22 +106,65 @@ export default function RoomDetailPage() {
 
   useEffect(() => {
     fetchRoom()
-    fetchGuestHistory()
-  }, [roomId])
+    if (canViewRoomFolio) fetchGuestHistory()
+  }, [roomId, canViewRoomFolio])
 
-  const fetchGuestHistory = async () => {
+  const fetchGuestHistory = async (filters?: {
+    name?: string
+    dateFrom?: string
+    dateTo?: string
+    status?: string
+    payment?: string
+  }) => {
+    if (!canViewRoomFolio) return
+
     try {
       setHistoryLoading(true)
       const supabase = createClient()
-      const { data, error } = await supabase
+      const activeFilters = {
+        name: filters?.name ?? filterName,
+        dateFrom: filters?.dateFrom ?? filterDateFrom,
+        dateTo: filters?.dateTo ?? filterDateTo,
+        status: filters?.status ?? filterStatus,
+        payment: filters?.payment ?? filterPayment,
+      }
+
+      let guestIds: string[] | null = null
+      if (activeFilters.name.trim()) {
+        const { data: guestMatches, error: guestError } = await supabase
+          .from('guests')
+          .select('id')
+          .eq('organization_id', organizationId)
+          .ilike('name', `%${activeFilters.name.trim()}%`)
+          .limit(100)
+
+        if (guestError) throw guestError
+        const matchedGuestIds = (guestMatches || []).map((guest: any) => guest.id)
+        if (matchedGuestIds.length === 0) {
+          setGuestHistory([])
+          return
+        }
+        guestIds = matchedGuestIds
+      }
+
+      let query = supabase
         .from('bookings')
         .select(`
-          id, check_in, check_out, number_of_nights, status, payment_status,
-          total_amount, balance, rate_per_night, created_at,
+          id, folio_id, check_in, check_out, number_of_nights, status, payment_status,
+          total_amount, deposit, balance, rate_per_night, created_at,
           guests (name, phone)
         `)
         .eq('room_id', roomId)
         .order('check_in', { ascending: false })
+        .limit(50)
+
+      if (guestIds !== null) query = query.in('guest_id', guestIds)
+      if (activeFilters.dateFrom) query = query.gte('check_in', activeFilters.dateFrom)
+      if (activeFilters.dateTo) query = query.lte('check_in', activeFilters.dateTo)
+      if (activeFilters.status !== 'all') query = query.eq('status', activeFilters.status)
+      if (activeFilters.payment !== 'all') query = query.eq('payment_status', activeFilters.payment)
+
+      const { data, error } = await query
 
       if (error) throw error
       setGuestHistory((data || []).map((b: any) => ({
@@ -445,14 +471,16 @@ export default function RoomDetailPage() {
       <Tabs defaultValue="details">
         <TabsList>
           <TabsTrigger value="details">Room Details</TabsTrigger>
-          <TabsTrigger value="history">
-            Guest History
-            {guestHistory.length > 0 && (
-              <span className="ml-1.5 rounded-full bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary">
-                {guestHistory.length}
-              </span>
-            )}
-          </TabsTrigger>
+          {canViewRoomFolio && (
+            <TabsTrigger value="history">
+              Room Folio
+              {guestHistory.length > 0 && (
+                <span className="ml-1.5 rounded-full bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary">
+                  {guestHistory.length}
+                </span>
+              )}
+            </TabsTrigger>
+          )}
         </TabsList>
 
         {/* Room Details Tab */}
@@ -526,16 +554,17 @@ export default function RoomDetailPage() {
           </Card>
         </TabsContent>
 
-        {/* Guest History Folio Tab */}
+        {/* Room Folio Tab */}
+        {canViewRoomFolio && (
         <TabsContent value="history">
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Users className="h-5 w-5" />
-                Guest History — Room {room.room_number}
+                Room Folio — Room {room.room_number}
               </CardTitle>
               <p className="text-sm text-muted-foreground">
-                All guests and stays recorded for this room
+                Latest guest stays and amount paid for this room. Use filters to search without loading the full database.
               </p>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -614,14 +643,22 @@ export default function RoomDetailPage() {
                       <SelectItem value="arrears">Arrears</SelectItem>
                     </SelectContent>
                   </Select>
+                  <Button
+                    type="button"
+                    className="h-9"
+                    onClick={() => fetchGuestHistory()}
+                    disabled={historyLoading}
+                  >
+                    Apply Filters
+                  </Button>
                 </div>
               </div>
 
               {/* Results summary */}
               {!historyLoading && guestHistory.length > 0 && (
                 <p className="text-xs text-muted-foreground">
-                  Showing {filteredHistory.length} of {guestHistory.length} record{guestHistory.length !== 1 ? 's' : ''}
-                  {hasActiveFilters && ' (filtered)'}
+                  Showing latest {guestHistory.length} record{guestHistory.length !== 1 ? 's' : ''}
+                  {hasActiveFilters ? ' matching your filters' : ' for this room'}
                 </p>
               )}
 
@@ -636,17 +673,9 @@ export default function RoomDetailPage() {
                   <CalendarDays className="h-8 w-8 opacity-40" />
                   <p className="text-sm">No stays recorded for this room yet</p>
                 </div>
-              ) : filteredHistory.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-10 text-muted-foreground gap-2">
-                  <Search className="h-7 w-7 opacity-40" />
-                  <p className="text-sm">No records match your filters</p>
-                  <button onClick={clearFilters} className="text-xs underline hover:text-foreground">
-                    Clear filters
-                  </button>
-                </div>
               ) : (
                 <div className="divide-y">
-                  {filteredHistory.map((entry) => {
+                  {guestHistory.map((entry) => {
                     const bookingStatusColors: Record<string, string> = {
                       checked_in: 'bg-green-500/10 text-green-700 border-green-200',
                       checked_out: 'bg-gray-100 text-gray-600 border-gray-200',
@@ -687,9 +716,17 @@ export default function RoomDetailPage() {
                                 ({entry.number_of_nights} night{entry.number_of_nights !== 1 ? 's' : ''})
                               </span>
                             </div>
+                            <button
+                              type="button"
+                              onClick={() => router.push(`/bookings/${entry.id}`)}
+                              className="text-xs text-primary underline-offset-2 hover:underline"
+                            >
+                              View folio {entry.folio_id}
+                            </button>
                           </div>
                           <div className="text-right space-y-1 shrink-0">
-                            <p className="text-sm font-semibold">{formatNaira(entry.total_amount)}</p>
+                            <p className="text-sm font-semibold">Total: {formatNaira(entry.total_amount)}</p>
+                            <p className="text-xs text-green-700">Paid: {formatNaira(entry.deposit || 0)}</p>
                             {entry.balance > 0 && (
                               <p className="text-xs text-destructive">Balance: {formatNaira(entry.balance)}</p>
                             )}
@@ -704,6 +741,7 @@ export default function RoomDetailPage() {
             </CardContent>
           </Card>
         </TabsContent>
+        )}
       </Tabs>
     </div>
   )

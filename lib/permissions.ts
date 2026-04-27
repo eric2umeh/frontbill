@@ -169,6 +169,7 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
       'organizations:view',
       'ledger:view',
       'night_audit:view', 'night_audit:run',
+      'settings:view',
     ],
   },
   {
