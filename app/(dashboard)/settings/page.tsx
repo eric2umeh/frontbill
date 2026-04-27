@@ -112,7 +112,7 @@ export default function SettingsPage() {
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Settings</h1>
         <p className="text-muted-foreground">
-          Manage hotel information and system preferences
+          Manage your profile and hotel information
         </p>
       </div>
 
@@ -122,9 +122,10 @@ export default function SettingsPage() {
           <div className="flex items-center gap-2">
             <Building2 className="h-5 w-5" />
             <CardTitle>Hotel Information</CardTitle>
+            {role !== 'admin' && <Badge variant="outline" className="ml-auto">View Only</Badge>}
           </div>
           <CardDescription>
-            Update your hotel details for documents and reports
+            {role === 'admin' ? 'Update your hotel details for documents and reports' : 'Hotel details (admins only can edit)'}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -142,6 +143,7 @@ export default function SettingsPage() {
                     placeholder="Grand Hotel"
                     value={hotelName}
                     onChange={(e) => setHotelName(e.target.value)}
+                    disabled={role !== 'admin' || hotelSaving}
                   />
                 </div>
                 <div className="space-y-2">
@@ -152,6 +154,7 @@ export default function SettingsPage() {
                     placeholder="info@hotel.com"
                     value={hotelEmail}
                     onChange={(e) => setHotelEmail(e.target.value)}
+                    disabled={role !== 'admin' || hotelSaving}
                   />
                 </div>
               </div>
@@ -162,6 +165,7 @@ export default function SettingsPage() {
                   placeholder="123 Main Street, Lagos"
                   value={hotelAddress}
                   onChange={(e) => setHotelAddress(e.target.value)}
+                  disabled={role !== 'admin' || hotelSaving}
                 />
               </div>
               <div className="grid gap-4 md:grid-cols-2">
@@ -172,6 +176,7 @@ export default function SettingsPage() {
                     placeholder="+234 800 000 0000"
                     value={hotelPhone}
                     onChange={(e) => setHotelPhone(e.target.value)}
+                    disabled={role !== 'admin' || hotelSaving}
                   />
                 </div>
                 <div className="space-y-2">
@@ -180,10 +185,12 @@ export default function SettingsPage() {
                 </div>
               </div>
               <Separator />
-              <Button onClick={handleSaveHotel} disabled={hotelSaving}>
-                {hotelSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Save Changes
-              </Button>
+              {role === 'admin' && (
+                <Button onClick={handleSaveHotel} disabled={hotelSaving}>
+                  {hotelSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  Save Changes
+                </Button>
+              )}
             </>
           )}
         </CardContent>
@@ -290,28 +297,6 @@ export default function SettingsPage() {
               Update Password
             </Button>
           </div>
-        </CardContent>
-      </Card>
-
-      {/* System Preferences */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <Users className="h-5 w-5" />
-            <CardTitle>System Preferences</CardTitle>
-          </div>
-          <CardDescription>
-            Manage staff accounts and system configuration
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <p className="text-sm text-muted-foreground mb-4">
-            User roles: Admin, Manager, Front Desk, Accountant
-          </p>
-          <Button variant="outline" onClick={() => router.push('/users-roles')}>
-            <Users className="mr-2 h-4 w-4" />
-            Manage Users
-          </Button>
         </CardContent>
       </Card>
     </div>

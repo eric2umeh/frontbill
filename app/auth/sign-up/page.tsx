@@ -21,7 +21,7 @@ export default function SignUpPage() {
 
   const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault()
-    
+
     // Client-side validation
     if (!email.trim()) {
       toast.error('Email is required')
@@ -50,10 +50,10 @@ export default function SignUpPage() {
       }
 
       const fullName = `${firstName} ${lastName}`
-      
+
       // Use production URL for email redirect, fallback to window.location.origin
       const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://frontbill-two.vercel.app'
-      
+
       const { data, error } = await supabase.auth.signUp({
         email,
         password,

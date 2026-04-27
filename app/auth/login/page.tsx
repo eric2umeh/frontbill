@@ -19,7 +19,7 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Hotel, Loader2, AlertCircle } from 'lucide-react'
+import { Hotel, Loader2, AlertCircle, Eye, EyeOff } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
@@ -27,6 +27,7 @@ import { toast } from 'sonner'
 export default function Page() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [isConfigured, setIsConfigured] = useState(true)
   const [showForgotPassword, setShowForgotPassword] = useState(false)
@@ -129,7 +130,7 @@ export default function Page() {
                   </div>
                 </div>
               )}
-              
+
               <form onSubmit={handleLogin}>
                 <div className="flex flex-col gap-6">
                   <div className="grid gap-2">
@@ -146,14 +147,29 @@ export default function Page() {
                   </div>
                   <div className="grid gap-2">
                     <Label htmlFor="password">Password</Label>
-                    <Input
-                      id="password"
-                      type="password"
-                      required
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      disabled={!isConfigured}
-                    />
+                    <div className="relative">
+                      <Input
+                        id="password"
+                        type={showPassword ? 'text' : 'password'}
+                        required
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        disabled={!isConfigured}
+                        className="pr-10"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                        tabIndex={-1}
+                      >
+                        {showPassword ? (
+                          <EyeOff className="h-4 w-4" />
+                        ) : (
+                          <Eye className="h-4 w-4" />
+                        )}
+                      </button>
+                    </div>
                   </div>
                   <Button type="submit" className="w-full" disabled={isLoading || !isConfigured}>
                     {isLoading ? (
@@ -175,7 +191,7 @@ export default function Page() {
                     </button>
                   </div>
                 </div>
-                <div className="mt-4 text-center text-sm">
+                {/* <div className="mt-4 text-center text-sm">
                   Don&apos;t have an account?{' '}
                   <Link
                     href="/auth/sign-up"
@@ -183,7 +199,7 @@ export default function Page() {
                   >
                     Sign up
                   </Link>
-                </div>
+                </div> */}
               </form>
             </CardContent>
           </Card>
