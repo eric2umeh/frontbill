@@ -77,7 +77,7 @@ export function AddOrganizationModal({ open, onClose, onSuccess }: AddOrganizati
       // Simulate API call
       await new Promise(resolve => setTimeout(resolve, 500))
       
-      console.log('[v0] Organization added:', formData)
+      console.log('Organization added:', formData)
       toast.success(`Organization "${formData.name}" added successfully!`)
       
       // Reset form

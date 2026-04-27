@@ -11,6 +11,8 @@ import { ExtendStayModal } from '@/components/bookings/extend-stay-modal'
 import { AddChargeModal } from '@/components/bookings/add-charge-modal'
 import { formatNaira } from '@/lib/utils/currency'
 import { usePageData } from '@/hooks/use-page-data'
+import { useAuth } from '@/lib/auth-context'
+import { hasPermission } from '@/lib/permissions'
 import { Plus, Loader2 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
@@ -45,6 +47,7 @@ export default function BookingsPage() {
   const [addChargeModalOpen, setAddChargeModalOpen] = useState(false)
   const [selectedBooking, setSelectedBooking] = useState<any>(null)
   const { initialLoading, startFetch, endFetch } = usePageData()
+  const { organizationId, role } = useAuth()
   const router = useRouter()
 
   useEffect(() => {
@@ -63,21 +66,10 @@ export default function BookingsPage() {
         return
       }
 
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) { endFetch(); router.push('/auth/login'); return }
-
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('organization_id')
-        .eq('id', user.id)
-        .single()
-
-      if (!profile?.organization_id) { endFetch(); return }
-
       const { data, error } = await supabase
         .from('bookings')
         .select('*, guests(name, phone), rooms(room_number, room_type), created_by, updated_by, updated_at')
-        .eq('organization_id', profile.organization_id)
+        .eq('organization_id', organizationId)
         .in('status', ['confirmed', 'checked_in'])
         .lte('check_in', new Date().toISOString().split('T')[0])
         .order('check_in', { ascending: false })
@@ -122,6 +114,8 @@ export default function BookingsPage() {
           ...booking,
           payment_method,
           ledger_account_name,
+          guestName: booking.guests?.name || '',
+          guestPhone: booking.guests?.phone || '',
           created_by_name: booking.created_by ? userMap[booking.created_by] || 'Unknown User' : 'System',
           updated_by_name: booking.updated_by ? userMap[booking.updated_by] || 'Unknown User' : null,
         }
@@ -218,15 +212,17 @@ export default function BookingsPage() {
           <h1 className="text-3xl font-bold tracking-tight">Bookings</h1>
           <p className="text-muted-foreground">Manage active bookings and check-ins</p>
         </div>
-        <Button onClick={() => setModalOpen(true)}>
-          <Plus className="mr-2 h-4 w-4" />
-          New Booking
-        </Button>
+        {hasPermission(role, 'bookings:create') && (
+          <Button onClick={() => setModalOpen(true)}>
+            <Plus className="mr-2 h-4 w-4" />
+            New Booking
+          </Button>
+        )}
       </div>
 
       <EnhancedDataTable
         data={bookings}
-        searchKeys={['folio_id', 'guests.name', 'rooms.room_number']}
+        searchKeys={['folio_id', 'guestName', 'guestPhone', 'ledger_account_name', 'rooms.room_number']}
         dateField="check_in"
         filters={[
           {

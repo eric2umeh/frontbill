@@ -1,4 +1,5 @@
 import { generateText, Output } from 'ai'
+import { openai } from '@ai-sdk/openai'
 import { z } from 'zod'
 
 const revenueRecommendationSchema = z.object({
@@ -40,7 +41,7 @@ Provide:
 6. Specific action items to implement`
 
     const result = await generateText({
-      model: 'openai/gpt-4o-mini',
+      model: openai('gpt-4o-mini'),
       prompt,
       output: Output.object({ schema: revenueRecommendationSchema }),
       system:
@@ -55,7 +56,7 @@ Provide:
       },
     })
   } catch (error: any) {
-    console.error('[v0] Revenue recommendation error:', error)
+    console.error('Revenue recommendation error:', error)
     return Response.json({ error: error.message }, { status: 500 })
   }
 }

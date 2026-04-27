@@ -10,9 +10,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Calendar } from '@/components/ui/calendar'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Badge } from '@/components/ui/badge'
-import { Separator } from '@/components/ui/separator'
 import { format, addDays, differenceInDays } from 'date-fns'
-import { Calendar as CalendarIcon, ChevronRight, ChevronLeft, Search, Plus, X, Loader2 } from 'lucide-react'
+import { Calendar as CalendarIcon, Plus, X, Loader2 } from 'lucide-react'
 import { formatNaira } from '@/lib/utils/currency'
 import { toast } from 'sonner'
 
@@ -30,7 +29,6 @@ const today = () => {
 }
 
 export function NewReservationModal({ open, onClose, onSuccess }: NewReservationModalProps) {
-  const [step, setStep] = useState(1)
   const [loading, setLoading] = useState(false)
   const [orgId, setOrgId] = useState('')
   const [currentUserId, setCurrentUserId] = useState('')
@@ -110,7 +108,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
         supabase.from('bookings').select('room_id, check_in, check_out').eq('organization_id', profile.organization_id).in('status', ['confirmed', 'reserved', 'checked_in']),
       ])
       setGuests(guestData || [])
-      setRooms(roomData || [])
+      setRooms((roomData || []).filter((r: any) => r.id && r.room_type && String(r.room_type).trim() !== '' && r.room_number && String(r.room_number).trim() !== ''))
       setAllBookings(bookingData || [])
     } catch {
       toast.error('Failed to load data')
@@ -142,20 +140,65 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
     setGuestSearchOpen(false)
   }
 
-  // City Ledger account search — searches all accounts without type filter
+  // City Ledger account search — filtered by type (individual / organization)
   const searchLedger = async (term: string) => {
     setLedgerSearch(term)
     setSelectedLedger(null)
     if (!term.trim()) { setLedgerResults([]); setLedgerSearchOpen(false); return }
     const supabase = createClient()
-    const { data } = await supabase
-      .from('city_ledger_accounts')
-      .select('id, account_name, account_type, contact_phone, balance')
-      .eq('organization_id', orgId)
-      .ilike('account_name', `%${term}%`)
-      .limit(8)
-    setLedgerResults((data || []).map(d => ({ ...d, name: d.account_name, source: 'city_ledger' })))
-    setLedgerSearchOpen((data || []).length > 0)
+
+    // Re-fetch orgId from profile in case state hasn't populated yet
+    let effectiveOrgId = orgId
+    if (!effectiveOrgId) {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        const { data: profile } = await supabase.from('profiles').select('organization_id').eq('id', user.id).single()
+        effectiveOrgId = profile?.organization_id || ''
+        if (effectiveOrgId) setOrgId(effectiveOrgId)
+      }
+    }
+    if (!effectiveOrgId) return
+
+    // Query both city_ledger_accounts AND organizations table (same as new-booking-modal)
+    const [{ data: ledgerData }, { data: orgTableData }] = await Promise.all([
+      supabase
+        .from('city_ledger_accounts')
+        .select('id, account_name, account_type, contact_phone, balance')
+        .eq('organization_id', effectiveOrgId)
+        .ilike('account_name', `%${term}%`)
+        .limit(10),
+      ledgerType === 'organization'
+        ? supabase
+            .from('organizations')
+            .select('id, name, phone')
+            .ilike('name', `%${term}%`)
+            .limit(5)
+        : Promise.resolve({ data: [] }),
+    ])
+
+    const fromLedger = (ledgerData || [])
+      .filter(d => ledgerType === 'individual'
+        ? ['individual', 'guest'].includes(d.account_type)
+        : d.account_type === 'organization')
+      .map(d => ({ ...d, name: d.account_name, source: 'city_ledger' as const }))
+
+    const fromOrgs = ledgerType === 'organization'
+      ? (orgTableData || [])
+          .filter(o => !fromLedger.some(l => l.name.toLowerCase() === o.name.toLowerCase()))
+          .map(o => ({
+            id: o.id,
+            name: o.name,
+            account_name: o.name,
+            account_type: 'organization' as const,
+            contact_phone: o.phone || '',
+            balance: 0,
+            source: 'organizations' as const,
+          }))
+      : []
+
+    const combined = [...fromLedger, ...fromOrgs]
+    setLedgerResults(combined)
+    setLedgerSearchOpen(combined.length > 0)
   }
 
   const createNewLedgerOrg = async () => {
@@ -232,11 +275,12 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
     else { setSelectedRoom(null); setPricePerNight(0) }
   }
 
-  const canGoNext = () => {
-    if (step === 1) return !!(guestId || fullName.trim())
-    if (step === 2) return !!(checkInDate && checkOutDate && nights > 0)
-    if (step === 3) return !!(selectedRoom)
-    return false
+  const canSubmitForm = () => {
+    if (!(guestId || fullName.trim())) return false
+    if (!(checkInDate && checkOutDate && nights > 0)) return false
+    if (!selectedRoom) return false
+    if (paymentMethod === 'city_ledger' && !selectedLedger) return false
+    return true
   }
 
   const effectiveRate = (customPrice !== '' ? Number(customPrice) : pricePerNight) || 0
@@ -267,6 +311,16 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
           .select().single()
         if (ge) throw ge
         finalGuestId = newGuest.id
+
+        // Auto-create city_ledger_account for this guest to prevent duplicates when city ledger is used later
+        await supabase.from('city_ledger_accounts').insert([{
+          organization_id: orgId,
+          account_name: fullName,
+          account_type: 'individual',
+          contact_phone: phone || null,
+          contact_email: email || null,
+          balance: 0,
+        }])
       }
 
       const isCityLedger = paymentMethod === 'city_ledger'
@@ -384,7 +438,6 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
   }
 
   const resetForm = () => {
-    setStep(1)
     setFullName(''); setPhone(''); setEmail(''); setAddress(''); setGuestId('')
     const d = new Date(); d.setHours(0, 0, 0, 0)
     setCheckInDate(d); setCheckOutDate(addDays(d, 1)); setNights(1)
@@ -395,26 +448,28 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
     setShowNewLedgerOrgForm(false); setNewLedgerOrgName(''); setNewLedgerOrgEmail(''); setNewLedgerOrgPhone(''); setNewLedgerOrgAddress('')
   }
 
+  // Combined room dropdown: each item shows "Room Type — Room Number"
+  const availableRoomOptions = rooms.filter(r => {
+    if (!checkInDate || !checkOutDate) return true
+    const cin = toLocalDateStr(checkInDate)
+    const cout = toLocalDateStr(checkOutDate)
+    const bookedIds = new Set(allBookings.filter(b => b.check_in < cout && b.check_out > cin).map(b => b.room_id))
+    return !bookedIds.has(r.id)
+  })
+
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) { setLoading(false); onClose() } }}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-2xl max-h-[92vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>New Reservation — Step {step} of 3</DialogTitle>
-          <DialogDescription>
-            {step === 1 ? 'Enter guest information' : step === 2 ? 'Select stay dates (today or future only)' : 'Choose room and payment details'}
-          </DialogDescription>
+          <DialogTitle>New Reservation</DialogTitle>
+          <DialogDescription>Fill in guest details, dates, room and payment</DialogDescription>
         </DialogHeader>
 
-        {/* Step indicator */}
-        <div className="flex items-center gap-2 pb-2">
-          {[1,2,3].map(s => (
-            <div key={s} className={`flex-1 h-1.5 rounded-full transition-colors ${s <= step ? 'bg-primary' : 'bg-muted'}`} />
-          ))}
-        </div>
+        <div className="space-y-5 py-2">
 
-        {/* ── STEP 1: Guest ── */}
-        {step === 1 && (
-          <div className="space-y-4 py-2">
+          {/* Guest Information */}
+          <div className="rounded-lg border p-4 space-y-4">
+            <p className="text-sm font-semibold">Guest Information</p>
             <div className="space-y-2">
               <Label>Full Name *</Label>
               <div className="relative">
@@ -438,24 +493,25 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
               {guestId && <p className="text-xs text-green-600">Existing guest selected: <strong>{fullName}</strong></p>}
               {!guestId && fullName.trim() && <p className="text-xs text-amber-600">New guest will be created: <strong>{fullName}</strong></p>}
             </div>
-            <div className="space-y-2">
-              <Label>Phone</Label>
-              <Input placeholder="Phone number" value={phone} onChange={(e) => setPhone(e.target.value)} disabled={!!guestId} />
-            </div>
-            <div className="space-y-2">
-              <Label>Email</Label>
-              <Input type="email" placeholder="Email address" value={email} onChange={(e) => setEmail(e.target.value)} disabled={!!guestId} />
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label>Phone</Label>
+                <Input placeholder="Phone number" value={phone} onChange={(e) => setPhone(e.target.value)} disabled={!!guestId} />
+              </div>
+              <div className="space-y-2">
+                <Label>Email</Label>
+                <Input type="email" placeholder="Email address" value={email} onChange={(e) => setEmail(e.target.value)} disabled={!!guestId} />
+              </div>
             </div>
             <div className="space-y-2">
               <Label>Address</Label>
               <Input placeholder="Street address" value={address} onChange={(e) => setAddress(e.target.value)} disabled={!!guestId} />
             </div>
           </div>
-        )}
 
-        {/* ── STEP 2: Dates ── */}
-        {step === 2 && (
-          <div className="space-y-4 py-2">
+          {/* Dates */}
+          <div className="rounded-lg border p-4 space-y-4">
+            <p className="text-sm font-semibold">Stay Dates</p>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>Check-in *</Label>
@@ -467,13 +523,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="w-auto p-0">
-                    <Calendar
-                      mode="single"
-                      selected={checkInDate}
-                      onSelect={handleCheckInChange}
-                      disabled={(d) => d < today()}
-                      initialFocus
-                    />
+                    <Calendar mode="single" selected={checkInDate} onSelect={handleCheckInChange} disabled={(d) => d < today()} initialFocus />
                   </PopoverContent>
                 </Popover>
               </div>
@@ -487,99 +537,70 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="w-auto p-0">
-                    <Calendar
-                      mode="single"
-                      selected={checkOutDate}
-                      onSelect={handleCheckOutChange}
-                      disabled={(d) => checkInDate ? d <= checkInDate : d < today()}
-                      initialFocus
-                    />
+                    <Calendar mode="single" selected={checkOutDate} onSelect={handleCheckOutChange} disabled={(d) => checkInDate ? d <= checkInDate : d < today()} />
                   </PopoverContent>
                 </Popover>
               </div>
             </div>
             <div className="space-y-2">
               <Label>Number of Nights</Label>
-              <Input
-                type="number"
-                min={1}
-                value={nights || ''}
-                onChange={(e) => handleNightsChange(parseInt(e.target.value))}
-                placeholder="e.g., 2"
-              />
+              <Input type="number" min={1} value={nights || ''} onChange={(e) => handleNightsChange(parseInt(e.target.value))} placeholder="e.g., 2" />
             </div>
-            {checkInDate && checkOutDate && (
-              <div className="p-3 rounded-lg bg-muted text-sm space-y-1">
-                <div><span className="text-muted-foreground">Duration: </span><span className="font-semibold">{nights} night(s)</span></div>
-                <div><span className="text-muted-foreground">Check-in: </span><span className="font-semibold">{format(checkInDate, 'EEE, dd MMM yyyy')}</span></div>
-                <div><span className="text-muted-foreground">Check-out: </span><span className="font-semibold">{format(checkOutDate, 'EEE, dd MMM yyyy')}</span></div>
+            {checkInDate && checkOutDate && nights > 0 && (
+              <div className="p-3 rounded-lg bg-muted text-sm">
+                <span className="text-muted-foreground">Duration: </span><span className="font-semibold">{nights} night(s) · {format(checkInDate, 'dd MMM')} — {format(checkOutDate, 'dd MMM yyyy')}</span>
               </div>
             )}
           </div>
-        )}
 
-        {/* ── STEP 3: Room + Payment ── */}
-        {step === 3 && (
-          <div className="space-y-4 py-2">
-            {/* Room selection */}
+          {/* Room — combined type + number */}
+          <div className="rounded-lg border p-4 space-y-4">
+            <p className="text-sm font-semibold">Room Selection</p>
             <div className="space-y-2">
-              <Label>Room Type *</Label>
-              <Select value={selectedRoomType} onValueChange={handleRoomTypeSelect}>
-                <SelectTrigger><SelectValue placeholder="Select room type" /></SelectTrigger>
+              <Label>Room *</Label>
+              <Select
+                value={selectedRoom?.id ?? ''}
+                onValueChange={(id) => {
+                  const r = availableRoomOptions.find(x => x.id === id)
+                  if (r) { setSelectedRoom(r); setSelectedRoomType(r.room_type); setPricePerNight(r.price_per_night) }
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder={availableRoomOptions.length === 0 ? 'No rooms available for selected dates' : 'Select room type and number'} />
+                </SelectTrigger>
                 <SelectContent>
-                  {Array.from(new Set(rooms.map(r => r.room_type))).length === 0 ? (
-                    <SelectItem value="__none__" disabled>No rooms in your organization yet</SelectItem>
+                  {availableRoomOptions.length === 0 ? (
+                    <SelectItem value="__none__" disabled>No rooms available</SelectItem>
                   ) : (
-                    Array.from(new Set(rooms.map(r => r.room_type))).map(rt => {
-                      const availableRooms = getAvailableRoomsForType(rt)
-                      const count = availableRooms.length
-                      return (
-                        <SelectItem key={rt} value={rt} disabled={count === 0}>
-                          {rt} {count === 0 ? '(none available)' : `(${count} available)`}
-                        </SelectItem>
-                      )
-                    })
+                    availableRoomOptions.map(r => (
+                      <SelectItem key={r.id} value={r.id}>
+                        {r.room_type} — Room {r.room_number}
+                      </SelectItem>
+                    ))
                   )}
                 </SelectContent>
               </Select>
             </div>
 
-            {selectedRoom && (
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Room Number</Label>
-                  <Select value={selectedRoom?.id} onValueChange={(id) => {
-                    const r = rooms.find(x => x.id === id)
-                    if (r) { setSelectedRoom(r); setPricePerNight(r.price_per_night) }
-                  }}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {rooms.filter(r => r.room_type === selectedRoomType).map(r => (
-                        <SelectItem key={r.id} value={r.id}>Room {r.room_number}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Rate / Night</Label>
-                  <Input value={formatNaira(pricePerNight)} readOnly className="bg-muted" />
-                </div>
-              </div>
-            )}
-
             <div className="space-y-2">
               <Label>Custom Rate (optional — overrides room rate)</Label>
-              <Input
-                type="number"
-                placeholder="Leave blank to use room rate"
-                value={customPrice}
-                onChange={(e) => setCustomPrice(e.target.value === '' ? '' : Number(e.target.value))}
-              />
+              <Input type="number" placeholder="Leave blank to use room rate" value={customPrice} onChange={(e) => setCustomPrice(e.target.value === '' ? '' : Number(e.target.value))} />
             </div>
 
-            <Separator />
+            {selectedRoom && nights > 0 && (
+              <div className="p-3 rounded-lg bg-muted space-y-1 text-sm border">
+                <div className="flex justify-between font-semibold">
+                  <span>Total Amount</span>
+                  <span>{formatNaira(totalAmount)}</span>
+                </div>
+                <p className="text-xs text-muted-foreground">{nights} night(s) × {formatNaira(effectiveRate)}/night</p>
+              </div>
+            )}
+          </div>
 
-            {/* Payment Method */}
+          {/* Payment */}
+          <div className="rounded-lg border p-4 space-y-4">
+            <p className="text-sm font-semibold">Payment</p>
             <div className="space-y-2">
               <Label>Payment Method</Label>
               <Select value={paymentMethod} onValueChange={(v: any) => { setPaymentMethod(v); if (v !== 'city_ledger') setSelectedLedger(null) }}>
@@ -594,138 +615,69 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
               </Select>
             </div>
 
-            {/* City Ledger account picker */}
             {paymentMethod === 'city_ledger' && (
               <div className="space-y-3 p-3 border rounded-lg bg-muted/30">
                 <Label className="text-sm font-medium">City Ledger Account</Label>
                 <div className="flex gap-2">
-                  <Button type="button" size="sm" variant={ledgerType === 'individual' ? 'default' : 'outline'}
-                    onClick={() => { setLedgerType('individual'); setLedgerSearch(''); setLedgerResults([]); setSelectedLedger(null); setShowNewLedgerOrgForm(false) }}>Individual</Button>
-                  <Button type="button" size="sm" variant={ledgerType === 'organization' ? 'default' : 'outline'}
-                    onClick={() => { setLedgerType('organization'); setLedgerSearch(''); setLedgerResults([]); setSelectedLedger(null); setShowNewLedgerOrgForm(false) }}>Organization</Button>
+                  <Button type="button" size="sm" variant={ledgerType === 'individual' ? 'default' : 'outline'} onClick={() => { setLedgerType('individual'); setLedgerSearch(''); setLedgerResults([]); setSelectedLedger(null); setShowNewLedgerOrgForm(false) }}>Individual</Button>
+                  <Button type="button" size="sm" variant={ledgerType === 'organization' ? 'default' : 'outline'} onClick={() => { setLedgerType('organization'); setLedgerSearch(''); setLedgerResults([]); setSelectedLedger(null); setShowNewLedgerOrgForm(false) }}>Organization</Button>
                 </div>
-
                 <div className="flex gap-2">
                   <div className="relative flex-1">
-                    <Input
-                      placeholder={ledgerType === 'individual' ? 'Search guest from database...' : 'Search organization from database...'}
-                      value={ledgerSearch}
-                      onChange={(e) => searchLedger(e.target.value)}
-                      onBlur={() => setTimeout(() => setLedgerSearchOpen(false), 150)}
-                    />
+                    <Input placeholder={ledgerType === 'individual' ? 'Search guest...' : 'Search organization...'} value={ledgerSearch} onChange={(e) => searchLedger(e.target.value)} onBlur={() => setTimeout(() => setLedgerSearchOpen(false), 150)} />
                     {ledgerSearchOpen && ledgerResults.length > 0 && (
                       <div className="absolute top-full left-0 right-0 mt-1 bg-background border rounded-md shadow-lg z-50 max-h-48 overflow-y-auto">
                         {ledgerResults.map((r: any) => (
-                          <button key={r.id} className="w-full text-left px-4 py-2 hover:bg-accent border-b last:border-b-0 text-sm"
-                            onMouseDown={(e) => { e.preventDefault(); setSelectedLedger(r); setLedgerSearch(r.name || r.account_name); setLedgerSearchOpen(false) }}>
+                          <button key={r.id} className="w-full text-left px-4 py-2 hover:bg-accent border-b last:border-b-0 text-sm" onMouseDown={(e) => { e.preventDefault(); setSelectedLedger(r); setLedgerSearch(r.name || r.account_name); setLedgerSearchOpen(false) }}>
                             <div className="font-medium">{r.name || r.account_name}</div>
-                            <div className="text-xs text-muted-foreground flex items-center gap-2">
-                              {(r.phone || r.contact_phone) && <span>{r.phone || r.contact_phone}</span>}
-                              {r.balance !== undefined && (
-                                <span className={r.balance > 0 ? 'text-orange-600' : 'text-green-600'}>
-                                  Balance: {formatNaira(r.balance || 0)}
-                                </span>
-                              )}
-                            </div>
+                            <div className="text-xs text-muted-foreground">{r.phone || r.contact_phone}</div>
                           </button>
                         ))}
                       </div>
-                    )}
-                    {ledgerSearch.trim() && ledgerResults.length === 0 && !ledgerSearchOpen && (
-                      <p className="text-xs text-muted-foreground mt-1">
-                        No account found. Use the New button to create one.
-                      </p>
                     )}
                   </div>
                   <Button type="button" size="sm" variant="outline" className="gap-1 whitespace-nowrap" onClick={() => setShowNewLedgerOrgForm(v => !v)}>
                     <Plus className="h-3 w-3" /> New
                   </Button>
                 </div>
-
-                {/* Inline new account form */}
                 {showNewLedgerOrgForm && (
                   <div className="border rounded-md p-3 space-y-2 bg-background">
-                    <p className="text-xs font-medium text-muted-foreground">
-                      Create new {ledgerType === 'individual' ? 'individual' : 'organization'} account
-                    </p>
-                    <Input
-                      placeholder={ledgerType === 'individual' ? 'Individual name' : 'Organization name'}
-                      value={newLedgerOrgName}
-                      onChange={(e) => setNewLedgerOrgName(e.target.value)}
-                      className="mt-2"
-                    />
-                    <Input
-                      placeholder="Phone (optional)"
-                      value={newLedgerOrgPhone}
-                      onChange={(e) => setNewLedgerOrgPhone(e.target.value)}
-                    />
+                    <p className="text-xs font-medium text-muted-foreground">Create new {ledgerType} account</p>
+                    <Input placeholder={ledgerType === 'individual' ? 'Individual name' : 'Organization name'} value={newLedgerOrgName} onChange={(e) => setNewLedgerOrgName(e.target.value)} />
+                    <Input placeholder="Phone (optional)" value={newLedgerOrgPhone} onChange={(e) => setNewLedgerOrgPhone(e.target.value)} />
                     <div className="flex gap-2">
-                      <Button
-                        size="sm"
-                        onClick={createNewLedgerOrg}
-                        disabled={creatingLedgerOrg || !newLedgerOrgName.trim()}
-                      >
-                        {creatingLedgerOrg ? 'Creating...' : 'Create'}
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => setShowNewLedgerOrgForm(false)}
-                      >
-                        Cancel
-                      </Button>
+                      <Button size="sm" onClick={createNewLedgerOrg} disabled={creatingLedgerOrg || !newLedgerOrgName.trim()}>{creatingLedgerOrg ? 'Creating...' : 'Create'}</Button>
+                      <Button size="sm" variant="outline" onClick={() => setShowNewLedgerOrgForm(false)}>Cancel</Button>
                     </div>
+                  </div>
+                )}
+                {selectedLedger && (
+                  <div className="flex items-center justify-between p-2 rounded border bg-background text-sm">
+                    <span className="font-medium">{selectedLedger.name || selectedLedger.account_name}</span>
+                    <Button variant="ghost" size="sm" className="text-destructive h-6 text-xs" onClick={() => { setSelectedLedger(null); setLedgerSearch('') }}>Remove</Button>
                   </div>
                 )}
               </div>
             )}
 
-            {/* Summary */}
             {selectedRoom && nights > 0 && (
-              <div className="p-4 rounded-lg bg-muted space-y-2 text-sm border">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Room {selectedRoom.room_number} · {nights} night(s) @ {formatNaira(effectiveRate)}/night</span>
-                </div>
-                <div className="flex justify-between font-semibold">
-                  <span>Total Amount</span>
-                  <span>{formatNaira(totalAmount)}</span>
-                </div>
-                {depositAmount > 0 && (
-                  <div className="flex justify-between text-green-700">
-                    <span>Amount Paid</span>
-                    <span>{formatNaira(depositAmount)}</span>
-                  </div>
-                )}
-                {balanceAmount > 0 && (
-                  <div className="flex justify-between text-orange-700 font-medium border-t pt-2">
-                    <span>Balance Due</span>
-                    <span>{formatNaira(balanceAmount)}</span>
-                  </div>
-                )}
+              <div className="p-3 rounded-lg bg-muted space-y-1 text-sm border">
+                {depositAmount > 0 && <div className="flex justify-between text-green-700"><span>Amount Paid</span><span>{formatNaira(depositAmount)}</span></div>}
+                {balanceAmount > 0 && <div className="flex justify-between text-orange-700 font-medium"><span>Balance Due</span><span>{formatNaira(balanceAmount)}</span></div>}
                 <div className="flex justify-between items-center pt-1">
-                  <span className="text-muted-foreground">Payment Method</span>
+                  <span className="text-muted-foreground">Method</span>
                   <Badge variant="outline">{paymentMethod.replace('_', ' ')}</Badge>
                 </div>
               </div>
             )}
           </div>
-        )}
+        </div>
 
-        {/* Navigation */}
-        <div className="flex justify-between pt-4 border-t">
-          <Button variant="outline" onClick={() => step > 1 ? setStep(step - 1) : onClose()} disabled={loading}>
-            <ChevronLeft className="mr-2 h-4 w-4" />
-            {step > 1 ? 'Back' : 'Cancel'}
+        <div className="flex justify-end gap-2 pt-4 border-t">
+          <Button variant="outline" onClick={onClose} disabled={loading}>Cancel</Button>
+          <Button onClick={handleSubmit} disabled={loading || !canSubmitForm()}>
+            {loading ? 'Creating...' : 'Create Reservation'}
           </Button>
-          {step < 3 ? (
-            <Button onClick={() => setStep(step + 1)} disabled={!canGoNext()}>
-              Next <ChevronRight className="ml-2 h-4 w-4" />
-            </Button>
-          ) : (
-            <Button onClick={handleSubmit} disabled={loading || !canGoNext()}>
-              {loading ? 'Creating...' : 'Create Reservation'}
-            </Button>
-          )}
         </div>
       </DialogContent>
     </Dialog>

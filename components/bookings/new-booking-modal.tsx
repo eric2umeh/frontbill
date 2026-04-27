@@ -12,7 +12,7 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Calendar } from '@/components/ui/calendar'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { format, addDays } from 'date-fns'
-import { Calendar as CalendarIcon, ChevronRight, ChevronLeft, X, Users, Building2 } from 'lucide-react'
+import { Calendar as CalendarIcon, X, Users, Building2 } from 'lucide-react'
 import { formatNaira } from '@/lib/utils/currency'
 import { toast } from 'sonner'
 
@@ -47,11 +47,10 @@ interface LedgerAccount {
 }
 
 export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalProps) {
-  const [step, setStep] = useState(1)
   const [loading, setLoading] = useState(false)
   const [organizationId, setOrganizationId] = useState('')
 
-  // Step 1: Guest
+  // Guest
   const [fullName, setFullName] = useState('')
   const [phone, setPhone] = useState('')
   const [email, setEmail] = useState('')
@@ -61,7 +60,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
   const [guests, setGuests] = useState<Guest[]>([])
   const [filteredGuests, setFilteredGuests] = useState<Guest[]>([])
 
-  // Step 2: Dates
+  // Dates
   const [checkInDate, setCheckInDate] = useState<Date>(() => {
     const d = new Date(); d.setHours(0, 0, 0, 0); return d
   })
@@ -72,7 +71,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
   const [checkInOpen, setCheckInOpen] = useState(false)
   const [checkOutOpen, setCheckOutOpen] = useState(false)
 
-  // Step 3: Room & Payment
+  // Room & Payment
   const [rooms, setRooms] = useState<Room[]>([]) // date-filtered available rooms
   const [allRooms, setAllRooms] = useState<Room[]>([]) // all non-maintenance rooms
   const [allBookingsForRooms, setAllBookingsForRooms] = useState<any[]>([]) // active bookings for date check
@@ -149,10 +148,14 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
         supabase.from('organizations').select('id, name, phone, email').order('name'),
       ])
 
+      // Sanitize rooms — filter out any with empty id, room_type or room_number to prevent SelectItem crashes
+      const sanitizedRooms = (roomData || []).filter(
+        (r: any) => r.id && r.room_type && String(r.room_type).trim() !== '' && r.room_number && String(r.room_number).trim() !== ''
+      )
       setGuests(guestData || [])
-      setAllRooms(roomData || [])
+      setAllRooms(sanitizedRooms)
       setAllBookingsForRooms(bookingData || [])
-      setRooms(roomData || [])
+      setRooms(sanitizedRooms)
 
       // Individuals: city_ledger_accounts with type individual/guest
       const individualLedger: LedgerAccount[] = (cityLedgerData || [])
@@ -197,7 +200,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
       setOrganizationAccounts(orgLedger)
       setFilteredLedgerAccounts(ledgerTab === 'individual' ? individualLedger : orgLedger)
     } catch (err: any) {
-      console.error('[v0] Error loading booking data:', err)
+      console.error('Error loading booking data:', err)
       toast.error('Failed to load booking data')
     } finally {
       setLoading(false)
@@ -414,7 +417,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
         .filter(b => b.check_in < coStr && b.check_out > ciStr)
         .map(b => b.room_id)
     )
-    setRooms(allRooms.filter(r => !bookedRoomIds.has(r.id)))
+    setRooms(allRooms.filter(r => !bookedRoomIds.has(r.id) && r.id && r.room_type && String(r.room_type).trim() !== ''))
     // Clear selected room if it's no longer available
     setSelectedRoom(prev => prev && bookedRoomIds.has(prev.id) ? null : prev)
     setSelectedRoomType(prev => {
@@ -461,11 +464,12 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
     }
   }
 
-  const canGoToNextStep = () => {
-    if (step === 1) return !!(guestId || fullName.trim())
-    if (step === 2) return !!(checkInDate && checkOutDate && nights > 0)
-    if (step === 3) return !!(selectedRoom && (paymentMethod !== 'city_ledger' || ledgerAccount))
-    return false
+  const canSubmitForm = () => {
+    if (!(guestId || fullName.trim())) return false
+    if (!(checkInDate && checkOutDate && nights > 0)) return false
+    if (!selectedRoom) return false
+    if (paymentMethod === 'city_ledger' && !ledgerAccount) return false
+    return true
   }
 
   const handleSubmit = async () => {
@@ -501,6 +505,16 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
           .single()
         if (ge) throw ge
         finalGuestId = newGuest.id
+
+        // Auto-create city_ledger_account for this guest to prevent duplicates when city ledger is used later
+        await supabase.from('city_ledger_accounts').insert([{
+          organization_id: organizationId,
+          account_name: fullName,
+          account_type: 'individual',
+          contact_phone: phone || null,
+          contact_email: email || null,
+          balance: 0,
+        }])
       }
 
       const effectiveRate = customPrice > 0 ? customPrice : pricePerNight
@@ -625,7 +639,6 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
   }
 
   const resetForm = () => {
-    setStep(1)
     setFullName(''); setPhone(''); setEmail(''); setAddress(''); setGuestId('')
     const d = new Date(); d.setHours(0, 0, 0, 0)
     setCheckInDate(d); setCheckOutDate(new Date(d.getTime() + 86400000)); setNights(1)
@@ -639,20 +652,23 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
 
   const activeLedgerSource = ledgerTab === 'individual' ? individualAccounts : organizationAccounts
 
+  // Combined room list: each option shows "Room Type - Room Number"
+  const availableRoomOptions = rooms.filter(r => r.id && r.room_type && r.room_number)
+
   return (
     <>
       <Dialog open={open} onOpenChange={(o) => { if (!o) { setLoading(false); onClose() } }}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-2xl max-h-[92vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>New Booking — Step {step} of 3</DialogTitle>
-            <DialogDescription>
-              {step === 1 ? 'Enter guest information' : step === 2 ? 'Select stay dates' : 'Choose room and payment'}
-            </DialogDescription>
+            <DialogTitle>New Booking</DialogTitle>
+            <DialogDescription>Fill in guest details, dates, room and payment</DialogDescription>
           </DialogHeader>
 
-          {/* Step 1: Guest Information */}
-          {step === 1 && (
-            <div className="space-y-4 py-4">
+          <div className="space-y-5 py-2">
+
+            {/* Guest Information */}
+            <div className="rounded-lg border p-4 space-y-4">
+              <p className="text-sm font-semibold">Guest Information</p>
               <div className="space-y-2">
                 <Label>Full Name *</Label>
                 <div className="relative">
@@ -680,37 +696,34 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
                 {!guestId && fullName.trim() && (
                   <p className="text-xs text-amber-600">New guest will be created: <strong>{fullName}</strong></p>
                 )}
+                {guestId && (
+                  <div className="flex items-center justify-between bg-blue-50 border border-blue-200 rounded p-2">
+                    <p className="text-xs text-blue-900">Existing guest selected</p>
+                    <Button size="sm" variant="ghost" className="h-6" onClick={() => { setGuestId(''); setFullName(''); setPhone(''); setEmail(''); setAddress('') }}>
+                      <X className="h-3 w-3" />
+                    </Button>
+                  </div>
+                )}
               </div>
-
-              <div className="space-y-2">
-                <Label>Phone Number</Label>
-                <Input placeholder="Phone number (optional)" value={phone} onChange={(e) => setPhone(e.target.value)} disabled={!!guestId} />
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <Label>Phone Number</Label>
+                  <Input placeholder="Phone number" value={phone} onChange={(e) => setPhone(e.target.value)} disabled={!!guestId} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Email</Label>
+                  <Input type="email" placeholder="Email address" value={email} onChange={(e) => setEmail(e.target.value)} disabled={!!guestId} />
+                </div>
               </div>
-
-              <div className="space-y-2">
-                <Label>Email</Label>
-                <Input type="email" placeholder="Email address" value={email} onChange={(e) => setEmail(e.target.value)} disabled={!!guestId} />
-              </div>
-
               <div className="space-y-2">
                 <Label>Address</Label>
                 <Input placeholder="Street address" value={address} onChange={(e) => setAddress(e.target.value)} disabled={!!guestId} />
               </div>
-
-              {guestId && (
-                <div className="flex items-center justify-between bg-blue-50 border border-blue-200 rounded p-3">
-                  <p className="text-sm text-blue-900">Details populated from existing guest record</p>
-                  <Button size="sm" variant="ghost" onClick={() => { setGuestId(''); setFullName(''); setPhone(''); setEmail(''); setAddress('') }}>
-                    <X className="h-4 w-4" />
-                  </Button>
-                </div>
-              )}
             </div>
-          )}
 
-          {/* Step 2: Dates */}
-          {step === 2 && (
-            <div className="space-y-4 py-4">
+            {/* Dates */}
+            <div className="rounded-lg border p-4 space-y-4">
+              <p className="text-sm font-semibold">Stay Dates</p>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Check-in Date *</Label>
@@ -718,7 +731,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
                     <PopoverTrigger asChild>
                       <Button variant="outline" className="w-full justify-start text-left font-normal">
                         <CalendarIcon className="mr-2 h-4 w-4" />
-                        {checkInDate ? format(checkInDate, 'MMM dd, yyyy') : 'Select date'}
+                        {checkInDate ? format(checkInDate, 'dd MMM yyyy') : 'Select date'}
                       </Button>
                     </PopoverTrigger>
                     <PopoverContent className="w-auto p-0" align="start">
@@ -726,14 +739,13 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
                     </PopoverContent>
                   </Popover>
                 </div>
-
                 <div className="space-y-2">
                   <Label>Check-out Date *</Label>
                   <Popover open={checkOutOpen} onOpenChange={setCheckOutOpen}>
                     <PopoverTrigger asChild>
                       <Button variant="outline" className="w-full justify-start text-left font-normal">
                         <CalendarIcon className="mr-2 h-4 w-4" />
-                        {checkOutDate ? format(checkOutDate, 'MMM dd, yyyy') : 'Select date'}
+                        {checkOutDate ? format(checkOutDate, 'dd MMM yyyy') : 'Select date'}
                       </Button>
                     </PopoverTrigger>
                     <PopoverContent className="w-auto p-0" align="start">
@@ -742,7 +754,6 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
                   </Popover>
                 </div>
               </div>
-
               <div className="space-y-2">
                 <Label>Number of Nights *</Label>
                 <Input
@@ -755,46 +766,42 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
                     if (!isNaN(n) && n >= 1) handleNightsChange(n)
                   }}
                 />
-                <p className="text-xs text-muted-foreground">Changing nights will update checkout date automatically</p>
               </div>
             </div>
-          )}
 
-          {/* Step 3: Room & Payment */}
-          {step === 3 && (
-            <div className="space-y-4 py-4">
+            {/* Room Selection — combined type + number in one dropdown */}
+            <div className="rounded-lg border p-4 space-y-4">
+              <p className="text-sm font-semibold">Room Selection</p>
               <div className="space-y-2">
-                <Label>Room Type *</Label>
-                <Select value={selectedRoomType} onValueChange={handleRoomTypeSelect}>
-                  <SelectTrigger><SelectValue placeholder="Select room type" /></SelectTrigger>
+                <Label>Room *</Label>
+                <Select
+                  value={selectedRoom?.id ?? ''}
+                  onValueChange={(id) => {
+                    const room = availableRoomOptions.find(r => r.id === id)
+                    if (room) {
+                      setSelectedRoom(room)
+                      setSelectedRoomType(room.room_type)
+                      setPricePerNight(room.price_per_night)
+                      setCustomPrice(0)
+                    }
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder={availableRoomOptions.length === 0 ? 'No rooms available for selected dates' : 'Select room type and number'} />
+                  </SelectTrigger>
                   <SelectContent>
-                    {Array.from(new Set(rooms.map(r => r.room_type))).length === 0 ? (
-                      <SelectItem value="__none__" disabled>No rooms available for selected dates</SelectItem>
+                    {availableRoomOptions.length === 0 ? (
+                      <SelectItem value="__none__" disabled>No rooms available</SelectItem>
                     ) : (
-                      Array.from(new Set(rooms.map(r => r.room_type))).map(type => (
-                        <SelectItem key={type} value={type}>{type}</SelectItem>
+                      availableRoomOptions.map(room => (
+                        <SelectItem key={room.id} value={room.id}>
+                          {room.room_type} — Room {room.room_number}
+                        </SelectItem>
                       ))
                     )}
                   </SelectContent>
                 </Select>
               </div>
-
-              {selectedRoom && (
-                <div className="space-y-2">
-                  <Label>Select Room *</Label>
-                  <Select value={selectedRoom.id} onValueChange={(id) => {
-                    const room = rooms.find(r => r.id === id)
-                    if (room) { setSelectedRoom(room); setPricePerNight(room.price_per_night); setCustomPrice(0) }
-                  }}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {rooms.filter(r => r.room_type === selectedRoomType).map(room => (
-                        <SelectItem key={room.id} value={room.id}>Room {room.room_number}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
 
               {selectedRoom && (
                 <>
@@ -818,14 +825,17 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
                   <div className="bg-blue-50 border border-blue-200 p-3 rounded-lg">
                     <p className="text-sm font-medium text-blue-900">Total: {formatNaira((customPrice || pricePerNight) * nights)}</p>
                     <p className="text-xs text-blue-700 mt-1">
-                      {nights} nights × {formatNaira(customPrice || pricePerNight)}{customPrice ? ' (custom rate)' : ''}
+                      {nights} night{nights !== 1 ? 's' : ''} × {formatNaira(customPrice || pricePerNight)}{customPrice ? ' (custom rate)' : ''}
                     </p>
                   </div>
                 </>
               )}
+            </div>
 
+            {/* Payment */}
+            <div className="rounded-lg border p-4 space-y-4">
+              <p className="text-sm font-semibold">Payment Method</p>
               <div className="space-y-2">
-                <Label>Payment Method *</Label>
                 <Select value={paymentMethod} onValueChange={(v) => { setPaymentMethod(v); setLedgerAccount(''); setLedgerSearch(''); setLedgerAccountName('') }}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
@@ -838,7 +848,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
               </div>
 
               {paymentMethod === 'city_ledger' && (
-                <div className="space-y-3 rounded-lg border border-input p-4">
+                <div className="space-y-3 rounded-lg border border-input p-3">
                   <div className="flex items-center justify-between">
                     <Label className="text-sm font-semibold">City Ledger Account *</Label>
                     <Button
@@ -847,65 +857,43 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
                       variant="outline"
                       className="h-7 text-xs"
                       onClick={() => {
-                        // Pre-populate with Step 1 data for individual, empty for org
                         if (ledgerTab === 'individual') {
                           setNewAccountName(fullName)
                           setNewAccountPhone(phone)
                           setNewAccountEmail(email)
                         } else {
-                          setNewAccountName('')
-                          setNewAccountPhone('')
-                          setNewAccountEmail('')
+                          setNewAccountName(''); setNewAccountPhone(''); setNewAccountEmail('')
                         }
-                        setNewAccountAddress('')
-                        setNewAccountCity('')
-                        setNewAccountType('')
+                        setNewAccountAddress(''); setNewAccountCity(''); setNewAccountType('')
                         setNewAccountDialogOpen(true)
                       }}
                     >
                       + New Account
                     </Button>
                   </div>
-
-                  {/* Individual / Organization tabs */}
                   <Tabs value={ledgerTab} onValueChange={handleLedgerTabChange}>
                     <TabsList className="grid w-full grid-cols-2 h-9">
                       <TabsTrigger value="individual" className="text-xs gap-1.5">
-                        <Users className="h-3.5 w-3.5" />
-                        Individual Guest
+                        <Users className="h-3.5 w-3.5" />Individual Guest
                       </TabsTrigger>
                       <TabsTrigger value="organization" className="text-xs gap-1.5">
-                        <Building2 className="h-3.5 w-3.5" />
-                        Organization
+                        <Building2 className="h-3.5 w-3.5" />Organization
                       </TabsTrigger>
                     </TabsList>
                   </Tabs>
-
-                  {/* Search input */}
                   <div className="relative">
                     <Input
-                      placeholder={
-                        ledgerTab === 'individual'
-                          ? 'Search individual guest accounts...'
-                          : 'Search organization accounts...'
-                      }
+                      placeholder={ledgerTab === 'individual' ? 'Search individual guest accounts...' : 'Search organization accounts...'}
                       value={ledgerSearch}
                       onChange={(e) => handleLedgerSearch(e.target.value)}
                       onFocus={() => {
-                        setFilteredLedgerAccounts(
-                          ledgerSearch.trim()
-                            ? activeLedgerSource.filter(a => a.account_name.toLowerCase().includes(ledgerSearch.toLowerCase()))
-                            : activeLedgerSource
-                        )
+                        setFilteredLedgerAccounts(ledgerSearch.trim() ? activeLedgerSource.filter(a => a.account_name.toLowerCase().includes(ledgerSearch.toLowerCase())) : activeLedgerSource)
                         setLedgerOpen(true)
                       }}
                       onBlur={() => setTimeout(() => setLedgerOpen(false), 150)}
                     />
                     {ledgerAccount && (
-                      <button
-                        className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                        onMouseDown={(e) => { e.preventDefault(); clearLedgerAccount() }}
-                      >
+                      <button className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground" onMouseDown={(e) => { e.preventDefault(); clearLedgerAccount() }}>
                         <X className="h-4 w-4" />
                       </button>
                     )}
@@ -913,11 +901,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
                       <div className="absolute top-full left-0 right-0 mt-1 bg-background border border-input rounded-md shadow-lg z-50 max-h-52 overflow-y-auto">
                         {filteredLedgerAccounts.length > 0 ? (
                           filteredLedgerAccounts.map(account => (
-                            <button
-                              key={account.id}
-                              className="w-full text-left px-3 py-2.5 hover:bg-accent border-b last:border-b-0 transition-colors text-sm"
-                              onMouseDown={(e) => { e.preventDefault(); selectLedgerAccount(account) }}
-                            >
+                            <button key={account.id} className="w-full text-left px-3 py-2.5 hover:bg-accent border-b last:border-b-0 transition-colors text-sm" onMouseDown={(e) => { e.preventDefault(); selectLedgerAccount(account) }}>
                               <div className="font-medium">{account.account_name}</div>
                               <div className="text-xs text-muted-foreground">
                                 {account.contact_phone && <span className="mr-3">{account.contact_phone}</span>}
@@ -927,15 +911,12 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
                           ))
                         ) : (
                           <div className="px-3 py-3 text-sm text-muted-foreground text-center">
-                            {activeLedgerSource.length === 0
-                              ? `No ${ledgerTab} accounts yet. Click "+ New Account" to create one.`
-                              : 'No matching accounts found'}
+                            {activeLedgerSource.length === 0 ? `No ${ledgerTab} accounts yet. Click "+ New Account".` : 'No matching accounts found'}
                           </div>
                         )}
                       </div>
                     )}
                   </div>
-
                   {ledgerAccount && (
                     <div className="flex items-center gap-2 text-xs text-green-700 bg-green-50 border border-green-200 rounded px-3 py-2">
                       {ledgerTab === 'individual' ? <Users className="h-3.5 w-3.5 flex-shrink-0" /> : <Building2 className="h-3.5 w-3.5 flex-shrink-0" />}
@@ -945,24 +926,14 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
                 </div>
               )}
             </div>
-          )}
+          </div>
 
-          {/* Navigation */}
-          <div className="flex justify-between gap-2 pt-4 border-t">
-            <Button variant="outline" onClick={() => setStep(s => s - 1)} disabled={step === 1 || loading}>
-              <ChevronLeft className="mr-2 h-4 w-4" />
-              Previous
+          {/* Submit */}
+          <div className="flex justify-end gap-2 pt-4 border-t">
+            <Button variant="outline" onClick={onClose} disabled={loading}>Cancel</Button>
+            <Button onClick={handleSubmit} disabled={!canSubmitForm() || loading}>
+              {loading ? 'Creating...' : 'Create Booking'}
             </Button>
-            {step < 3 ? (
-              <Button onClick={() => setStep(s => s + 1)} disabled={!canGoToNextStep() || loading}>
-                Next
-                <ChevronRight className="ml-2 h-4 w-4" />
-              </Button>
-            ) : (
-              <Button onClick={handleSubmit} disabled={!canGoToNextStep() || loading}>
-                {loading ? 'Creating...' : 'Create Booking'}
-              </Button>
-            )}
           </div>
         </DialogContent>
       </Dialog>

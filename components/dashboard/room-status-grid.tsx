@@ -63,7 +63,7 @@ export function RoomStatusGrid() {
         if (error) throw error
         if (isMounted) setRooms(data || [])
       } catch (error: any) {
-        console.error('[v0] Error fetching rooms:', error)
+        console.error('Error fetching rooms:', error)
         if (isMounted) setRooms([])
       } finally {
         if (isMounted) setLoading(false)

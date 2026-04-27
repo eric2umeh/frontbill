@@ -10,9 +10,16 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Hotel, Loader2, AlertCircle } from 'lucide-react'
+import { Hotel, Loader2, AlertCircle, Eye, EyeOff } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
@@ -20,8 +27,12 @@ import { toast } from 'sonner'
 export default function Page() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [isConfigured, setIsConfigured] = useState(true)
+  const [showForgotPassword, setShowForgotPassword] = useState(false)
+  const [resetEmail, setResetEmail] = useState('')
+  const [resetLoading, setResetLoading] = useState(false)
   const router = useRouter()
 
   useEffect(() => {
@@ -30,6 +41,35 @@ export default function Page() {
       setIsConfigured(false)
     }
   }, [])
+
+  const handleForgotPassword = async () => {
+    if (!resetEmail) {
+      toast.error('Please enter your email address')
+      return
+    }
+    setResetLoading(true)
+    try {
+      const supabase = createClient()
+      if (!supabase) {
+        toast.error('Supabase not configured')
+        return
+      }
+
+      const { error } = await supabase.auth.resetPasswordForEmail(resetEmail, {
+        redirectTo: `${window.location.origin}/auth/reset-password`,
+      })
+
+      if (error) throw error
+
+      toast.success('Password reset email sent! Check your inbox.')
+      setShowForgotPassword(false)
+      setResetEmail('')
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to send reset email')
+    } finally {
+      setResetLoading(false)
+    }
+  }
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -90,7 +130,7 @@ export default function Page() {
                   </div>
                 </div>
               )}
-              
+
               <form onSubmit={handleLogin}>
                 <div className="flex flex-col gap-6">
                   <div className="grid gap-2">
@@ -107,14 +147,29 @@ export default function Page() {
                   </div>
                   <div className="grid gap-2">
                     <Label htmlFor="password">Password</Label>
-                    <Input
-                      id="password"
-                      type="password"
-                      required
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      disabled={!isConfigured}
-                    />
+                    <div className="relative">
+                      <Input
+                        id="password"
+                        type={showPassword ? 'text' : 'password'}
+                        required
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        disabled={!isConfigured}
+                        className="pr-10"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                        tabIndex={-1}
+                      >
+                        {showPassword ? (
+                          <EyeOff className="h-4 w-4" />
+                        ) : (
+                          <Eye className="h-4 w-4" />
+                        )}
+                      </button>
+                    </div>
                   </div>
                   <Button type="submit" className="w-full" disabled={isLoading || !isConfigured}>
                     {isLoading ? (
@@ -126,8 +181,17 @@ export default function Page() {
                       'Login'
                     )}
                   </Button>
+                  <div className="text-center">
+                    <button
+                      type="button"
+                      onClick={() => setShowForgotPassword(true)}
+                      className="text-sm text-muted-foreground hover:text-primary underline-offset-4 hover:underline"
+                    >
+                      Forgot password?
+                    </button>
+                  </div>
                 </div>
-                <div className="mt-4 text-center text-sm">
+                {/* <div className="mt-4 text-center text-sm">
                   Don&apos;t have an account?{' '}
                   <Link
                     href="/auth/sign-up"
@@ -135,12 +199,52 @@ export default function Page() {
                   >
                     Sign up
                   </Link>
-                </div>
+                </div> */}
               </form>
             </CardContent>
           </Card>
         </div>
       </div>
+
+      {/* Forgot Password Dialog */}
+      <Dialog open={showForgotPassword} onOpenChange={setShowForgotPassword}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Reset Password</DialogTitle>
+            <DialogDescription>
+              Enter your email address and we&apos;ll send you a link to reset your password.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="reset-email">Email</Label>
+              <Input
+                id="reset-email"
+                type="email"
+                placeholder="your@email.com"
+                value={resetEmail}
+                onChange={(e) => setResetEmail(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleForgotPassword()}
+              />
+            </div>
+            <div className="flex gap-2 justify-end">
+              <Button variant="outline" onClick={() => setShowForgotPassword(false)}>
+                Cancel
+              </Button>
+              <Button onClick={handleForgotPassword} disabled={resetLoading}>
+                {resetLoading ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Sending...
+                  </>
+                ) : (
+                  'Send Reset Link'
+                )}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

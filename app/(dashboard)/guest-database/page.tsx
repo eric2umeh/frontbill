@@ -9,6 +9,7 @@ import { CardContent } from '@/components/ui/card'
 import { calculateGuestBalancesBatch } from '@/lib/balance'
 import { formatNaira } from '@/lib/utils/currency'
 import { usePageData } from '@/hooks/use-page-data'
+import { useAuth } from '@/lib/auth-context'
 import { Loader2 } from 'lucide-react'
 import { format } from 'date-fns'
 
@@ -29,6 +30,7 @@ interface Guest {
 export default function GuestDatabasePage() {
   const [guests, setGuests] = useState<Guest[]>([])
   const { initialLoading, startFetch, endFetch } = usePageData()
+  const { organizationId } = useAuth()
   const router = useRouter()
 
   useEffect(() => {
@@ -40,17 +42,11 @@ export default function GuestDatabasePage() {
       startFetch()
       const supabase = createClient()
       if (!supabase) { setGuests([]); endFetch(); return }
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) { router.push('/auth/login'); return }
-
-      const { data: profile } = await supabase
-        .from('profiles').select('organization_id').eq('id', user.id).single()
-      if (!profile) return
 
       const { data, error } = await supabase
         .from('guests')
         .select('*')
-        .eq('organization_id', profile.organization_id)
+        .eq('organization_id', organizationId)
         .order('created_at', { ascending: false })
 
       if (error) throw error
@@ -67,7 +63,7 @@ export default function GuestDatabasePage() {
 
       setGuests(guestsWithBalance)
     } catch (err: any) {
-      console.error('[v0] Error fetching guests:', err)
+      console.error('Error fetching guests:', err)
       setGuests([])
     } finally {
       endFetch()

@@ -148,6 +148,11 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
       toast.error('Please enter a description')
       return
     }
+    // Prevent any charges on checked-out folios
+    if ((booking?.folio_status || 'active') === 'checked_out') {
+      toast.error('This folio has been checked out and cannot accept new charges')
+      return
+    }
 
     setAddChargeLoading(true)
     // Determine if this charge goes onto the city ledger (unpaid bill) or is settled immediately
@@ -584,11 +589,13 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
     .filter(c => c.paymentStatus === 'paid' && c.amount > 0 && c.type === 'charge')
     .reduce((sum, c) => sum + c.amount, 0)
 
-  // Bill Balance (Unpaid) = sum of all pending/unpaid folio charges
-  // Derived entirely from folioCharges state - no reliance on bookings.balance column.
-  // This avoids RLS-blocked DB writes and stale-read race conditions.
+  // Bill Balance (Unpaid) = sum of all pending/unpaid/city_ledger folio charges
+  // city_ledger charges are billed to an account — still an outstanding balance owed to the hotel.
   const totalBillBalance = folioCharges
-    .filter((c: any) => (c.paymentStatus === 'pending' || c.paymentStatus === 'unpaid') && Number(c.amount) > 0)
+    .filter((c: any) => {
+      const status = c.paymentStatus || c.payment_status
+      return ['pending', 'unpaid', 'city_ledger'].includes(status) && Number(c.amount) > 0
+    })
     .reduce((sum: number, c: any) => sum + Number(c.amount), 0)
 
   // Amount Paid = initial booking deposit + all "Record Payment" entries in folio
@@ -778,20 +785,23 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
       </Dialog>
 
       <div className="flex items-center justify-between">
-        <Button variant="ghost" onClick={() => router.back()}>
+        <Button variant="ghost" onClick={() => router.push('/bookings')}>
           <ArrowLeft className="mr-2 h-4 w-4" />
           Back to Bookings
         </Button>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => setExtendStayModalOpen(true)} disabled={addChargeLoading}>
+        <div className="flex gap-2 items-center flex-wrap">
+          {(booking?.folio_status || 'active') === 'checked_out' && (
+            <Badge variant="secondary" className="bg-gray-100 text-gray-700">Folio Checked Out</Badge>
+          )}
+          <Button variant="outline" size="sm" onClick={() => setExtendStayModalOpen(true)} disabled={addChargeLoading || (booking?.folio_status === 'checked_out')}>
             <Clock className="mr-2 h-4 w-4" />
             Extend Stay
           </Button>
-          <Button variant="outline" size="sm">
+          <Button variant="outline" size="sm" disabled={booking?.folio_status === 'checked_out'}>
             <Edit className="mr-2 h-4 w-4" />
             Edit
           </Button>
-          <Button variant="destructive" size="sm" onClick={handleDelete}>
+          <Button variant="destructive" size="sm" onClick={handleDelete} disabled={booking?.folio_status === 'checked_out'}>
             <Trash2 className="mr-2 h-4 w-4" />
             Delete
           </Button>
@@ -841,7 +851,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
             <div>
               <div className="flex items-center justify-between mb-4">
                 <h3 className="font-semibold text-lg">Folio - All Charges & Payments</h3>
-                <Button size="sm" variant="outline" onClick={() => setAddChargeModalOpen(true)}>
+                <Button size="sm" variant="outline" onClick={() => setAddChargeModalOpen(true)} disabled={booking?.folio_status === 'checked_out'}>
                   <Plus className="mr-2 h-4 w-4" />
                   Add Charge
                 </Button>

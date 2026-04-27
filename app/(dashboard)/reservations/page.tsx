@@ -10,6 +10,8 @@ import { Button } from '@/components/ui/button'
 import { CardContent } from '@/components/ui/card'
 import { formatNaira } from '@/lib/utils/currency'
 import { usePageData } from '@/hooks/use-page-data'
+import { useAuth } from '@/lib/auth-context'
+import { hasPermission } from '@/lib/permissions'
 import { Plus, Users, Loader2 } from 'lucide-react'
 import { BulkBookingModal } from '@/components/reservations/bulk-booking-modal'
 import { NewReservationModal } from '@/components/reservations/new-reservation-modal'
@@ -42,6 +44,7 @@ export default function ReservationsPage() {
   const [bulkModalOpen, setBulkModalOpen] = useState(false)
   const [newReservationOpen, setNewReservationOpen] = useState(false)
   const { initialLoading, startFetch, endFetch } = usePageData()
+  const { organizationId, role } = useAuth()
   const router = useRouter()
 
   useEffect(() => {
@@ -58,16 +61,6 @@ export default function ReservationsPage() {
         setReservations([])
         return
       }
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) { endFetch(); return }
-
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('organization_id')
-        .eq('id', user.id)
-        .single()
-
-      if (!profile?.organization_id) { endFetch(); return }
 
       // Single query — no FK join on profiles (no FK exists), fetch user names separately
       const { data, error } = await supabase
@@ -78,7 +71,7 @@ export default function ReservationsPage() {
           guests:guest_id(id, name, phone),
           rooms:room_id(id, room_number, room_type)
         `)
-        .eq('organization_id', profile.organization_id)
+        .eq('organization_id', organizationId)
         .eq('status', 'reserved')
         .gt('check_in', new Date().toISOString().split('T')[0])
         .order('check_in', { ascending: true })
@@ -124,6 +117,8 @@ export default function ReservationsPage() {
           ...reservation,
           payment_method,
           ledger_account_name,
+          guestName: reservation.guests?.name || '',
+          guestPhone: reservation.guests?.phone || '',
           guests: reservation.guests
             ? (Array.isArray(reservation.guests) ? reservation.guests[0] : reservation.guests)
             : null,
@@ -175,21 +170,23 @@ export default function ReservationsPage() {
           <h1 className="text-3xl font-bold tracking-tight">Reservations</h1>
           <p className="text-muted-foreground">Manage future bookings and reservations</p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={() => setBulkModalOpen(true)}>
-            <Users className="mr-2 h-4 w-4" />
-            Bulk Booking
-          </Button>
-          <Button onClick={() => setNewReservationOpen(true)}>
-            <Plus className="mr-2 h-4 w-4" />
-            New Reservation
-          </Button>
-        </div>
+        {hasPermission(role, 'reservations:create') && (
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => setBulkModalOpen(true)}>
+              <Users className="mr-2 h-4 w-4" />
+              Bulk Booking
+            </Button>
+            <Button onClick={() => setNewReservationOpen(true)}>
+              <Plus className="mr-2 h-4 w-4" />
+              New Reservation
+            </Button>
+          </div>
+        )}
       </div>
 
       <EnhancedDataTable
         data={reservations}
-        searchKeys={['folio_id', 'guests.name', 'rooms.room_number']}
+        searchKeys={['folio_id', 'guestName', 'guestPhone', 'ledger_account_name', 'rooms.room_number']}
         dateField="check_in"
         filters={[
           {
