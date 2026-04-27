@@ -21,7 +21,7 @@ export type Permission =
   | 'housekeeping:view' | 'housekeeping:create' | 'housekeeping:edit' | 'housekeeping:assign' | 'housekeeping:report'
   | 'maintenance:view' | 'maintenance:create' | 'maintenance:edit' | 'maintenance:assign' | 'maintenance:report'
 
-export type RoleKey = 'admin' | 'manager' | 'front_desk' | 'receptionist' | 'accountant' | 'staff' | 'housekeeper' | 'maintenance'
+export type RoleKey = 'admin' | 'manager' | 'front_desk' | 'receptionist' | 'accountant' | 'staff' | 'housekeeping' | 'maintenance'
 
 export interface RoleDefinition {
   key: RoleKey
@@ -189,7 +189,7 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
     ],
   },
   {
-    key: 'housekeeper',
+    key: 'housekeeping',
     label: 'Housekeeper',
     description: 'Can manage housekeeping tasks, update room cleaning status, view bookings/reservations and submit daily reports.',
     color: 'bg-teal-100 text-teal-800',
