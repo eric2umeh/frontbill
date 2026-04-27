@@ -78,7 +78,7 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
 
       const [{ data: guestData }, { data: roomData }, { data: bookingData }] = await Promise.all([
         supabase.from('guests').select('id, name, phone').eq('organization_id', profile.organization_id).order('name'),
-        supabase.from('rooms').select('id, room_number, room_type, price_per_night').eq('organization_id', profile.organization_id).neq('status', 'maintenance').order('room_number'),
+        supabase.from('rooms').select('id, room_number, room_type, price_per_night, status').eq('organization_id', profile.organization_id).eq('status', 'available').order('room_number'),
         supabase.from('bookings').select('room_id, check_in, check_out').eq('organization_id', profile.organization_id).in('status', ['confirmed', 'reserved', 'checked_in']),
       ])
 
@@ -188,13 +188,6 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
         if (ge) throw ge
         finalGuestId = newGuest.id
 
-        await supabase.from('city_ledger_accounts').insert([{
-          organization_id: orgId,
-          account_name: fullName,
-          account_type: 'individual',
-          contact_phone: phone || null,
-          balance: 0,
-        }])
       }
 
       const rate = customPrice !== '' ? Number(customPrice) : (selectedRoom.price_per_night || 0)
@@ -221,7 +214,7 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
       }]).select().single()
       if (be) throw be
 
-      await supabase.from('rooms').update({ status: 'occupied' }).eq('id', selectedRoom.id)
+      await supabase.from('rooms').update({ status: 'occupied', updated_by: user?.id, updated_at: new Date().toISOString() }).eq('id', selectedRoom.id)
 
       await supabase.from('folio_charges').insert([{
         booking_id: booking.id,
@@ -445,7 +438,7 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
                 <SelectContent>
                   <SelectItem value="cash">Cash</SelectItem>
                   <SelectItem value="pos">POS</SelectItem>
-                  <SelectItem value="transfer">Bank Transfer</SelectItem>
+                  <SelectItem value="transfer">Transfer</SelectItem>
                   <SelectItem value="card">Card</SelectItem>
                   <SelectItem value="city_ledger">City Ledger</SelectItem>
                 </SelectContent>
