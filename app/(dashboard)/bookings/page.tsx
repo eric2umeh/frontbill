@@ -16,6 +16,7 @@ import { hasPermission } from '@/lib/permissions'
 import { Plus, Loader2 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
+import { getUserDisplayName } from '@/lib/utils/user-display'
 
 interface Booking {
   id: string
@@ -27,6 +28,11 @@ interface Booking {
   number_of_nights: number
   status: string
   payment_status: string
+  payment_method?: string
+  ledger_account_name?: string
+  guestName?: string
+  guestPhone?: string
+  organization_id?: string
   rate_per_night: number
   total_amount: number
   balance: number
@@ -49,6 +55,7 @@ export default function BookingsPage() {
   const { initialLoading, startFetch, endFetch } = usePageData()
   const { organizationId, role } = useAuth()
   const router = useRouter()
+  const isAdmin = role === 'admin'
 
   useEffect(() => {
     let isMounted = true
@@ -88,8 +95,8 @@ export default function BookingsPage() {
           .select('id, full_name')
           .in('id', userIds)
         
-        profiles?.forEach(profile => {
-          userMap[profile.id] = profile.full_name || 'Unknown User'
+        profiles?.forEach((profile: any) => {
+          userMap[profile.id] = getUserDisplayName(profile, profile.id)
         })
       }
       
@@ -116,8 +123,8 @@ export default function BookingsPage() {
           ledger_account_name,
           guestName: booking.guests?.name || '',
           guestPhone: booking.guests?.phone || '',
-          created_by_name: booking.created_by ? userMap[booking.created_by] || 'Unknown User' : 'System',
-          updated_by_name: booking.updated_by ? userMap[booking.updated_by] || 'Unknown User' : null,
+          created_by_name: booking.created_by ? userMap[booking.created_by] || getUserDisplayName(null, booking.created_by) : 'System',
+          updated_by_name: booking.updated_by ? userMap[booking.updated_by] || getUserDisplayName(null, booking.updated_by) : null,
         }
       })
 
@@ -154,7 +161,7 @@ export default function BookingsPage() {
     }
   }
 
-  const statusColors = {
+  const statusColors: Record<string, string> = {
     reserved: 'bg-blue-500/10 text-blue-700 border-blue-200',
     checked_in: 'bg-green-500/10 text-green-700 border-green-200',
     checked_out: 'bg-gray-500/10 text-gray-700 border-gray-200',
@@ -162,7 +169,7 @@ export default function BookingsPage() {
     cancelled: 'bg-red-500/10 text-red-700 border-red-200',
   }
 
-  const paymentColors = {
+  const paymentColors: Record<string, string> = {
     paid: 'bg-green-500/10 text-green-700 border-green-200',
     partial: 'bg-yellow-500/10 text-yellow-700 border-yellow-200',
     pending: 'bg-orange-500/10 text-orange-700 border-orange-200',
@@ -222,7 +229,7 @@ export default function BookingsPage() {
 
       <EnhancedDataTable
         data={bookings}
-        searchKeys={['folio_id', 'guestName', 'guestPhone', 'ledger_account_name', 'rooms.room_number']}
+        searchKeys={['folio_id', 'guestName', 'guestPhone', 'ledger_account_name', 'rooms.room_number'] as any}
         dateField="check_in"
         filters={[
           {
@@ -363,7 +370,7 @@ export default function BookingsPage() {
           {
             key: 'actions',
             label: 'Actions',
-            render: (booking) => (
+            render: (booking) => isAdmin ? (
               <div className="flex gap-2">
                 <Button 
                   size="sm" 
@@ -391,7 +398,6 @@ export default function BookingsPage() {
                   variant="outline"
                   onClick={(e) => {
                     e.stopPropagation()
-                    const nights = calculateNights(booking.check_in, booking.check_out)
                     setSelectedBooking({
                       id: booking.id,
                       folioId: booking.folio_id,
@@ -409,7 +415,7 @@ export default function BookingsPage() {
                   Extend Stay
                 </Button>
               </div>
-            ),
+            ) : null,
           },
         ]}
         renderCard={(booking) => (
