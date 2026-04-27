@@ -16,7 +16,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { toast } from 'sonner'
 import { format, parseISO } from 'date-fns'
 import {
-  Sparkles, Plus, Search, Filter, CheckCircle2, Clock, AlertCircle,
+  Sparkles, Search, Filter, CheckCircle2, Clock, AlertCircle,
   User, Bed, CalendarDays, ClipboardList, RefreshCw, ChevronDown,
 } from 'lucide-react'
 
@@ -102,6 +102,7 @@ export default function HousekeepingPage() {
   const [newTaskOpen, setNewTaskOpen] = useState(false)
   const [reportOpen, setReportOpen] = useState(false)
   const [statusChangeRoom, setStatusChangeRoom] = useState<Room | null>(null)
+  const [statusComment, setStatusComment] = useState('')
 
   // New task form
   const [taskForm, setTaskForm] = useState({
@@ -217,11 +218,31 @@ export default function HousekeepingPage() {
 
   const handleRoomStatusChange = async (roomId: string, newStatus: string) => {
     const supabase = createClient()
-    const { error } = await supabase.from('rooms').update({ status: newStatus }).eq('id', roomId)
+    const room = rooms.find(r => r.id === roomId)
+    const { error } = await supabase
+      .from('rooms')
+      .update({ status: newStatus, updated_by: userId, updated_at: new Date().toISOString() })
+      .eq('id', roomId)
     if (error) return toast.error(error.message)
+    if (statusComment.trim() && room) {
+      await supabase.from('housekeeping_tasks').insert([{
+        organization_id: organizationId,
+        room_id: roomId,
+        room_number: room.room_number,
+        task_type: 'Room Status Change',
+        priority: 'normal',
+        notes: statusComment.trim(),
+        created_by: userId,
+        created_by_name: currentUserName,
+        scheduled_date: filterDate,
+        status: 'done',
+        completed_at: new Date().toISOString(),
+      }])
+    }
     toast.success('Room status updated')
     setRooms(prev => prev.map(r => r.id === roomId ? { ...r, status: newStatus } : r))
     setStatusChangeRoom(null)
+    setStatusComment('')
   }
 
   const handleSubmitReport = async () => {
@@ -265,12 +286,6 @@ export default function HousekeepingPage() {
             <Button variant="outline" onClick={() => setReportOpen(true)}>
               <ClipboardList className="mr-2 h-4 w-4" />
               Daily Report
-            </Button>
-          )}
-          {canCreate && (
-            <Button onClick={() => setNewTaskOpen(true)}>
-              <Plus className="mr-2 h-4 w-4" />
-              New Task
             </Button>
           )}
         </div>
@@ -514,6 +529,16 @@ export default function HousekeepingPage() {
             <DialogHeader>
               <DialogTitle>Update Room {statusChangeRoom.room_number} Status</DialogTitle>
             </DialogHeader>
+            <div className="space-y-2 mb-3">
+              <Label>Comment</Label>
+              <Textarea
+                placeholder="Add note for this room status change..."
+                value={statusComment}
+                onChange={(e) => setStatusComment(e.target.value)}
+                rows={2}
+              />
+              <p className="text-xs text-muted-foreground">Created by {currentUserName}. Last updated by {currentUserName}.</p>
+            </div>
             <div className="grid grid-cols-2 gap-2">
               {ROOM_STATUS_OPTIONS.map(opt => (
                 <button
