@@ -50,7 +50,7 @@ const routes: Array<{ label: string; icon: any; href: string; permission?: Permi
     permission: 'reservations:view',
   },
   {
-    label: 'Accounts',
+    label: 'Guests',
     icon: Users,
     href: '/accounts',
     permission: 'guests:view', // Guests & city ledger accounts
