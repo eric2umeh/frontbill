@@ -27,6 +27,8 @@ interface UserProfile {
   avatar_url: string | null
   created_at: string
   email?: string
+  added_by?: string | null
+  added_by_name?: string | null
 }
 
 // ---- Add User state shape ----
@@ -206,7 +208,8 @@ export default function UsersRolesPage() {
   const filteredUsers = useMemo(() =>
     users.filter(u =>
       (u.full_name || '').toLowerCase().includes(search.toLowerCase()) ||
-      u.role.toLowerCase().includes(search.toLowerCase())
+      u.role.toLowerCase().includes(search.toLowerCase()) ||
+      (u.added_by_name || '').toLowerCase().includes(search.toLowerCase())
     ), [users, search])
 
   const permissionGroups = getPermissionGroups()
@@ -245,7 +248,7 @@ export default function UsersRolesPage() {
             <div className="relative flex-1 max-w-sm">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
-                placeholder="Search by name or role..."
+                placeholder="Search by name, role, or added by..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 className="pl-9"
@@ -285,6 +288,7 @@ export default function UsersRolesPage() {
                         </div>
                         <div className="text-xs text-muted-foreground mt-0.5">
                           Added {new Date(user.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                          {' '}| Added By: {user.added_by_name || user.full_name || 'Unknown User'}
                         </div>
                       </div>
                       {/* Permissions quick-view */}

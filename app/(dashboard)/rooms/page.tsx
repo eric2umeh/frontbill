@@ -13,6 +13,8 @@ import { useAuth } from '@/lib/auth-context'
 import { Plus, Users, Loader2 } from 'lucide-react'
 import { AddRoomModal } from '@/components/rooms/add-room-modal'
 import { toast } from 'sonner'
+import { getUserDisplayName } from '@/lib/utils/user-display'
+import { fetchUserDisplayNameMap } from '@/lib/utils/fetch-user-display-names'
 
 interface Room {
   id: string
@@ -34,11 +36,11 @@ export default function RoomsPage() {
   const [rooms, setRooms] = useState<Room[]>([])
   const [addRoomModalOpen, setAddRoomModalOpen] = useState(false)
   const { initialLoading, startFetch, endFetch } = usePageData()
-  const { organizationId, role } = useAuth()
+  const { organizationId, role, userId } = useAuth()
   const router = useRouter()
 
-  // Only admin and manager can add rooms
-  const canAddRoom = role && ['admin', 'manager'].includes(role)
+  // Only admins can create rooms. Other roles can view only.
+  const canAddRoom = role === 'admin'
 
   useEffect(() => {
     fetchRooms()
@@ -67,24 +69,13 @@ export default function RoomsPage() {
       const userIds = Array.from(new Set(
         [...(data || []).map((r: any) => r.created_by), ...(data || []).map((r: any) => r.updated_by)].filter(Boolean)
       ))
-      let userMap: { [key: string]: string } = {}
-      
-      if (userIds.length > 0) {
-        const { data: profiles } = await supabase
-          .from('profiles')
-          .select('id, full_name')
-          .in('id', userIds)
-        
-        profiles?.forEach(profile => {
-          userMap[profile.id] = profile.full_name || 'Unknown User'
-        })
-      }
+      const userMap = await fetchUserDisplayNameMap(userIds as string[], userId)
       
       // Add created_by_name and updated_by_name to each room
       const roomsWithUsers = (data || []).map((room: any) => ({
         ...room,
-        created_by_name: room.created_by ? userMap[room.created_by] || 'Unknown User' : 'System',
-        updated_by_name: room.updated_by ? userMap[room.updated_by] || 'Unknown User' : null
+        created_by_name: room.created_by ? userMap[room.created_by] || getUserDisplayName(null, room.created_by) : 'System',
+        updated_by_name: room.updated_by ? userMap[room.updated_by] || getUserDisplayName(null, room.updated_by) : null
       }))
       
       setRooms(roomsWithUsers)
@@ -96,7 +87,7 @@ export default function RoomsPage() {
     }
   }
 
-  const statusColors = {
+  const statusColors: Record<string, string> = {
     available: 'bg-green-500/10 text-green-700 border-green-200',
     occupied: 'bg-red-500/10 text-red-700 border-red-200',
     cleaning: 'bg-yellow-500/10 text-yellow-700 border-yellow-200',
@@ -162,7 +153,7 @@ export default function RoomsPage() {
                 onClick={() => router.push(`/rooms/${room.id}`)}
               >
                 <div className="font-semibold text-lg">Room {room.room_number}</div>
-                <div className="text-xs text-muted-foreground">Floor {room.floor_number}</div>
+                <div className="text-xs text-muted-foreground">{room.floor_number === 0 ? 'Ground Floor' : `Floor ${room.floor_number}`}</div>
               </div>
             ),
           },
@@ -285,7 +276,7 @@ export default function RoomsPage() {
               <div className="space-y-2">
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-muted-foreground">Floor</span>
-                  <span className="font-medium">{room.floor_number}</span>
+                  <span className="font-medium">{room.floor_number === 0 ? 'Ground Floor' : `Floor ${room.floor_number}`}</span>
                 </div>
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-muted-foreground">Capacity</span>

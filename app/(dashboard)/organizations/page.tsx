@@ -19,6 +19,9 @@ import { Badge } from '@/components/ui/badge'
 import { format } from 'date-fns'
 import { usePageData } from '@/hooks/use-page-data'
 import { useAuth } from '@/lib/auth-context'
+import { isOrganizationMenuRecord } from '@/lib/utils/ledger-organization'
+import { getUserDisplayName } from '@/lib/utils/user-display'
+import { fetchUserDisplayNameMap } from '@/lib/utils/fetch-user-display-names'
 
 interface Organization {
   id: string
@@ -37,7 +40,7 @@ export default function OrganizationsPage() {
   const router = useRouter()
   const [organizations, setOrganizations] = useState<Organization[]>([])
   const { initialLoading, startFetch, endFetch } = usePageData()
-  const { userId } = useAuth()
+  const { userId, organizationId } = useAuth()
   const [addOrgModalOpen, setAddOrgModalOpen] = useState(false)
 
   // Form states
@@ -65,35 +68,29 @@ export default function OrganizationsPage() {
       const { data, error } = await supabase
         .from('organizations')
         .select('id, name, org_type, email, phone, contact_person, address, current_balance, created_at, created_by')
-        .not('name', 'like', '%Hotel%')
         .order('created_at', { ascending: false })
 
       if (error) throw error
       
       // Batch-fetch organization balances from folio_charges
-      const orgIds = (data || []).map((org: any) => org.id)
+      const { data: teamProfiles } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('organization_id', organizationId)
+      const teamCreatorIds = new Set<string>((teamProfiles || []).map((profile: any) => profile.id))
+      const menuOrganizations = (data || []).filter((org: any) => isOrganizationMenuRecord(org, teamCreatorIds))
+      const orgIds = menuOrganizations.map((org: any) => org.id)
       const balanceMap = await calculateOrganizationBalancesBatch(supabase, orgIds)
       
       // Fetch creator profiles for all organizations
-      const creatorIds = Array.from(new Set((data || []).map(org => org.created_by).filter(Boolean)))
-      let creatorMap: { [key: string]: string } = {}
-      
-      if (creatorIds.length > 0) {
-        const { data: profiles } = await supabase
-          .from('profiles')
-          .select('id, full_name')
-          .in('id', creatorIds)
-        
-        profiles?.forEach(profile => {
-          creatorMap[profile.id] = profile.full_name || 'Unknown User'
-        })
-      }
+      const creatorIds = Array.from(new Set(menuOrganizations.map((org: any) => org.created_by).filter(Boolean)))
+      const creatorMap = await fetchUserDisplayNameMap(creatorIds as string[], userId)
       
       // Transform the data with dynamic balance calculation
-      const transformed = (data || []).map((org: any) => ({
+      const transformed = menuOrganizations.map((org: any) => ({
         ...org,
         current_balance: balanceMap[org.id] || 0,
-        created_by_name: org.created_by ? creatorMap[org.created_by] || 'Unknown User' : 'System'
+        created_by_name: org.created_by ? creatorMap[org.created_by] || getUserDisplayName(null, org.created_by) : 'System'
       }))
       
       setOrganizations(transformed)

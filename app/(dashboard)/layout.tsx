@@ -1,12 +1,13 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import { Sidebar } from '@/components/layout/sidebar'
 import { Header } from '@/components/layout/header'
 import { LoadingScreen } from '@/components/shared/loading-screen'
 import { createClient } from '@/lib/supabase/client'
 import { AuthProvider } from '@/lib/auth-context'
+import { hasPermission, type Permission } from '@/lib/permissions'
 
 interface DashboardUser {
   id: string
@@ -14,6 +15,34 @@ interface DashboardUser {
   name: string
   role: string
   organizationId?: string
+}
+
+const ROUTE_PERMISSIONS: Array<{ path: string; permission: Permission }> = [
+  { path: '/dashboard', permission: 'dashboard:view' },
+  { path: '/bookings', permission: 'bookings:view' },
+  { path: '/reservations', permission: 'reservations:view' },
+  { path: '/accounts', permission: 'guests:view' },
+  { path: '/guest-database', permission: 'guests:view' },
+  { path: '/organizations', permission: 'organizations:view' },
+  { path: '/transactions', permission: 'transactions:view' },
+  { path: '/payments', permission: 'payments:view' },
+  { path: '/reports', permission: 'analytics:view' },
+  { path: '/analytics', permission: 'analytics:view' },
+  { path: '/night-audit', permission: 'night_audit:view' },
+  { path: '/reconciliation', permission: 'reconciliation:view' },
+  { path: '/ledger', permission: 'ledger:view' },
+  { path: '/housekeeping', permission: 'housekeeping:view' },
+  { path: '/maintenance', permission: 'maintenance:view' },
+  { path: '/rooms', permission: 'rooms:view' },
+  { path: '/users-roles', permission: 'users:view' },
+  { path: '/settings', permission: 'settings:view' },
+]
+
+function getRequiredPermission(pathname: string) {
+  return ROUTE_PERMISSIONS
+    .sort((a, b) => b.path.length - a.path.length)
+    .find(route => pathname === route.path || pathname.startsWith(`${route.path}/`))
+    ?.permission
 }
 
 export default function DashboardLayout({
@@ -26,6 +55,7 @@ export default function DashboardLayout({
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [redirected, setRedirected] = useState(false)
   const router = useRouter()
+  const pathname = usePathname()
 
   useEffect(() => {
     let isMounted = true
@@ -115,7 +145,22 @@ export default function DashboardLayout({
     }
   }, [])
 
+  useEffect(() => {
+    if (!user) return
+
+    const requiredPermission = getRequiredPermission(pathname)
+    if (requiredPermission && !hasPermission(user.role, requiredPermission)) {
+      setRedirected(true)
+      router.replace('/access-denied')
+    }
+  }, [pathname, router, user])
+
   if (loading || !user) {
+    return <LoadingScreen />
+  }
+
+  const requiredPermission = getRequiredPermission(pathname)
+  if (requiredPermission && !hasPermission(user.role, requiredPermission)) {
     return <LoadingScreen />
   }
 

@@ -39,7 +39,7 @@ export default function AnalyticsPage() {
   const [bookings, setBookings] = useState<any[]>([])
   const [cityLedger, setCityLedger] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
-  const [period, setPeriod] = useState<Period>('30d')
+  const [period, setPeriod] = useState<Period>('today')
   const [customDate, setCustomDate] = useState<Date>(new Date())
   const [calOpen, setCalOpen] = useState(false)
   const [paymentMethodFilter, setPaymentMethodFilter] = useState<string>('all')
@@ -228,7 +228,6 @@ export default function AnalyticsPage() {
               <SelectItem value="cash">Cash</SelectItem>
               <SelectItem value="pos">POS</SelectItem>
               <SelectItem value="transfer">Transfer</SelectItem>
-              <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
               <SelectItem value="city_ledger">City Ledger</SelectItem>
             </SelectContent>
           </Select>
@@ -453,7 +452,7 @@ export default function AnalyticsPage() {
                         </div>
                         <div className="flex items-center gap-3 shrink-0">
                           <Badge variant="outline" style={{ borderColor: METHOD_COLORS[method], color: METHOD_COLORS[method] }}>
-                            {method.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                            {method.replace('_', ' ').replace(/\b\w/g, (l: string) => l.toUpperCase())}
                           </Badge>
                           <span className="font-bold">{formatNaira(p.amount)}</span>
                           {p.bookings?.payment_status === 'paid' ? (
