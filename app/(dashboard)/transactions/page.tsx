@@ -46,7 +46,7 @@ export default function TransactionsPage() {
   const [payments, setPayments] = useState<Payment[]>([])
   const { initialLoading, startFetch, endFetch } = usePageData()
   const { organizationId, userId } = useAuth()
-  const [dateRange, setDateRange] = useState<DateRange>('this_month')
+  const [dateRange, setDateRange] = useState<DateRange>('today')
   const [customDate, setCustomDate] = useState<Date>(new Date())
   const [calOpen, setCalOpen] = useState(false)
   const router = useRouter()
