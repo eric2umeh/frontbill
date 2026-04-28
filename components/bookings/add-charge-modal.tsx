@@ -12,6 +12,7 @@ import { formatNaira } from '@/lib/utils/currency'
 import { toast } from 'sonner'
 import { createClient } from '@/lib/supabase/client'
 import { isSelectableLedgerName } from '@/lib/utils/ledger-organization'
+import { resolveOrganizationLedgerAccount } from '@/lib/utils/resolve-ledger-account'
 
 interface AddChargeModalProps {
   open: boolean
@@ -35,6 +36,12 @@ export function AddChargeModal({ open, onClose, booking }: AddChargeModalProps) 
   const [ledgerType, setLedgerType] = useState('individual')
   const [selectedLedger, setSelectedLedger] = useState<any>(null)
   const [organizations, setOrganizations] = useState<any[]>([])
+  const [orgSearchTerm, setOrgSearchTerm] = useState('')
+  const [filteredOrganizations, setFilteredOrganizations] = useState<any[]>([])
+  const [showNewOrgForm, setShowNewOrgForm] = useState(false)
+  const [newOrgName, setNewOrgName] = useState('')
+  const [newOrgPhone, setNewOrgPhone] = useState('')
+  const [creatingOrg, setCreatingOrg] = useState(false)
 
   // When modal opens with city_ledger, auto-select the current guest
   useEffect(() => {
@@ -50,18 +57,77 @@ export function AddChargeModal({ open, onClose, booking }: AddChargeModalProps) 
   const fetchOrganizations = async () => {
     try {
       const supabase = createClient()
-      const { data, error } = await supabase
-        .from('city_ledger_accounts')
-        .select('id, account_name, balance')
-        .eq('organization_id', booking.organization_id!)
-        .order('account_name')
+      const [{ data: ledgerData, error: ledgerError }, { data: orgData, error: orgError }] = await Promise.all([
+        supabase
+          .from('city_ledger_accounts')
+          .select('id, account_name, balance, account_type, contact_phone')
+          .eq('organization_id', booking.organization_id!)
+          .order('account_name'),
+        supabase
+          .from('organizations')
+          .select('id, name, phone, org_type')
+          .neq('id', booking.organization_id!)
+          .order('name'),
+      ])
 
-      if (error) throw error
-      setOrganizations((data || [])
-        .filter((d: any) => isSelectableLedgerName(d.account_name))
-        .map((d: any) => ({ id: d.id, name: d.account_name, balance: d.balance })))
+      if (ledgerError) throw ledgerError
+      if (orgError) throw orgError
+      const ledgerOrgs = (ledgerData || [])
+        .filter((d: any) => ['organization', 'corporate'].includes(d.account_type) && isSelectableLedgerName(d.account_name))
+        .map((d: any) => ({ id: d.id, name: d.account_name, balance: d.balance || 0, phone: d.contact_phone, source: 'city_ledger' }))
+      const ledgerNames = new Set(ledgerOrgs.map((org: any) => org.name.toLowerCase()))
+      const menuOrgs = (orgData || [])
+        .filter((d: any) => d.org_type && isSelectableLedgerName(d.name) && !ledgerNames.has(String(d.name || '').toLowerCase()))
+        .map((d: any) => ({ id: d.id, name: d.name, balance: 0, phone: d.phone, source: 'organizations' }))
+      const accounts = [...ledgerOrgs, ...menuOrgs].sort((a, b) => a.name.localeCompare(b.name))
+      setOrganizations(accounts)
+      setFilteredOrganizations(accounts)
     } catch (error: any) {
       toast.error('Failed to load accounts')
+    }
+  }
+
+  const handleOrgSearch = (value: string) => {
+    setOrgSearchTerm(value)
+    const filtered = value.trim()
+      ? organizations.filter((org) => org.name.toLowerCase().includes(value.toLowerCase()))
+      : organizations
+    setFilteredOrganizations(filtered)
+  }
+
+  const createNewOrganizationAccount = async () => {
+    if (!newOrgName.trim()) {
+      toast.error('Organization name is required')
+      return
+    }
+    setCreatingOrg(true)
+    try {
+      const supabase = createClient()
+      const { data, error } = await supabase
+        .from('city_ledger_accounts')
+        .insert([{
+          organization_id: booking.organization_id,
+          account_name: newOrgName.trim(),
+          account_type: 'organization',
+          contact_phone: newOrgPhone.trim() || null,
+          balance: 0,
+        }])
+        .select('id, account_name, balance, contact_phone')
+        .single()
+      if (error) throw error
+      const account = { id: data.id, name: data.account_name, balance: data.balance || 0, phone: data.contact_phone, source: 'city_ledger' }
+      setOrganizations((prev) => [account, ...prev])
+      setFilteredOrganizations((prev) => [account, ...prev])
+      setSelectedLedger(account)
+      setOrgSearchTerm(account.name)
+      setShowNewOrgForm(false)
+      setNewOrgName('')
+      setNewOrgPhone('')
+      toast.success(`Organization account "${account.name}" created and selected`)
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to create organization account')
+    } finally {
+      setCreatingOrg(false)
     }
   }
 
@@ -228,6 +294,10 @@ export function AddChargeModal({ open, onClose, booking }: AddChargeModalProps) 
     setPaymentMethod('city_ledger')
     setLedgerType('individual')
     setSelectedLedger(null)
+    setOrgSearchTerm('')
+    setShowNewOrgForm(false)
+    setNewOrgName('')
+    setNewOrgPhone('')
   }
 
   return (
@@ -326,21 +396,51 @@ export function AddChargeModal({ open, onClose, booking }: AddChargeModalProps) 
                   )}
 
                   {ledgerType === 'organization' && (
-                    <div>
-                      <Label>Select Organization</Label>
-                      <Select value={selectedLedger?.id || ''} onValueChange={(id) => {
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <Label>Select Organization</Label>
+                        <Button type="button" size="sm" variant="outline" onClick={() => setShowNewOrgForm(true)}>
+                          + New Account
+                        </Button>
+                      </div>
+                      <Input
+                        placeholder="Search organization account..."
+                        value={orgSearchTerm}
+                        onChange={(e) => handleOrgSearch(e.target.value)}
+                      />
+                      <Select value={selectedLedger?.id || ''} onValueChange={async (id) => {
                         const org = organizations.find(o => o.id === id)
-                        setSelectedLedger(org)
+                        if (!org) return
+                        try {
+                          const supabase = createClient()
+                          const resolved = await resolveOrganizationLedgerAccount(supabase, booking.organization_id!, org)
+                          setSelectedLedger(resolved)
+                          setOrgSearchTerm(resolved.name || resolved.account_name)
+                        } catch (error: any) {
+                          toast.error(error.message || 'Failed to select organization')
+                        }
                       }}>
-                        <SelectTrigger className="mt-2">
+                        <SelectTrigger>
                           <SelectValue placeholder="Choose organization..." />
                         </SelectTrigger>
                         <SelectContent>
-                          {organizations.map(org => (
-                            <SelectItem key={org.id} value={org.id}>{org.name}</SelectItem>
+                          {filteredOrganizations.map(org => (
+                            <SelectItem key={`${org.source}-${org.id}`} value={org.id}>{org.name}</SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
+                      {showNewOrgForm && (
+                        <div className="rounded-md border bg-muted/30 p-3 space-y-2">
+                          <Input placeholder="Organization name" value={newOrgName} onChange={(e) => setNewOrgName(e.target.value)} />
+                          <Input placeholder="Phone optional" value={newOrgPhone} onChange={(e) => setNewOrgPhone(e.target.value)} />
+                          <div className="flex gap-2 justify-end">
+                            <Button type="button" size="sm" variant="outline" onClick={() => setShowNewOrgForm(false)}>Cancel</Button>
+                            <Button type="button" size="sm" onClick={createNewOrganizationAccount} disabled={creatingOrg || !newOrgName.trim()}>
+                              {creatingOrg ? 'Creating...' : 'Create & Select'}
+                            </Button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
                 </>
