@@ -572,10 +572,10 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
             </div>
             {paymentMethod === 'city_ledger' && (
               <div className="space-y-3 rounded-md border bg-muted/30 p-3">
-                <div className="flex items-center justify-between gap-2">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <Label>Organization Account</Label>
                   <Button type="button" size="sm" variant="outline" onClick={() => setShowNewLedgerOrgForm(true)}>
-                    + New Account
+                    + New Organization Account
                   </Button>
                 </div>
                 <div className="relative">
@@ -612,6 +612,11 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
                     </div>
                   )}
                 </div>
+                {!showNewLedgerOrgForm && (
+                  <Button type="button" size="sm" variant="secondary" className="w-full" onClick={() => setShowNewLedgerOrgForm(true)}>
+                    + New Organization Account
+                  </Button>
+                )}
                 {showNewLedgerOrgForm && (
                   <div className="rounded-md border bg-background p-3 space-y-2">
                     <Input placeholder="Organization name" value={newLedgerOrgName} onChange={(e) => setNewLedgerOrgName(e.target.value)} />
