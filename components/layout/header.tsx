@@ -20,7 +20,7 @@ import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { useAuth } from '@/lib/auth-context'
 import { formatNaira } from '@/lib/utils/currency'
-import { formatDistanceToNow, setHours, setMinutes } from 'date-fns'
+import { addDays, formatDistanceToNow, setHours, setMinutes } from 'date-fns'
 
 interface DashboardUser {
   id: string
@@ -54,6 +54,24 @@ export function Header({ user, onMenuClick }: HeaderProps) {
   const [notifOpen, setNotifOpen] = useState(false)
   const router = useRouter()
   const { organizationId } = useAuth()
+  const notificationStorageKey = `frontbill-read-notifications-${organizationId || user.id}`
+
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(notificationStorageKey)
+      if (saved) setReadIds(new Set(JSON.parse(saved)))
+    } catch {
+      setReadIds(new Set())
+    }
+  }, [notificationStorageKey])
+
+  const persistReadIds = (ids: Set<string>) => {
+    try {
+      window.localStorage.setItem(notificationStorageKey, JSON.stringify(Array.from(ids)))
+    } catch {
+      // Ignore storage failures; notifications still work for this session.
+    }
+  }
 
   const fetchNotifications = useCallback(async () => {
     const supabase = createClient()
@@ -61,11 +79,19 @@ export function Header({ user, onMenuClick }: HeaderProps) {
 
     try {
       const now = new Date()
-      const today = now.toISOString().split('T')[0]
+      const toLocalDateStr = (date: Date) => {
+        const year = date.getFullYear()
+        const month = String(date.getMonth() + 1).padStart(2, '0')
+        const day = String(date.getDate()).padStart(2, '0')
+        return `${year}-${month}-${day}`
+      }
+      const today = toLocalDateStr(now)
+      const tomorrow = toLocalDateStr(addDays(now, 1))
       const checkoutReminderTime = setMinutes(setHours(now, 11), 30)
       const checkinReminderTime = setMinutes(setHours(now, 9), 0)
+      const eveningReminderTime = setMinutes(setHours(now, 21), 0)
 
-      const [transactionsRes, checkinsRes, checkoutsRes, overdueRes, balancesRes, roomsRes] = await Promise.all([
+      const [transactionsRes, checkinsRes, tomorrowCheckinsRes, checkoutsRes, tomorrowCheckoutsRes, overdueRes, balancesRes, roomsRes] = await Promise.all([
         supabase
         .from('transactions')
         .select('id, description, amount, created_at, booking_id, guest_id, folio_id')
@@ -82,8 +108,20 @@ export function Header({ user, onMenuClick }: HeaderProps) {
           .from('bookings')
           .select('id, folio_id, check_in, check_out, balance, status, guests:guest_id(id, name), rooms:room_id(room_number)')
           .eq('organization_id', organizationId)
+          .eq('status', 'reserved')
+          .eq('check_in', tomorrow),
+        supabase
+          .from('bookings')
+          .select('id, folio_id, check_in, check_out, balance, status, guests:guest_id(id, name), rooms:room_id(room_number)')
+          .eq('organization_id', organizationId)
           .in('status', ['confirmed', 'checked_in'])
           .eq('check_out', today),
+        supabase
+          .from('bookings')
+          .select('id, folio_id, check_in, check_out, balance, status, guests:guest_id(id, name), rooms:room_id(room_number)')
+          .eq('organization_id', organizationId)
+          .in('status', ['confirmed', 'checked_in'])
+          .eq('check_out', tomorrow),
         supabase
           .from('bookings')
           .select('id, folio_id, check_in, check_out, balance, status, guests:guest_id(id, name), rooms:room_id(room_number)')
@@ -135,6 +173,21 @@ export function Header({ user, onMenuClick }: HeaderProps) {
           }))
         : []
 
+      const tomorrowCheckinNotifications: Notification[] = now >= eveningReminderTime
+        ? (tomorrowCheckinsRes.data || []).map((b: any) => ({
+            id: `checkin-tomorrow-${b.id}`,
+            description: `${getGuestName(b) || 'Guest'} is due to check in tomorrow at 1pm${getRoomNumber(b) ? ` - Room ${getRoomNumber(b)}` : ''}`,
+            amount: Number(b.balance || 0),
+            created_at: `${today}T21:00:00`,
+            booking_id: b.id,
+            guest_id: getGuestId(b) ?? null,
+            folio_id: b.folio_id ?? null,
+            read: readIds.has(`checkin-tomorrow-${b.id}`),
+            type: 'reservation',
+            actionLabel: 'View reservation',
+          }))
+        : []
+
       const checkoutNotifications: Notification[] = now >= checkoutReminderTime
         ? (checkoutsRes.data || []).map((b: any) => ({
             id: `checkout-${b.id}`,
@@ -145,6 +198,21 @@ export function Header({ user, onMenuClick }: HeaderProps) {
             guest_id: getGuestId(b) ?? null,
             folio_id: b.folio_id ?? null,
             read: readIds.has(`checkout-${b.id}`),
+            type: 'checkout',
+            actionLabel: 'View booking',
+          }))
+        : []
+
+      const tomorrowCheckoutNotifications: Notification[] = now >= eveningReminderTime
+        ? (tomorrowCheckoutsRes.data || []).map((b: any) => ({
+            id: `checkout-tomorrow-${b.id}`,
+            description: `${getGuestName(b) || 'Guest'} is due to check out tomorrow by 12pm${getRoomNumber(b) ? ` - Room ${getRoomNumber(b)}` : ''}`,
+            amount: Number(b.balance || 0),
+            created_at: `${today}T21:00:00`,
+            booking_id: b.id,
+            guest_id: getGuestId(b) ?? null,
+            folio_id: b.folio_id ?? null,
+            read: readIds.has(`checkout-tomorrow-${b.id}`),
             type: 'checkout',
             actionLabel: 'View booking',
           }))
@@ -192,7 +260,9 @@ export function Header({ user, onMenuClick }: HeaderProps) {
       const combined = [
         ...overdueNotifications,
         ...checkoutNotifications,
+        ...tomorrowCheckoutNotifications,
         ...checkinNotifications,
+        ...tomorrowCheckinNotifications,
         ...balanceNotifications,
         ...roomNotifications,
         ...transactionNotifications,
@@ -215,12 +285,17 @@ export function Header({ user, onMenuClick }: HeaderProps) {
   const markAllRead = () => {
     const allIds = new Set(notifications.map((n) => n.id))
     setReadIds(allIds)
+    persistReadIds(allIds)
     setNotifications((prev) => prev.map((n) => ({ ...n, read: true })))
   }
 
   const handleNotificationClick = (n: Notification) => {
     // Mark as read
-    setReadIds((prev) => new Set([...prev, n.id]))
+    setReadIds((prev) => {
+      const next = new Set([...prev, n.id])
+      persistReadIds(next)
+      return next
+    })
     setNotifications((prev) => prev.map((x) => x.id === n.id ? { ...x, read: true } : x))
     setNotifOpen(false)
     // Navigate to the most specific page
@@ -349,12 +424,12 @@ export function Header({ user, onMenuClick }: HeaderProps) {
               </div>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <Link href="/settings" asChild>
-              <DropdownMenuItem>
+            <DropdownMenuItem asChild>
+              <Link href="/settings">
                 <UserIcon className="mr-2 h-4 w-4" />
                 <span>Profile & Settings</span>
-              </DropdownMenuItem>
-            </Link>
+              </Link>
+            </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={handleLogout} className="text-destructive" disabled={loggingOut}>
               {loggingOut ? (
