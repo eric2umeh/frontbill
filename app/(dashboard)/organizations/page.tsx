@@ -72,13 +72,8 @@ export default function OrganizationsPage() {
 
       if (error) throw error
       
-      // Batch-fetch organization balances from folio_charges
-      const { data: teamProfiles } = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('organization_id', organizationId)
-      const teamCreatorIds = new Set<string>((teamProfiles || []).map((profile: any) => profile.id))
-      const menuOrganizations = (data || []).filter((org: any) => isOrganizationMenuRecord(org, teamCreatorIds))
+      // Show organizations created from the Organizations menu, regardless of which team role created them.
+      const menuOrganizations = (data || []).filter((org: any) => isOrganizationMenuRecord(org))
       const orgIds = menuOrganizations.map((org: any) => org.id)
       const balanceMap = await calculateOrganizationBalancesBatch(supabase, orgIds)
       

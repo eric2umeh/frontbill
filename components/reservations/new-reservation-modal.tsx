@@ -15,6 +15,7 @@ import { Calendar as CalendarIcon, Plus, X, Loader2 } from 'lucide-react'
 import { formatNaira } from '@/lib/utils/currency'
 import { toast } from 'sonner'
 import { isOrganizationMenuRecord, isSelectableLedgerName } from '@/lib/utils/ledger-organization'
+import { resolveOrganizationLedgerAccount } from '@/lib/utils/resolve-ledger-account'
 
 const toLocalDateStr = (date: Date) => {
   const y = date.getFullYear()
@@ -167,7 +168,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
     if (!effectiveOrgId) return
 
     // Query both city_ledger_accounts AND organizations table (same as new-booking-modal)
-    const [{ data: ledgerData }, { data: orgTableData }, { data: teamProfiles }] = await Promise.all([
+    const [{ data: ledgerData }, { data: orgTableData }] = await Promise.all([
       supabase
         .from('city_ledger_accounts')
         .select('id, account_name, account_type, contact_phone, balance')
@@ -182,19 +183,17 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
             .ilike('name', `%${term}%`)
             .limit(5)
         : Promise.resolve({ data: [] }),
-      supabase.from('profiles').select('id').eq('organization_id', effectiveOrgId),
     ])
-    const teamCreatorIds = new Set((teamProfiles || []).map((profile: any) => profile.id))
 
     const fromLedger = (ledgerData || [])
       .filter((d: any) => ledgerType === 'individual'
         ? ['individual', 'guest'].includes(d.account_type) && isSelectableLedgerName(d.account_name)
-        : false)
+        : ['organization', 'corporate'].includes(d.account_type) && isSelectableLedgerName(d.account_name))
       .map((d: any) => ({ ...d, name: d.account_name, source: 'city_ledger' as const }))
 
     const fromOrgs = ledgerType === 'organization'
       ? (orgTableData || [])
-          .filter((o: any) => isOrganizationMenuRecord(o, teamCreatorIds) && !fromLedger.some((l: any) => l.name.toLowerCase() === o.name.toLowerCase()))
+          .filter((o: any) => isOrganizationMenuRecord(o) && !fromLedger.some((l: any) => l.name.toLowerCase() === o.name.toLowerCase()))
           .map((o: any) => ({
             id: o.id,
             name: o.name,
@@ -236,6 +235,20 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
       toast.error(err.message || 'Failed to create account')
     } finally {
       setCreatingLedgerOrg(false)
+    }
+  }
+
+  const selectLedgerAccount = async (account: any) => {
+    try {
+      const supabase = createClient()
+      const resolved = ledgerType === 'organization'
+        ? await resolveOrganizationLedgerAccount(supabase, orgId, account)
+        : account
+      setSelectedLedger(resolved)
+      setLedgerSearch(resolved.name || resolved.account_name)
+      setLedgerSearchOpen(false)
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to select account')
     }
   }
 
@@ -681,7 +694,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
                     {ledgerSearchOpen && ledgerResults.length > 0 && (
                       <div className="absolute top-full left-0 right-0 mt-1 bg-background border rounded-md shadow-lg z-50 max-h-48 overflow-y-auto">
                         {ledgerResults.map((r: any) => (
-                          <button key={r.id} className="w-full text-left px-4 py-2 hover:bg-accent border-b last:border-b-0 text-sm" onMouseDown={(e) => { e.preventDefault(); setSelectedLedger(r); setLedgerSearch(r.name || r.account_name); setLedgerSearchOpen(false) }}>
+                          <button key={`${r.source || 'account'}-${r.id}`} className="w-full text-left px-4 py-2 hover:bg-accent border-b last:border-b-0 text-sm" onMouseDown={(e) => { e.preventDefault(); selectLedgerAccount(r) }}>
                             <div className="font-medium">{r.name || r.account_name}</div>
                             <div className="text-xs text-muted-foreground">{r.phone || r.contact_phone}</div>
                           </button>
@@ -689,15 +702,13 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
                       </div>
                     )}
                   </div>
-                  {ledgerType === 'individual' && (
-                    <Button type="button" size="sm" variant="outline" className="gap-1 whitespace-nowrap" onClick={() => setShowNewLedgerOrgForm(v => !v)}>
+                  <Button type="button" size="sm" variant="outline" className="gap-1 whitespace-nowrap" onClick={() => setShowNewLedgerOrgForm(v => !v)}>
                       <Plus className="h-3 w-3" /> New
-                    </Button>
-                  )}
+                  </Button>
                 </div>
                 {ledgerType === 'organization' && (
                   <p className="text-xs text-muted-foreground">
-                    Only organizations created from the Organizations menu are shown here.
+                    Search organizations created from the Organizations menu or city ledger organization accounts. Use New to create one here.
                   </p>
                 )}
                 {showNewLedgerOrgForm && (

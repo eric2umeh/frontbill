@@ -13,6 +13,8 @@ import { format, addDays } from 'date-fns'
 import { Calendar as CalendarIcon, X } from 'lucide-react'
 import { formatNaira } from '@/lib/utils/currency'
 import { toast } from 'sonner'
+import { isOrganizationMenuRecord, isSelectableLedgerName } from '@/lib/utils/ledger-organization'
+import { resolveOrganizationLedgerAccount } from '@/lib/utils/resolve-ledger-account'
 
 interface CheckinModalProps {
   open: boolean
@@ -55,6 +57,14 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
   // Payment
   const [paymentMethod, setPaymentMethod] = useState('cash')
   const [customPrice, setCustomPrice] = useState<number | ''>('')
+  const [ledgerSearch, setLedgerSearch] = useState('')
+  const [ledgerResults, setLedgerResults] = useState<any[]>([])
+  const [ledgerSearchOpen, setLedgerSearchOpen] = useState(false)
+  const [selectedLedger, setSelectedLedger] = useState<any>(null)
+  const [showNewLedgerOrgForm, setShowNewLedgerOrgForm] = useState(false)
+  const [newLedgerOrgName, setNewLedgerOrgName] = useState('')
+  const [newLedgerOrgPhone, setNewLedgerOrgPhone] = useState('')
+  const [creatingLedgerOrg, setCreatingLedgerOrg] = useState(false)
 
   // Driver referral
   const [driverCode, setDriverCode] = useState('')
@@ -172,8 +182,105 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
 
   const canSubmit = () => !!(fullName.trim() && selectedRoom && checkInDate && checkOutDate && nights > 0)
 
+  const searchLedgerOrganizations = async (term: string) => {
+    setLedgerSearch(term)
+    setSelectedLedger(null)
+    if (!term.trim()) {
+      setLedgerResults([])
+      setLedgerSearchOpen(false)
+      return
+    }
+
+    const supabase = createClient()
+    const [{ data: ledgerData }, { data: orgData }] = await Promise.all([
+      supabase
+        .from('city_ledger_accounts')
+        .select('id, account_name, account_type, contact_phone, balance')
+        .eq('organization_id', orgId)
+        .ilike('account_name', `%${term}%`)
+        .limit(8),
+      supabase
+        .from('organizations')
+        .select('id, name, phone, org_type, created_by')
+        .neq('id', orgId)
+        .ilike('name', `%${term}%`)
+        .limit(8),
+    ])
+
+    const fromLedger = (ledgerData || [])
+      .filter((account: any) => ['organization', 'corporate'].includes(account.account_type) && isSelectableLedgerName(account.account_name))
+      .map((account: any) => ({
+        id: account.id,
+        name: account.account_name,
+        account_name: account.account_name,
+        phone: account.contact_phone,
+        balance: account.balance || 0,
+        source: 'city_ledger',
+      }))
+    const ledgerNames = new Set(fromLedger.map((account: any) => String(account.name || '').toLowerCase()))
+    const fromOrgs = (orgData || [])
+      .filter((org: any) => isOrganizationMenuRecord(org) && !ledgerNames.has(String(org.name || '').toLowerCase()))
+      .map((org: any) => ({
+        id: org.id,
+        name: org.name,
+        account_name: org.name,
+        phone: org.phone,
+        balance: 0,
+        source: 'organizations',
+      }))
+
+    const results = [...fromLedger, ...fromOrgs]
+    setLedgerResults(results)
+    setLedgerSearchOpen(results.length > 0)
+  }
+
+  const createNewLedgerOrganization = async () => {
+    if (!newLedgerOrgName.trim()) {
+      toast.error('Organization name required')
+      return
+    }
+    setCreatingLedgerOrg(true)
+    try {
+      const supabase = createClient()
+      const { data, error } = await supabase
+        .from('city_ledger_accounts')
+        .insert([{
+          organization_id: orgId,
+          account_name: newLedgerOrgName.trim(),
+          account_type: 'organization',
+          contact_phone: newLedgerOrgPhone.trim() || null,
+          balance: 0,
+        }])
+        .select('id, account_name, contact_phone, balance')
+        .single()
+      if (error) throw error
+      const account = {
+        id: data.id,
+        name: data.account_name,
+        account_name: data.account_name,
+        phone: data.contact_phone,
+        balance: data.balance || 0,
+        source: 'city_ledger',
+      }
+      setSelectedLedger(account)
+      setLedgerSearch(account.name)
+      setShowNewLedgerOrgForm(false)
+      setNewLedgerOrgName('')
+      setNewLedgerOrgPhone('')
+      toast.success(`Organization account "${account.name}" created and selected`)
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to create organization account')
+    } finally {
+      setCreatingLedgerOrg(false)
+    }
+  }
+
   const handleSubmit = async () => {
     if (!canSubmit()) { toast.error('Please fill in all required fields'); return }
+    if (paymentMethod === 'city_ledger' && !selectedLedger) {
+      toast.error('Please select a city ledger organization account')
+      return
+    }
     try {
       setLoading(true)
       const supabase = createClient()
@@ -210,9 +317,26 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
         payment_status: isPaid ? 'paid' : 'pending',
         status: 'confirmed',
         created_by: user?.id,
-        notes: `payment_method: ${paymentMethod}${driverVerified ? ` | driver: ${driverCode}` : ''}`,
+        notes: paymentMethod === 'city_ledger'
+          ? `City Ledger: ${selectedLedger?.name || selectedLedger?.account_name}${driverVerified ? ` | driver: ${driverCode}` : ''}`
+          : `payment_method: ${paymentMethod}${driverVerified ? ` | driver: ${driverCode}` : ''}`,
       }]).select().single()
       if (be) throw be
+
+      if (paymentMethod === 'city_ledger' && selectedLedger?.id) {
+        const { data: account } = await supabase
+          .from('city_ledger_accounts')
+          .select('id, balance')
+          .eq('id', selectedLedger.id)
+          .maybeSingle()
+
+        if (account) {
+          await supabase
+            .from('city_ledger_accounts')
+            .update({ balance: (Number(account.balance) || 0) + total })
+            .eq('id', selectedLedger.id)
+        }
+      }
 
       await supabase.from('rooms').update({ status: 'occupied', updated_by: user?.id, updated_at: new Date().toISOString() }).eq('id', selectedRoom.id)
 
@@ -268,6 +392,8 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
     const d = new Date(); d.setHours(0,0,0,0)
     setCheckInDate(d); setCheckOutDate(addDays(d, 1)); setNights(1)
     setSelectedRoom(null); setPaymentMethod('cash'); setCustomPrice('')
+    setLedgerSearch(''); setLedgerResults([]); setSelectedLedger(null); setLedgerSearchOpen(false)
+    setShowNewLedgerOrgForm(false); setNewLedgerOrgName(''); setNewLedgerOrgPhone('')
     setDriverCode(''); setDriverVerified(false); setDriverName('')
   }
 
@@ -444,6 +570,73 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
                 </SelectContent>
               </Select>
             </div>
+            {paymentMethod === 'city_ledger' && (
+              <div className="space-y-3 rounded-md border bg-muted/30 p-3">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <Label>Organization Account</Label>
+                  <Button type="button" size="sm" variant="outline" onClick={() => setShowNewLedgerOrgForm(true)}>
+                    + New Organization Account
+                  </Button>
+                </div>
+                <div className="relative">
+                  <Input
+                    placeholder="Search organization account..."
+                    value={ledgerSearch}
+                    onChange={(e) => searchLedgerOrganizations(e.target.value)}
+                    onBlur={() => setTimeout(() => setLedgerSearchOpen(false), 150)}
+                  />
+                  {ledgerSearchOpen && ledgerResults.length > 0 && (
+                    <div className="absolute top-full left-0 right-0 mt-1 bg-background border rounded-md shadow-lg z-50 max-h-48 overflow-y-auto">
+                      {ledgerResults.map((account: any) => (
+                        <button
+                          key={`${account.source}-${account.id}`}
+                          type="button"
+                          className="w-full text-left px-4 py-2 hover:bg-accent border-b last:border-b-0 text-sm"
+                          onMouseDown={async (e) => {
+                            e.preventDefault()
+                            try {
+                              const supabase = createClient()
+                              const resolved = await resolveOrganizationLedgerAccount(supabase, orgId, account)
+                              setSelectedLedger(resolved)
+                              setLedgerSearch(resolved.name || resolved.account_name)
+                              setLedgerSearchOpen(false)
+                            } catch (error: any) {
+                              toast.error(error.message || 'Failed to select account')
+                            }
+                          }}
+                        >
+                          <div className="font-medium">{account.name || account.account_name}</div>
+                          {account.phone && <div className="text-xs text-muted-foreground">{account.phone}</div>}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                {!showNewLedgerOrgForm && (
+                  <Button type="button" size="sm" variant="secondary" className="w-full" onClick={() => setShowNewLedgerOrgForm(true)}>
+                    + New Organization Account
+                  </Button>
+                )}
+                {showNewLedgerOrgForm && (
+                  <div className="rounded-md border bg-background p-3 space-y-2">
+                    <Input placeholder="Organization name" value={newLedgerOrgName} onChange={(e) => setNewLedgerOrgName(e.target.value)} />
+                    <Input placeholder="Phone optional" value={newLedgerOrgPhone} onChange={(e) => setNewLedgerOrgPhone(e.target.value)} />
+                    <div className="flex gap-2 justify-end">
+                      <Button type="button" size="sm" variant="outline" onClick={() => setShowNewLedgerOrgForm(false)}>Cancel</Button>
+                      <Button type="button" size="sm" onClick={createNewLedgerOrganization} disabled={creatingLedgerOrg || !newLedgerOrgName.trim()}>
+                        {creatingLedgerOrg ? 'Creating...' : 'Create & Select'}
+                      </Button>
+                    </div>
+                  </div>
+                )}
+                {selectedLedger && (
+                  <div className="flex items-center justify-between p-2 rounded border bg-background text-sm">
+                    <span className="font-medium">{selectedLedger.name || selectedLedger.account_name}</span>
+                    <Button type="button" variant="ghost" size="sm" className="text-destructive h-6 text-xs" onClick={() => { setSelectedLedger(null); setLedgerSearch('') }}>Remove</Button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Driver Referral */}
