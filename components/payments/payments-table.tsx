@@ -22,7 +22,7 @@ export function PaymentsTable({ payments }: PaymentsTableProps) {
   const columns: Column<Payment>[] = [
     {
       header: 'Reference',
-      accessor: 'payment_reference',
+      accessor: (payment) => (payment as any).reference_number || (payment as any).payment_reference || payment.id,
       cell: (value) => (
         <span className="font-mono text-sm">{value}</span>
       ),
@@ -30,20 +30,25 @@ export function PaymentsTable({ payments }: PaymentsTableProps) {
     {
       header: 'Payer',
       accessor: (payment) => {
-        if (payment.organization) return payment.organization.name
-        if (payment.guest) return `${payment.guest.first_name} ${payment.guest.last_name}`
+        const row = payment as any
+        if (row.organization) return row.organization.name
+        if (row.guests?.name) return row.guests.name
+        if (row.guest?.name) return row.guest.name
+        if (row.guest) return `${row.guest.first_name || ''} ${row.guest.last_name || ''}`.trim()
         return 'N/A'
       },
       cell: (_, payment) => (
         <div>
-          {payment.organization ? (
+          {(payment as any).organization ? (
             <>
-              <p className="font-medium">{payment.organization.name}</p>
+              <p className="font-medium">{(payment as any).organization.name}</p>
               <p className="text-xs text-muted-foreground">Organization</p>
             </>
-          ) : payment.guest ? (
+          ) : (payment as any).guests?.name || (payment as any).guest ? (
             <>
-              <p className="font-medium">{payment.guest.first_name} {payment.guest.last_name}</p>
+              <p className="font-medium">
+                {(payment as any).guests?.name || (payment as any).guest?.name || `${(payment as any).guest?.first_name || ''} ${(payment as any).guest?.last_name || ''}`.trim()}
+              </p>
               <p className="text-xs text-muted-foreground">Individual</p>
             </>
           ) : (
