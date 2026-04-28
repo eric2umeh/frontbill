@@ -16,7 +16,8 @@ import { format, differenceInDays } from 'date-fns'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 import { formatNaira } from '@/lib/utils/currency'
-import { isOrganizationMenuRecord } from '@/lib/utils/ledger-organization'
+import { isOrganizationMenuRecord, isSelectableLedgerName } from '@/lib/utils/ledger-organization'
+import { resolveOrganizationLedgerAccount } from '@/lib/utils/resolve-ledger-account'
 
 const ROOM_TYPES_FALLBACK = ['Deluxe', 'Royal', 'Kings', 'Mini Suite', 'Executive Suite', 'Diplomatic Suite']
 
@@ -73,7 +74,6 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
   const [orgSearching, setOrgSearching] = useState(false)
   const [selectedOrg, setSelectedOrg] = useState<any>(null)
   const [orgSearchOpen, setOrgSearchOpen] = useState(false)
-  const [organizationCreatorIds, setOrganizationCreatorIds] = useState<Set<string>>(new Set())
   const [showNewOrgForm, setShowNewOrgForm] = useState(false)
   // Inline new org form fields
   const [newOrgName, setNewOrgName] = useState('')
@@ -129,13 +129,11 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
     const { data: profile } = await supabase.from('profiles').select('organization_id').eq('id', user.id).single()
     if (!profile) return
     setOrgId(profile.organization_id)
-    const [{ data: guestData }, { data: roomData }, { data: bookingData }, { data: teamProfiles }] = await Promise.all([
+    const [{ data: guestData }, { data: roomData }, { data: bookingData }] = await Promise.all([
       supabase.from('guests').select('id, name, phone, email').eq('organization_id', profile.organization_id).order('name'),
       supabase.from('rooms').select('id, room_number, room_type, price_per_night, status').eq('organization_id', profile.organization_id).eq('status', 'available').order('room_number'),
       supabase.from('bookings').select('room_id, check_in, check_out').eq('organization_id', profile.organization_id).in('status', ['confirmed', 'reserved', 'checked_in']),
-      supabase.from('profiles').select('id').eq('organization_id', profile.organization_id),
     ])
-    setOrganizationCreatorIds(new Set((teamProfiles || []).map((teamProfile: any) => teamProfile.id)))
     setAllGuests(guestData || [])
     setAllRooms((roomData || []).filter((r: any) => r.id && r.room_type && String(r.room_type).trim() !== '' && r.room_number && String(r.room_number).trim() !== ''))
     setAllActiveBookings(bookingData || [])
@@ -155,7 +153,7 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
         .neq('id', orgId)
         .ilike('name', `%${term}%`)
         .limit(8)
-      const results = (data || []).filter((org: any) => isOrganizationMenuRecord(org, organizationCreatorIds))
+      const results = (data || []).filter((org: any) => isOrganizationMenuRecord(org))
       setOrgResults(results)
       setOrgSearchOpen(results.length > 0)
       if (results.length === 0) setShowNewOrgForm(false)
@@ -198,24 +196,38 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
     setCreatingLedgerOrg(true)
     try {
       const supabase = createClient()
-      const { data, error } = await supabase.from('organizations').insert([{
-        name: newLedgerOrgName.trim(),
-        org_type: 'other',
-        email: newLedgerOrgEmail.trim() || null,
-        phone: newLedgerOrgPhone.trim() || null,
-        current_balance: 0,
-        created_by: currentUserId,
+      const { data, error } = await supabase.from('city_ledger_accounts').insert([{
+        organization_id: orgId,
+        account_name: newLedgerOrgName.trim(),
+        account_type: 'organization',
+        contact_email: newLedgerOrgEmail.trim() || null,
+        contact_phone: newLedgerOrgPhone.trim() || null,
+        balance: 0,
       }]).select().single()
       if (error) throw error
-      setSelectedLedger({ id: data.id, name: data.name, phone: data.phone, source: 'organizations' })
-      setLedgerSearch(data.name)
+      setSelectedLedger({ id: data.id, name: data.account_name, account_name: data.account_name, phone: data.contact_phone, source: 'city_ledger' })
+      setLedgerSearch(data.account_name)
       setShowNewLedgerOrgForm(false)
       setNewLedgerOrgName(''); setNewLedgerOrgEmail(''); setNewLedgerOrgPhone('')
-      toast.success(`Organization "${data.name}" created and selected`)
+      toast.success(`Organization account "${data.account_name}" created and selected`)
     } catch (err: any) {
-      toast.error(err.message || 'Failed to create organization')
+      toast.error(err.message || 'Failed to create organization account')
     } finally {
       setCreatingLedgerOrg(false)
+    }
+  }
+
+  const selectLedgerAccount = async (account: any) => {
+    try {
+      const supabase = createClient()
+      const resolved = ledgerType === 'organization'
+        ? await resolveOrganizationLedgerAccount(supabase, orgId, account)
+        : account
+      setSelectedLedger(resolved)
+      setLedgerSearch(resolved.name || resolved.account_name)
+      setLedgerSearchOpen(false)
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to select account')
     }
   }
 
@@ -240,8 +252,18 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
       setLedgerSearchOpen(filtered.length > 0)
     } else {
       const supabase = createClient()
-      const { data } = await supabase.from('organizations').select('id, name, phone, email, org_type, created_by').neq('id', orgId).ilike('name', `%${term}%`).limit(8)
-      const results = (data || []).filter((d: any) => isOrganizationMenuRecord(d, organizationCreatorIds)).map((d: any) => ({ ...d, source: 'organizations' }))
+      const [{ data: orgData }, { data: ledgerData }] = await Promise.all([
+        supabase.from('organizations').select('id, name, phone, email, org_type, created_by').neq('id', orgId).ilike('name', `%${term}%`).limit(8),
+        supabase.from('city_ledger_accounts').select('id, account_name, contact_phone, balance, account_type').eq('organization_id', orgId).ilike('account_name', `%${term}%`).limit(8),
+      ])
+      const fromLedger = (ledgerData || [])
+        .filter((d: any) => ['organization', 'corporate'].includes(d.account_type) && isSelectableLedgerName(d.account_name))
+        .map((d: any) => ({ ...d, name: d.account_name, phone: d.contact_phone, source: 'city_ledger' }))
+      const ledgerNames = new Set(fromLedger.map((d: any) => String(d.name || '').toLowerCase()))
+      const fromOrgs = (orgData || [])
+        .filter((d: any) => isOrganizationMenuRecord(d) && !ledgerNames.has(String(d.name || '').toLowerCase()))
+        .map((d: any) => ({ ...d, source: 'organizations' }))
+      const results = [...fromLedger, ...fromOrgs]
       setLedgerResults(results)
       setLedgerSearchOpen(results.length > 0)
     }
@@ -776,8 +798,8 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
                       {ledgerSearchOpen && ledgerResults.length > 0 && (
                         <div className="absolute top-full left-0 right-0 mt-1 bg-background border rounded-md shadow-lg z-50 max-h-48 overflow-y-auto">
                           {ledgerResults.map((r: any) => (
-                            <button key={r.id} className="w-full text-left px-4 py-2 hover:bg-accent border-b last:border-b-0 text-sm"
-                              onMouseDown={(e) => { e.preventDefault(); setSelectedLedger(r); setLedgerSearch(r.name || r.account_name); setLedgerSearchOpen(false) }}>
+                            <button key={`${r.source || 'account'}-${r.id}`} className="w-full text-left px-4 py-2 hover:bg-accent border-b last:border-b-0 text-sm"
+                              onMouseDown={(e) => { e.preventDefault(); selectLedgerAccount(r) }}>
                               <div className="font-medium">{r.name || r.account_name}</div>
                               <div className="text-xs text-muted-foreground">{r.phone || r.contact_phone}</div>
                             </button>
@@ -785,10 +807,15 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
                         </div>
                       )}
                     </div>
+                    {ledgerType === 'organization' && (
+                      <Button type="button" size="sm" variant="outline" className="whitespace-nowrap" onClick={() => setShowNewLedgerOrgForm(v => !v)}>
+                        + New Account
+                      </Button>
+                    )}
                   </div>
                   {ledgerType === 'organization' && (
                     <p className="text-xs text-muted-foreground">
-                      Only organizations created from the Organizations menu are shown here.
+                      Search organizations created from the Organizations menu or city ledger organization accounts. Use New Account to create one here.
                     </p>
                   )}
 
