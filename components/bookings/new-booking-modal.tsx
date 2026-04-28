@@ -916,23 +916,21 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
                 <div className="space-y-3 rounded-lg border border-input p-3">
                   <div className="flex items-center justify-between">
                     <Label className="text-sm font-semibold">City Ledger Account *</Label>
-                    {ledgerTab === 'individual' && (
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        className="h-7 text-xs"
-                        onClick={() => {
-                          setNewAccountName(fullName)
-                          setNewAccountPhone(phone)
-                          setNewAccountEmail(email)
-                          setNewAccountAddress(''); setNewAccountCity(''); setNewAccountType('')
-                          setNewAccountDialogOpen(true)
-                        }}
-                      >
-                        + New Account
-                      </Button>
-                    )}
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-xs"
+                      onClick={() => {
+                        setNewAccountName(ledgerTab === 'individual' ? fullName : '')
+                        setNewAccountPhone(ledgerTab === 'individual' ? phone : '')
+                        setNewAccountEmail(ledgerTab === 'individual' ? email : '')
+                        setNewAccountAddress(''); setNewAccountCity(''); setNewAccountType('')
+                        setNewAccountDialogOpen(true)
+                      }}
+                    >
+                      {ledgerTab === 'individual' ? '+ New Guest Account' : '+ New Organization Account'}
+                    </Button>
                   </div>
                   <Tabs value={ledgerTab} onValueChange={handleLedgerTabChange}>
                     <TabsList className="grid w-full grid-cols-2 h-9">
