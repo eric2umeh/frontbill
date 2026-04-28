@@ -15,6 +15,7 @@ import { CreditCard, Check } from 'lucide-react'
 import { format, differenceInDays } from 'date-fns'
 import { createClient } from '@/lib/supabase/client'
 import { isSelectableLedgerName } from '@/lib/utils/ledger-organization'
+import { resolveOrganizationLedgerAccount } from '@/lib/utils/resolve-ledger-account'
 
 interface ExtendStayModalProps {
   open: boolean
@@ -45,6 +46,10 @@ export function ExtendStayModal({ open, onClose, onSuccess, booking }: ExtendSta
   const [organizations, setOrganizations] = useState<any[]>([])
   const [filteredOrganizations, setFilteredOrganizations] = useState<any[]>([])
   const [orgSearchTerm, setOrgSearchTerm] = useState('')
+  const [showNewOrgForm, setShowNewOrgForm] = useState(false)
+  const [newOrgName, setNewOrgName] = useState('')
+  const [newOrgPhone, setNewOrgPhone] = useState('')
+  const [creatingOrg, setCreatingOrg] = useState(false)
 
   // When modal opens with city_ledger, auto-select the current guest
   useEffect(() => {
@@ -61,19 +66,31 @@ export function ExtendStayModal({ open, onClose, onSuccess, booking }: ExtendSta
   const fetchOrganizations = async () => {
     try {
       const supabase = createClient()
-      // Fetch from city_ledger_accounts for organizations (exclude individuals)
-      const { data, error } = await supabase
-        .from('city_ledger_accounts')
-        .select('id, account_name, balance')
-        .eq('organization_id', booking.organization_id!)
-        .neq('account_type', 'individual')
-        .neq('account_type', 'guest')
-        .order('account_name')
+      const [{ data: ledgerData, error: ledgerError }, { data: orgData, error: orgError }] = await Promise.all([
+        supabase
+          .from('city_ledger_accounts')
+          .select('id, account_name, balance, account_type, contact_phone')
+          .eq('organization_id', booking.organization_id!)
+          .neq('account_type', 'individual')
+          .neq('account_type', 'guest')
+          .order('account_name'),
+        supabase
+          .from('organizations')
+          .select('id, name, phone, org_type')
+          .neq('id', booking.organization_id!)
+          .order('name'),
+      ])
 
-      if (error) throw error
-      const accounts = (data || [])
+      if (ledgerError) throw ledgerError
+      if (orgError) throw orgError
+      const ledgerOrgs = (ledgerData || [])
         .filter((d: any) => isSelectableLedgerName(d.account_name))
-        .map((d: any) => ({ id: d.id, name: d.account_name, current_balance: d.balance || 0 }))
+        .map((d: any) => ({ id: d.id, name: d.account_name, current_balance: d.balance || 0, phone: d.contact_phone, source: 'city_ledger' }))
+      const ledgerNames = new Set(ledgerOrgs.map((org: any) => org.name.toLowerCase()))
+      const menuOrgs = (orgData || [])
+        .filter((d: any) => d.org_type && isSelectableLedgerName(d.name) && !ledgerNames.has(String(d.name || '').toLowerCase()))
+        .map((d: any) => ({ id: d.id, name: d.name, current_balance: 0, phone: d.phone, source: 'organizations' }))
+      const accounts = [...ledgerOrgs, ...menuOrgs].sort((a, b) => a.name.localeCompare(b.name))
       setOrganizations(accounts)
       setFilteredOrganizations(accounts)
     } catch (error: any) {
@@ -90,6 +107,42 @@ export function ExtendStayModal({ open, onClose, onSuccess, booking }: ExtendSta
       setFilteredOrganizations(filtered)
     } else {
       setFilteredOrganizations(organizations)
+    }
+  }
+
+  const createNewOrganizationAccount = async () => {
+    if (!newOrgName.trim()) {
+      toast.error('Organization name is required')
+      return
+    }
+    setCreatingOrg(true)
+    try {
+      const supabase = createClient()
+      const { data, error } = await supabase
+        .from('city_ledger_accounts')
+        .insert([{
+          organization_id: booking.organization_id,
+          account_name: newOrgName.trim(),
+          account_type: 'organization',
+          contact_phone: newOrgPhone.trim() || null,
+          balance: 0,
+        }])
+        .select('id, account_name, balance, contact_phone')
+        .single()
+      if (error) throw error
+      const account = { id: data.id, name: data.account_name, current_balance: data.balance || 0, phone: data.contact_phone, source: 'city_ledger' }
+      setOrganizations((prev) => [account, ...prev])
+      setFilteredOrganizations((prev) => [account, ...prev])
+      setSelectedLedger(account)
+      setOrgSearchTerm(account.name)
+      setShowNewOrgForm(false)
+      setNewOrgName('')
+      setNewOrgPhone('')
+      toast.success(`Organization account "${account.name}" created and selected`)
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to create organization account')
+    } finally {
+      setCreatingOrg(false)
     }
   }
 
@@ -306,6 +359,9 @@ export function ExtendStayModal({ open, onClose, onSuccess, booking }: ExtendSta
     setShowOrgSearch(false)
     setSelectedLedger(null)
     setOrgSearchTerm('')
+    setShowNewOrgForm(false)
+    setNewOrgName('')
+    setNewOrgPhone('')
   }
 
   return (
@@ -441,7 +497,12 @@ export function ExtendStayModal({ open, onClose, onSuccess, booking }: ExtendSta
                   {/* Organization Search */}
                   {ledgerType === 'organization' && (
                     <div className="space-y-2">
-                      <Label>Search Organization</Label>
+                      <div className="flex items-center justify-between gap-2">
+                        <Label>Search Organization</Label>
+                        <Button type="button" size="sm" variant="outline" onClick={() => setShowNewOrgForm(true)}>
+                          + New Account
+                        </Button>
+                      </div>
                       <div className="space-y-2">
                         <div className="relative">
                           <Input
@@ -457,10 +518,16 @@ export function ExtendStayModal({ open, onClose, onSuccess, booking }: ExtendSta
                             {filteredOrganizations.map((org) => (
                               <button
                                 key={org.id}
-                                onClick={() => {
-                                  setSelectedLedger(org)
-                                  setOrgSearchTerm('')
-                                  setFilteredOrganizations([])
+                                onClick={async () => {
+                                  try {
+                                    const supabase = createClient()
+                                    const resolved = await resolveOrganizationLedgerAccount(supabase, booking.organization_id!, org)
+                                    setSelectedLedger(resolved)
+                                    setOrgSearchTerm('')
+                                    setFilteredOrganizations([])
+                                  } catch (error: any) {
+                                    toast.error(error.message || 'Failed to select organization')
+                                  }
                                 }}
                                 className="w-full text-left px-3 py-2 hover:bg-accent border-b last:border-b-0 transition-colors flex items-center justify-between"
                               >
@@ -481,6 +548,18 @@ export function ExtendStayModal({ open, onClose, onSuccess, booking }: ExtendSta
                         {orgSearchTerm && filteredOrganizations.length === 0 && (
                           <div className="text-sm text-muted-foreground p-3 border rounded-md text-center">
                             No organizations found
+                          </div>
+                        )}
+                        {showNewOrgForm && (
+                          <div className="rounded-md border bg-muted/30 p-3 space-y-2">
+                            <Input placeholder="Organization name" value={newOrgName} onChange={(e) => setNewOrgName(e.target.value)} />
+                            <Input placeholder="Phone optional" value={newOrgPhone} onChange={(e) => setNewOrgPhone(e.target.value)} />
+                            <div className="flex gap-2 justify-end">
+                              <Button type="button" size="sm" variant="outline" onClick={() => setShowNewOrgForm(false)}>Cancel</Button>
+                              <Button type="button" size="sm" onClick={createNewOrganizationAccount} disabled={creatingOrg || !newOrgName.trim()}>
+                                {creatingOrg ? 'Creating...' : 'Create & Select'}
+                              </Button>
+                            </div>
                           </div>
                         )}
                       </div>
