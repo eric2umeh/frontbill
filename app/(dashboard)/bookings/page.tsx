@@ -19,7 +19,7 @@ import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { getUserDisplayName } from '@/lib/utils/user-display'
 import { fetchUserDisplayNameMap } from '@/lib/utils/fetch-user-display-names'
-import { extractBulkGroupId } from '@/lib/utils/bulk-booking'
+import { getBulkGroupId } from '@/lib/utils/bulk-booking'
 
 interface Booking {
   id: string
@@ -187,7 +187,7 @@ export default function BookingsPage() {
     const singles: Booking[] = []
 
     rows.forEach((row) => {
-      const groupId = extractBulkGroupId(row.notes)
+      const groupId = getBulkGroupId(row)
       if (!groupId) {
         singles.push(row)
         return
