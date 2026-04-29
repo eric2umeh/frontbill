@@ -78,7 +78,7 @@ export async function calculateGuestBalancesBatch(
   // Get all bookings for these guests (across all orgs, will check per guest later)
   const { data: bookings } = await supabase
     .from('bookings')
-    .select('id, guest_id, total_amount, deposit, payment_status')
+    .select('id, guest_id, total_amount, deposit, balance, payment_status')
     .in('guest_id', guestIds)
     .not('status', 'in', '("cancelled")')
 
@@ -94,7 +94,7 @@ export async function calculateGuestBalancesBatch(
 
   // Build a bookingId → guestId map
   const bookingToGuest: Record<string, string> = {}
-  const bookingMap: Record<string, { total_amount: number; deposit: number; payment_status: string }> = {}
+  const bookingMap: Record<string, { total_amount: number; deposit: number; balance?: number; payment_status: string }> = {}
   bookings.forEach(b => {
     bookingToGuest[b.id] = b.guest_id
     bookingMap[b.id] = b
@@ -115,33 +115,31 @@ export async function calculateGuestBalancesBatch(
     return balanceMap
   }
 
-  // Track which bookings have any charges
-  const bookingsWithCharges = new Set<string>()
-  charges.forEach(c => bookingsWithCharges.add(c.booking_id))
-
-  // For bookings without charges fall back to total - deposit
-  bookings.forEach(b => {
-    if (!bookingsWithCharges.has(b.id) && b.payment_status !== 'paid') {
-      const gId = b.guest_id
-      const owed = Math.max(0, (b.total_amount || 0) - (b.deposit || 0))
-      balanceMap[gId] = (balanceMap[gId] || 0) + owed
-    }
-  })
-
-  // Sum charges per guest
+  const folioBalanceByBooking: Record<string, number> = {}
   charges.forEach(c => {
     const gId = bookingToGuest[c.booking_id]
     if (!gId) return
     if (c.charge_type === 'payment') {
       // Payment amounts are negative — reduces balance
-      balanceMap[gId] = (balanceMap[gId] || 0) + (c.amount || 0)
+      folioBalanceByBooking[c.booking_id] = (folioBalanceByBooking[c.booking_id] || 0) + (c.amount || 0)
     } else if (
       c.payment_method === 'city_ledger' ||
       c.payment_status === 'pending' ||
       c.payment_status === 'unpaid'
     ) {
-      balanceMap[gId] = (balanceMap[gId] || 0) + (c.amount || 0)
+      folioBalanceByBooking[c.booking_id] = (folioBalanceByBooking[c.booking_id] || 0) + (c.amount || 0)
     }
+  })
+
+  bookings.forEach(b => {
+    const gId = b.guest_id
+    const fallbackOwed = Math.max(0, (Number(b.total_amount) || 0) - (Number(b.deposit) || 0))
+    const outstanding = Math.max(
+      Number(folioBalanceByBooking[b.id] || 0),
+      Number(b.balance || 0),
+      fallbackOwed
+    )
+    balanceMap[gId] = (balanceMap[gId] || 0) + outstanding
   })
 
   // Clamp negatives to 0 (credit balance shown elsewhere)
