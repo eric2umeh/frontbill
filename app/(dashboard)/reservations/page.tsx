@@ -17,7 +17,7 @@ import { BulkBookingModal } from '@/components/reservations/bulk-booking-modal'
 import { NewReservationModal } from '@/components/reservations/new-reservation-modal'
 import { getUserDisplayName } from '@/lib/utils/user-display'
 import { fetchUserDisplayNameMap } from '@/lib/utils/fetch-user-display-names'
-import { extractBulkGroupId } from '@/lib/utils/bulk-booking'
+import { getBulkGroupId } from '@/lib/utils/bulk-booking'
 
 interface Reservation {
   id: string
@@ -77,7 +77,7 @@ export default function ReservationsPage() {
         .from('bookings')
         .select(`
           id, folio_id, guest_id, room_id, check_in, check_out, status, payment_status,
-          rate_per_night, total_amount, balance, deposit, notes, created_by, updated_by,
+          rate_per_night, total_amount, balance, deposit, notes, created_by, created_at, updated_by,
           guests:guest_id(id, name, phone),
           rooms:room_id(id, room_number, room_type)
         `)
@@ -160,7 +160,7 @@ export default function ReservationsPage() {
     const singles: Reservation[] = []
 
     rows.forEach((row) => {
-      const groupId = extractBulkGroupId(row.notes)
+      const groupId = getBulkGroupId(row)
       if (!groupId) {
         singles.push(row)
         return
