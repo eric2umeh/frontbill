@@ -257,6 +257,9 @@ export function hasPermission(userRole: string | null | undefined, permission: P
   if (['bookings:edit', 'reservations:edit'].includes(permission)) {
     return userRole === 'superadmin'
   }
+  if (['guests:edit', 'guests:delete', 'organizations:edit', 'organizations:delete'].includes(permission)) {
+    return userRole === 'superadmin'
+  }
   const role = getRoleDefinition(userRole)
   if (!role) return false
   return role.permissions.includes(permission)
