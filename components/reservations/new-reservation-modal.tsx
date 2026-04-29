@@ -6,6 +6,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Calendar } from '@/components/ui/calendar'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -41,6 +42,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
   const [loading, setLoading] = useState(false)
   const [orgId, setOrgId] = useState('')
   const [currentUserId, setCurrentUserId] = useState('')
+  const [currentUserRole, setCurrentUserRole] = useState('')
 
   // Step 1: Guest
   const [fullName, setFullName] = useState('')
@@ -58,6 +60,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
   const [nights, setNights] = useState(0)
   const [checkInOpen, setCheckInOpen] = useState(false)
   const [checkOutOpen, setCheckOutOpen] = useState(false)
+  const [backdateReason, setBackdateReason] = useState('')
 
   // Step 3: Room & Payment
   const [rooms, setRooms] = useState<any[]>([])
@@ -105,9 +108,10 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
       setCurrentUserId(user.id)
-      const { data: profile } = await supabase.from('profiles').select('organization_id').eq('id', user.id).single()
+      const { data: profile } = await supabase.from('profiles').select('organization_id, role').eq('id', user.id).single()
       if (!profile?.organization_id) return
       setOrgId(profile.organization_id)
+      setCurrentUserRole(profile.role || '')
 
       const [{ data: guestData }, { data: roomData }, { data: bookingData }] = await Promise.all([
         supabase.from('guests').select('id, name, phone, email, address').eq('organization_id', profile.organization_id).order('name'),
@@ -314,9 +318,65 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
   const isCityLedgerPayment = paymentMethod === 'city_ledger'
   const depositAmount = isCityLedgerPayment ? 0 : paymentStatus === 'paid' ? totalAmount : paymentStatus === 'partial' ? Math.min(Number(partialAmount) || 0, totalAmount) : 0
   const balanceAmount = Math.max(0, totalAmount - depositAmount)
+  const isSuperadmin = currentUserRole === 'superadmin'
+  const isBackdated = checkInDate ? checkInDate < today() : false
+
+  const hasApprovedBackdateRequest = async () => {
+    if (!checkInDate) return false
+    const res = await fetch(`/api/backdate-requests?caller_id=${currentUserId}`, { credentials: 'include' })
+    const json = await res.json()
+    if (!res.ok) return false
+    return (json.requests || []).some((request: any) =>
+      request.status === 'approved'
+      && request.request_type === 'reservation'
+      && request.requested_check_in === toLocalDateStr(checkInDate)
+      && (!checkOutDate || request.requested_check_out === toLocalDateStr(checkOutDate))
+    )
+  }
+
+  const handleRequestBackdate = async () => {
+    if (!checkInDate) { toast.error('Select a backdated check-in date'); return }
+    if (!backdateReason.trim()) { toast.error('Enter a reason for the superadmin'); return }
+    setLoading(true)
+    try {
+      const res = await fetch('/api/backdate-requests', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          caller_id: currentUserId,
+          request_type: 'reservation',
+          requested_check_in: toLocalDateStr(checkInDate),
+          requested_check_out: checkOutDate ? toLocalDateStr(checkOutDate) : null,
+          reason: backdateReason,
+          metadata: { guest_name: fullName || guestId, room_id: selectedRoom?.id || null },
+        }),
+      })
+      const json = await res.json()
+      if (!res.ok) { toast.error(json.error || 'Failed to send backdate request'); return }
+      toast.success('Backdate request sent to superadmin')
+      setBackdateReason('')
+    } catch {
+      toast.error('Failed to send backdate request')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleBackdatedReservationAction = async () => {
+    if (await hasApprovedBackdateRequest()) {
+      await handleSubmit()
+      return
+    }
+    await handleRequestBackdate()
+  }
 
   const handleSubmit = async () => {
     if (!checkInDate || !checkOutDate) { toast.error('Dates required'); return }
+    if (isBackdated && !isSuperadmin && !(await hasApprovedBackdateRequest())) {
+      toast.error('Backdated reservations require superadmin approval. Send a request first.')
+      return
+    }
     if (!selectedRoom) { toast.error('Room required'); return }
     if (selectedRoom.status && selectedRoom.status !== 'available') { toast.error('Selected room is not available'); return }
     if (paymentMethod === 'city_ledger' && !selectedLedger) {
@@ -481,7 +541,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
   const resetForm = () => {
     setFullName(''); setPhone(''); setEmail(''); setAddress(''); setGuestId('')
     const d = new Date(); d.setHours(0, 0, 0, 0)
-    setCheckInDate(d); setCheckOutDate(addDays(d, 1)); setNights(1)
+    setCheckInDate(d); setCheckOutDate(addDays(d, 1)); setNights(1); setBackdateReason('')
     setSelectedRoomType(''); setSelectedRoom(null); setPricePerNight(0); setCustomPrice('')
     setPaymentMethod('cash'); setPaymentStatus('paid'); setPartialAmount('')
     setLedgerType('individual'); setLedgerSearch(''); setLedgerResults([])
@@ -564,7 +624,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="w-auto p-0">
-                    <Calendar mode="single" selected={checkInDate} onSelect={handleCheckInChange} disabled={(d) => d < today()} initialFocus />
+                    <Calendar mode="single" selected={checkInDate} onSelect={handleCheckInChange} initialFocus />
                   </PopoverContent>
                 </Popover>
               </div>
@@ -590,6 +650,17 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
             {checkInDate && checkOutDate && nights > 0 && (
               <div className="p-3 rounded-lg bg-muted text-sm">
                 <span className="text-muted-foreground">Duration: </span><span className="font-semibold">{nights} night(s) · {format(checkInDate, 'dd MMM')} — {format(checkOutDate, 'dd MMM yyyy')}</span>
+              </div>
+            )}
+            {isBackdated && !isSuperadmin && (
+              <div className="space-y-2 rounded-md border border-amber-200 bg-amber-50 p-3">
+                <Label>Reason for Backdate Request *</Label>
+                <Textarea
+                  value={backdateReason}
+                  onChange={(e) => setBackdateReason(e.target.value)}
+                  placeholder="Explain why this reservation must be backdated for superadmin approval"
+                />
+                <p className="text-xs text-amber-700">Only a superadmin can approve or directly create backdated reservations.</p>
               </div>
             )}
           </div>
@@ -748,8 +819,11 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
 
         <div className="flex justify-end gap-2 pt-4 border-t">
           <Button variant="outline" onClick={onClose} disabled={loading}>Cancel</Button>
-          <Button onClick={handleSubmit} disabled={loading || !canSubmitForm()}>
-            {loading ? 'Creating...' : 'Create Reservation'}
+          <Button
+            onClick={isBackdated && !isSuperadmin ? handleBackdatedReservationAction : handleSubmit}
+            disabled={loading || !canSubmitForm()}
+          >
+            {loading ? 'Working...' : isBackdated && !isSuperadmin ? 'Request / Use Superadmin Approval' : 'Create Reservation'}
           </Button>
         </div>
       </DialogContent>
