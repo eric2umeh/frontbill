@@ -18,6 +18,7 @@ import { toast } from 'sonner'
 import { formatNaira } from '@/lib/utils/currency'
 import { isOrganizationMenuRecord, isSelectableLedgerName } from '@/lib/utils/ledger-organization'
 import { resolveOrganizationLedgerAccount } from '@/lib/utils/resolve-ledger-account'
+import { formatPersonName, normalizeName, normalizeNameKey } from '@/lib/utils/name-format'
 
 const ROOM_TYPES_FALLBACK = ['Deluxe', 'Royal', 'Kings', 'Mini Suite', 'Executive Suite', 'Diplomatic Suite']
 
@@ -95,6 +96,7 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
   const [checkOut, setCheckOut] = useState<Date>()
 
   // Step 3: Payment
+  const [customRate, setCustomRate] = useState<number | ''>('')
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'pos' | 'card' | 'transfer' | 'city_ledger'>('cash')
   const [paymentStatus, setPaymentStatus] = useState<'paid' | 'partial' | 'unpaid'>('unpaid')
   const [partialAmount, setPartialAmount] = useState<number | ''>('')
@@ -152,7 +154,8 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
         .select('id, name, email, phone, address, org_type, created_by')
         .neq('id', orgId)
         .ilike('name', `%${term}%`)
-        .limit(8)
+        .order('name')
+        .limit(30)
       const results = (data || []).filter((org: any) => isOrganizationMenuRecord(org))
       setOrgResults(results)
       setOrgSearchOpen(results.length > 0)
@@ -247,14 +250,15 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
     setSelectedLedger(null)
     if (!term.trim()) { setLedgerResults([]); setLedgerSearchOpen(false); return }
     if (ledgerType === 'individual') {
-      const filtered = allGuests.filter(g => g.name.toLowerCase().includes(term.toLowerCase()) || (g.phone || '').includes(term))
+      const searchTerm = normalizeNameKey(term)
+      const filtered = allGuests.filter(g => normalizeNameKey(g.name).includes(searchTerm) || (g.phone || '').includes(term))
       setLedgerResults(filtered.slice(0, 8))
       setLedgerSearchOpen(filtered.length > 0)
     } else {
       const supabase = createClient()
       const [{ data: orgData }, { data: ledgerData }] = await Promise.all([
-        supabase.from('organizations').select('id, name, phone, email, org_type, created_by').neq('id', orgId).ilike('name', `%${term}%`).limit(8),
-        supabase.from('city_ledger_accounts').select('id, account_name, contact_phone, balance, account_type').eq('organization_id', orgId).ilike('account_name', `%${term}%`).limit(8),
+        supabase.from('organizations').select('id, name, phone, email, org_type, created_by').neq('id', orgId).ilike('name', `%${term}%`).order('name').limit(30),
+        supabase.from('city_ledger_accounts').select('id, account_name, contact_phone, balance, account_type').eq('organization_id', orgId).ilike('account_name', `%${term}%`).order('account_name').limit(30),
       ])
       const fromLedger = (ledgerData || [])
         .filter((d: any) => ['organization', 'corporate'].includes(d.account_type) && isSelectableLedgerName(d.account_name))
@@ -292,7 +296,12 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
     updated[index].guestName = term
     updated[index].guestId = null
     if (term.trim()) {
-      const filtered = allGuests.filter(g => g.name.toLowerCase().includes(term.toLowerCase()) || (g.phone || '').includes(term))
+      const searchTerm = normalizeNameKey(term)
+      const selectedOrgKey = normalizeNameKey(selectedOrg?.name || '')
+      const filtered = allGuests.filter(g => {
+        const guestKey = normalizeNameKey(g.name)
+        return guestKey !== selectedOrgKey && (guestKey.includes(searchTerm) || (g.phone || '').includes(term))
+      })
       updated[index].filteredGuests = filtered.slice(0, 6)
       updated[index].guestSearchOpen = filtered.length > 0
     } else {
@@ -304,10 +313,10 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
 
   const selectRoomGuest = (index: number, guest: any) => {
     const updated = [...entries]
-    updated[index].guestName = guest.name
+    updated[index].guestName = formatPersonName(guest.name)
     updated[index].guestId = guest.id
     updated[index].phone = guest.phone || ''
-    updated[index].guestSearch = guest.name
+    updated[index].guestSearch = formatPersonName(guest.name)
     updated[index].guestSearchOpen = false
     updated[index].filteredGuests = []
     setEntries(updated)
@@ -337,6 +346,7 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
     return true
   }
   const canSubmit = () => {
+    if (!customRate || Number(customRate) <= 0) return false
     if (paymentMethod === 'city_ledger' && !selectedLedger) return false
     if (paymentStatus === 'partial' && (!partialAmount || Number(partialAmount) <= 0)) return false
     return true
@@ -344,6 +354,7 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
 
   const handleSubmit = async () => {
     if (!checkIn || !checkOut) { toast.error('Dates required'); return }
+    if (!customRate || Number(customRate) <= 0) { toast.error('Enter the custom rate per room'); return }
     if (!canSubmit()) { toast.error('Complete payment details'); return }
 
     // Validate entries — only first entry guest name is required
@@ -382,35 +393,57 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
       const supabase = createClient()
       let createdCount = 0
       const totalRooms = fillLater ? (Number(totalRoomsCount) || 1) : entries.length
+      const guestCache = new Map<string, string | null>()
+      const orgNameKey = normalizeNameKey(selectedOrg?.name || '')
+
+      const findOrCreateGuest = async (name: string, phone?: string | null) => {
+        const formattedName = formatPersonName(name)
+        const guestKey = normalizeNameKey(formattedName)
+        if (!guestKey) return null
+        if (bookingType === 'organization' && guestKey === orgNameKey) return null
+        if (guestCache.has(guestKey)) return guestCache.get(guestKey) || null
+
+        const localGuest = allGuests.find((guest: any) => normalizeNameKey(guest.name) === guestKey)
+        if (localGuest) {
+          guestCache.set(guestKey, localGuest.id)
+          return localGuest.id
+        }
+
+        const { data: existingGuest } = await supabase
+          .from('guests')
+          .select('id')
+          .eq('organization_id', orgId)
+          .ilike('name', formattedName)
+          .maybeSingle()
+
+        if (existingGuest) {
+          guestCache.set(guestKey, existingGuest.id)
+          return existingGuest.id
+        }
+
+        const { data: newGuest, error } = await supabase
+          .from('guests')
+          .insert([{ organization_id: orgId, name: formattedName, phone: phone || null }])
+          .select('id')
+          .single()
+        if (error) throw error
+        guestCache.set(guestKey, newGuest.id)
+        return newGuest.id
+      }
 
       // Resolve step-1 contact as fallback guest for entries with no name
       let fallbackGuestId: string | null = null
       if (!fillLater) {
         const contactName = bookingType === 'organization'
-          ? (selectedOrg?.name || 'Bulk Guest')
-          : (selectedGroupGuest?.name || 'Bulk Guest')
+          ? ''
+          : (selectedGroupGuest?.name || '')
         const contactPhone = bookingType === 'organization'
           ? (selectedOrg?.phone || null)
           : (selectedGroupGuest?.phone || null)
-        // Check if guest already exists
-        const { data: existingGuest } = await supabase
-          .from('guests')
-          .select('id')
-          .eq('organization_id', orgId)
-          .ilike('name', contactName)
-          .limit(1)
-          .maybeSingle()
-        if (existingGuest) {
-          fallbackGuestId = existingGuest.id
-        } else {
-          const { data: newFallback } = await supabase
-            .from('guests')
-            .insert([{ organization_id: orgId, name: contactName, phone: contactPhone }])
-            .select('id')
-            .single()
-          fallbackGuestId = newFallback?.id || null
-        }
+        fallbackGuestId = contactName ? await findOrCreateGuest(contactName, contactPhone) : null
       }
+
+      const usedRoomIds = new Set<string>()
 
       if (fillLater) {
         // Create placeholder reservations — no guest/room assigned yet
@@ -425,10 +458,10 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
             check_in: toLocalDateStr(checkIn),
             check_out: toLocalDateStr(checkOut),
             number_of_nights: nights,
-            rate_per_night: 0,
-            total_amount: 0,
+            rate_per_night: Number(customRate),
+            total_amount: Number(customRate) * nights,
             deposit: 0,
-            balance: 0,
+            balance: Number(customRate) * nights,
             payment_status: 'pending',
             status: 'reserved',
             created_by: currentUserId,
@@ -450,7 +483,7 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
               .map(b => b.room_id)
           )
           const available = allRooms
-            .filter(r => r.room_type === entry.roomType && !bookedIds.has(r.id))
+            .filter(r => r.room_type === entry.roomType && !bookedIds.has(r.id) && !usedRoomIds.has(r.id))
             .slice(0, totalRoomSlots)
 
           if (!available || available.length === 0) {
@@ -459,18 +492,14 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
 
           // Resolve guest: use entry's guest if provided, fallback to step-1 contact
           let finalGuestId = entry.guestId
-          if (!finalGuestId && entry.guestName.trim()) {
-            const { data: ng, error: ge } = await supabase.from('guests')
-              .insert([{ organization_id: orgId, name: entry.guestName, phone: entry.phone || null }])
-              .select().single()
-            if (ge) throw ge
-            finalGuestId = ng.id
-          }
+          const entryGuestName = formatPersonName(entry.guestName)
+          if (!finalGuestId && entryGuestName) finalGuestId = await findOrCreateGuest(entryGuestName, entry.phone || null)
           // Always ensure a non-null guest_id (use step-1 contact fallback)
           if (!finalGuestId) finalGuestId = fallbackGuestId
 
           for (const room of available) {
-            const total = room.price_per_night * nights
+            usedRoomIds.add(room.id)
+            const total = Number(customRate) * nights
             const depositAmt = paymentStatus === 'paid' ? total : paymentStatus === 'partial' ? (Number(partialAmount) || 0) : 0
             const balanceAmt = total - depositAmt
             const isCityLedger = paymentMethod === 'city_ledger'
@@ -479,7 +508,7 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
             const { data: booking, error: be } = await supabase.from('bookings').insert([{
               organization_id: orgId, guest_id: finalGuestId, room_id: room.id, folio_id: folioId,
               check_in: toLocalDateStr(checkIn), check_out: toLocalDateStr(checkOut),
-              number_of_nights: nights, rate_per_night: room.price_per_night,
+              number_of_nights: nights, rate_per_night: Number(customRate),
               total_amount: total, deposit: depositAmt, balance: balanceAmt,
               payment_status: paymentStatus === 'paid' ? 'paid' : paymentStatus === 'partial' ? 'partial' : 'pending',
               status: 'reserved', created_by: currentUserId,
@@ -490,16 +519,43 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
             if (be) throw be
 
             await supabase.from('rooms').update({ status: 'reserved', updated_by: currentUserId, updated_at: new Date().toISOString() }).eq('id', room.id)
+            await supabase.from('folio_charges').insert([{
+              booking_id: booking.id,
+              organization_id: orgId,
+              description: `Bulk reservation room charge - ${nights} night${nights !== 1 ? 's' : ''}`,
+              amount: total,
+              charge_type: 'room_charge',
+              payment_method: isCityLedger ? 'city_ledger' : paymentMethod,
+              ledger_account_id: isCityLedger && selectedLedger ? selectedLedger.id : null,
+              ledger_account_type: isCityLedger ? ledgerType : null,
+              payment_status: balanceAmt > 0 ? 'unpaid' : 'paid',
+              created_by: currentUserId,
+            }])
             await supabase.from('transactions').insert([{
               organization_id: orgId, booking_id: booking.id,
               transaction_id: `TXN-${Date.now().toString(36).toUpperCase()}`,
-              guest_name: entry.guestName, room: room.room_number, amount: total,
+              guest_name: entryGuestName || selectedOrg?.name || selectedGroupGuest?.name || 'Bulk Guest', room: room.room_number, amount: total,
               payment_method: isCityLedger ? 'city_ledger' : paymentMethod,
               status: paymentStatus === 'paid' ? 'paid' : paymentStatus === 'partial' ? 'partial' : 'pending',
               description: `Bulk reservation — ${bookingType === 'organization' ? selectedOrg?.name : selectedGroupGuest?.name} — ${folioId}`,
               received_by: currentUserId,
             }])
             createdCount++
+          }
+        }
+
+        if (paymentMethod === 'city_ledger' && selectedLedger?.id) {
+          const totalDebt = createdCount * Number(customRate) * nights
+          const { data: account } = await supabase
+            .from('city_ledger_accounts')
+            .select('balance')
+            .eq('id', selectedLedger.id)
+            .maybeSingle()
+          if (account) {
+            await supabase
+              .from('city_ledger_accounts')
+              .update({ balance: Number(account.balance || 0) + totalDebt })
+              .eq('id', selectedLedger.id)
           }
         }
       }
@@ -520,7 +576,7 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
     setNewOrgName(''); setNewOrgType(''); setNewOrgContact(''); setNewOrgPhone(''); setNewOrgEmail(''); setNewOrgAddress('')
     setGroupGuestSearch(''); setGroupGuestResults([]); setSelectedGroupGuest(null); setGroupGuestSearchOpen(false)
     setCheckIn(undefined); setCheckOut(undefined); setRoomAvailabilityChecked(false); setAvailableRooms([])
-    setPaymentMethod('cash'); setPaymentStatus('unpaid'); setPartialAmount('')
+    setCustomRate(''); setPaymentMethod('cash'); setPaymentStatus('unpaid'); setPartialAmount('')
     setLedgerSearch(''); setLedgerResults([]); setSelectedLedger(null); setLedgerSearchOpen(false)
     setShowNewLedgerOrgForm(false); setNewLedgerOrgName(''); setNewLedgerOrgEmail(''); setNewLedgerOrgPhone('')
     setEntries([makeEntry()]); setQuickRoomCount(''); setQuickRoomType(''); setFillLater(false); setTotalRoomsCount('')
@@ -763,6 +819,19 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
             {/* Payment section */}
             <div className="space-y-4">
               <p className="text-sm font-semibold">Payment Details</p>
+              <div className="space-y-2">
+                <Label>Custom Rate Per Room *</Label>
+                <Input
+                  type="number"
+                  min={1}
+                  placeholder="Enter agreed room rate"
+                  value={customRate}
+                  onChange={(e) => setCustomRate(e.target.value === '' ? '' : Number(e.target.value))}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Required for bulk reservations. This rate is used for every selected room.
+                </p>
+              </div>
               <div className="space-y-2">
                 <Label>Payment Method</Label>
                 <Select value={paymentMethod} onValueChange={(v: any) => { setPaymentMethod(v); if (v !== 'city_ledger') { setSelectedLedger(null); setShowNewLedgerOrgForm(false) } }}>
