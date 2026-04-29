@@ -26,19 +26,23 @@ export async function PATCH(request: Request, { params }: Params) {
       return NextResponse.json({ error: 'Caller profile not found' }, { status: 403 })
     }
 
-    if (!['admin', 'manager'].includes(callerProfile.role)) {
-      return NextResponse.json({ error: 'Only admins or managers can update users' }, { status: 403 })
+    if (!['superadmin', 'admin', 'manager'].includes(callerProfile.role)) {
+      return NextResponse.json({ error: 'Only superadmins, admins or managers can update users' }, { status: 403 })
     }
 
     // Verify target user belongs to same org
     const { data: targetProfile } = await admin
       .from('profiles')
-      .select('organization_id')
+      .select('organization_id, role')
       .eq('id', id)
       .single()
 
     if (!targetProfile || targetProfile.organization_id !== callerProfile.organization_id) {
       return NextResponse.json({ error: 'User not found in your organization' }, { status: 404 })
+    }
+
+    if ((updates.role === 'superadmin' || targetProfile.role === 'superadmin') && callerProfile.role !== 'superadmin') {
+      return NextResponse.json({ error: 'Only a superadmin can assign or edit a superadmin' }, { status: 403 })
     }
 
     // Update auth user (password and/or metadata)
@@ -95,19 +99,23 @@ export async function DELETE(request: Request, { params }: Params) {
       return NextResponse.json({ error: 'Caller profile not found' }, { status: 403 })
     }
 
-    if (!['admin', 'manager'].includes(callerProfile.role)) {
-      return NextResponse.json({ error: 'Only admins or managers can delete users' }, { status: 403 })
+    if (!['superadmin', 'admin', 'manager'].includes(callerProfile.role)) {
+      return NextResponse.json({ error: 'Only superadmins, admins or managers can delete users' }, { status: 403 })
     }
 
     // Verify target belongs to same org
     const { data: targetProfile } = await admin
       .from('profiles')
-      .select('organization_id')
+      .select('organization_id, role')
       .eq('id', id)
       .single()
 
     if (!targetProfile || targetProfile.organization_id !== callerProfile.organization_id) {
       return NextResponse.json({ error: 'User not found in your organization' }, { status: 404 })
+    }
+
+    if (targetProfile.role === 'superadmin' && callerProfile.role !== 'superadmin') {
+      return NextResponse.json({ error: 'Only a superadmin can delete another superadmin' }, { status: 403 })
     }
 
     // Delete auth user (cascade deletes profile via FK)

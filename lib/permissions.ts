@@ -14,15 +14,16 @@ export type Permission =
   | 'reports:view' | 'reports:export'
   | 'organizations:view' | 'organizations:create' | 'organizations:edit' | 'organizations:delete'
   | 'ledger:view' | 'ledger:manage'
-  | 'night_audit:view' | 'night_audit:run'
+  | 'night_audit:view' | 'night_audit:run' | 'audit_trails:view'
   | 'reconciliation:view' | 'reconciliation:manage'
   | 'users:view' | 'users:create' | 'users:edit' | 'users:delete'
   | 'roles:view' | 'roles:manage'
   | 'settings:view' | 'settings:manage'
+  | 'backdate:request' | 'backdate:approve'
   | 'housekeeping:view' | 'housekeeping:create' | 'housekeeping:edit' | 'housekeeping:assign' | 'housekeeping:report'
   | 'maintenance:view' | 'maintenance:create' | 'maintenance:edit' | 'maintenance:assign' | 'maintenance:report'
 
-export type RoleKey = 'admin' | 'manager' | 'front_desk' | 'receptionist' | 'accountant' | 'staff' | 'housekeeping' | 'maintenance'
+export type RoleKey = 'superadmin' | 'admin' | 'manager' | 'front_desk' | 'receptionist' | 'accountant' | 'staff' | 'housekeeping' | 'maintenance'
 
 export interface RoleDefinition {
   key: RoleKey
@@ -72,6 +73,7 @@ export const ALL_PERMISSIONS: { key: Permission; label: string; group: string }[
 
   { key: 'night_audit:view', label: 'View Night Audit', group: 'Night Audit' },
   { key: 'night_audit:run', label: 'Run Night Audit', group: 'Night Audit' },
+  { key: 'audit_trails:view', label: 'View Audit Trails', group: 'Night Audit' },
 
   { key: 'housekeeping:view', label: 'View Housekeeping', group: 'Housekeeping' },
   { key: 'housekeeping:create', label: 'Create Housekeeping Log Entries', group: 'Housekeeping' },
@@ -109,17 +111,27 @@ export const ALL_PERMISSIONS: { key: Permission; label: string; group: string }[
 
   { key: 'settings:view', label: 'View Profile & Settings', group: 'Settings' },
   { key: 'settings:manage', label: 'Manage Hotel/System Settings', group: 'Settings' },
+
+  { key: 'backdate:request', label: 'Request Backdated Booking/Reservation', group: 'Superadmin Controls' },
+  { key: 'backdate:approve', label: 'Approve Backdated Booking/Reservation', group: 'Superadmin Controls' },
 ]
 
 const ALL: Permission[] = ALL_PERMISSIONS.map(p => p.key)
 
 export const ROLE_DEFINITIONS: RoleDefinition[] = [
   {
+    key: 'superadmin',
+    label: 'Superadmin',
+    description: 'Highest authority role. Can approve backdated bookings, manage admins/staff, and perform all sensitive edits/deletes with audit oversight.',
+    color: 'bg-black text-white',
+    permissions: ALL,
+  },
+  {
     key: 'admin',
     label: 'Administrator',
-    description: 'Full access to all features including user and role management.',
+    description: 'Full hotel admin access except superadmin-only approvals such as backdated booking authorization.',
     color: 'bg-red-100 text-red-800',
-    permissions: ALL,
+    permissions: ALL.filter(p => !['backdate:approve'].includes(p)),
   },
   {
     key: 'manager',
@@ -133,6 +145,7 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
       'rooms:create',
       'rooms:edit',
       'rooms:delete',
+      'backdate:approve',
     ].includes(p)),
   },
   {
@@ -172,7 +185,8 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
       'payments:view', 'payments:create',
       'organizations:view', 'organizations:create',
       'ledger:view',
-      'night_audit:view', 'night_audit:run',
+      'night_audit:view', 'night_audit:run', 'audit_trails:view',
+      'backdate:request',
       'settings:view',
     ],
   },
@@ -238,7 +252,7 @@ export function getRoleDefinition(roleKey: string): RoleDefinition | undefined {
 export function hasPermission(userRole: string | null | undefined, permission: Permission): boolean {
   if (!userRole) return false
   if (['rooms:create', 'rooms:edit', 'rooms:delete'].includes(permission)) {
-    return userRole === 'admin'
+    return userRole === 'admin' || userRole === 'superadmin'
   }
   const role = getRoleDefinition(userRole)
   if (!role) return false

@@ -6,6 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Calendar } from '@/components/ui/calendar'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -56,6 +57,7 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
   const [loading, setLoading] = useState(false)
   const [orgId, setOrgId] = useState('')
   const [currentUserId, setCurrentUserId] = useState('')
+  const [currentUserRole, setCurrentUserRole] = useState('')
   const [allGuests, setAllGuests] = useState<any[]>([])
   const [allRooms, setAllRooms] = useState<any[]>([]) // all non-maintenance rooms from DB
   const [allActiveBookings, setAllActiveBookings] = useState<any[]>([]) // for date overlap checks
@@ -94,6 +96,7 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
   // Step 2: Dates
   const [checkIn, setCheckIn] = useState<Date>()
   const [checkOut, setCheckOut] = useState<Date>()
+  const [backdateReason, setBackdateReason] = useState('')
 
   // Step 3: Payment
   const [customRate, setCustomRate] = useState<number | ''>('')
@@ -128,9 +131,10 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
     setCurrentUserId(user.id)
-    const { data: profile } = await supabase.from('profiles').select('organization_id').eq('id', user.id).single()
+    const { data: profile } = await supabase.from('profiles').select('organization_id, role').eq('id', user.id).single()
     if (!profile) return
     setOrgId(profile.organization_id)
+    setCurrentUserRole(profile.role || '')
     const [{ data: guestData }, { data: roomData }, { data: bookingData }] = await Promise.all([
       supabase.from('guests').select('id, name, phone, email').eq('organization_id', profile.organization_id).order('name'),
       supabase.from('rooms').select('id, room_number, room_type, price_per_night, status').eq('organization_id', profile.organization_id).eq('status', 'available').order('room_number'),
@@ -352,10 +356,71 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
     return true
   }
 
+  const isSuperadmin = currentUserRole === 'superadmin'
+  const isBackdated = checkIn ? checkIn < todayDate() : false
+
+  const hasApprovedBackdateRequest = async () => {
+    if (!checkIn) return false
+    const res = await fetch(`/api/backdate-requests?caller_id=${currentUserId}`, { credentials: 'include' })
+    const json = await res.json()
+    if (!res.ok) return false
+    return (json.requests || []).some((request: any) =>
+      request.status === 'approved'
+      && request.request_type === 'bulk_booking'
+      && request.requested_check_in === toLocalDateStr(checkIn)
+      && (!checkOut || request.requested_check_out === toLocalDateStr(checkOut))
+    )
+  }
+
+  const handleRequestBackdate = async () => {
+    if (!checkIn) { toast.error('Select a backdated check-in date'); return }
+    if (!backdateReason.trim()) { toast.error('Enter a reason for the superadmin'); return }
+    setLoading(true)
+    try {
+      const res = await fetch('/api/backdate-requests', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          caller_id: currentUserId,
+          request_type: 'bulk_booking',
+          requested_check_in: toLocalDateStr(checkIn),
+          requested_check_out: checkOut ? toLocalDateStr(checkOut) : null,
+          reason: backdateReason,
+          metadata: {
+            booking_type: bookingType,
+            organization_name: selectedOrg?.name || null,
+            room_count: fillLater ? totalRoomsCount : entries.reduce((sum, entry) => sum + (entry.numberOfRooms || 1), 0),
+          },
+        }),
+      })
+      const json = await res.json()
+      if (!res.ok) { toast.error(json.error || 'Failed to send backdate request'); return }
+      toast.success('Backdate request sent to superadmin')
+      setBackdateReason('')
+    } catch {
+      toast.error('Failed to send backdate request')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleBackdatedBulkAction = async () => {
+    if (await hasApprovedBackdateRequest()) {
+      await handleSubmit()
+      return
+    }
+    await handleRequestBackdate()
+  }
+
   const handleSubmit = async () => {
     if (!checkIn || !checkOut) { toast.error('Dates required'); return }
     if (!customRate || Number(customRate) <= 0) { toast.error('Enter the custom rate per room'); return }
     if (!canSubmit()) { toast.error('Complete payment details'); return }
+    if (isBackdated && !isSuperadmin && !(await hasApprovedBackdateRequest())) {
+      toast.error('Backdated bulk bookings require superadmin approval. Send a request first.')
+      return
+    }
 
     // Validate entries — only first entry guest name is required
     if (!fillLater && entries.length > 0 && !entries[0].guestName.trim()) {
@@ -584,7 +649,7 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
     setOrgSearch(''); setOrgResults([]); setSelectedOrg(null); setOrgSearchOpen(false); setShowNewOrgForm(false)
     setNewOrgName(''); setNewOrgType(''); setNewOrgContact(''); setNewOrgPhone(''); setNewOrgEmail(''); setNewOrgAddress('')
     setGroupGuestSearch(''); setGroupGuestResults([]); setSelectedGroupGuest(null); setGroupGuestSearchOpen(false)
-    setCheckIn(undefined); setCheckOut(undefined); setRoomAvailabilityChecked(false); setAvailableRooms([])
+    setCheckIn(undefined); setCheckOut(undefined); setBackdateReason(''); setRoomAvailabilityChecked(false); setAvailableRooms([])
     setCustomRate(''); setPaymentMethod('cash'); setPaymentStatus('unpaid'); setPartialAmount('')
     setLedgerSearch(''); setLedgerResults([]); setSelectedLedger(null); setLedgerSearchOpen(false)
     setShowNewLedgerOrgForm(false); setNewLedgerOrgName(''); setNewLedgerOrgEmail(''); setNewLedgerOrgPhone('')
@@ -770,7 +835,7 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="w-auto p-0">
-                    <Calendar mode="single" selected={checkIn} onSelect={(d) => { setCheckIn(d); setCheckOut(undefined); setRoomAvailabilityChecked(false); setAvailableRooms([]) }} disabled={(d) => d < todayDate()} initialFocus />
+                    <Calendar mode="single" selected={checkIn} onSelect={(d) => { setCheckIn(d); setCheckOut(undefined); setRoomAvailabilityChecked(false); setAvailableRooms([]) }} initialFocus />
                   </PopoverContent>
                 </Popover>
               </div>
@@ -792,6 +857,18 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
 
             {checkIn && checkOut && nights > 0 && (
               <p className="text-sm text-muted-foreground">{nights} night(s) · {format(checkIn, 'dd MMM')} — {format(checkOut, 'dd MMM yyyy')}</p>
+            )}
+
+            {isBackdated && !isSuperadmin && (
+              <div className="space-y-2 rounded-md border border-amber-200 bg-amber-50 p-3">
+                <Label>Reason for Backdate Request *</Label>
+                <Textarea
+                  value={backdateReason}
+                  onChange={(e) => setBackdateReason(e.target.value)}
+                  placeholder="Explain why this bulk booking must be backdated for superadmin approval"
+                />
+                <p className="text-xs text-amber-700">Only a superadmin can approve or directly create backdated bulk bookings.</p>
+              </div>
             )}
 
             {/* Check Availability */}
@@ -1050,9 +1127,12 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
               Next <ChevronRight className="ml-2 h-4 w-4" />
             </Button>
           ) : (
-            <Button onClick={handleSubmit} disabled={loading || !canSubmit()}>
+            <Button
+              onClick={isBackdated && !isSuperadmin ? handleBackdatedBulkAction : handleSubmit}
+              disabled={loading || !canSubmit()}
+            >
               {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-              {loading ? 'Creating...' : 'Confirm Bulk Reservation'}
+              {loading ? 'Working...' : isBackdated && !isSuperadmin ? 'Request / Use Superadmin Approval' : 'Confirm Bulk Reservation'}
             </Button>
           )}
         </div>
