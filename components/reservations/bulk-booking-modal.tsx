@@ -366,7 +366,7 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
       toast.error('Select a room type for each entry'); return
     }
 
-    // Pre-submit: warn if fewer available rooms than requested (but allow proceeding)
+    // Pre-submit: never allow partial bulk creation. The requested quantity must be fully available.
     if (!fillLater) {
       const cin = toLocalDateStr(checkIn)
       const cout = toLocalDateStr(checkOut)
@@ -375,16 +375,25 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
           .filter(b => b.check_in < cout && b.check_out > cin)
           .map(b => b.room_id)
       )
-      let totalRequested = 0
-      let totalAvailable = 0
-      for (const entry of entries) {
-        const requested = entry.numberOfRooms || 1
-        totalRequested += requested
-        const avail = allRooms.filter(r => r.room_type === entry.roomType && !bookedIds.has(r.id)).length
-        totalAvailable += Math.min(avail, requested)
-      }
-      if (totalAvailable < totalRequested) {
-        toast.warning(`Only ${totalAvailable} of ${totalRequested} requested rooms are available. ${totalRequested - totalAvailable} will be skipped.`)
+      const requestedByType: Record<string, number> = {}
+      entries.forEach((entry) => {
+        requestedByType[entry.roomType] = (requestedByType[entry.roomType] || 0) + (entry.numberOfRooms || 1)
+      })
+
+      const shortages = Object.entries(requestedByType)
+        .map(([roomType, requested]) => {
+          const available = allRooms.filter(r => r.room_type === roomType && !bookedIds.has(r.id)).length
+          return { roomType, requested, available }
+        })
+        .filter((item) => item.available < item.requested)
+
+      if (shortages.length > 0) {
+        toast.error(
+          shortages
+            .map((item) => `${item.roomType}: requested ${item.requested}, available ${item.available}`)
+            .join(' | ')
+        )
+        return
       }
     }
 
