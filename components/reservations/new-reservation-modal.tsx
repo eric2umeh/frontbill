@@ -16,6 +16,7 @@ import { formatNaira } from '@/lib/utils/currency'
 import { toast } from 'sonner'
 import { isOrganizationMenuRecord, isSelectableLedgerName } from '@/lib/utils/ledger-organization'
 import { resolveOrganizationLedgerAccount } from '@/lib/utils/resolve-ledger-account'
+import { formatPersonName } from '@/lib/utils/name-format'
 
 const toLocalDateStr = (date: Date) => {
   const y = date.getFullYear()
@@ -331,11 +332,12 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
       setLoading(true)
       const supabase = createClient()
 
+      const formattedGuestName = formatPersonName(fullName)
       let finalGuestId = guestId
       if (!guestId) {
         const { data: newGuest, error: ge } = await supabase
           .from('guests')
-          .insert([{ organization_id: orgId, name: fullName, phone, email: email || null, address: address || null }])
+          .insert([{ organization_id: orgId, name: formattedGuestName, phone, email: email || null, address: address || null }])
           .select().single()
         if (ge) throw ge
         finalGuestId = newGuest.id
@@ -343,7 +345,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
         // Auto-create city_ledger_account for this guest to prevent duplicates when city ledger is used later
         await supabase.from('city_ledger_accounts').insert([{
           organization_id: orgId,
-          account_name: fullName,
+          account_name: formattedGuestName,
           account_type: 'individual',
           contact_phone: phone || null,
           contact_email: email || null,
@@ -440,7 +442,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
         organization_id: orgId,
         booking_id: booking.id,
         transaction_id: `TXN-${Date.now().toString(36).toUpperCase()}`,
-        guest_name: fullName,
+        guest_name: formattedGuestName,
         room: selectedRoom.room_number,
         amount: totalAmount,
         payment_method: isCityLedger ? 'city_ledger' : paymentMethod,
