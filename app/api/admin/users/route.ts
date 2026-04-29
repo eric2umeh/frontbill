@@ -1,6 +1,7 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { sendWelcomeEmail } from '@/lib/email/welcome-user'
 import { NextResponse } from 'next/server'
+import { formatPersonName } from '@/lib/utils/name-format'
 
 // POST /api/admin/users — create a new user in the same organization
 // caller_id is passed from the client (already authenticated in browser) and validated server-side
@@ -11,6 +12,7 @@ export async function POST(request: Request) {
     if (!email || !password || !full_name || !role || !caller_id) {
       return NextResponse.json({ error: 'full_name, email, password, role and caller_id are required' }, { status: 400 })
     }
+    const formattedFullName = formatPersonName(full_name)
 
     const admin = createAdminClient()
 
@@ -46,7 +48,7 @@ export async function POST(request: Request) {
       email,
       password,
       email_confirm: true,
-      user_metadata: { full_name },
+      user_metadata: { full_name: formattedFullName },
     })
 
     if (createError) {
@@ -57,7 +59,7 @@ export async function POST(request: Request) {
     const profilePayload = {
       id: newUser.user.id,
       organization_id: callerProfile.organization_id,
-      full_name,
+      full_name: formattedFullName,
       role,
       added_by: caller_id,
       created_at: new Date().toISOString(),
@@ -88,7 +90,7 @@ export async function POST(request: Request) {
     let emailSent = false
     let emailError: string | null = null
     try {
-      await sendWelcomeEmail({ full_name, email, password, role, site_url, org_name })
+      await sendWelcomeEmail({ full_name: formattedFullName, email, password, role, site_url, org_name })
       emailSent = true
     } catch (emailErr: any) {
       // Log but don't fail — user was created successfully
@@ -101,10 +103,10 @@ export async function POST(request: Request) {
       user: {
         id: newUser.user.id,
         email,
-        full_name,
+        full_name: formattedFullName,
         role,
         added_by: caller_id,
-        added_by_name: callerProfile.full_name || full_name,
+        added_by_name: callerProfile.full_name || formattedFullName,
         created_at: newUser.user.created_at,
       },
       emailSent,
