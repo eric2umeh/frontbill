@@ -15,6 +15,7 @@ import { formatNaira } from '@/lib/utils/currency'
 import { toast } from 'sonner'
 import { isOrganizationMenuRecord, isSelectableLedgerName } from '@/lib/utils/ledger-organization'
 import { resolveOrganizationLedgerAccount } from '@/lib/utils/resolve-ledger-account'
+import { formatPersonName } from '@/lib/utils/name-format'
 
 interface CheckinModalProps {
   open: boolean
@@ -286,11 +287,12 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
       const supabase = createClient()
       const { data: { user } } = await supabase.auth.getUser()
 
+      const formattedGuestName = formatPersonName(fullName)
       let finalGuestId = guestId
       if (!guestId) {
         const { data: newGuest, error: ge } = await supabase
           .from('guests')
-          .insert([{ organization_id: orgId, name: fullName, phone: phone || null }])
+          .insert([{ organization_id: orgId, name: formattedGuestName, phone: phone || null }])
           .select().single()
         if (ge) throw ge
         finalGuestId = newGuest.id
@@ -355,7 +357,7 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
         organization_id: orgId,
         booking_id: booking.id,
         transaction_id: `TXN-${Date.now().toString(36).toUpperCase()}`,
-        guest_name: fullName,
+        guest_name: formattedGuestName,
         room: selectedRoom.room_number,
         amount: total,
         payment_method: paymentMethod,
