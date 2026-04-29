@@ -266,6 +266,10 @@ export default function UsersRolesPage() {
 
   const permissionGroups = getPermissionGroups()
   const roleDef = viewingRole ? ROLE_DEFINITIONS.find(r => r.key === viewingRole) : null
+  const canManageUsers = ['superadmin', 'admin', 'manager'].includes(currentUserRole || '')
+  const selectableRoles = currentUserRole === 'superadmin'
+    ? ROLE_DEFINITIONS
+    : ROLE_DEFINITIONS.filter(role => role.key !== 'superadmin')
 
   if (initialLoading) {
     return (
@@ -313,7 +317,7 @@ export default function UsersRolesPage() {
               />
             </div>
             <Badge variant="outline" className="text-muted-foreground">{filteredUsers.length} users</Badge>
-            {currentUserRole === 'admin' && (
+            {canManageUsers && (
               <Button size="sm" className="gap-2 ml-auto" onClick={() => { setAddOpen(true); setAddForm(EMPTY_ADD_FORM) }}>
                 <Plus className="h-4 w-4" />
                 Add User
@@ -325,6 +329,7 @@ export default function UsersRolesPage() {
             {filteredUsers.map(user => {
               const role = ROLE_DEFINITIONS.find(r => r.key === user.role)
               const isCurrentUser = user.id === currentUserId
+              const canActOnUser = canManageUsers && (currentUserRole === 'superadmin' || user.role !== 'superadmin')
               return (
                 <Card key={user.id} className="hover:shadow-sm transition-shadow">
                   <CardContent className="p-4">
@@ -360,8 +365,8 @@ export default function UsersRolesPage() {
                           </Badge>
                         )}
                       </div>
-                      {/* Actions — only admin, cannot act on self */}
-                      {currentUserRole === 'admin' && (
+                      {/* Actions */}
+                      {canActOnUser && (
                         <div className="flex items-center gap-1 shrink-0">
                           <Button variant="ghost" size="sm" className="gap-1.5" onClick={() => openEdit(user)}>
                             <Edit2 className="h-3.5 w-3.5" />
@@ -550,7 +555,7 @@ export default function UsersRolesPage() {
                   <SelectValue placeholder="Select a role" />
                 </SelectTrigger>
                 <SelectContent>
-                  {ROLE_DEFINITIONS.map(r => (
+                  {selectableRoles.map(r => (
                     <SelectItem key={r.key} value={r.key}>
                       <div className="flex flex-col">
                         <span className="font-medium">{r.label}</span>
@@ -599,7 +604,7 @@ export default function UsersRolesPage() {
                   <SelectValue placeholder="Select a role" />
                 </SelectTrigger>
                 <SelectContent>
-                  {ROLE_DEFINITIONS.map(r => (
+                  {selectableRoles.map(r => (
                     <SelectItem key={r.key} value={r.key}>
                       <div className="flex flex-col">
                         <span className="font-medium">{r.label}</span>
