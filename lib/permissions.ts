@@ -14,7 +14,7 @@ export type Permission =
   | 'reports:view' | 'reports:export'
   | 'organizations:view' | 'organizations:create' | 'organizations:edit' | 'organizations:delete'
   | 'ledger:view' | 'ledger:manage'
-  | 'night_audit:view' | 'night_audit:run'
+  | 'night_audit:view' | 'night_audit:run' | 'audit_trails:view'
   | 'reconciliation:view' | 'reconciliation:manage'
   | 'users:view' | 'users:create' | 'users:edit' | 'users:delete'
   | 'roles:view' | 'roles:manage'
@@ -73,6 +73,7 @@ export const ALL_PERMISSIONS: { key: Permission; label: string; group: string }[
 
   { key: 'night_audit:view', label: 'View Night Audit', group: 'Night Audit' },
   { key: 'night_audit:run', label: 'Run Night Audit', group: 'Night Audit' },
+  { key: 'audit_trails:view', label: 'View Audit Trails', group: 'Night Audit' },
 
   { key: 'housekeeping:view', label: 'View Housekeeping', group: 'Housekeeping' },
   { key: 'housekeeping:create', label: 'Create Housekeeping Log Entries', group: 'Housekeeping' },
@@ -184,7 +185,7 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
       'payments:view', 'payments:create',
       'organizations:view', 'organizations:create',
       'ledger:view',
-      'night_audit:view', 'night_audit:run',
+      'night_audit:view', 'night_audit:run', 'audit_trails:view',
       'backdate:request',
       'settings:view',
     ],
