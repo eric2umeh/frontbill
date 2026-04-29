@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { formatNaira } from '@/lib/utils/currency'
+import { getBulkGroupId, isLegacyBulkGroupId } from '@/lib/utils/bulk-booking'
 
 export default function BulkBookingDetailPage({ params }: { params: Promise<{ groupId: string }> | { groupId: string } }) {
   const router = useRouter()
@@ -31,15 +32,21 @@ export default function BulkBookingDetailPage({ params }: { params: Promise<{ gr
     try {
       setLoading(true)
       const supabase = createClient()
-      const { data, error } = await supabase
+      const query = supabase
         .from('bookings')
         .select('*, guests:guest_id(name, phone), rooms:room_id(room_number, room_type)')
         .eq('organization_id', organizationId)
-        .ilike('notes', `%bulk_group:${id}%`)
         .order('room_id', { ascending: true })
+      
+      const { data, error } = isLegacyBulkGroupId(id)
+        ? await query.ilike('folio_id', 'BLK-%')
+        : await query.ilike('notes', `%bulk_group:${id}%`)
 
       if (error) throw error
-      setRows(data || [])
+      setRows(isLegacyBulkGroupId(id)
+        ? (data || []).filter((row: any) => getBulkGroupId(row) === id)
+        : data || []
+      )
     } finally {
       setLoading(false)
     }
