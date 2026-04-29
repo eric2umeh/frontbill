@@ -258,19 +258,19 @@ export default function BookingsPage() {
         </>
       )}
       
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Bookings</h1>
           <p className="text-muted-foreground">Manage active bookings and check-ins</p>
         </div>
         {hasPermission(role, 'bookings:create') && (
-          <div className="flex gap-2">
-            <Button variant="outline" onClick={() => setBulkModalOpen(true)}>
-              <Users className="mr-2 h-4 w-4" />
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+            <Button variant="outline" size="sm" className="w-full text-xs sm:w-auto sm:text-sm" onClick={() => setBulkModalOpen(true)}>
+              <Users className="mr-2 h-3.5 w-3.5 sm:h-4 sm:w-4" />
               Bulk Booking
             </Button>
-            <Button onClick={() => setModalOpen(true)}>
-              <Plus className="mr-2 h-4 w-4" />
+            <Button size="sm" className="w-full text-xs sm:w-auto sm:text-sm" onClick={() => setModalOpen(true)}>
+              <Plus className="mr-2 h-3.5 w-3.5 sm:h-4 sm:w-4" />
               New Booking
             </Button>
           </div>
