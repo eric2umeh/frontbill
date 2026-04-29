@@ -71,7 +71,7 @@ const routes: Array<{ label: string; icon: any; href: string; permission?: Permi
     label: 'Reports',
     icon: FileBarChart,
     href: '/reports',
-    permission: 'analytics:view',
+    permission: 'reports:view',
   },
   {
     label: 'Night Audit',
