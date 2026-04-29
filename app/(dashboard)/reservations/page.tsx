@@ -210,19 +210,19 @@ export default function ReservationsPage() {
       <BulkBookingModal open={bulkModalOpen} onClose={() => setBulkModalOpen(false)} onSuccess={() => { setBulkModalOpen(false); fetchReservations() }} />
       <NewReservationModal open={newReservationOpen} onClose={() => setNewReservationOpen(false)} onSuccess={() => { setNewReservationOpen(false); fetchReservations() }} />
       
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Reservations</h1>
           <p className="text-muted-foreground">Manage future bookings and reservations</p>
         </div>
         {hasPermission(role, 'reservations:create') && (
-          <div className="flex gap-2">
-            <Button variant="outline" onClick={() => setBulkModalOpen(true)}>
-              <Users className="mr-2 h-4 w-4" />
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+            <Button variant="outline" size="sm" className="w-full text-xs sm:w-auto sm:text-sm" onClick={() => setBulkModalOpen(true)}>
+              <Users className="mr-2 h-3.5 w-3.5 sm:h-4 sm:w-4" />
               Bulk Booking
             </Button>
-            <Button onClick={() => setNewReservationOpen(true)}>
-              <Plus className="mr-2 h-4 w-4" />
+            <Button size="sm" className="w-full text-xs sm:w-auto sm:text-sm" onClick={() => setNewReservationOpen(true)}>
+              <Plus className="mr-2 h-3.5 w-3.5 sm:h-4 sm:w-4" />
               New Reservation
             </Button>
           </div>
