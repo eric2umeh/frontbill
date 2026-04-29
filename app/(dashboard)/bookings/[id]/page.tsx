@@ -23,8 +23,8 @@ import { fetchUserDisplayNameMap } from '@/lib/utils/fetch-user-display-names'
 export default function BookingDetailPage({ params }: { params: Promise<{ id: string }> | { id: string } }) {
   const router = useRouter()
   const { role, userId } = useAuth()
-  const isAdmin = role === 'admin'
-  const canManageFolio = isAdmin || role === 'front_desk'
+  const isSuperadmin = role === 'superadmin'
+  const canManageFolio = isSuperadmin || role === 'front_desk'
   const [booking, setBooking] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [bookingId, setBookingId] = useState<string>('')
@@ -833,7 +833,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
               </Button>
             </>
           )}
-          {isAdmin && (
+          {isSuperadmin && (
             <>
               <Button variant="outline" size="sm" disabled={booking?.folio_status === 'checked_out'}>
                 <Edit className="mr-2 h-4 w-4" />
@@ -926,7 +926,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                       <div className={`font-semibold text-right min-w-[100px] ${charge.amount < 0 ? 'text-green-600' : charge.paymentStatus === 'paid' && charge.type === 'charge' ? 'text-muted-foreground' : 'text-foreground'}`}>
                         {charge.amount < 0 ? '-' : '+'}{formatNaira(Math.abs(charge.amount))}
                       </div>
-                      {isAdmin && (
+                      {isSuperadmin && (
                         <div className="flex gap-1">
                           <Button
                             size="sm"
