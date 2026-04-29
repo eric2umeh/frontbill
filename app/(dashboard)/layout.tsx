@@ -20,6 +20,7 @@ interface DashboardUser {
 const ROUTE_PERMISSIONS: Array<{ path: string; permission: Permission }> = [
   { path: '/dashboard', permission: 'dashboard:view' },
   { path: '/bookings', permission: 'bookings:view' },
+  { path: '/bulk-bookings', permission: 'bookings:view' },
   { path: '/reservations', permission: 'reservations:view' },
   { path: '/accounts', permission: 'guests:view' },
   { path: '/guest-database', permission: 'guests:view' },

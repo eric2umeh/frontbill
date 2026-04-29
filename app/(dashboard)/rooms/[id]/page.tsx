@@ -58,8 +58,8 @@ export default function RoomDetailPage() {
   const params = useParams()
   const roomId = params.id as string
   const { role, organizationId } = useAuth()
-  const isAdmin = role === 'admin'
-  const canViewRoomFolio = ['admin', 'manager', 'front_desk', 'accountant'].includes(role)
+  const isSuperadmin = role === 'superadmin'
+  const canViewRoomFolio = ['superadmin', 'admin', 'manager', 'front_desk', 'accountant'].includes(role)
 
   const [room, setRoom] = useState<Room | null>(null)
   const [loading, setLoading] = useState(true)
@@ -211,8 +211,8 @@ export default function RoomDetailPage() {
   }
 
   const handleSaveChanges = async () => {
-    if (!isAdmin) {
-      toast.error('Only admins can edit rooms')
+    if (!isSuperadmin) {
+      toast.error('Only superadmins can edit rooms')
       return
     }
 
@@ -248,8 +248,8 @@ export default function RoomDetailPage() {
   }
 
   const handleDeleteClick = () => {
-    if (!isAdmin) {
-      toast.error('Only admins can delete rooms')
+    if (!isSuperadmin) {
+      toast.error('Only superadmins can delete rooms')
       return
     }
 
@@ -290,8 +290,8 @@ export default function RoomDetailPage() {
   }
 
   const handleDeleteConfirm = async () => {
-    if (!isAdmin) {
-      toast.error('Only admins can delete rooms')
+    if (!isSuperadmin) {
+      toast.error('Only superadmins can delete rooms')
       return
     }
 
@@ -346,7 +346,7 @@ export default function RoomDetailPage() {
 
   return (
     <div className="space-y-6">
-      {isAdmin && (
+      {isSuperadmin && (
       <Dialog open={editModalOpen} onOpenChange={setEditModalOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
@@ -454,7 +454,7 @@ export default function RoomDetailPage() {
           <ArrowLeft className="mr-2 h-4 w-4" />
           Back to Rooms
         </Button>
-        {isAdmin && (
+        {isSuperadmin && (
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={() => setEditModalOpen(true)}>
             <Edit className="mr-2 h-4 w-4" />

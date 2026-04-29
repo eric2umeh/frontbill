@@ -20,6 +20,7 @@ import { formatNaira } from '@/lib/utils/currency'
 import { isOrganizationMenuRecord, isSelectableLedgerName } from '@/lib/utils/ledger-organization'
 import { resolveOrganizationLedgerAccount } from '@/lib/utils/resolve-ledger-account'
 import { formatPersonName, normalizeName, normalizeNameKey } from '@/lib/utils/name-format'
+import { appendBulkGroupNote, createBulkGroupId } from '@/lib/utils/bulk-booking'
 
 const ROOM_TYPES_FALLBACK = ['Deluxe', 'Royal', 'Kings', 'Mini Suite', 'Executive Suite', 'Diplomatic Suite']
 
@@ -469,6 +470,8 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
       const totalRooms = fillLater ? (Number(totalRoomsCount) || 1) : entries.length
       const guestCache = new Map<string, string | null>()
       const orgNameKey = normalizeNameKey(selectedOrg?.name || '')
+      const bulkGroupId = createBulkGroupId()
+      const isOrganizationLedger = paymentMethod === 'city_ledger' && ledgerType === 'organization'
 
       const findOrCreateGuest = async (name: string, phone?: string | null) => {
         const formattedName = formatPersonName(name)
@@ -524,6 +527,12 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
         for (let i = 0; i < totalRooms; i++) {
           const folioId = `BLK-${Date.now().toString(36).toUpperCase()}-${i}`
           const isCityLedger = paymentMethod === 'city_ledger'
+          const notes = appendBulkGroupNote(
+            isCityLedger && selectedLedger
+              ? `City Ledger: ${selectedLedger.name || selectedLedger.account_name}`
+              : `payment_method: ${paymentMethod}`,
+            bulkGroupId
+          )
           await supabase.from('bookings').insert([{
             organization_id: orgId,
             guest_id: null,
@@ -535,13 +544,11 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
             rate_per_night: Number(customRate),
             total_amount: Number(customRate) * nights,
             deposit: 0,
-            balance: Number(customRate) * nights,
+            balance: isOrganizationLedger ? 0 : Number(customRate) * nights,
             payment_status: 'pending',
             status: 'reserved',
             created_by: currentUserId,
-            notes: isCityLedger && selectedLedger
-              ? `City Ledger: ${selectedLedger.name || selectedLedger.account_name}`
-              : `payment_method: ${paymentMethod}`,
+            notes,
           }])
           createdCount++
         }
@@ -578,17 +585,22 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
             const balanceAmt = total - depositAmt
             const isCityLedger = paymentMethod === 'city_ledger'
             const folioId = `BLK-${Date.now().toString(36).toUpperCase()}`
+            const bookingBalance = isOrganizationLedger ? 0 : balanceAmt
+            const notes = appendBulkGroupNote(
+              isCityLedger && selectedLedger
+                ? `City Ledger: ${selectedLedger.name || selectedLedger.account_name}`
+                : `payment_method: ${paymentMethod}`,
+              bulkGroupId
+            )
 
             const { data: booking, error: be } = await supabase.from('bookings').insert([{
               organization_id: orgId, guest_id: finalGuestId, room_id: room.id, folio_id: folioId,
               check_in: toLocalDateStr(checkIn), check_out: toLocalDateStr(checkOut),
               number_of_nights: nights, rate_per_night: Number(customRate),
-              total_amount: total, deposit: depositAmt, balance: balanceAmt,
+              total_amount: total, deposit: depositAmt, balance: bookingBalance,
               payment_status: paymentStatus === 'paid' ? 'paid' : paymentStatus === 'partial' ? 'partial' : 'pending',
               status: 'reserved', created_by: currentUserId,
-              notes: isCityLedger && selectedLedger
-                ? `City Ledger: ${selectedLedger.name || selectedLedger.account_name}`
-                : `payment_method: ${paymentMethod}`,
+              notes,
             }]).select().single()
             if (be) throw be
 
@@ -602,7 +614,7 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
               payment_method: isCityLedger ? 'city_ledger' : paymentMethod,
               ledger_account_id: isCityLedger && selectedLedger ? selectedLedger.id : null,
               ledger_account_type: isCityLedger ? ledgerType : null,
-              payment_status: balanceAmt > 0 ? 'unpaid' : 'paid',
+              payment_status: isOrganizationLedger ? 'posted_to_ledger' : balanceAmt > 0 ? 'unpaid' : 'paid',
               created_by: currentUserId,
             }])
             await supabase.from('transactions').insert([{
@@ -630,6 +642,20 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
               .from('city_ledger_accounts')
               .update({ balance: Number(account.balance || 0) + totalDebt })
               .eq('id', selectedLedger.id)
+          }
+          if (ledgerType === 'organization') {
+            const ledgerName = selectedLedger.name || selectedLedger.account_name
+            const { data: orgRow } = await supabase
+              .from('organizations')
+              .select('id, current_balance')
+              .eq('name', ledgerName)
+              .maybeSingle()
+            if (orgRow?.id) {
+              await supabase
+                .from('organizations')
+                .update({ current_balance: Number(orgRow.current_balance || 0) + totalDebt })
+                .eq('id', orgRow.id)
+            }
           }
         }
       }

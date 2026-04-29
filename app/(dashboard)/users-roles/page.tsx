@@ -15,6 +15,7 @@ import { Separator } from '@/components/ui/separator'
 import { toast } from 'sonner'
 import { usePageData } from '@/hooks/use-page-data'
 import { useAuth } from '@/lib/auth-context'
+import { formatPersonName } from '@/lib/utils/name-format'
 import {
   Loader2, Search, ShieldCheck, Check, X, Users, Edit2, Plus,
   Trash2, Eye, EyeOff, KeyRound, CalendarClock,
@@ -184,9 +185,10 @@ export default function UsersRolesPage() {
       const json = await res.json()
       if (!res.ok) { toast.error(json.error || 'Failed to update user'); return }
 
-      toast.success(`${editForm.full_name || editingUser.full_name} updated`)
+      const displayName = editForm.full_name ? formatPersonName(editForm.full_name) : editingUser.full_name
+      toast.success(`${displayName} updated`)
       setUsers(prev => prev.map(u => u.id === editingUser.id
-        ? { ...u, role: editForm.role, full_name: editForm.full_name || u.full_name }
+        ? { ...u, role: editForm.role, full_name: displayName || u.full_name }
         : u
       ))
       setEditingUser(null)

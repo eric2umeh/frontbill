@@ -44,7 +44,7 @@ export default function OrganizationDetailPage() {
   const params = useParams()
   const orgId = params.id as string
   const { role, userId } = useAuth()
-  const isAdmin = role === 'admin'
+  const isSuperadmin = role === 'superadmin'
 
   const [organization, setOrganization] = useState<Organization | null>(null)
   const [createdByProfile, setCreatedByProfile] = useState<ProfileInfo | null>(null)
@@ -295,7 +295,7 @@ export default function OrganizationDetailPage() {
             </Badge>
           </div>
         </div>
-        {isAdmin && <div className="flex gap-2">
+        {isSuperadmin && <div className="flex gap-2">
           {isEditing ? (
             <>
               <Button

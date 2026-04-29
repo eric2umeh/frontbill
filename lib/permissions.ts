@@ -91,9 +91,9 @@ export const ALL_PERMISSIONS: { key: Permission; label: string; group: string }[
   { key: 'analytics:export', label: 'Export Analytics', group: 'Analytics' },
 
   { key: 'rooms:view', label: 'View Rooms', group: 'Rooms' },
-  { key: 'rooms:create', label: 'Create Rooms (Admin Only)', group: 'Rooms' },
-  { key: 'rooms:edit', label: 'Edit Rooms (Admin Only)', group: 'Rooms' },
-  { key: 'rooms:delete', label: 'Delete Rooms (Admin Only)', group: 'Rooms' },
+  { key: 'rooms:create', label: 'Create Rooms (Superadmin Only)', group: 'Rooms' },
+  { key: 'rooms:edit', label: 'Edit Rooms (Superadmin Only)', group: 'Rooms' },
+  { key: 'rooms:delete', label: 'Delete Rooms (Superadmin Only)', group: 'Rooms' },
   { key: 'rooms:update_status', label: 'Update Room Status', group: 'Rooms' },
 
   { key: 'ledger:view', label: 'View City Ledger', group: 'City Ledger' },
@@ -136,7 +136,7 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
   {
     key: 'manager',
     label: 'Manager',
-    description: 'Broad operational access across bookings, reservations, reports, payments and analytics. Room creation, editing and deletion remain admin-only.',
+    description: 'Broad operational access across bookings, reservations, reports, payments and analytics. Room creation, editing and deletion remain superadmin-only.',
     color: 'bg-purple-100 text-purple-800',
     permissions: ALL.filter(p => ![
       'roles:manage',
@@ -173,7 +173,7 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
   {
     key: 'front_desk',
     label: 'Front Desk',
-    description: 'Can create bookings, bulk bookings and reservations, manage guest check-in/out, add charges, extend stays, record payments, create organizations, and run night audit. Room CRUD is admin-only.',
+    description: 'Can create bookings, bulk bookings and reservations, manage guest check-in/out, add charges, extend stays, record payments, create organizations, and run night audit. Room CRUD is superadmin-only.',
     color: 'bg-green-100 text-green-800',
     permissions: [
       'dashboard:view',
@@ -252,7 +252,13 @@ export function getRoleDefinition(roleKey: string): RoleDefinition | undefined {
 export function hasPermission(userRole: string | null | undefined, permission: Permission): boolean {
   if (!userRole) return false
   if (['rooms:create', 'rooms:edit', 'rooms:delete'].includes(permission)) {
-    return userRole === 'admin' || userRole === 'superadmin'
+    return userRole === 'superadmin'
+  }
+  if (['bookings:edit', 'reservations:edit'].includes(permission)) {
+    return userRole === 'superadmin'
+  }
+  if (['guests:edit', 'guests:delete', 'organizations:edit', 'organizations:delete'].includes(permission)) {
+    return userRole === 'superadmin'
   }
   const role = getRoleDefinition(userRole)
   if (!role) return false
