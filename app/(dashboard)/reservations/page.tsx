@@ -77,7 +77,6 @@ export default function ReservationsPage() {
         `)
         .eq('organization_id', organizationId)
         .eq('status', 'reserved')
-        .gt('check_in', new Date().toISOString().split('T')[0])
         .order('check_in', { ascending: true })
 
       if (error) throw error
