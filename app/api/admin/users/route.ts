@@ -30,19 +30,7 @@ export async function POST(request: Request) {
     }
 
     if (role === 'superadmin' && callerProfile.role !== 'superadmin') {
-      if (callerProfile.role !== 'admin') {
-        return NextResponse.json({ error: 'Only an admin can create the first superadmin' }, { status: 403 })
-      }
-
-      const { count } = await admin
-        .from('profiles')
-        .select('id', { count: 'exact', head: true })
-        .eq('organization_id', callerProfile.organization_id)
-        .eq('role', 'superadmin')
-
-      if ((count || 0) > 0) {
-        return NextResponse.json({ error: 'Only a superadmin can create another superadmin' }, { status: 403 })
-      }
+      return NextResponse.json({ error: 'Only a superadmin can create a superadmin' }, { status: 403 })
     }
 
     // Fetch organization name for the welcome email
