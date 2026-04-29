@@ -7,13 +7,14 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { CardContent } from '@/components/ui/card'
 import { NewBookingModal } from '@/components/bookings/new-booking-modal'
+import { BulkBookingModal } from '@/components/reservations/bulk-booking-modal'
 import { ExtendStayModal } from '@/components/bookings/extend-stay-modal'
 import { AddChargeModal } from '@/components/bookings/add-charge-modal'
 import { formatNaira } from '@/lib/utils/currency'
 import { usePageData } from '@/hooks/use-page-data'
 import { useAuth } from '@/lib/auth-context'
 import { hasPermission } from '@/lib/permissions'
-import { Plus, Loader2 } from 'lucide-react'
+import { Plus, Loader2, Users } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { getUserDisplayName } from '@/lib/utils/user-display'
@@ -50,6 +51,7 @@ interface Booking {
 export default function BookingsPage() {
   const [bookings, setBookings] = useState<Booking[]>([])
   const [modalOpen, setModalOpen] = useState(false)
+  const [bulkModalOpen, setBulkModalOpen] = useState(false)
   const [extendModalOpen, setExtendModalOpen] = useState(false)
   const [addChargeModalOpen, setAddChargeModalOpen] = useState(false)
   const [selectedBooking, setSelectedBooking] = useState<any>(null)
@@ -184,6 +186,7 @@ export default function BookingsPage() {
   return (
     <div className="space-y-6">
       <NewBookingModal open={modalOpen} onClose={() => { setModalOpen(false); fetchBookings() }} />
+      <BulkBookingModal open={bulkModalOpen} onClose={() => setBulkModalOpen(false)} onSuccess={() => { setBulkModalOpen(false); fetchBookings() }} />
       {selectedBooking && (
         <>
           <ExtendStayModal 
@@ -211,10 +214,16 @@ export default function BookingsPage() {
           <p className="text-muted-foreground">Manage active bookings and check-ins</p>
         </div>
         {hasPermission(role, 'bookings:create') && (
-          <Button onClick={() => setModalOpen(true)}>
-            <Plus className="mr-2 h-4 w-4" />
-            New Booking
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => setBulkModalOpen(true)}>
+              <Users className="mr-2 h-4 w-4" />
+              Bulk Booking
+            </Button>
+            <Button onClick={() => setModalOpen(true)}>
+              <Plus className="mr-2 h-4 w-4" />
+              New Booking
+            </Button>
+          </div>
         )}
       </div>
 
