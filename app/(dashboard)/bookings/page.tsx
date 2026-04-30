@@ -5,7 +5,9 @@ import { createClient } from '@/lib/supabase/client'
 import { EnhancedDataTable } from '@/components/shared/enhanced-data-table'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { CardContent } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
+import { Label } from '@/components/ui/label'
+import { Input } from '@/components/ui/input'
 import { NewBookingModal } from '@/components/bookings/new-booking-modal'
 import { BulkBookingModal } from '@/components/reservations/bulk-booking-modal'
 import { ExtendStayModal } from '@/components/bookings/extend-stay-modal'
@@ -14,7 +16,7 @@ import { formatNaira } from '@/lib/utils/currency'
 import { usePageData } from '@/hooks/use-page-data'
 import { useAuth } from '@/lib/auth-context'
 import { hasPermission } from '@/lib/permissions'
-import { Plus, Loader2, Users } from 'lucide-react'
+import { Plus, Loader2, Users, LogOut } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { getUserDisplayName } from '@/lib/utils/user-display'
@@ -61,6 +63,9 @@ export default function BookingsPage() {
   const [extendModalOpen, setExtendModalOpen] = useState(false)
   const [addChargeModalOpen, setAddChargeModalOpen] = useState(false)
   const [selectedBooking, setSelectedBooking] = useState<any>(null)
+  const [checkoutLoadingId, setCheckoutLoadingId] = useState<string | null>(null)
+  const [filterDateFrom, setFilterDateFrom] = useState('')
+  const [filterDateTo, setFilterDateTo] = useState('')
   const { initialLoading, startFetch, endFetch } = usePageData()
   const { organizationId, role, userId } = useAuth()
   const router = useRouter()
@@ -68,10 +73,12 @@ export default function BookingsPage() {
   const canManageFolio = isSuperadmin || role === 'front_desk'
 
   useEffect(() => {
-    let isMounted = true
-    if (isMounted) fetchBookings()
-    return () => { isMounted = false }
-  }, [])
+    if (organizationId) fetchBookings()
+  }, [organizationId, userId])
+
+  useEffect(() => {
+    if (organizationId) fetchBookings()
+  }, [filterDateFrom, filterDateTo])
 
   const fetchBookings = async () => {
     try {
@@ -83,12 +90,27 @@ export default function BookingsPage() {
         return
       }
 
-      const { data, error } = await supabase
+      let query = supabase
         .from('bookings')
         .select('*, guests(name, phone), rooms(room_number, room_type), created_by, updated_by, updated_at')
         .eq('organization_id', organizationId)
-        .in('status', ['confirmed', 'checked_in', 'reserved'])
-        .lte('check_in', new Date().toISOString().split('T')[0])
+        .in('status', ['confirmed', 'checked_in', 'reserved', 'checked_out'])
+
+      // Apply date range filter if set, otherwise default to showing recent + future bookings
+      if (filterDateFrom || filterDateTo) {
+        if (filterDateFrom) {
+          query = query.gte('check_in', filterDateFrom)
+        }
+        if (filterDateTo) {
+          query = query.lte('check_out', filterDateTo)
+        }
+      } else {
+        // Default: show bookings from 90 days ago to future
+        const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+        query = query.gte('check_in', ninetyDaysAgo)
+      }
+
+      const { data, error } = await query
         .order('check_in', { ascending: false })
         .order('created_at', { ascending: false })
 
@@ -225,6 +247,59 @@ export default function BookingsPage() {
     return [...bulkRows, ...singles].sort((a, b) => new Date(b.check_in).getTime() - new Date(a.check_in).getTime())
   }
 
+  const handleCheckoutFromTable = (booking: Booking) => {
+    toast.custom(
+      (t: string | number) => (
+        <div className="flex flex-col gap-3">
+          <div className="flex gap-2 items-start">
+            <LogOut className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" />
+            <div>
+              <p className="font-semibold">Check Out Guest?</p>
+              <p className="text-sm text-muted-foreground">
+                {booking.guests?.name} — Room {booking.rooms?.room_number}
+              </p>
+              {booking.balance > 0 && (
+                <p className="text-xs text-red-600 mt-1">Outstanding balance: {formatNaira(booking.balance)}</p>
+              )}
+            </div>
+          </div>
+          <div className="flex gap-2 justify-end">
+            <Button variant="outline" size="sm" onClick={() => toast.dismiss(t)}>Cancel</Button>
+            <Button
+              size="sm"
+              className="bg-amber-600 hover:bg-amber-700 text-white"
+              onClick={async () => {
+                toast.dismiss(t)
+                setCheckoutLoadingId(booking.id)
+                try {
+                  const supabase = createClient()
+                  const today = new Date().toISOString().split('T')[0]
+                  const { error } = await supabase
+                    .from('bookings')
+                    .update({ status: 'checked_out', check_out: today, folio_status: 'checked_out', updated_by: userId })
+                    .eq('id', booking.id)
+                  if (error) throw error
+                  if (booking.room_id) {
+                    await supabase.from('rooms').update({ status: 'available' }).eq('id', booking.room_id)
+                  }
+                  toast.success(`${booking.guests?.name} checked out successfully`)
+                  fetchBookings()
+                } catch (err: any) {
+                  toast.error(err.message || 'Failed to check out guest')
+                } finally {
+                  setCheckoutLoadingId(null)
+                }
+              }}
+            >
+              Confirm Checkout
+            </Button>
+          </div>
+        </div>
+      ),
+      { duration: Infinity }
+    )
+  }
+
   if (initialLoading) {
     return (
       <div className="flex items-center justify-center h-96">
@@ -277,6 +352,54 @@ export default function BookingsPage() {
         )}
       </div>
 
+      {/* Date Range Filter */}
+      <Card>
+        <CardContent className="pt-6">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+            <div className="flex-1 space-y-2">
+              <Label htmlFor="filter-date-from" className="text-xs">Check-in From</Label>
+              <Input
+                id="filter-date-from"
+                type="date"
+                value={filterDateFrom}
+                onChange={(e) => {
+                  setFilterDateFrom(e.target.value)
+                }}
+                className="text-sm h-9"
+              />
+            </div>
+            <div className="flex-1 space-y-2">
+              <Label htmlFor="filter-date-to" className="text-xs">Check-in To</Label>
+              <Input
+                id="filter-date-to"
+                type="date"
+                value={filterDateTo}
+                onChange={(e) => {
+                  setFilterDateTo(e.target.value)
+                }}
+                className="text-sm h-9"
+              />
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setFilterDateFrom('')
+                setFilterDateTo('')
+              }}
+              disabled={!filterDateFrom && !filterDateTo}
+            >
+              Clear
+            </Button>
+          </div>
+          {(filterDateFrom || filterDateTo) && (
+            <p className="text-xs text-muted-foreground mt-2">
+              Showing bookings from {filterDateFrom || 'any date'} to {filterDateTo || 'any date'}
+            </p>
+          )}
+        </CardContent>
+      </Card>
+
       <EnhancedDataTable
         data={bookings}
         searchKeys={['folio_id', 'guestName', 'guestPhone', 'ledger_account_name', 'rooms.room_number'] as any}
@@ -296,6 +419,7 @@ export default function BookingsPage() {
             label: 'Status',
             options: [
               { value: 'reserved', label: 'Reserved' },
+              { value: 'confirmed', label: 'Confirmed' },
               { value: 'checked_in', label: 'Checked In' },
               { value: 'checked_out', label: 'Checked Out' },
             ],
@@ -365,11 +489,33 @@ export default function BookingsPage() {
           {
             key: 'check_out',
             label: 'Check-out',
-            render: (booking) => (
-              <div className="text-sm">
-                {new Date(booking.check_out).toLocaleDateString('en-GB')}
-              </div>
-            ),
+            render: (booking) => {
+              const today = new Date().toISOString().split('T')[0]
+              const nowHour = new Date().getHours()
+              const isOverdue =
+                booking.status === 'checked_in' &&
+                booking.check_out <= today &&
+                nowHour >= 12
+              const isAutoCheckoutSoon =
+                booking.status === 'checked_in' &&
+                booking.check_out === today &&
+                nowHour >= 12 && nowHour < 14
+              return (
+                <div className="text-sm space-y-1">
+                  <span>{new Date(booking.check_out).toLocaleDateString('en-GB')}</span>
+                  {isAutoCheckoutSoon && (
+                    <Badge variant="outline" className="text-xs bg-amber-50 text-amber-700 border-amber-200 block w-fit">
+                      Due today
+                    </Badge>
+                  )}
+                  {isOverdue && nowHour >= 14 && (
+                    <Badge variant="outline" className="text-xs bg-red-50 text-red-600 border-red-200 block w-fit">
+                      Overdue
+                    </Badge>
+                  )}
+                </div>
+              )
+            },
           },
           {
             key: 'payment_status',
@@ -403,28 +549,14 @@ export default function BookingsPage() {
             ),
           },
           {
-            key: 'updated_by_name',
-            label: 'Last Updated',
-            render: (booking) => (
-              <div className="text-sm">
-                {booking.updated_by_name ? (
-                  <div className="text-muted-foreground">
-                    {booking.updated_by_name}
-                  </div>
-                ) : (
-                  <span className="text-muted-foreground">—</span>
-                )}
-              </div>
-            ),
-          },
-          {
             key: 'actions',
             label: 'Actions',
             render: (booking) => canManageFolio && !booking.is_bulk ? (
-              <div className="flex gap-2">
+              <div className="flex gap-1 flex-nowrap">
                 <Button 
                   size="sm" 
                   variant="outline"
+                  className="text-xs whitespace-nowrap"
                   onClick={(e) => {
                     e.stopPropagation()
                     setSelectedBooking({
@@ -446,6 +578,7 @@ export default function BookingsPage() {
                 <Button 
                   size="sm" 
                   variant="outline"
+                  className="text-xs whitespace-nowrap"
                   onClick={(e) => {
                     e.stopPropagation()
                     setSelectedBooking({
@@ -464,6 +597,29 @@ export default function BookingsPage() {
                 >
                   Extend Stay
                 </Button>
+                {(() => {
+                  const today = new Date().toISOString().split('T')[0]
+                  const nowHour = new Date().getHours()
+                  const autoChedkoutPassed = booking.check_out <= today && nowHour >= 14
+                  if (autoChedkoutPassed || booking.status === 'checked_out') return null
+                  return (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="text-xs text-amber-600 hover:text-amber-700 border-amber-200 hover:bg-amber-50 whitespace-nowrap"
+                      disabled={checkoutLoadingId === booking.id}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleCheckoutFromTable(booking)
+                      }}
+                    >
+                      {checkoutLoadingId === booking.id
+                        ? <Loader2 className="h-3 w-3 animate-spin" />
+                        : <><LogOut className="mr-1 h-3 w-3" />Check Out</>
+                      }
+                    </Button>
+                  )
+                })()}
               </div>
             ) : null,
           },
