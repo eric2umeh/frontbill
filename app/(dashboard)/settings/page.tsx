@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { Badge } from '@/components/ui/badge'
 import { toast } from 'sonner'
-import { Loader2, Building2, Shield, Users, Eye, EyeOff } from 'lucide-react'
+import { Loader2, Building2, Shield, Eye, EyeOff, Clock } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
 import { createClient } from '@/lib/supabase/client'
 
@@ -31,13 +31,19 @@ export default function SettingsPage() {
   const [showNewPassword, setShowNewPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
 
+  // Checkout policy
+  const [checkoutTime, setCheckoutTime] = useState('12:00')
+  const [lateCheckoutFeePerHour, setLateCheckoutFeePerHour] = useState('')
+  const [checkoutPolicySaving, setCheckoutPolicySaving] = useState(false)
+  const isAdmin = role === 'admin'
+
   useEffect(() => {
     async function fetchHotelInfo() {
       if (!organizationId || !supabase) return
       try {
         const { data, error } = await supabase
           .from('organizations')
-          .select('name, email, address, phone')
+          .select('name, email, address, phone, checkout_time, late_checkout_fee_per_hour')
           .eq('id', organizationId)
           .maybeSingle()
 
@@ -47,6 +53,8 @@ export default function SettingsPage() {
           setHotelEmail(data.email || '')
           setHotelAddress(data.address || '')
           setHotelPhone(data.phone || '')
+          setCheckoutTime(data.checkout_time || '12:00')
+          setLateCheckoutFeePerHour(data.late_checkout_fee_per_hour?.toString() || '')
         }
       } catch (err: any) {
         toast.error(err.message || 'Failed to load hotel information')
@@ -89,6 +97,26 @@ export default function SettingsPage() {
       toast.error(err.message || 'Failed to update password')
     } finally {
       setPasswordSaving(false)
+    }
+  }
+
+  async function handleSaveCheckoutPolicy() {
+    if (!organizationId || !isAdmin) return
+    setCheckoutPolicySaving(true)
+    try {
+      const { error } = await supabase
+        .from('organizations')
+        .update({
+          checkout_time: checkoutTime,
+          late_checkout_fee_per_hour: lateCheckoutFeePerHour ? parseFloat(lateCheckoutFeePerHour) : null,
+        })
+        .eq('id', organizationId)
+      if (error) throw error
+      toast.success('Checkout policy saved successfully')
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to save checkout policy')
+    } finally {
+      setCheckoutPolicySaving(false)
     }
   }
 
@@ -271,6 +299,67 @@ export default function SettingsPage() {
               Update Password
             </Button>
           </div>
+        </CardContent>
+      </Card>
+
+      {/* Checkout Policy */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <Clock className="h-5 w-5" />
+            <CardTitle>Checkout Policy</CardTitle>
+            {!isAdmin && <Badge variant="outline" className="ml-auto">View Only</Badge>}
+          </div>
+          <CardDescription>
+            Set the standard checkout time and the late checkout fee charged per extra hour. Auto-checkout runs at 2:00 PM for all overdue bookings.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="checkout_time">Standard Checkout Time</Label>
+              <Input
+                id="checkout_time"
+                type="time"
+                value={checkoutTime}
+                onChange={(e) => setCheckoutTime(e.target.value)}
+                disabled={!isAdmin}
+              />
+              <p className="text-xs text-muted-foreground">
+                Guests are expected to check out by this time. Auto-checkout enforces departure by 2:00 PM.
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="late_checkout_fee">Late Checkout Fee (per hour, ₦)</Label>
+              <Input
+                id="late_checkout_fee"
+                type="number"
+                min="0"
+                placeholder="e.g. 5000"
+                value={lateCheckoutFeePerHour}
+                onChange={(e) => setLateCheckoutFeePerHour(e.target.value)}
+                disabled={!isAdmin}
+              />
+              <p className="text-xs text-muted-foreground">
+                Charge per extra hour past the standard checkout time. Use &quot;Add Charge&quot; on the booking to apply it.
+              </p>
+            </div>
+          </div>
+          <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 space-y-1">
+            <p className="font-medium">How late checkout works</p>
+            <ul className="list-disc list-inside space-y-0.5 text-xs">
+              <li>Standard checkout time: <strong>{checkoutTime}</strong></li>
+              <li>Grace window: up to <strong>2:00 PM</strong> without auto-checkout</li>
+              <li>Any extension past {checkoutTime} requires an &quot;Add Charge&quot; entry on the booking for <strong>₦{lateCheckoutFeePerHour || '—'}/hr</strong></li>
+              <li>At 2:00 PM the system automatically checks out any remaining active bookings</li>
+            </ul>
+          </div>
+          {isAdmin && (
+            <Button onClick={handleSaveCheckoutPolicy} disabled={checkoutPolicySaving}>
+              {checkoutPolicySaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Save Policy
+            </Button>
+          )}
         </CardContent>
       </Card>
     </div>
