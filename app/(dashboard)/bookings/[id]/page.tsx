@@ -11,7 +11,7 @@ import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { ArrowLeft, CreditCard, Trash2, Edit, Plus, Clock, AlertCircle, Loader2 } from 'lucide-react'
+import { ArrowLeft, CreditCard, Trash2, Edit, Plus, Clock, AlertCircle, Loader2, LogOut } from 'lucide-react'
 import { formatNaira } from '@/lib/utils/currency'
 import { toast } from 'sonner'
 import { ExtendStayModal } from '@/components/bookings/extend-stay-modal'
@@ -46,6 +46,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
   const [editChargeDescription, setEditChargeDescription] = useState('')
   const [editChargeLoading, setEditChargeLoading] = useState(false)
   const [addChargeLoading, setAddChargeLoading] = useState(false)
+  const [checkoutLoading, setCheckoutLoading] = useState(false)
 
   useEffect(() => {
     const getParamsAndFetch = async () => {
@@ -512,6 +513,83 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
     }
   }
 
+  const handleCheckout = () => {
+    toast.custom(
+      (t: string | number) => (
+        <div className="flex flex-col gap-3">
+          <div className="flex gap-2 items-start">
+            <LogOut className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" />
+            <div>
+              <p className="font-semibold">Check Out Guest?</p>
+              <p className="text-sm text-muted-foreground">
+                {booking?.guests?.name} — Room {booking?.rooms?.room_number}
+              </p>
+              {booking?.balance > 0 && (
+                <p className="text-xs text-red-600 mt-1">
+                  Outstanding balance: {formatNaira(booking.balance)}
+                </p>
+              )}
+            </div>
+          </div>
+          <div className="flex gap-2 justify-end">
+            <Button variant="outline" size="sm" onClick={() => toast.dismiss(t)}>
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              className="bg-amber-600 hover:bg-amber-700 text-white"
+              disabled={checkoutLoading}
+              onClick={async () => {
+                toast.dismiss(t)
+                setCheckoutLoading(true)
+                try {
+                  const supabase = createClient()
+                  const today = new Date().toISOString().split('T')[0]
+
+                  const { error } = await supabase
+                    .from('bookings')
+                    .update({
+                      status: 'checked_out',
+                      check_out: today,
+                      folio_status: 'checked_out',
+                      updated_by: userId,
+                    })
+                    .eq('id', bookingId)
+
+                  if (error) throw error
+
+                  // Free up the room — set status back to available
+                  if (booking?.room_id) {
+                    await supabase
+                      .from('rooms')
+                      .update({ status: 'available' })
+                      .eq('id', booking.room_id)
+                  }
+
+                  setBooking((prev: any) => prev ? {
+                    ...prev,
+                    status: 'checked_out',
+                    check_out: today,
+                    folio_status: 'checked_out',
+                  } : prev)
+
+                  toast.success(`${booking?.guests?.name} checked out successfully`)
+                } catch (err: any) {
+                  toast.error(err.message || 'Failed to check out guest')
+                } finally {
+                  setCheckoutLoading(false)
+                }
+              }}
+            >
+              {checkoutLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Confirm Checkout'}
+            </Button>
+          </div>
+        </div>
+      ),
+      { duration: Infinity }
+    )
+  }
+
   const handleDelete = () => {
     toast.custom(
       (t: string | number) => (
@@ -827,9 +905,18 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
           )}
           {canManageFolio && (
             <>
-              <Button variant="outline" size="sm" onClick={() => setExtendStayModalOpen(true)} disabled={addChargeLoading || (booking?.folio_status === 'checked_out')}>
+              <Button variant="outline" size="sm" onClick={() => setExtendStayModalOpen(true)} disabled={addChargeLoading || (booking?.folio_status === 'checked_out') || booking?.status === 'checked_out'}>
                 <Clock className="mr-2 h-4 w-4" />
                 Extend Stay
+              </Button>
+              <Button
+                size="sm"
+                className="bg-amber-600 hover:bg-amber-700 text-white"
+                onClick={handleCheckout}
+                disabled={checkoutLoading || booking?.status === 'checked_out' || booking?.folio_status === 'checked_out'}
+              >
+                {checkoutLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <LogOut className="mr-2 h-4 w-4" />}
+                Check Out
               </Button>
             </>
           )}
