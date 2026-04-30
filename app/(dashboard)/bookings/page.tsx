@@ -5,7 +5,9 @@ import { createClient } from '@/lib/supabase/client'
 import { EnhancedDataTable } from '@/components/shared/enhanced-data-table'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { CardContent } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
+import { Label } from '@/components/ui/label'
+import { Input } from '@/components/ui/input'
 import { NewBookingModal } from '@/components/bookings/new-booking-modal'
 import { BulkBookingModal } from '@/components/reservations/bulk-booking-modal'
 import { ExtendStayModal } from '@/components/bookings/extend-stay-modal'
@@ -14,7 +16,7 @@ import { formatNaira } from '@/lib/utils/currency'
 import { usePageData } from '@/hooks/use-page-data'
 import { useAuth } from '@/lib/auth-context'
 import { hasPermission } from '@/lib/permissions'
-import { Plus, Loader2, Users, LogOut, Calendar } from 'lucide-react'
+import { Plus, Loader2, Users, LogOut } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { getUserDisplayName } from '@/lib/utils/user-display'
@@ -71,13 +73,11 @@ export default function BookingsPage() {
   const canManageFolio = isSuperadmin || role === 'front_desk'
 
   useEffect(() => {
-    if (isMounted) fetchBookings()
-  }, [isMounted, organizationId, userId])
+    if (organizationId) fetchBookings()
+  }, [organizationId, userId])
 
   useEffect(() => {
-    if (isMounted) {
-      fetchBookings()
-    }
+    if (organizationId) fetchBookings()
   }, [filterDateFrom, filterDateTo])
 
   const fetchBookings = async () => {
