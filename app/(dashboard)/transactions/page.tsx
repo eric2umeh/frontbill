@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { formatNaira } from '@/lib/utils/currency'
 import { usePageData } from '@/hooks/use-page-data'
 import { useAuth } from '@/lib/auth-context'
+import { toast } from 'sonner'
 import { fetchUserDisplayNameMap } from '@/lib/utils/fetch-user-display-names'
 import {
   Calendar as CalendarIcon, TrendingUp, CreditCard, Loader2,
@@ -45,7 +46,7 @@ type DateRange = 'today' | 'yesterday' | 'this_week' | 'this_month' | 'custom'
 export default function TransactionsPage() {
   const [payments, setPayments] = useState<Payment[]>([])
   const { initialLoading, startFetch, endFetch } = usePageData()
-  const { organizationId, userId } = useAuth()
+  const { organizationId, userId, role } = useAuth()
   const [dateRange, setDateRange] = useState<DateRange>('today')
   const [customDate, setCustomDate] = useState<Date>(new Date())
   const [calOpen, setCalOpen] = useState(false)
@@ -68,23 +69,40 @@ export default function TransactionsPage() {
       const supabase = createClient()
       if (!supabase) { setPayments([]); endFetch(); return }
 
-      const { data: txData, error: txError } = await supabase
-        .from('transactions')
-        .select('*')
-        .eq('organization_id', organizationId)
-        .order('created_at', { ascending: false })
-        .limit(1000)
-
-      if (txError) {
-        console.error('Transactions query error:', txError)
+      const orgId = (organizationId || '').trim()
+      if (!orgId && role !== 'superadmin') {
+        toast.error('Your profile has no organization. Assign organization_id in Supabase to view transactions.')
         setPayments([])
+        endFetch()
         return
       }
 
-      const visibleTxData = (txData || []).filter((t: any) => {
-        const pDate = new Date(t.created_at).getTime()
-        return pDate >= dateFilter.from.getTime() && pDate <= dateFilter.to.getTime()
-      })
+      const fromIso = dateFilter.from.toISOString()
+      const toIso = dateFilter.to.toISOString()
+
+      let txQuery = supabase
+        .from('transactions')
+        .select('*')
+        .gte('created_at', fromIso)
+        .lte('created_at', toIso)
+        .order('created_at', { ascending: false })
+        .limit(5000)
+
+      if (role !== 'superadmin' && orgId) {
+        txQuery = txQuery.eq('organization_id', orgId)
+      }
+
+      const { data: txData, error: txError } = await txQuery
+
+      if (txError) {
+        console.error('Transactions query error:', txError)
+        toast.error(txError.message || 'Could not load transactions')
+        setPayments([])
+        endFetch()
+        return
+      }
+
+      const visibleTxData = txData || []
 
       const bookingIds = Array.from(new Set(visibleTxData.map((t: any) => t.booking_id).filter(Boolean)))
       const bookingCreatorMap: Record<string, string> = {}
@@ -143,7 +161,7 @@ export default function TransactionsPage() {
     } finally {
       endFetch()
     }
-  }, [dateFilter, organizationId, userId])
+  }, [dateFilter, organizationId, userId, role])
 
   useEffect(() => { fetchPayments() }, [fetchPayments])
 
