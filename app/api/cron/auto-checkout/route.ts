@@ -2,7 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
 
 /**
- * Auto-checkout cron job — runs every hour 12:00–15:00 WAT (vercel.json).
+ * Auto-checkout cron job — Hobby: once daily at 13:00 UTC (~14:00 WAT).
  *
  * Logic:
  *  1. Hard cutoff is 14:00 WAT (2 pm). Nothing runs before that.
