@@ -460,11 +460,11 @@ export default function BookingsPage() {
             key: 'actions',
             label: 'Actions',
             render: (booking) => canManageFolio && !booking.is_bulk ? (
-              <div className="flex gap-1.5 flex-wrap">
+              <div className="flex gap-1 flex-nowrap">
                 <Button 
                   size="sm" 
                   variant="outline"
-                  className="text-xs"
+                  className="text-xs whitespace-nowrap"
                   onClick={(e) => {
                     e.stopPropagation()
                     setSelectedBooking({
@@ -486,7 +486,7 @@ export default function BookingsPage() {
                 <Button 
                   size="sm" 
                   variant="outline"
-                  className="text-xs"
+                  className="text-xs whitespace-nowrap"
                   onClick={(e) => {
                     e.stopPropagation()
                     setSelectedBooking({
@@ -507,7 +507,8 @@ export default function BookingsPage() {
                 </Button>
                 <Button
                   size="sm"
-                  className="text-xs bg-amber-600 hover:bg-amber-700 text-white"
+                  variant="outline"
+                  className="text-xs text-amber-600 hover:text-amber-700 border-amber-200 hover:bg-amber-50 whitespace-nowrap"
                   disabled={checkoutLoadingId === booking.id || booking.status === 'checked_out'}
                   onClick={(e) => {
                     e.stopPropagation()
