@@ -14,7 +14,7 @@ import { formatNaira } from '@/lib/utils/currency'
 import { usePageData } from '@/hooks/use-page-data'
 import { useAuth } from '@/lib/auth-context'
 import { hasPermission } from '@/lib/permissions'
-import { Plus, Loader2, Users } from 'lucide-react'
+import { Plus, Loader2, Users, LogOut } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { getUserDisplayName } from '@/lib/utils/user-display'
@@ -61,6 +61,7 @@ export default function BookingsPage() {
   const [extendModalOpen, setExtendModalOpen] = useState(false)
   const [addChargeModalOpen, setAddChargeModalOpen] = useState(false)
   const [selectedBooking, setSelectedBooking] = useState<any>(null)
+  const [checkoutLoadingId, setCheckoutLoadingId] = useState<string | null>(null)
   const { initialLoading, startFetch, endFetch } = usePageData()
   const { organizationId, role, userId } = useAuth()
   const router = useRouter()
@@ -223,6 +224,59 @@ export default function BookingsPage() {
     })
 
     return [...bulkRows, ...singles].sort((a, b) => new Date(b.check_in).getTime() - new Date(a.check_in).getTime())
+  }
+
+  const handleCheckoutFromTable = (booking: Booking) => {
+    toast.custom(
+      (t: string | number) => (
+        <div className="flex flex-col gap-3">
+          <div className="flex gap-2 items-start">
+            <LogOut className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" />
+            <div>
+              <p className="font-semibold">Check Out Guest?</p>
+              <p className="text-sm text-muted-foreground">
+                {booking.guests?.name} — Room {booking.rooms?.room_number}
+              </p>
+              {booking.balance > 0 && (
+                <p className="text-xs text-red-600 mt-1">Outstanding balance: {formatNaira(booking.balance)}</p>
+              )}
+            </div>
+          </div>
+          <div className="flex gap-2 justify-end">
+            <Button variant="outline" size="sm" onClick={() => toast.dismiss(t)}>Cancel</Button>
+            <Button
+              size="sm"
+              className="bg-amber-600 hover:bg-amber-700 text-white"
+              onClick={async () => {
+                toast.dismiss(t)
+                setCheckoutLoadingId(booking.id)
+                try {
+                  const supabase = createClient()
+                  const today = new Date().toISOString().split('T')[0]
+                  const { error } = await supabase
+                    .from('bookings')
+                    .update({ status: 'checked_out', check_out: today, folio_status: 'checked_out', updated_by: userId })
+                    .eq('id', booking.id)
+                  if (error) throw error
+                  if (booking.room_id) {
+                    await supabase.from('rooms').update({ status: 'available' }).eq('id', booking.room_id)
+                  }
+                  toast.success(`${booking.guests?.name} checked out successfully`)
+                  fetchBookings()
+                } catch (err: any) {
+                  toast.error(err.message || 'Failed to check out guest')
+                } finally {
+                  setCheckoutLoadingId(null)
+                }
+              }}
+            >
+              Confirm Checkout
+            </Button>
+          </div>
+        </div>
+      ),
+      { duration: Infinity }
+    )
   }
 
   if (initialLoading) {
@@ -403,28 +457,14 @@ export default function BookingsPage() {
             ),
           },
           {
-            key: 'updated_by_name',
-            label: 'Last Updated',
-            render: (booking) => (
-              <div className="text-sm">
-                {booking.updated_by_name ? (
-                  <div className="text-muted-foreground">
-                    {booking.updated_by_name}
-                  </div>
-                ) : (
-                  <span className="text-muted-foreground">—</span>
-                )}
-              </div>
-            ),
-          },
-          {
             key: 'actions',
             label: 'Actions',
             render: (booking) => canManageFolio && !booking.is_bulk ? (
-              <div className="flex gap-2">
+              <div className="flex gap-1.5 flex-wrap">
                 <Button 
                   size="sm" 
                   variant="outline"
+                  className="text-xs"
                   onClick={(e) => {
                     e.stopPropagation()
                     setSelectedBooking({
@@ -446,6 +486,7 @@ export default function BookingsPage() {
                 <Button 
                   size="sm" 
                   variant="outline"
+                  className="text-xs"
                   onClick={(e) => {
                     e.stopPropagation()
                     setSelectedBooking({
@@ -463,6 +504,20 @@ export default function BookingsPage() {
                   }}
                 >
                   Extend Stay
+                </Button>
+                <Button
+                  size="sm"
+                  className="text-xs bg-amber-600 hover:bg-amber-700 text-white"
+                  disabled={checkoutLoadingId === booking.id || booking.status === 'checked_out'}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    handleCheckoutFromTable(booking)
+                  }}
+                >
+                  {checkoutLoadingId === booking.id
+                    ? <Loader2 className="h-3 w-3 animate-spin" />
+                    : <><LogOut className="mr-1 h-3 w-3" />Check Out</>
+                  }
                 </Button>
               </div>
             ) : null,
