@@ -909,15 +909,23 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                 <Clock className="mr-2 h-4 w-4" />
                 Extend Stay
               </Button>
-              <Button
-                size="sm"
-                className="bg-amber-600 hover:bg-amber-700 text-white"
-                onClick={handleCheckout}
-                disabled={checkoutLoading || booking?.status === 'checked_out' || booking?.folio_status === 'checked_out'}
-              >
-                {checkoutLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <LogOut className="mr-2 h-4 w-4" />}
-                Check Out
-              </Button>
+              {(() => {
+                const today = new Date().toISOString().split('T')[0]
+                const nowHour = new Date().getHours()
+                const autoCheckoutPassed = booking?.check_out <= today && nowHour >= 14
+                if (autoCheckoutPassed || booking?.status === 'checked_out' || booking?.folio_status === 'checked_out') return null
+                return (
+                  <Button
+                    size="sm"
+                    className="bg-amber-600 hover:bg-amber-700 text-white"
+                    onClick={handleCheckout}
+                    disabled={checkoutLoading}
+                  >
+                    {checkoutLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <LogOut className="mr-2 h-4 w-4" />}
+                    Check Out
+                  </Button>
+                )
+              })()}
             </>
           )}
           {isSuperadmin && (
