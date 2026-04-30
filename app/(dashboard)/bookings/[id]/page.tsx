@@ -19,6 +19,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/lib/auth-context'
 import { getUserDisplayName } from '@/lib/utils/user-display'
 import { fetchUserDisplayNameMap } from '@/lib/utils/fetch-user-display-names'
+import { manualCheckoutEligible, resolvedCheckoutDateForClosing } from '@/lib/utils/booking-checkout-ui'
 
 export default function BookingDetailPage({ params }: { params: Promise<{ id: string }> | { id: string } }) {
   const router = useRouter()
@@ -544,13 +545,15 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                 setCheckoutLoading(true)
                 try {
                   const supabase = createClient()
-                  const today = new Date().toISOString().split('T')[0]
+                  const outDate = resolvedCheckoutDateForClosing({
+                    check_out: booking?.check_out ?? new Date().toISOString().split('T')[0],
+                  })
 
                   const { error } = await supabase
                     .from('bookings')
                     .update({
                       status: 'checked_out',
-                      check_out: today,
+                      check_out: outDate,
                       folio_status: 'checked_out',
                       updated_by: userId,
                     })
@@ -569,7 +572,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                   setBooking((prev: any) => prev ? {
                     ...prev,
                     status: 'checked_out',
-                    check_out: today,
+                    check_out: outDate,
                     folio_status: 'checked_out',
                   } : prev)
 
@@ -910,10 +913,15 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                 Extend Stay
               </Button>
               {(() => {
-                const today = new Date().toISOString().split('T')[0]
-                const nowHour = new Date().getHours()
-                const autoCheckoutPassed = booking?.check_out <= today && nowHour >= 14
-                if (autoCheckoutPassed || booking?.status === 'checked_out' || booking?.folio_status === 'checked_out') return null
+                if (
+                  !manualCheckoutEligible({
+                    status: booking?.status,
+                    check_in: booking?.check_in,
+                    check_out: booking?.check_out,
+                    folio_status: booking?.folio_status,
+                  })
+                )
+                  return null
                 return (
                   <Button
                     size="sm"

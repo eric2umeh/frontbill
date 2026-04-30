@@ -32,6 +32,8 @@ interface EnhancedDataTableProps<T> {
   dateField?: keyof T
   onDateFilterChange?: (date: Date | undefined) => void
   onRowClick?: (item: T) => void
+  /** Tighter cell padding (e.g. Bookings table with many actions). */
+  compactTable?: boolean
 }
 
 export function EnhancedDataTable<T extends Record<string, any>>({
@@ -44,6 +46,7 @@ export function EnhancedDataTable<T extends Record<string, any>>({
   dateField,
   onDateFilterChange,
   onRowClick,
+  compactTable = false,
 }: EnhancedDataTableProps<T>) {
   const [searchQuery, setSearchQuery] = useState('')
   const [activeFilters, setActiveFilters] = useState<Record<string, string>>({})
@@ -88,6 +91,11 @@ export function EnhancedDataTable<T extends Record<string, any>>({
     setCurrentPage(1)
     onDateFilterChange?.(date)
   }
+
+  const thClass = compactTable
+    ? 'px-2 py-1.5 text-left text-xs font-medium'
+    : 'px-4 py-3 text-left text-sm font-medium'
+  const tdClass = compactTable ? 'px-2 py-1.5 text-sm' : 'px-4 py-3 text-sm'
 
   return (
     <div className="space-y-4">
@@ -187,15 +195,21 @@ export function EnhancedDataTable<T extends Record<string, any>>({
 
       {/* Table or Card View */}
       {viewMode === 'table' ? (
-        <div className="border rounded-lg overflow-hidden">
-          <div className="overflow-x-auto md:overflow-visible">
-            <table className="w-full">
+        <div className="border rounded-lg overflow-hidden max-w-full">
+          <div
+            className={[
+              'w-full max-w-full overflow-x-auto',
+              '[scrollbar-width:thin]',
+              '[scrollbar-gutter:stable]',
+            ].join(' ')}
+          >
+            <table className="w-full min-w-[600px]">
               <thead className="bg-muted/50">
                 <tr>
                   {columns.map((column, index) => (
-                    <th 
-                      key={column.key.toString()} 
-                      className={`px-4 py-3 text-left text-sm font-medium ${index >= 3 ? 'hidden md:table-cell' : ''}`}
+                    <th
+                      key={column.key.toString()}
+                      className={`${thClass} ${index >= 3 ? 'hidden lg:table-cell' : ''}`}
                     >
                       {column.label}
                     </th>
@@ -210,9 +224,9 @@ export function EnhancedDataTable<T extends Record<string, any>>({
                     onClick={() => onRowClick?.(item)}
                   >
                     {columns.map((column, colIndex) => (
-                      <td 
-                        key={column.key.toString()} 
-                        className={`px-4 py-3 text-sm ${colIndex >= 3 ? 'hidden md:table-cell' : ''}`}
+                      <td
+                        key={column.key.toString()}
+                        className={`${tdClass} ${colIndex >= 3 ? 'hidden lg:table-cell' : ''}`}
                       >
                         {column.render ? column.render(item) : item[column.key]}
                       </td>

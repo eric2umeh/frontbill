@@ -22,6 +22,7 @@ import { toast } from 'sonner'
 import { getUserDisplayName } from '@/lib/utils/user-display'
 import { fetchUserDisplayNameMap } from '@/lib/utils/fetch-user-display-names'
 import { getBulkGroupId } from '@/lib/utils/bulk-booking'
+import { manualCheckoutEligible, resolvedCheckoutDateForClosing } from '@/lib/utils/booking-checkout-ui'
 
 interface Booking {
   id: string
@@ -252,18 +253,17 @@ export default function BookingsPage() {
     return [...bulkRows, ...singles].sort((a, b) => new Date(b.check_in).getTime() - new Date(a.check_in).getTime())
   }
 
-  const manualCheckoutVisible = (b: Pick<Booking, 'check_out' | 'status'> & { folio_status?: string | null }) => {
-    const today = new Date().toISOString().split('T')[0]
-    const nowHour = new Date().getHours()
-    if (b.check_out <= today && nowHour >= 14) return false
-    if (b.status === 'checked_out') return false
-    if ((b.folio_status || 'active') === 'checked_out') return false
-    return true
-  }
-
   const handleBulkCheckoutFromTable = (bulkRow: Booking) => {
     const members = bulkRow.bulk_members || []
-    const targets = members.filter((m) => manualCheckoutVisible(m))
+    const targets = members.filter((m) =>
+      manualCheckoutEligible({
+        status: m.status,
+        check_in: m.check_in,
+        check_out: m.check_out,
+        folio_status: m.folio_status,
+      }),
+    )
+
     if (targets.length === 0) {
       toast.message('No folios in this group are available for checkout (already checked out or past auto-checkout window).')
       return
@@ -299,13 +299,13 @@ export default function BookingsPage() {
                 setCheckoutLoadingGroupId(gid)
                 try {
                   const supabase = createClient()
-                  const today = new Date().toISOString().split('T')[0]
                   for (const m of targets) {
+                    const outDate = resolvedCheckoutDateForClosing(m)
                     const { error } = await supabase
                       .from('bookings')
                       .update({
                         status: 'checked_out',
-                        check_out: today,
+                        check_out: outDate,
                         folio_status: 'checked_out',
                         updated_by: userId,
                       })
@@ -359,10 +359,15 @@ export default function BookingsPage() {
                 setCheckoutLoadingId(booking.id)
                 try {
                   const supabase = createClient()
-                  const today = new Date().toISOString().split('T')[0]
+                  const outDate = resolvedCheckoutDateForClosing(booking)
                   const { error } = await supabase
                     .from('bookings')
-                    .update({ status: 'checked_out', check_out: today, folio_status: 'checked_out', updated_by: userId })
+                    .update({
+                      status: 'checked_out',
+                      check_out: outDate,
+                      folio_status: 'checked_out',
+                      updated_by: userId,
+                    })
                     .eq('id', booking.id)
                   if (error) throw error
                   if (booking.room_id) {
@@ -488,6 +493,7 @@ export default function BookingsPage() {
 
       <EnhancedDataTable
         data={bookings}
+        compactTable
         searchKeys={['folio_id', 'guestName', 'guestPhone', 'ledger_account_name', 'rooms.room_number'] as any}
         dateField="check_in"
         filters={[
@@ -642,16 +648,22 @@ export default function BookingsPage() {
 
               if (booking.is_bulk) {
                 const showBulkCheckout = (booking.bulk_members || []).some((m) =>
-                  manualCheckoutVisible(m),
+                  manualCheckoutEligible({
+                    status: m.status,
+                    check_in: m.check_in,
+                    check_out: m.check_out,
+                    folio_status: m.folio_status,
+                  }),
                 )
                 if (!showBulkCheckout) return null
                 const gid = booking.bulk_group_id || ''
                 return (
-                  <div className="flex gap-1 flex-nowrap">
+                  <div className="flex shrink-0 flex-nowrap gap-0.5">
                     <Button
                       size="sm"
                       variant="outline"
-                      className="text-xs text-amber-600 hover:text-amber-700 border-amber-200 hover:bg-amber-50 whitespace-nowrap"
+                      title="Check out all eligible rooms in this group"
+                      className="h-7 px-2 text-[11px] leading-tight text-amber-700 border-amber-200 hover:bg-amber-50"
                       disabled={checkoutLoadingGroupId === gid}
                       onClick={(e) => {
                         e.stopPropagation()
@@ -662,7 +674,8 @@ export default function BookingsPage() {
                         <Loader2 className="h-3 w-3 animate-spin" />
                       ) : (
                         <>
-                          <LogOut className="mr-1 h-3 w-3" />Check Out
+                          <LogOut className="mr-1 h-3 w-3" />
+                          Out
                         </>
                       )}
                     </Button>
@@ -671,11 +684,12 @@ export default function BookingsPage() {
               }
 
               return (
-                <div className="flex gap-1 flex-nowrap">
+                <div className="flex shrink-0 flex-nowrap gap-0.5">
                   <Button 
                     size="sm" 
                     variant="outline"
-                    className="text-xs whitespace-nowrap"
+                    title="Add folio charge"
+                    className="h-7 px-2 text-[11px] leading-tight whitespace-nowrap"
                     onClick={(e) => {
                       e.stopPropagation()
                       setSelectedBooking({
@@ -692,12 +706,13 @@ export default function BookingsPage() {
                       setAddChargeModalOpen(true)
                     }}
                   >
-                    Add Charge
+                    Charge
                   </Button>
                   <Button 
                     size="sm" 
                     variant="outline"
-                    className="text-xs whitespace-nowrap"
+                    title="Extend stay"
+                    className="h-7 px-2 text-[11px] leading-tight whitespace-nowrap"
                     onClick={(e) => {
                       e.stopPropagation()
                       setSelectedBooking({
@@ -716,21 +731,30 @@ export default function BookingsPage() {
                   >
                     Extend Stay
                   </Button>
-                  {!manualCheckoutVisible(booking) ? null : (
+                  {!manualCheckoutEligible({
+                    status: booking.status,
+                    check_in: booking.check_in,
+                    check_out: booking.check_out,
+                    folio_status: booking.folio_status,
+                  }) ? null : (
                     <Button
                       size="sm"
                       variant="outline"
-                      className="text-xs text-amber-600 hover:text-amber-700 border-amber-200 hover:bg-amber-50 whitespace-nowrap"
+                      title="Check out guest"
+                      className="h-7 px-2 text-[11px] leading-tight text-amber-700 border-amber-200 hover:bg-amber-50 whitespace-nowrap"
                       disabled={checkoutLoadingId === booking.id}
                       onClick={(e) => {
                         e.stopPropagation()
                         handleCheckoutFromTable(booking)
                       }}
                     >
-                      {checkoutLoadingId === booking.id
-                        ? <Loader2 className="h-3 w-3 animate-spin" />
-                        : <><LogOut className="mr-1 h-3 w-3" />Check Out</>
-                      }
+                      {checkoutLoadingId === booking.id ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <>
+                          <LogOut className="mr-1 h-3 w-3" />Out
+                        </>
+                      )}
                     </Button>
                   )}
                 </div>

@@ -11,6 +11,7 @@ import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { formatNaira } from '@/lib/utils/currency'
 import { getBulkGroupId, isLegacyBulkGroupId } from '@/lib/utils/bulk-booking'
+import { manualCheckoutEligible, resolvedCheckoutDateForClosing } from '@/lib/utils/booking-checkout-ui'
 import { toast } from 'sonner'
 
 export default function BulkBookingDetailPage({ params }: { params: Promise<{ groupId: string }> | { groupId: string } }) {
@@ -56,25 +57,18 @@ export default function BulkBookingDetailPage({ params }: { params: Promise<{ gr
     }
   }
 
-  const manualCheckoutVisible = (b: { check_out: string; status: string; folio_status?: string | null }) => {
-    const today = new Date().toISOString().split('T')[0]
-    const nowHour = new Date().getHours()
-    if (b.check_out <= today && nowHour >= 14) return false
-    if (b.status === 'checked_out') return false
-    if ((b.folio_status || 'active') === 'checked_out') return false
-    return true
-  }
-
-  const runCheckoutUpdates = async (targets: Array<{ id: string; room_id: string | null }>) => {
+  const runCheckoutUpdates = async (
+    targets: Array<{ id: string; room_id: string | null; check_out: string }>,
+  ) => {
     const supabase = createClient()
     if (!supabase) throw new Error('Unable to connect')
-    const today = new Date().toISOString().split('T')[0]
     for (const row of targets) {
+      const outDate = resolvedCheckoutDateForClosing(row)
       const { error } = await supabase
         .from('bookings')
         .update({
           status: 'checked_out',
-          check_out: today,
+          check_out: outDate,
           folio_status: 'checked_out',
           updated_by: userId,
         })
@@ -86,8 +80,16 @@ export default function BulkBookingDetailPage({ params }: { params: Promise<{ gr
     }
   }
 
+  const checkoutRowEligible = (r: any) =>
+    manualCheckoutEligible({
+      status: r.status,
+      check_in: r.check_in,
+      check_out: r.check_out,
+      folio_status: r.folio_status,
+    })
+
   const handleCheckoutOneRow = (row: any) => {
-    if (!manualCheckoutVisible(row)) return
+    if (!checkoutRowEligible(row)) return
     toast.custom(
       (tid: string | number) => (
         <div className="flex flex-col gap-3">
@@ -138,7 +140,7 @@ export default function BulkBookingDetailPage({ params }: { params: Promise<{ gr
   }
 
   const handleCheckoutAllEligible = () => {
-    const targets = rows.filter((r) => manualCheckoutVisible(r))
+    const targets = rows.filter((r) => checkoutRowEligible(r))
     if (targets.length === 0) {
       toast.message('No folios are available for checkout.')
       return
@@ -211,7 +213,7 @@ export default function BulkBookingDetailPage({ params }: { params: Promise<{ gr
           <ArrowLeft className="mr-2 h-4 w-4" />
           Back
         </Button>
-        {canManageFolio && rows.some((r) => manualCheckoutVisible(r)) && (
+        {canManageFolio && rows.some((r) => checkoutRowEligible(r)) && (
           <Button
             variant="outline"
             className="shrink-0 text-amber-700 border-amber-200 hover:bg-amber-50"
@@ -273,7 +275,7 @@ export default function BulkBookingDetailPage({ params }: { params: Promise<{ gr
           <CardTitle>Rooms and Guests</CardTitle>
           <CardDescription>All rooms created under this bulk booking/reservation.</CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="overflow-x-auto p-0 px-4 pb-6 sm:px-6 [scrollbar-width:thin]">
           <Table>
             <TableHeader>
               <TableRow>
@@ -322,7 +324,7 @@ export default function BulkBookingDetailPage({ params }: { params: Promise<{ gr
                   <TableCell className="text-right">{formatNaira(row.total_amount || 0)}</TableCell>
                   {canManageFolio && (
                     <TableCell className="text-right">
-                      {manualCheckoutVisible(row) ? (
+                      {checkoutRowEligible(row) ? (
                         <Button
                           size="sm"
                           variant="outline"
