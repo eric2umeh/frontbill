@@ -935,6 +935,35 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
         </div>
       </div>
 
+      {/* Late checkout warning banner */}
+      {(() => {
+        const today = new Date().toISOString().split('T')[0]
+        const nowHour = new Date().getHours()
+        const isActive = booking?.status === 'checked_in'
+        const isOverdueDate = booking?.check_out < today
+        const isTodayOverdue = booking?.check_out === today && nowHour >= 12
+        if (!isActive || (!isOverdueDate && !isTodayOverdue)) return null
+        const hoursLate = isOverdueDate
+          ? null
+          : nowHour - 12
+        return (
+          <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            <AlertCircle className="h-4 w-4 mt-0.5 shrink-0 text-amber-600" />
+            <div className="space-y-0.5">
+              <p className="font-semibold">
+                {isOverdueDate
+                  ? 'This guest is overdue — checkout date has passed'
+                  : `Late checkout in progress — ${hoursLate} hour${hoursLate !== 1 ? 's' : ''} past 12:00 PM`}
+              </p>
+              <p className="text-xs">
+                Standard checkout is 12:00 PM. Auto-checkout will run at 2:00 PM and a late checkout fee may be applied automatically.
+                Use <strong>Add Charge</strong> above to manually record a late checkout fee if the guest has agreed to an extension.
+              </p>
+            </div>
+          </div>
+        )
+      })()}
+
       <div className="grid gap-6 lg:grid-cols-3">
         <Card className="lg:col-span-2">
           <CardHeader>

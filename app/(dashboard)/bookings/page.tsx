@@ -419,11 +419,33 @@ export default function BookingsPage() {
           {
             key: 'check_out',
             label: 'Check-out',
-            render: (booking) => (
-              <div className="text-sm">
-                {new Date(booking.check_out).toLocaleDateString('en-GB')}
-              </div>
-            ),
+            render: (booking) => {
+              const today = new Date().toISOString().split('T')[0]
+              const nowHour = new Date().getHours()
+              const isOverdue =
+                booking.status === 'checked_in' &&
+                booking.check_out <= today &&
+                nowHour >= 12
+              const isAutoCheckoutSoon =
+                booking.status === 'checked_in' &&
+                booking.check_out === today &&
+                nowHour >= 12 && nowHour < 14
+              return (
+                <div className="text-sm space-y-1">
+                  <span>{new Date(booking.check_out).toLocaleDateString('en-GB')}</span>
+                  {isAutoCheckoutSoon && (
+                    <Badge variant="outline" className="text-xs bg-amber-50 text-amber-700 border-amber-200 block w-fit">
+                      Due today
+                    </Badge>
+                  )}
+                  {isOverdue && nowHour >= 14 && (
+                    <Badge variant="outline" className="text-xs bg-red-50 text-red-600 border-red-200 block w-fit">
+                      Overdue
+                    </Badge>
+                  )}
+                </div>
+              )
+            },
           },
           {
             key: 'payment_status',
