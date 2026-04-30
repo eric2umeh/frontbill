@@ -22,6 +22,16 @@ const statusConfig = {
   reserved: { label: 'Reserved', color: 'bg-yellow-500' },
   maintenance: { label: 'Maintenance', color: 'bg-red-500' },
   cleaning: { label: 'Cleaning', color: 'bg-purple-500' },
+  out_of_order: { label: 'Out of Order', color: 'bg-red-700' },
+}
+
+const statusPriority: Record<string, number> = {
+  occupied: 1,
+  maintenance: 2,
+  out_of_order: 3,
+  cleaning: 4,
+  reserved: 5,
+  available: 6,
 }
 
 export function RoomStatusGrid() {
@@ -58,10 +68,14 @@ export function RoomStatusGrid() {
           .select('id, room_number, room_type, status, organization_id')
           .eq('organization_id', profile.organization_id)
           .order('room_number', { ascending: true })
-          .limit(12)
 
         if (error) throw error
-        if (isMounted) setRooms(data || [])
+        const sortedRooms = (data || []).sort((a: any, b: any) => {
+          const priorityDiff = (statusPriority[a.status] || 99) - (statusPriority[b.status] || 99)
+          if (priorityDiff !== 0) return priorityDiff
+          return String(a.room_number).localeCompare(String(b.room_number), undefined, { numeric: true })
+        })
+        if (isMounted) setRooms(sortedRooms)
       } catch (error: any) {
         console.error('Error fetching rooms:', error)
         if (isMounted) setRooms([])
@@ -96,14 +110,14 @@ export function RoomStatusGrid() {
           </div>
         ) : (
           <ScrollArea className="h-[300px]">
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
               {rooms.map((room) => {
                 const config = statusConfig[room.status as keyof typeof statusConfig]
                 return (
                   <div
                     key={room.id}
                     className={cn(
-                      'relative rounded-lg border-2 p-3 transition-all hover:shadow-md',
+                      'relative rounded-md border p-2 transition-all hover:shadow-sm',
                       room.status === 'available' ? 'border-green-200 bg-green-50' :
                       room.status === 'occupied' ? 'border-blue-200 bg-blue-50' :
                       room.status === 'reserved' ? 'border-yellow-200 bg-yellow-50' :
@@ -113,19 +127,19 @@ export function RoomStatusGrid() {
                   >
                     <div className="flex items-start justify-between">
                       <div>
-                        <p className="font-semibold text-sm">{room.room_number}</p>
-                        <p className="text-xs text-muted-foreground capitalize">
+                        <p className="text-xs font-semibold leading-tight">{room.room_number}</p>
+                        <p className="truncate text-[10px] capitalize leading-tight text-muted-foreground">
                           {room.room_type?.replace('_', ' ') || 'Standard'}
                         </p>
                       </div>
                       <div
                         className={cn(
-                          'h-2.5 w-2.5 rounded-full',
+                          'h-2 w-2 rounded-full',
                           config?.color
                         )}
                       />
                     </div>
-                    <p className="mt-1 text-xs font-medium capitalize">
+                    <p className="mt-1 text-[10px] font-medium capitalize leading-tight">
                       {config?.label}
                     </p>
                   </div>

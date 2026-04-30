@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Calendar } from '@/components/ui/calendar'
@@ -16,6 +17,9 @@ import { Calendar as CalendarIcon, X, Users, Building2 } from 'lucide-react'
 import { formatNaira } from '@/lib/utils/currency'
 import { toast } from 'sonner'
 import { isOrganizationMenuRecord, isSelectableLedgerName } from '@/lib/utils/ledger-organization'
+import { resolveOrganizationLedgerAccount } from '@/lib/utils/resolve-ledger-account'
+import { formatPersonName } from '@/lib/utils/name-format'
+import { useAuth } from '@/lib/auth-context'
 
 interface NewBookingModalProps {
   open: boolean
@@ -51,6 +55,7 @@ interface LedgerAccount {
 export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalProps) {
   const [loading, setLoading] = useState(false)
   const [organizationId, setOrganizationId] = useState('')
+  const { userId, role } = useAuth()
 
   // Guest
   const [fullName, setFullName] = useState('')
@@ -72,6 +77,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
   const [nights, setNights] = useState(1)
   const [checkInOpen, setCheckInOpen] = useState(false)
   const [checkOutOpen, setCheckOutOpen] = useState(false)
+  const [backdateReason, setBackdateReason] = useState('')
 
   // Room & Payment
   const [rooms, setRooms] = useState<Room[]>([]) // date-filtered available rooms
@@ -94,7 +100,6 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
   const [individualAccounts, setIndividualAccounts] = useState<LedgerAccount[]>([])
   const [organizationAccounts, setOrganizationAccounts] = useState<LedgerAccount[]>([])
   const [filteredLedgerAccounts, setFilteredLedgerAccounts] = useState<LedgerAccount[]>([])
-  const [organizationCreatorIds, setOrganizationCreatorIds] = useState<Set<string>>(new Set())
 
   // New ledger account dialog
   const [newAccountDialogOpen, setNewAccountDialogOpen] = useState(false)
@@ -140,7 +145,6 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
         { data: bookingData },
         { data: cityLedgerData },
         { data: orgsData },
-        { data: teamProfiles },
       ] = await Promise.all([
         // Guests table
         supabase.from('guests').select('id, name, phone, email, address').eq('organization_id', orgId).order('name'),
@@ -152,10 +156,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
         supabase.from('city_ledger_accounts').select('id, account_name, account_type, contact_phone, balance').eq('organization_id', orgId).order('account_name'),
         // Also load from organizations table as fallback (legacy orgs may live there)
         supabase.from('organizations').select('id, name, phone, email, org_type, created_by').neq('id', orgId).order('name'),
-        supabase.from('profiles').select('id').eq('organization_id', orgId),
       ])
-      const teamCreatorIds = new Set((teamProfiles || []).map((profile: any) => profile.id))
-      setOrganizationCreatorIds(teamCreatorIds)
 
       // Sanitize rooms — filter out any with empty id, room_type or room_number to prevent SelectItem crashes
       const sanitizedRooms = (roomData || []).filter(
@@ -180,8 +181,21 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
 
       // Organizations must come from the Organizations menu, not generated hotel tenant records.
       const orgNames = new Set<string>()
+      const orgFromLedger: LedgerAccount[] = (cityLedgerData || [])
+        .filter((a: any) => ['organization', 'corporate'].includes(a.account_type) && isSelectableLedgerName(a.account_name))
+        .map((a: any) => {
+          orgNames.add(String(a.account_name || '').toLowerCase())
+          return {
+            id: a.id,
+            account_name: a.account_name,
+            account_type: 'organization' as const,
+            contact_phone: a.contact_phone || '',
+            balance: a.balance || 0,
+            source: 'city_ledger',
+          }
+        })
       const orgFromTable: LedgerAccount[] = (orgsData || [])
-        .filter((o: any) => isOrganizationMenuRecord(o, teamCreatorIds) && !orgNames.has(o.name.toLowerCase()))
+        .filter((o: any) => isOrganizationMenuRecord(o) && !orgNames.has(o.name.toLowerCase()))
         .map((o: any) => ({
           id: o.id,
           account_name: o.name,
@@ -191,7 +205,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
           source: 'organizations',
         }))
 
-      const orgLedger: LedgerAccount[] = orgFromTable
+      const orgLedger: LedgerAccount[] = [...orgFromLedger, ...orgFromTable]
         .sort((a, b) => a.account_name.localeCompare(b.account_name))
 
       setIndividualAccounts(individualLedger)
@@ -279,21 +293,21 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
         .ilike('name', `%${value}%`)
         .limit(10),
     ])
-    const fromLedger: LedgerAccount[] = ledgerTab === 'individual'
-      ? (ledgerData || [])
-        .filter((a: any) => (a.account_type === 'individual' || a.account_type === 'guest') && isSelectableLedgerName(a.account_name))
+    const fromLedger: LedgerAccount[] = (ledgerData || [])
+        .filter((a: any) => ledgerTab === 'individual'
+          ? (a.account_type === 'individual' || a.account_type === 'guest') && isSelectableLedgerName(a.account_name)
+          : ['organization', 'corporate'].includes(a.account_type) && isSelectableLedgerName(a.account_name))
         .map((a: any) => ({
       id: a.id,
       account_name: a.account_name,
-      account_type: 'individual',
+      account_type: ledgerTab,
       contact_phone: a.contact_phone || '',
       balance: a.balance || 0,
       source: 'city_ledger' as const,
         }))
-      : []
     const ledgerNames = new Set(fromLedger.map(a => a.account_name.toLowerCase()))
     const fromOrgs: LedgerAccount[] = (orgSearchData || [])
-      .filter((o: any) => ledgerTab === 'organization' && isOrganizationMenuRecord(o, organizationCreatorIds) && !ledgerNames.has(o.name.toLowerCase()))
+      .filter((o: any) => ledgerTab === 'organization' && isOrganizationMenuRecord(o) && !ledgerNames.has(o.name.toLowerCase()))
       .map((o: any) => ({
         id: o.id,
         account_name: o.name,
@@ -307,11 +321,25 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
     setLedgerOpen(results.length > 0)
   }
 
-  const selectLedgerAccount = (account: LedgerAccount) => {
-    setLedgerAccount(account.id)
-    setLedgerAccountName(account.account_name)
-    setLedgerSearch(account.account_name)
-    setLedgerOpen(false)
+  const selectLedgerAccount = async (account: LedgerAccount) => {
+    try {
+      const supabase = createClient()
+      const resolved = ledgerTab === 'organization'
+        ? await resolveOrganizationLedgerAccount(supabase, organizationId, account)
+        : account
+      if (!resolved) return
+      setLedgerAccount(resolved.id)
+      setLedgerAccountName(resolved.account_name || resolved.name)
+      setLedgerSearch(resolved.account_name || resolved.name)
+      if (ledgerTab === 'organization' && resolved.source === 'city_ledger') {
+        setOrganizationAccounts((prev) => prev.some((item) => item.id === resolved.id)
+          ? prev
+          : [{ id: resolved.id, account_name: resolved.account_name, account_type: 'organization', contact_phone: resolved.contact_phone || '', balance: resolved.balance || 0, source: 'city_ledger' }, ...prev])
+      }
+      setLedgerOpen(false)
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to select ledger account')
+    }
   }
 
   const clearLedgerAccount = () => {
@@ -475,10 +503,67 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
     return true
   }
 
+  const isSuperadmin = role === 'superadmin'
+  const isBackdated = checkInDate ? checkInDate < new Date(new Date().setHours(0, 0, 0, 0)) : false
+
+  const hasApprovedBackdateRequest = async () => {
+    if (!checkInDate) return false
+    const res = await fetch(`/api/backdate-requests?caller_id=${userId}`, { credentials: 'include' })
+    const json = await res.json()
+    if (!res.ok) return false
+    return (json.requests || []).some((request: any) =>
+      request.status === 'approved'
+      && request.request_type === 'booking'
+      && request.requested_check_in === toLocalDateStr(checkInDate)
+      && (!checkOutDate || request.requested_check_out === toLocalDateStr(checkOutDate))
+    )
+  }
+
+  const handleRequestBackdate = async () => {
+    if (!checkInDate) { toast.error('Select a backdated check-in date'); return }
+    if (!backdateReason.trim()) { toast.error('Enter a reason for the superadmin'); return }
+    setLoading(true)
+    try {
+      const res = await fetch('/api/backdate-requests', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          caller_id: userId,
+          request_type: 'booking',
+          requested_check_in: toLocalDateStr(checkInDate),
+          requested_check_out: checkOutDate ? toLocalDateStr(checkOutDate) : null,
+          reason: backdateReason,
+          metadata: { guest_name: fullName || guestId, room_id: selectedRoom?.id || null },
+        }),
+      })
+      const json = await res.json()
+      if (!res.ok) { toast.error(json.error || 'Failed to send backdate request'); return }
+      toast.success('Backdate request sent to superadmin')
+      setBackdateReason('')
+    } catch {
+      toast.error('Failed to send backdate request')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleBackdatedBookingAction = async () => {
+    if (await hasApprovedBackdateRequest()) {
+      await handleSubmit()
+      return
+    }
+    await handleRequestBackdate()
+  }
+
   const handleSubmit = async () => {
     try {
       setLoading(true)
       if (!checkInDate || !checkOutDate) { toast.error('Dates required'); return }
+      if (isBackdated && !isSuperadmin && !(await hasApprovedBackdateRequest())) {
+        toast.error('Backdated bookings require superadmin approval. Send a request first.')
+        return
+      }
       if (!selectedRoom) { toast.error('Room required'); return }
       if (selectedRoom.status && selectedRoom.status !== 'available') { toast.error('Selected room is not available'); return }
       if (paymentMethod === 'city_ledger' && !ledgerAccount) { toast.error('Select a ledger account'); return }
@@ -500,11 +585,12 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
       const supabase = createClient()
       const { data: { user } } = await supabase.auth.getUser()
 
+      const formattedGuestName = formatPersonName(fullName)
       let finalGuestId = guestId
       if (!guestId) {
         const { data: newGuest, error: ge } = await supabase
           .from('guests')
-          .insert([{ organization_id: organizationId, name: fullName, phone, email: email || null, address: address || null }])
+          .insert([{ organization_id: organizationId, name: formattedGuestName, phone, email: email || null, address: address || null }])
           .select()
           .single()
         if (ge) throw ge
@@ -621,7 +707,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
         organization_id: organizationId,
         booking_id: booking.id,
         transaction_id: `TXN-${Date.now().toString(36).toUpperCase()}`,
-        guest_name: fullName,
+        guest_name: formattedGuestName,
         room: selectedRoom.room_number,
         amount: paidAmount || total,
         payment_method: paymentMethod,
@@ -750,7 +836,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
                       </Button>
                     </PopoverTrigger>
                     <PopoverContent className="w-auto p-0" align="start">
-                      <Calendar mode="single" selected={checkInDate} onSelect={handleCheckInChange} disabled={(d) => d < new Date(new Date().setHours(0,0,0,0))} />
+                      <Calendar mode="single" selected={checkInDate} onSelect={handleCheckInChange} />
                     </PopoverContent>
                   </Popover>
                 </div>
@@ -782,6 +868,17 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
                   }}
                 />
               </div>
+              {isBackdated && !isSuperadmin && (
+                <div className="space-y-2 rounded-md border border-amber-200 bg-amber-50 p-3">
+                  <Label>Reason for Backdate Request *</Label>
+                  <Textarea
+                    value={backdateReason}
+                    onChange={(e) => setBackdateReason(e.target.value)}
+                    placeholder="Explain why this booking must be backdated for superadmin approval"
+                  />
+                  <p className="text-xs text-amber-700">Only a superadmin can approve or directly create backdated bookings.</p>
+                </div>
+              )}
             </div>
 
             {/* Room Selection — combined type + number in one dropdown */}
@@ -893,23 +990,21 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
                 <div className="space-y-3 rounded-lg border border-input p-3">
                   <div className="flex items-center justify-between">
                     <Label className="text-sm font-semibold">City Ledger Account *</Label>
-                    {ledgerTab === 'individual' && (
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        className="h-7 text-xs"
-                        onClick={() => {
-                          setNewAccountName(fullName)
-                          setNewAccountPhone(phone)
-                          setNewAccountEmail(email)
-                          setNewAccountAddress(''); setNewAccountCity(''); setNewAccountType('')
-                          setNewAccountDialogOpen(true)
-                        }}
-                      >
-                        + New Account
-                      </Button>
-                    )}
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-xs"
+                      onClick={() => {
+                        setNewAccountName(ledgerTab === 'individual' ? fullName : '')
+                        setNewAccountPhone(ledgerTab === 'individual' ? phone : '')
+                        setNewAccountEmail(ledgerTab === 'individual' ? email : '')
+                        setNewAccountAddress(''); setNewAccountCity(''); setNewAccountType('')
+                        setNewAccountDialogOpen(true)
+                      }}
+                    >
+                      {ledgerTab === 'individual' ? '+ New Guest Account' : '+ New Organization Account'}
+                    </Button>
                   </div>
                   <Tabs value={ledgerTab} onValueChange={handleLedgerTabChange}>
                     <TabsList className="grid w-full grid-cols-2 h-9">
@@ -959,7 +1054,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
                   </div>
                   {ledgerTab === 'organization' && (
                     <p className="text-xs text-muted-foreground">
-                      Only organizations created from the Organizations menu are shown here.
+                      Search organizations from the Organizations menu or city ledger organization accounts. Use + New Account to create one here.
                     </p>
                   )}
                   {ledgerAccount && (
@@ -976,8 +1071,11 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
           {/* Submit */}
           <div className="flex justify-end gap-2 pt-4 border-t">
             <Button variant="outline" onClick={onClose} disabled={loading}>Cancel</Button>
-            <Button onClick={handleSubmit} disabled={!canSubmitForm() || loading}>
-              {loading ? 'Creating...' : 'Create Booking'}
+            <Button
+              onClick={isBackdated && !isSuperadmin ? handleBackdatedBookingAction : handleSubmit}
+              disabled={!canSubmitForm() || loading}
+            >
+              {loading ? 'Working...' : isBackdated && !isSuperadmin ? 'Request / Use Superadmin Approval' : 'Create Booking'}
             </Button>
           </div>
         </DialogContent>

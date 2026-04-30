@@ -11,17 +11,19 @@ export type Permission =
   | 'transactions:view' | 'transactions:create' | 'transactions:edit' | 'transactions:delete' | 'transactions:export'
   | 'analytics:view' | 'analytics:export'
   | 'payments:view' | 'payments:create' | 'payments:refund'
+  | 'reports:view' | 'reports:export'
   | 'organizations:view' | 'organizations:create' | 'organizations:edit' | 'organizations:delete'
   | 'ledger:view' | 'ledger:manage'
-  | 'night_audit:view' | 'night_audit:run'
+  | 'night_audit:view' | 'night_audit:run' | 'audit_trails:view'
   | 'reconciliation:view' | 'reconciliation:manage'
   | 'users:view' | 'users:create' | 'users:edit' | 'users:delete'
   | 'roles:view' | 'roles:manage'
   | 'settings:view' | 'settings:manage'
+  | 'backdate:request' | 'backdate:approve'
   | 'housekeeping:view' | 'housekeeping:create' | 'housekeeping:edit' | 'housekeeping:assign' | 'housekeeping:report'
   | 'maintenance:view' | 'maintenance:create' | 'maintenance:edit' | 'maintenance:assign' | 'maintenance:report'
 
-export type RoleKey = 'admin' | 'manager' | 'front_desk' | 'receptionist' | 'accountant' | 'staff' | 'housekeeping' | 'maintenance'
+export type RoleKey = 'superadmin' | 'admin' | 'manager' | 'front_desk' | 'receptionist' | 'accountant' | 'staff' | 'housekeeping' | 'maintenance'
 
 export interface RoleDefinition {
   key: RoleKey
@@ -32,98 +34,109 @@ export interface RoleDefinition {
 }
 
 export const ALL_PERMISSIONS: { key: Permission; label: string; group: string }[] = [
-  // Dashboard
-  { key: 'dashboard:view', label: 'View Dashboard', group: 'Dashboard' },
-  // Bookings
+  { key: 'dashboard:view', label: 'View Dashboard Widgets', group: 'Dashboard' },
+
   { key: 'bookings:view', label: 'View Bookings', group: 'Bookings' },
-  { key: 'bookings:create', label: 'Create Bookings', group: 'Bookings' },
-  { key: 'bookings:edit', label: 'Edit Bookings', group: 'Bookings' },
+  { key: 'bookings:create', label: 'Create Bookings & Bulk Bookings', group: 'Bookings' },
+  { key: 'bookings:edit', label: 'Edit Booking Details', group: 'Bookings' },
   { key: 'bookings:delete', label: 'Delete Bookings', group: 'Bookings' },
   { key: 'bookings:checkin', label: 'Check In Guests', group: 'Bookings' },
-  { key: 'bookings:checkout', label: 'Check Out Guests', group: 'Bookings' },
-  // Reservations
+  { key: 'bookings:checkout', label: 'Check Out Folios', group: 'Bookings' },
+
   { key: 'reservations:view', label: 'View Reservations', group: 'Reservations' },
-  { key: 'reservations:create', label: 'Create Reservations', group: 'Reservations' },
+  { key: 'reservations:create', label: 'Create Reservations & Bulk Reservations', group: 'Reservations' },
   { key: 'reservations:edit', label: 'Edit Reservations', group: 'Reservations' },
-  { key: 'reservations:delete', label: 'Delete Reservations', group: 'Reservations' },
-  // Rooms
-  { key: 'rooms:view', label: 'View Rooms', group: 'Rooms' },
-  { key: 'rooms:create', label: 'Add Rooms', group: 'Rooms' },
-  { key: 'rooms:edit', label: 'Edit Rooms', group: 'Rooms' },
-  { key: 'rooms:delete', label: 'Delete Rooms', group: 'Rooms' },
-  // Guests
-  { key: 'guests:view', label: 'View Guests', group: 'Guest Database' },
-  { key: 'guests:create', label: 'Add Guests', group: 'Guest Database' },
-  { key: 'guests:edit', label: 'Edit Guests', group: 'Guest Database' },
-  { key: 'guests:delete', label: 'Delete Guests', group: 'Guest Database' },
-  // Transactions
+  { key: 'reservations:delete', label: 'Cancel/Delete Reservations', group: 'Reservations' },
+
+  { key: 'guests:view', label: 'View Guests', group: 'Guests' },
+  { key: 'guests:create', label: 'Create Guest Profiles', group: 'Guests' },
+  { key: 'guests:edit', label: 'Edit Guest Profiles', group: 'Guests' },
+  { key: 'guests:delete', label: 'Delete Guest Profiles', group: 'Guests' },
+
+  { key: 'organizations:view', label: 'View Organizations', group: 'Organizations' },
+  { key: 'organizations:create', label: 'Create Organizations', group: 'Organizations' },
+  { key: 'organizations:edit', label: 'Edit Organizations', group: 'Organizations' },
+  { key: 'organizations:delete', label: 'Delete Organizations', group: 'Organizations' },
+
   { key: 'transactions:view', label: 'View Transactions', group: 'Transactions' },
-  { key: 'transactions:create', label: 'Create Transactions', group: 'Transactions' },
+  { key: 'transactions:create', label: 'Record Transactions', group: 'Transactions' },
   { key: 'transactions:edit', label: 'Edit Transactions', group: 'Transactions' },
   { key: 'transactions:delete', label: 'Delete Transactions', group: 'Transactions' },
   { key: 'transactions:export', label: 'Export Transactions', group: 'Transactions' },
-  // Analytics
-  { key: 'analytics:view', label: 'View Analytics', group: 'Analytics' },
-  { key: 'analytics:export', label: 'Export Analytics', group: 'Analytics' },
-  // Payments
+
   { key: 'payments:view', label: 'View Payments', group: 'Payments' },
   { key: 'payments:create', label: 'Record Payments', group: 'Payments' },
-  { key: 'payments:refund', label: 'Process Refunds', group: 'Payments' },
-  // Organizations
-  { key: 'organizations:view', label: 'View Organizations', group: 'Organizations' },
-  { key: 'organizations:create', label: 'Add Organizations', group: 'Organizations' },
-  { key: 'organizations:edit', label: 'Edit Organizations', group: 'Organizations' },
-  { key: 'organizations:delete', label: 'Delete Organizations', group: 'Organizations' },
-  // Ledger
-  { key: 'ledger:view', label: 'View City Ledger', group: 'City Ledger' },
-  { key: 'ledger:manage', label: 'Manage City Ledger', group: 'City Ledger' },
-  // Night Audit
+  { key: 'payments:refund', label: 'Process Refunds/Credits', group: 'Payments' },
+
+  { key: 'reports:view', label: 'View Reports', group: 'Reports' },
+  { key: 'reports:export', label: 'Export/Print Reports', group: 'Reports' },
+
   { key: 'night_audit:view', label: 'View Night Audit', group: 'Night Audit' },
   { key: 'night_audit:run', label: 'Run Night Audit', group: 'Night Audit' },
-  // Reconciliation
+  { key: 'audit_trails:view', label: 'View Audit Trails', group: 'Night Audit' },
+
+  { key: 'housekeeping:view', label: 'View Housekeeping', group: 'Housekeeping' },
+  { key: 'housekeeping:create', label: 'Create Housekeeping Log Entries', group: 'Housekeeping' },
+  { key: 'housekeeping:edit', label: 'Update Housekeeping Tasks', group: 'Housekeeping' },
+  { key: 'housekeeping:assign', label: 'Assign Housekeeping Work', group: 'Housekeeping' },
+  { key: 'housekeeping:report', label: 'Submit Housekeeping Daily Reports', group: 'Housekeeping' },
+
+  { key: 'maintenance:view', label: 'View Maintenance', group: 'Maintenance' },
+  { key: 'maintenance:create', label: 'Create Maintenance Log Entries', group: 'Maintenance' },
+  { key: 'maintenance:edit', label: 'Update Maintenance Work', group: 'Maintenance' },
+  { key: 'maintenance:assign', label: 'Assign Maintenance Work', group: 'Maintenance' },
+  { key: 'maintenance:report', label: 'Submit Maintenance Daily Reports', group: 'Maintenance' },
+
+  { key: 'analytics:view', label: 'View Analytics', group: 'Analytics' },
+  { key: 'analytics:export', label: 'Export Analytics', group: 'Analytics' },
+
+  { key: 'rooms:view', label: 'View Rooms', group: 'Rooms' },
+  { key: 'rooms:create', label: 'Create Rooms (Superadmin Only)', group: 'Rooms' },
+  { key: 'rooms:edit', label: 'Edit Rooms (Superadmin Only)', group: 'Rooms' },
+  { key: 'rooms:delete', label: 'Delete Rooms (Superadmin Only)', group: 'Rooms' },
+  { key: 'rooms:update_status', label: 'Update Room Status', group: 'Rooms' },
+
+  { key: 'ledger:view', label: 'View City Ledger', group: 'City Ledger' },
+  { key: 'ledger:manage', label: 'Manage City Ledger Balances', group: 'City Ledger' },
+
   { key: 'reconciliation:view', label: 'View Reconciliation', group: 'Reconciliation' },
   { key: 'reconciliation:manage', label: 'Manage Reconciliation', group: 'Reconciliation' },
-  // Users
-  { key: 'users:view', label: 'View Users', group: 'User Management' },
-  { key: 'users:create', label: 'Invite Users', group: 'User Management' },
-  { key: 'users:edit', label: 'Edit Users', group: 'User Management' },
-  { key: 'users:delete', label: 'Remove Users', group: 'User Management' },
-  // Roles
-  { key: 'roles:view', label: 'View Roles', group: 'Roles & Permissions' },
-  { key: 'roles:manage', label: 'Manage Roles', group: 'Roles & Permissions' },
-  // Settings
-  { key: 'settings:view', label: 'View Settings', group: 'Settings' },
-  { key: 'settings:manage', label: 'Manage Settings', group: 'Settings' },
-  // Housekeeping
-  { key: 'housekeeping:view', label: 'View Housekeeping', group: 'Housekeeping' },
-  { key: 'housekeeping:create', label: 'Create Housekeeping Tasks', group: 'Housekeeping' },
-  { key: 'housekeeping:edit', label: 'Edit Housekeeping Tasks', group: 'Housekeeping' },
-  { key: 'housekeeping:assign', label: 'Assign Housekeeping Tasks', group: 'Housekeeping' },
-  { key: 'housekeeping:report', label: 'Submit Daily Reports', group: 'Housekeeping' },
-  // Maintenance
-  { key: 'maintenance:view', label: 'View Maintenance', group: 'Maintenance' },
-  { key: 'maintenance:create', label: 'Create Work Orders', group: 'Maintenance' },
-  { key: 'maintenance:edit', label: 'Edit Work Orders', group: 'Maintenance' },
-  { key: 'maintenance:assign', label: 'Assign Work Orders', group: 'Maintenance' },
-  { key: 'maintenance:report', label: 'Submit Maintenance Reports', group: 'Maintenance' },
-  // Rooms status update (for housekeeping/maintenance)
-  { key: 'rooms:update_status', label: 'Update Room Status', group: 'Rooms' },
+
+  { key: 'users:view', label: 'View Users & Roles', group: 'Users & Roles' },
+  { key: 'users:create', label: 'Add Staff Users', group: 'Users & Roles' },
+  { key: 'users:edit', label: 'Edit Staff Users', group: 'Users & Roles' },
+  { key: 'users:delete', label: 'Delete Staff Users', group: 'Users & Roles' },
+  { key: 'roles:view', label: 'View Permission Sets', group: 'Users & Roles' },
+  { key: 'roles:manage', label: 'Manage Role Assignments', group: 'Users & Roles' },
+
+  { key: 'settings:view', label: 'View Profile & Settings', group: 'Settings' },
+  { key: 'settings:manage', label: 'Manage Hotel/System Settings', group: 'Settings' },
+
+  { key: 'backdate:request', label: 'Request Backdated Booking/Reservation', group: 'Superadmin Controls' },
+  { key: 'backdate:approve', label: 'Approve Backdated Booking/Reservation', group: 'Superadmin Controls' },
 ]
 
 const ALL: Permission[] = ALL_PERMISSIONS.map(p => p.key)
 
 export const ROLE_DEFINITIONS: RoleDefinition[] = [
   {
+    key: 'superadmin',
+    label: 'Superadmin',
+    description: 'Highest authority role. Can approve backdated bookings, manage admins/staff, and perform all sensitive edits/deletes with audit oversight.',
+    color: 'bg-black text-white',
+    permissions: ALL,
+  },
+  {
     key: 'admin',
     label: 'Administrator',
-    description: 'Full access to all features including user and role management.',
+    description: 'Full hotel admin access except superadmin-only approvals such as backdated booking authorization.',
     color: 'bg-red-100 text-red-800',
-    permissions: ALL,
+    permissions: ALL.filter(p => !['backdate:approve'].includes(p)),
   },
   {
     key: 'manager',
     label: 'Manager',
-    description: 'Full operational access. Can view analytics, manage bookings, rooms, guests, and transactions. Cannot manage roles.',
+    description: 'Broad operational access across bookings, reservations, reports, payments and analytics. Room creation, editing and deletion remain superadmin-only.',
     color: 'bg-purple-100 text-purple-800',
     permissions: ALL.filter(p => ![
       'roles:manage',
@@ -132,18 +145,20 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
       'rooms:create',
       'rooms:edit',
       'rooms:delete',
+      'backdate:approve',
     ].includes(p)),
   },
   {
     key: 'accountant',
     label: 'Accountant',
-    description: 'Financial access only. Can view and export transactions, analytics, payments, city ledger and reconciliation.',
+    description: 'Financial access for payments, transactions, city ledger, reports, analytics, reconciliation and room folio review.',
     color: 'bg-blue-100 text-blue-800',
     permissions: [
       'dashboard:view',
       'transactions:view', 'transactions:export',
       'analytics:view', 'analytics:export',
       'payments:view', 'payments:create', 'payments:refund',
+      'reports:view', 'reports:export',
       'ledger:view', 'ledger:manage',
       'reconciliation:view', 'reconciliation:manage',
       'night_audit:view',
@@ -151,12 +166,14 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
       'reservations:view',
       'guests:view',
       'organizations:view',
+      'rooms:view',
+      'settings:view',
     ],
   },
   {
     key: 'front_desk',
     label: 'Front Desk',
-    description: 'Can manage bookings, check-ins/outs, reservations, guests and payments. No access to analytics or admin settings.',
+    description: 'Can create bookings, bulk bookings and reservations, manage guest check-in/out, add charges, extend stays, record payments, create organizations, and run night audit. Room CRUD is superadmin-only.',
     color: 'bg-green-100 text-green-800',
     permissions: [
       'dashboard:view',
@@ -166,15 +183,17 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
       'guests:view', 'guests:create', 'guests:edit',
       'transactions:view', 'transactions:create',
       'payments:view', 'payments:create',
-      'organizations:view',
+      'organizations:view', 'organizations:create',
       'ledger:view',
-      'night_audit:view', 'night_audit:run',
+      'night_audit:view', 'night_audit:run', 'audit_trails:view',
+      'backdate:request',
+      'settings:view',
     ],
   },
   {
     key: 'receptionist',
     label: 'Receptionist',
-    description: 'View-only access to bookings, reservations, rooms and guests. Can perform check-in and check-out.',
+    description: 'Front-office view access for bookings, reservations, rooms, guests, payments and transactions, with check-in/check-out support.',
     color: 'bg-yellow-100 text-yellow-800',
     permissions: [
       'dashboard:view',
@@ -184,22 +203,24 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
       'guests:view', 'guests:create',
       'payments:view',
       'transactions:view',
+      'settings:view',
     ],
   },
   {
     key: 'staff',
     label: 'Staff',
-    description: 'Basic access. Can view dashboard, rooms and their own assigned tasks only.',
+    description: 'Basic view access for operational context only.',
     color: 'bg-gray-100 text-gray-800',
     permissions: [
       'rooms:view',
       'bookings:view',
+      'settings:view',
     ],
   },
   {
     key: 'housekeeping',
     label: 'Housekeeper',
-    description: 'Can manage housekeeping tasks, update room cleaning status, view bookings/reservations and submit daily reports.',
+    description: 'Housekeeping access without dashboard access. Can view assigned work, update room status with comments, and submit daily reports.',
     color: 'bg-teal-100 text-teal-800',
     permissions: [
       'housekeeping:view', 'housekeeping:create', 'housekeeping:edit', 'housekeeping:report',
@@ -212,7 +233,7 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
   {
     key: 'maintenance',
     label: 'Maintenance',
-    description: 'Can manage maintenance work orders, update room maintenance status, view bookings/reservations and submit reports.',
+    description: 'Maintenance access without dashboard access. Can view work orders, update room status with comments, and submit maintenance reports.',
     color: 'bg-orange-100 text-orange-800',
     permissions: [
       'maintenance:view', 'maintenance:create', 'maintenance:edit', 'maintenance:report',
@@ -230,6 +251,15 @@ export function getRoleDefinition(roleKey: string): RoleDefinition | undefined {
 
 export function hasPermission(userRole: string | null | undefined, permission: Permission): boolean {
   if (!userRole) return false
+  if (['rooms:create', 'rooms:edit', 'rooms:delete'].includes(permission)) {
+    return userRole === 'superadmin'
+  }
+  if (['bookings:edit', 'reservations:edit'].includes(permission)) {
+    return userRole === 'superadmin'
+  }
+  if (['guests:edit', 'guests:delete', 'organizations:edit', 'organizations:delete'].includes(permission)) {
+    return userRole === 'superadmin'
+  }
   const role = getRoleDefinition(userRole)
   if (!role) return false
   return role.permissions.includes(permission)

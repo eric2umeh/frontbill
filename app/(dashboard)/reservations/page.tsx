@@ -17,6 +17,7 @@ import { BulkBookingModal } from '@/components/reservations/bulk-booking-modal'
 import { NewReservationModal } from '@/components/reservations/new-reservation-modal'
 import { getUserDisplayName } from '@/lib/utils/user-display'
 import { fetchUserDisplayNameMap } from '@/lib/utils/fetch-user-display-names'
+import { getBulkGroupId } from '@/lib/utils/bulk-booking'
 
 interface Reservation {
   id: string
@@ -39,6 +40,11 @@ interface Reservation {
   created_by_name?: string
   updated_by?: string
   updated_by_name?: string
+  is_bulk?: boolean
+  bulk_group_id?: string
+  room_count?: number
+  guest_count?: number
+  total_amount?: number
   guests?: { name: string; phone: string }
   rooms?: { room_number: string; room_type: string }
 }
@@ -71,14 +77,14 @@ export default function ReservationsPage() {
         .from('bookings')
         .select(`
           id, folio_id, guest_id, room_id, check_in, check_out, status, payment_status,
-          rate_per_night, balance, deposit, notes, created_by, updated_by,
+          rate_per_night, total_amount, balance, deposit, notes, created_by, created_at, updated_by,
           guests:guest_id(id, name, phone),
           rooms:room_id(id, room_number, room_type)
         `)
         .eq('organization_id', organizationId)
         .eq('status', 'reserved')
         .gt('check_in', new Date().toISOString().split('T')[0])
-        .order('check_in', { ascending: true })
+        .order('created_at', { ascending: false })
 
       if (error) throw error
 
@@ -128,7 +134,7 @@ export default function ReservationsPage() {
         }
       })
       
-      setReservations(reservationsWithData)
+      setReservations(groupBulkRows(reservationsWithData))
     } catch (error: any) {
       console.error('Error fetching reservations:', error)
       setReservations([])
@@ -149,6 +155,48 @@ export default function ReservationsPage() {
     cancelled: 'bg-red-500/10 text-red-700 border-red-200',
   }
 
+  const groupBulkRows = (rows: Reservation[]) => {
+    const grouped = new Map<string, Reservation[]>()
+    const singles: Reservation[] = []
+
+    rows.forEach((row) => {
+      const groupId = getBulkGroupId(row)
+      if (!groupId) {
+        singles.push(row)
+        return
+      }
+      grouped.set(groupId, [...(grouped.get(groupId) || []), row])
+    })
+
+    const bulkRows = Array.from(grouped.entries()).map(([groupId, groupRows]) => {
+      const first = groupRows[0]
+      const guestNames = Array.from(new Set(groupRows.map(row => row.guests?.name).filter(Boolean)))
+      const roomTypes = Array.from(new Set(groupRows.map(row => row.rooms?.room_type).filter(Boolean)))
+      return {
+        ...first,
+        folio_id: `Bulk ${groupId}`,
+        is_bulk: true,
+        bulk_group_id: groupId,
+        room_count: groupRows.length,
+        guest_count: guestNames.length,
+        total_amount: groupRows.reduce((sum, row) => sum + Number(row.total_amount || 0), 0),
+        deposit: groupRows.reduce((sum, row) => sum + Number(row.deposit || 0), 0),
+        balance: groupRows.reduce((sum, row) => sum + Number(row.balance || 0), 0),
+        guests: {
+          name: guestNames.length > 1 ? `${guestNames[0]} + ${guestNames.length - 1} more` : guestNames[0] || 'Bulk Guests',
+          phone: `${groupRows.length} room${groupRows.length === 1 ? '' : 's'}`,
+        },
+        guestName: guestNames.join(' '),
+        rooms: {
+          room_number: `${groupRows.length}`,
+          room_type: roomTypes.join(', ') || 'Multiple rooms',
+        },
+      }
+    })
+
+    return [...bulkRows, ...singles].sort((a, b) => new Date(b.check_in).getTime() - new Date(a.check_in).getTime())
+  }
+
   if (initialLoading) {
     return (
       <div className="flex items-center justify-center h-96">
@@ -162,19 +210,19 @@ export default function ReservationsPage() {
       <BulkBookingModal open={bulkModalOpen} onClose={() => setBulkModalOpen(false)} onSuccess={() => { setBulkModalOpen(false); fetchReservations() }} />
       <NewReservationModal open={newReservationOpen} onClose={() => setNewReservationOpen(false)} onSuccess={() => { setNewReservationOpen(false); fetchReservations() }} />
       
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Reservations</h1>
           <p className="text-muted-foreground">Manage future bookings and reservations</p>
         </div>
         {hasPermission(role, 'reservations:create') && (
-          <div className="flex gap-2">
-            <Button variant="outline" onClick={() => setBulkModalOpen(true)}>
-              <Users className="mr-2 h-4 w-4" />
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+            <Button variant="outline" size="sm" className="w-full text-xs sm:w-auto sm:text-sm" onClick={() => setBulkModalOpen(true)}>
+              <Users className="mr-2 h-3.5 w-3.5 sm:h-4 sm:w-4" />
               Bulk Booking
             </Button>
-            <Button onClick={() => setNewReservationOpen(true)}>
-              <Plus className="mr-2 h-4 w-4" />
+            <Button size="sm" className="w-full text-xs sm:w-auto sm:text-sm" onClick={() => setNewReservationOpen(true)}>
+              <Plus className="mr-2 h-3.5 w-3.5 sm:h-4 sm:w-4" />
               New Reservation
             </Button>
           </div>
@@ -202,10 +250,10 @@ export default function ReservationsPage() {
             label: 'Folio Ref',
             render: (res) => (
               <Link 
-                href={`/reservations/${res.id}`}
+                href={res.is_bulk ? `/bulk-bookings/${res.bulk_group_id}` : `/reservations/${res.id}`}
                 className="font-mono text-sm cursor-pointer hover:text-primary"
               >
-                {res.folio_id}
+                {res.is_bulk ? `Bulk Reservation (${res.room_count} rooms)` : res.folio_id}
               </Link>
             ),
           },
@@ -214,7 +262,7 @@ export default function ReservationsPage() {
             label: 'Guest',
             render: (res) => (
               <Link 
-                href={`/reservations/${res.id}`}
+                href={res.is_bulk ? `/bulk-bookings/${res.bulk_group_id}` : `/reservations/${res.id}`}
                 className="cursor-pointer hover:text-primary block"
               >
                 <div className="font-medium">{res.guests?.name}</div>
@@ -226,8 +274,8 @@ export default function ReservationsPage() {
             key: 'room',
             label: 'Room',
             render: (res) => (
-              <Link href={`/reservations/${res.id}`} className="cursor-pointer block">
-                <div className="font-medium">Room {res.rooms?.room_number}</div>
+              <Link href={res.is_bulk ? `/bulk-bookings/${res.bulk_group_id}` : `/reservations/${res.id}`} className="cursor-pointer block">
+                <div className="font-medium">{res.is_bulk ? `${res.room_count} Rooms` : `Room ${res.rooms?.room_number}`}</div>
                 <div className="text-xs text-muted-foreground">{res.rooms?.room_type}</div>
               </Link>
             ),
@@ -316,7 +364,7 @@ export default function ReservationsPage() {
             label: 'Actions',
             render: (res) => (
               <Button asChild size="sm" variant="outline">
-                <Link href={`/reservations/${res.id}`}>View</Link>
+                <Link href={res.is_bulk ? `/bulk-bookings/${res.bulk_group_id}` : `/reservations/${res.id}`}>View</Link>
               </Button>
             ),
           },
@@ -336,7 +384,7 @@ export default function ReservationsPage() {
               <div className="grid grid-cols-2 gap-2 text-sm">
                 <div>
                   <div className="text-muted-foreground">Room</div>
-                  <div className="font-medium">Room {res.rooms?.room_number}</div>
+                  <div className="font-medium">{res.is_bulk ? `${res.room_count} Rooms` : `Room ${res.rooms?.room_number}`}</div>
                 </div>
                 <div>
                   <div className="text-muted-foreground">Check-in</div>

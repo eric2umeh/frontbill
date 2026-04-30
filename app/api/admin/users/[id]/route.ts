@@ -1,5 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
+import { formatPersonName } from '@/lib/utils/name-format'
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -26,14 +27,14 @@ export async function PATCH(request: Request, { params }: Params) {
       return NextResponse.json({ error: 'Caller profile not found' }, { status: 403 })
     }
 
-    if (!['admin', 'manager'].includes(callerProfile.role)) {
-      return NextResponse.json({ error: 'Only admins or managers can update users' }, { status: 403 })
+    if (!['superadmin', 'admin', 'manager'].includes(callerProfile.role)) {
+      return NextResponse.json({ error: 'Only superadmins, admins or managers can update users' }, { status: 403 })
     }
 
     // Verify target user belongs to same org
     const { data: targetProfile } = await admin
       .from('profiles')
-      .select('organization_id')
+      .select('organization_id, role')
       .eq('id', id)
       .single()
 
@@ -41,10 +42,15 @@ export async function PATCH(request: Request, { params }: Params) {
       return NextResponse.json({ error: 'User not found in your organization' }, { status: 404 })
     }
 
+    if ((updates.role === 'superadmin' || targetProfile.role === 'superadmin') && callerProfile.role !== 'superadmin') {
+      return NextResponse.json({ error: 'Only a superadmin can assign or edit a superadmin' }, { status: 403 })
+    }
+
     // Update auth user (password and/or metadata)
     const authUpdates: Record<string, any> = {}
+    const formattedFullName = updates.full_name ? formatPersonName(updates.full_name) : ''
     if (updates.password) authUpdates.password = updates.password
-    if (updates.full_name) authUpdates.user_metadata = { full_name: updates.full_name }
+    if (updates.full_name) authUpdates.user_metadata = { full_name: formattedFullName }
 
     if (Object.keys(authUpdates).length > 0) {
       const { error: authError } = await admin.auth.admin.updateUserById(id, authUpdates)
@@ -54,7 +60,7 @@ export async function PATCH(request: Request, { params }: Params) {
     // Update profile row
     const profileUpdates: Record<string, any> = { updated_at: new Date().toISOString() }
     if (updates.role) profileUpdates.role = updates.role
-    if (updates.full_name) profileUpdates.full_name = updates.full_name
+    if (updates.full_name) profileUpdates.full_name = formattedFullName
 
     const { error: profileError } = await admin
       .from('profiles')
@@ -95,19 +101,23 @@ export async function DELETE(request: Request, { params }: Params) {
       return NextResponse.json({ error: 'Caller profile not found' }, { status: 403 })
     }
 
-    if (!['admin', 'manager'].includes(callerProfile.role)) {
-      return NextResponse.json({ error: 'Only admins or managers can delete users' }, { status: 403 })
+    if (!['superadmin', 'admin', 'manager'].includes(callerProfile.role)) {
+      return NextResponse.json({ error: 'Only superadmins, admins or managers can delete users' }, { status: 403 })
     }
 
     // Verify target belongs to same org
     const { data: targetProfile } = await admin
       .from('profiles')
-      .select('organization_id')
+      .select('organization_id, role')
       .eq('id', id)
       .single()
 
     if (!targetProfile || targetProfile.organization_id !== callerProfile.organization_id) {
       return NextResponse.json({ error: 'User not found in your organization' }, { status: 404 })
+    }
+
+    if (targetProfile.role === 'superadmin' && callerProfile.role !== 'superadmin') {
+      return NextResponse.json({ error: 'Only a superadmin can delete another superadmin' }, { status: 403 })
     }
 
     // Delete auth user (cascade deletes profile via FK)

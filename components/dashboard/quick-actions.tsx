@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { CreditCard, FileText } from 'lucide-react'
+import { ClipboardCheck, CreditCard, FileText } from 'lucide-react'
 
 export function QuickActions() {
   return (
@@ -25,9 +25,9 @@ export function QuickActions() {
           </Link>
         </Button>
         <Button asChild variant="outline" className="h-20 flex-col gap-2">
-          <Link href="/reconciliation">
-            <FileText className="h-5 w-5" />
-            <span className="text-xs">Reconciliation</span>
+          <Link href="/night-audit">
+            <ClipboardCheck className="h-5 w-5" />
+            <span className="text-xs">Night Audit</span>
           </Link>
         </Button>
         <Button asChild variant="outline" className="h-20 flex-col gap-2">

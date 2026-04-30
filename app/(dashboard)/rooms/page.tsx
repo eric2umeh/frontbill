@@ -39,8 +39,8 @@ export default function RoomsPage() {
   const { organizationId, role, userId } = useAuth()
   const router = useRouter()
 
-  // Only admins can create rooms. Other roles can view only.
-  const canAddRoom = role === 'admin'
+  // Only superadmins can create rooms. Other roles can view only.
+  const canAddRoom = role === 'superadmin'
 
   useEffect(() => {
     fetchRooms()

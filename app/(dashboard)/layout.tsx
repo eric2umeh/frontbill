@@ -20,13 +20,14 @@ interface DashboardUser {
 const ROUTE_PERMISSIONS: Array<{ path: string; permission: Permission }> = [
   { path: '/dashboard', permission: 'dashboard:view' },
   { path: '/bookings', permission: 'bookings:view' },
+  { path: '/bulk-bookings', permission: 'bookings:view' },
   { path: '/reservations', permission: 'reservations:view' },
   { path: '/accounts', permission: 'guests:view' },
   { path: '/guest-database', permission: 'guests:view' },
   { path: '/organizations', permission: 'organizations:view' },
   { path: '/transactions', permission: 'transactions:view' },
   { path: '/payments', permission: 'payments:view' },
-  { path: '/reports', permission: 'analytics:view' },
+  { path: '/reports', permission: 'reports:view' },
   { path: '/analytics', permission: 'analytics:view' },
   { path: '/night-audit', permission: 'night_audit:view' },
   { path: '/reconciliation', permission: 'reconciliation:view' },
@@ -106,7 +107,7 @@ export default function DashboardLayout({
               organizationId: profile.organization_id || '',
             })
             // Check if role has dashboard access
-            const allowedRoles = ['admin', 'manager', 'front_desk', 'receptionist', 'housekeeping', 'maintenance', 'accountant']
+            const allowedRoles = ['superadmin', 'admin', 'manager', 'front_desk', 'receptionist', 'housekeeping', 'maintenance', 'accountant']
             if (!allowedRoles.includes(profile.role || 'admin')) {
               if (isMounted) {
                 setRedirected(true)

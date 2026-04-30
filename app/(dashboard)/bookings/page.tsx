@@ -7,17 +7,19 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { CardContent } from '@/components/ui/card'
 import { NewBookingModal } from '@/components/bookings/new-booking-modal'
+import { BulkBookingModal } from '@/components/reservations/bulk-booking-modal'
 import { ExtendStayModal } from '@/components/bookings/extend-stay-modal'
 import { AddChargeModal } from '@/components/bookings/add-charge-modal'
 import { formatNaira } from '@/lib/utils/currency'
 import { usePageData } from '@/hooks/use-page-data'
 import { useAuth } from '@/lib/auth-context'
 import { hasPermission } from '@/lib/permissions'
-import { Plus, Loader2 } from 'lucide-react'
+import { Plus, Loader2, Users } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { getUserDisplayName } from '@/lib/utils/user-display'
 import { fetchUserDisplayNameMap } from '@/lib/utils/fetch-user-display-names'
+import { getBulkGroupId } from '@/lib/utils/bulk-booking'
 
 interface Booking {
   id: string
@@ -43,6 +45,11 @@ interface Booking {
   updated_by?: string
   updated_by_name?: string
   updated_at?: string
+  notes?: string
+  is_bulk?: boolean
+  bulk_group_id?: string
+  room_count?: number
+  guest_count?: number
   guests?: { name: string; phone: string }
   rooms?: { room_number: string; room_type: string }
 }
@@ -50,13 +57,15 @@ interface Booking {
 export default function BookingsPage() {
   const [bookings, setBookings] = useState<Booking[]>([])
   const [modalOpen, setModalOpen] = useState(false)
+  const [bulkModalOpen, setBulkModalOpen] = useState(false)
   const [extendModalOpen, setExtendModalOpen] = useState(false)
   const [addChargeModalOpen, setAddChargeModalOpen] = useState(false)
   const [selectedBooking, setSelectedBooking] = useState<any>(null)
   const { initialLoading, startFetch, endFetch } = usePageData()
   const { organizationId, role, userId } = useAuth()
   const router = useRouter()
-  const isAdmin = role === 'admin'
+  const isSuperadmin = role === 'superadmin'
+  const canManageFolio = isSuperadmin || role === 'front_desk'
 
   useEffect(() => {
     let isMounted = true
@@ -78,9 +87,10 @@ export default function BookingsPage() {
         .from('bookings')
         .select('*, guests(name, phone), rooms(room_number, room_type), created_by, updated_by, updated_at')
         .eq('organization_id', organizationId)
-        .in('status', ['confirmed', 'checked_in'])
+        .in('status', ['confirmed', 'checked_in', 'reserved'])
         .lte('check_in', new Date().toISOString().split('T')[0])
         .order('check_in', { ascending: false })
+        .order('created_at', { ascending: false })
 
       if (error) throw error
       
@@ -142,7 +152,7 @@ export default function BookingsPage() {
         }
       }
 
-      setBookings(bookingsWithUsers)
+      setBookings(groupBulkRows(bookingsWithUsers))
     } catch (error: any) {
       console.error('Error fetching bookings:', error)
       toast.error('Failed to load bookings')
@@ -172,6 +182,49 @@ export default function BookingsPage() {
     return Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24))
   }
 
+  const groupBulkRows = (rows: Booking[]) => {
+    const grouped = new Map<string, Booking[]>()
+    const singles: Booking[] = []
+
+    rows.forEach((row) => {
+      const groupId = getBulkGroupId(row)
+      if (!groupId) {
+        singles.push(row)
+        return
+      }
+      grouped.set(groupId, [...(grouped.get(groupId) || []), row])
+    })
+
+    const bulkRows = Array.from(grouped.entries()).map(([groupId, groupRows]) => {
+      const first = groupRows[0]
+      const guestNames = Array.from(new Set(groupRows.map(row => row.guests?.name).filter(Boolean)))
+      const roomTypes = Array.from(new Set(groupRows.map(row => row.rooms?.room_type).filter(Boolean)))
+      return {
+        ...first,
+        id: first.id,
+        folio_id: `Bulk ${groupId}`,
+        is_bulk: true,
+        bulk_group_id: groupId,
+        room_count: groupRows.length,
+        guest_count: guestNames.length,
+        total_amount: groupRows.reduce((sum, row) => sum + Number(row.total_amount || 0), 0),
+        deposit: groupRows.reduce((sum, row) => sum + Number(row.deposit || 0), 0),
+        balance: groupRows.reduce((sum, row) => sum + Number(row.balance || 0), 0),
+        guests: {
+          name: guestNames.length > 1 ? `${guestNames[0]} + ${guestNames.length - 1} more` : guestNames[0] || 'Bulk Guests',
+          phone: `${groupRows.length} room${groupRows.length === 1 ? '' : 's'}`,
+        },
+        guestName: guestNames.join(' '),
+        rooms: {
+          room_number: `${groupRows.length}`,
+          room_type: roomTypes.join(', ') || 'Multiple rooms',
+        },
+      }
+    })
+
+    return [...bulkRows, ...singles].sort((a, b) => new Date(b.check_in).getTime() - new Date(a.check_in).getTime())
+  }
+
   if (initialLoading) {
     return (
       <div className="flex items-center justify-center h-96">
@@ -183,6 +236,7 @@ export default function BookingsPage() {
   return (
     <div className="space-y-6">
       <NewBookingModal open={modalOpen} onClose={() => { setModalOpen(false); fetchBookings() }} />
+      <BulkBookingModal open={bulkModalOpen} onClose={() => setBulkModalOpen(false)} onSuccess={() => { setBulkModalOpen(false); fetchBookings() }} />
       {selectedBooking && (
         <>
           <ExtendStayModal 
@@ -204,16 +258,22 @@ export default function BookingsPage() {
         </>
       )}
       
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Bookings</h1>
           <p className="text-muted-foreground">Manage active bookings and check-ins</p>
         </div>
         {hasPermission(role, 'bookings:create') && (
-          <Button onClick={() => setModalOpen(true)}>
-            <Plus className="mr-2 h-4 w-4" />
-            New Booking
-          </Button>
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+            <Button variant="outline" size="sm" className="w-full text-xs sm:w-auto sm:text-sm" onClick={() => setBulkModalOpen(true)}>
+              <Users className="mr-2 h-3.5 w-3.5 sm:h-4 sm:w-4" />
+              Bulk Booking
+            </Button>
+            <Button size="sm" className="w-full text-xs sm:w-auto sm:text-sm" onClick={() => setModalOpen(true)}>
+              <Plus className="mr-2 h-3.5 w-3.5 sm:h-4 sm:w-4" />
+              New Booking
+            </Button>
+          </div>
         )}
       </div>
 
@@ -248,9 +308,9 @@ export default function BookingsPage() {
             render: (booking) => (
               <div 
                 className="font-mono text-sm cursor-pointer hover:text-primary"
-                onClick={() => router.push(`/bookings/${booking.id}`)}
+                onClick={() => router.push(booking.is_bulk ? `/bulk-bookings/${booking.bulk_group_id}` : `/bookings/${booking.id}`)}
               >
-                {booking.folio_id}
+                {booking.is_bulk ? `Bulk Booking (${booking.room_count} rooms)` : booking.folio_id}
               </div>
             ),
           },
@@ -260,7 +320,7 @@ export default function BookingsPage() {
             render: (booking) => (
               <div 
                 className="cursor-pointer hover:text-primary"
-                onClick={() => router.push(`/bookings/${booking.id}`)}
+                onClick={() => router.push(booking.is_bulk ? `/bulk-bookings/${booking.bulk_group_id}` : `/bookings/${booking.id}`)}
               >
                 <div className="font-medium">{booking.guests?.name}</div>
                 <div className="text-xs text-muted-foreground">{booking.guests?.phone}</div>
@@ -272,7 +332,7 @@ export default function BookingsPage() {
             label: 'Room',
             render: (booking) => (
               <div>
-                <div className="font-medium">Room {booking.rooms?.room_number}</div>
+                <div className="font-medium">{booking.is_bulk ? `${booking.room_count} Rooms` : `Room ${booking.rooms?.room_number}`}</div>
                 <div className="text-xs text-muted-foreground">{booking.rooms?.room_type}</div>
               </div>
             ),
@@ -360,7 +420,7 @@ export default function BookingsPage() {
           {
             key: 'actions',
             label: 'Actions',
-            render: (booking) => isAdmin ? (
+            render: (booking) => canManageFolio && !booking.is_bulk ? (
               <div className="flex gap-2">
                 <Button 
                   size="sm" 

@@ -23,8 +23,6 @@ export default function SettingsPage() {
   const [hotelAddress, setHotelAddress] = useState('')
   const [hotelPhone, setHotelPhone] = useState('')
   const [hotelLoading, setHotelLoading] = useState(true)
-  const [hotelSaving, setHotelSaving] = useState(false)
-
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
@@ -59,30 +57,11 @@ export default function SettingsPage() {
     fetchHotelInfo()
   }, [organizationId])
 
-  async function handleSaveHotel() {
-    if (!organizationId || !supabase) return
-    setHotelSaving(true)
-    try {
-      const { error } = await supabase
-        .from('organizations')
-        .update({
-          name: hotelName.trim(),
-          email: hotelEmail.trim(),
-          address: hotelAddress.trim(),
-          phone: hotelPhone.trim(),
-        })
-        .eq('id', organizationId)
-
-      if (error) throw error
-      toast.success('Hotel information updated successfully')
-    } catch (err: any) {
-      toast.error(err.message || 'Failed to update hotel information')
-    } finally {
-      setHotelSaving(false)
-    }
-  }
-
   async function handleUpdatePassword() {
+    if (!currentPassword) {
+      toast.error('Please enter your current password')
+      return
+    }
     if (newPassword.length < 6) {
       toast.error('New password must be at least 6 characters')
       return
@@ -94,6 +73,12 @@ export default function SettingsPage() {
     if (!supabase) return
     setPasswordSaving(true)
     try {
+      const { error: verifyError } = await supabase.auth.signInWithPassword({
+        email,
+        password: currentPassword,
+      })
+      if (verifyError) throw new Error('Current password is incorrect')
+
       const { error } = await supabase.auth.updateUser({ password: newPassword })
       if (error) throw error
       toast.success('Password updated successfully')
@@ -122,10 +107,10 @@ export default function SettingsPage() {
           <div className="flex items-center gap-2">
             <Building2 className="h-5 w-5" />
             <CardTitle>Hotel Information</CardTitle>
-            {role !== 'admin' && <Badge variant="outline" className="ml-auto">View Only</Badge>}
+            <Badge variant="outline" className="ml-auto">View Only</Badge>
           </div>
           <CardDescription>
-            {role === 'admin' ? 'Update your hotel details for documents and reports' : 'Hotel details (admins only can edit)'}
+            Hotel details are view-only here.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -142,8 +127,7 @@ export default function SettingsPage() {
                     id="hotel_name"
                     placeholder="Grand Hotel"
                     value={hotelName}
-                    onChange={(e) => setHotelName(e.target.value)}
-                    disabled={role !== 'admin' || hotelSaving}
+                    disabled
                   />
                 </div>
                 <div className="space-y-2">
@@ -153,8 +137,7 @@ export default function SettingsPage() {
                     type="email"
                     placeholder="info@hotel.com"
                     value={hotelEmail}
-                    onChange={(e) => setHotelEmail(e.target.value)}
-                    disabled={role !== 'admin' || hotelSaving}
+                    disabled
                   />
                 </div>
               </div>
@@ -164,8 +147,7 @@ export default function SettingsPage() {
                   id="hotel_address"
                   placeholder="123 Main Street, Lagos"
                   value={hotelAddress}
-                  onChange={(e) => setHotelAddress(e.target.value)}
-                  disabled={role !== 'admin' || hotelSaving}
+                  disabled
                 />
               </div>
               <div className="grid gap-4 md:grid-cols-2">
@@ -175,8 +157,7 @@ export default function SettingsPage() {
                     id="hotel_phone"
                     placeholder="+234 800 000 0000"
                     value={hotelPhone}
-                    onChange={(e) => setHotelPhone(e.target.value)}
-                    disabled={role !== 'admin' || hotelSaving}
+                    disabled
                   />
                 </div>
                 <div className="space-y-2">
@@ -184,13 +165,6 @@ export default function SettingsPage() {
                   <Input id="currency" value="Nigerian Naira (₦)" disabled />
                 </div>
               </div>
-              <Separator />
-              {role === 'admin' && (
-                <Button onClick={handleSaveHotel} disabled={hotelSaving}>
-                  {hotelSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                  Save Changes
-                </Button>
-              )}
             </>
           )}
         </CardContent>

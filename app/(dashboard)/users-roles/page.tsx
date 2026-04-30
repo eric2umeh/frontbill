@@ -15,9 +15,10 @@ import { Separator } from '@/components/ui/separator'
 import { toast } from 'sonner'
 import { usePageData } from '@/hooks/use-page-data'
 import { useAuth } from '@/lib/auth-context'
+import { formatPersonName } from '@/lib/utils/name-format'
 import {
   Loader2, Search, ShieldCheck, Check, X, Users, Edit2, Plus,
-  Trash2, Eye, EyeOff, KeyRound,
+  Trash2, Eye, EyeOff, KeyRound, CalendarClock,
 } from 'lucide-react'
 
 interface UserProfile {
@@ -37,6 +38,19 @@ interface AddUserForm {
   email: string
   password: string
   role: string
+}
+
+interface BackdateRequest {
+  id: string
+  request_type: string
+  requested_check_in: string
+  requested_check_out: string | null
+  reason: string
+  status: 'pending' | 'approved' | 'rejected'
+  requested_by_name: string
+  approved_by_name?: string | null
+  decision_note?: string | null
+  created_at: string
 }
 
 const EMPTY_ADD_FORM: AddUserForm = { full_name: '', email: '', password: '', role: '' }
@@ -66,6 +80,8 @@ export default function UsersRolesPage() {
 
   // Roles view
   const [viewingRole, setViewingRole] = useState<RoleKey | null>(null)
+  const [backdateRequests, setBackdateRequests] = useState<BackdateRequest[]>([])
+  const [decidingRequestId, setDecidingRequestId] = useState<string | null>(null)
 
   const router = useRouter()
 
@@ -74,7 +90,7 @@ export default function UsersRolesPage() {
   const fetchUsers = async () => {
     startFetch()
     try {
-      if (!['admin', 'manager'].includes(currentUserRole || '')) {
+      if (!['superadmin', 'admin', 'manager'].includes(currentUserRole || '')) {
         router.push('/dashboard')
         return
       }
@@ -85,6 +101,7 @@ export default function UsersRolesPage() {
       const json = await res.json()
       if (!res.ok) { toast.error(json.error || 'Failed to load users'); return }
       setUsers(json.users || [])
+      if (currentUserRole === 'superadmin') fetchBackdateRequests()
     } finally {
       endFetch()
     }
@@ -168,9 +185,10 @@ export default function UsersRolesPage() {
       const json = await res.json()
       if (!res.ok) { toast.error(json.error || 'Failed to update user'); return }
 
-      toast.success(`${editForm.full_name || editingUser.full_name} updated`)
+      const displayName = editForm.full_name ? formatPersonName(editForm.full_name) : editingUser.full_name
+      toast.success(`${displayName} updated`)
       setUsers(prev => prev.map(u => u.id === editingUser.id
-        ? { ...u, role: editForm.role, full_name: editForm.full_name || u.full_name }
+        ? { ...u, role: editForm.role, full_name: displayName || u.full_name }
         : u
       ))
       setEditingUser(null)
@@ -205,6 +223,42 @@ export default function UsersRolesPage() {
     }
   }
 
+  const fetchBackdateRequests = async () => {
+    if (currentUserRole !== 'superadmin') return
+    try {
+      const res = await fetch(`/api/backdate-requests?caller_id=${currentUserId}`, { credentials: 'include' })
+      const json = await res.json()
+      if (!res.ok) { toast.error(json.error || 'Failed to load backdate requests'); return }
+      setBackdateRequests(json.requests || [])
+    } catch {
+      toast.error('Failed to load backdate requests')
+    }
+  }
+
+  const decideBackdateRequest = async (requestId: string, status: 'approved' | 'rejected') => {
+    setDecidingRequestId(requestId)
+    try {
+      const decision_note = status === 'approved'
+        ? 'Approved by superadmin'
+        : 'Rejected by superadmin'
+      const res = await fetch('/api/backdate-requests', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ caller_id: currentUserId, request_id: requestId, status, decision_note }),
+      })
+      const json = await res.json()
+      if (!res.ok) { toast.error(json.error || 'Failed to update request'); return }
+      toast.success(`Backdate request ${status}`)
+      setBackdateRequests(prev => prev.map(item => item.id === requestId ? { ...item, ...json.request } : item))
+      fetchBackdateRequests()
+    } catch {
+      toast.error('Failed to update request')
+    } finally {
+      setDecidingRequestId(null)
+    }
+  }
+
   const filteredUsers = useMemo(() =>
     users.filter(u =>
       (u.full_name || '').toLowerCase().includes(search.toLowerCase()) ||
@@ -214,6 +268,10 @@ export default function UsersRolesPage() {
 
   const permissionGroups = getPermissionGroups()
   const roleDef = viewingRole ? ROLE_DEFINITIONS.find(r => r.key === viewingRole) : null
+  const canManageUsers = ['superadmin', 'admin', 'manager'].includes(currentUserRole || '')
+  const selectableRoles = currentUserRole === 'superadmin'
+    ? ROLE_DEFINITIONS
+    : ROLE_DEFINITIONS.filter(role => role.key !== 'superadmin')
 
   if (initialLoading) {
     return (
@@ -240,6 +298,12 @@ export default function UsersRolesPage() {
             <ShieldCheck className="h-4 w-4" />
             Roles & Permissions
           </TabsTrigger>
+          {currentUserRole === 'superadmin' && (
+            <TabsTrigger value="backdates" className="gap-2">
+              <CalendarClock className="h-4 w-4" />
+              Backdate Requests ({backdateRequests.filter(r => r.status === 'pending').length})
+            </TabsTrigger>
+          )}
         </TabsList>
 
         {/* ---- Users tab ---- */}
@@ -255,7 +319,7 @@ export default function UsersRolesPage() {
               />
             </div>
             <Badge variant="outline" className="text-muted-foreground">{filteredUsers.length} users</Badge>
-            {currentUserRole === 'admin' && (
+            {canManageUsers && (
               <Button size="sm" className="gap-2 ml-auto" onClick={() => { setAddOpen(true); setAddForm(EMPTY_ADD_FORM) }}>
                 <Plus className="h-4 w-4" />
                 Add User
@@ -267,6 +331,7 @@ export default function UsersRolesPage() {
             {filteredUsers.map(user => {
               const role = ROLE_DEFINITIONS.find(r => r.key === user.role)
               const isCurrentUser = user.id === currentUserId
+              const canActOnUser = canManageUsers && (currentUserRole === 'superadmin' || user.role !== 'superadmin')
               return (
                 <Card key={user.id} className="hover:shadow-sm transition-shadow">
                   <CardContent className="p-4">
@@ -302,8 +367,8 @@ export default function UsersRolesPage() {
                           </Badge>
                         )}
                       </div>
-                      {/* Actions — only admin, cannot act on self */}
-                      {currentUserRole === 'admin' && (
+                      {/* Actions */}
+                      {canActOnUser && (
                         <div className="flex items-center gap-1 shrink-0">
                           <Button variant="ghost" size="sm" className="gap-1.5" onClick={() => openEdit(user)}>
                             <Edit2 className="h-3.5 w-3.5" />
@@ -370,6 +435,70 @@ export default function UsersRolesPage() {
             ))}
           </div>
         </TabsContent>
+
+        {currentUserRole === 'superadmin' && (
+          <TabsContent value="backdates" className="mt-4 space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Approve or reject staff requests to create bookings/reservations with past check-in dates. Approved requests are kept as an audit trail.
+            </p>
+            <div className="grid gap-3">
+              {backdateRequests.length === 0 ? (
+                <Card>
+                  <CardContent className="py-8 text-center text-sm text-muted-foreground">
+                    No backdate requests yet.
+                  </CardContent>
+                </Card>
+              ) : backdateRequests.map(request => (
+                <Card key={request.id}>
+                  <CardContent className="p-4 space-y-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <p className="font-medium capitalize">{request.request_type.replace('_', ' ')} backdate</p>
+                          <Badge variant={request.status === 'pending' ? 'default' : request.status === 'approved' ? 'secondary' : 'destructive'}>
+                            {request.status}
+                          </Badge>
+                        </div>
+                        <p className="text-sm text-muted-foreground">
+                          Requested by {request.requested_by_name} for {request.requested_check_in}
+                          {request.requested_check_out ? ` to ${request.requested_check_out}` : ''}
+                        </p>
+                      </div>
+                      {request.status === 'pending' && (
+                        <div className="flex gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => decideBackdateRequest(request.id, 'rejected')}
+                            disabled={decidingRequestId === request.id}
+                          >
+                            Reject
+                          </Button>
+                          <Button
+                            size="sm"
+                            onClick={() => decideBackdateRequest(request.id, 'approved')}
+                            disabled={decidingRequestId === request.id}
+                          >
+                            {decidingRequestId === request.id ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                            Approve
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                    <div className="rounded-md bg-muted/40 p-3 text-sm">
+                      <span className="font-medium">Reason: </span>{request.reason}
+                    </div>
+                    {request.decision_note && (
+                      <p className="text-xs text-muted-foreground">
+                        Decision: {request.decision_note}{request.approved_by_name ? ` by ${request.approved_by_name}` : ''}
+                      </p>
+                    )}
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </TabsContent>
+        )}
       </Tabs>
 
       {/* ======== ADD USER DIALOG ======== */}
@@ -428,7 +557,7 @@ export default function UsersRolesPage() {
                   <SelectValue placeholder="Select a role" />
                 </SelectTrigger>
                 <SelectContent>
-                  {ROLE_DEFINITIONS.map(r => (
+                  {selectableRoles.map(r => (
                     <SelectItem key={r.key} value={r.key}>
                       <div className="flex flex-col">
                         <span className="font-medium">{r.label}</span>
@@ -477,7 +606,7 @@ export default function UsersRolesPage() {
                   <SelectValue placeholder="Select a role" />
                 </SelectTrigger>
                 <SelectContent>
-                  {ROLE_DEFINITIONS.map(r => (
+                  {selectableRoles.map(r => (
                     <SelectItem key={r.key} value={r.key}>
                       <div className="flex flex-col">
                         <span className="font-medium">{r.label}</span>

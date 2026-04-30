@@ -40,7 +40,15 @@ export default function DashboardPage() {
   const [bookingModalOpen, setBookingModalOpen] = useState(false)
   const [refreshKey, setRefreshKey] = useState(0)
   const [bookings, setBookings] = useState<any[]>([])
-  const [dailyData, setDailyData] = useState({ checkouts: 0, checkIns: 0, occupancy: 0, revenue: 0 })
+  const [dailyData, setDailyData] = useState({
+    checkouts: 0,
+    checkIns: 0,
+    occupancy: 0,
+    revenue: 0,
+    pendingCheckouts: 0,
+    expectedArrivals: 0,
+    outstandingBalance: 0,
+  })
   const { organizationId } = useAuth()
 
   const fetchDashboardData = useCallback(async () => {
@@ -50,31 +58,44 @@ export default function DashboardPage() {
     try {
       const today = new Date().toISOString().split('T')[0]
 
-      const [bookingsRes, roomsRes, paymentsRes, checkoutsRes] = await Promise.all([
-        supabase.from('bookings').select('*').eq('organization_id', organizationId).eq('status', 'checked_in'),
-        supabase.from('rooms').select('*').eq('organization_id', organizationId),
-        supabase.from('payments').select('*').eq('organization_id', organizationId)
+      const [bookingsRes, roomsRes, paymentsRes, checkoutsRes, arrivalsRes, pendingCheckoutsRes, balancesRes] = await Promise.all([
+        supabase
+          .from('bookings')
+          .select('id, folio_id, guest_id, room_id, check_in, check_out, number_of_nights, rate_per_night, total_amount, deposit, balance, payment_status, status, notes, guests:guest_id(id, name), rooms:room_id(room_number, room_type)')
+          .eq('organization_id', organizationId)
+          .order('check_in', { ascending: false })
+          .limit(100),
+        supabase.from('rooms').select('id, status').eq('organization_id', organizationId),
+        supabase.from('payments').select('id, amount, payment_date').eq('organization_id', organizationId)
           .gte('payment_date', `${today}T00:00:00`).lte('payment_date', `${today}T23:59:59`),
-        supabase.from('bookings').select('*').eq('organization_id', organizationId).eq('status', 'checked_out')
-          .gte('check_out_date', `${today}T00:00:00`).lte('check_out_date', `${today}T23:59:59`),
+        supabase.from('bookings').select('id').eq('organization_id', organizationId).eq('status', 'checked_out').eq('check_out', today),
+        supabase.from('bookings').select('id').eq('organization_id', organizationId).eq('status', 'reserved').eq('check_in', today),
+        supabase.from('bookings').select('id').eq('organization_id', organizationId).in('status', ['confirmed', 'checked_in']).eq('check_out', today),
+        supabase.from('bookings').select('balance').eq('organization_id', organizationId).gt('balance', 0).in('status', ['confirmed', 'checked_in', 'reserved']),
       ])
 
       const allBookings = bookingsRes.data || []
       const rooms = roomsRes.data || []
       const payments = paymentsRes.data || []
       const checkouts = checkoutsRes.data || []
+      const arrivals = arrivalsRes.data || []
+      const pendingCheckouts = pendingCheckoutsRes.data || []
+      const outstandingBalance = (balancesRes.data || []).reduce((sum: number, booking: any) => sum + Number(booking.balance || 0), 0)
 
       const totalRooms = rooms.length
-      const occupiedRooms = allBookings.length
+      const occupiedRooms = rooms.filter((room: any) => room.status === 'occupied').length
       const occupancyRate = totalRooms > 0 ? Math.round((occupiedRooms / totalRooms) * 100) : 0
       const totalRevenue = payments.reduce((sum: number, p: any) => sum + p.amount, 0)
 
       setBookings(allBookings)
       setDailyData({
         checkouts: checkouts.length,
-        checkIns: allBookings.length,
+        checkIns: arrivals.length,
         occupancy: occupancyRate,
         revenue: totalRevenue,
+        pendingCheckouts: pendingCheckouts.length,
+        expectedArrivals: arrivals.length,
+        outstandingBalance,
       })
     } catch (error) {
       console.error('Error fetching dashboard data:', error)

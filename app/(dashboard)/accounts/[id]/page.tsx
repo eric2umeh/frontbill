@@ -105,15 +105,26 @@ export default function AccountDetailPage() {
 
       if (isGuest) {
         // --- GUEST ACCOUNT ---
-        const [{ data: guest }, { data: bookingData }] = await Promise.all([
-          supabase.from('guests').select('*').eq('id', actualId).eq('organization_id', profile.organization_id).single(),
-          supabase.from('bookings')
-            .select('id, folio_id, check_in, check_out, number_of_nights, total_amount, deposit, balance, payment_status, status, rooms(room_number, room_type)')
-            .eq('guest_id', actualId)
-            .order('check_in', { ascending: false }),
-        ])
+        const { data: guest } = await supabase.from('guests').select('*').eq('id', actualId).eq('organization_id', profile.organization_id).single()
 
         if (!guest) { router.push('/accounts'); return }
+
+        const { data: duplicateGuests } = await supabase
+          .from('guests')
+          .select('id, name')
+          .eq('organization_id', profile.organization_id)
+
+        const guestNameKey = String(guest.name || '').trim().replace(/\s+/g, ' ').toLowerCase()
+        const relatedGuestIds = Array.from(new Set((duplicateGuests || [])
+          .filter((item: any) => String(item.name || '').trim().replace(/\s+/g, ' ').toLowerCase() === guestNameKey)
+          .map((item: any) => item.id)))
+
+        const { data: bookingData } = await supabase
+          .from('bookings')
+          .select('id, folio_id, check_in, check_out, number_of_nights, total_amount, deposit, balance, payment_status, status, rooms(room_number, room_type)')
+          .in('guest_id', relatedGuestIds.length > 0 ? relatedGuestIds : [actualId])
+          .order('check_in', { ascending: false })
+
         setGuestData(guest)
 
         const rawBookings = bookingData || []
@@ -139,12 +150,20 @@ export default function AccountDetailPage() {
           }
         }
 
-        const enrichedBookings = rawBookings.map((b: any) => ({ ...b, balance: folioPendingByBooking[b.id] ?? 0 }))
+        const enrichedBookings = rawBookings.map((b: any) => {
+          const fallbackOwed = Math.max(0, Number(b.total_amount || 0) - Number(b.deposit || 0))
+          const outstanding = Math.max(
+            Number(folioPendingByBooking[b.id] || 0),
+            Number(b.balance || 0),
+            fallbackOwed
+          )
+          return { ...b, balance: outstanding }
+        })
         setBookings(enrichedBookings)
         setFolioPaymentsSum(folioPaymentsTotal)
         if (enrichedBookings.length > 0) setSelectedFolioId(enrichedBookings[0].folio_id)
 
-        const pendingTotal = Object.values(folioPendingByBooking).reduce((s, v) => s + v, 0)
+        const pendingTotal = enrichedBookings.reduce((sum: number, booking: any) => sum + Number(booking.balance || 0), 0)
         setGuestPendingBalance(pendingTotal)
 
         const { data: ledger } = await supabase

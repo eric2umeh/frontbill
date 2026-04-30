@@ -24,7 +24,7 @@ export default function ReservationDetailPage({
 }) {
   const router = useRouter()
   const { role, userId } = useAuth()
-  const isAdmin = role === 'admin'
+  const isSuperadmin = role === 'superadmin'
   const [rid, setRid] = useState('')
   const [reservation, setReservation] = useState<any>(null)
   const [loading, setLoading] = useState(true)
@@ -397,7 +397,7 @@ export default function ReservationDetailPage({
               ? `Check-in on ${format(new Date(reservation!.check_in), 'dd MMM')}`
               : 'Check-in Guest'}
           </Button>
-          {isAdmin && (
+          {isSuperadmin && (
             <Button
               variant="destructive"
               size="sm"
@@ -580,7 +580,7 @@ export default function ReservationDetailPage({
                   ? `Check-in on ${format(new Date(reservation!.check_in), 'dd MMM')}`
                   : 'Check-in Guest'}
               </Button>
-              {isAdmin && (
+              {isSuperadmin && (
                 <Button
                   className="w-full"
                   variant="destructive"

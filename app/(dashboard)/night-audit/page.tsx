@@ -6,31 +6,65 @@ import { createClient } from '@/lib/supabase/client'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
 import { formatNaira } from '@/lib/utils/currency'
 import { usePageData } from '@/hooks/use-page-data'
 import { useAuth } from '@/lib/auth-context'
+import { hasPermission } from '@/lib/permissions'
 import { 
   CheckCircle2, AlertTriangle, TrendingUp, Users,
-  Bed, DollarSign, Clock, Play, Loader2, Sparkles
+  Bed, DollarSign, Clock, Play, Loader2, Sparkles, ClipboardList, Search
 } from 'lucide-react'
 import { toast } from 'sonner'
+
+interface AuditTrailLog {
+  id: string
+  source: string
+  category: string
+  action: string
+  status: string
+  actor_name: string
+  reference: string
+  description: string
+  amount?: number | null
+  created_at: string
+  href?: string
+}
 
 export default function NightAuditPage() {
   const router = useRouter()
   const [auditRunning, setAuditRunning] = useState(false)
   const [auditComplete, setAuditComplete] = useState(false)
   const { initialLoading, startFetch, endFetch } = usePageData()
-  const { organizationId } = useAuth()
+  const { organizationId, userId, role } = useAuth()
   const [auditData, setAuditData] = useState<any>(null)
   const [aiSummary, setAiSummary] = useState<any>(null)
   const [aiLoading, setAiLoading] = useState(false)
+  const [auditLogs, setAuditLogs] = useState<AuditTrailLog[]>([])
+  const [logsLoading, setLogsLoading] = useState(false)
+  const todayStr = new Date().toISOString().split('T')[0]
+  const [logFilters, setLogFilters] = useState({
+    startDate: todayStr,
+    endDate: todayStr,
+    type: 'all',
+    status: 'all',
+    search: '',
+  })
+  const canViewAuditTrails = hasPermission(role, 'audit_trails:view')
 
   useEffect(() => {
     fetchAuditData()
   }, [])
+
+  useEffect(() => {
+    if (canViewAuditTrails && userId) fetchAuditLogs()
+  }, [canViewAuditTrails, userId])
 
   const fetchAuditData = async () => {
     try {
@@ -242,6 +276,30 @@ export default function NightAuditPage() {
     }
   }
 
+  const fetchAuditLogs = async () => {
+    if (!canViewAuditTrails) return
+    setLogsLoading(true)
+    try {
+      const params = new URLSearchParams({
+        caller_id: userId,
+        start_date: logFilters.startDate,
+        end_date: logFilters.endDate,
+        type: logFilters.type,
+        status: logFilters.status,
+        search: logFilters.search,
+        limit: '100',
+      })
+      const res = await fetch(`/api/audit-trails?${params.toString()}`, { credentials: 'include' })
+      const json = await res.json()
+      if (!res.ok) { toast.error(json.error || 'Failed to load audit trails'); return }
+      setAuditLogs(json.logs || [])
+    } catch {
+      toast.error('Failed to load audit trails')
+    } finally {
+      setLogsLoading(false)
+    }
+  }
+
   if (initialLoading) {
     return (
       <div className="flex items-center justify-center h-96">
@@ -411,81 +469,233 @@ export default function NightAuditPage() {
         </CardContent>
       </Card>
 
-      {auditData?.pendingCheckouts && auditData.pendingCheckouts.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Pending Checkouts</CardTitle>
-            <CardDescription>Guests expected to depart today</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Folio ID</TableHead>
-                  <TableHead>Guest Name</TableHead>
-                  <TableHead>Room</TableHead>
-                  <TableHead>Check-out Date</TableHead>
-                  <TableHead className="text-right">Balance</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {auditData.pendingCheckouts.map((b: any) => (
-                  <TableRow
-                    key={b.id}
-                    className="cursor-pointer"
-                    onClick={() => router.push(`/bookings/${b.id}`)}
-                  >
-                    <TableCell className="font-mono text-xs">
-                      {b.folio_id || b.booking_number || b.id.slice(0, 8)}
-                    </TableCell>
-                    <TableCell>{b.guests?.name || '—'}</TableCell>
-                    <TableCell>{b.rooms?.room_number || '—'}</TableCell>
-                    <TableCell>{b.check_out}</TableCell>
-                    <TableCell className="text-right">{formatNaira(b.balance || 0)}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-      )}
+      <Tabs defaultValue="expected-arrivals" className="space-y-4">
+        <TabsList className="flex flex-wrap h-auto">
+          <TabsTrigger value="expected-arrivals">Expected Arrivals</TabsTrigger>
+          <TabsTrigger value="pending-checkouts">Pending Checkouts</TabsTrigger>
+          {canViewAuditTrails && <TabsTrigger value="audit-trails">Audit Trails</TabsTrigger>}
+        </TabsList>
 
-      {auditData?.expectedArrivals && auditData.expectedArrivals.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Expected Arrivals</CardTitle>
-            <CardDescription>Reservations arriving today</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Folio ID</TableHead>
-                  <TableHead>Guest Name</TableHead>
-                  <TableHead>Room</TableHead>
-                  <TableHead>Check-in Date</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {auditData.expectedArrivals.map((b: any) => (
-                  <TableRow
-                    key={b.id}
-                    className="cursor-pointer"
-                    onClick={() => router.push(`/bookings/${b.id}`)}
-                  >
-                    <TableCell className="font-mono text-xs">
-                      {b.folio_id || b.id.slice(0, 8)}
-                    </TableCell>
-                    <TableCell>{b.guests?.name || '—'}</TableCell>
-                    <TableCell>{b.rooms?.room_number || '—'}</TableCell>
-                    <TableCell>{b.check_in}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-      )}
+        <TabsContent value="expected-arrivals">
+          <Card>
+            <CardHeader>
+              <CardTitle>Expected Arrivals</CardTitle>
+              <CardDescription>Reservations arriving today</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {auditData?.expectedArrivals?.length ? (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Folio ID</TableHead>
+                      <TableHead>Guest Name</TableHead>
+                      <TableHead>Room</TableHead>
+                      <TableHead>Check-in Date</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {auditData.expectedArrivals.map((b: any) => (
+                      <TableRow
+                        key={b.id}
+                        className="cursor-pointer"
+                        onClick={() => router.push(`/bookings/${b.id}`)}
+                      >
+                        <TableCell className="font-mono text-xs">
+                          {b.folio_id || b.id.slice(0, 8)}
+                        </TableCell>
+                        <TableCell>{b.guests?.name || '—'}</TableCell>
+                        <TableCell>{b.rooms?.room_number || '—'}</TableCell>
+                        <TableCell>{b.check_in}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              ) : (
+                <div className="py-8 text-center text-sm text-muted-foreground">No expected arrivals for today.</div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="pending-checkouts">
+          <Card>
+            <CardHeader>
+              <CardTitle>Pending Checkouts</CardTitle>
+              <CardDescription>Guests expected to depart today</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {auditData?.pendingCheckouts?.length ? (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Folio ID</TableHead>
+                      <TableHead>Guest Name</TableHead>
+                      <TableHead>Room</TableHead>
+                      <TableHead>Check-out Date</TableHead>
+                      <TableHead className="text-right">Balance</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {auditData.pendingCheckouts.map((b: any) => (
+                      <TableRow
+                        key={b.id}
+                        className="cursor-pointer"
+                        onClick={() => router.push(`/bookings/${b.id}`)}
+                      >
+                        <TableCell className="font-mono text-xs">
+                          {b.folio_id || b.booking_number || b.id.slice(0, 8)}
+                        </TableCell>
+                        <TableCell>{b.guests?.name || '—'}</TableCell>
+                        <TableCell>{b.rooms?.room_number || '—'}</TableCell>
+                        <TableCell>{b.check_out}</TableCell>
+                        <TableCell className="text-right">{formatNaira(b.balance || 0)}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              ) : (
+                <div className="py-8 text-center text-sm text-muted-foreground">No pending checkouts for today.</div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {canViewAuditTrails && (
+          <TabsContent value="audit-trails">
+            <Card>
+              <CardHeader>
+                <div className="flex items-center gap-2">
+                  <ClipboardList className="h-5 w-5 text-muted-foreground" />
+                  <CardTitle>Audit Trails</CardTitle>
+                </div>
+                <CardDescription>Filtered logs for requests, bookings, transactions, payments and night audits.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid gap-3 md:grid-cols-6">
+                  <div className="space-y-1">
+                    <Label>From</Label>
+                    <Input
+                      type="date"
+                      value={logFilters.startDate}
+                      onChange={(e) => setLogFilters(prev => ({ ...prev, startDate: e.target.value }))}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label>To</Label>
+                    <Input
+                      type="date"
+                      value={logFilters.endDate}
+                      onChange={(e) => setLogFilters(prev => ({ ...prev, endDate: e.target.value }))}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label>Type</Label>
+                    <Select value={logFilters.type} onValueChange={(value) => setLogFilters(prev => ({ ...prev, type: value }))}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Logs</SelectItem>
+                        <SelectItem value="backdate">Backdate Requests</SelectItem>
+                        <SelectItem value="booking">Bookings/Reservations</SelectItem>
+                        <SelectItem value="payment">Payments</SelectItem>
+                        <SelectItem value="transaction">Transactions</SelectItem>
+                        <SelectItem value="night_audit">Night Audits</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label>Status</Label>
+                    <Select value={logFilters.status} onValueChange={(value) => setLogFilters(prev => ({ ...prev, status: value }))}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Statuses</SelectItem>
+                        <SelectItem value="pending">Pending</SelectItem>
+                        <SelectItem value="approved">Approved</SelectItem>
+                        <SelectItem value="rejected">Rejected</SelectItem>
+                        <SelectItem value="confirmed">Confirmed</SelectItem>
+                        <SelectItem value="reserved">Reserved</SelectItem>
+                        <SelectItem value="paid">Paid</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1 md:col-span-2">
+                    <Label>Search</Label>
+                    <div className="flex gap-2">
+                      <div className="relative flex-1">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                        <Input
+                          className="pl-9"
+                          placeholder="Actor, guest, reference..."
+                          value={logFilters.search}
+                          onChange={(e) => setLogFilters(prev => ({ ...prev, search: e.target.value }))}
+                        />
+                      </div>
+                      <Button onClick={fetchAuditLogs} disabled={logsLoading}>
+                        {logsLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Filter'}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Time</TableHead>
+                      <TableHead>Type</TableHead>
+                      <TableHead>Activity</TableHead>
+                      <TableHead>Actor</TableHead>
+                      <TableHead>Reference</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead className="text-right">Amount</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {logsLoading ? (
+                      <TableRow>
+                        <TableCell colSpan={7} className="py-8 text-center text-muted-foreground">
+                          Loading audit trails...
+                        </TableCell>
+                      </TableRow>
+                    ) : auditLogs.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={7} className="py-8 text-center text-muted-foreground">
+                          No audit logs found for the selected filters.
+                        </TableCell>
+                      </TableRow>
+                    ) : auditLogs.map((log) => (
+                      <TableRow
+                        key={`${log.source}-${log.id}`}
+                        className={log.href ? 'cursor-pointer' : ''}
+                        onClick={() => log.href && router.push(log.href)}
+                      >
+                        <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
+                          {new Date(log.created_at).toLocaleString('en-GB')}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline">{log.category}</Badge>
+                        </TableCell>
+                        <TableCell>
+                          <div className="font-medium text-sm">{log.action}</div>
+                          <div className="text-xs text-muted-foreground line-clamp-1">{log.description}</div>
+                        </TableCell>
+                        <TableCell>{log.actor_name}</TableCell>
+                        <TableCell className="font-mono text-xs">{log.reference}</TableCell>
+                        <TableCell>
+                          <Badge variant={['rejected', 'failed', 'variance'].includes(log.status) ? 'destructive' : 'secondary'}>
+                            {log.status}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {log.amount ? formatNaira(log.amount) : '—'}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          </TabsContent>
+        )}
+      </Tabs>
 
       {auditData?.anomalies && auditData.anomalies.length > 0 && (
         <Card className="border-orange-200">

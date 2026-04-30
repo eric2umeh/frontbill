@@ -11,11 +11,11 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { formatNaira } from '@/lib/utils/currency'
 import { toast } from 'sonner'
-import { CreditCard, ChevronRight, Check } from 'lucide-react'
+import { CreditCard, Check } from 'lucide-react'
 import { format, differenceInDays } from 'date-fns'
-import { cn } from '@/lib/utils'
 import { createClient } from '@/lib/supabase/client'
 import { isSelectableLedgerName } from '@/lib/utils/ledger-organization'
+import { resolveOrganizationLedgerAccount } from '@/lib/utils/resolve-ledger-account'
 
 interface ExtendStayModalProps {
   open: boolean
@@ -32,11 +32,11 @@ interface ExtendStayModalProps {
     guestBalance?: number
     organization_id?: string
     created_by?: string
+    folio_status?: string
   }
 }
 
 export function ExtendStayModal({ open, onClose, onSuccess, booking }: ExtendStayModalProps) {
-  const [step, setStep] = useState(1)
   const [newCheckOutDate, setNewCheckOutDate] = useState<Date | undefined>()
   const [paymentMethod, setPaymentMethod] = useState('')
   const [loading, setLoading] = useState(false)
@@ -46,6 +46,10 @@ export function ExtendStayModal({ open, onClose, onSuccess, booking }: ExtendSta
   const [organizations, setOrganizations] = useState<any[]>([])
   const [filteredOrganizations, setFilteredOrganizations] = useState<any[]>([])
   const [orgSearchTerm, setOrgSearchTerm] = useState('')
+  const [showNewOrgForm, setShowNewOrgForm] = useState(false)
+  const [newOrgName, setNewOrgName] = useState('')
+  const [newOrgPhone, setNewOrgPhone] = useState('')
+  const [creatingOrg, setCreatingOrg] = useState(false)
 
   // When modal opens with city_ledger, auto-select the current guest
   useEffect(() => {
@@ -62,19 +66,31 @@ export function ExtendStayModal({ open, onClose, onSuccess, booking }: ExtendSta
   const fetchOrganizations = async () => {
     try {
       const supabase = createClient()
-      // Fetch from city_ledger_accounts for organizations (exclude individuals)
-      const { data, error } = await supabase
-        .from('city_ledger_accounts')
-        .select('id, account_name, balance')
-        .eq('organization_id', booking.organization_id!)
-        .neq('account_type', 'individual')
-        .neq('account_type', 'guest')
-        .order('account_name')
+      const [{ data: ledgerData, error: ledgerError }, { data: orgData, error: orgError }] = await Promise.all([
+        supabase
+          .from('city_ledger_accounts')
+          .select('id, account_name, balance, account_type, contact_phone')
+          .eq('organization_id', booking.organization_id!)
+          .neq('account_type', 'individual')
+          .neq('account_type', 'guest')
+          .order('account_name'),
+        supabase
+          .from('organizations')
+          .select('id, name, phone, org_type')
+          .neq('id', booking.organization_id!)
+          .order('name'),
+      ])
 
-      if (error) throw error
-      const accounts = (data || [])
+      if (ledgerError) throw ledgerError
+      if (orgError) throw orgError
+      const ledgerOrgs = (ledgerData || [])
         .filter((d: any) => isSelectableLedgerName(d.account_name))
-        .map((d: any) => ({ id: d.id, name: d.account_name, current_balance: d.balance || 0 }))
+        .map((d: any) => ({ id: d.id, name: d.account_name, current_balance: d.balance || 0, phone: d.contact_phone, source: 'city_ledger' }))
+      const ledgerNames = new Set(ledgerOrgs.map((org: any) => org.name.toLowerCase()))
+      const menuOrgs = (orgData || [])
+        .filter((d: any) => d.org_type && isSelectableLedgerName(d.name) && !ledgerNames.has(String(d.name || '').toLowerCase()))
+        .map((d: any) => ({ id: d.id, name: d.name, current_balance: 0, phone: d.phone, source: 'organizations' }))
+      const accounts = [...ledgerOrgs, ...menuOrgs].sort((a, b) => a.name.localeCompare(b.name))
       setOrganizations(accounts)
       setFilteredOrganizations(accounts)
     } catch (error: any) {
@@ -91,6 +107,42 @@ export function ExtendStayModal({ open, onClose, onSuccess, booking }: ExtendSta
       setFilteredOrganizations(filtered)
     } else {
       setFilteredOrganizations(organizations)
+    }
+  }
+
+  const createNewOrganizationAccount = async () => {
+    if (!newOrgName.trim()) {
+      toast.error('Organization name is required')
+      return
+    }
+    setCreatingOrg(true)
+    try {
+      const supabase = createClient()
+      const { data, error } = await supabase
+        .from('city_ledger_accounts')
+        .insert([{
+          organization_id: booking.organization_id,
+          account_name: newOrgName.trim(),
+          account_type: 'organization',
+          contact_phone: newOrgPhone.trim() || null,
+          balance: 0,
+        }])
+        .select('id, account_name, balance, contact_phone')
+        .single()
+      if (error) throw error
+      const account = { id: data.id, name: data.account_name, current_balance: data.balance || 0, phone: data.contact_phone, source: 'city_ledger' }
+      setOrganizations((prev) => [account, ...prev])
+      setFilteredOrganizations((prev) => [account, ...prev])
+      setSelectedLedger(account)
+      setOrgSearchTerm(account.name)
+      setShowNewOrgForm(false)
+      setNewOrgName('')
+      setNewOrgPhone('')
+      toast.success(`Organization account "${account.name}" created and selected`)
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to create organization account')
+    } finally {
+      setCreatingOrg(false)
     }
   }
 
@@ -143,7 +195,7 @@ export function ExtendStayModal({ open, onClose, onSuccess, booking }: ExtendSta
         ledger_account_id: paymentMethod === 'city_ledger' ? selectedLedger?.id : null,
         ledger_account_type: paymentMethod === 'city_ledger' ? ledgerType : null,
         payment_status: isPaidNow ? 'paid' : 'pending',
-        created_by: booking.created_by
+        created_by: currentUserId
       }
       
       // Try to include organization_id if column exists
@@ -301,13 +353,15 @@ export function ExtendStayModal({ open, onClose, onSuccess, booking }: ExtendSta
   }
 
   const resetForm = () => {
-    setStep(1)
     setNewCheckOutDate(undefined)
     setPaymentMethod('')
     setLedgerType('individual')
     setShowOrgSearch(false)
     setSelectedLedger(null)
     setOrgSearchTerm('')
+    setShowNewOrgForm(false)
+    setNewOrgName('')
+    setNewOrgPhone('')
   }
 
   return (
@@ -321,11 +375,6 @@ export function ExtendStayModal({ open, onClose, onSuccess, booking }: ExtendSta
         <DialogHeader>
           <DialogTitle>Extend Stay - {booking.folioId}</DialogTitle>
           <DialogDescription className="sr-only">Extend guest stay wizard</DialogDescription>
-          <div className="flex items-center gap-2 mt-2 text-sm text-muted-foreground">
-            <Badge variant={step === 1 ? 'default' : 'secondary'}>1. New Checkout Date</Badge>
-            <ChevronRight className="h-4 w-4 text-muted-foreground" />
-            <Badge variant={step === 2 ? 'default' : 'secondary'}>2. Payment</Badge>
-          </div>
         </DialogHeader>
 
         <div className="space-y-4 py-4">
@@ -349,48 +398,21 @@ export function ExtendStayModal({ open, onClose, onSuccess, booking }: ExtendSta
             </div>
           </div>
 
-          {/* Step 1: Select New Checkout Date */}
-          {step === 1 && (
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <Label>New Checkout Date *</Label>
-                <div className="flex justify-center">
-                  <Calendar
-                    mode="single"
-                    selected={newCheckOutDate}
-                    onSelect={setNewCheckOutDate}
-                    disabled={(date) => date < currentCheckOut}
-                    className="rounded-md border"
-                  />
-                </div>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>New Checkout Date *</Label>
+              <div className="flex justify-center">
+                <Calendar
+                  mode="single"
+                  selected={newCheckOutDate}
+                  onSelect={setNewCheckOutDate}
+                  disabled={(date) => date < currentCheckOut}
+                  className="rounded-md border"
+                />
               </div>
-
-              {newCheckOutDate && additionalNights > 0 && (
-                <div className="p-4 bg-primary/5 rounded-lg space-y-2">
-                  <div className="flex justify-between text-sm">
-                    <span>Additional Nights:</span>
-                    <span className="font-semibold">{additionalNights} night{additionalNights !== 1 ? 's' : ''}</span>
-                  </div>
-                  <div className="flex justify-between text-base font-semibold">
-                    <span>Additional Amount:</span>
-                    <span className="text-primary">{formatNaira(additionalAmount)}</span>
-                  </div>
-                </div>
-              )}
-
-              <Button
-                onClick={() => setStep(2)}
-                className="w-full"
-                disabled={!newCheckOutDate || additionalNights <= 0}
-              >
-                Continue to Payment
-              </Button>
             </div>
-          )}
 
-          {/* Step 2: Payment Method */}
-          {step === 2 && (
-            <div className="space-y-4">
+            {newCheckOutDate && additionalNights > 0 && (
               <div className="p-4 bg-muted rounded-lg space-y-2">
                 <div className="flex justify-between text-sm">
                   <span>New Checkout Date:</span>
@@ -405,29 +427,31 @@ export function ExtendStayModal({ open, onClose, onSuccess, booking }: ExtendSta
                   <span className="text-primary">{formatNaira(additionalAmount)}</span>
                 </div>
               </div>
+            )}
 
-              <div className="space-y-2">
-                <Label htmlFor="paymentMethod">Payment Method *</Label>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                  {['cash', 'pos', 'transfer', 'city_ledger'].map((method) => (
-                    <Button
-                      key={method}
-                      variant={paymentMethod === method ? 'default' : 'outline'}
-                      onClick={() => {
-                        setPaymentMethod(method)
-                        if (method !== 'city_ledger') {
-                          setShowOrgSearch(false)
-                          setSelectedLedger(null)
-                        }
-                      }}
-                    >
-                      {method.replace('_', ' ').toUpperCase()}
-                    </Button>
-                  ))}
-                </div>
+            <div className="space-y-2">
+              <Label htmlFor="paymentMethod">Payment Method *</Label>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                {['cash', 'pos', 'transfer', 'city_ledger'].map((method) => (
+                  <Button
+                    key={method}
+                    type="button"
+                    variant={paymentMethod === method ? 'default' : 'outline'}
+                    onClick={() => {
+                      setPaymentMethod(method)
+                      if (method !== 'city_ledger') {
+                        setShowOrgSearch(false)
+                        setSelectedLedger(null)
+                      }
+                    }}
+                  >
+                    {method.replace('_', ' ').toUpperCase()}
+                  </Button>
+                ))}
               </div>
+            </div>
 
-              {paymentMethod === 'city_ledger' && (
+            {paymentMethod === 'city_ledger' && (
                 <div className="space-y-3">
                   {/* Ledger Type Selector */}
                   <div className="space-y-2">
@@ -473,7 +497,12 @@ export function ExtendStayModal({ open, onClose, onSuccess, booking }: ExtendSta
                   {/* Organization Search */}
                   {ledgerType === 'organization' && (
                     <div className="space-y-2">
-                      <Label>Search Organization</Label>
+                      <div className="flex items-center justify-between gap-2">
+                        <Label>Search Organization</Label>
+                        <Button type="button" size="sm" variant="outline" onClick={() => setShowNewOrgForm(true)}>
+                          + New Account
+                        </Button>
+                      </div>
                       <div className="space-y-2">
                         <div className="relative">
                           <Input
@@ -489,10 +518,16 @@ export function ExtendStayModal({ open, onClose, onSuccess, booking }: ExtendSta
                             {filteredOrganizations.map((org) => (
                               <button
                                 key={org.id}
-                                onClick={() => {
-                                  setSelectedLedger(org)
-                                  setOrgSearchTerm('')
-                                  setFilteredOrganizations([])
+                                onClick={async () => {
+                                  try {
+                                    const supabase = createClient()
+                                    const resolved = await resolveOrganizationLedgerAccount(supabase, booking.organization_id!, org)
+                                    setSelectedLedger(resolved)
+                                    setOrgSearchTerm('')
+                                    setFilteredOrganizations([])
+                                  } catch (error: any) {
+                                    toast.error(error.message || 'Failed to select organization')
+                                  }
                                 }}
                                 className="w-full text-left px-3 py-2 hover:bg-accent border-b last:border-b-0 transition-colors flex items-center justify-between"
                               >
@@ -513,6 +548,18 @@ export function ExtendStayModal({ open, onClose, onSuccess, booking }: ExtendSta
                         {orgSearchTerm && filteredOrganizations.length === 0 && (
                           <div className="text-sm text-muted-foreground p-3 border rounded-md text-center">
                             No organizations found
+                          </div>
+                        )}
+                        {showNewOrgForm && (
+                          <div className="rounded-md border bg-muted/30 p-3 space-y-2">
+                            <Input placeholder="Organization name" value={newOrgName} onChange={(e) => setNewOrgName(e.target.value)} />
+                            <Input placeholder="Phone optional" value={newOrgPhone} onChange={(e) => setNewOrgPhone(e.target.value)} />
+                            <div className="flex gap-2 justify-end">
+                              <Button type="button" size="sm" variant="outline" onClick={() => setShowNewOrgForm(false)}>Cancel</Button>
+                              <Button type="button" size="sm" onClick={createNewOrganizationAccount} disabled={creatingOrg || !newOrgName.trim()}>
+                                {creatingOrg ? 'Creating...' : 'Create & Select'}
+                              </Button>
+                            </div>
                           </div>
                         )}
                       </div>
@@ -538,21 +585,15 @@ export function ExtendStayModal({ open, onClose, onSuccess, booking }: ExtendSta
                 </div>
               )}
 
-              <div className="flex gap-2">
-                <Button variant="outline" onClick={() => setStep(1)} className="flex-1">
-                  Back
-                </Button>
-                <Button 
-                  onClick={handleExtend} 
-                  className="flex-1"
-                  disabled={!paymentMethod || loading}
-                >
-                  <CreditCard className="mr-2 h-4 w-4" />
-                  {loading ? 'Processing...' : 'Confirm Extension'}
-                </Button>
-              </div>
-            </div>
-          )}
+            <Button 
+              onClick={handleExtend} 
+              className="w-full"
+              disabled={!paymentMethod || !newCheckOutDate || additionalNights <= 0 || loading}
+            >
+              <CreditCard className="mr-2 h-4 w-4" />
+              {loading ? 'Processing...' : 'Confirm Extension'}
+            </Button>
+          </div>
         </div>
       </DialogContent>
     </Dialog>

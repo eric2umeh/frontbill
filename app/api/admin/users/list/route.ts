@@ -27,12 +27,12 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'Caller profile not found' }, { status: 403 })
     }
 
-    if (!['admin', 'manager'].includes(callerProfile.role)) {
-      return NextResponse.json({ error: 'Only admins or managers can list users' }, { status: 403 })
+    if (!['superadmin', 'admin', 'manager'].includes(callerProfile.role)) {
+      return NextResponse.json({ error: 'Only superadmins, admins or managers can list users' }, { status: 403 })
     }
 
     // Fetch all profiles in the same org — admin client bypasses RLS
-    let { data: users, error: usersError } = await admin
+    let { data: users, error: usersError }: { data: any[] | null; error: any } = await admin
       .from('profiles')
       .select('id, full_name, role, avatar_url, created_at, added_by')
       .eq('organization_id', callerProfile.organization_id)
