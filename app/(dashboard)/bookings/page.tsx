@@ -72,10 +72,12 @@ export default function BookingsPage() {
 
   useEffect(() => {
     if (isMounted) fetchBookings()
-  }, [])
+  }, [isMounted, organizationId, userId])
 
   useEffect(() => {
-    if (isMounted) fetchBookings()
+    if (isMounted) {
+      fetchBookings()
+    }
   }, [filterDateFrom, filterDateTo])
 
   const fetchBookings = async () => {
@@ -93,14 +95,19 @@ export default function BookingsPage() {
         .select('*, guests(name, phone), rooms(room_number, room_type), created_by, updated_by, updated_at')
         .eq('organization_id', organizationId)
         .in('status', ['confirmed', 'checked_in', 'reserved', 'checked_out'])
-        .lte('check_in', new Date().toISOString().split('T')[0])
 
-      // Apply date range filter if set
-      if (filterDateFrom) {
-        query = query.gte('check_in', filterDateFrom)
-      }
-      if (filterDateTo) {
-        query = query.lte('check_out', filterDateTo)
+      // Apply date range filter if set, otherwise default to showing recent + future bookings
+      if (filterDateFrom || filterDateTo) {
+        if (filterDateFrom) {
+          query = query.gte('check_in', filterDateFrom)
+        }
+        if (filterDateTo) {
+          query = query.lte('check_out', filterDateTo)
+        }
+      } else {
+        // Default: show bookings from 90 days ago to future
+        const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+        query = query.gte('check_in', ninetyDaysAgo)
       }
 
       const { data, error } = await query
