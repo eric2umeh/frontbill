@@ -14,7 +14,7 @@ import { formatNaira } from '@/lib/utils/currency'
 import { usePageData } from '@/hooks/use-page-data'
 import { useAuth } from '@/lib/auth-context'
 import { hasPermission } from '@/lib/permissions'
-import { Plus, Loader2, Users, LogOut } from 'lucide-react'
+import { Plus, Loader2, Users, LogOut, Calendar } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { getUserDisplayName } from '@/lib/utils/user-display'
@@ -62,6 +62,8 @@ export default function BookingsPage() {
   const [addChargeModalOpen, setAddChargeModalOpen] = useState(false)
   const [selectedBooking, setSelectedBooking] = useState<any>(null)
   const [checkoutLoadingId, setCheckoutLoadingId] = useState<string | null>(null)
+  const [filterDateFrom, setFilterDateFrom] = useState('')
+  const [filterDateTo, setFilterDateTo] = useState('')
   const { initialLoading, startFetch, endFetch } = usePageData()
   const { organizationId, role, userId } = useAuth()
   const router = useRouter()
@@ -69,10 +71,12 @@ export default function BookingsPage() {
   const canManageFolio = isSuperadmin || role === 'front_desk'
 
   useEffect(() => {
-    let isMounted = true
     if (isMounted) fetchBookings()
-    return () => { isMounted = false }
   }, [])
+
+  useEffect(() => {
+    if (isMounted) fetchBookings()
+  }, [filterDateFrom, filterDateTo])
 
   const fetchBookings = async () => {
     try {
@@ -84,12 +88,22 @@ export default function BookingsPage() {
         return
       }
 
-      const { data, error } = await supabase
+      let query = supabase
         .from('bookings')
         .select('*, guests(name, phone), rooms(room_number, room_type), created_by, updated_by, updated_at')
         .eq('organization_id', organizationId)
-        .in('status', ['confirmed', 'checked_in', 'reserved'])
+        .in('status', ['confirmed', 'checked_in', 'reserved', 'checked_out'])
         .lte('check_in', new Date().toISOString().split('T')[0])
+
+      // Apply date range filter if set
+      if (filterDateFrom) {
+        query = query.gte('check_in', filterDateFrom)
+      }
+      if (filterDateTo) {
+        query = query.lte('check_out', filterDateTo)
+      }
+
+      const { data, error } = await query
         .order('check_in', { ascending: false })
         .order('created_at', { ascending: false })
 
@@ -331,6 +345,54 @@ export default function BookingsPage() {
         )}
       </div>
 
+      {/* Date Range Filter */}
+      <Card>
+        <CardContent className="pt-6">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+            <div className="flex-1 space-y-2">
+              <Label htmlFor="filter-date-from" className="text-xs">Check-in From</Label>
+              <Input
+                id="filter-date-from"
+                type="date"
+                value={filterDateFrom}
+                onChange={(e) => {
+                  setFilterDateFrom(e.target.value)
+                }}
+                className="text-sm h-9"
+              />
+            </div>
+            <div className="flex-1 space-y-2">
+              <Label htmlFor="filter-date-to" className="text-xs">Check-in To</Label>
+              <Input
+                id="filter-date-to"
+                type="date"
+                value={filterDateTo}
+                onChange={(e) => {
+                  setFilterDateTo(e.target.value)
+                }}
+                className="text-sm h-9"
+              />
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setFilterDateFrom('')
+                setFilterDateTo('')
+              }}
+              disabled={!filterDateFrom && !filterDateTo}
+            >
+              Clear
+            </Button>
+          </div>
+          {(filterDateFrom || filterDateTo) && (
+            <p className="text-xs text-muted-foreground mt-2">
+              Showing bookings from {filterDateFrom || 'any date'} to {filterDateTo || 'any date'}
+            </p>
+          )}
+        </CardContent>
+      </Card>
+
       <EnhancedDataTable
         data={bookings}
         searchKeys={['folio_id', 'guestName', 'guestPhone', 'ledger_account_name', 'rooms.room_number'] as any}
@@ -350,6 +412,7 @@ export default function BookingsPage() {
             label: 'Status',
             options: [
               { value: 'reserved', label: 'Reserved' },
+              { value: 'confirmed', label: 'Confirmed' },
               { value: 'checked_in', label: 'Checked In' },
               { value: 'checked_out', label: 'Checked Out' },
             ],
