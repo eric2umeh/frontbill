@@ -527,21 +527,29 @@ export default function BookingsPage() {
                 >
                   Extend Stay
                 </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="text-xs text-amber-600 hover:text-amber-700 border-amber-200 hover:bg-amber-50 whitespace-nowrap"
-                  disabled={checkoutLoadingId === booking.id || booking.status === 'checked_out'}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    handleCheckoutFromTable(booking)
-                  }}
-                >
-                  {checkoutLoadingId === booking.id
-                    ? <Loader2 className="h-3 w-3 animate-spin" />
-                    : <><LogOut className="mr-1 h-3 w-3" />Check Out</>
-                  }
-                </Button>
+                {(() => {
+                  const today = new Date().toISOString().split('T')[0]
+                  const nowHour = new Date().getHours()
+                  const autoChedkoutPassed = booking.check_out <= today && nowHour >= 14
+                  if (autoChedkoutPassed || booking.status === 'checked_out') return null
+                  return (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="text-xs text-amber-600 hover:text-amber-700 border-amber-200 hover:bg-amber-50 whitespace-nowrap"
+                      disabled={checkoutLoadingId === booking.id}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleCheckoutFromTable(booking)
+                      }}
+                    >
+                      {checkoutLoadingId === booking.id
+                        ? <Loader2 className="h-3 w-3 animate-spin" />
+                        : <><LogOut className="mr-1 h-3 w-3" />Check Out</>
+                      }
+                    </Button>
+                  )
+                })()}
               </div>
             ) : null,
           },
