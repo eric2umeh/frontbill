@@ -22,6 +22,7 @@ import { toast } from 'sonner'
 import { getUserDisplayName } from '@/lib/utils/user-display'
 import { fetchUserDisplayNameMap } from '@/lib/utils/fetch-user-display-names'
 import { getBulkGroupId } from '@/lib/utils/bulk-booking'
+import { manualCheckoutEligible, resolvedCheckoutDateForClosing } from '@/lib/utils/booking-checkout-ui'
 
 interface Booking {
   id: string
@@ -50,10 +51,13 @@ interface Booking {
   notes?: string
   is_bulk?: boolean
   bulk_group_id?: string
+  /** Folios in this bulk group (for grouped rows only) */
+  bulk_members?: Booking[]
   room_count?: number
   guest_count?: number
   guests?: { name: string; phone: string }
   rooms?: { room_number: string; room_type: string }
+  folio_status?: string | null
 }
 
 export default function BookingsPage() {
@@ -64,6 +68,7 @@ export default function BookingsPage() {
   const [addChargeModalOpen, setAddChargeModalOpen] = useState(false)
   const [selectedBooking, setSelectedBooking] = useState<any>(null)
   const [checkoutLoadingId, setCheckoutLoadingId] = useState<string | null>(null)
+  const [checkoutLoadingGroupId, setCheckoutLoadingGroupId] = useState<string | null>(null)
   const [filterDateFrom, setFilterDateFrom] = useState('')
   const [filterDateTo, setFilterDateTo] = useState('')
   const { initialLoading, startFetch, endFetch } = usePageData()
@@ -227,6 +232,7 @@ export default function BookingsPage() {
         folio_id: `Bulk ${groupId}`,
         is_bulk: true,
         bulk_group_id: groupId,
+        bulk_members: groupRows,
         room_count: groupRows.length,
         guest_count: guestNames.length,
         total_amount: groupRows.reduce((sum, row) => sum + Number(row.total_amount || 0), 0),
@@ -245,6 +251,86 @@ export default function BookingsPage() {
     })
 
     return [...bulkRows, ...singles].sort((a, b) => new Date(b.check_in).getTime() - new Date(a.check_in).getTime())
+  }
+
+  const handleBulkCheckoutFromTable = (bulkRow: Booking) => {
+    const members = bulkRow.bulk_members || []
+    const targets = members.filter((m) =>
+      manualCheckoutEligible({
+        status: m.status,
+        check_in: m.check_in,
+        check_out: m.check_out,
+        folio_status: m.folio_status,
+      }),
+    )
+
+    if (targets.length === 0) {
+      toast.message('No folios in this group are available for checkout (already checked out or past auto-checkout window).')
+      return
+    }
+    const totalOutstanding = targets.reduce((s, m) => s + Number(m.balance || 0), 0)
+    const gid = bulkRow.bulk_group_id || ''
+    toast.custom(
+      (tid: string | number) => (
+        <div className="flex flex-col gap-3">
+          <div className="flex gap-2 items-start">
+            <LogOut className="w-5 h-5 text-amber-600 mt-0.5 shrink-0" />
+            <div>
+              <p className="font-semibold">Check out bulk group?</p>
+              <p className="text-sm text-muted-foreground">
+                {targets.length} room{targets.length === 1 ? '' : 's'} — {bulkRow.guests?.name}
+              </p>
+              {totalOutstanding > 0 && (
+                <p className="text-xs text-red-600 mt-1">
+                  Outstanding (sum): {formatNaira(totalOutstanding)}
+                </p>
+              )}
+            </div>
+          </div>
+          <div className="flex gap-2 justify-end">
+            <Button variant="outline" size="sm" onClick={() => toast.dismiss(tid)}>
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              className="bg-amber-600 hover:bg-amber-700 text-white"
+              onClick={async () => {
+                toast.dismiss(tid)
+                setCheckoutLoadingGroupId(gid)
+                try {
+                  const supabase = createClient()
+                  for (const m of targets) {
+                    const outDate = resolvedCheckoutDateForClosing(m)
+                    const { error } = await supabase
+                      .from('bookings')
+                      .update({
+                        status: 'checked_out',
+                        check_out: outDate,
+                        folio_status: 'checked_out',
+                        updated_by: userId,
+                      })
+                      .eq('id', m.id)
+                    if (error) throw error
+                    if (m.room_id) {
+                      await supabase.from('rooms').update({ status: 'available' }).eq('id', m.room_id)
+                    }
+                  }
+                  toast.success(`Checked out ${targets.length} room${targets.length === 1 ? '' : 's'}`)
+                  fetchBookings()
+                } catch (err: any) {
+                  toast.error(err.message || 'Failed to check out group')
+                } finally {
+                  setCheckoutLoadingGroupId(null)
+                }
+              }}
+            >
+              Confirm checkout
+            </Button>
+          </div>
+        </div>
+      ),
+      { duration: Infinity }
+    )
   }
 
   const handleCheckoutFromTable = (booking: Booking) => {
@@ -273,10 +359,15 @@ export default function BookingsPage() {
                 setCheckoutLoadingId(booking.id)
                 try {
                   const supabase = createClient()
-                  const today = new Date().toISOString().split('T')[0]
+                  const outDate = resolvedCheckoutDateForClosing(booking)
                   const { error } = await supabase
                     .from('bookings')
-                    .update({ status: 'checked_out', check_out: today, folio_status: 'checked_out', updated_by: userId })
+                    .update({
+                      status: 'checked_out',
+                      check_out: outDate,
+                      folio_status: 'checked_out',
+                      updated_by: userId,
+                    })
                     .eq('id', booking.id)
                   if (error) throw error
                   if (booking.room_id) {
@@ -402,6 +493,7 @@ export default function BookingsPage() {
 
       <EnhancedDataTable
         data={bookings}
+        compactTable
         searchKeys={['folio_id', 'guestName', 'guestPhone', 'ledger_account_name', 'rooms.room_number'] as any}
         dateField="check_in"
         filters={[
@@ -551,77 +643,123 @@ export default function BookingsPage() {
           {
             key: 'actions',
             label: 'Actions',
-            render: (booking) => canManageFolio && !booking.is_bulk ? (
-              <div className="flex gap-1 flex-nowrap">
-                <Button 
-                  size="sm" 
-                  variant="outline"
-                  className="text-xs whitespace-nowrap"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    setSelectedBooking({
-                      id: booking.id,
-                      folioId: booking.folio_id,
-                      guestName: booking.guests?.name,
-                      guestId: booking.guest_id,
-                      room: `Room ${booking.rooms?.room_number}`,
-                      currentCheckOut: booking.check_out,
-                      ratePerNight: booking.rate_per_night,
-                      organization_id: booking.organization_id,
-                      created_by: booking.created_by
-                    })
-                    setAddChargeModalOpen(true)
-                  }}
-                >
-                  Add Charge
-                </Button>
-                <Button 
-                  size="sm" 
-                  variant="outline"
-                  className="text-xs whitespace-nowrap"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    setSelectedBooking({
-                      id: booking.id,
-                      folioId: booking.folio_id,
-                      guestName: booking.guests?.name,
-                      guestId: booking.guest_id,
-                      room: `Room ${booking.rooms?.room_number}`,
-                      currentCheckOut: booking.check_out,
-                      ratePerNight: booking.rate_per_night,
-                      organization_id: booking.organization_id,
-                      created_by: booking.created_by
-                    })
-                    setExtendModalOpen(true)
-                  }}
-                >
-                  Extend Stay
-                </Button>
-                {(() => {
-                  const today = new Date().toISOString().split('T')[0]
-                  const nowHour = new Date().getHours()
-                  const autoChedkoutPassed = booking.check_out <= today && nowHour >= 14
-                  if (autoChedkoutPassed || booking.status === 'checked_out') return null
-                  return (
+            render: (booking) => {
+              if (!canManageFolio) return null
+
+              if (booking.is_bulk) {
+                const showBulkCheckout = (booking.bulk_members || []).some((m) =>
+                  manualCheckoutEligible({
+                    status: m.status,
+                    check_in: m.check_in,
+                    check_out: m.check_out,
+                    folio_status: m.folio_status,
+                  }),
+                )
+                if (!showBulkCheckout) return null
+                const gid = booking.bulk_group_id || ''
+                return (
+                  <div className="flex shrink-0 flex-nowrap gap-0.5">
                     <Button
                       size="sm"
                       variant="outline"
-                      className="text-xs text-amber-600 hover:text-amber-700 border-amber-200 hover:bg-amber-50 whitespace-nowrap"
+                      title="Check out all eligible rooms in this group"
+                      className="h-7 px-2 text-[11px] leading-tight text-amber-700 border-amber-200 hover:bg-amber-50"
+                      disabled={checkoutLoadingGroupId === gid}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleBulkCheckoutFromTable(booking)
+                      }}
+                    >
+                      {checkoutLoadingGroupId === gid ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <>
+                          <LogOut className="mr-1 h-3 w-3" />
+                          Out
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                )
+              }
+
+              return (
+                <div className="flex shrink-0 flex-nowrap gap-0.5">
+                  <Button 
+                    size="sm" 
+                    variant="outline"
+                    title="Add folio charge"
+                    className="h-7 px-2 text-[11px] leading-tight whitespace-nowrap"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setSelectedBooking({
+                        id: booking.id,
+                        folioId: booking.folio_id,
+                        guestName: booking.guests?.name,
+                        guestId: booking.guest_id,
+                        room: `Room ${booking.rooms?.room_number}`,
+                        currentCheckOut: booking.check_out,
+                        ratePerNight: booking.rate_per_night,
+                        organization_id: booking.organization_id,
+                        created_by: booking.created_by
+                      })
+                      setAddChargeModalOpen(true)
+                    }}
+                  >
+                    Charge
+                  </Button>
+                  <Button 
+                    size="sm" 
+                    variant="outline"
+                    title="Extend stay"
+                    className="h-7 px-2 text-[11px] leading-tight whitespace-nowrap"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setSelectedBooking({
+                        id: booking.id,
+                        folioId: booking.folio_id,
+                        guestName: booking.guests?.name,
+                        guestId: booking.guest_id,
+                        room: `Room ${booking.rooms?.room_number}`,
+                        currentCheckOut: booking.check_out,
+                        ratePerNight: booking.rate_per_night,
+                        organization_id: booking.organization_id,
+                        created_by: booking.created_by
+                      })
+                      setExtendModalOpen(true)
+                    }}
+                  >
+                    Extend Stay
+                  </Button>
+                  {!manualCheckoutEligible({
+                    status: booking.status,
+                    check_in: booking.check_in,
+                    check_out: booking.check_out,
+                    folio_status: booking.folio_status,
+                  }) ? null : (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      title="Check out guest"
+                      className="h-7 px-2 text-[11px] leading-tight text-amber-700 border-amber-200 hover:bg-amber-50 whitespace-nowrap"
                       disabled={checkoutLoadingId === booking.id}
                       onClick={(e) => {
                         e.stopPropagation()
                         handleCheckoutFromTable(booking)
                       }}
                     >
-                      {checkoutLoadingId === booking.id
-                        ? <Loader2 className="h-3 w-3 animate-spin" />
-                        : <><LogOut className="mr-1 h-3 w-3" />Check Out</>
-                      }
+                      {checkoutLoadingId === booking.id ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <>
+                          <LogOut className="mr-1 h-3 w-3" />Out
+                        </>
+                      )}
                     </Button>
-                  )
-                })()}
-              </div>
-            ) : null,
+                  )}
+                </div>
+              )
+            },
           },
         ]}
         renderCard={(booking) => (
