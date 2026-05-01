@@ -334,7 +334,7 @@ export default function ReservationsPage() {
                 href={res.is_bulk ? `/bulk-bookings/${res.bulk_group_id}` : `/reservations/${res.id}`}
                 className="font-mono text-sm cursor-pointer hover:text-primary"
               >
-                {res.is_bulk ? `Bulk Reservation (${res.room_count} rooms)` : res.folio_id}
+                {res.is_bulk ? `Bulk booking (${res.room_count} rooms)` : res.folio_id}
               </Link>
             ),
           },
