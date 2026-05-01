@@ -15,6 +15,7 @@ import { createClient } from '@/lib/supabase/client'
 import { formatNaira } from '@/lib/utils/currency'
 import { format } from 'date-fns'
 import CityLedgerPaymentModal from '@/components/city-ledger/city-ledger-payment-modal'
+import { calculateOrganizationBalancesBatch } from '@/lib/balance'
 import { useAuth } from '@/lib/auth-context'
 import { getUserDisplayName } from '@/lib/utils/user-display'
 import { fetchUserDisplayNameMap } from '@/lib/utils/fetch-user-display-names'
@@ -43,7 +44,7 @@ export default function OrganizationDetailPage() {
   const router = useRouter()
   const params = useParams()
   const orgId = params.id as string
-  const { role, userId } = useAuth()
+  const { role, userId, organizationId: authTenantOrgId } = useAuth()
   const isSuperadmin = role === 'superadmin'
 
   const [organization, setOrganization] = useState<Organization | null>(null)
@@ -76,12 +77,21 @@ export default function OrganizationDetailPage() {
       setLoading(true)
       const supabase = createClient()
 
-      // Get hotel org id for scoping
+      // Get hotel tenant id (city_ledger_accounts + transactions are scoped by this)
+      let tenantId = ''
       const { data: { user } } = await supabase.auth.getUser()
       if (user) {
-        const { data: profile } = await supabase.from('profiles').select('organization_id').eq('id', user.id).single()
-        if (profile) setHotelOrgId(profile.organization_id)
+        const { data: profileRow } = await supabase
+          .from('profiles')
+          .select('organization_id')
+          .eq('id', user.id)
+          .single()
+        if (profileRow?.organization_id) {
+          tenantId = profileRow.organization_id
+          setHotelOrgId(profileRow.organization_id)
+        }
       }
+      if (!tenantId && authTenantOrgId) tenantId = authTenantOrgId
 
       const { data, error } = await supabase
         .from('organizations')
@@ -91,7 +101,12 @@ export default function OrganizationDetailPage() {
 
       if (error) throw error
 
-      setOrganization(data)
+      const balanceMap = await calculateOrganizationBalancesBatch(supabase, [orgId], {
+        ...(tenantId ? { hotelTenantId: tenantId } : {}),
+      })
+      const mergedBalance = Number(balanceMap[orgId] ?? data.current_balance ?? 0)
+
+      setOrganization({ ...data, current_balance: mergedBalance })
       setFormData({
         name: data.name,
         org_type: data.org_type,
@@ -101,24 +116,39 @@ export default function OrganizationDetailPage() {
         address: data.address || '',
       })
 
-      // Look up city_ledger_accounts entry for this org by name
-      const { data: ledgerData } = await supabase
-        .from('city_ledger_accounts')
-        .select('id, balance, account_name, account_type')
-        .ilike('account_name', data.name)
-        .in('account_type', ['organization', 'corporate'])
-        .maybeSingle()
-      setLedgerAccountId(ledgerData?.id || null)
+      // city_ledger_accounts.organization_id is the hotel tenant; link by account_name + tenant
+      if (tenantId) {
+        const { data: ledgerRows } = await supabase
+          .from('city_ledger_accounts')
+          .select('id, balance, account_name, account_type')
+          .eq('organization_id', tenantId)
+          .ilike('account_name', data.name.trim())
+          .in('account_type', ['organization', 'corporate'])
+          .order('balance', { ascending: false })
+
+        const ledgerPick =
+          ledgerRows && ledgerRows.length
+            ? ledgerRows.reduce((best: any, row: any) =>
+                Number(row.balance || 0) > Number(best.balance || 0) ? row : best
+              )
+            : null
+        setLedgerAccountId(ledgerPick?.id ?? null)
+      } else {
+        setLedgerAccountId(null)
+      }
 
       // Fetch ledger transaction history
-      if (data.name) {
+      if (data.name && tenantId) {
         const { data: txData } = await supabase
           .from('transactions')
           .select('id, transaction_id, amount, payment_method, status, description, created_at')
-          .ilike('guest_name', data.name)
+          .eq('organization_id', tenantId)
+          .ilike('guest_name', data.name.trim())
           .order('created_at', { ascending: false })
           .limit(20)
         setLedgerHistory(txData || [])
+      } else {
+        setLedgerHistory([])
       }
 
       const profileIds = [data.created_by, data.updated_by].filter(Boolean)
@@ -439,7 +469,13 @@ export default function OrganizationDetailPage() {
         {/* Sidebar */}
         <div className="space-y-6">
           {/* Balance Card */}
-          <Card className={`border-2 ${organization.current_balance > 0 ? 'border-red-200 bg-red-50/30' : organization.current_balance < 0 ? 'border-green-200 bg-green-50/30' : 'border-border'}`}>
+          <Card className={`border-2 ${
+            organization.current_balance > 0
+              ? 'border-red-200 bg-red-50/30'
+              : organization.current_balance < 0
+                ? 'border-red-200 bg-red-50/30'
+                : 'border-border'
+          }`}>
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
@@ -448,7 +484,13 @@ export default function OrganizationDetailPage() {
                 </div>
                 <Badge
                   variant="outline"
-                  className={`text-xs ${organization.current_balance > 0 ? 'border-red-200 text-red-700 bg-red-50' : organization.current_balance < 0 ? 'border-green-200 text-green-700 bg-green-50' : ''}`}
+                  className={`text-xs ${
+                    organization.current_balance > 0
+                      ? 'border-red-200 text-red-700 bg-red-50'
+                      : organization.current_balance < 0
+                        ? 'border-red-200 text-red-700 bg-red-50'
+                        : ''
+                  }`}
                 >
                   {organization.current_balance > 0 ? 'Debit' : organization.current_balance < 0 ? 'Credit' : 'Settled'}
                 </Badge>
@@ -456,7 +498,9 @@ export default function OrganizationDetailPage() {
             </CardHeader>
             <CardContent className="space-y-3">
               <div>
-                <p className={`text-3xl font-bold ${organization.current_balance > 0 ? 'text-red-600' : organization.current_balance < 0 ? 'text-green-600' : 'text-muted-foreground'}`}>
+                <p className={`text-3xl font-bold ${
+                  organization.current_balance !== 0 ? 'text-red-600' : 'text-muted-foreground'
+                }`}>
                   {formatNaira(Math.abs(organization.current_balance))}
                 </p>
                 <p className="text-xs text-muted-foreground mt-1">
@@ -578,7 +622,7 @@ export default function OrganizationDetailPage() {
         accountName={organization.name}
         ledgerAccountId={ledgerAccountId}
         currentBalance={organization.current_balance}
-        organizationId={hotelOrgId || orgId}
+        organizationId={(hotelOrgId || authTenantOrgId) ?? ''}
         orgId={orgId}
       />
     </div>
