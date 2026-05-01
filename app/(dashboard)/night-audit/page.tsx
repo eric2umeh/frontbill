@@ -19,9 +19,11 @@ import { useAuth } from '@/lib/auth-context'
 import { hasPermission } from '@/lib/permissions'
 import { 
   CheckCircle2, AlertTriangle, TrendingUp, Users,
-  Bed, DollarSign, Clock, Play, Loader2, Sparkles, ClipboardList, Search
+  Bed, DollarSign, Clock, Play, Loader2, Sparkles, ClipboardList, Search,
+  CalendarClock,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { BackdateRequestsTab } from '@/components/night-audit/backdate-requests-tab'
 
 interface AuditTrailLog {
   id: string
@@ -57,6 +59,7 @@ export default function NightAuditPage() {
     search: '',
   })
   const canViewAuditTrails = hasPermission(role, 'audit_trails:view')
+  const canApproveBackdates = hasPermission(role, 'backdate:approve')
 
   useEffect(() => {
     fetchAuditData()
@@ -474,6 +477,12 @@ export default function NightAuditPage() {
           <TabsTrigger value="expected-arrivals">Expected Arrivals</TabsTrigger>
           <TabsTrigger value="pending-checkouts">Pending Checkouts</TabsTrigger>
           {canViewAuditTrails && <TabsTrigger value="audit-trails">Audit Trails</TabsTrigger>}
+          {canApproveBackdates && !!userId && (
+            <TabsTrigger value="backdate-requests" className="gap-1.5">
+              <CalendarClock className="h-3.5 w-3.5" />
+              Backdate Requests
+            </TabsTrigger>
+          )}
         </TabsList>
 
         <TabsContent value="expected-arrivals">
@@ -560,7 +569,7 @@ export default function NightAuditPage() {
           </Card>
         </TabsContent>
 
-        {canViewAuditTrails && (
+        {canViewAuditTrails ? (
           <TabsContent value="audit-trails">
             <Card>
               <CardHeader>
@@ -694,7 +703,13 @@ export default function NightAuditPage() {
               </CardContent>
             </Card>
           </TabsContent>
-        )}
+        ) : null}
+
+        {canApproveBackdates && userId ? (
+          <TabsContent value="backdate-requests">
+            <BackdateRequestsTab userId={userId} />
+          </TabsContent>
+        ) : null}
       </Tabs>
 
       {auditData?.anomalies && auditData.anomalies.length > 0 && (
