@@ -8,13 +8,11 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Calendar } from '@/components/ui/calendar'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { Checkbox } from '@/components/ui/checkbox'
-import { Calendar as CalendarIcon, Plus, Trash2, Loader2, Users, Building2, ChevronLeft, ChevronRight, X } from 'lucide-react'
-import { format, differenceInDays } from 'date-fns'
+import { Plus, Trash2, Loader2, Users, Building2, ChevronLeft, ChevronRight, X } from 'lucide-react'
+import { format, differenceInDays, addDays } from 'date-fns'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 import { formatNaira } from '@/lib/utils/currency'
@@ -22,6 +20,7 @@ import { isOrganizationMenuRecord, isSelectableLedgerName } from '@/lib/utils/le
 import { resolveOrganizationLedgerAccount } from '@/lib/utils/resolve-ledger-account'
 import { formatPersonName, normalizeName, normalizeNameKey } from '@/lib/utils/name-format'
 import { appendBulkGroupNote, createBulkGroupId } from '@/lib/utils/bulk-booking'
+import { StayDateRangeFields } from '@/components/shared/stay-date-range-fields'
 
 const ROOM_TYPES_FALLBACK = ['Deluxe', 'Royal', 'Kings', 'Mini Suite', 'Executive Suite', 'Diplomatic Suite']
 
@@ -302,7 +301,7 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
     const needByType: Record<string, number> = {}
     for (const e of entries) {
       if (!e.roomType.trim()) return 'Assign a room type on every row when using picked rooms.'
-      needByType[e.roomType] = (needByType[e.roomType] || 0) + (e.numberOfRooms || 1)
+      needByType[e.roomType] = (needByType[e.roomType] || 0) + e.numberOfRooms
     }
     const haveByType: Record<string, number> = {}
     for (const id of pickIds) {
@@ -451,7 +450,7 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
           metadata: {
             booking_type: bookingType,
             organization_name: selectedOrg?.name || null,
-            room_count: fillLater ? totalRoomsCount : entries.reduce((sum, entry) => sum + (entry.numberOfRooms || 1), 0),
+            room_count: fillLater ? totalRoomsCount : entries.reduce((sum, entry) => sum + entry.numberOfRooms, 0),
           },
         }),
       })
@@ -488,6 +487,10 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
     if (!fillLater && entries.some(e => !e.roomType)) {
       toast.error('Select a room type for each entry'); return
     }
+    if (!fillLater && entries.some(e => !e.numberOfRooms || e.numberOfRooms < 1)) {
+      toast.error('Enter a quantity of at least 1 for each room entry')
+      return
+    }
 
     const pickErr = pickedRoomsValidationError(pickedRoomIds)
     if (pickErr) { toast.error(pickErr); return }
@@ -511,7 +514,7 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
       )
       const requestedByType: Record<string, number> = {}
       entries.forEach((entry) => {
-        requestedByType[entry.roomType] = (requestedByType[entry.roomType] || 0) + (entry.numberOfRooms || 1)
+        requestedByType[entry.roomType] = (requestedByType[entry.roomType] || 0) + entry.numberOfRooms
       })
 
       if (pickedRoomIds.length === 0) {
@@ -580,7 +583,7 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
         }
       }
 
-      const totalRooms = fillLater ? (Number(totalRoomsCount) || 1) : entries.reduce((s, e) => s + (e.numberOfRooms || 1), 0)
+      const totalRooms = fillLater ? (Number(totalRoomsCount) || 1) : entries.reduce((s, e) => s + e.numberOfRooms, 0)
       const guestCache = new Map<string, string | null>()
       const orgNameKey = normalizeNameKey(selectedOrg?.name || '')
       const bulkGroupId = createBulkGroupId()
@@ -673,7 +676,7 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
         }
       } else {
         for (const entry of entries) {
-          const totalRoomSlots = entry.numberOfRooms || 1
+          const totalRoomSlots = entry.numberOfRooms
           const cin = toLocalDateStr(checkIn)
           const cout = toLocalDateStr(checkOut)
           const bookedIds = new Set(
@@ -827,7 +830,7 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="max-w-3xl max-h-[92vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Bulk Reservation — Step {step} of 2</DialogTitle>
+          <DialogTitle>Bulk Booking — Step {step} of 2</DialogTitle>
           <DialogDescription>{stepLabel}</DialogDescription>
         </DialogHeader>
 
@@ -988,36 +991,32 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
             )}
 
             {/* Dates + Room Availability — merged into step 1 */}
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Check-in Date *</Label>
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button variant="outline" className={cn('w-full justify-start text-left font-normal', !checkIn && 'text-muted-foreground')}>
-                      <CalendarIcon className="mr-2 h-4 w-4" />
-                      {checkIn ? format(checkIn, 'dd MMM yyyy') : 'Select date'}
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0">
-                    <Calendar mode="single" selected={checkIn} onSelect={(d) => { setCheckIn(d); setCheckOut(undefined); setRoomAvailabilityChecked(false); setAvailableRooms([]); setPickedRoomIds([]) }} initialFocus />
-                  </PopoverContent>
-                </Popover>
-              </div>
-              <div className="space-y-2">
-                <Label>Check-out Date *</Label>
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button variant="outline" className={cn('w-full justify-start text-left font-normal', !checkOut && 'text-muted-foreground')}>
-                      <CalendarIcon className="mr-2 h-4 w-4" />
-                      {checkOut ? format(checkOut, 'dd MMM yyyy') : 'Select date'}
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0">
-                    <Calendar mode="single" selected={checkOut} onSelect={(d) => { setCheckOut(d); setRoomAvailabilityChecked(false); setAvailableRooms([]); setPickedRoomIds([]) }} disabled={(d) => checkIn ? d <= checkIn : d < todayDate()} initialFocus />
-                  </PopoverContent>
-                </Popover>
-              </div>
-            </div>
+            <StayDateRangeFields
+              layout="inline"
+              checkIn={checkIn}
+              checkOut={checkOut}
+              nights={checkIn && checkOut ? Math.max(differenceInDays(checkOut, checkIn), 0) : 0}
+              onDatesChange={(from, to) => {
+                setCheckIn(from)
+                setCheckOut(to)
+                setRoomAvailabilityChecked(false)
+                setAvailableRooms([])
+                setPickedRoomIds([])
+              }}
+              onNightsChange={(n) => {
+                if (!checkIn) return
+                setCheckOut(addDays(checkIn, n))
+                setRoomAvailabilityChecked(false)
+                setAvailableRooms([])
+                setPickedRoomIds([])
+              }}
+              showNights
+              disableCalendar={(d) => {
+                if (!checkIn) return d < todayDate()
+                if (!checkOut) return d <= checkIn
+                return false
+              }}
+            />
 
             {checkIn && checkOut && nights > 0 && (
               <p className="text-sm text-muted-foreground">{nights} night(s) · {format(checkIn, 'dd MMM')} — {format(checkOut, 'dd MMM yyyy')}</p>
@@ -1251,7 +1250,16 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
                   <p className="text-xs text-amber-700">Guest and room assignments can be completed later from the Reservations menu.</p>
                   <div className="space-y-1 pt-1">
                     <Label className="text-xs">Total Number of Rooms to Reserve</Label>
-                    <Input type="number" min={1} placeholder="e.g., 50" value={totalRoomsCount} onChange={(e) => setTotalRoomsCount(e.target.value === '' ? '' : Number(e.target.value))} className="max-w-[160px]" />
+                    <Input
+                      inputMode="numeric"
+                      placeholder="e.g., 50"
+                      className="max-w-[160px]"
+                      value={totalRoomsCount === '' ? '' : String(totalRoomsCount)}
+                      onChange={(e) => {
+                        const raw = e.target.value.replace(/\D/g, '')
+                        setTotalRoomsCount(raw === '' ? '' : Number(raw))
+                      }}
+                    />
                   </div>
                 </div>
               ) : (
@@ -1260,7 +1268,16 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
                   <div className="flex items-end gap-2 p-3 bg-muted/30 rounded-lg">
                     <div className="space-y-1">
                       <Label className="text-xs">Number of Rooms</Label>
-                      <Input type="number" min={1} placeholder="e.g., 10" value={quickRoomCount} onChange={(e) => setQuickRoomCount(e.target.value === '' ? '' : Number(e.target.value))} className="w-28" />
+                      <Input
+                        inputMode="numeric"
+                        placeholder="e.g., 10"
+                        className="w-28"
+                        value={quickRoomCount === '' ? '' : String(quickRoomCount)}
+                        onChange={(e) => {
+                          const raw = e.target.value.replace(/\D/g, '')
+                          setQuickRoomCount(raw === '' ? '' : Number(raw))
+                        }}
+                      />
                     </div>
                     <div className="space-y-1 flex-1">
                       <Label className="text-xs">Room Type</Label>
@@ -1318,7 +1335,21 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
                           <Input placeholder="Phone (optional)" value={entry.phone} onChange={(e) => { const u = [...entries]; u[i].phone = e.target.value; setEntries(u) }} disabled={!!entry.guestId} />
                           <div className="flex items-center gap-2">
                             <Label className="text-xs whitespace-nowrap">Qty:</Label>
-                            <Input type="number" min={1} value={entry.numberOfRooms} onChange={(e) => { const u = [...entries]; u[i].numberOfRooms = Number(e.target.value) || 1; setEntries(u) }} className="w-20" />
+                            <Input
+                              inputMode="numeric"
+                              className="w-20"
+                              value={entry.numberOfRooms <= 0 ? '' : String(entry.numberOfRooms)}
+                              onChange={(e) => {
+                                const raw = e.target.value.replace(/\D/g, '')
+                                const u = [...entries]
+                                if (raw === '') u[i].numberOfRooms = 0
+                                else {
+                                  const n = parseInt(raw, 10)
+                                  u[i].numberOfRooms = Number.isNaN(n) ? 0 : Math.min(999, n)
+                                }
+                                setEntries(u)
+                              }}
+                            />
                           </div>
                         </div>
                       </div>
@@ -1349,7 +1380,7 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
               disabled={loading || !canSubmit()}
             >
               {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-              {loading ? 'Working...' : isBackdated && !isSuperadmin ? 'Request / Use Superadmin Approval' : 'Confirm Bulk Reservation'}
+              {loading ? 'Working...' : isBackdated && !isSuperadmin ? 'Request / Use Superadmin Approval' : 'Confirm bulk booking'}
             </Button>
           )}
         </div>
