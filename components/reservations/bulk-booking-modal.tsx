@@ -8,12 +8,11 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Calendar } from '@/components/ui/calendar'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
-import { Calendar as CalendarIcon, Plus, Trash2, Loader2, Users, Building2, ChevronLeft, ChevronRight, X } from 'lucide-react'
-import { format, differenceInDays } from 'date-fns'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Plus, Trash2, Loader2, Users, Building2, ChevronLeft, ChevronRight, X } from 'lucide-react'
+import { format, differenceInDays, addDays } from 'date-fns'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 import { formatNaira } from '@/lib/utils/currency'
@@ -21,6 +20,7 @@ import { isOrganizationMenuRecord, isSelectableLedgerName } from '@/lib/utils/le
 import { resolveOrganizationLedgerAccount } from '@/lib/utils/resolve-ledger-account'
 import { formatPersonName, normalizeName, normalizeNameKey } from '@/lib/utils/name-format'
 import { appendBulkGroupNote, createBulkGroupId } from '@/lib/utils/bulk-booking'
+import { StayDateRangeFields } from '@/components/shared/stay-date-range-fields'
 
 const ROOM_TYPES_FALLBACK = ['Deluxe', 'Royal', 'Kings', 'Mini Suite', 'Executive Suite', 'Diplomatic Suite']
 
@@ -63,6 +63,8 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
   const [allRooms, setAllRooms] = useState<any[]>([]) // all non-maintenance rooms from DB
   const [allActiveBookings, setAllActiveBookings] = useState<any[]>([]) // for date overlap checks
   const [availableRooms, setAvailableRooms] = useState<any[]>([])
+  /** Specific rooms locked in Step 1 (optional). When set, submit assigns only these IDs by room type instead of arbitrary auto-pick. */
+  const [pickedRoomIds, setPickedRoomIds] = useState<string[]>([])
   const [roomAvailabilityChecked, setRoomAvailabilityChecked] = useState(false)
   // Derived room types from actual DB rooms
   const roomTypes = allRooms.length > 0
@@ -138,7 +140,12 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
     setCurrentUserRole(profile.role || '')
     const [{ data: guestData }, { data: roomData }, { data: bookingData }] = await Promise.all([
       supabase.from('guests').select('id, name, phone, email').eq('organization_id', profile.organization_id).order('name'),
-      supabase.from('rooms').select('id, room_number, room_type, price_per_night, status').eq('organization_id', profile.organization_id).eq('status', 'available').order('room_number'),
+      supabase
+        .from('rooms')
+        .select('id, room_number, room_type, price_per_night, status')
+        .eq('organization_id', profile.organization_id)
+        .neq('status', 'maintenance')
+        .order('room_number'),
       supabase.from('bookings').select('room_id, check_in, check_out').eq('organization_id', profile.organization_id).in('status', ['confirmed', 'reserved', 'checked_in']),
     ])
     setAllGuests(guestData || [])
@@ -278,18 +285,71 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
     }
   }
 
-  // Check room availability using date-overlap logic (same as booking modal)
+  const togglePickedRoom = (roomId: string) => {
+    setPickedRoomIds((prev) => (prev.includes(roomId) ? prev.filter((id) => id !== roomId) : [...prev, roomId]))
+  }
+
+  /** Sort rows by numeric-friendly room_number. */
+  const sortRoomsByNumber = <T extends { room_number?: string | number | null }>(rows: T[]) =>
+    [...rows].sort((a, b) =>
+      String(a.room_number ?? '').localeCompare(String(b.room_number ?? ''), undefined, { numeric: true }),
+    )
+
+  /** Validates picked-room counts cover each requested room type. */
+  const pickedRoomsValidationError = (pickIds: string[]): string | null => {
+    if (!pickIds.length || fillLater) return null
+    const needByType: Record<string, number> = {}
+    for (const e of entries) {
+      if (!e.roomType.trim()) return 'Assign a room type on every row when using picked rooms.'
+      needByType[e.roomType] = (needByType[e.roomType] || 0) + e.numberOfRooms
+    }
+    const haveByType: Record<string, number> = {}
+    for (const id of pickIds) {
+      const row = allRooms.find((r: any) => r.id === id)
+      if (!row?.room_type) return 'One or more selected rooms are unknown — rerun availability.'
+      const t = row.room_type
+      haveByType[t] = (haveByType[t] || 0) + 1
+    }
+    for (const [t, needed] of Object.entries(needByType)) {
+      const have = haveByType[t] || 0
+      if (have !== needed) {
+        return `${t}: picked ${have} room(s), need exactly ${needed} — adjust selection or quantities in Step 2.`
+      }
+    }
+    for (const t of Object.keys(haveByType)) {
+      if (!needByType[t]) return `Extra ${t} rooms selected — not required by room entries below. Clear them or add an entry.`
+    }
+    return null
+  }
+
+  /** Nightly rate: custom overrides room master price when set. */
+  const resolveRatePerNight = (room: { price_per_night?: number | null }) => {
+    const custom = Number(customRate)
+    if (customRate !== '' && !Number.isNaN(custom) && custom > 0) return custom
+    const fallback = Number(room?.price_per_night ?? 0)
+    return fallback > 0 ? fallback : 0
+  }
+
+  const medianInventoryRate = () => {
+    const raw = [...new Set(allRooms.map((r: any) => Number(r.price_per_night || 0)).filter((p) => p > 0))]
+    raw.sort((a, b) => a - b)
+    if (!raw.length) return 0
+    return raw[Math.floor(raw.length / 2)]
+  }
+
   const checkRoomAvailability = () => {
     if (!checkIn || !checkOut || nights <= 0) { toast.error('Select valid check-in and check-out dates'); return }
     const cin = toLocalDateStr(checkIn)
     const cout = toLocalDateStr(checkOut)
-    // A room is booked if any existing booking overlaps: existing.check_in < newCheckOut AND existing.check_out > newCheckIn
+    setPickedRoomIds([])
     const bookedRoomIds = new Set(
       allActiveBookings
-        .filter(b => b.check_in < cout && b.check_out > cin)
-        .map(b => b.room_id)
+        .filter(b => b.check_in < cout && b.check_out > cin && b.room_id)
+        .map(b => b.room_id),
     )
-    const available = allRooms.filter(r => r.status === 'available' && !bookedRoomIds.has(r.id))
+    const available = allRooms.filter(
+      (r: any) => r.status !== 'maintenance' && r.id && !bookedRoomIds.has(r.id),
+    )
     setAvailableRooms(available)
     setRoomAvailabilityChecked(true)
   }
@@ -351,7 +411,6 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
     return true
   }
   const canSubmit = () => {
-    if (!customRate || Number(customRate) <= 0) return false
     if (paymentMethod === 'city_ledger' && !selectedLedger) return false
     if (paymentStatus === 'partial' && (!partialAmount || Number(partialAmount) <= 0)) return false
     return true
@@ -391,7 +450,7 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
           metadata: {
             booking_type: bookingType,
             organization_name: selectedOrg?.name || null,
-            room_count: fillLater ? totalRoomsCount : entries.reduce((sum, entry) => sum + (entry.numberOfRooms || 1), 0),
+            room_count: fillLater ? totalRoomsCount : entries.reduce((sum, entry) => sum + entry.numberOfRooms, 0),
           },
         }),
       })
@@ -416,49 +475,88 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
 
   const handleSubmit = async () => {
     if (!checkIn || !checkOut) { toast.error('Dates required'); return }
-    if (!customRate || Number(customRate) <= 0) { toast.error('Enter the custom rate per room'); return }
     if (!canSubmit()) { toast.error('Complete payment details'); return }
     if (isBackdated && !isSuperadmin && !(await hasApprovedBackdateRequest())) {
       toast.error('Backdated bulk bookings require superadmin approval. Send a request first.')
       return
     }
 
-    // Validate entries — only first entry guest name is required
     if (!fillLater && entries.length > 0 && !entries[0].guestName.trim()) {
       toast.error('First room entry must have a guest name'); return
     }
-    // Room type must be set for all entries
     if (!fillLater && entries.some(e => !e.roomType)) {
       toast.error('Select a room type for each entry'); return
     }
+    if (!fillLater && entries.some(e => !e.numberOfRooms || e.numberOfRooms < 1)) {
+      toast.error('Enter a quantity of at least 1 for each room entry')
+      return
+    }
 
-    // Pre-submit: never allow partial bulk creation. The requested quantity must be fully available.
+    const pickErr = pickedRoomsValidationError(pickedRoomIds)
+    if (pickErr) { toast.error(pickErr); return }
+
+    if (!fillLater) {
+      const c = Number(customRate)
+      const hasCustomRate = customRate !== '' && !Number.isNaN(c) && c > 0
+      if (!hasCustomRate && medianInventoryRate() <= 0) {
+        toast.error('Add nightly rates on your Rooms list or enter a custom nightly rate in Step 2.')
+        return
+      }
+    }
+
     if (!fillLater) {
       const cin = toLocalDateStr(checkIn)
       const cout = toLocalDateStr(checkOut)
       const bookedIds = new Set(
         allActiveBookings
-          .filter(b => b.check_in < cout && b.check_out > cin)
-          .map(b => b.room_id)
+          .filter(b => b.check_in < cout && b.check_out > cin && b.room_id)
+          .map(b => b.room_id),
       )
       const requestedByType: Record<string, number> = {}
       entries.forEach((entry) => {
-        requestedByType[entry.roomType] = (requestedByType[entry.roomType] || 0) + (entry.numberOfRooms || 1)
+        requestedByType[entry.roomType] = (requestedByType[entry.roomType] || 0) + entry.numberOfRooms
       })
 
-      const shortages = Object.entries(requestedByType)
-        .map(([roomType, requested]) => {
-          const available = allRooms.filter(r => r.room_type === roomType && !bookedIds.has(r.id)).length
-          return { roomType, requested, available }
-        })
-        .filter((item) => item.available < item.requested)
+      if (pickedRoomIds.length === 0) {
+        const shortages = Object.entries(requestedByType)
+          .map(([roomType, requested]) => {
+            const available = allRooms.filter(r => r.room_type === roomType && !bookedIds.has(r.id)).length
+            return { roomType, requested, available }
+          })
+          .filter((item) => item.available < item.requested)
 
-      if (shortages.length > 0) {
-        toast.error(
-          shortages
-            .map((item) => `${item.roomType}: requested ${item.requested}, available ${item.available}`)
-            .join(' | ')
-        )
+        if (shortages.length > 0) {
+          toast.error(
+            shortages
+              .map((item) => `${item.roomType}: requested ${item.requested}, available ${item.available}`)
+              .join(' | '),
+          )
+          return
+        }
+      }
+    }
+
+    if (!fillLater && pickedRoomIds.length > 0) {
+      const cin = toLocalDateStr(checkIn)
+      const cout = toLocalDateStr(checkOut)
+      const overlapBooked = new Set(
+        allActiveBookings
+          .filter(b => b.check_in < cout && b.check_out > cin && b.room_id)
+          .map(b => b.room_id),
+      )
+      for (const id of pickedRoomIds) {
+        if (overlapBooked.has(id)) {
+          toast.error('One or more picked rooms overlap another booking — run availability again.')
+          return
+        }
+      }
+    }
+
+    if (fillLater) {
+      const c = Number(customRate)
+      const nightlyFallback = customRate !== '' && !Number.isNaN(c) && c > 0 ? c : medianInventoryRate()
+      if (nightlyFallback <= 0) {
+        toast.error('Set nightly prices on your room list or enter an optional custom rate above.')
         return
       }
     }
@@ -467,7 +565,25 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
     try {
       const supabase = createClient()
       let createdCount = 0
-      const totalRooms = fillLater ? (Number(totalRoomsCount) || 1) : entries.length
+      let ledgerAmountToAdd = 0
+
+      /** When Step 1 rooms are locked, dequeue by type in numeric room-number order */
+      let pickedQueues: Record<string, any[]> | null = null
+      if (!fillLater && pickedRoomIds.length > 0) {
+        pickedQueues = {}
+        const byType: Record<string, any[]> = {}
+        for (const pid of pickedRoomIds) {
+          const row = allRooms.find((r: any) => r.id === pid)
+          if (!row?.room_type) continue
+          if (!byType[row.room_type]) byType[row.room_type] = []
+          byType[row.room_type].push(row)
+        }
+        for (const [rt, rows] of Object.entries(byType)) {
+          pickedQueues[rt] = sortRoomsByNumber(rows)
+        }
+      }
+
+      const totalRooms = fillLater ? (Number(totalRoomsCount) || 1) : entries.reduce((s, e) => s + e.numberOfRooms, 0)
       const guestCache = new Map<string, string | null>()
       const orgNameKey = normalizeNameKey(selectedOrg?.name || '')
       const bulkGroupId = createBulkGroupId()
@@ -523,7 +639,10 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
       const usedRoomIds = new Set<string>()
 
       if (fillLater) {
-        // Create placeholder reservations — no guest/room assigned yet
+        const c = Number(customRate)
+        const nightlyFallback = medianInventoryRate()
+        const nightly = customRate !== '' && !Number.isNaN(c) && c > 0 ? c : nightlyFallback
+
         for (let i = 0; i < totalRooms; i++) {
           const folioId = `BLK-${Date.now().toString(36).toUpperCase()}-${i}`
           const isCityLedger = paymentMethod === 'city_ledger'
@@ -533,6 +652,9 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
               : `payment_method: ${paymentMethod}`,
             bulkGroupId
           )
+          const totalAmt = nightly * nights
+          if (paymentMethod === 'city_ledger' && selectedLedger?.id) ledgerAmountToAdd += totalAmt
+
           await supabase.from('bookings').insert([{
             organization_id: orgId,
             guest_id: null,
@@ -541,10 +663,10 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
             check_in: toLocalDateStr(checkIn),
             check_out: toLocalDateStr(checkOut),
             number_of_nights: nights,
-            rate_per_night: Number(customRate),
-            total_amount: Number(customRate) * nights,
+            rate_per_night: nightly,
+            total_amount: totalAmt,
             deposit: 0,
-            balance: isOrganizationLedger ? 0 : Number(customRate) * nights,
+            balance: isOrganizationLedger ? 0 : totalAmt,
             payment_status: 'pending',
             status: 'reserved',
             created_by: currentUserId,
@@ -554,33 +676,52 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
         }
       } else {
         for (const entry of entries) {
-          const totalRoomSlots = entry.numberOfRooms || 1
+          const totalRoomSlots = entry.numberOfRooms
           const cin = toLocalDateStr(checkIn)
           const cout = toLocalDateStr(checkOut)
-          // Use date-overlap logic — not status='available' — to find truly free rooms
           const bookedIds = new Set(
             allActiveBookings
-              .filter(b => b.check_in < cout && b.check_out > cin)
-              .map(b => b.room_id)
+              .filter(b => b.check_in < cout && b.check_out > cin && b.room_id)
+              .map(b => b.room_id),
           )
-          const available = allRooms
-            .filter(r => r.room_type === entry.roomType && !bookedIds.has(r.id) && !usedRoomIds.has(r.id))
-            .slice(0, totalRoomSlots)
 
-          if (!available || available.length === 0) {
-            toast.error(`No available ${entry.roomType} rooms — skipped`); continue
-          }
-
-          // Resolve guest: use entry's guest if provided, fallback to step-1 contact
           let finalGuestId = entry.guestId
           const entryGuestName = formatPersonName(entry.guestName)
           if (!finalGuestId && entryGuestName) finalGuestId = await findOrCreateGuest(entryGuestName, entry.phone || null)
-          // Always ensure a non-null guest_id (use step-1 contact fallback)
           if (!finalGuestId) finalGuestId = fallbackGuestId
 
-          for (const room of available) {
+          for (let slot = 0; slot < totalRoomSlots; slot++) {
+            let room: any
+            if (pickedQueues) {
+              const q = pickedQueues[entry.roomType] || []
+              room = q.shift()
+              if (!room) {
+                toast.error(`Not enough picked ${entry.roomType} rooms — adjust Step 2 or room selection in Step 1.`)
+                return
+              }
+            } else {
+              const pool = sortRoomsByNumber(
+                allRooms.filter(
+                  (r: any) => r.room_type === entry.roomType && !bookedIds.has(r.id) && !usedRoomIds.has(r.id),
+                ),
+              )
+              room = pool[0]
+              if (!room) {
+                toast.error(`No available ${entry.roomType} rooms`)
+                continue
+              }
+            }
+
             usedRoomIds.add(room.id)
-            const total = Number(customRate) * nights
+            const ratePn = resolveRatePerNight(room)
+            if (ratePn <= 0) {
+              toast.error(`Missing nightly price for room ${room.room_number}. Set it under Rooms or enter a custom rate in Step 2.`)
+              return
+            }
+
+            const total = ratePn * nights
+            if (paymentMethod === 'city_ledger' && selectedLedger?.id) ledgerAmountToAdd += total
+
             const depositAmt = paymentStatus === 'paid' ? total : paymentStatus === 'partial' ? (Number(partialAmount) || 0) : 0
             const balanceAmt = total - depositAmt
             const isCityLedger = paymentMethod === 'city_ledger'
@@ -596,7 +737,7 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
             const { data: booking, error: be } = await supabase.from('bookings').insert([{
               organization_id: orgId, guest_id: finalGuestId, room_id: room.id, folio_id: folioId,
               check_in: toLocalDateStr(checkIn), check_out: toLocalDateStr(checkOut),
-              number_of_nights: nights, rate_per_night: Number(customRate),
+              number_of_nights: nights, rate_per_night: ratePn,
               total_amount: total, deposit: depositAmt, balance: bookingBalance,
               payment_status: paymentStatus === 'paid' ? 'paid' : paymentStatus === 'partial' ? 'partial' : 'pending',
               status: 'reserved', created_by: currentUserId,
@@ -629,33 +770,32 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
             createdCount++
           }
         }
+      }
 
-        if (paymentMethod === 'city_ledger' && selectedLedger?.id) {
-          const totalDebt = createdCount * Number(customRate) * nights
-          const { data: account } = await supabase
+      if (paymentMethod === 'city_ledger' && selectedLedger?.id && ledgerAmountToAdd > 0) {
+        const { data: account } = await supabase
+          .from('city_ledger_accounts')
+          .select('balance')
+          .eq('id', selectedLedger.id)
+          .maybeSingle()
+        if (account) {
+          await supabase
             .from('city_ledger_accounts')
-            .select('balance')
+            .update({ balance: Number(account.balance || 0) + ledgerAmountToAdd })
             .eq('id', selectedLedger.id)
+        }
+        if (ledgerType === 'organization') {
+          const ledgerName = selectedLedger.name || selectedLedger.account_name
+          const { data: orgRow } = await supabase
+            .from('organizations')
+            .select('id, current_balance')
+            .eq('name', ledgerName)
             .maybeSingle()
-          if (account) {
+          if (orgRow?.id) {
             await supabase
-              .from('city_ledger_accounts')
-              .update({ balance: Number(account.balance || 0) + totalDebt })
-              .eq('id', selectedLedger.id)
-          }
-          if (ledgerType === 'organization') {
-            const ledgerName = selectedLedger.name || selectedLedger.account_name
-            const { data: orgRow } = await supabase
               .from('organizations')
-              .select('id, current_balance')
-              .eq('name', ledgerName)
-              .maybeSingle()
-            if (orgRow?.id) {
-              await supabase
-                .from('organizations')
-                .update({ current_balance: Number(orgRow.current_balance || 0) + totalDebt })
-                .eq('id', orgRow.id)
-            }
+              .update({ current_balance: Number(orgRow.current_balance || 0) + ledgerAmountToAdd })
+              .eq('id', orgRow.id)
           }
         }
       }
@@ -680,6 +820,7 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
     setLedgerSearch(''); setLedgerResults([]); setSelectedLedger(null); setLedgerSearchOpen(false)
     setShowNewLedgerOrgForm(false); setNewLedgerOrgName(''); setNewLedgerOrgEmail(''); setNewLedgerOrgPhone('')
     setEntries([makeEntry()]); setQuickRoomCount(''); setQuickRoomType(''); setFillLater(false); setTotalRoomsCount('')
+    setPickedRoomIds([])
     onClose()
   }
 
@@ -689,7 +830,7 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="max-w-3xl max-h-[92vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Bulk Reservation — Step {step} of 2</DialogTitle>
+          <DialogTitle>Bulk Booking — Step {step} of 2</DialogTitle>
           <DialogDescription>{stepLabel}</DialogDescription>
         </DialogHeader>
 
@@ -850,36 +991,32 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
             )}
 
             {/* Dates + Room Availability — merged into step 1 */}
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Check-in Date *</Label>
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button variant="outline" className={cn('w-full justify-start text-left font-normal', !checkIn && 'text-muted-foreground')}>
-                      <CalendarIcon className="mr-2 h-4 w-4" />
-                      {checkIn ? format(checkIn, 'dd MMM yyyy') : 'Select date'}
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0">
-                    <Calendar mode="single" selected={checkIn} onSelect={(d) => { setCheckIn(d); setCheckOut(undefined); setRoomAvailabilityChecked(false); setAvailableRooms([]) }} initialFocus />
-                  </PopoverContent>
-                </Popover>
-              </div>
-              <div className="space-y-2">
-                <Label>Check-out Date *</Label>
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button variant="outline" className={cn('w-full justify-start text-left font-normal', !checkOut && 'text-muted-foreground')}>
-                      <CalendarIcon className="mr-2 h-4 w-4" />
-                      {checkOut ? format(checkOut, 'dd MMM yyyy') : 'Select date'}
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0">
-                    <Calendar mode="single" selected={checkOut} onSelect={(d) => { setCheckOut(d); setRoomAvailabilityChecked(false); setAvailableRooms([]) }} disabled={(d) => checkIn ? d <= checkIn : d < todayDate()} initialFocus />
-                  </PopoverContent>
-                </Popover>
-              </div>
-            </div>
+            <StayDateRangeFields
+              layout="inline"
+              checkIn={checkIn}
+              checkOut={checkOut}
+              nights={checkIn && checkOut ? Math.max(differenceInDays(checkOut, checkIn), 0) : 0}
+              onDatesChange={(from, to) => {
+                setCheckIn(from)
+                setCheckOut(to)
+                setRoomAvailabilityChecked(false)
+                setAvailableRooms([])
+                setPickedRoomIds([])
+              }}
+              onNightsChange={(n) => {
+                if (!checkIn) return
+                setCheckOut(addDays(checkIn, n))
+                setRoomAvailabilityChecked(false)
+                setAvailableRooms([])
+                setPickedRoomIds([])
+              }}
+              showNights
+              disableCalendar={(d) => {
+                if (!checkIn) return d < todayDate()
+                if (!checkOut) return d <= checkIn
+                return false
+              }}
+            />
 
             {checkIn && checkOut && nights > 0 && (
               <p className="text-sm text-muted-foreground">{nights} night(s) · {format(checkIn, 'dd MMM')} — {format(checkOut, 'dd MMM yyyy')}</p>
@@ -918,6 +1055,52 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
                         </div>
                       )
                     })}
+                    <p className="text-xs text-muted-foreground pt-1">
+                      Optionally pick exact rooms to hold below — totals per room type must match your Step 2 entries. Leave unchecked to assign automatically by type.
+                    </p>
+                    {pickedRoomIds.length > 0 ? (
+                      <p className="text-xs font-medium">{pickedRoomIds.length} room(s) selected</p>
+                    ) : null}
+                    <div className="max-h-52 overflow-y-auto rounded-md border bg-background mt-2">
+                      {roomTypes.every((rt) => availableRooms.filter((r) => r.room_type === rt).length === 0) ? (
+                        <p className="text-sm text-muted-foreground p-3">No vacant rooms overlap these dates.</p>
+                      ) : (
+                        roomTypes.map((rt) => {
+                          const rows = sortRoomsByNumber(
+                            availableRooms.filter((r: any) => r.room_type === rt),
+                          )
+                          if (!rows.length) return null
+                          return (
+                            <div key={rt} className="border-b last:border-b-0">
+                              <div className="sticky top-0 z-[1] bg-muted/70 px-2 py-1.5 text-xs font-medium">{rt}</div>
+                              {rows.map((r: any) => (
+                                <label
+                                  key={r.id}
+                                  className="flex items-center gap-3 px-2 py-1.5 text-sm hover:bg-muted/40 cursor-pointer border-t border-muted/60 first:border-t-0"
+                                >
+                                  <Checkbox
+                                    checked={pickedRoomIds.includes(r.id)}
+                                    onCheckedChange={() => togglePickedRoom(r.id)}
+                                  />
+                                  <span className="tabular-nums font-medium w-14">Rm {r.room_number}</span>
+                                  <span className="text-muted-foreground text-xs flex-1 truncate">{r.room_type}</span>
+                                  {r.price_per_night != null && Number(r.price_per_night) > 0 && (
+                                    <span className="text-xs text-muted-foreground whitespace-nowrap">
+                                      {formatNaira(Number(r.price_per_night))}/nt
+                                    </span>
+                                  )}
+                                </label>
+                              ))}
+                            </div>
+                          )
+                        })
+                      )}
+                    </div>
+                    {pickedRoomIds.length > 0 && (
+                      <Button type="button" variant="ghost" size="sm" className="h-8 text-xs" onClick={() => setPickedRoomIds([])}>
+                        Clear selection
+                      </Button>
+                    )}
                   </div>
                 )}
               </div>
@@ -932,16 +1115,16 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
             <div className="space-y-4">
               <p className="text-sm font-semibold">Payment Details</p>
               <div className="space-y-2">
-                <Label>Custom Rate Per Room *</Label>
+                <Label>Custom Rate Per Room</Label>
                 <Input
                   type="number"
-                  min={1}
-                  placeholder="Enter agreed room rate"
+                  min={0}
+                  placeholder="Uses each room's nightly price when left blank"
                   value={customRate}
                   onChange={(e) => setCustomRate(e.target.value === '' ? '' : Number(e.target.value))}
                 />
                 <p className="text-xs text-muted-foreground">
-                  Required for bulk reservations. This rate is used for every selected room.
+                  Optional. Applies to every room when set; otherwise the master room nightly rate is used.
                 </p>
               </div>
               <div className="space-y-2">
@@ -1046,12 +1229,19 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
 
             {/* Room entries */}
             <div className="space-y-3">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="text-sm font-semibold">Room Entries</p>
-                <label className="flex items-center gap-2 text-sm cursor-pointer">
-                  <input type="checkbox" checked={fillLater} onChange={(e) => setFillLater(e.target.checked)} className="rounded" />
-                  Fill room details later
-                </label>
+                <Label className="flex items-center gap-2 cursor-pointer font-normal">
+                  <Checkbox
+                    checked={fillLater}
+                    onCheckedChange={(c) => {
+                      const v = Boolean(c)
+                      setFillLater(v)
+                      if (v) setPickedRoomIds([])
+                    }}
+                  />
+                  <span className="text-sm">Fill room details later</span>
+                </Label>
               </div>
 
               {fillLater ? (
@@ -1060,7 +1250,16 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
                   <p className="text-xs text-amber-700">Guest and room assignments can be completed later from the Reservations menu.</p>
                   <div className="space-y-1 pt-1">
                     <Label className="text-xs">Total Number of Rooms to Reserve</Label>
-                    <Input type="number" min={1} placeholder="e.g., 50" value={totalRoomsCount} onChange={(e) => setTotalRoomsCount(e.target.value === '' ? '' : Number(e.target.value))} className="max-w-[160px]" />
+                    <Input
+                      inputMode="numeric"
+                      placeholder="e.g., 50"
+                      className="max-w-[160px]"
+                      value={totalRoomsCount === '' ? '' : String(totalRoomsCount)}
+                      onChange={(e) => {
+                        const raw = e.target.value.replace(/\D/g, '')
+                        setTotalRoomsCount(raw === '' ? '' : Number(raw))
+                      }}
+                    />
                   </div>
                 </div>
               ) : (
@@ -1069,7 +1268,16 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
                   <div className="flex items-end gap-2 p-3 bg-muted/30 rounded-lg">
                     <div className="space-y-1">
                       <Label className="text-xs">Number of Rooms</Label>
-                      <Input type="number" min={1} placeholder="e.g., 10" value={quickRoomCount} onChange={(e) => setQuickRoomCount(e.target.value === '' ? '' : Number(e.target.value))} className="w-28" />
+                      <Input
+                        inputMode="numeric"
+                        placeholder="e.g., 10"
+                        className="w-28"
+                        value={quickRoomCount === '' ? '' : String(quickRoomCount)}
+                        onChange={(e) => {
+                          const raw = e.target.value.replace(/\D/g, '')
+                          setQuickRoomCount(raw === '' ? '' : Number(raw))
+                        }}
+                      />
                     </div>
                     <div className="space-y-1 flex-1">
                       <Label className="text-xs">Room Type</Label>
@@ -1127,7 +1335,21 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
                           <Input placeholder="Phone (optional)" value={entry.phone} onChange={(e) => { const u = [...entries]; u[i].phone = e.target.value; setEntries(u) }} disabled={!!entry.guestId} />
                           <div className="flex items-center gap-2">
                             <Label className="text-xs whitespace-nowrap">Qty:</Label>
-                            <Input type="number" min={1} value={entry.numberOfRooms} onChange={(e) => { const u = [...entries]; u[i].numberOfRooms = Number(e.target.value) || 1; setEntries(u) }} className="w-20" />
+                            <Input
+                              inputMode="numeric"
+                              className="w-20"
+                              value={entry.numberOfRooms <= 0 ? '' : String(entry.numberOfRooms)}
+                              onChange={(e) => {
+                                const raw = e.target.value.replace(/\D/g, '')
+                                const u = [...entries]
+                                if (raw === '') u[i].numberOfRooms = 0
+                                else {
+                                  const n = parseInt(raw, 10)
+                                  u[i].numberOfRooms = Number.isNaN(n) ? 0 : Math.min(999, n)
+                                }
+                                setEntries(u)
+                              }}
+                            />
                           </div>
                         </div>
                       </div>
@@ -1158,7 +1380,7 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
               disabled={loading || !canSubmit()}
             >
               {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-              {loading ? 'Working...' : isBackdated && !isSuperadmin ? 'Request / Use Superadmin Approval' : 'Confirm Bulk Reservation'}
+              {loading ? 'Working...' : isBackdated && !isSuperadmin ? 'Request / Use Superadmin Approval' : 'Confirm bulk booking'}
             </Button>
           )}
         </div>

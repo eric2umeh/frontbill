@@ -8,16 +8,15 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Calendar } from '@/components/ui/calendar'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Badge } from '@/components/ui/badge'
-import { format, addDays, differenceInDays } from 'date-fns'
-import { Calendar as CalendarIcon, Plus, X, Loader2 } from 'lucide-react'
+import { addDays, differenceInDays, format } from 'date-fns'
+import { Plus, X, Loader2 } from 'lucide-react'
 import { formatNaira } from '@/lib/utils/currency'
 import { toast } from 'sonner'
 import { isOrganizationMenuRecord, isSelectableLedgerName } from '@/lib/utils/ledger-organization'
 import { resolveOrganizationLedgerAccount } from '@/lib/utils/resolve-ledger-account'
 import { formatPersonName } from '@/lib/utils/name-format'
+import { StayDateRangeFields } from '@/components/shared/stay-date-range-fields'
 
 const toLocalDateStr = (date: Date) => {
   const y = date.getFullYear()
@@ -58,8 +57,6 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
   const [checkInDate, setCheckInDate] = useState<Date>()
   const [checkOutDate, setCheckOutDate] = useState<Date>()
   const [nights, setNights] = useState(0)
-  const [checkInOpen, setCheckInOpen] = useState(false)
-  const [checkOutOpen, setCheckOutOpen] = useState(false)
   const [backdateReason, setBackdateReason] = useState('')
 
   // Step 3: Room & Payment
@@ -272,28 +269,29 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
     return roomsOfType.filter(r => r.status === 'available' && !bookedRoomIds.has(r.id))
   }
 
-  const handleCheckInChange = (date: Date | undefined) => {
-    if (!date) return
-    setCheckInDate(date)
-    setCheckInOpen(false)
-    const nextDay = addDays(date, 1)
-    setCheckOutDate(nextDay)
-    setNights(1)
-    setSelectedRoom(null); setSelectedRoomType('')
-  }
-
-  const handleCheckOutChange = (date: Date | undefined) => {
-    if (!date || !checkInDate) return
-    setCheckOutDate(date)
-    setCheckOutOpen(false)
-    setNights(Math.max(0, differenceInDays(date, checkInDate)))
-    setSelectedRoom(null); setSelectedRoomType('')
+  const handleStayDatesChange = (from: Date, to: Date | undefined) => {
+    setCheckInDate(from)
+    if (to) {
+      setCheckOutDate(to)
+      setNights(Math.max(0, differenceInDays(to, from)))
+      setSelectedRoom(null)
+      setSelectedRoomType('')
+    } else {
+      setCheckOutDate(undefined)
+      setNights(0)
+      setSelectedRoom(null)
+      setSelectedRoomType('')
+    }
   }
 
   const handleNightsChange = (value: number) => {
     const n = Math.max(1, value || 1)
     setNights(n)
-    if (checkInDate) setCheckOutDate(addDays(checkInDate, n))
+    if (checkInDate) {
+      setCheckOutDate(addDays(checkInDate, n))
+      setSelectedRoom(null)
+      setSelectedRoomType('')
+    }
   }
 
   const handleRoomTypeSelect = (roomType: string) => {
@@ -613,40 +611,16 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
           {/* Dates */}
           <div className="rounded-lg border p-4 space-y-4">
             <p className="text-sm font-semibold">Stay Dates</p>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Check-in *</Label>
-                <Popover open={checkInOpen} onOpenChange={setCheckInOpen}>
-                  <PopoverTrigger asChild>
-                    <Button variant="outline" className="w-full justify-start text-left font-normal">
-                      <CalendarIcon className="mr-2 h-4 w-4" />
-                      {checkInDate ? format(checkInDate, 'dd MMM yyyy') : 'Select date'}
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0">
-                    <Calendar mode="single" selected={checkInDate} onSelect={handleCheckInChange} initialFocus />
-                  </PopoverContent>
-                </Popover>
-              </div>
-              <div className="space-y-2">
-                <Label>Check-out *</Label>
-                <Popover open={checkOutOpen} onOpenChange={setCheckOutOpen}>
-                  <PopoverTrigger asChild>
-                    <Button variant="outline" className="w-full justify-start text-left font-normal">
-                      <CalendarIcon className="mr-2 h-4 w-4" />
-                      {checkOutDate ? format(checkOutDate, 'dd MMM yyyy') : 'Select date'}
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0">
-                    <Calendar mode="single" selected={checkOutDate} onSelect={handleCheckOutChange} disabled={(d) => checkInDate ? d <= checkInDate : d < today()} />
-                  </PopoverContent>
-                </Popover>
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label>Number of Nights</Label>
-              <Input type="number" min={1} value={nights || ''} onChange={(e) => handleNightsChange(parseInt(e.target.value))} placeholder="e.g., 2" />
-            </div>
+            <StayDateRangeFields
+              layout="inline"
+              checkIn={checkInDate}
+              checkOut={checkOutDate}
+              nights={nights}
+              onDatesChange={handleStayDatesChange}
+              onNightsChange={handleNightsChange}
+              showNights
+              disableCalendar={(d) => !!(checkInDate && !checkOutDate && d <= checkInDate)}
+            />
             {checkInDate && checkOutDate && nights > 0 && (
               <div className="p-3 rounded-lg bg-muted text-sm">
                 <span className="text-muted-foreground">Duration: </span><span className="font-semibold">{nights} night(s) · {format(checkInDate, 'dd MMM')} — {format(checkOutDate, 'dd MMM yyyy')}</span>

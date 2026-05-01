@@ -10,15 +10,14 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Calendar } from '@/components/ui/calendar'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { format, addDays } from 'date-fns'
-import { Calendar as CalendarIcon, X, Users, Building2 } from 'lucide-react'
+import { addDays, differenceInCalendarDays } from 'date-fns'
+import { X, Users, Building2 } from 'lucide-react'
 import { formatNaira } from '@/lib/utils/currency'
 import { toast } from 'sonner'
 import { isOrganizationMenuRecord, isSelectableLedgerName } from '@/lib/utils/ledger-organization'
 import { resolveOrganizationLedgerAccount } from '@/lib/utils/resolve-ledger-account'
 import { formatPersonName } from '@/lib/utils/name-format'
+import { StayDateRangeFields } from '@/components/shared/stay-date-range-fields'
 import { useAuth } from '@/lib/auth-context'
 
 interface NewBookingModalProps {
@@ -75,8 +74,6 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
     const d = new Date(); d.setHours(0, 0, 0, 0); return new Date(d.getTime() + 86400000)
   })
   const [nights, setNights] = useState(1)
-  const [checkInOpen, setCheckInOpen] = useState(false)
-  const [checkOutOpen, setCheckOutOpen] = useState(false)
   const [backdateReason, setBackdateReason] = useState('')
 
   // Room & Payment
@@ -458,28 +455,27 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
     })
   }
 
-  const handleCheckInChange = (date: Date | undefined) => {
-    if (!date) return
-    setCheckInDate(date)
-    setCheckInOpen(false)
-    setCheckOutDate(undefined)
-    setNights(0)
-  }
-
-  const handleCheckOutChange = (date: Date | undefined) => {
-    if (!date || !checkInDate) return
-    setCheckOutDate(date)
-    setCheckOutOpen(false)
-    const n = Math.ceil((date.getTime() - checkInDate.getTime()) / (1000 * 60 * 60 * 24))
-    setNights(Math.max(0, n))
-    // Re-filter available rooms for the newly selected dates
-    filterRoomsForDates(checkInDate, date)
+  const handleStayDatesChange = (from: Date, to: Date | undefined) => {
+    setCheckInDate(from)
+    if (to) {
+      setCheckOutDate(to)
+      const n = Math.max(1, differenceInCalendarDays(to, from))
+      setNights(n)
+      filterRoomsForDates(from, to)
+    } else {
+      setCheckOutDate(undefined)
+      setNights(0)
+    }
   }
 
   const handleNightsChange = (value: number) => {
     const n = Math.max(1, value || 1)
     setNights(n)
-    if (checkInDate) setCheckOutDate(addDays(checkInDate, n))
+    if (checkInDate) {
+      const co = addDays(checkInDate, n)
+      setCheckOutDate(co)
+      filterRoomsForDates(checkInDate, co)
+    }
   }
 
   // Room selection — rooms list is already filtered for the selected dates
@@ -823,63 +819,27 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
             </div>
 
             {/* Dates */}
-            <div className="rounded-lg border p-4 space-y-4">
-              <p className="text-sm font-semibold">Stay Dates</p>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Check-in Date *</Label>
-                  <Popover open={checkInOpen} onOpenChange={setCheckInOpen}>
-                    <PopoverTrigger asChild>
-                      <Button variant="outline" className="w-full justify-start text-left font-normal">
-                        <CalendarIcon className="mr-2 h-4 w-4" />
-                        {checkInDate ? format(checkInDate, 'dd MMM yyyy') : 'Select date'}
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-auto p-0" align="start">
-                      <Calendar mode="single" selected={checkInDate} onSelect={handleCheckInChange} />
-                    </PopoverContent>
-                  </Popover>
-                </div>
-                <div className="space-y-2">
-                  <Label>Check-out Date *</Label>
-                  <Popover open={checkOutOpen} onOpenChange={setCheckOutOpen}>
-                    <PopoverTrigger asChild>
-                      <Button variant="outline" className="w-full justify-start text-left font-normal">
-                        <CalendarIcon className="mr-2 h-4 w-4" />
-                        {checkOutDate ? format(checkOutDate, 'dd MMM yyyy') : 'Select date'}
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-auto p-0" align="start">
-                      <Calendar mode="single" selected={checkOutDate} onSelect={handleCheckOutChange} disabled={(d) => !checkInDate || d <= checkInDate} />
-                    </PopoverContent>
-                  </Popover>
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label>Number of Nights *</Label>
-                <Input
-                  type="number"
-                  min="1"
-                  placeholder="1"
-                  value={nights || ''}
-                  onChange={(e) => {
-                    const n = parseInt(e.target.value)
-                    if (!isNaN(n) && n >= 1) handleNightsChange(n)
-                  }}
+            <StayDateRangeFields
+              layout="card"
+              checkIn={checkInDate}
+              checkOut={checkOutDate}
+              nights={nights}
+              onDatesChange={handleStayDatesChange}
+              onNightsChange={handleNightsChange}
+              showNights
+              disableCalendar={(d) => !!(checkInDate && !checkOutDate && d <= checkInDate)}
+            />
+            {isBackdated && !isSuperadmin && (
+              <div className="space-y-2 rounded-md border border-amber-200 bg-amber-50 p-3">
+                <Label>Reason for Backdate Request *</Label>
+                <Textarea
+                  value={backdateReason}
+                  onChange={(e) => setBackdateReason(e.target.value)}
+                  placeholder="Explain why this booking must be backdated for superadmin approval"
                 />
+                <p className="text-xs text-amber-700">Only a superadmin can approve or directly create backdated bookings.</p>
               </div>
-              {isBackdated && !isSuperadmin && (
-                <div className="space-y-2 rounded-md border border-amber-200 bg-amber-50 p-3">
-                  <Label>Reason for Backdate Request *</Label>
-                  <Textarea
-                    value={backdateReason}
-                    onChange={(e) => setBackdateReason(e.target.value)}
-                    placeholder="Explain why this booking must be backdated for superadmin approval"
-                  />
-                  <p className="text-xs text-amber-700">Only a superadmin can approve or directly create backdated bookings.</p>
-                </div>
-              )}
-            </div>
+            )}
 
             {/* Room Selection — combined type + number in one dropdown */}
             <div className="rounded-lg border p-4 space-y-4">

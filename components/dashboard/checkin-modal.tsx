@@ -7,15 +7,14 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Calendar } from '@/components/ui/calendar'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { format, addDays } from 'date-fns'
-import { Calendar as CalendarIcon, X } from 'lucide-react'
+import { addDays, differenceInCalendarDays, format } from 'date-fns'
+import { X } from 'lucide-react'
 import { formatNaira } from '@/lib/utils/currency'
 import { toast } from 'sonner'
 import { isOrganizationMenuRecord, isSelectableLedgerName } from '@/lib/utils/ledger-organization'
 import { resolveOrganizationLedgerAccount } from '@/lib/utils/resolve-ledger-account'
 import { formatPersonName } from '@/lib/utils/name-format'
+import { StayDateRangeFields } from '@/components/shared/stay-date-range-fields'
 
 interface CheckinModalProps {
   open: boolean
@@ -46,8 +45,6 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
   const [checkInDate, setCheckInDate] = useState<Date>(() => { const d = new Date(); d.setHours(0,0,0,0); return d })
   const [checkOutDate, setCheckOutDate] = useState<Date>(() => { const d = new Date(); d.setHours(0,0,0,0); return addDays(d, 1) })
   const [nights, setNights] = useState(1)
-  const [checkInOpen, setCheckInOpen] = useState(false)
-  const [checkOutOpen, setCheckOutOpen] = useState(false)
 
   // Room
   const [rooms, setRooms] = useState<any[]>([])
@@ -132,23 +129,18 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
     setGuestSearchOpen(false)
   }
 
-  const handleCheckInChange = (date: Date | undefined) => {
-    if (!date) return
-    setCheckInDate(date)
-    setCheckInOpen(false)
-    const next = addDays(date, 1)
-    setCheckOutDate(next)
-    setNights(1)
-    filterRooms(date, next, allBookings, allRooms)
-  }
-
-  const handleCheckOutChange = (date: Date | undefined) => {
-    if (!date || !checkInDate) return
-    setCheckOutDate(date)
-    setCheckOutOpen(false)
-    const n = Math.max(1, Math.round((date.getTime() - checkInDate.getTime()) / 86400000))
-    setNights(n)
-    filterRooms(checkInDate, date, allBookings, allRooms)
+  const handleStayDatesChange = (from: Date, to: Date | undefined) => {
+    setCheckInDate(from)
+    if (to) {
+      setCheckOutDate(to)
+      setNights(Math.max(1, differenceInCalendarDays(to, from)))
+      filterRooms(from, to, allBookings, allRooms)
+    } else {
+      const provisional = addDays(from, 1)
+      setCheckOutDate(provisional)
+      setNights(1)
+      filterRooms(from, provisional, allBookings, allRooms)
+    }
   }
 
   const handleNightsChange = (n: number) => {
@@ -452,36 +444,15 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
                 <Input placeholder="08012345678" value={phone} onChange={(e) => setPhone(e.target.value)} disabled={!!guestId} />
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Check-in Date *</Label>
-                <Popover open={checkInOpen} onOpenChange={setCheckInOpen}>
-                  <PopoverTrigger asChild>
-                    <Button variant="outline" className="w-full justify-start text-left font-normal">
-                      <CalendarIcon className="mr-2 h-4 w-4" />
-                      {format(checkInDate, 'dd/MM/yyyy')}
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0" align="start">
-                    <Calendar mode="single" selected={checkInDate} onSelect={handleCheckInChange} disabled={(d) => d < new Date(new Date().setHours(0,0,0,0))} />
-                  </PopoverContent>
-                </Popover>
-              </div>
-              <div className="space-y-2">
-                <Label>Check-out Date *</Label>
-                <Popover open={checkOutOpen} onOpenChange={setCheckOutOpen}>
-                  <PopoverTrigger asChild>
-                    <Button variant="outline" className="w-full justify-start text-left font-normal">
-                      <CalendarIcon className="mr-2 h-4 w-4" />
-                      {format(checkOutDate, 'dd/MM/yyyy')}
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0" align="start">
-                    <Calendar mode="single" selected={checkOutDate} onSelect={handleCheckOutChange} disabled={(d) => d <= checkInDate} />
-                  </PopoverContent>
-                </Popover>
-              </div>
-            </div>
+            <StayDateRangeFields
+              layout="inline"
+              checkIn={checkInDate}
+              checkOut={checkOutDate}
+              nights={nights}
+              onDatesChange={handleStayDatesChange}
+              showNights={false}
+              disableCalendar={(d) => d < new Date(new Date().setHours(0, 0, 0, 0))}
+            />
             <div className="space-y-2">
               <Label>Room Number *</Label>
               <Select

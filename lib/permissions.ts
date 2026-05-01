@@ -44,7 +44,7 @@ export const ALL_PERMISSIONS: { key: Permission; label: string; group: string }[
   { key: 'bookings:checkout', label: 'Check Out Folios', group: 'Bookings' },
 
   { key: 'reservations:view', label: 'View Reservations', group: 'Reservations' },
-  { key: 'reservations:create', label: 'Create Reservations & Bulk Reservations', group: 'Reservations' },
+  { key: 'reservations:create', label: 'Create Reservations & Bulk Booking', group: 'Reservations' },
   { key: 'reservations:edit', label: 'Edit Reservations', group: 'Reservations' },
   { key: 'reservations:delete', label: 'Cancel/Delete Reservations', group: 'Reservations' },
 
@@ -112,8 +112,8 @@ export const ALL_PERMISSIONS: { key: Permission; label: string; group: string }[
   { key: 'settings:view', label: 'View Profile & Settings', group: 'Settings' },
   { key: 'settings:manage', label: 'Manage Hotel/System Settings', group: 'Settings' },
 
-  { key: 'backdate:request', label: 'Request Backdated Booking/Reservation', group: 'Superadmin Controls' },
-  { key: 'backdate:approve', label: 'Approve Backdated Booking/Reservation', group: 'Superadmin Controls' },
+  { key: 'backdate:request', label: 'Request Backdated Booking/Reservation', group: 'Night Audit' },
+  { key: 'backdate:approve', label: 'Approve Backdated Booking/Reservation', group: 'Night Audit' },
 ]
 
 const ALL: Permission[] = ALL_PERMISSIONS.map(p => p.key)
@@ -122,21 +122,21 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
   {
     key: 'superadmin',
     label: 'Superadmin',
-    description: 'Highest authority role. Can approve backdated bookings, manage admins/staff, and perform all sensitive edits/deletes with audit oversight.',
+    description: 'Full system access—including Night Audit approvals for backdates, unrestricted user/role management, and superadmin-only code paths such as destructive guest/organization edits and room inventory changes.',
     color: 'bg-black text-white',
     permissions: ALL,
   },
   {
     key: 'admin',
     label: 'Administrator',
-    description: 'Full hotel admin access except superadmin-only approvals such as backdated booking authorization.',
+    description: 'Runs the property day-to-day: same breadth as superadmin for operations except backdate approval (superadmin-only in Night Audit), role management, deleting users, editing core guest or organization profiles, and room create/edit/delete.',
     color: 'bg-red-100 text-red-800',
     permissions: ALL.filter(p => !['backdate:approve'].includes(p)),
   },
   {
     key: 'manager',
     label: 'Manager',
-    description: 'Broad operational access across bookings, reservations, reports, payments and analytics. Room creation, editing and deletion remain superadmin-only.',
+    description: 'Operations lead: dashboards, bookings and reservations including bulk/group flows, reserve check-in/cancel from lists, checkout, payments, ledger view, analytics, exports, housekeeping/maintenance oversight, night audit visibility and audit trails—and financial views accountants use except reconciliation management. Editing existing booking/reservation records themselves (not day-to-day front-desk actions), managing users/roles, destructive guest or organization profile edits, and physical room inventory changes stay superadmin-only.',
     color: 'bg-purple-100 text-purple-800',
     permissions: ALL.filter(p => ![
       'roles:manage',
@@ -151,7 +151,7 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
   {
     key: 'accountant',
     label: 'Accountant',
-    description: 'Financial access for payments, transactions, city ledger, reports, analytics, reconciliation and room folio review.',
+    description: 'Finance: transactions view and export (no transaction entry from this role configuration), reconciliation, refunds, ledger management and settlement tools, analytics, recording payments/receipts against folios opened by front office, bookings and reservations read-only, guests and organizations read-only. Opens Night Audit for review but cannot run audits or approve backdates.',
     color: 'bg-blue-100 text-blue-800',
     permissions: [
       'dashboard:view',
@@ -173,7 +173,7 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
   {
     key: 'front_desk',
     label: 'Front Desk',
-    description: 'Can create bookings, bulk bookings and reservations, manage guest check-in/out, add charges, extend stays, record payments, create organizations, and run night audit. Room CRUD is superadmin-only.',
+    description: 'Front office: new walk-ins and group/bulk bookings, reserve workflows and reserve check-ins from the operational lists, check-out, folio charges and extensions where policy allows, payments, city ledger posting, organization creation for corporates, night audit run plus audit trail review, and backdate requests. Editing an existing booking or reservation record and master guest/organization profiles is superadmin-only in this build; room inventory is superadmin-only.',
     color: 'bg-green-100 text-green-800',
     permissions: [
       'dashboard:view',
@@ -193,7 +193,7 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
   {
     key: 'receptionist',
     label: 'Receptionist',
-    description: 'Front-office view access for bookings, reservations, rooms, guests, payments and transactions, with check-in/check-out support.',
+    description: 'Lobby team: monitors live bookings and arrivals, executes check-ins/check-outs, verifies payments on folios that are unlocked for their role, and keeps guest lookups current. Creating new bookings or reservations happens through front desk supervisors; housekeeping status is read-only from this persona.',
     color: 'bg-yellow-100 text-yellow-800',
     permissions: [
       'dashboard:view',
@@ -209,7 +209,7 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
   {
     key: 'staff',
     label: 'Staff',
-    description: 'Basic view access for operational context only.',
+    description: 'Lightweight oversight: confirms room states on the housekeeping board plus upcoming reservations/bookings for scheduling; used by operations floaters.',
     color: 'bg-gray-100 text-gray-800',
     permissions: [
       'rooms:view',
@@ -220,7 +220,7 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
   {
     key: 'housekeeping',
     label: 'Housekeeper',
-    description: 'Housekeeping access without dashboard access. Can view assigned work, update room status with comments, and submit daily reports.',
+    description: 'Housekeeping board, room status updates with notes, and daily housekeeping reporting. Can see bookings/reservations only for coordination—no dashboards, billing, or front-office edits.',
     color: 'bg-teal-100 text-teal-800',
     permissions: [
       'housekeeping:view', 'housekeeping:create', 'housekeeping:edit', 'housekeeping:report',
@@ -233,7 +233,7 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
   {
     key: 'maintenance',
     label: 'Maintenance',
-    description: 'Maintenance access without dashboard access. Can view work orders, update room status with comments, and submit maintenance reports.',
+    description: 'Maintenance queue, updating linked room statuses with notes, and maintenance reporting. Shares the same read-only booking/reservation context as housekeeping without billing access.',
     color: 'bg-orange-100 text-orange-800',
     permissions: [
       'maintenance:view', 'maintenance:create', 'maintenance:edit', 'maintenance:report',

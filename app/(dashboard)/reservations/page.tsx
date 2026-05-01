@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { EnhancedDataTable } from '@/components/shared/enhanced-data-table'
 import { Badge } from '@/components/ui/badge'
@@ -12,18 +11,21 @@ import { formatNaira } from '@/lib/utils/currency'
 import { usePageData } from '@/hooks/use-page-data'
 import { useAuth } from '@/lib/auth-context'
 import { hasPermission } from '@/lib/permissions'
-import { Plus, Users, Loader2 } from 'lucide-react'
+import { Plus, Users, Loader2, DoorOpen } from 'lucide-react'
 import { BulkBookingModal } from '@/components/reservations/bulk-booking-modal'
 import { NewReservationModal } from '@/components/reservations/new-reservation-modal'
+import { ReserveCheckInModal, type ReserveCheckInBooking } from '@/components/reservations/reserve-checkin-modal'
 import { getUserDisplayName } from '@/lib/utils/user-display'
 import { fetchUserDisplayNameMap } from '@/lib/utils/fetch-user-display-names'
 import { getBulkGroupId } from '@/lib/utils/bulk-booking'
+import { toast } from 'sonner'
 
 interface Reservation {
   id: string
+  organization_id?: string
   folio_id: string
-  guest_id: string
-  room_id: string
+  guest_id?: string | null
+  room_id?: string | null
   check_in: string
   check_out: string
   status: string
@@ -46,24 +48,27 @@ interface Reservation {
   guest_count?: number
   total_amount?: number
   guests?: { name: string; phone: string }
-  rooms?: { room_number: string; room_type: string }
+  rooms?: { id?: string; room_number: string; room_type: string }
 }
 
 export default function ReservationsPage() {
   const [reservations, setReservations] = useState<Reservation[]>([])
   const [bulkModalOpen, setBulkModalOpen] = useState(false)
   const [newReservationOpen, setNewReservationOpen] = useState(false)
+  const [reserveCheckInOpen, setReserveCheckInOpen] = useState(false)
+  const [reserveCheckInBooking, setReserveCheckInBooking] = useState<ReserveCheckInBooking | null>(null)
+  const [cancelReserveLoadingId, setCancelReserveLoadingId] = useState<string | null>(null)
   const { initialLoading, startFetch, endFetch } = usePageData()
   const { organizationId, role, userId } = useAuth()
-  const router = useRouter()
-
   useEffect(() => {
-    let isMounted = true
-    if (isMounted) fetchReservations()
-    return () => { isMounted = false }
-  }, [])
+    fetchReservations()
+  }, [organizationId])
 
   const fetchReservations = async () => {
+    if (!organizationId) {
+      setReservations([])
+      return
+    }
     try {
       startFetch()
       const supabase = createClient()
@@ -76,14 +81,13 @@ export default function ReservationsPage() {
       const { data, error } = await supabase
         .from('bookings')
         .select(`
-          id, folio_id, guest_id, room_id, check_in, check_out, status, payment_status,
+          id, organization_id, folio_id, guest_id, room_id, check_in, check_out, status, payment_status,
           rate_per_night, total_amount, balance, deposit, notes, created_by, created_at, updated_by,
           guests:guest_id(id, name, phone),
           rooms:room_id(id, room_number, room_type)
         `)
         .eq('organization_id', organizationId)
         .eq('status', 'reserved')
-        .gt('check_in', new Date().toISOString().split('T')[0])
         .order('created_at', { ascending: false })
 
       if (error) throw error
@@ -197,6 +201,76 @@ export default function ReservationsPage() {
     return [...bulkRows, ...singles].sort((a, b) => new Date(b.check_in).getTime() - new Date(a.check_in).getTime())
   }
 
+  const canCheckInReserved = hasPermission(role, 'bookings:checkin')
+  const canCancelReservation = hasPermission(role, 'reservations:delete')
+
+  const openReserveCheckIn = (res: Reservation) => {
+    setReserveCheckInBooking({
+      id: res.id,
+      organization_id: res.organization_id || organizationId || '',
+      folio_id: res.folio_id,
+      check_in: res.check_in,
+      check_out: res.check_out,
+      guest_id: res.guest_id,
+      room_id: res.room_id,
+      rate_per_night: res.rate_per_night,
+      guests: res.guests?.name ? { name: res.guests.name } : null,
+      rooms:
+        res.rooms?.room_number && res.rooms
+          ? { id: res.rooms.id, room_number: res.rooms.room_number, room_type: res.rooms.room_type }
+          : null,
+    })
+    setReserveCheckInOpen(true)
+  }
+
+  const handleCancelReservation = (res: Reservation) => {
+    toast.custom(
+      (tid: string | number) => (
+        <div className="flex flex-col gap-3">
+          <div className="flex gap-2 items-start">
+            <div className="text-red-600 mt-0.5 text-lg">!</div>
+            <div>
+              <p className="font-semibold">Cancel this reservation?</p>
+              <p className="text-sm text-muted-foreground">Held rooms are freed; the folio becomes cancelled.</p>
+            </div>
+          </div>
+          <div className="flex gap-2 justify-end">
+            <Button variant="outline" size="sm" onClick={() => toast.dismiss(tid)}>Keep</Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              disabled={cancelReserveLoadingId === res.id}
+              onClick={async () => {
+                toast.dismiss(tid)
+                setCancelReserveLoadingId(res.id)
+                try {
+                  const supabase = createClient()
+                  const { error } = await supabase
+                    .from('bookings')
+                    .update({ status: 'cancelled', updated_by: userId || null, updated_at: new Date().toISOString() })
+                    .eq('id', res.id)
+                  if (error) throw error
+                  if (res.room_id) {
+                    await supabase.from('rooms').update({ status: 'available', updated_at: new Date().toISOString() }).eq('id', res.room_id)
+                  }
+                  toast.success('Reservation cancelled')
+                  fetchReservations()
+                } catch (e: any) {
+                  toast.error(e?.message || 'Failed to cancel')
+                } finally {
+                  setCancelReserveLoadingId(null)
+                }
+              }}
+            >
+              Cancel reservation
+            </Button>
+          </div>
+        </div>
+      ),
+      { duration: Infinity },
+    )
+  }
+
   if (initialLoading) {
     return (
       <div className="flex items-center justify-center h-96">
@@ -209,6 +283,13 @@ export default function ReservationsPage() {
     <div className="space-y-6">
       <BulkBookingModal open={bulkModalOpen} onClose={() => setBulkModalOpen(false)} onSuccess={() => { setBulkModalOpen(false); fetchReservations() }} />
       <NewReservationModal open={newReservationOpen} onClose={() => setNewReservationOpen(false)} onSuccess={() => { setNewReservationOpen(false); fetchReservations() }} />
+      <ReserveCheckInModal
+        open={reserveCheckInOpen}
+        onClose={() => { setReserveCheckInOpen(false); setReserveCheckInBooking(null) }}
+        onSuccess={fetchReservations}
+        booking={reserveCheckInBooking}
+        userId={userId || ''}
+      />
       
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
@@ -253,7 +334,7 @@ export default function ReservationsPage() {
                 href={res.is_bulk ? `/bulk-bookings/${res.bulk_group_id}` : `/reservations/${res.id}`}
                 className="font-mono text-sm cursor-pointer hover:text-primary"
               >
-                {res.is_bulk ? `Bulk Reservation (${res.room_count} rooms)` : res.folio_id}
+                {res.is_bulk ? `Bulk booking (${res.room_count} rooms)` : res.folio_id}
               </Link>
             ),
           },
@@ -363,9 +444,35 @@ export default function ReservationsPage() {
             key: 'actions',
             label: 'Actions',
             render: (res) => (
-              <Button asChild size="sm" variant="outline">
-                <Link href={res.is_bulk ? `/bulk-bookings/${res.bulk_group_id}` : `/reservations/${res.id}`}>View</Link>
-              </Button>
+              <div className="flex flex-wrap gap-1">
+                {!res.is_bulk && canCheckInReserved && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    title="Open check-in"
+                    className="h-7 px-2 text-[11px] text-green-700 border-green-200 hover:bg-green-50"
+                    onClick={() => openReserveCheckIn(res)}
+                  >
+                    <DoorOpen className="mr-1 h-3 w-3" />
+                    Check in
+                  </Button>
+                )}
+                {!res.is_bulk && canCancelReservation && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    title="Cancel reservation"
+                    disabled={cancelReserveLoadingId === res.id}
+                    className="h-7 px-2 text-[11px] border-destructive/40 text-destructive hover:bg-destructive/10"
+                    onClick={() => handleCancelReservation(res)}
+                  >
+                    Cancel
+                  </Button>
+                )}
+                <Button asChild size="sm" variant="outline" className="h-7 px-2 text-[11px]">
+                  <Link href={res.is_bulk ? `/bulk-bookings/${res.bulk_group_id}` : `/reservations/${res.id}`}>View</Link>
+                </Button>
+              </div>
             ),
           },
         ]}

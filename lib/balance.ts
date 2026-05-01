@@ -160,20 +160,22 @@ export async function calculateGuestBalancesBatch(
 }
 
 /**
- * Batch-calculate balances for organizations (city ledger entities).
- * An organization's balance = sum of all unpaid city_ledger charges across their bookings.
+ * Batch-calculate balances for menu organizations (NGO / corp rows).
+ * For each organization row we take max(organizations.current_balance, matching city ledger account balance).
+ * City ledger rows are scoped per hotel tenant via organization_id + account_name matching the entity name.
  */
 export async function calculateOrganizationBalancesBatch(
   supabase: any,
-  organizationIds: string[]
+  menuOrganizationIds: string[],
+  options?: { hotelTenantId?: string | null }
 ): Promise<Record<string, number>> {
-  if (!organizationIds.length) return {}
+  if (!menuOrganizationIds.length) return {}
 
-  const balanceMap: Record<string, number> = Object.fromEntries(organizationIds.map(id => [id, 0]))
+  const balanceMap: Record<string, number> = Object.fromEntries(menuOrganizationIds.map(id => [id, 0]))
   const { data: organizations } = await supabase
     .from('organizations')
     .select('id, name, current_balance')
-    .in('id', organizationIds)
+    .in('id', menuOrganizationIds)
 
   const orgRows = organizations || []
   orgRows.forEach((org: any) => {
@@ -182,23 +184,24 @@ export async function calculateOrganizationBalancesBatch(
 
   const names = orgRows.map((org: any) => org.name).filter(Boolean)
   if (names.length > 0) {
-    const { data: ledgerAccounts } = await supabase
+    let q = supabase
       .from('city_ledger_accounts')
       .select('account_name, balance')
       .in('account_name', names)
-      .eq('account_type', 'organization')
+      .in('account_type', ['organization', 'corporate'])
+    if (options?.hotelTenantId) {
+      q = q.eq('organization_id', options.hotelTenantId)
+    }
+    const { data: ledgerAccounts } = await q
 
     ;(ledgerAccounts || []).forEach((account: any) => {
-      const org = orgRows.find((item: any) => String(item.name || '').toLowerCase() === String(account.account_name || '').toLowerCase())
+      const org = orgRows.find(
+        (item: any) => String(item.name || '').toLowerCase() === String(account.account_name || '').toLowerCase()
+      )
       if (!org?.id) return
       balanceMap[org.id] = Math.max(balanceMap[org.id] || 0, Number(account.balance || 0))
     })
   }
-
-  // Clamp negatives to 0
-  Object.keys(balanceMap).forEach(id => {
-    balanceMap[id] = Math.max(0, balanceMap[id] || 0)
-  })
 
   return balanceMap
 }

@@ -5,30 +5,29 @@ import { createClient } from '@/lib/supabase/client'
 import { EnhancedDataTable } from '@/components/shared/enhanced-data-table'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent } from '@/components/ui/card'
-import { Label } from '@/components/ui/label'
-import { Input } from '@/components/ui/input'
+import { CardContent } from '@/components/ui/card'
 import { NewBookingModal } from '@/components/bookings/new-booking-modal'
 import { BulkBookingModal } from '@/components/reservations/bulk-booking-modal'
+import { ReserveCheckInModal, type ReserveCheckInBooking } from '@/components/reservations/reserve-checkin-modal'
 import { ExtendStayModal } from '@/components/bookings/extend-stay-modal'
 import { AddChargeModal } from '@/components/bookings/add-charge-modal'
 import { formatNaira } from '@/lib/utils/currency'
 import { usePageData } from '@/hooks/use-page-data'
 import { useAuth } from '@/lib/auth-context'
 import { hasPermission } from '@/lib/permissions'
-import { Plus, Loader2, Users, LogOut } from 'lucide-react'
+import { Plus, Loader2, Users, LogOut, DoorOpen } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { getUserDisplayName } from '@/lib/utils/user-display'
 import { fetchUserDisplayNameMap } from '@/lib/utils/fetch-user-display-names'
 import { getBulkGroupId } from '@/lib/utils/bulk-booking'
-import { manualCheckoutEligible, resolvedCheckoutDateForClosing } from '@/lib/utils/booking-checkout-ui'
+import { manualCheckoutEligible, resolvedCheckoutDateForClosing, hideChargeExtendInBookingsTable } from '@/lib/utils/booking-checkout-ui'
 
 interface Booking {
   id: string
   folio_id: string
-  guest_id: string
-  room_id: string
+  guest_id?: string | null
+  room_id?: string | null
   check_in: string
   check_out: string
   number_of_nights: number
@@ -56,7 +55,7 @@ interface Booking {
   room_count?: number
   guest_count?: number
   guests?: { name: string; phone: string }
-  rooms?: { room_number: string; room_type: string }
+  rooms?: { id?: string; room_number: string; room_type: string }
   folio_status?: string | null
 }
 
@@ -69,21 +68,20 @@ export default function BookingsPage() {
   const [selectedBooking, setSelectedBooking] = useState<any>(null)
   const [checkoutLoadingId, setCheckoutLoadingId] = useState<string | null>(null)
   const [checkoutLoadingGroupId, setCheckoutLoadingGroupId] = useState<string | null>(null)
-  const [filterDateFrom, setFilterDateFrom] = useState('')
-  const [filterDateTo, setFilterDateTo] = useState('')
+  const [cancelReserveLoadingId, setCancelReserveLoadingId] = useState<string | null>(null)
+  const [reserveCheckInBooking, setReserveCheckInBooking] = useState<ReserveCheckInBooking | null>(null)
+  const [reserveCheckInOpen, setReserveCheckInOpen] = useState(false)
   const { initialLoading, startFetch, endFetch } = usePageData()
   const { organizationId, role, userId } = useAuth()
   const router = useRouter()
   const isSuperadmin = role === 'superadmin'
   const canManageFolio = isSuperadmin || role === 'front_desk'
+  const canCheckInReserved = hasPermission(role, 'bookings:checkin')
+  const canCancelReservation = hasPermission(role, 'reservations:delete')
 
   useEffect(() => {
     if (organizationId) fetchBookings()
   }, [organizationId, userId])
-
-  useEffect(() => {
-    if (organizationId) fetchBookings()
-  }, [filterDateFrom, filterDateTo])
 
   const fetchBookings = async () => {
     try {
@@ -97,23 +95,13 @@ export default function BookingsPage() {
 
       let query = supabase
         .from('bookings')
-        .select('*, guests(name, phone), rooms(room_number, room_type), created_by, updated_by, updated_at')
+        .select('*, guests(name, phone), rooms(id, room_number, room_type), created_by, updated_by, updated_at')
         .eq('organization_id', organizationId)
         .in('status', ['confirmed', 'checked_in', 'reserved', 'checked_out'])
 
-      // Apply date range filter if set, otherwise default to showing recent + future bookings
-      if (filterDateFrom || filterDateTo) {
-        if (filterDateFrom) {
-          query = query.gte('check_in', filterDateFrom)
-        }
-        if (filterDateTo) {
-          query = query.lte('check_out', filterDateTo)
-        }
-      } else {
-        // Default: show bookings from 90 days ago to future
-        const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
-        query = query.gte('check_in', ninetyDaysAgo)
-      }
+      // Default: show bookings from 90 days ago to future (narrow further with table date picker)
+      const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+      query = query.gte('check_in', ninetyDaysAgo)
 
       const { data, error } = await query
         .order('check_in', { ascending: false })
@@ -333,6 +321,77 @@ export default function BookingsPage() {
     )
   }
 
+  const handleCancelReserveFromTable = (booking: Booking) => {
+    toast.custom(
+      (tid: string | number) => (
+        <div className="flex flex-col gap-3">
+          <div className="flex gap-2 items-start">
+            <LogOut className="w-5 h-5 text-red-600 mt-0.5 shrink-0" />
+            <div>
+              <p className="font-semibold">Cancel this reservation?</p>
+              <p className="text-sm text-muted-foreground">The folio is marked cancelled; any held room is freed.</p>
+            </div>
+          </div>
+          <div className="flex gap-2 justify-end">
+            <Button variant="outline" size="sm" onClick={() => toast.dismiss(tid)}>Keep</Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              disabled={cancelReserveLoadingId === booking.id}
+              onClick={async () => {
+                toast.dismiss(tid)
+                setCancelReserveLoadingId(booking.id)
+                try {
+                  const supabase = createClient()
+                  const { error } = await supabase
+                    .from('bookings')
+                    .update({ status: 'cancelled', updated_by: userId, updated_at: new Date().toISOString() })
+                    .eq('id', booking.id)
+                  if (error) throw error
+                  const rid = booking.room_id
+                  if (rid) {
+                    await supabase.from('rooms').update({ status: 'available', updated_at: new Date().toISOString() }).eq('id', rid)
+                  }
+                  toast.success('Reservation cancelled')
+                  fetchBookings()
+                } catch (err: any) {
+                  toast.error(err.message || 'Failed to cancel reservation')
+                } finally {
+                  setCancelReserveLoadingId(null)
+                }
+              }}
+            >
+              Cancel reservation
+            </Button>
+          </div>
+        </div>
+      ),
+      { duration: Infinity },
+    )
+  }
+
+  const openReserveCheckIn = (booking: Booking) => {
+    setReserveCheckInBooking({
+      id: booking.id,
+      organization_id: booking.organization_id || organizationId || '',
+      folio_id: booking.folio_id,
+      check_in: booking.check_in,
+      check_out: booking.check_out,
+      guest_id: booking.guest_id,
+      room_id: booking.room_id,
+      rate_per_night: booking.rate_per_night,
+      guests: booking.guests?.name ? { name: booking.guests.name } : null,
+      rooms: booking.rooms?.room_number
+        ? {
+            id: booking.rooms.id,
+            room_number: booking.rooms.room_number,
+            room_type: booking.rooms.room_type,
+          }
+        : null,
+    })
+    setReserveCheckInOpen(true)
+  }
+
   const handleCheckoutFromTable = (booking: Booking) => {
     toast.custom(
       (t: string | number) => (
@@ -403,6 +462,13 @@ export default function BookingsPage() {
     <div className="space-y-6">
       <NewBookingModal open={modalOpen} onClose={() => { setModalOpen(false); fetchBookings() }} />
       <BulkBookingModal open={bulkModalOpen} onClose={() => setBulkModalOpen(false)} onSuccess={() => { setBulkModalOpen(false); fetchBookings() }} />
+      <ReserveCheckInModal
+        open={reserveCheckInOpen}
+        onClose={() => { setReserveCheckInOpen(false); setReserveCheckInBooking(null) }}
+        onSuccess={fetchBookings}
+        booking={reserveCheckInBooking}
+        userId={userId || ''}
+      />
       {selectedBooking && (
         <>
           <ExtendStayModal 
@@ -442,54 +508,6 @@ export default function BookingsPage() {
           </div>
         )}
       </div>
-
-      {/* Date Range Filter */}
-      <Card>
-        <CardContent className="pt-6">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-            <div className="flex-1 space-y-2">
-              <Label htmlFor="filter-date-from" className="text-xs">Check-in From</Label>
-              <Input
-                id="filter-date-from"
-                type="date"
-                value={filterDateFrom}
-                onChange={(e) => {
-                  setFilterDateFrom(e.target.value)
-                }}
-                className="text-sm h-9"
-              />
-            </div>
-            <div className="flex-1 space-y-2">
-              <Label htmlFor="filter-date-to" className="text-xs">Check-in To</Label>
-              <Input
-                id="filter-date-to"
-                type="date"
-                value={filterDateTo}
-                onChange={(e) => {
-                  setFilterDateTo(e.target.value)
-                }}
-                className="text-sm h-9"
-              />
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                setFilterDateFrom('')
-                setFilterDateTo('')
-              }}
-              disabled={!filterDateFrom && !filterDateTo}
-            >
-              Clear
-            </Button>
-          </div>
-          {(filterDateFrom || filterDateTo) && (
-            <p className="text-xs text-muted-foreground mt-2">
-              Showing bookings from {filterDateFrom || 'any date'} to {filterDateTo || 'any date'}
-            </p>
-          )}
-        </CardContent>
-      </Card>
 
       <EnhancedDataTable
         data={bookings}
@@ -644,9 +662,15 @@ export default function BookingsPage() {
             key: 'actions',
             label: 'Actions',
             render: (booking) => {
-              if (!canManageFolio) return null
+              const showReserveRow =
+                !booking.is_bulk &&
+                booking.status === 'reserved' &&
+                (canCheckInReserved || canCancelReservation)
+
+              if (!canManageFolio && !booking.is_bulk && !showReserveRow) return null
 
               if (booking.is_bulk) {
+                if (!canManageFolio) return null
                 const showBulkCheckout = (booking.bulk_members || []).some((m) =>
                   manualCheckoutEligible({
                     status: m.status,
@@ -683,80 +707,121 @@ export default function BookingsPage() {
                 )
               }
 
+              const hideChargeExtend = hideChargeExtendInBookingsTable({ check_out: booking.check_out })
+
               return (
-                <div className="flex shrink-0 flex-nowrap gap-0.5">
-                  <Button 
-                    size="sm" 
-                    variant="outline"
-                    title="Add folio charge"
-                    className="h-7 px-2 text-[11px] leading-tight whitespace-nowrap"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      setSelectedBooking({
-                        id: booking.id,
-                        folioId: booking.folio_id,
-                        guestName: booking.guests?.name,
-                        guestId: booking.guest_id,
-                        room: `Room ${booking.rooms?.room_number}`,
-                        currentCheckOut: booking.check_out,
-                        ratePerNight: booking.rate_per_night,
-                        organization_id: booking.organization_id,
-                        created_by: booking.created_by
-                      })
-                      setAddChargeModalOpen(true)
-                    }}
-                  >
-                    Charge
-                  </Button>
-                  <Button 
-                    size="sm" 
-                    variant="outline"
-                    title="Extend stay"
-                    className="h-7 px-2 text-[11px] leading-tight whitespace-nowrap"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      setSelectedBooking({
-                        id: booking.id,
-                        folioId: booking.folio_id,
-                        guestName: booking.guests?.name,
-                        guestId: booking.guest_id,
-                        room: `Room ${booking.rooms?.room_number}`,
-                        currentCheckOut: booking.check_out,
-                        ratePerNight: booking.rate_per_night,
-                        organization_id: booking.organization_id,
-                        created_by: booking.created_by
-                      })
-                      setExtendModalOpen(true)
-                    }}
-                  >
-                    Extend Stay
-                  </Button>
-                  {!manualCheckoutEligible({
-                    status: booking.status,
-                    check_in: booking.check_in,
-                    check_out: booking.check_out,
-                    folio_status: booking.folio_status,
-                  }) ? null : (
+                <div className="flex shrink-0 flex-wrap gap-0.5">
+                  {showReserveRow && canCheckInReserved && (
                     <Button
                       size="sm"
                       variant="outline"
-                      title="Check out guest"
-                      className="h-7 px-2 text-[11px] leading-tight text-amber-700 border-amber-200 hover:bg-amber-50 whitespace-nowrap"
-                      disabled={checkoutLoadingId === booking.id}
+                      title="Check in — pick room when guest arrives"
+                      className="h-7 px-2 text-[11px] leading-tight whitespace-nowrap text-green-700 border-green-200 hover:bg-green-50"
                       onClick={(e) => {
                         e.stopPropagation()
-                        handleCheckoutFromTable(booking)
+                        openReserveCheckIn(booking)
                       }}
                     >
-                      {checkoutLoadingId === booking.id ? (
-                        <Loader2 className="h-3 w-3 animate-spin" />
-                      ) : (
-                        <>
-                          <LogOut className="mr-1 h-3 w-3" />Out
-                        </>
-                      )}
+                      <DoorOpen className="mr-1 h-3 w-3 shrink-0 inline" aria-hidden />
+                      Check in
                     </Button>
                   )}
+                  {showReserveRow && canCancelReservation && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      title="Cancel reservation"
+                      className="h-7 px-2 text-[11px] leading-tight whitespace-nowrap border-destructive/40 text-destructive hover:bg-destructive/10"
+                      disabled={cancelReserveLoadingId === booking.id}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleCancelReserveFromTable(booking)
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                  )}
+
+                  {canManageFolio && booking.room_id ? (
+                    <>
+                      {!hideChargeExtend && (
+                        <>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            title="Add folio charge"
+                            className="h-7 px-2 text-[11px] leading-tight whitespace-nowrap"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setSelectedBooking({
+                                id: booking.id,
+                                folioId: booking.folio_id,
+                                guestName: booking.guests?.name,
+                                guestId: booking.guest_id,
+                                room: `Room ${booking.rooms?.room_number}`,
+                                currentCheckOut: booking.check_out,
+                                ratePerNight: booking.rate_per_night,
+                                organization_id: booking.organization_id,
+                                created_by: booking.created_by
+                              })
+                              setAddChargeModalOpen(true)
+                            }}
+                          >
+                            Charge
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            title="Extend stay"
+                            className="h-7 px-2 text-[11px] leading-tight whitespace-nowrap"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setSelectedBooking({
+                                id: booking.id,
+                                folioId: booking.folio_id,
+                                guestName: booking.guests?.name,
+                                guestId: booking.guest_id,
+                                room: `Room ${booking.rooms?.room_number}`,
+                                currentCheckOut: booking.check_out,
+                                ratePerNight: booking.rate_per_night,
+                                organization_id: booking.organization_id,
+                                created_by: booking.created_by
+                              })
+                              setExtendModalOpen(true)
+                            }}
+                          >
+                            Extend Stay
+                          </Button>
+                        </>
+                      )}
+                      {!manualCheckoutEligible({
+                        status: booking.status,
+                        check_in: booking.check_in,
+                        check_out: booking.check_out,
+                        folio_status: booking.folio_status,
+                      }) ? null : (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          title="Check out guest"
+                          className="h-7 px-2 text-[11px] leading-tight text-amber-700 border-amber-200 hover:bg-amber-50 whitespace-nowrap"
+                          disabled={checkoutLoadingId === booking.id}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleCheckoutFromTable(booking)
+                          }}
+                        >
+                          {checkoutLoadingId === booking.id ? (
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                          ) : (
+                            <>
+                              <LogOut className="mr-1 h-3 w-3" />Out
+                            </>
+                          )}
+                        </Button>
+                      )}
+                    </>
+                  ) : null}
                 </div>
               )
             },

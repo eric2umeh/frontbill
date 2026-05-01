@@ -75,7 +75,9 @@ export default function OrganizationsPage() {
       // Show organizations created from the Organizations menu, regardless of which team role created them.
       const menuOrganizations = (data || []).filter((org: any) => isOrganizationMenuRecord(org))
       const orgIds = menuOrganizations.map((org: any) => org.id)
-      const balanceMap = await calculateOrganizationBalancesBatch(supabase, orgIds)
+      const balanceMap = await calculateOrganizationBalancesBatch(supabase, orgIds, {
+        hotelTenantId: organizationId,
+      })
       
       // Fetch creator profiles for all organizations
       const creatorIds = Array.from(new Set(menuOrganizations.map((org: any) => org.created_by).filter(Boolean)))
@@ -326,11 +328,12 @@ export default function OrganizationsPage() {
             {
               key: 'current_balance',
               label: 'Balance',
-              render: (org) => (
-                <div className="font-semibold text-blue-600">
-                  {formatNaira(org.current_balance)}
-                </div>
-              ),
+              render: (org) => {
+                const b = Number(org.current_balance || 0)
+                const cls =
+                  b < 0 ? 'text-red-600' : b > 0 ? 'text-blue-600 font-semibold' : 'text-muted-foreground font-semibold'
+                return <div className={cls}>{formatNaira(b)}</div>
+              },
             },
             {
               key: 'created_at',
@@ -375,7 +378,14 @@ export default function OrganizationsPage() {
                 )}
                 <div className="pt-3 border-t">
                   <p className="text-xs text-muted-foreground">City Ledger Balance</p>
-                  <p className="text-lg font-bold text-blue-600">{formatNaira(org.current_balance)}</p>
+                  {(() => {
+                    const b = Number(org.current_balance || 0)
+                    const cls =
+                      b < 0 ? 'text-red-600' : b > 0 ? 'text-blue-600' : 'text-muted-foreground'
+                    return (
+                      <p className={`text-lg font-bold ${cls}`}>{formatNaira(b)}</p>
+                    )
+                  })()}
                 </div>
                 <div className="pt-2 text-xs text-muted-foreground">
                   Created by {org.created_by_name}
