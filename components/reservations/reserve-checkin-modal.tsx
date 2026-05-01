@@ -115,18 +115,19 @@ export function ReserveCheckInModal({ open, onClose, onSuccess, booking, userId 
       setSelectedRoomId(booking.room_id)
       return
     }
-    const preferredType = booking.rooms?.room_type
-    const byType =
-      preferredType &&
-      sortByRoomNumber(
-        availableRooms.filter((r) => r.room_type === preferredType && r.id !== booking.room_id),
-      )
-    const anyFree = sortByRoomNumber([...availableRooms])
+    const preferredRows = booking.rooms?.room_type
+      ? sortByRoomNumber(
+          availableRooms.filter(
+            (r) => r.room_type === booking.rooms?.room_type && r.id !== booking.room_id,
+          ),
+        )
+      : []
+
+    const excludingCurrent = sortByRoomNumber(
+      booking.room_id ? availableRooms.filter((r) => r.id !== booking.room_id) : [...availableRooms],
+    )
     const pick =
-      byType?.[0]?.id ??
-      sortByRoomNumber(availableRooms.filter((r) => r.id !== booking.room_id))[0]?.id ??
-      availableRooms[0]?.id ??
-      ''
+      preferredRows[0]?.id ?? excludingCurrent[0]?.id ?? availableRooms[0]?.id ?? ''
     setSelectedRoomId(pick)
   }, [open, booking?.id, booking?.room_id, booking?.rooms?.room_type, availableRooms])
 
