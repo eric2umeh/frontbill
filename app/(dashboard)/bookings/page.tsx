@@ -21,7 +21,7 @@ import { toast } from 'sonner'
 import { getUserDisplayName } from '@/lib/utils/user-display'
 import { fetchUserDisplayNameMap } from '@/lib/utils/fetch-user-display-names'
 import { getBulkGroupId } from '@/lib/utils/bulk-booking'
-import { manualCheckoutEligible, resolvedCheckoutDateForClosing } from '@/lib/utils/booking-checkout-ui'
+import { manualCheckoutEligible, resolvedCheckoutDateForClosing, hideChargeExtendInBookingsTable } from '@/lib/utils/booking-checkout-ui'
 
 interface Booking {
   id: string
@@ -707,6 +707,8 @@ export default function BookingsPage() {
                 )
               }
 
+              const hideChargeExtend = hideChargeExtendInBookingsTable({ check_out: booking.check_out })
+
               return (
                 <div className="flex shrink-0 flex-wrap gap-0.5">
                   {showReserveRow && canCheckInReserved && (
@@ -742,52 +744,56 @@ export default function BookingsPage() {
 
                   {canManageFolio && booking.room_id ? (
                     <>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        title="Add folio charge"
-                        className="h-7 px-2 text-[11px] leading-tight whitespace-nowrap"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          setSelectedBooking({
-                            id: booking.id,
-                            folioId: booking.folio_id,
-                            guestName: booking.guests?.name,
-                            guestId: booking.guest_id,
-                            room: `Room ${booking.rooms?.room_number}`,
-                            currentCheckOut: booking.check_out,
-                            ratePerNight: booking.rate_per_night,
-                            organization_id: booking.organization_id,
-                            created_by: booking.created_by
-                          })
-                          setAddChargeModalOpen(true)
-                        }}
-                      >
-                        Charge
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        title="Extend stay"
-                        className="h-7 px-2 text-[11px] leading-tight whitespace-nowrap"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          setSelectedBooking({
-                            id: booking.id,
-                            folioId: booking.folio_id,
-                            guestName: booking.guests?.name,
-                            guestId: booking.guest_id,
-                            room: `Room ${booking.rooms?.room_number}`,
-                            currentCheckOut: booking.check_out,
-                            ratePerNight: booking.rate_per_night,
-                            organization_id: booking.organization_id,
-                            created_by: booking.created_by
-                          })
-                          setExtendModalOpen(true)
-                        }}
-                      >
-                        Extend Stay
-                      </Button>
+                      {!hideChargeExtend && (
+                        <>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            title="Add folio charge"
+                            className="h-7 px-2 text-[11px] leading-tight whitespace-nowrap"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setSelectedBooking({
+                                id: booking.id,
+                                folioId: booking.folio_id,
+                                guestName: booking.guests?.name,
+                                guestId: booking.guest_id,
+                                room: `Room ${booking.rooms?.room_number}`,
+                                currentCheckOut: booking.check_out,
+                                ratePerNight: booking.rate_per_night,
+                                organization_id: booking.organization_id,
+                                created_by: booking.created_by
+                              })
+                              setAddChargeModalOpen(true)
+                            }}
+                          >
+                            Charge
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            title="Extend stay"
+                            className="h-7 px-2 text-[11px] leading-tight whitespace-nowrap"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setSelectedBooking({
+                                id: booking.id,
+                                folioId: booking.folio_id,
+                                guestName: booking.guests?.name,
+                                guestId: booking.guest_id,
+                                room: `Room ${booking.rooms?.room_number}`,
+                                currentCheckOut: booking.check_out,
+                                ratePerNight: booking.rate_per_night,
+                                organization_id: booking.organization_id,
+                                created_by: booking.created_by
+                              })
+                              setExtendModalOpen(true)
+                            }}
+                          >
+                            Extend Stay
+                          </Button>
+                        </>
+                      )}
                       {!manualCheckoutEligible({
                         status: booking.status,
                         check_in: booking.check_in,
