@@ -18,7 +18,7 @@ import { useAuth } from '@/lib/auth-context'
 import { formatPersonName } from '@/lib/utils/name-format'
 import {
   Loader2, Search, ShieldCheck, Check, X, Users, Edit2, Plus,
-  Trash2, Eye, EyeOff, KeyRound, CalendarClock,
+  Trash2, Eye, EyeOff, KeyRound,
 } from 'lucide-react'
 
 interface UserProfile {
@@ -38,19 +38,6 @@ interface AddUserForm {
   email: string
   password: string
   role: string
-}
-
-interface BackdateRequest {
-  id: string
-  request_type: string
-  requested_check_in: string
-  requested_check_out: string | null
-  reason: string
-  status: 'pending' | 'approved' | 'rejected'
-  requested_by_name: string
-  approved_by_name?: string | null
-  decision_note?: string | null
-  created_at: string
 }
 
 const EMPTY_ADD_FORM: AddUserForm = { full_name: '', email: '', password: '', role: '' }
@@ -80,9 +67,6 @@ export default function UsersRolesPage() {
 
   // Roles view
   const [viewingRole, setViewingRole] = useState<RoleKey | null>(null)
-  const [backdateRequests, setBackdateRequests] = useState<BackdateRequest[]>([])
-  const [decidingRequestId, setDecidingRequestId] = useState<string | null>(null)
-
   const router = useRouter()
 
   useEffect(() => { fetchUsers() }, [])
@@ -101,7 +85,6 @@ export default function UsersRolesPage() {
       const json = await res.json()
       if (!res.ok) { toast.error(json.error || 'Failed to load users'); return }
       setUsers(json.users || [])
-      if (currentUserRole === 'superadmin') fetchBackdateRequests()
     } finally {
       endFetch()
     }
@@ -223,42 +206,6 @@ export default function UsersRolesPage() {
     }
   }
 
-  const fetchBackdateRequests = async () => {
-    if (currentUserRole !== 'superadmin') return
-    try {
-      const res = await fetch(`/api/backdate-requests?caller_id=${currentUserId}`, { credentials: 'include' })
-      const json = await res.json()
-      if (!res.ok) { toast.error(json.error || 'Failed to load backdate requests'); return }
-      setBackdateRequests(json.requests || [])
-    } catch {
-      toast.error('Failed to load backdate requests')
-    }
-  }
-
-  const decideBackdateRequest = async (requestId: string, status: 'approved' | 'rejected') => {
-    setDecidingRequestId(requestId)
-    try {
-      const decision_note = status === 'approved'
-        ? 'Approved by superadmin'
-        : 'Rejected by superadmin'
-      const res = await fetch('/api/backdate-requests', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ caller_id: currentUserId, request_id: requestId, status, decision_note }),
-      })
-      const json = await res.json()
-      if (!res.ok) { toast.error(json.error || 'Failed to update request'); return }
-      toast.success(`Backdate request ${status}`)
-      setBackdateRequests(prev => prev.map(item => item.id === requestId ? { ...item, ...json.request } : item))
-      fetchBackdateRequests()
-    } catch {
-      toast.error('Failed to update request')
-    } finally {
-      setDecidingRequestId(null)
-    }
-  }
-
   const filteredUsers = useMemo(() =>
     users.filter(u =>
       (u.full_name || '').toLowerCase().includes(search.toLowerCase()) ||
@@ -298,12 +245,6 @@ export default function UsersRolesPage() {
             <ShieldCheck className="h-4 w-4" />
             Roles & Permissions
           </TabsTrigger>
-          {currentUserRole === 'superadmin' && (
-            <TabsTrigger value="backdates" className="gap-2">
-              <CalendarClock className="h-4 w-4" />
-              Backdate Requests ({backdateRequests.filter(r => r.status === 'pending').length})
-            </TabsTrigger>
-          )}
         </TabsList>
 
         {/* ---- Users tab ---- */}
@@ -401,7 +342,7 @@ export default function UsersRolesPage() {
         {/* ---- Roles tab ---- */}
         <TabsContent value="roles" className="mt-4 space-y-4">
           <p className="text-sm text-muted-foreground">
-            These are the standard hotel roles. Each role comes with a preset list of permissions. Click a role to view its full permission set.
+            FrontBill assigns fixed permission bundles—there is no per-user toggling. Descriptions summarise what each role experiences in this product (bulk booking, reserves, extend/charge safeguards, Night Audit tooling, ledger rules, housekeeping/maintenance workspaces, etc.). Expand a row to inspect every granular permission grouped by sidebar area.
           </p>
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
             {ROLE_DEFINITIONS.map(role => (
@@ -435,70 +376,6 @@ export default function UsersRolesPage() {
             ))}
           </div>
         </TabsContent>
-
-        {currentUserRole === 'superadmin' && (
-          <TabsContent value="backdates" className="mt-4 space-y-4">
-            <p className="text-sm text-muted-foreground">
-              Approve or reject staff requests to create bookings/reservations with past check-in dates. Approved requests are kept as an audit trail.
-            </p>
-            <div className="grid gap-3">
-              {backdateRequests.length === 0 ? (
-                <Card>
-                  <CardContent className="py-8 text-center text-sm text-muted-foreground">
-                    No backdate requests yet.
-                  </CardContent>
-                </Card>
-              ) : backdateRequests.map(request => (
-                <Card key={request.id}>
-                  <CardContent className="p-4 space-y-3">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <p className="font-medium capitalize">{request.request_type.replace('_', ' ')} backdate</p>
-                          <Badge variant={request.status === 'pending' ? 'default' : request.status === 'approved' ? 'secondary' : 'destructive'}>
-                            {request.status}
-                          </Badge>
-                        </div>
-                        <p className="text-sm text-muted-foreground">
-                          Requested by {request.requested_by_name} for {request.requested_check_in}
-                          {request.requested_check_out ? ` to ${request.requested_check_out}` : ''}
-                        </p>
-                      </div>
-                      {request.status === 'pending' && (
-                        <div className="flex gap-2">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => decideBackdateRequest(request.id, 'rejected')}
-                            disabled={decidingRequestId === request.id}
-                          >
-                            Reject
-                          </Button>
-                          <Button
-                            size="sm"
-                            onClick={() => decideBackdateRequest(request.id, 'approved')}
-                            disabled={decidingRequestId === request.id}
-                          >
-                            {decidingRequestId === request.id ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-                            Approve
-                          </Button>
-                        </div>
-                      )}
-                    </div>
-                    <div className="rounded-md bg-muted/40 p-3 text-sm">
-                      <span className="font-medium">Reason: </span>{request.reason}
-                    </div>
-                    {request.decision_note && (
-                      <p className="text-xs text-muted-foreground">
-                        Decision: {request.decision_note}{request.approved_by_name ? ` by ${request.approved_by_name}` : ''}
-                      </p>
-                    )}
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          </TabsContent>
-        )}
       </Tabs>
 
       {/* ======== ADD USER DIALOG ======== */}
