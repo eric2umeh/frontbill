@@ -13,8 +13,9 @@
 --   1) Run PREVIEW only; confirm rows.
 --   2) Run BEGIN…COMMIT once. Check Results / notices for UPDATE counts.
 --
--- Optional: restrict to one hotel
---   Uncomment AND b.organization_id = '...uuid...' in each UPDATE below.
+-- Optional: uncomment AND b.organization_id / AND r.organization_id lines in APPLY.
+--   Use single quotes around the UUID: 'cd97...b2b0'::uuid
+--   Do not put ';' until the end of each UPDATE — one semicolon closes the whole statement.
 
 ----------------------------------------------------------------------
 -- PREVIEW (read-only): bookings that will be closed by steps 1–2
