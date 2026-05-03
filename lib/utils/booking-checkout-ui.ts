@@ -8,16 +8,19 @@ export type CheckoutEligibilityBooking = {
 /** When to show manual Check out on lists and bulk detail. */
 export function manualCheckoutEligible(b: CheckoutEligibilityBooking): boolean {
   const today = new Date().toISOString().split('T')[0]
-  const hour = new Date().getHours()
   const folioDone = (b.folio_status || 'active') === 'checked_out'
   if (b.status === 'checked_out' || folioDone) return false
 
+  // Reserve: treat as check-in flow until guest is in-house; allow after arrival day
   if (b.status === 'reserved') {
     if (b.check_in > today) return false
     return true
   }
 
-  if (b.check_out <= today && hour >= 14) return false
+  // Do NOT hide checkout after 14:00 on/after departure day: auto-checkout cron may not run
+  // (missed schedule, env error, timezone edge), leaving rooms stuck "occupied" with no UI path.
+  if (b.status === 'confirmed' && b.check_in > today) return false
+
   return true
 }
 
