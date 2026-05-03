@@ -1,5 +1,10 @@
 -- FrontBill: close bookings that stayed "checked_in" after scheduled checkout (rooms stuck occupied).
 --
+-- WHERE DO I SEE QUERY RESULTS IN SUPABASE?
+--   Dashboard → your project → SQL Editor → paste ONE query → click Run (or Ctrl/Cmd+Enter).
+--   Scroll down: a table appears under the editor (tab "Results").
+--   Message "Success. No rows returned" means zero rows matched — not a bug; use TROUBLESHOOTING below.
+--
 -- WHY: Manual checkout was hidden after 14:00 local time on/over departure day (assuming cron ran).
 --      If cron missed/failed or dates drifted, staff had no "Check out" in the UI.
 --
@@ -32,6 +37,38 @@ LEFT JOIN public.rooms r ON r.id = b.room_id
 WHERE b.status = 'checked_in'
   AND COALESCE(b.folio_status, 'active') IS DISTINCT FROM 'checked_out'
   AND b.check_out::date < (timezone('Africa/Lagos', now()))::date;
+
+----------------------------------------------------------------------
+-- TROUBLESHOOTING — run each query alone in SQL Editor (copy one at a time).
+-- Use when PREVIEW A is empty but Rooms still show "occupied".
+----------------------------------------------------------------------
+
+-- TR-1: Calendar "today" in Lagos (sanity check vs your check_out dates)
+-- SELECT (timezone('Africa/Lagos', now()))::date AS lagos_today;
+
+-- TR-2: Every booking still checked_in (watch check_out vs lagos_today / your local expectation)
+-- SELECT b.folio_id, b.check_out, b.status, b.folio_status, b.room_id, r.room_number, r.status AS room_status
+-- FROM public.bookings b
+-- LEFT JOIN public.rooms r ON r.id = b.room_id
+-- WHERE b.status = 'checked_in'
+-- ORDER BY b.check_out ASC;
+
+-- TR-3: Occupied rooms WITH their open booking row (status may be reserved — not only checked_in)
+-- SELECT r.organization_id, r.room_number, r.status AS room_row, b.status AS booking_status,
+--        b.check_out, b.folio_id, b.id AS booking_id
+-- FROM public.rooms r
+-- LEFT JOIN public.bookings b ON b.room_id = r.id AND b.status IN ('checked_in', 'reserved', 'confirmed')
+-- WHERE r.status = 'occupied'
+-- ORDER BY r.room_number, b.check_out;
+
+-- TR-4: Occupied rooms with NO checked_in booking at all — "orphan" room state (fix ORPHAN block below)
+-- SELECT r.id, r.organization_id, r.room_number
+-- FROM public.rooms r
+-- WHERE r.status = 'occupied'
+--   AND NOT EXISTS (
+--     SELECT 1 FROM public.bookings b
+--     WHERE b.room_id = r.id AND b.status = 'checked_in'
+--   );
 
 ----------------------------------------------------------------------
 -- PREVIEW B (read-only): include departures due TODAY (still checked_in)
