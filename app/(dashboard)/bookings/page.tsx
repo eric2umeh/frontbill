@@ -11,6 +11,7 @@ import { BulkBookingModal } from '@/components/reservations/bulk-booking-modal'
 import { ReserveCheckInModal, type ReserveCheckInBooking } from '@/components/reservations/reserve-checkin-modal'
 import { ExtendStayModal } from '@/components/bookings/extend-stay-modal'
 import { AddChargeModal } from '@/components/bookings/add-charge-modal'
+import { CheckoutConfirmDialog } from '@/components/bookings/checkout-confirm-dialog'
 import { formatNaira } from '@/lib/utils/currency'
 import { usePageData } from '@/hooks/use-page-data'
 import { useAuth } from '@/lib/auth-context'
@@ -59,6 +60,10 @@ interface Booking {
   folio_status?: string | null
 }
 
+type BookingsCheckoutDraft =
+  | { kind: 'single'; booking: Booking }
+  | { kind: 'bulk'; bulkRow: Booking; targets: Booking[] }
+
 export default function BookingsPage() {
   const [bookings, setBookings] = useState<Booking[]>([])
   const [modalOpen, setModalOpen] = useState(false)
@@ -68,6 +73,7 @@ export default function BookingsPage() {
   const [selectedBooking, setSelectedBooking] = useState<any>(null)
   const [checkoutLoadingId, setCheckoutLoadingId] = useState<string | null>(null)
   const [checkoutLoadingGroupId, setCheckoutLoadingGroupId] = useState<string | null>(null)
+  const [checkoutDraft, setCheckoutDraft] = useState<BookingsCheckoutDraft | null>(null)
   const [cancelReserveLoadingId, setCancelReserveLoadingId] = useState<string | null>(null)
   const [reserveCheckInBooking, setReserveCheckInBooking] = useState<ReserveCheckInBooking | null>(null)
   const [reserveCheckInOpen, setReserveCheckInOpen] = useState(false)
@@ -281,69 +287,7 @@ export default function BookingsPage() {
       toast.message('No folios in this group are available for checkout (already checked out or past auto-checkout window).')
       return
     }
-    const totalOutstanding = targets.reduce((s, m) => s + Number(m.balance || 0), 0)
-    const gid = bulkRow.bulk_group_id || ''
-    toast.custom(
-      (tid: string | number) => (
-        <div className="flex flex-col gap-3">
-          <div className="flex gap-2 items-start">
-            <LogOut className="w-5 h-5 text-amber-600 mt-0.5 shrink-0" />
-            <div>
-              <p className="font-semibold">Check out bulk group?</p>
-              <p className="text-sm text-muted-foreground">
-                {targets.length} room{targets.length === 1 ? '' : 's'} — {bulkRow.guests?.name}
-              </p>
-              {totalOutstanding > 0 && (
-                <p className="text-xs text-red-600 mt-1">
-                  Outstanding (sum): {formatNaira(totalOutstanding)}
-                </p>
-              )}
-            </div>
-          </div>
-          <div className="flex gap-2 justify-end">
-            <Button variant="outline" size="sm" onClick={() => toast.dismiss(tid)}>
-              Cancel
-            </Button>
-            <Button
-              size="sm"
-              className="bg-amber-600 hover:bg-amber-700 text-white"
-              onClick={async () => {
-                toast.dismiss(tid)
-                setCheckoutLoadingGroupId(gid)
-                try {
-                  const supabase = createClient()
-                  for (const m of targets) {
-                    const outDate = resolvedCheckoutDateForClosing(m)
-                    const { error } = await supabase
-                      .from('bookings')
-                      .update({
-                        status: 'checked_out',
-                        check_out: outDate,
-                        folio_status: 'checked_out',
-                        updated_by: userId,
-                      })
-                      .eq('id', m.id)
-                    if (error) throw error
-                    if (m.room_id) {
-                      await supabase.from('rooms').update({ status: 'available' }).eq('id', m.room_id)
-                    }
-                  }
-                  toast.success(`Checked out ${targets.length} room${targets.length === 1 ? '' : 's'}`)
-                  fetchBookings()
-                } catch (err: any) {
-                  toast.error(err.message || 'Failed to check out group')
-                } finally {
-                  setCheckoutLoadingGroupId(null)
-                }
-              }}
-            >
-              Confirm checkout
-            </Button>
-          </div>
-        </div>
-      ),
-      { duration: Infinity }
-    )
+    setCheckoutDraft({ kind: 'bulk', bulkRow, targets })
   }
 
   const handleCancelReserveFromTable = (booking: Booking) => {
@@ -418,61 +362,78 @@ export default function BookingsPage() {
   }
 
   const handleCheckoutFromTable = (booking: Booking) => {
-    toast.custom(
-      (t: string | number) => (
-        <div className="flex flex-col gap-3">
-          <div className="flex gap-2 items-start">
-            <LogOut className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" />
-            <div>
-              <p className="font-semibold">Check Out Guest?</p>
-              <p className="text-sm text-muted-foreground">
-                {booking.guests?.name} — Room {booking.rooms?.room_number}
-              </p>
-              {booking.balance > 0 && (
-                <p className="text-xs text-red-600 mt-1">Outstanding balance: {formatNaira(booking.balance)}</p>
-              )}
-            </div>
-          </div>
-          <div className="flex gap-2 justify-end">
-            <Button variant="outline" size="sm" onClick={() => toast.dismiss(t)}>Cancel</Button>
-            <Button
-              size="sm"
-              className="bg-amber-600 hover:bg-amber-700 text-white"
-              onClick={async () => {
-                toast.dismiss(t)
-                setCheckoutLoadingId(booking.id)
-                try {
-                  const supabase = createClient()
-                  const outDate = resolvedCheckoutDateForClosing(booking)
-                  const { error } = await supabase
-                    .from('bookings')
-                    .update({
-                      status: 'checked_out',
-                      check_out: outDate,
-                      folio_status: 'checked_out',
-                      updated_by: userId,
-                    })
-                    .eq('id', booking.id)
-                  if (error) throw error
-                  if (booking.room_id) {
-                    await supabase.from('rooms').update({ status: 'available' }).eq('id', booking.room_id)
-                  }
-                  toast.success(`${booking.guests?.name} checked out successfully`)
-                  fetchBookings()
-                } catch (err: any) {
-                  toast.error(err.message || 'Failed to check out guest')
-                } finally {
-                  setCheckoutLoadingId(null)
-                }
-              }}
-            >
-              Confirm Checkout
-            </Button>
-          </div>
-        </div>
-      ),
-      { duration: Infinity }
-    )
+    setCheckoutDraft({ kind: 'single', booking })
+  }
+
+  const checkoutDialogBusy =
+    checkoutDraft?.kind === 'single'
+      ? checkoutLoadingId === checkoutDraft.booking.id
+      : checkoutDraft?.kind === 'bulk'
+        ? checkoutLoadingGroupId === (checkoutDraft.bulkRow.bulk_group_id ?? '')
+        : false
+
+  const confirmCheckoutFromDialog = async () => {
+    if (!checkoutDraft || !userId) return
+
+    if (checkoutDraft.kind === 'single') {
+      const booking = checkoutDraft.booking
+      setCheckoutLoadingId(booking.id)
+      try {
+        const supabase = createClient()
+        const outDate = resolvedCheckoutDateForClosing(booking)
+        const { error } = await supabase
+          .from('bookings')
+          .update({
+            status: 'checked_out',
+            check_out: outDate,
+            folio_status: 'checked_out',
+            updated_by: userId,
+          })
+          .eq('id', booking.id)
+        if (error) throw error
+        if (booking.room_id) {
+          await supabase.from('rooms').update({ status: 'available' }).eq('id', booking.room_id)
+        }
+        toast.success(`${booking.guests?.name} checked out successfully`)
+        setCheckoutDraft(null)
+        fetchBookings()
+      } catch (err: any) {
+        toast.error(err.message || 'Failed to check out guest')
+      } finally {
+        setCheckoutLoadingId(null)
+      }
+      return
+    }
+
+    const { targets, bulkRow } = checkoutDraft
+    const gid = bulkRow.bulk_group_id ?? ''
+    setCheckoutLoadingGroupId(gid)
+    try {
+      const supabase = createClient()
+      for (const m of targets) {
+        const outDate = resolvedCheckoutDateForClosing(m)
+        const { error } = await supabase
+          .from('bookings')
+          .update({
+            status: 'checked_out',
+            check_out: outDate,
+            folio_status: 'checked_out',
+            updated_by: userId,
+          })
+          .eq('id', m.id)
+        if (error) throw error
+        if (m.room_id) {
+          await supabase.from('rooms').update({ status: 'available' }).eq('id', m.room_id)
+        }
+      }
+      toast.success(`Checked out ${targets.length} room${targets.length === 1 ? '' : 's'}`)
+      setCheckoutDraft(null)
+      fetchBookings()
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to check out group')
+    } finally {
+      setCheckoutLoadingGroupId(null)
+    }
   }
 
   if (initialLoading) {
@@ -485,6 +446,49 @@ export default function BookingsPage() {
 
   return (
     <div className="space-y-6">
+      <CheckoutConfirmDialog
+        open={checkoutDraft !== null}
+        onClose={() => {
+          if (checkoutDialogBusy) return
+          setCheckoutDraft(null)
+        }}
+        title={
+          checkoutDraft?.kind === 'bulk'
+            ? `Check out ${checkoutDraft.targets.length} room${checkoutDraft.targets.length === 1 ? '' : 's'}?`
+            : 'Check out guest?'
+        }
+        description={
+          checkoutDraft?.kind === 'bulk' ? (
+            <>
+              <p>
+                {checkoutDraft.targets.length} room{checkoutDraft.targets.length === 1 ? '' : 's'} —{' '}
+                <span className="font-medium text-foreground">{checkoutDraft.bulkRow.guests?.name}</span>
+              </p>
+              <p className="mt-1">All eligible folios in this bulk group will be marked checked out.</p>
+            </>
+          ) : checkoutDraft?.kind === 'single' ? (
+            <>
+              <p>
+                <span className="font-medium text-foreground">{checkoutDraft.booking.guests?.name}</span>
+                {' — '}
+                Room {checkoutDraft.booking.rooms?.room_number}
+              </p>
+              <p className="mt-1">This closes the folio and frees the room.</p>
+            </>
+          ) : undefined
+        }
+        outstandingAmount={
+          checkoutDraft?.kind === 'bulk'
+            ? checkoutDraft.targets.reduce((s, m) => s + Number(m.balance ?? 0), 0)
+            : checkoutDraft?.kind === 'single'
+              ? Number(checkoutDraft.booking.balance ?? 0)
+              : undefined
+        }
+        outstandingLabel={checkoutDraft?.kind === 'bulk' ? 'Outstanding (sum):' : 'Outstanding balance:'}
+        loading={checkoutDialogBusy}
+        onConfirm={confirmCheckoutFromDialog}
+      />
+
       <NewBookingModal open={modalOpen} onClose={() => { setModalOpen(false); fetchBookings() }} />
       <BulkBookingModal
         wording="booking"
