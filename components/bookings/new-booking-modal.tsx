@@ -20,6 +20,8 @@ import { formatPersonName } from '@/lib/utils/name-format'
 import { StayDateRangeFields } from '@/components/shared/stay-date-range-fields'
 import { useAuth } from '@/lib/auth-context'
 import { BOOKING_MODAL_ROOMS_LIMIT, normalizeRoomsForBookingPickers } from '@/lib/utils/room-bookability'
+import { Checkbox } from '@/components/ui/checkbox'
+import { applyPaymentToGuestCityLedger } from '@/lib/utils/guest-city-ledger'
 
 interface NewBookingModalProps {
   open: boolean
@@ -88,6 +90,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
   const [paymentMethod, setPaymentMethod] = useState('cash')
   const [paymentStatus, setPaymentStatus] = useState<'paid' | 'partial'>('paid')
   const [amountPaid, setAmountPaid] = useState<number | ''>('')
+  const [payAboveRoomTotal, setPayAboveRoomTotal] = useState(false)
 
   // City Ledger — split into individual and organization tabs
   const [ledgerTab, setLedgerTab] = useState<'individual' | 'organization'>('individual')
@@ -605,8 +608,16 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
       const effectiveRate = customPrice > 0 ? customPrice : pricePerNight
       const total = effectiveRate * nights
       const isCityLedger = paymentMethod === 'city_ledger'
-      const paidAmount = isCityLedger ? 0 : paymentStatus === 'paid' ? total : Math.min(Number(amountPaid) || 0, total)
-      const balanceAmount = total - paidAmount
+      const rawPaid = Number(amountPaid) || 0
+      let paidAmount = 0
+      if (!isCityLedger) {
+        if (paymentStatus === 'paid') {
+          paidAmount = payAboveRoomTotal ? Math.max(total, rawPaid || total) : total
+        } else {
+          paidAmount = payAboveRoomTotal ? Math.max(0, rawPaid) : Math.min(rawPaid, total)
+        }
+      }
+      const balanceAmount = Math.max(0, total - paidAmount)
       if (!isCityLedger && paymentStatus === 'partial' && paidAmount <= 0) {
         toast.error('Please enter the amount paid')
         return
@@ -738,6 +749,20 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
         }])
       }
 
+      const prepayExcess = Math.max(0, paidAmount - total)
+      if (!isCityLedger && prepayExcess > 0 && paymentMethod !== 'city_ledger' && finalGuestId) {
+        const { data: gRow } = await supabase.from('guests').select('name').eq('id', finalGuestId).maybeSingle()
+        const ledgerName = (gRow?.name || formattedGuestName).trim()
+        if (ledgerName) {
+          await applyPaymentToGuestCityLedger(supabase, {
+            organizationId,
+            guestName: ledgerName,
+            paymentAmount: prepayExcess,
+            createIfMissingExcess: prepayExcess,
+          })
+        }
+      }
+
       toast.success(`Booking created! Ref: ${booking.folio_id}`)
       onSuccess?.()
       onClose()
@@ -754,7 +779,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
     const d = new Date(); d.setHours(0, 0, 0, 0)
     setCheckInDate(d); setCheckOutDate(new Date(d.getTime() + 86400000)); setNights(1)
     setSelectedRoomType(''); setSelectedRoom(null); setPricePerNight(0); setCustomPrice(0)
-    setPaymentMethod('cash'); setPaymentStatus('paid'); setAmountPaid('')
+    setPaymentMethod('cash'); setPaymentStatus('paid'); setAmountPaid(''); setPayAboveRoomTotal(false)
     setLedgerSearch(''); setLedgerAccount(''); setLedgerAccountName('')
     setLedgerTab('individual')
     setNewAccountName(''); setNewAccountPhone(''); setNewAccountEmail('')
@@ -938,18 +963,48 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
                     <Input
                       type="number"
                       min="0"
-                      max={(customPrice || pricePerNight) * nights}
-                      value={paymentStatus === 'paid' ? ((customPrice || pricePerNight) * nights) || '' : amountPaid}
+                      max={
+                        paymentStatus === 'partial' && !payAboveRoomTotal
+                          ? (customPrice || pricePerNight) * nights
+                          : undefined
+                      }
+                      value={
+                        paymentStatus === 'paid' && !payAboveRoomTotal
+                          ? ((customPrice || pricePerNight) * nights) || ''
+                          : amountPaid
+                      }
                       onChange={(e) => setAmountPaid(e.target.value === '' ? '' : Number(e.target.value))}
-                      disabled={paymentStatus === 'paid'}
+                      disabled={paymentStatus === 'paid' && !payAboveRoomTotal}
                       placeholder="Enter paid amount"
                     />
                   </div>
                 </div>
               )}
+              {paymentMethod !== 'city_ledger' && (
+                <div className="flex items-start gap-2 rounded-md border border-input p-3">
+                  <Checkbox
+                    id="nb-pay-above-total"
+                    checked={payAboveRoomTotal}
+                    onCheckedChange={(c) => {
+                      const v = Boolean(c)
+                      setPayAboveRoomTotal(v)
+                      const t = (customPrice || pricePerNight) * nights
+                      if (v && paymentStatus === 'paid') {
+                        setAmountPaid(prev => {
+                          const n = typeof prev === 'number' ? prev : 0
+                          return n >= t ? n : t
+                        })
+                      }
+                    }}
+                  />
+                  <Label htmlFor="nb-pay-above-total" className="text-sm font-normal leading-snug cursor-pointer">
+                    Guest is paying more than the room total — save the excess as city ledger credit for future stays or incidentals.
+                  </Label>
+                </div>
+              )}
               <div className="space-y-2">
                 <Label>Payment Method</Label>
-                <Select value={paymentMethod} onValueChange={(v) => { setPaymentMethod(v); setLedgerAccount(''); setLedgerSearch(''); setLedgerAccountName('') }}>
+                <Select value={paymentMethod} onValueChange={(v) => { setPaymentMethod(v); setLedgerAccount(''); setLedgerSearch(''); setLedgerAccountName(''); setPayAboveRoomTotal(false) }}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="cash">Cash</SelectItem>
