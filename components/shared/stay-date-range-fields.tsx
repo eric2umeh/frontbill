@@ -41,6 +41,11 @@ export function StayDateRangeFields({
   className,
 }: StayDateRangeFieldsProps) {
   const [open, setOpen] = React.useState(false)
+  const [nightsDraft, setNightsDraft] = React.useState(() => (nights < 1 ? '' : String(nights)))
+
+  React.useEffect(() => {
+    setNightsDraft(nights < 1 ? '' : String(nights))
+  }, [nights])
 
   const inner = (
     <>
@@ -101,15 +106,32 @@ export function StayDateRangeFields({
         <div className="space-y-2">
           <Label>Number of Nights *</Label>
           <Input
-            type="number"
-            min={1}
+            type="text"
+            inputMode="numeric"
+            autoComplete="off"
             placeholder="1"
-            value={nights || ''}
+            value={nightsDraft}
             onChange={(e) => {
               const raw = e.target.value
-              if (raw === '') return
+              if (raw === '') {
+                setNightsDraft('')
+                return
+              }
+              if (!/^\d+$/.test(raw)) return
+              setNightsDraft(raw)
               const n = parseInt(raw, 10)
               if (!Number.isNaN(n) && n >= 1) onNightsChange(n)
+            }}
+            onBlur={() => {
+              const n = parseInt(nightsDraft, 10)
+              if (nightsDraft.trim() === '' || Number.isNaN(n) || n < 1) {
+                const fallback = nights >= 1 ? nights : 1
+                setNightsDraft(String(fallback))
+                onNightsChange(fallback)
+                return
+              }
+              setNightsDraft(String(n))
+              onNightsChange(n)
             }}
           />
         </div>
