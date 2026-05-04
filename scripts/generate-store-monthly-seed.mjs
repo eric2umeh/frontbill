@@ -62,11 +62,27 @@ function normalizeUnit(u) {
   return x || 'pcs'
 }
 
+/** CSV section "HOUSEKEEPING/LAUNDRY DEPARTMENT" — items split into laundry vs housekeeping by SKU name. */
+const HK_LAUNDRY_BLOCK = '__hk_laundry_block__'
+
+/**
+ * Classify rows from the combined HK/Laundry CSV block into two store categories.
+ */
+function storeCategorySlugFromHkLaundryBlock(itemName) {
+  const u = itemName.toUpperCase()
+  if (u.includes('LAUNDRY')) return 'laundry'
+  if (u.includes('ARIEL')) return 'laundry'
+  if (u.includes('STAIN REMOVAL')) return 'laundry'
+  if (u.includes('SPRAY STARCH')) return 'laundry'
+  if (u.includes('COAL WATER STARCH')) return 'laundry'
+  return 'housekeeping'
+}
+
 function matchSection(labelRaw) {
   const u = labelRaw.toUpperCase().replace(/\./g, '').replace(/\s+/g, ' ').trim()
   if (!u) return null
   if (u.includes('GENERAL STORE')) return 'general-store'
-  if (u.includes('HOUSEKEEPING') || u.includes('LAUNDRY DEPARTMENT')) return 'housekeeping-laundry'
+  if (u.includes('HOUSEKEEPING') && u.includes('LAUNDRY')) return HK_LAUNDRY_BLOCK
   if (u.includes('STAFF MEAL')) return 'staff-meal'
   if (u.includes('STATIONERIES')) return 'stationeries'
   if (u.includes('KITCHEN CONSUMAB')) return 'kitchen-consumable'
@@ -131,16 +147,22 @@ function main() {
       unit = p.unit
     }
 
-    const key = `${currentSlug}::${name.toLowerCase()}`
+    let catSlug = currentSlug
+    if (currentSlug === HK_LAUNDRY_BLOCK) {
+      catSlug = storeCategorySlugFromHkLaundryBlock(name)
+    }
+
+    const key = `${catSlug}::${name.toLowerCase()}`
     if (seen.has(key)) continue
     seen.add(key)
 
-    items.push({ catSlug: currentSlug, name, unit, qty })
+    items.push({ catSlug, name, unit, qty })
   }
 
   const categories = [
     { slug: 'general-store', name: 'General Store', order: 10 },
-    { slug: 'housekeeping-laundry', name: 'Housekeeping / Laundry', order: 20 },
+    { slug: 'housekeeping', name: 'Housekeeping', order: 20 },
+    { slug: 'laundry', name: 'Laundry', order: 25 },
     { slug: 'staff-meal', name: 'Staff Meal (Food)', order: 30 },
     { slug: 'stationeries', name: 'Stationeries', order: 40 },
     { slug: 'kitchen-consumable', name: 'Kitchen consumable', order: 50 },
