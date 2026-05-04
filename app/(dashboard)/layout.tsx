@@ -108,7 +108,7 @@ export default function DashboardLayout({
               organizationId: profile.organization_id || '',
             })
             // Check if role has dashboard access
-            const allowedRoles = ['superadmin', 'admin', 'manager', 'front_desk', 'receptionist', 'housekeeping', 'maintenance', 'accountant', 'store']
+            const allowedRoles = ['superadmin', 'admin', 'manager', 'front_desk', 'receptionist', 'housekeeping', 'maintenance', 'accountant', 'auditor', 'store']
             if (!allowedRoles.includes(profile.role || 'admin')) {
               if (isMounted) {
                 setRedirected(true)
