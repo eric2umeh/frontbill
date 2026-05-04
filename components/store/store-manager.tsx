@@ -644,7 +644,7 @@ export function StoreManager() {
                       <TableRow className="hover:bg-transparent">
                         <TableHead>Item</TableHead>
                         <TableHead className="hidden lg:table-cell">Category</TableHead>
-                        <TableHead className="text-right">On hand</TableHead>
+                        <TableHead className="text-right">Qty Stock</TableHead>
                         <TableHead className="hidden md:table-cell text-right">Reorder</TableHead>
                         <TableHead className="hidden sm:table-cell text-right">Unit price</TableHead>
                         <TableHead className="w-[140px] text-right">Actions</TableHead>
@@ -932,7 +932,7 @@ export function StoreManager() {
             </div>
             <div className="grid gap-4 sm:grid-cols-3">
               <div className="space-y-2">
-                <Label>On hand {!editingItem && '(initial)'}</Label>
+                <Label>Qty Stock {!editingItem && '(initial)'}</Label>
                 <Input
                   type="number"
                   min={0}
@@ -1025,7 +1025,7 @@ export function StoreManager() {
             </div>
             {adjustType === 'adjustment' ? (
               <div className="space-y-2">
-                <Label>New quantity on hand</Label>
+                <Label>New quantity Qty Stock</Label>
                 <Input
                   type="number"
                   min={0}
