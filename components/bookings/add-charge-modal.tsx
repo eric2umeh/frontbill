@@ -153,7 +153,7 @@ export function AddChargeModal({ open, onClose, booking }: AddChargeModalProps) 
       const supabase = createClient()
       const { data: authData } = await supabase.auth.getUser()
       const currentUserId = authData.user?.id || booking.created_by || null
-      // Cash, POS, card, transfer, cheque = paid immediately
+      // Cash, POS, card, transfer = paid immediately
       // city_ledger = deferred (pending)
       const isPaidNow = paymentMethod !== 'city_ledger' && paymentMethod !== 'deferred'
 
@@ -363,7 +363,6 @@ export function AddChargeModal({ open, onClose, booking }: AddChargeModalProps) 
                   <SelectItem value="pos">POS</SelectItem>
                   <SelectItem value="card">Card</SelectItem>
                   <SelectItem value="transfer">Transfer</SelectItem>
-                  <SelectItem value="cheque">Cheque</SelectItem>
                   <SelectItem value="city_ledger">City Ledger</SelectItem>
                 </SelectContent>
               </Select>
