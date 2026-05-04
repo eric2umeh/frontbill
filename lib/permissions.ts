@@ -23,6 +23,7 @@ export type Permission =
   | 'housekeeping:view' | 'housekeeping:create' | 'housekeeping:edit' | 'housekeeping:assign' | 'housekeeping:report'
   | 'maintenance:view' | 'maintenance:create' | 'maintenance:edit' | 'maintenance:assign' | 'maintenance:report'
   | 'store:view' | 'store:create' | 'store:edit' | 'store:delete' | 'store:adjust'
+  | 'store:issue' | 'store:reports' | 'store:audit'
 
 export type RoleKey =
   | 'superadmin'
@@ -31,6 +32,7 @@ export type RoleKey =
   | 'front_desk'
   | 'receptionist'
   | 'accountant'
+  | 'auditor'
   | 'staff'
   | 'housekeeping'
   | 'maintenance'
@@ -103,6 +105,9 @@ export const ALL_PERMISSIONS: { key: Permission; label: string; group: string }[
   { key: 'store:edit', label: 'Edit Store Items', group: 'Store' },
   { key: 'store:delete', label: 'Delete Store Items', group: 'Store' },
   { key: 'store:adjust', label: 'Stock In / Out & Adjustments', group: 'Store' },
+  { key: 'store:issue', label: 'Issue Stock to Outlets / Departments', group: 'Store' },
+  { key: 'store:reports', label: 'Store Daily Sales & Closing by Category', group: 'Store' },
+  { key: 'store:audit', label: 'Store Movement Audit Trail (Full Detail)', group: 'Store' },
 
   { key: 'analytics:view', label: 'View Analytics', group: 'Analytics' },
   { key: 'analytics:export', label: 'Export Analytics', group: 'Analytics' },
@@ -177,6 +182,23 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
       'store:edit',
       'store:delete',
       'store:adjust',
+      'store:issue',
+      'store:reports',
+      'settings:view',
+    ],
+  },
+  {
+    key: 'auditor',
+    label: 'Auditor',
+    description:
+      'Internal audit: read-only view of the hotel store, daily movement summaries, and detailed stock audit trail; may also open system audit trails elsewhere.',
+    color: 'bg-slate-200 text-slate-900 dark:bg-slate-800 dark:text-slate-100',
+    permissions: [
+      'store:view',
+      'store:reports',
+      'store:audit',
+      'night_audit:view',
+      'audit_trails:view',
       'settings:view',
     ],
   },
@@ -194,11 +216,15 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
       'ledger:view', 'ledger:manage',
       'reconciliation:view', 'reconciliation:manage',
       'night_audit:view',
+      'audit_trails:view',
       'bookings:view',
       'reservations:view',
       'guests:view',
       'organizations:view',
       'rooms:view',
+      'store:view',
+      'store:reports',
+      'store:audit',
       'settings:view',
     ],
   },
