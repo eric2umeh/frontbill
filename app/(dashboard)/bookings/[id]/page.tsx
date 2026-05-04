@@ -1010,7 +1010,6 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                   <SelectItem value="pos">POS (paid now - not added to Bill Balance)</SelectItem>
                   <SelectItem value="card">Card (paid now - not added to Bill Balance)</SelectItem>
                   <SelectItem value="transfer">Transfer (paid now - not added to Bill Balance)</SelectItem>
-                  <SelectItem value="cheque">Cheque (paid now - not added to Bill Balance)</SelectItem>
                   <SelectItem value="city_ledger">City Ledger (bill to account - adds to Bill Balance)</SelectItem>
                   <SelectItem value="deferred">Defer / Not yet paid (adds to Bill Balance)</SelectItem>
                 </SelectContent>
@@ -1108,7 +1107,6 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                       <SelectItem value="pos">POS</SelectItem>
                       <SelectItem value="card">Card</SelectItem>
                       <SelectItem value="transfer">Transfer</SelectItem>
-                      <SelectItem value="cheque">Cheque</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -1150,7 +1148,6 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                       <SelectItem value="pos">POS</SelectItem>
                       <SelectItem value="card">Card</SelectItem>
                       <SelectItem value="transfer">Transfer</SelectItem>
-                      <SelectItem value="cheque">Cheque</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
