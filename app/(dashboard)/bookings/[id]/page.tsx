@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -19,7 +19,19 @@ import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/lib/auth-context'
 import { getUserDisplayName } from '@/lib/utils/user-display'
 import { fetchUserDisplayNameMap } from '@/lib/utils/fetch-user-display-names'
-import { manualCheckoutEligible, resolvedCheckoutDateForClosing } from '@/lib/utils/booking-checkout-ui'
+import {
+  manualCheckoutEligible,
+  resolvedCheckoutDateForClosing,
+  DEFAULT_ORG_CHECKOUT_TIME,
+  folioGuestActionsLocked,
+  shouldAutoCheckoutDueBooking,
+  formatCheckoutTimeLabel,
+  parseCheckoutTimeHM,
+  localTodayYmd,
+  isBookingCheckedOut,
+  isPastCheckoutCutoff,
+  normalizeBookingCheckoutYmd,
+} from '@/lib/utils/booking-checkout-ui'
 
 export default function BookingDetailPage({ params }: { params: Promise<{ id: string }> | { id: string } }) {
   const router = useRouter()
@@ -48,6 +60,8 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
   const [editChargeLoading, setEditChargeLoading] = useState(false)
   const [addChargeLoading, setAddChargeLoading] = useState(false)
   const [checkoutLoading, setCheckoutLoading] = useState(false)
+  const [orgCheckoutTime, setOrgCheckoutTime] = useState(DEFAULT_ORG_CHECKOUT_TIME)
+  const autoCheckoutInFlight = useRef(false)
 
   useEffect(() => {
     const getParamsAndFetch = async () => {
@@ -71,6 +85,15 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
 
       if (bookingError) throw bookingError
       setBooking(bookingData)
+
+      if (bookingData.organization_id) {
+        const { data: orgRow } = await supabase
+          .from('organizations')
+          .select('checkout_time')
+          .eq('id', bookingData.organization_id)
+          .maybeSingle()
+        setOrgCheckoutTime(orgRow?.checkout_time ?? DEFAULT_ORG_CHECKOUT_TIME)
+      }
 
       const bookingUserIds = [bookingData.created_by, bookingData.updated_by].filter(Boolean)
       const bookingUserMap = await fetchUserDisplayNameMap(bookingUserIds, userId)
@@ -128,6 +151,73 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
     }
   }
 
+  useEffect(() => {
+    if (!bookingId || loading || !booking) return
+    if (isBookingCheckedOut(booking)) return
+    const iv = window.setInterval(() => {
+      fetchBookingDetails(bookingId)
+    }, 60_000)
+    return () => window.clearInterval(iv)
+  }, [bookingId, loading, booking?.status, booking?.folio_status])
+
+  useEffect(() => {
+    if (loading || !booking || !bookingId || !canManageFolio || !userId) return
+    if (!shouldAutoCheckoutDueBooking(booking, orgCheckoutTime)) return
+    if (autoCheckoutInFlight.current) return
+    autoCheckoutInFlight.current = true
+    ;(async () => {
+      setCheckoutLoading(true)
+      try {
+        const supabase = createClient()
+        const outDate = resolvedCheckoutDateForClosing({
+          check_out: booking.check_out ?? localTodayYmd(),
+        })
+
+        const { data: patched, error } = await supabase
+          .from('bookings')
+          .update({
+            status: 'checked_out',
+            check_out: outDate,
+            folio_status: 'checked_out',
+            updated_by: userId,
+          })
+          .eq('id', bookingId)
+          .in('status', ['checked_in', 'reserved'])
+          .select('id')
+
+        if (error) throw error
+        if (!patched?.length) {
+          await fetchBookingDetails(bookingId)
+          return
+        }
+
+        if (booking.room_id) {
+          await supabase.from('rooms').update({ status: 'available' }).eq('id', booking.room_id)
+        }
+
+        toast.success(`${booking?.guests?.name ?? 'Guest'} checked out automatically — past standard checkout (${formatCheckoutTimeLabel(orgCheckoutTime)}).`)
+        await fetchBookingDetails(bookingId)
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : 'Auto-checkout failed'
+        toast.error(msg)
+      } finally {
+        setCheckoutLoading(false)
+        autoCheckoutInFlight.current = false
+      }
+    })()
+  }, [
+    loading,
+    bookingId,
+    canManageFolio,
+    userId,
+    orgCheckoutTime,
+    booking?.id,
+    booking?.status,
+    booking?.folio_status,
+    booking?.check_out,
+    booking?.room_id,
+  ])
+
   const handleAddCharge = async () => {
     if (addChargeLoading) return // prevent double-submit
     if (!chargeAmount || Number(chargeAmount) <= 0) {
@@ -139,9 +229,20 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
       toast.error('Please enter a description')
       return
     }
-    // Prevent any charges on checked-out folios
-    if ((booking?.folio_status || 'active') === 'checked_out') {
-      toast.error('This folio has been checked out and cannot accept new charges')
+    // Prevent charges after checkout cutoff or on closed folios
+    if (!booking) return
+    if (
+      folioGuestActionsLocked(
+        {
+          status: booking.status,
+          check_in: booking.check_in,
+          check_out: booking.check_out,
+          folio_status: booking.folio_status,
+        },
+        orgCheckoutTime,
+      )
+    ) {
+      toast.error('This folio is closed or past standard checkout time — charges and payments cannot be edited here.')
       return
     }
 
@@ -737,6 +838,18 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
     )
   }
 
+  const folioLocked = folioGuestActionsLocked(
+    {
+      status: booking.status,
+      check_in: booking.check_in,
+      check_out: booking.check_out,
+      folio_status: booking.folio_status,
+    },
+    orgCheckoutTime,
+  )
+
+  const checkoutBannerCoYmd = normalizeBookingCheckoutYmd(booking.check_out || '')
+
   return (
     <div className="space-y-6">
       <ExtendStayModal 
@@ -908,32 +1021,34 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
           )}
           {canManageFolio && (
             <>
-              <Button variant="outline" size="sm" onClick={() => setExtendStayModalOpen(true)} disabled={addChargeLoading || (booking?.folio_status === 'checked_out') || booking?.status === 'checked_out'}>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setExtendStayModalOpen(true)}
+                disabled={addChargeLoading || folioLocked}
+              >
                 <Clock className="mr-2 h-4 w-4" />
                 Extend Stay
               </Button>
-              {(() => {
-                if (
-                  !manualCheckoutEligible({
-                    status: booking?.status,
-                    check_in: booking?.check_in,
-                    check_out: booking?.check_out,
-                    folio_status: booking?.folio_status,
-                  })
-                )
-                  return null
-                return (
-                  <Button
-                    size="sm"
-                    className="bg-amber-600 hover:bg-amber-700 text-white"
-                    onClick={handleCheckout}
-                    disabled={checkoutLoading}
-                  >
-                    {checkoutLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <LogOut className="mr-2 h-4 w-4" />}
-                    Check Out
-                  </Button>
-                )
-              })()}
+              {manualCheckoutEligible(
+                {
+                  status: booking?.status,
+                  check_in: booking?.check_in,
+                  check_out: booking?.check_out,
+                  folio_status: booking?.folio_status,
+                },
+                orgCheckoutTime,
+              ) ? (
+                <Button
+                  size="sm"
+                  className="bg-amber-600 hover:bg-amber-700 text-white"
+                  onClick={handleCheckout}
+                  disabled={checkoutLoading}
+                >
+                  {checkoutLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <LogOut className="mr-2 h-4 w-4" />}
+                  Check Out
+                </Button>
+              ) : null}
             </>
           )}
           {isSuperadmin && (
@@ -952,33 +1067,45 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
       </div>
 
       {/* Late checkout warning banner */}
-      {(() => {
-        const today = new Date().toISOString().split('T')[0]
-        const nowHour = new Date().getHours()
-        const isActive = booking?.status === 'checked_in'
-        const isOverdueDate = booking?.check_out < today
-        const isTodayOverdue = booking?.check_out === today && nowHour >= 12
-        if (!isActive || (!isOverdueDate && !isTodayOverdue)) return null
-        const hoursLate = isOverdueDate
-          ? null
-          : nowHour - 12
-        return (
-          <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-            <AlertCircle className="h-4 w-4 mt-0.5 shrink-0 text-amber-600" />
-            <div className="space-y-0.5">
-              <p className="font-semibold">
-                {isOverdueDate
-                  ? 'This guest is overdue — checkout date has passed'
-                  : `Late checkout in progress — ${hoursLate} hour${hoursLate !== 1 ? 's' : ''} past 12:00 PM`}
-              </p>
-              <p className="text-xs">
-                Standard checkout is 12:00 PM. Auto-checkout will run at 2:00 PM and a late checkout fee may be applied automatically.
-                Use <strong>Add Charge</strong> above to manually record a late checkout fee if the guest has agreed to an extension.
-              </p>
-            </div>
-          </div>
-        )
-      })()}
+      {booking.status === 'checked_in'
+        ? (() => {
+            const todayStr = localTodayYmd()
+            const overdueNight = checkoutBannerCoYmd < todayStr
+            const pastCutSameDay =
+              checkoutBannerCoYmd === todayStr &&
+              isPastCheckoutCutoff({ check_out: booking.check_out }, orgCheckoutTime)
+            if (!overdueNight && !pastCutSameDay) return null
+            let lateLabel = ''
+            if (!overdueNight && pastCutSameDay) {
+              const { hour: dh, minute: dm } = parseCheckoutTimeHM(orgCheckoutTime)
+              const dl = new Date()
+              dl.setHours(dh, dm, 0, 0)
+              const hrs = Math.floor((Date.now() - dl.getTime()) / 3_600_000)
+              const mins = Math.max(1, Math.floor((Date.now() - dl.getTime()) / 60_000))
+              lateLabel =
+                hrs >= 1
+                  ? `${hrs} hour${hrs !== 1 ? 's' : ''} past ${formatCheckoutTimeLabel(orgCheckoutTime)}`
+                  : `${mins} minute${mins !== 1 ? 's' : ''} past ${formatCheckoutTimeLabel(orgCheckoutTime)}`
+            }
+            return (
+              <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                <AlertCircle className="h-4 w-4 mt-0.5 shrink-0 text-amber-600" />
+                <div className="space-y-0.5">
+                  <p className="font-semibold">
+                    {overdueNight
+                      ? 'This guest is overdue — the scheduled checkout date has passed.'
+                      : `Late checkout — ${lateLabel}`}
+                  </p>
+                  <p className="text-xs">
+                    Standard checkout is {formatCheckoutTimeLabel(orgCheckoutTime)} ({orgCheckoutTime}). After this time,
+                    charge, extend stay, and manual check out are unavailable; overdue rooms are checked out automatically
+                    (with any late-checkout policy from Settings).
+                  </p>
+                </div>
+              </div>
+            )
+          })()
+        : null}
 
       <div className="grid gap-6 lg:grid-cols-3">
         <Card className="lg:col-span-2">
@@ -1024,7 +1151,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
               <div className="flex items-center justify-between mb-4">
                 <h3 className="font-semibold text-lg">Folio - All Charges & Payments</h3>
                 {canManageFolio && (
-                  <Button size="sm" variant="outline" onClick={() => setAddChargeModalOpen(true)} disabled={booking?.folio_status === 'checked_out'}>
+                  <Button size="sm" variant="outline" onClick={() => setAddChargeModalOpen(true)} disabled={folioLocked}>
                     <Plus className="mr-2 h-4 w-4" />
                     Add Charge
                   </Button>
@@ -1120,7 +1247,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                   {formatNaira(totalBillBalance)}
                 </span>
               </div>
-              {totalBillBalance > 0 && (
+              {totalBillBalance > 0 && !folioLocked && (
                 <Button
                   className="w-full mt-4"
                   disabled={addChargeLoading}
