@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogClose } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Calendar } from '@/components/ui/calendar'
@@ -11,7 +11,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { formatNaira } from '@/lib/utils/currency'
 import { toast } from 'sonner'
-import { CreditCard, Check } from 'lucide-react'
+import { CreditCard, Check, X } from 'lucide-react'
 import { format, differenceInDays } from 'date-fns'
 import { createClient } from '@/lib/supabase/client'
 import { isSelectableLedgerName } from '@/lib/utils/ledger-organization'
@@ -371,122 +371,111 @@ export function ExtendStayModal({ open, onClose, onSuccess, booking }: ExtendSta
         resetForm()
       }
     }}>
-      <DialogContent className="sm:max-w-xl">
-        <DialogHeader>
-          <DialogTitle>Extend Stay - {booking.folioId}</DialogTitle>
-          <DialogDescription className="sr-only">Extend guest stay wizard</DialogDescription>
+      <DialogContent
+        showCloseButton={false}
+        className="flex h-[min(92dvh,900px)] w-[calc(100vw-1.5rem)] max-w-2xl flex-col gap-0 overflow-hidden p-0 shadow-xl sm:h-[min(88dvh,860px)]"
+      >
+        <DialogHeader className="relative shrink-0 space-y-1 border-b px-4 pb-3 pt-4 text-left sm:px-5 sm:pt-5">
+          <DialogTitle className="pr-10 text-base font-semibold leading-snug sm:text-lg">
+            Extend stay · {booking.folioId}
+          </DialogTitle>
+          <DialogDescription className="text-xs text-muted-foreground sm:text-sm">
+            Pick a new checkout date, then choose payment and confirm below.
+          </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4 py-4">
+        <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-4 py-3 sm:px-5">
           {/* Guest Info Summary */}
-          <div className="p-3 bg-muted rounded-lg space-y-1 text-sm">
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Guest:</span>
-              <span className="font-medium">{booking.guestName}</span>
+          <div className="mb-3 space-y-1 rounded-lg bg-muted p-3 text-xs sm:text-sm">
+            <div className="flex justify-between gap-2">
+              <span className="shrink-0 text-muted-foreground">Guest</span>
+              <span className="text-right font-medium">{booking.guestName}</span>
             </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Room:</span>
+            <div className="flex justify-between gap-2">
+              <span className="text-muted-foreground">Room</span>
               <span className="font-medium">{booking.room}</span>
             </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Current Checkout:</span>
-              <span className="font-medium">{format(currentCheckOut, 'PPP')}</span>
+            <div className="flex justify-between gap-2">
+              <span className="shrink-0 text-muted-foreground">Current checkout</span>
+              <span className="text-right font-medium">{format(currentCheckOut, 'PP')}</span>
             </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Rate/Night:</span>
+            <div className="flex justify-between gap-2">
+              <span className="text-muted-foreground">Rate / night</span>
               <span className="font-medium">{formatNaira(booking.ratePerNight)}</span>
             </div>
           </div>
 
-          <div className="space-y-4">
+          <div className="space-y-3 sm:space-y-4">
             <div className="space-y-2">
-              <Label>New Checkout Date *</Label>
+              <Label className="text-xs font-medium sm:text-sm">New checkout date *</Label>
               <div className="flex justify-center">
                 <Calendar
                   mode="single"
                   selected={newCheckOutDate}
                   onSelect={setNewCheckOutDate}
                   disabled={(date) => date < currentCheckOut}
-                  className="rounded-md border"
+                  className="origin-top scale-[0.92] rounded-md border p-2 sm:scale-100 sm:p-3"
                 />
               </div>
             </div>
 
             {newCheckOutDate && additionalNights > 0 && (
-              <div className="p-4 bg-muted rounded-lg space-y-2">
-                <div className="flex justify-between text-sm">
-                  <span>New Checkout Date:</span>
-                  <span className="font-semibold">{newCheckOutDate && format(newCheckOutDate, 'PPP')}</span>
+              <div className="space-y-2 rounded-lg bg-muted p-3 text-xs sm:p-4 sm:text-sm">
+                <div className="flex justify-between gap-2">
+                  <span className="text-muted-foreground">New checkout</span>
+                  <span className="font-semibold">{newCheckOutDate && format(newCheckOutDate, 'PP')}</span>
                 </div>
-                <div className="flex justify-between text-sm">
-                  <span>Additional Nights:</span>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Extra nights</span>
                   <span className="font-semibold">{additionalNights}</span>
                 </div>
-                <div className="flex justify-between text-lg font-bold border-t pt-2">
-                  <span>Total Amount:</span>
+                <div className="flex justify-between border-t border-border/60 pt-2 text-sm font-bold sm:text-base">
+                  <span>Total</span>
                   <span className="text-primary">{formatNaira(additionalAmount)}</span>
                 </div>
               </div>
             )}
 
-            <div className="space-y-2">
-              <Label htmlFor="paymentMethod">Payment Method *</Label>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                {['cash', 'pos', 'transfer', 'city_ledger'].map((method) => (
-                  <Button
-                    key={method}
-                    type="button"
-                    variant={paymentMethod === method ? 'default' : 'outline'}
-                    onClick={() => {
-                      setPaymentMethod(method)
-                      if (method !== 'city_ledger') {
-                        setShowOrgSearch(false)
-                        setSelectedLedger(null)
-                      }
-                    }}
-                  >
-                    {method.replace('_', ' ').toUpperCase()}
-                  </Button>
-                ))}
-              </div>
-            </div>
-
             {paymentMethod === 'city_ledger' && (
-                <div className="space-y-3">
-                  {/* Ledger Type Selector */}
+                <div className="space-y-3 border-t pt-3">
                   <div className="space-y-2">
-                    <Label>Bill to Account Type *</Label>
+                    <Label className="text-xs font-medium sm:text-sm">Bill to account type *</Label>
                     <Select value={ledgerType} onValueChange={setLedgerType}>
-                      <SelectTrigger>
+                      <SelectTrigger className="h-9 text-xs sm:h-10 sm:text-sm">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="individual">Individual (Guest)</SelectItem>
+                        <SelectItem value="individual">Individual (guest)</SelectItem>
                         <SelectItem value="organization">Organization</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
 
-                  {/* Individual Guest Account */}
                   {ledgerType === 'individual' && (
                     <Card className="bg-muted">
                       <CardContent className="p-3">
                         <button
+                          type="button"
                           onClick={() => setSelectedLedger({ id: booking.guestId, name: booking.guestName, balance: booking.guestBalance || 0 })}
-                          className="w-full text-left hover:opacity-80 transition-opacity"
+                          className="w-full text-left transition-opacity hover:opacity-80"
                         >
-                          <div className="flex items-center justify-between">
+                          <div className="flex items-center justify-between gap-2">
                             <div>
                               <div className="text-sm font-medium">{booking.guestName}</div>
-                              <div className="text-sm text-muted-foreground">
+                              <div className="text-xs text-muted-foreground sm:text-sm">
                                 Balance: {formatNaira(booking.guestBalance || 0)}
                               </div>
                             </div>
-                            {selectedLedger?.id === booking.guestId && (
-                              <Badge variant="default">Selected</Badge>
-                            )}
-                            {!selectedLedger && (
-                              <Badge variant="secondary">Click to Select</Badge>
+                            {selectedLedger?.id === booking.guestId ? (
+                              <Badge variant="default" className="shrink-0 text-xs">
+                                Selected
+                              </Badge>
+                            ) : (
+                              !selectedLedger && (
+                                <Badge variant="secondary" className="shrink-0 text-xs">
+                                  Tap to select
+                                </Badge>
+                              )
                             )}
                           </div>
                         </button>
@@ -494,30 +483,30 @@ export function ExtendStayModal({ open, onClose, onSuccess, booking }: ExtendSta
                     </Card>
                   )}
 
-                  {/* Organization Search */}
                   {ledgerType === 'organization' && (
                     <div className="space-y-2">
-                      <div className="flex items-center justify-between gap-2">
-                        <Label>Search Organization</Label>
-                        <Button type="button" size="sm" variant="outline" onClick={() => setShowNewOrgForm(true)}>
-                          + New Account
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <Label className="text-xs font-medium sm:text-sm">Search organization</Label>
+                        <Button type="button" size="sm" variant="outline" className="h-8 text-xs" onClick={() => setShowNewOrgForm(true)}>
+                          + New account
                         </Button>
                       </div>
                       <div className="space-y-2">
                         <div className="relative">
                           <Input
-                            placeholder="Search organization by name..."
+                            placeholder="Search by name…"
                             value={orgSearchTerm || ''}
                             onChange={(e) => handleOrgSearch(e.target.value)}
-                            className="rounded-md border px-3 py-2"
+                            className="h-9 rounded-md px-3 text-sm"
                           />
                         </div>
 
                         {orgSearchTerm && filteredOrganizations.length > 0 && (
-                          <div className="border rounded-md max-h-64 overflow-y-auto">
+                          <div className="max-h-40 overflow-y-auto rounded-md border sm:max-h-48">
                             {filteredOrganizations.map((org) => (
                               <button
                                 key={org.id}
+                                type="button"
                                 onClick={async () => {
                                   try {
                                     const supabase = createClient()
@@ -529,35 +518,35 @@ export function ExtendStayModal({ open, onClose, onSuccess, booking }: ExtendSta
                                     toast.error(error.message || 'Failed to select organization')
                                   }
                                 }}
-                                className="w-full text-left px-3 py-2 hover:bg-accent border-b last:border-b-0 transition-colors flex items-center justify-between"
+                                className="flex w-full items-center justify-between border-b px-3 py-2 text-left transition-colors last:border-b-0 hover:bg-accent"
                               >
-                                <div>
-                                  <div className="font-medium text-sm">{org.name}</div>
+                                <div className="min-w-0">
+                                  <div className="truncate text-sm font-medium">{org.name}</div>
                                   <div className="text-xs text-muted-foreground">
                                     Balance: {formatNaira(org.current_balance || 0)}
                                   </div>
                                 </div>
-                                {selectedLedger?.id === org.id && (
-                                  <Check className="h-4 w-4 text-green-600" />
-                                )}
+                                {selectedLedger?.id === org.id && <Check className="h-4 w-4 shrink-0 text-green-600" />}
                               </button>
                             ))}
                           </div>
                         )}
 
                         {orgSearchTerm && filteredOrganizations.length === 0 && (
-                          <div className="text-sm text-muted-foreground p-3 border rounded-md text-center">
+                          <div className="rounded-md border p-3 text-center text-xs text-muted-foreground">
                             No organizations found
                           </div>
                         )}
                         {showNewOrgForm && (
-                          <div className="rounded-md border bg-muted/30 p-3 space-y-2">
-                            <Input placeholder="Organization name" value={newOrgName} onChange={(e) => setNewOrgName(e.target.value)} />
-                            <Input placeholder="Phone optional" value={newOrgPhone} onChange={(e) => setNewOrgPhone(e.target.value)} />
-                            <div className="flex gap-2 justify-end">
-                              <Button type="button" size="sm" variant="outline" onClick={() => setShowNewOrgForm(false)}>Cancel</Button>
-                              <Button type="button" size="sm" onClick={createNewOrganizationAccount} disabled={creatingOrg || !newOrgName.trim()}>
-                                {creatingOrg ? 'Creating...' : 'Create & Select'}
+                          <div className="space-y-2 rounded-md border bg-muted/30 p-3">
+                            <Input placeholder="Organization name" value={newOrgName} onChange={(e) => setNewOrgName(e.target.value)} className="h-9 text-sm" />
+                            <Input placeholder="Phone (optional)" value={newOrgPhone} onChange={(e) => setNewOrgPhone(e.target.value)} className="h-9 text-sm" />
+                            <div className="flex justify-end gap-2">
+                              <Button type="button" size="sm" variant="outline" className="h-8 text-xs" onClick={() => setShowNewOrgForm(false)}>
+                                Cancel
+                              </Button>
+                              <Button type="button" size="sm" className="h-8 text-xs" onClick={createNewOrganizationAccount} disabled={creatingOrg || !newOrgName.trim()}>
+                                {creatingOrg ? 'Creating…' : 'Create & select'}
                               </Button>
                             </div>
                           </div>
@@ -566,35 +555,73 @@ export function ExtendStayModal({ open, onClose, onSuccess, booking }: ExtendSta
                     </div>
                   )}
 
-                  {/* Selected Organization Display */}
                   {selectedLedger && ledgerType === 'organization' && (
-                    <Card className="mt-2 bg-primary/10 border-primary">
+                    <Card className="mt-1 border-primary bg-primary/10">
                       <CardContent className="p-3">
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <div className="text-sm font-medium">{selectedLedger.name}</div>
-                            <div className="text-sm text-muted-foreground">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="truncate text-sm font-medium">{selectedLedger.name}</div>
+                            <div className="text-xs text-muted-foreground">
                               Balance: {formatNaira(selectedLedger.current_balance || 0)}
                             </div>
                           </div>
-                          <Badge variant="default">Selected</Badge>
+                          <Badge variant="default" className="shrink-0 text-xs">
+                            Selected
+                          </Badge>
                         </div>
                       </CardContent>
                     </Card>
                   )}
                 </div>
               )}
-
-            <Button 
-              onClick={handleExtend} 
-              className="w-full"
-              disabled={!paymentMethod || !newCheckOutDate || additionalNights <= 0 || loading}
-            >
-              <CreditCard className="mr-2 h-4 w-4" />
-              {loading ? 'Processing...' : 'Confirm Extension'}
-            </Button>
           </div>
         </div>
+
+        <div className="shrink-0 space-y-3 border-t bg-background px-4 py-3 shadow-[0_-8px_24px_-12px_rgba(0,0,0,0.15)] sm:px-5 sm:py-4">
+          <div className="space-y-2">
+            <Label className="text-xs font-medium sm:text-sm">
+              Payment method *
+            </Label>
+            <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4 sm:gap-2">
+              {['cash', 'pos', 'transfer', 'city_ledger'].map((method) => (
+                <Button
+                  key={method}
+                  type="button"
+                  variant={paymentMethod === method ? 'default' : 'outline'}
+                  size="sm"
+                  className="h-9 text-[10px] font-medium uppercase tracking-wide sm:h-10 sm:text-xs"
+                  onClick={() => {
+                    setPaymentMethod(method)
+                    if (method !== 'city_ledger') {
+                      setShowOrgSearch(false)
+                      setSelectedLedger(null)
+                    }
+                  }}
+                >
+                  {method.replace('_', ' ')}
+                </Button>
+              ))}
+            </div>
+          </div>
+
+          <Button
+            type="button"
+            onClick={handleExtend}
+            className="h-10 w-full text-sm font-semibold sm:h-11"
+            disabled={!paymentMethod || !newCheckOutDate || additionalNights <= 0 || loading}
+          >
+            <CreditCard className="mr-2 h-4 w-4 shrink-0" />
+            {loading ? 'Processing…' : 'Confirm extension'}
+          </Button>
+        </div>
+
+        <DialogClose
+          className="absolute right-3 top-3 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none sm:right-4 sm:top-4"
+          aria-label="Close"
+        >
+          <X className="h-4 w-4" />
+          <span className="sr-only">Close</span>
+        </DialogClose>
       </DialogContent>
     </Dialog>
   )
