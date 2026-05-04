@@ -57,7 +57,7 @@ export const ALL_PERMISSIONS: { key: Permission; label: string; group: string }[
   { key: 'bookings:checkout', label: 'Check Out Folios', group: 'Bookings' },
 
   { key: 'reservations:view', label: 'View Reservations', group: 'Reservations' },
-  { key: 'reservations:create', label: 'Create Reservations & Bulk Booking', group: 'Reservations' },
+  { key: 'reservations:create', label: 'Create Reservations & Bulk Reservation', group: 'Reservations' },
   { key: 'reservations:edit', label: 'Edit Reservations', group: 'Reservations' },
   { key: 'reservations:delete', label: 'Cancel/Delete Reservations', group: 'Reservations' },
 
