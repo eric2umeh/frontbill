@@ -1,5 +1,7 @@
 -- FrontBill: Hotel Store — categories, stock items, movements (Supabase SQL Editor)
 -- Run after verifying organizations(id) exists for your hotel tenant.
+-- Optional: after this migration, run 030_store_monthly_report_seed.sql (set org_id in the DECLARE block)
+-- to load opening stock lines from scripts/data/monthly-report-store-september.csv.
 
 -- ── Tables ───────────────────────────────────────────────────────────
 
