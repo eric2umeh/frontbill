@@ -11,7 +11,7 @@ import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { formatNaira } from '@/lib/utils/currency'
 import { getBulkGroupId, isLegacyBulkGroupId } from '@/lib/utils/bulk-booking'
-import { manualCheckoutEligible, resolvedCheckoutDateForClosing } from '@/lib/utils/booking-checkout-ui'
+import { manualCheckoutEligible, resolvedCheckoutDateForClosing, DEFAULT_ORG_CHECKOUT_TIME } from '@/lib/utils/booking-checkout-ui'
 import { toast } from 'sonner'
 
 export default function BulkBookingDetailPage({ params }: { params: Promise<{ groupId: string }> | { groupId: string } }) {
@@ -23,6 +23,25 @@ export default function BulkBookingDetailPage({ params }: { params: Promise<{ gr
   const [loading, setLoading] = useState(true)
   const [checkoutRowId, setCheckoutRowId] = useState<string | null>(null)
   const [checkoutAllLoading, setCheckoutAllLoading] = useState(false)
+  const [orgCheckoutTime, setOrgCheckoutTime] = useState(DEFAULT_ORG_CHECKOUT_TIME)
+
+  useEffect(() => {
+    if (!organizationId) return
+    let cancelled = false
+    ;(async () => {
+      const supabase = createClient()
+      if (!supabase) return
+      const { data } = await supabase
+        .from('organizations')
+        .select('checkout_time')
+        .eq('id', organizationId)
+        .maybeSingle()
+      if (!cancelled) setOrgCheckoutTime(data?.checkout_time ?? DEFAULT_ORG_CHECKOUT_TIME)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [organizationId])
 
   useEffect(() => {
     const init = async () => {
@@ -81,12 +100,15 @@ export default function BulkBookingDetailPage({ params }: { params: Promise<{ gr
   }
 
   const checkoutRowEligible = (r: any) =>
-    manualCheckoutEligible({
-      status: r.status,
-      check_in: r.check_in,
-      check_out: r.check_out,
-      folio_status: r.folio_status,
-    })
+    manualCheckoutEligible(
+      {
+        status: r.status,
+        check_in: r.check_in,
+        check_out: r.check_out,
+        folio_status: r.folio_status,
+      },
+      orgCheckoutTime,
+    )
 
   const handleCheckoutOneRow = (row: any) => {
     if (!checkoutRowEligible(row)) return
