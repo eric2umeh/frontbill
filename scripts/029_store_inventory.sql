@@ -1,4 +1,9 @@
 -- FrontBill: Hotel Store — categories, stock items, movements (Supabase SQL Editor)
+--
+-- Run the WHOLE file from the next line down (Cmd/Ctrl+A, paste). If Supabase runs only
+-- the highlighted selection, a partial copy starting at "id UUID ..." causes:
+--   ERROR: syntax error at or near "UUID"  (because CREATE TABLE ... is missing)
+--
 -- Run after verifying organizations(id) exists for your hotel tenant.
 -- Optional: after this migration, run 030_store_monthly_report_seed.sql (set org_id in the DECLARE block)
 -- to load opening stock lines from scripts/data/monthly-report-store-september.csv.
@@ -106,7 +111,7 @@ BEGIN
 
     CREATE TRIGGER store_items_set_updated_at
       BEFORE UPDATE ON public.store_items
-      FOR EACH ROW EXECUTE FUNCTION public.touch_store_items_updated_at();
+      FOR EACH ROW EXECUTE PROCEDURE public.touch_store_items_updated_at();
   END IF;
 END $$;
 
@@ -117,7 +122,8 @@ INSERT INTO public.store_categories (organization_id, name, slug, sort_order)
 SELECT org.id, v.name, v.slug, v.ord
 FROM org, (VALUES
   ('General Store', 'general-store', 10),
-  ('Housekeeping / Laundry', 'housekeeping-laundry', 20),
+  ('Housekeeping', 'housekeeping', 20),
+  ('Laundry', 'laundry', 25),
   ('Staff Meal (Food)', 'staff-meal', 30),
   ('Stationeries', 'stationeries', 40),
   ('Kitchen Consumable', 'kitchen-consumable', 50),
@@ -144,8 +150,8 @@ JOIN (VALUES
   ('RICE (GUEST) *50kg', 'kg', 'general-store'),
   ('WHEAT *2kg', 'kg', 'general-store'),
   ('SPAGHETTI', 'pack', 'general-store'),
-  ('LAUNDRY NYLON BIG', 'pcs', 'housekeeping-laundry'),
-  ('ARIEL DETERGENT *800g', 'packs', 'housekeeping-laundry'),
+  ('LAUNDRY NYLON BIG', 'pcs', 'laundry'),
+  ('ARIEL DETERGENT *800g', 'packs', 'laundry'),
   ('EGUSI', 'mud', 'staff-meal'),
   ('A4 PAPER', 'rm', 'stationeries'),
   ('LAURENT PERIER', 'btts', 'main-bar-wine'),
