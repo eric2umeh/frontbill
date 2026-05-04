@@ -15,6 +15,7 @@ import { ArrowLeft, CreditCard, Trash2, Edit, Plus, Clock, AlertCircle, Loader2,
 import { formatNaira } from '@/lib/utils/currency'
 import { toast } from 'sonner'
 import { ExtendStayModal } from '@/components/bookings/extend-stay-modal'
+import { CheckoutConfirmDialog } from '@/components/bookings/checkout-confirm-dialog'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/lib/auth-context'
 import { getUserDisplayName } from '@/lib/utils/user-display'
@@ -62,6 +63,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
   const [addChargeLoading, setAddChargeLoading] = useState(false)
   const [checkoutLoading, setCheckoutLoading] = useState(false)
   const [orgCheckoutTime, setOrgCheckoutTime] = useState(DEFAULT_ORG_CHECKOUT_TIME)
+  const [checkoutConfirmOpen, setCheckoutConfirmOpen] = useState(false)
   const autoCheckoutInFlight = useRef(false)
 
   useEffect(() => {
@@ -616,84 +618,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
     }
   }
 
-  const handleCheckout = () => {
-    toast.custom(
-      (t: string | number) => (
-        <div className="flex flex-col gap-3">
-          <div className="flex gap-2 items-start">
-            <LogOut className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" />
-            <div>
-              <p className="font-semibold">Check Out Guest?</p>
-              <p className="text-sm text-muted-foreground">
-                {booking?.guests?.name} — Room {booking?.rooms?.room_number}
-              </p>
-              {booking?.balance > 0 && (
-                <p className="text-xs text-red-600 mt-1">
-                  Outstanding balance: {formatNaira(booking.balance)}
-                </p>
-              )}
-            </div>
-          </div>
-          <div className="flex gap-2 justify-end">
-            <Button variant="outline" size="sm" onClick={() => toast.dismiss(t)}>
-              Cancel
-            </Button>
-            <Button
-              size="sm"
-              className="bg-amber-600 hover:bg-amber-700 text-white"
-              disabled={checkoutLoading}
-              onClick={async () => {
-                toast.dismiss(t)
-                setCheckoutLoading(true)
-                try {
-                  const supabase = createClient()
-                  const outDate = resolvedCheckoutDateForClosing({
-                    check_out: booking?.check_out ?? new Date().toISOString().split('T')[0],
-                  })
-
-                  const { error } = await supabase
-                    .from('bookings')
-                    .update({
-                      status: 'checked_out',
-                      check_out: outDate,
-                      folio_status: 'checked_out',
-                      updated_by: userId,
-                    })
-                    .eq('id', bookingId)
-
-                  if (error) throw error
-
-                  // Free up the room — set status back to available
-                  if (booking?.room_id) {
-                    await supabase
-                      .from('rooms')
-                      .update({ status: 'available' })
-                      .eq('id', booking.room_id)
-                  }
-
-                  setBooking((prev: any) => prev ? {
-                    ...prev,
-                    status: 'checked_out',
-                    check_out: outDate,
-                    folio_status: 'checked_out',
-                  } : prev)
-
-                  toast.success(`${booking?.guests?.name} checked out successfully`)
-                } catch (err: any) {
-                  toast.error(err.message || 'Failed to check out guest')
-                } finally {
-                  setCheckoutLoading(false)
-                }
-              }}
-            >
-              {checkoutLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Confirm Checkout'}
-            </Button>
-          </div>
-        </div>
-      ),
-      { duration: Infinity }
-    )
-  }
+  const handleCheckout = () => setCheckoutConfirmOpen(true)
 
   const handleDelete = () => {
     toast.custom(
@@ -856,7 +781,73 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
 
   return (
     <div className="space-y-6">
-      <ExtendStayModal 
+      <CheckoutConfirmDialog
+        open={checkoutConfirmOpen}
+        onClose={() => {
+          if (checkoutLoading) return
+          setCheckoutConfirmOpen(false)
+        }}
+        title="Check out guest?"
+        description={
+          <>
+            <p className="text-foreground">
+              <span className="font-medium">{booking.guests?.name}</span>
+              {' — '}
+              Room {booking.rooms?.room_number}
+            </p>
+            <p className="mt-1">The room will be set to available and this folio will be marked checked out.</p>
+          </>
+        }
+        outstandingAmount={totalBillBalance}
+        outstandingLabel="Bill balance (unpaid):"
+        loading={checkoutLoading}
+        confirmLabel="Confirm checkout"
+        onConfirm={async () => {
+          setCheckoutLoading(true)
+          try {
+            const supabase = createClient()
+            const outDate = resolvedCheckoutDateForClosing({
+              check_out: booking.check_out ?? localTodayYmd(),
+            })
+
+            const { error } = await supabase
+              .from('bookings')
+              .update({
+                status: 'checked_out',
+                check_out: outDate,
+                folio_status: 'checked_out',
+                updated_by: userId,
+              })
+              .eq('id', bookingId)
+
+            if (error) throw error
+
+            if (booking.room_id) {
+              await supabase.from('rooms').update({ status: 'available' }).eq('id', booking.room_id)
+            }
+
+            setBooking((prev: any) =>
+              prev
+                ? {
+                    ...prev,
+                    status: 'checked_out',
+                    check_out: outDate,
+                    folio_status: 'checked_out',
+                  }
+                : prev,
+            )
+
+            setCheckoutConfirmOpen(false)
+            toast.success(`${booking.guests?.name} checked out successfully`)
+          } catch (err: any) {
+            toast.error(err?.message || 'Failed to check out guest')
+          } finally {
+            setCheckoutLoading(false)
+          }
+        }}
+      />
+
+      <ExtendStayModal
         open={extendStayModalOpen}
         onClose={() => setExtendStayModalOpen(false)}
         onSuccess={() => fetchBookingDetails(bookingId)}
