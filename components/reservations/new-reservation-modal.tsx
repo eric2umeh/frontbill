@@ -17,7 +17,7 @@ import { isOrganizationMenuRecord, isSelectableLedgerName } from '@/lib/utils/le
 import { resolveOrganizationLedgerAccount } from '@/lib/utils/resolve-ledger-account'
 import { formatPersonName } from '@/lib/utils/name-format'
 import { StayDateRangeFields } from '@/components/shared/stay-date-range-fields'
-import { isRoomAssignable } from '@/lib/utils/room-bookability'
+import { BOOKING_MODAL_ROOMS_LIMIT, isRoomAssignable, normalizeRoomsForBookingPickers } from '@/lib/utils/room-bookability'
 
 const toLocalDateStr = (date: Date) => {
   const y = date.getFullYear()
@@ -113,22 +113,12 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
 
       const [{ data: guestData }, { data: roomData }, { data: bookingData }] = await Promise.all([
         supabase.from('guests').select('id, name, phone, email, address').eq('organization_id', profile.organization_id).order('name'),
-        supabase.from('rooms').select('id, room_number, room_type, price_per_night, status').eq('organization_id', profile.organization_id).order('room_number'),
+        supabase.from('rooms').select('id, room_number, room_type, price_per_night, status').eq('organization_id', profile.organization_id).order('room_number').limit(BOOKING_MODAL_ROOMS_LIMIT),
         // Fetch active bookings to check date availability
-        supabase.from('bookings').select('room_id, check_in, check_out').eq('organization_id', profile.organization_id).in('status', ['confirmed', 'reserved', 'checked_in']),
+        supabase.from('bookings').select('room_id, check_in, check_out').eq('organization_id', profile.organization_id).in('status', ['confirmed', 'reserved', 'checked_in']).limit(BOOKING_MODAL_ROOMS_LIMIT),
       ])
       setGuests(guestData || [])
-      setRooms(
-        (roomData || []).filter(
-          (r: any) =>
-            r.id &&
-            r.room_type &&
-            String(r.room_type).trim() !== '' &&
-            r.room_number &&
-            String(r.room_number).trim() !== '' &&
-            isRoomAssignable(r.status)
-        )
-      )
+      setRooms(normalizeRoomsForBookingPickers(roomData) as any[])
       setAllBookings(bookingData || [])
     } catch {
       toast.error('Failed to load data')

@@ -19,7 +19,7 @@ import { resolveOrganizationLedgerAccount } from '@/lib/utils/resolve-ledger-acc
 import { formatPersonName } from '@/lib/utils/name-format'
 import { StayDateRangeFields } from '@/components/shared/stay-date-range-fields'
 import { useAuth } from '@/lib/auth-context'
-import { isRoomAssignable } from '@/lib/utils/room-bookability'
+import { BOOKING_MODAL_ROOMS_LIMIT, normalizeRoomsForBookingPickers } from '@/lib/utils/room-bookability'
 
 interface NewBookingModalProps {
   open: boolean
@@ -147,25 +147,16 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
         // Guests table
         supabase.from('guests').select('id, name, phone, email, address').eq('organization_id', orgId).order('name'),
         // All inventory except maintenance — date conflicts + isRoomAssignable gate the picker
-        supabase.from('rooms').select('id, room_number, room_type, price_per_night, status').eq('organization_id', orgId).order('room_number'),
+        supabase.from('rooms').select('id, room_number, room_type, price_per_night, status').eq('organization_id', orgId).order('room_number').limit(BOOKING_MODAL_ROOMS_LIMIT),
         // Active bookings to check date conflicts
-        supabase.from('bookings').select('room_id, check_in, check_out').eq('organization_id', orgId).in('status', ['confirmed', 'reserved', 'checked_in']),
+        supabase.from('bookings').select('room_id, check_in, check_out').eq('organization_id', orgId).in('status', ['confirmed', 'reserved', 'checked_in']).limit(BOOKING_MODAL_ROOMS_LIMIT),
         // City ledger accounts — load ALL, split by type client-side
         supabase.from('city_ledger_accounts').select('id, account_name, account_type, contact_phone, balance').eq('organization_id', orgId).order('account_name'),
         // Also load from organizations table as fallback (legacy orgs may live there)
         supabase.from('organizations').select('id, name, phone, email, org_type, created_by').neq('id', orgId).order('name'),
       ])
 
-      // Sanitize rooms — filter out maintenance, empty id/type/number (prevents SelectItem crashes)
-      const sanitizedRooms = (roomData || []).filter(
-        (r: any) =>
-          r.id &&
-          r.room_type &&
-          String(r.room_type).trim() !== '' &&
-          r.room_number &&
-          String(r.room_number).trim() !== '' &&
-          isRoomAssignable(r.status)
-      )
+      const sanitizedRooms = normalizeRoomsForBookingPickers(roomData) as unknown as Room[]
       setGuests(guestData || [])
       setAllRooms(sanitizedRooms)
       setAllBookingsForRooms(bookingData || [])

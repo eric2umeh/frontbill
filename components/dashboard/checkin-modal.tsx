@@ -15,7 +15,7 @@ import { isOrganizationMenuRecord, isSelectableLedgerName } from '@/lib/utils/le
 import { resolveOrganizationLedgerAccount } from '@/lib/utils/resolve-ledger-account'
 import { formatPersonName } from '@/lib/utils/name-format'
 import { StayDateRangeFields } from '@/components/shared/stay-date-range-fields'
-import { isRoomAssignable } from '@/lib/utils/room-bookability'
+import { BOOKING_MODAL_ROOMS_LIMIT, normalizeRoomsForBookingPickers } from '@/lib/utils/room-bookability'
 
 interface CheckinModalProps {
   open: boolean
@@ -87,18 +87,12 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
 
       const [{ data: guestData }, { data: roomData }, { data: bookingData }] = await Promise.all([
         supabase.from('guests').select('id, name, phone').eq('organization_id', profile.organization_id).order('name'),
-        supabase.from('rooms').select('id, room_number, room_type, price_per_night, status').eq('organization_id', profile.organization_id).order('room_number'),
-        supabase.from('bookings').select('room_id, check_in, check_out').eq('organization_id', profile.organization_id).in('status', ['confirmed', 'reserved', 'checked_in']),
+        supabase.from('rooms').select('id, room_number, room_type, price_per_night, status').eq('organization_id', profile.organization_id).order('room_number').limit(BOOKING_MODAL_ROOMS_LIMIT),
+        supabase.from('bookings').select('room_id, check_in, check_out').eq('organization_id', profile.organization_id).in('status', ['confirmed', 'reserved', 'checked_in']).limit(BOOKING_MODAL_ROOMS_LIMIT),
       ])
 
       setGuests(guestData || [])
-      const sanitized = (roomData || []).filter(
-        (r: any) =>
-          r.id &&
-          r.room_type &&
-          r.room_number &&
-          isRoomAssignable(r.status)
-      )
+      const sanitized = normalizeRoomsForBookingPickers(roomData) as any[]
       setAllRooms(sanitized)
       setAllBookings(bookingData || [])
       filterRooms(checkInDate, checkOutDate, bookingData || [], sanitized)
