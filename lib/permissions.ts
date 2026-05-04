@@ -22,8 +22,21 @@ export type Permission =
   | 'backdate:request' | 'backdate:approve'
   | 'housekeeping:view' | 'housekeeping:create' | 'housekeeping:edit' | 'housekeeping:assign' | 'housekeeping:report'
   | 'maintenance:view' | 'maintenance:create' | 'maintenance:edit' | 'maintenance:assign' | 'maintenance:report'
+  | 'store:view' | 'store:create' | 'store:edit' | 'store:delete' | 'store:adjust'
+  | 'store:issue' | 'store:reports' | 'store:audit'
 
-export type RoleKey = 'superadmin' | 'admin' | 'manager' | 'front_desk' | 'receptionist' | 'accountant' | 'staff' | 'housekeeping' | 'maintenance'
+export type RoleKey =
+  | 'superadmin'
+  | 'admin'
+  | 'manager'
+  | 'front_desk'
+  | 'receptionist'
+  | 'accountant'
+  | 'auditor'
+  | 'staff'
+  | 'housekeeping'
+  | 'maintenance'
+  | 'store'
 
 export interface RoleDefinition {
   key: RoleKey
@@ -87,6 +100,15 @@ export const ALL_PERMISSIONS: { key: Permission; label: string; group: string }[
   { key: 'maintenance:assign', label: 'Assign Maintenance Work', group: 'Maintenance' },
   { key: 'maintenance:report', label: 'Submit Maintenance Daily Reports', group: 'Maintenance' },
 
+  { key: 'store:view', label: 'View Store & Inventory', group: 'Store' },
+  { key: 'store:create', label: 'Add Store Items', group: 'Store' },
+  { key: 'store:edit', label: 'Edit Store Items', group: 'Store' },
+  { key: 'store:delete', label: 'Delete Store Items', group: 'Store' },
+  { key: 'store:adjust', label: 'Stock In / Out & Adjustments', group: 'Store' },
+  { key: 'store:issue', label: 'Issue Stock to Outlets / Departments', group: 'Store' },
+  { key: 'store:reports', label: 'Store Daily Sales & Closing by Category', group: 'Store' },
+  { key: 'store:audit', label: 'Store Movement Audit Trail (Full Detail)', group: 'Store' },
+
   { key: 'analytics:view', label: 'View Analytics', group: 'Analytics' },
   { key: 'analytics:export', label: 'Export Analytics', group: 'Analytics' },
 
@@ -149,6 +171,38 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
     ].includes(p)),
   },
   {
+    key: 'store',
+    label: 'Store',
+    description:
+      'General store and inventory only: catalogue, stock counts, and movements — no dashboard or front-office menus. Profile/settings only.',
+    color: 'bg-amber-100 text-amber-950 dark:bg-amber-950/30 dark:text-amber-100',
+    permissions: [
+      'store:view',
+      'store:create',
+      'store:edit',
+      'store:delete',
+      'store:adjust',
+      'store:issue',
+      'store:reports',
+      'settings:view',
+    ],
+  },
+  {
+    key: 'auditor',
+    label: 'Auditor',
+    description:
+      'Internal audit: read-only view of the hotel store, daily movement summaries, and detailed stock audit trail; may also open system audit trails elsewhere.',
+    color: 'bg-slate-200 text-slate-900 dark:bg-slate-800 dark:text-slate-100',
+    permissions: [
+      'store:view',
+      'store:reports',
+      'store:audit',
+      'night_audit:view',
+      'audit_trails:view',
+      'settings:view',
+    ],
+  },
+  {
     key: 'accountant',
     label: 'Accountant',
     description: 'Finance: transactions view and export (no transaction entry from this role configuration), reconciliation, refunds, ledger management and settlement tools, analytics, recording payments/receipts against folios opened by front office, bookings and reservations read-only, guests and organizations read-only. Opens Night Audit for review but cannot run audits or approve backdates.',
@@ -162,11 +216,15 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
       'ledger:view', 'ledger:manage',
       'reconciliation:view', 'reconciliation:manage',
       'night_audit:view',
+      'audit_trails:view',
       'bookings:view',
       'reservations:view',
       'guests:view',
       'organizations:view',
       'rooms:view',
+      'store:view',
+      'store:reports',
+      'store:audit',
       'settings:view',
     ],
   },

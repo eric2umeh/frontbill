@@ -28,6 +28,7 @@ import {
   Hotel,
   Sparkles,
   Wrench,
+  ShoppingBag,
 } from 'lucide-react'
 
 const routes: Array<{ label: string; icon: any; href: string; permission?: Permission }> = [
@@ -90,6 +91,12 @@ const routes: Array<{ label: string; icon: any; href: string; permission?: Permi
     icon: Wrench,
     href: '/maintenance',
     permission: 'maintenance:view',
+  },
+  {
+    label: 'Store',
+    icon: ShoppingBag,
+    href: '/store',
+    permission: 'store:view',
   },
   {
     label: 'Analytics',
