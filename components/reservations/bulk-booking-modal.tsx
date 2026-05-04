@@ -21,6 +21,7 @@ import { resolveOrganizationLedgerAccount } from '@/lib/utils/resolve-ledger-acc
 import { formatPersonName, normalizeName, normalizeNameKey } from '@/lib/utils/name-format'
 import { appendBulkGroupNote, createBulkGroupId } from '@/lib/utils/bulk-booking'
 import { StayDateRangeFields } from '@/components/shared/stay-date-range-fields'
+import { isRoomAssignable } from '@/lib/utils/room-bookability'
 
 const ROOM_TYPES_FALLBACK = ['Deluxe', 'Royal', 'Kings', 'Mini Suite', 'Executive Suite', 'Diplomatic Suite']
 
@@ -144,12 +145,11 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
         .from('rooms')
         .select('id, room_number, room_type, price_per_night, status')
         .eq('organization_id', profile.organization_id)
-        .neq('status', 'maintenance')
         .order('room_number'),
       supabase.from('bookings').select('room_id, check_in, check_out').eq('organization_id', profile.organization_id).in('status', ['confirmed', 'reserved', 'checked_in']),
     ])
     setAllGuests(guestData || [])
-    setAllRooms((roomData || []).filter((r: any) => r.id && r.room_type && String(r.room_type).trim() !== '' && r.room_number && String(r.room_number).trim() !== ''))
+    setAllRooms((roomData || []).filter((r: any) => r.id && r.room_type && String(r.room_type).trim() !== '' && r.room_number && String(r.room_number).trim() !== '' && isRoomAssignable(r.status)))
     setAllActiveBookings(bookingData || [])
   }
 
