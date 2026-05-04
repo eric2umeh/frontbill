@@ -680,7 +680,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
       await supabase.from('rooms').update({ status: 'occupied', updated_by: user?.id, updated_at: new Date().toISOString() }).eq('id', selectedRoom.id)
 
       // Insert folio charge (this is what the Transactions page reads from)
-      await supabase.from('folio_charges').insert([{
+      const { error: folioInsertError } = await supabase.from('folio_charges').insert([{
         booking_id: booking.id,
         organization_id: organizationId,
         description: `Initial booking charge - ${nights} night${nights !== 1 ? 's' : ''}`,
@@ -688,10 +688,16 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
         charge_type: 'room_charge',
         payment_method: paymentMethod,
         ledger_account_id: ledgerAccount || null,
-        ledger_account_type: paymentMethod === 'city_ledger' ? 'organization' : null,
-        payment_status: balanceAmount <= 0 ? 'paid' : 'unpaid',
+        ledger_account_type:
+          paymentMethod === 'city_ledger'
+            ? ledgerTab === 'individual'
+              ? 'individual'
+              : 'organization'
+            : null,
+        payment_status: isCityLedger ? 'city_ledger' : balanceAmount <= 0 ? 'paid' : 'unpaid',
         created_by: user?.id,
       }])
+      if (folioInsertError) throw folioInsertError
 
       if (paidAmount > 0 && balanceAmount > 0) {
         await supabase.from('folio_charges').insert([{
