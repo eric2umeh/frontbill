@@ -17,6 +17,7 @@ import { isOrganizationMenuRecord, isSelectableLedgerName } from '@/lib/utils/le
 import { resolveOrganizationLedgerAccount } from '@/lib/utils/resolve-ledger-account'
 import { formatPersonName } from '@/lib/utils/name-format'
 import { StayDateRangeFields } from '@/components/shared/stay-date-range-fields'
+import { isRoomAssignable } from '@/lib/utils/room-bookability'
 
 const toLocalDateStr = (date: Date) => {
   const y = date.getFullYear()
@@ -112,13 +113,22 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
 
       const [{ data: guestData }, { data: roomData }, { data: bookingData }] = await Promise.all([
         supabase.from('guests').select('id, name, phone, email, address').eq('organization_id', profile.organization_id).order('name'),
-        // Fetch all non-maintenance rooms — we'll filter availability by date ourselves
-        supabase.from('rooms').select('id, room_number, room_type, price_per_night, status').eq('organization_id', profile.organization_id).eq('status', 'available').order('room_number'),
+        supabase.from('rooms').select('id, room_number, room_type, price_per_night, status').eq('organization_id', profile.organization_id).order('room_number'),
         // Fetch active bookings to check date availability
         supabase.from('bookings').select('room_id, check_in, check_out').eq('organization_id', profile.organization_id).in('status', ['confirmed', 'reserved', 'checked_in']),
       ])
       setGuests(guestData || [])
-      setRooms((roomData || []).filter((r: any) => r.id && r.room_type && String(r.room_type).trim() !== '' && r.room_number && String(r.room_number).trim() !== ''))
+      setRooms(
+        (roomData || []).filter(
+          (r: any) =>
+            r.id &&
+            r.room_type &&
+            String(r.room_type).trim() !== '' &&
+            r.room_number &&
+            String(r.room_number).trim() !== '' &&
+            isRoomAssignable(r.status)
+        )
+      )
       setAllBookings(bookingData || [])
     } catch {
       toast.error('Failed to load data')
@@ -266,7 +276,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
         .filter(b => b.check_in < cout && b.check_out > cin)
         .map(b => b.room_id)
     )
-    return roomsOfType.filter(r => r.status === 'available' && !bookedRoomIds.has(r.id))
+    return roomsOfType.filter((r) => isRoomAssignable(r.status) && !bookedRoomIds.has(r.id))
   }
 
   const handleStayDatesChange = (from: Date, to: Date | undefined) => {
@@ -376,7 +386,10 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
       return
     }
     if (!selectedRoom) { toast.error('Room required'); return }
-    if (selectedRoom.status && selectedRoom.status !== 'available') { toast.error('Selected room is not available'); return }
+    if (selectedRoom.status && String(selectedRoom.status).toLowerCase().trim() === 'maintenance') {
+      toast.error('Selected room is under maintenance — pick another')
+      return
+    }
     if (paymentMethod === 'city_ledger' && !selectedLedger) {
       toast.error('Please select a city ledger account')
       return
@@ -553,7 +566,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
     const cin = toLocalDateStr(checkInDate)
     const cout = toLocalDateStr(checkOutDate)
     const bookedIds = new Set(allBookings.filter(b => b.check_in < cout && b.check_out > cin).map(b => b.room_id))
-    return r.status === 'available' && !bookedIds.has(r.id)
+    return isRoomAssignable(r.status) && !bookedIds.has(r.id)
   })
 
   return (
