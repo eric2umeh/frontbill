@@ -32,6 +32,7 @@ import {
   isPastCheckoutCutoff,
   normalizeBookingCheckoutYmd,
 } from '@/lib/utils/booking-checkout-ui'
+import { bookingDisplayBillBalance } from '@/lib/utils/booking-bill-balance'
 
 export default function BookingDetailPage({ params }: { params: Promise<{ id: string }> | { id: string } }) {
   const router = useRouter()
@@ -793,27 +794,28 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
 
   const totalCharges = folioCharges.reduce((sum: number, charge: any) => sum + charge.amount, 0)
 
-  // Pending (city ledger / deferred) additional charges - excludes cash/card/pos paid charges
+  // Pending (city ledger / deferred / unpaid) folio charges — positive amount, not payment rows
   const pendingAdditionalCharges = folioCharges
-    .filter((c: any) => c.paymentStatus === 'pending' && c.amount > 0)
-    .reduce((sum: number, c: any) => sum + c.amount, 0)
+    .filter((c: any) => {
+      const ctype = c.type || c.charge_type
+      if (ctype === 'payment' || ctype === 'room_charge' || ctype === 'reservation') return false
+      const status = String(c.paymentStatus ?? c.payment_status ?? '').toLowerCase()
+      if (!Number(c.amount) || Number(c.amount) <= 0) return false
+      if (status === 'posted_to_ledger') return false
+      const method = String(c.paymentMethod ?? c.payment_method ?? '').toLowerCase()
+      return (
+        ['pending', 'unpaid', 'city_ledger'].includes(status) ||
+        (method === 'city_ledger' && status !== 'paid')
+      )
+    })
+    .reduce((sum: number, c: any) => sum + Number(c.amount), 0)
 
   // Paid additional charges (cash/card/pos/transfer on the spot) - for folio display only
   const paidAdditionalCharges = folioCharges
     .filter((c: any) => c.paymentStatus === 'paid' && c.amount > 0 && c.type === 'charge')
     .reduce((sum: number, c: any) => sum + c.amount, 0)
 
-  // Bill Balance (Unpaid) = sum of all pending/unpaid/city_ledger folio charges
-  // city_ledger charges are billed to an account — still an outstanding balance owed to the hotel.
-  const totalBillBalance = folioCharges
-    .filter((c: any) => {
-      const status = c.paymentStatus || c.payment_status
-      return ['pending', 'unpaid', 'city_ledger'].includes(status) && Number(c.amount) > 0
-    })
-    .reduce((sum: number, c: any) => sum + Number(c.amount), 0)
-
-  // Amount Paid = initial booking deposit + all "Record Payment" entries in folio
-  // Using both 'type' (DB-loaded) and 'chargeType' (optimistic) field names.
+  // Payments from folio (must run before booking null guards; booking may still be loading)
   const paymentsFromFolio = folioCharges.reduce((sum: number, c: any) => {
     const cType = c.chargeType || c.type
     const amt = Number(c.amount)
@@ -849,6 +851,8 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
   )
 
   const checkoutBannerCoYmd = normalizeBookingCheckoutYmd(booking.check_out || '')
+
+  const totalBillBalance = bookingDisplayBillBalance(booking, folioCharges)
 
   return (
     <div className="space-y-6">
@@ -1163,17 +1167,22 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-medium">{charge.description}</span>
-                        {charge.type === 'charge' && charge.paymentStatus === 'paid' && (
-                          <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200">Paid on Spot</Badge>
-                        )}
-                        {charge.type === 'charge' && charge.paymentStatus === 'pending' && charge.paymentMethod === 'city_ledger' && (
-                          <Badge variant="outline" className="text-xs bg-orange-50 text-orange-700 border-orange-200">City Ledger</Badge>
-                        )}
-                        {charge.type === 'charge' && charge.paymentStatus === 'pending' && !charge.paymentMethod && (
-                          <Badge variant="outline" className="text-xs bg-yellow-50 text-yellow-700 border-yellow-200">Pending</Badge>
-                        )}
                         {charge.type === 'payment' && (
                           <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200">Payment</Badge>
+                        )}
+                        {charge.type !== 'payment' && Number(charge.amount) > 0 && charge.paymentStatus === 'paid' && (
+                          <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200">Paid on Spot</Badge>
+                        )}
+                        {charge.type !== 'payment' && Number(charge.amount) > 0
+                          && (charge.paymentMethod === 'city_ledger' || String(charge.paymentStatus || '').toLowerCase() === 'city_ledger')
+                          && String(charge.paymentStatus || '').toLowerCase() !== 'paid' && (
+                          <Badge variant="outline" className="text-xs bg-orange-50 text-orange-700 border-orange-200">City Ledger</Badge>
+                        )}
+                        {charge.type !== 'payment' && Number(charge.amount) > 0
+                          && ['pending', 'unpaid'].includes(String(charge.paymentStatus || '').toLowerCase())
+                          && charge.paymentMethod !== 'city_ledger'
+                          && String(charge.paymentStatus || '').toLowerCase() !== 'city_ledger' && (
+                          <Badge variant="outline" className="text-xs bg-yellow-50 text-yellow-700 border-yellow-200">Pending</Badge>
                         )}
                       </div>
                       <div className="text-xs text-muted-foreground mt-1 space-y-0.5">
@@ -1182,7 +1191,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                       </div>
                     </div>
                     <div className="flex items-center gap-3 ml-4">
-                      <div className={`font-semibold text-right min-w-[100px] ${charge.amount < 0 ? 'text-green-600' : charge.paymentStatus === 'paid' && charge.type === 'charge' ? 'text-muted-foreground' : 'text-foreground'}`}>
+                      <div className={`font-semibold text-right min-w-[100px] ${charge.amount < 0 ? 'text-green-600' : charge.type !== 'payment' && charge.paymentStatus === 'paid' ? 'text-muted-foreground' : 'text-foreground'}`}>
                         {charge.amount < 0 ? '-' : '+'}{formatNaira(Math.abs(charge.amount))}
                       </div>
                       {isSuperadmin && (
