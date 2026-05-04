@@ -21,7 +21,7 @@ import { toast } from 'sonner'
 import { getUserDisplayName } from '@/lib/utils/user-display'
 import { fetchUserDisplayNameMap } from '@/lib/utils/fetch-user-display-names'
 import { getBulkGroupId } from '@/lib/utils/bulk-booking'
-import { manualCheckoutEligible, resolvedCheckoutDateForClosing, hideChargeExtendInBookingsTable } from '@/lib/utils/booking-checkout-ui'
+import { manualCheckoutEligible, resolvedCheckoutDateForClosing, hideChargeExtendInBookingsTable, DEFAULT_ORG_CHECKOUT_TIME } from '@/lib/utils/booking-checkout-ui'
 
 interface Booking {
   id: string
@@ -78,6 +78,28 @@ export default function BookingsPage() {
   const canManageFolio = isSuperadmin || role === 'front_desk'
   const canCheckInReserved = hasPermission(role, 'bookings:checkin')
   const canCancelReservation = hasPermission(role, 'reservations:delete')
+
+  const [orgCheckoutTime, setOrgCheckoutTime] = useState(DEFAULT_ORG_CHECKOUT_TIME)
+
+  useEffect(() => {
+    if (!organizationId) return
+    let cancelled = false
+    ;(async () => {
+      const supabase = createClient()
+      if (!supabase) return
+      const { data } = await supabase
+        .from('organizations')
+        .select('checkout_time')
+        .eq('id', organizationId)
+        .maybeSingle()
+      if (!cancelled) {
+        setOrgCheckoutTime(data?.checkout_time ?? DEFAULT_ORG_CHECKOUT_TIME)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [organizationId])
 
   useEffect(() => {
     if (organizationId) fetchBookings()
@@ -244,12 +266,15 @@ export default function BookingsPage() {
   const handleBulkCheckoutFromTable = (bulkRow: Booking) => {
     const members = bulkRow.bulk_members || []
     const targets = members.filter((m) =>
-      manualCheckoutEligible({
-        status: m.status,
-        check_in: m.check_in,
-        check_out: m.check_out,
-        folio_status: m.folio_status,
-      }),
+      manualCheckoutEligible(
+        {
+          status: m.status,
+          check_in: m.check_in,
+          check_out: m.check_out,
+          folio_status: m.folio_status,
+        },
+        orgCheckoutTime,
+      ),
     )
 
     if (targets.length === 0) {
@@ -680,12 +705,15 @@ export default function BookingsPage() {
               if (booking.is_bulk) {
                 if (!canManageFolio) return null
                 const showBulkCheckout = (booking.bulk_members || []).some((m) =>
-                  manualCheckoutEligible({
-                    status: m.status,
-                    check_in: m.check_in,
-                    check_out: m.check_out,
-                    folio_status: m.folio_status,
-                  }),
+                  manualCheckoutEligible(
+                    {
+                      status: m.status,
+                      check_in: m.check_in,
+                      check_out: m.check_out,
+                      folio_status: m.folio_status,
+                    },
+                    orgCheckoutTime,
+                  ),
                 )
                 if (!showBulkCheckout) return null
                 const gid = booking.bulk_group_id || ''
@@ -715,7 +743,15 @@ export default function BookingsPage() {
                 )
               }
 
-              const hideChargeExtend = hideChargeExtendInBookingsTable({ check_out: booking.check_out })
+              const hideChargeExtend = hideChargeExtendInBookingsTable(
+                {
+                  check_out: booking.check_out,
+                  status: booking.status,
+                  check_in: booking.check_in,
+                  folio_status: booking.folio_status,
+                },
+                orgCheckoutTime,
+              )
 
               return (
                 <div className="flex shrink-0 flex-wrap gap-0.5">
@@ -802,12 +838,15 @@ export default function BookingsPage() {
                           </Button>
                         </>
                       )}
-                      {!manualCheckoutEligible({
-                        status: booking.status,
-                        check_in: booking.check_in,
-                        check_out: booking.check_out,
-                        folio_status: booking.folio_status,
-                      }) ? null : (
+                      {!manualCheckoutEligible(
+                        {
+                          status: booking.status,
+                          check_in: booking.check_in,
+                          check_out: booking.check_out,
+                          folio_status: booking.folio_status,
+                        },
+                        orgCheckoutTime,
+                      ) ? null : (
                         <Button
                           size="sm"
                           variant="outline"
