@@ -2,15 +2,15 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
 
 /**
- * Auto-checkout cron job — Hobby: once daily at 13:00 UTC (~14:00 WAT).
+ * Auto-checkout cron — schedule via CRON_SECRET; typically runs every hour past checkout window.
  *
  * Logic:
- *  1. Hard cutoff is 14:00 WAT (2 pm). Nothing runs before that.
- *  2. Finds bookings where check_out <= today (WAT date) and status is:
- *     - checked_in (guests on premises), or
- *     - reserved — release room holds that were never checked in (e.g. bulk blocks).
- *  3. For checked_in — same day only — may apply late checkout fee from org policy.
- *  4. Marks booking checked_out, preserves original scheduled check_out date, frees rooms.
+ *  1. Fetches bookings where check_out <= today (WAT calendar date from offset + UTC getters) and
+ *     status is checked_in or reserved.
+ *  2. Drops rows that are still *before* the org standard checkout TIME on today's checkout date.
+ *     (Guests due tomorrow are excluded by lte check_out.)
+ *  3. Applies late-checkout fee only for checked_in, same-calendar-day checkout past org time.
+ *  4. Marks bookings checked_out, frees rooms (same-date late fee uses org checkout_time clock).
  */
 export async function GET(request: Request) {
   const authHeader = request.headers.get('authorization')
@@ -30,17 +30,12 @@ export async function GET(request: Request) {
   }
 
   const nowUTC = new Date()
+  /** Approximate Nigeria (WAT) wall clock via +1h offset and UTC getters — matches prior routes. */
   const nowWAT = new Date(nowUTC.getTime() + 60 * 60 * 1000)
   const watHour = nowWAT.getUTCHours()
   const watMinute = nowWAT.getUTCMinutes()
+  const watNowMinutes = watHour * 60 + watMinute
   const todayWAT = nowWAT.toISOString().split('T')[0]
-
-  if (watHour < 14) {
-    return NextResponse.json({
-      message: `Too early — WAT time is ${watHour}:${String(watMinute).padStart(2, '0')}. Auto-checkout enforces at 14:00 WAT.`,
-      checked_out: 0,
-    })
-  }
 
   const selectCols = `
     id, status, room_id, organization_id, folio_id, guest_id,
@@ -89,8 +84,34 @@ export async function GET(request: Request) {
     }
   }
 
-  const ids = toCheckout.map((b) => b.id)
-  const roomIds = [...new Set(toCheckout.map((b) => b.room_id).filter(Boolean))]
+  const cutoffMinutes = (hm: string) => {
+    const [hRaw, mRaw] = hm.split(':')
+    const h = Math.min(23, Math.max(0, Number(hRaw)))
+    const m = Math.min(59, Math.max(0, Number(mRaw || 0)))
+    return (Number.isFinite(h) ? h : 12) * 60 + (Number.isFinite(m) ? m : 0)
+  }
+
+  const normalizedCheckOutDay = (v: unknown) =>
+    typeof v === 'string' ? (v.includes('T') ? v.split('T')[0] : v.slice(0, 10)) : ''
+
+  const dueForCheckout = toCheckout.filter((b) => {
+    const coDay = normalizedCheckOutDay(b.check_out)
+    if (coDay < todayWAT) return true
+    if (coDay > todayWAT) return false
+    const policy = orgMap[b.organization_id]
+    const cutoff = cutoffMinutes(policy?.checkout_time ?? '12:00')
+    return watNowMinutes >= cutoff
+  })
+
+  if (dueForCheckout.length === 0) {
+    return NextResponse.json({
+      message: `No bookings past org checkout cutoffs yet (${todayWAT}).`,
+      checked_out: 0,
+    })
+  }
+
+  const ids = dueForCheckout.map((b) => b.id)
+  const roomIds = [...new Set(dueForCheckout.map((b) => b.room_id).filter(Boolean))]
 
   const lateCharges: Array<{
     organization_id: string
@@ -104,9 +125,10 @@ export async function GET(request: Request) {
     created_at: string
   }> = []
 
-  for (const booking of toCheckout) {
+  for (const booking of dueForCheckout) {
     if (booking.status !== 'checked_in') continue
-    if (booking.check_out !== todayWAT) continue
+    const coDayFee = normalizedCheckOutDay(booking.check_out)
+    if (coDayFee !== todayWAT) continue
     const policy = orgMap[booking.organization_id]
     if (!policy?.late_checkout_fee_per_hour) continue
 
@@ -125,7 +147,7 @@ export async function GET(request: Request) {
       folio_id: booking.folio_id ?? null,
       guest_id: booking.guest_id ?? null,
       amount: feeAmount,
-      description: `Late checkout fee — ${lateHours} hour${lateHours > 1 ? 's' : ''} past ${policy.checkout_time} (auto-charged at 2:00 PM)`,
+      description: `Late checkout fee — ${lateHours} hour${lateHours > 1 ? 's' : ''} past ${policy.checkout_time} (auto-checkout run)`,
       transaction_type: 'charge',
       payment_method: 'cash',
       created_at: nowUTC.toISOString(),
@@ -158,12 +180,12 @@ export async function GET(request: Request) {
   }
 
   console.log(
-    `[auto-checkout] Checked out ${toCheckout.length} booking(s) (incl. overdue reserved), ${lateCharges.length} late fee(s).`
+    `[auto-checkout] Checked out ${dueForCheckout.length} booking(s) (incl. overdue reserved), ${lateCharges.length} late fee(s).`
   )
 
   return NextResponse.json({
     message: 'Auto-checkout complete.',
-    checked_out: toCheckout.length,
+    checked_out: dueForCheckout.length,
     late_charges_applied: lateCharges.length,
     booking_ids: ids,
   })

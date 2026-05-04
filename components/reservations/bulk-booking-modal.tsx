@@ -21,6 +21,7 @@ import { resolveOrganizationLedgerAccount } from '@/lib/utils/resolve-ledger-acc
 import { formatPersonName, normalizeName, normalizeNameKey } from '@/lib/utils/name-format'
 import { appendBulkGroupNote, createBulkGroupId } from '@/lib/utils/bulk-booking'
 import { StayDateRangeFields } from '@/components/shared/stay-date-range-fields'
+import { BOOKING_MODAL_ROOMS_LIMIT, normalizeRoomsForBookingPickers } from '@/lib/utils/room-bookability'
 
 const ROOM_TYPES_FALLBACK = ['Deluxe', 'Royal', 'Kings', 'Mini Suite', 'Executive Suite', 'Diplomatic Suite']
 
@@ -51,9 +52,15 @@ const makeEntry = (): RoomEntry => ({
   guestSearch: '', guestSearchOpen: false, filteredGuests: [],
 })
 
-interface BulkBookingModalProps { open: boolean; onClose: () => void; onSuccess?: () => void }
+interface BulkBookingModalProps {
+  open: boolean
+  onClose: () => void
+  onSuccess?: () => void
+  /** `reservation` (default): copy for Reservations menu. `booking`: copy when opened from Bookings. */
+  wording?: 'reservation' | 'booking'
+}
 
-export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalProps) {
+export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservation' }: BulkBookingModalProps) {
   const [step, setStep] = useState(1)
   const [loading, setLoading] = useState(false)
   const [orgId, setOrgId] = useState('')
@@ -144,12 +151,12 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
         .from('rooms')
         .select('id, room_number, room_type, price_per_night, status')
         .eq('organization_id', profile.organization_id)
-        .neq('status', 'maintenance')
-        .order('room_number'),
-      supabase.from('bookings').select('room_id, check_in, check_out').eq('organization_id', profile.organization_id).in('status', ['confirmed', 'reserved', 'checked_in']),
+        .order('room_number')
+        .limit(BOOKING_MODAL_ROOMS_LIMIT),
+      supabase.from('bookings').select('room_id, check_in, check_out').eq('organization_id', profile.organization_id).in('status', ['confirmed', 'reserved', 'checked_in']).limit(BOOKING_MODAL_ROOMS_LIMIT),
     ])
     setAllGuests(guestData || [])
-    setAllRooms((roomData || []).filter((r: any) => r.id && r.room_type && String(r.room_type).trim() !== '' && r.room_number && String(r.room_number).trim() !== ''))
+    setAllRooms(normalizeRoomsForBookingPickers(roomData) as any[])
     setAllActiveBookings(bookingData || [])
   }
 
@@ -419,6 +426,25 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
   const isSuperadmin = currentUserRole === 'superadmin'
   const isBackdated = checkIn ? checkIn < todayDate() : false
 
+  const copy =
+    wording === 'booking'
+      ? {
+          title: (step: number) => `Bulk booking — Step ${step} of 2`,
+          typeLabel: 'Booking type',
+          backdateBlocked: 'Backdated bulk bookings require superadmin approval. Send a request first.',
+          backdatePlaceholder: 'Explain why this bulk booking must be backdated for superadmin approval',
+          backdateHelp: 'Only a superadmin can approve or directly create backdated bulk bookings.',
+          confirm: 'Confirm bulk booking',
+        }
+      : {
+          title: (step: number) => `Bulk reservation — Step ${step} of 2`,
+          typeLabel: 'Reservation type',
+          backdateBlocked: 'Backdated bulk reservations require superadmin approval. Send a request first.',
+          backdatePlaceholder: 'Explain why this bulk reservation must be backdated for superadmin approval',
+          backdateHelp: 'Only a superadmin can approve or directly create backdated bulk reservations.',
+          confirm: 'Confirm bulk reservation',
+        }
+
   const hasApprovedBackdateRequest = async () => {
     if (!checkIn) return false
     const res = await fetch(`/api/backdate-requests?caller_id=${currentUserId}`, { credentials: 'include' })
@@ -477,7 +503,7 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
     if (!checkIn || !checkOut) { toast.error('Dates required'); return }
     if (!canSubmit()) { toast.error('Complete payment details'); return }
     if (isBackdated && !isSuperadmin && !(await hasApprovedBackdateRequest())) {
-      toast.error('Backdated bulk bookings require superadmin approval. Send a request first.')
+      toast.error(copy.backdateBlocked)
       return
     }
 
@@ -749,7 +775,9 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
             await supabase.from('folio_charges').insert([{
               booking_id: booking.id,
               organization_id: orgId,
-              description: `Bulk reservation room charge - ${nights} night${nights !== 1 ? 's' : ''}`,
+              description: `${
+                wording === 'booking' ? 'Bulk booking' : 'Bulk reservation'
+              } room charge - ${nights} night${nights !== 1 ? 's' : ''}`,
               amount: total,
               charge_type: 'room_charge',
               payment_method: isCityLedger ? 'city_ledger' : paymentMethod,
@@ -764,7 +792,9 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
               guest_name: entryGuestName || selectedOrg?.name || selectedGroupGuest?.name || 'Bulk Guest', room: room.room_number, amount: total,
               payment_method: isCityLedger ? 'city_ledger' : paymentMethod,
               status: paymentStatus === 'paid' ? 'paid' : paymentStatus === 'partial' ? 'partial' : 'pending',
-              description: `Bulk reservation — ${bookingType === 'organization' ? selectedOrg?.name : selectedGroupGuest?.name} — ${folioId}`,
+              description: `${
+                wording === 'booking' ? 'Bulk booking' : 'Bulk reservation'
+              } — ${bookingType === 'organization' ? selectedOrg?.name : selectedGroupGuest?.name} — ${folioId}`,
               received_by: currentUserId,
             }])
             createdCount++
@@ -800,11 +830,13 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
         }
       }
 
-      toast.success(`${createdCount} reservation(s) created`)
+      toast.success(
+        `${createdCount} ${wording === 'booking' ? 'booking' : 'reservation'}${createdCount === 1 ? '' : 's'} created`,
+      )
       onSuccess?.()
       handleClose()
     } catch (err: any) {
-      toast.error(err.message || 'Failed to create reservations')
+      toast.error(err.message || (wording === 'booking' ? 'Failed to create bookings' : 'Failed to create reservations'))
     } finally {
       setLoading(false)
     }
@@ -830,7 +862,7 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="max-w-3xl max-h-[92vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Bulk Booking — Step {step} of 2</DialogTitle>
+          <DialogTitle>{copy.title(step)}</DialogTitle>
           <DialogDescription>{stepLabel}</DialogDescription>
         </DialogHeader>
 
@@ -844,7 +876,7 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
         {step === 1 && (
           <div className="space-y-5 py-2">
             <div className="space-y-2">
-              <Label>Booking Type</Label>
+              <Label>{copy.typeLabel}</Label>
               <Select value={bookingType} onValueChange={(v: any) => {
                 setBookingType(v); setSelectedOrg(null); setOrgSearch(''); setSelectedGroupGuest(null); setGroupGuestSearch(''); setShowNewOrgForm(false)
               }}>
@@ -1028,9 +1060,9 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
                 <Textarea
                   value={backdateReason}
                   onChange={(e) => setBackdateReason(e.target.value)}
-                  placeholder="Explain why this bulk booking must be backdated for superadmin approval"
+                  placeholder={copy.backdatePlaceholder}
                 />
-                <p className="text-xs text-amber-700">Only a superadmin can approve or directly create backdated bulk bookings.</p>
+                <p className="text-xs text-amber-700">{copy.backdateHelp}</p>
               </div>
             )}
 
@@ -1380,7 +1412,7 @@ export function BulkBookingModal({ open, onClose, onSuccess }: BulkBookingModalP
               disabled={loading || !canSubmit()}
             >
               {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-              {loading ? 'Working...' : isBackdated && !isSuperadmin ? 'Request / Use Superadmin Approval' : 'Confirm bulk booking'}
+              {loading ? 'Working...' : isBackdated && !isSuperadmin ? 'Request / Use Superadmin Approval' : copy.confirm}
             </Button>
           )}
         </div>
