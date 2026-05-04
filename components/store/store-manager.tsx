@@ -1,11 +1,19 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/lib/auth-context'
 import { hasPermission } from '@/lib/permissions'
 import { formatNaira } from '@/lib/utils/currency'
 import { cn } from '@/lib/utils'
+import { OUTLET_DEPARTMENTS } from '@/lib/store/outlet-departments'
+import type {
+  StoreCategoryRow,
+  StoreItemRow,
+  MovementRow,
+  StoreMovementType,
+} from '@/lib/store/types'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -39,10 +47,12 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { toast } from 'sonner'
-import { format, parseISO } from 'date-fns'
+import { format, parseISO, startOfDay, endOfDay } from 'date-fns'
 import {
   ArrowDownRight,
   ArrowUpRight,
+  BarChart3,
+  ClipboardList,
   History,
   Layers,
   Loader2,
@@ -50,51 +60,12 @@ import {
   Pencil,
   Plus,
   Search,
+  ShieldCheck,
   SlidersHorizontal,
   Sparkles,
   Trash2,
   TrendingDown,
 } from 'lucide-react'
-
-type MovementType = 'in' | 'out' | 'adjustment' | 'sale'
-
-export interface StoreCategoryRow {
-  id: string
-  organization_id: string
-  name: string
-  slug: string
-  sort_order: number
-  created_at: string
-}
-
-export interface StoreItemRow {
-  id: string
-  organization_id: string
-  category_id: string | null
-  name: string
-  sku: string | null
-  unit: string
-  quantity_on_hand: number
-  reorder_level: number
-  unit_price: number
-  is_active: boolean
-  notes: string | null
-  created_at: string
-  updated_at: string
-}
-
-export interface MovementRow {
-  id: string
-  organization_id: string
-  item_id: string
-  movement_type: MovementType
-  quantity: number
-  balance_after: number | null
-  reference: string | null
-  notes: string | null
-  created_at: string
-  created_by: string | null
-}
 
 function slugify(name: string) {
   return (
@@ -118,6 +89,10 @@ export function StoreManager() {
   const canEdit = hasPermission(role, 'store:edit')
   const canDelete = hasPermission(role, 'store:delete')
   const canAdjust = hasPermission(role, 'store:adjust')
+  const canIssue = hasPermission(role, 'store:issue')
+  const canReports = hasPermission(role, 'store:reports')
+  const canAuditTab = hasPermission(role, 'store:audit')
+  const canSystemAudit = hasPermission(role, 'audit_trails:view')
 
   const [categories, setCategories] = useState<StoreCategoryRow[]>([])
   const [items, setItems] = useState<StoreItemRow[]>([])
@@ -127,7 +102,19 @@ export function StoreManager() {
   const [search, setSearch] = useState('')
   const [catFilter, setCatFilter] = useState<string>('all')
   const [inactiveToo, setInactiveToo] = useState(false)
-  const [tab, setTab] = useState<'inventory' | 'categories' | 'movements'>('inventory')
+  const [tab, setTab] = useState<
+    'inventory' | 'categories' | 'movements' | 'daily' | 'audit'
+  >('inventory')
+
+  const [reportDate, setReportDate] = useState(() => format(new Date(), 'yyyy-MM-dd'))
+  const [dailyMovements, setDailyMovements] = useState<MovementRow[]>([])
+  const [auditMovements, setAuditMovements] = useState<MovementRow[]>([])
+  const [loadingDaily, setLoadingDaily] = useState(false)
+  const [loadingAudit, setLoadingAudit] = useState(false)
+  const [staffById, setStaffById] = useState<Record<string, string>>({})
+
+  const [adjustDept, setAdjustDept] = useState('')
+  const [adjustReceivedBy, setAdjustReceivedBy] = useState<string>('')
 
   const [catDialog, setCatDialog] = useState(false)
   const [editingCat, setEditingCat] = useState<StoreCategoryRow | null>(null)
@@ -151,7 +138,7 @@ export function StoreManager() {
 
   const [adjustOpen, setAdjustOpen] = useState(false)
   const [adjustItem, setAdjustItem] = useState<StoreItemRow | null>(null)
-  const [adjustType, setAdjustType] = useState<MovementType>('in')
+  const [adjustType, setAdjustType] = useState<StoreMovementType>('in')
   const [adjustQty, setAdjustQty] = useState('')
   const [adjustRef, setAdjustRef] = useState('')
   const [adjustNotes, setAdjustNotes] = useState('')
@@ -211,6 +198,59 @@ export function StoreManager() {
     void fetchAll()
   }, [fetchAll])
 
+  useEffect(() => {
+    const supabase = createClient()
+    if (!supabase || !organizationId) return
+    void supabase
+      .from('profiles')
+      .select('id, full_name')
+      .eq('organization_id', organizationId)
+      .then((res: { data: { id: string; full_name: string | null }[] | null }) => {
+        const m: Record<string, string> = {}
+        res.data?.forEach(p => {
+          m[p.id] = p.full_name || p.id.slice(0, 8)
+        })
+        setStaffById(m)
+      })
+  }, [organizationId])
+
+  useEffect(() => {
+    if (tab !== 'daily' || !organizationId) return
+    const supabase = createClient()
+    if (!supabase) return
+    setLoadingDaily(true)
+    const day = parseISO(reportDate)
+    const start = startOfDay(day).toISOString()
+    const end = endOfDay(day).toISOString()
+    void supabase
+      .from('store_stock_movements')
+      .select('*')
+      .eq('organization_id', organizationId)
+      .gte('created_at', start)
+      .lte('created_at', end)
+      .then((res: { data: unknown; error: { message: string } | null }) => {
+        if (!res.error) setDailyMovements((res.data as MovementRow[]) || [])
+        setLoadingDaily(false)
+      })
+  }, [tab, reportDate, organizationId])
+
+  useEffect(() => {
+    if (tab !== 'audit' || !organizationId) return
+    const supabase = createClient()
+    if (!supabase) return
+    setLoadingAudit(true)
+    void supabase
+      .from('store_stock_movements')
+      .select('*')
+      .eq('organization_id', organizationId)
+      .order('created_at', { ascending: false })
+      .limit(1500)
+      .then((res: { data: unknown; error: { message: string } | null }) => {
+        if (!res.error) setAuditMovements((res.data as MovementRow[]) || [])
+        setLoadingAudit(false)
+      })
+  }, [tab, organizationId])
+
   const categoryById = useMemo(() => {
     const m = new Map<string, StoreCategoryRow>()
     categories.forEach(c => m.set(c.id, c))
@@ -222,6 +262,60 @@ export function StoreManager() {
     items.forEach(i => m.set(i.id, i.name))
     return m
   }, [items])
+
+  const dailyDeptSummary = useMemo(() => {
+    const salesLike = dailyMovements.filter(m =>
+      ['sale', 'issue', 'out'].includes(m.movement_type)
+    )
+    const byDept: Record<string, { qty: number; value: number }> = {}
+    for (const m of salesLike) {
+      const item = items.find(i => i.id === m.item_id)
+      const dept = (m.destination_department || '').trim() || '— Unassigned outlet'
+      const qtyAbs = Math.abs(Number(m.quantity))
+      const val = qtyAbs * Number(item?.unit_price || 0)
+      if (!byDept[dept]) byDept[dept] = { qty: 0, value: 0 }
+      byDept[dept].qty += qtyAbs
+      byDept[dept].value += val
+    }
+    return Object.entries(byDept).sort((a, b) => a[0].localeCompare(b[0]))
+  }, [dailyMovements, items])
+
+  const dailyCategorySummary = useMemo(() => {
+    const salesLike = dailyMovements.filter(m =>
+      ['sale', 'issue', 'out'].includes(m.movement_type)
+    )
+    const byCat: Record<string, { qty: number; value: number }> = {}
+    for (const m of salesLike) {
+      const item = items.find(i => i.id === m.item_id)
+      const cat =
+        item?.category_id && categoryById.get(item.category_id)
+          ? categoryById.get(item.category_id)!.name
+          : 'Uncategorized'
+      const qtyAbs = Math.abs(Number(m.quantity))
+      const val = qtyAbs * Number(item?.unit_price || 0)
+      if (!byCat[cat]) byCat[cat] = { qty: 0, value: 0 }
+      byCat[cat].qty += qtyAbs
+      byCat[cat].value += val
+    }
+    return Object.entries(byCat).sort((a, b) => a[0].localeCompare(b[0]))
+  }, [dailyMovements, items, categoryById])
+
+  const closingByCategory = useMemo(() => {
+    const map: Record<string, { qty: number; value: number }> = {}
+    items
+      .filter(i => i.is_active)
+      .forEach(i => {
+        const label =
+          i.category_id && categoryById.get(i.category_id)
+            ? categoryById.get(i.category_id)!.name
+            : 'Uncategorized'
+        if (!map[label]) map[label] = { qty: 0, value: 0 }
+        const q = Number(i.quantity_on_hand)
+        map[label].qty += q
+        map[label].value += q * Number(i.unit_price || 0)
+      })
+    return Object.entries(map).sort((a, b) => a[0].localeCompare(b[0]))
+  }, [items, categoryById])
 
   const filteredItems = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -291,6 +385,8 @@ export function StoreManager() {
             name: catForm.name.trim(),
             slug,
             sort_order: catForm.sort_order,
+            updated_by: userId || null,
+            updated_at: new Date().toISOString(),
           })
           .eq('id', editingCat.id)
         if (error) throw error
@@ -301,6 +397,7 @@ export function StoreManager() {
           name: catForm.name.trim(),
           slug,
           sort_order: catForm.sort_order,
+          created_by: userId || null,
         })
         if (error) throw error
         toast.success('Category created')
@@ -387,7 +484,13 @@ export function StoreManager() {
       }
 
       if (editingItem) {
-        const { error } = await supabase.from('store_items').update(payload).eq('id', editingItem.id)
+        const { error } = await supabase
+          .from('store_items')
+          .update({
+            ...payload,
+            updated_by: userId || null,
+          })
+          .eq('id', editingItem.id)
         if (error) throw error
         toast.success('Item updated')
       } else {
@@ -432,6 +535,8 @@ export function StoreManager() {
     setAdjustRef('')
     setAdjustNotes('')
     setAdjustTarget('')
+    setAdjustDept('')
+    setAdjustReceivedBy('')
     setAdjustOpen(true)
   }
 
@@ -443,7 +548,18 @@ export function StoreManager() {
     const prev = Number(adjustItem.quantity_on_hand)
     let nextQty = prev
     let movementQty = 0
-    const mtype: MovementType = adjustType
+    const mtype: StoreMovementType = adjustType
+
+    if (mtype === 'issue') {
+      if (!canIssue) {
+        toast.error('You do not have permission to issue stock to outlets')
+        return
+      }
+      if (!adjustDept.trim()) {
+        toast.error('Select an outlet / department for an issue')
+        return
+      }
+    }
 
     if (mtype === 'adjustment') {
       const target = parseFloat(adjustTarget)
@@ -472,6 +588,9 @@ export function StoreManager() {
       }
     }
 
+    const dept = adjustDept.trim() || null
+    const recv = adjustReceivedBy || null
+
     setAdjustSaving(true)
     try {
       const { data: inserted, error: insErr } = await supabase
@@ -485,6 +604,8 @@ export function StoreManager() {
           reference: adjustRef.trim() || null,
           notes: adjustNotes.trim() || null,
           created_by: userId,
+          destination_department: dept,
+          received_by: recv,
         })
         .select('id')
         .single()
@@ -493,7 +614,11 @@ export function StoreManager() {
 
       const { error: upErr } = await supabase
         .from('store_items')
-        .update({ quantity_on_hand: nextQty, updated_at: new Date().toISOString() })
+        .update({
+          quantity_on_hand: nextQty,
+          updated_at: new Date().toISOString(),
+          updated_by: userId,
+        })
         .eq('id', adjustItem.id)
 
       if (upErr) {
@@ -543,9 +668,19 @@ export function StoreManager() {
             </div>
             <h1 className="text-3xl font-bold tracking-tight md:text-4xl">General store</h1>
             <p className="max-w-xl text-sm text-muted-foreground md:text-base">
-              Categories, SKU catalogue, live stock levels, and a full movement history — aligned with your monthly
-              store reporting structure.
+              Receiving into categories, issuing to outlets, daily consumption, and full movement accountability.
             </p>
+            {canSystemAudit && (
+              <p className="text-sm">
+                <Link
+                  href="/night-audit"
+                  className="inline-flex items-center gap-1 font-medium text-amber-800 underline-offset-4 hover:underline dark:text-amber-300"
+                >
+                  <ShieldCheck className="h-3.5 w-3.5" />
+                  System audit trails (Night Audit)
+                </Link>
+              </p>
+            )}
           </div>
           <div className="grid grid-cols-3 gap-3 text-center">
             <div className="rounded-xl border bg-white/70 px-4 py-3 shadow-sm dark:bg-stone-900/70">
@@ -570,7 +705,7 @@ export function StoreManager() {
         </div>
       ) : (
         <Tabs value={tab} onValueChange={v => setTab(v as typeof tab)} className="space-y-6">
-          <TabsList className="grid w-full max-w-lg grid-cols-3 md:w-auto md:inline-flex">
+          <TabsList className="flex h-auto min-h-10 w-full flex-wrap gap-1 md:w-auto md:inline-flex">
             <TabsTrigger value="inventory" className="gap-2">
               <Package className="h-4 w-4" />
               Inventory
@@ -583,6 +718,18 @@ export function StoreManager() {
               <History className="h-4 w-4" />
               Movements
             </TabsTrigger>
+            {canReports && (
+              <TabsTrigger value="daily" className="gap-2">
+                <BarChart3 className="h-4 w-4" />
+                Daily / closing
+              </TabsTrigger>
+            )}
+            {canAuditTab && (
+              <TabsTrigger value="audit" className="gap-2">
+                <ClipboardList className="h-4 w-4" />
+                Audit trail
+              </TabsTrigger>
+            )}
           </TabsList>
 
           <TabsContent value="inventory" className="space-y-4">
@@ -661,7 +808,9 @@ export function StoreManager() {
                           <TableRow key={it.id} className={cn(!it.is_active && 'opacity-60')}>
                             <TableCell>
                               <div className="flex flex-col gap-1">
-                                <span className="font-medium">{it.name}</span>
+                                <Link href={`/store/items/${it.id}`} className="font-medium hover:underline">
+                                  {it.name}
+                                </Link>
                                 <div className="flex flex-wrap items-center gap-2">
                                   {it.sku && (
                                     <Badge variant="outline" className="text-xs font-normal">
@@ -754,6 +903,10 @@ export function StoreManager() {
                         </Badge>
                       </div>
                       <CardDescription className="font-mono text-xs">{c.slug}</CardDescription>
+                      <div className="mt-2 space-y-0.5 text-[11px] text-muted-foreground">
+                        {c.created_by && <p>Added by: {staffById[c.created_by] || '—'}</p>}
+                        {c.updated_by && <p>Updated by: {staffById[c.updated_by] || '—'}</p>}
+                      </div>
                     </CardHeader>
                     <CardContent className="flex justify-end gap-2 pt-0">
                       {canEdit && (
@@ -797,6 +950,7 @@ export function StoreManager() {
                         <TableHead>Type</TableHead>
                         <TableHead className="text-right">Δ Qty</TableHead>
                         <TableHead className="text-right">Balance</TableHead>
+                        <TableHead className="hidden lg:table-cell">Dept / outlet</TableHead>
                         <TableHead className="hidden md:table-cell">Ref / notes</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -815,7 +969,11 @@ export function StoreManager() {
                             <TableCell className="whitespace-nowrap text-sm text-muted-foreground">
                               {format(parseISO(m.created_at), 'MMM d, HH:mm')}
                             </TableCell>
-                            <TableCell className="font-medium">{name}</TableCell>
+                            <TableCell className="font-medium">
+                              <Link href={`/store/items/${m.item_id}`} className="hover:underline">
+                                {name}
+                              </Link>
+                            </TableCell>
                             <TableCell>
                               <span className="inline-flex items-center gap-1.5">
                                 <Icon className="h-3.5 w-3.5 text-muted-foreground" />
@@ -828,6 +986,9 @@ export function StoreManager() {
                             </TableCell>
                             <TableCell className="text-right font-mono text-sm">
                               {m.balance_after != null ? Number(m.balance_after).toLocaleString() : '—'}
+                            </TableCell>
+                            <TableCell className="hidden lg:table-cell text-sm">
+                              {m.destination_department || '—'}
                             </TableCell>
                             <TableCell className="hidden md:table-cell max-w-[200px] truncate text-xs text-muted-foreground">
                               {[m.reference, m.notes].filter(Boolean).join(' · ') || '—'}
@@ -844,6 +1005,209 @@ export function StoreManager() {
               </CardContent>
             </Card>
           </TabsContent>
+
+          {canReports && (
+            <TabsContent value="daily" className="space-y-4">
+              <Card>
+                <CardHeader>
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+                    <div>
+                      <CardTitle className="text-lg">Daily outlet activity &amp; closing snapshot</CardTitle>
+                      <CardDescription>
+                        Left: movements classified as sale, issue, or out for the chosen day. Right: central store stock
+                        by category (current quantities).
+                      </CardDescription>
+                    </div>
+                    <div className="space-y-1">
+                      <Label>Report date</Label>
+                      <Input
+                        type="date"
+                        value={reportDate}
+                        onChange={e => setReportDate(e.target.value)}
+                        className="w-[200px]"
+                      />
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-8">
+                  {loadingDaily ? (
+                    <div className="flex justify-center py-12">
+                      <Loader2 className="h-10 w-10 animate-spin text-amber-600" />
+                    </div>
+                  ) : (
+                    <>
+                      <div className="grid gap-6 lg:grid-cols-2">
+                        <div>
+                          <h4 className="mb-2 text-sm font-semibold">By outlet / department</h4>
+                          <ScrollArea className="h-[min(240px,40vh)] rounded-md border">
+                            <Table>
+                              <TableHeader>
+                                <TableRow>
+                                  <TableHead>Outlet</TableHead>
+                                  <TableHead className="text-right">Qty moved</TableHead>
+                                  <TableHead className="text-right">Value (est.)</TableHead>
+                                </TableRow>
+                              </TableHeader>
+                              <TableBody>
+                                {dailyDeptSummary.length === 0 ? (
+                                  <TableRow>
+                                    <TableCell colSpan={3} className="text-center text-muted-foreground">
+                                      No outs, issues, or sales this day.
+                                    </TableCell>
+                                  </TableRow>
+                                ) : (
+                                  dailyDeptSummary.map(([dept, row]) => (
+                                    <TableRow key={dept}>
+                                      <TableCell>{dept}</TableCell>
+                                      <TableCell className="text-right font-mono">{row.qty.toLocaleString()}</TableCell>
+                                      <TableCell className="text-right text-sm">{formatNaira(row.value)}</TableCell>
+                                    </TableRow>
+                                  ))
+                                )}
+                              </TableBody>
+                            </Table>
+                          </ScrollArea>
+                        </div>
+                        <div>
+                          <h4 className="mb-2 text-sm font-semibold">By store category (same movements)</h4>
+                          <ScrollArea className="h-[min(240px,40vh)] rounded-md border">
+                            <Table>
+                              <TableHeader>
+                                <TableRow>
+                                  <TableHead>Category</TableHead>
+                                  <TableHead className="text-right">Qty moved</TableHead>
+                                  <TableHead className="text-right">Value (est.)</TableHead>
+                                </TableRow>
+                              </TableHeader>
+                              <TableBody>
+                                {dailyCategorySummary.length === 0 ? (
+                                  <TableRow>
+                                    <TableCell colSpan={3} className="text-center text-muted-foreground">
+                                      No consumption rows for this date.
+                                    </TableCell>
+                                  </TableRow>
+                                ) : (
+                                  dailyCategorySummary.map(([cat, row]) => (
+                                    <TableRow key={cat}>
+                                      <TableCell>{cat}</TableCell>
+                                      <TableCell className="text-right font-mono">{row.qty.toLocaleString()}</TableCell>
+                                      <TableCell className="text-right text-sm">{formatNaira(row.value)}</TableCell>
+                                    </TableRow>
+                                  ))
+                                )}
+                              </TableBody>
+                            </Table>
+                          </ScrollArea>
+                        </div>
+                      </div>
+                      <div>
+                        <h4 className="mb-2 text-sm font-semibold">Central store — closing balance by category</h4>
+                        <p className="mb-3 text-xs text-muted-foreground">
+                          Live on-hand quantities in the main store (not departmental sub-ledgers).
+                        </p>
+                        <ScrollArea className="h-[min(280px,45vh)] rounded-md border">
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead>Category</TableHead>
+                                <TableHead className="text-right">On hand (qty)</TableHead>
+                                <TableHead className="text-right">Stock value</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {closingByCategory.map(([cat, row]) => (
+                                <TableRow key={cat}>
+                                  <TableCell>{cat}</TableCell>
+                                  <TableCell className="text-right font-mono">{row.qty.toLocaleString()}</TableCell>
+                                  <TableCell className="text-right">{formatNaira(row.value)}</TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        </ScrollArea>
+                      </div>
+                    </>
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
+          )}
+
+          {canAuditTab && (
+            <TabsContent value="audit" className="space-y-4">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">Movement audit trail</CardTitle>
+                  <CardDescription>
+                    Every line includes who recorded the movement and — when captured — who received stock at the
+                    outlet.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="p-0">
+                  {loadingAudit ? (
+                    <div className="flex justify-center py-16">
+                      <Loader2 className="h-10 w-10 animate-spin text-amber-600" />
+                    </div>
+                  ) : (
+                    <ScrollArea className="h-[min(520px,70vh)]">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>When</TableHead>
+                            <TableHead>Item</TableHead>
+                            <TableHead>Type</TableHead>
+                            <TableHead className="text-right">Δ</TableHead>
+                            <TableHead className="text-right">Bal</TableHead>
+                            <TableHead className="hidden md:table-cell">Dept</TableHead>
+                            <TableHead className="hidden lg:table-cell">Received</TableHead>
+                            <TableHead className="hidden lg:table-cell">Recorded</TableHead>
+                            <TableHead className="hidden xl:table-cell">Notes</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {auditMovements.map(m => (
+                              <TableRow key={m.id}>
+                                <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
+                                  {format(parseISO(m.created_at), 'MMM d, HH:mm')}
+                                </TableCell>
+                                <TableCell className="max-w-[140px] truncate text-sm font-medium">
+                                  {itemNameById.get(m.item_id) || '—'}
+                                </TableCell>
+                                <TableCell className="capitalize">{m.movement_type}</TableCell>
+                                <TableCell className="text-right font-mono text-sm">
+                                  {Number(m.quantity) > 0 ? '+' : ''}
+                                  {Number(m.quantity).toLocaleString()}
+                                </TableCell>
+                                <TableCell className="text-right font-mono text-sm">
+                                  {m.balance_after != null ? Number(m.balance_after).toLocaleString() : '—'}
+                                </TableCell>
+                                <TableCell className="hidden md:table-cell text-sm">
+                                  {m.destination_department || '—'}
+                                </TableCell>
+                                <TableCell className="hidden lg:table-cell text-sm">
+                                  {m.received_by
+                                    ? staffById[m.received_by] || m.received_by.slice(0, 8)
+                                    : '—'}
+                                </TableCell>
+                                <TableCell className="hidden lg:table-cell text-sm">
+                                  {m.created_by ? staffById[m.created_by] || m.created_by.slice(0, 8) : '—'}
+                                </TableCell>
+                                <TableCell className="hidden xl:table-cell max-w-[160px] truncate text-xs text-muted-foreground">
+                                  {[m.reference, m.notes].filter(Boolean).join(' · ') || '—'}
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                        </TableBody>
+                      </Table>
+                    </ScrollArea>
+                  )}
+                  {!loadingAudit && auditMovements.length === 0 && (
+                    <p className="py-12 text-center text-sm text-muted-foreground">No movements yet.</p>
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
+          )}
         </Tabs>
       )}
 
@@ -1011,21 +1375,67 @@ export function StoreManager() {
           <div className="space-y-4 py-2">
             <div className="space-y-2">
               <Label>Movement type</Label>
-              <Select value={adjustType} onValueChange={v => setAdjustType(v as MovementType)}>
+              <Select value={adjustType} onValueChange={v => setAdjustType(v as StoreMovementType)}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="in">Stock in (delivery / purchase)</SelectItem>
                   <SelectItem value="out">Stock out (consumption)</SelectItem>
+                  {canIssue && (
+                    <SelectItem value="issue">Issue to outlet / department (transfer)</SelectItem>
+                  )}
                   <SelectItem value="sale">Sale (POS / outlet)</SelectItem>
                   <SelectItem value="adjustment">Physical count (set level)</SelectItem>
                 </SelectContent>
               </Select>
             </div>
+            {adjustType !== 'adjustment' && adjustType !== 'in' && (
+              <>
+                <div className="space-y-2">
+                  <Label>
+                    Outlet / department {adjustType === 'issue' ? '(required for issue)' : '(optional)'}
+                  </Label>
+                  <Select value={adjustDept || '__none__'} onValueChange={v => setAdjustDept(v === '__none__' ? '' : v)}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select outlet" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">— Not specified —</SelectItem>
+                      {OUTLET_DEPARTMENTS.map(d => (
+                        <SelectItem key={d} value={d}>
+                          {d}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Received by (acknowledgement)</Label>
+                  <Select
+                    value={adjustReceivedBy || '__none__'}
+                    onValueChange={v => setAdjustReceivedBy(v === '__none__' ? '' : v)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Optional — who took receipt" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">— None —</SelectItem>
+                      {Object.entries(staffById)
+                        .sort((a, b) => a[1].localeCompare(b[1]))
+                        .map(([id, name]) => (
+                          <SelectItem key={id} value={id}>
+                            {name}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </>
+            )}
             {adjustType === 'adjustment' ? (
               <div className="space-y-2">
-                <Label>New quantity Qty Stock</Label>
+                <Label>New quantity on hand</Label>
                 <Input
                   type="number"
                   min={0}
@@ -1044,7 +1454,7 @@ export function StoreManager() {
                   step="0.001"
                   value={adjustQty}
                   onChange={e => setAdjustQty(e.target.value)}
-                  placeholder={adjustType === 'in' ? 'Units received' : 'Units removed'}
+                  placeholder={adjustType === 'in' ? 'Units received' : 'Units removed / issued'}
                 />
               </div>
             )}
