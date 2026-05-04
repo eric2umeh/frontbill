@@ -22,8 +22,19 @@ export type Permission =
   | 'backdate:request' | 'backdate:approve'
   | 'housekeeping:view' | 'housekeeping:create' | 'housekeeping:edit' | 'housekeeping:assign' | 'housekeeping:report'
   | 'maintenance:view' | 'maintenance:create' | 'maintenance:edit' | 'maintenance:assign' | 'maintenance:report'
+  | 'store:view' | 'store:create' | 'store:edit' | 'store:delete' | 'store:adjust'
 
-export type RoleKey = 'superadmin' | 'admin' | 'manager' | 'front_desk' | 'receptionist' | 'accountant' | 'staff' | 'housekeeping' | 'maintenance'
+export type RoleKey =
+  | 'superadmin'
+  | 'admin'
+  | 'manager'
+  | 'front_desk'
+  | 'receptionist'
+  | 'accountant'
+  | 'staff'
+  | 'housekeeping'
+  | 'maintenance'
+  | 'store'
 
 export interface RoleDefinition {
   key: RoleKey
@@ -87,6 +98,12 @@ export const ALL_PERMISSIONS: { key: Permission; label: string; group: string }[
   { key: 'maintenance:assign', label: 'Assign Maintenance Work', group: 'Maintenance' },
   { key: 'maintenance:report', label: 'Submit Maintenance Daily Reports', group: 'Maintenance' },
 
+  { key: 'store:view', label: 'View Store & Inventory', group: 'Store' },
+  { key: 'store:create', label: 'Add Store Items', group: 'Store' },
+  { key: 'store:edit', label: 'Edit Store Items', group: 'Store' },
+  { key: 'store:delete', label: 'Delete Store Items', group: 'Store' },
+  { key: 'store:adjust', label: 'Stock In / Out & Adjustments', group: 'Store' },
+
   { key: 'analytics:view', label: 'View Analytics', group: 'Analytics' },
   { key: 'analytics:export', label: 'Export Analytics', group: 'Analytics' },
 
@@ -147,6 +164,21 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
       'rooms:delete',
       'backdate:approve',
     ].includes(p)),
+  },
+  {
+    key: 'store',
+    label: 'Store',
+    description:
+      'General store and inventory only: catalogue, stock counts, and movements — no dashboard or front-office menus. Profile/settings only.',
+    color: 'bg-amber-100 text-amber-950 dark:bg-amber-950/30 dark:text-amber-100',
+    permissions: [
+      'store:view',
+      'store:create',
+      'store:edit',
+      'store:delete',
+      'store:adjust',
+      'settings:view',
+    ],
   },
   {
     key: 'accountant',

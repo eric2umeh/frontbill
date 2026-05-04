@@ -48,11 +48,31 @@ export async function POST(request: Request) {
       console.log('Front desk user created:', deskData.user?.email)
     }
 
+    const { error: storeError } = await supabase.auth.admin.createUser({
+      email: 'store@frontbill.com',
+      password: 'Store@123456',
+      email_confirm: true,
+      user_metadata: {
+        full_name: 'Store Clerk',
+        role: 'store',
+      },
+    })
+
+    if (storeError) {
+      console.error('Error creating store user:', storeError)
+      if (!storeError.message.includes('already exists')) {
+        throw storeError
+      }
+    } else {
+      console.log('Store user created: store@frontbill.com')
+    }
+
     return NextResponse.json({
       message: 'Demo users seeded successfully',
       credentials: [
         { email: 'admin@frontbill.com', password: 'Admin@123456', role: 'Admin' },
         { email: 'frontdesk@frontbill.com', password: 'Desk@123456', role: 'Front Desk' },
+        { email: 'store@frontbill.com', password: 'Store@123456', role: 'Store' },
       ],
     })
   } catch (error: any) {

@@ -34,6 +34,7 @@ const ROUTE_PERMISSIONS: Array<{ path: string; permission: Permission }> = [
   { path: '/ledger', permission: 'ledger:view' },
   { path: '/housekeeping', permission: 'housekeeping:view' },
   { path: '/maintenance', permission: 'maintenance:view' },
+  { path: '/store', permission: 'store:view' },
   { path: '/rooms', permission: 'rooms:view' },
   { path: '/users-roles', permission: 'users:view' },
   { path: '/settings', permission: 'settings:view' },
@@ -107,7 +108,7 @@ export default function DashboardLayout({
               organizationId: profile.organization_id || '',
             })
             // Check if role has dashboard access
-            const allowedRoles = ['superadmin', 'admin', 'manager', 'front_desk', 'receptionist', 'housekeeping', 'maintenance', 'accountant']
+            const allowedRoles = ['superadmin', 'admin', 'manager', 'front_desk', 'receptionist', 'housekeeping', 'maintenance', 'accountant', 'store']
             if (!allowedRoles.includes(profile.role || 'admin')) {
               if (isMounted) {
                 setRedirected(true)
@@ -148,6 +149,14 @@ export default function DashboardLayout({
 
   useEffect(() => {
     if (!user) return
+
+    if (
+      user.role === 'store' &&
+      (pathname === '/dashboard' || pathname.startsWith('/dashboard/'))
+    ) {
+      router.replace('/store')
+      return
+    }
 
     const requiredPermission = getRequiredPermission(pathname)
     if (requiredPermission && !hasPermission(user.role, requiredPermission)) {

@@ -23,6 +23,7 @@ import { Hotel, Loader2, AlertCircle, Eye, EyeOff } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
+import { getPostLoginPath } from '@/lib/utils/post-login-path'
 
 export default function Page() {
   const [email, setEmail] = useState('')
@@ -93,8 +94,14 @@ export default function Page() {
         throw error
       }
 
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', data.user.id)
+        .maybeSingle()
+
       toast.success('Login successful!')
-      router.push('/dashboard')
+      router.push(getPostLoginPath(profile?.role))
     } catch (error: any) {
       toast.error(error.message || 'Failed to login')
       setIsLoading(false)
