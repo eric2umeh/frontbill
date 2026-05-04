@@ -8,7 +8,7 @@ export type OrganizationType = 'government' | 'ngo' | 'private' | 'individual'
 export type BookingStatus = 'pending' | 'confirmed' | 'checked_in' | 'checked_out' | 'cancelled' | 'no_show'
 export type PaymentStatus = 'pending' | 'partial' | 'paid' | 'arrears'
 
-export type PaymentMethod = 'cash' | 'pos' | 'transfer' | 'cheque' | 'credit'
+export type PaymentMethod = 'cash' | 'pos' | 'transfer' | 'card' | 'credit'
 
 export type TransactionType = 'charge' | 'payment' | 'adjustment'
 
