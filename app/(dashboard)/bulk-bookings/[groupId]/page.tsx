@@ -231,7 +231,7 @@ export default function BulkBookingDetailPage({ params }: { params: Promise<{ gr
       </div>
 
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">Bulk Booking Details</h1>
+        <h1 className="text-3xl font-bold tracking-tight">Bulk reservation details</h1>
         <p className="text-muted-foreground">Group reference: {groupId}</p>
       </div>
 
@@ -273,7 +273,9 @@ export default function BulkBookingDetailPage({ params }: { params: Promise<{ gr
       <Card>
         <CardHeader>
           <CardTitle>Rooms and Guests</CardTitle>
-          <CardDescription>All rooms created under this bulk booking/reservation.</CardDescription>
+          <CardDescription>
+            Rooms and guests linked to this bulk reservation group (may also appear as bookings when checked in).
+          </CardDescription>
         </CardHeader>
         <CardContent className="overflow-x-auto p-0 px-4 pb-6 sm:px-6 [scrollbar-width:thin]">
           <Table>

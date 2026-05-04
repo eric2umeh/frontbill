@@ -300,7 +300,7 @@ export default function ReservationsPage() {
           <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
             <Button variant="outline" size="sm" className="w-full text-xs sm:w-auto sm:text-sm" onClick={() => setBulkModalOpen(true)}>
               <Users className="mr-2 h-3.5 w-3.5 sm:h-4 sm:w-4" />
-              Bulk Booking
+              Bulk Reservation
             </Button>
             <Button size="sm" className="w-full text-xs sm:w-auto sm:text-sm" onClick={() => setNewReservationOpen(true)}>
               <Plus className="mr-2 h-3.5 w-3.5 sm:h-4 sm:w-4" />
@@ -334,7 +334,7 @@ export default function ReservationsPage() {
                 href={res.is_bulk ? `/bulk-bookings/${res.bulk_group_id}` : `/reservations/${res.id}`}
                 className="font-mono text-sm cursor-pointer hover:text-primary"
               >
-                {res.is_bulk ? `Bulk booking (${res.room_count} rooms)` : res.folio_id}
+                {res.is_bulk ? `Bulk reservation (${res.room_count} rooms)` : res.folio_id}
               </Link>
             ),
           },

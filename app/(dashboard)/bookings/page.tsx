@@ -461,7 +461,15 @@ export default function BookingsPage() {
   return (
     <div className="space-y-6">
       <NewBookingModal open={modalOpen} onClose={() => { setModalOpen(false); fetchBookings() }} />
-      <BulkBookingModal open={bulkModalOpen} onClose={() => setBulkModalOpen(false)} onSuccess={() => { setBulkModalOpen(false); fetchBookings() }} />
+      <BulkBookingModal
+        wording="booking"
+        open={bulkModalOpen}
+        onClose={() => setBulkModalOpen(false)}
+        onSuccess={() => {
+          setBulkModalOpen(false)
+          fetchBookings()
+        }}
+      />
       <ReserveCheckInModal
         open={reserveCheckInOpen}
         onClose={() => { setReserveCheckInOpen(false); setReserveCheckInBooking(null) }}
