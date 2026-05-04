@@ -12,7 +12,10 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { formatNaira } from '@/lib/utils/currency'
 import { getBulkGroupId, isLegacyBulkGroupId } from '@/lib/utils/bulk-booking'
 import { manualCheckoutEligible, resolvedCheckoutDateForClosing, DEFAULT_ORG_CHECKOUT_TIME } from '@/lib/utils/booking-checkout-ui'
+import { CheckoutConfirmDialog } from '@/components/bookings/checkout-confirm-dialog'
 import { toast } from 'sonner'
+
+type BulkPageCheckoutDraft = { kind: 'row'; row: any } | { kind: 'all'; targets: any[] }
 
 export default function BulkBookingDetailPage({ params }: { params: Promise<{ groupId: string }> | { groupId: string } }) {
   const router = useRouter()
@@ -23,6 +26,7 @@ export default function BulkBookingDetailPage({ params }: { params: Promise<{ gr
   const [loading, setLoading] = useState(true)
   const [checkoutRowId, setCheckoutRowId] = useState<string | null>(null)
   const [checkoutAllLoading, setCheckoutAllLoading] = useState(false)
+  const [checkoutDraft, setCheckoutDraft] = useState<BulkPageCheckoutDraft | null>(null)
   const [orgCheckoutTime, setOrgCheckoutTime] = useState(DEFAULT_ORG_CHECKOUT_TIME)
 
   useEffect(() => {
@@ -110,55 +114,16 @@ export default function BulkBookingDetailPage({ params }: { params: Promise<{ gr
       orgCheckoutTime,
     )
 
+  const checkoutDialogBusy =
+    checkoutDraft?.kind === 'row'
+      ? checkoutRowId === checkoutDraft.row.id
+      : checkoutDraft?.kind === 'all'
+        ? checkoutAllLoading
+        : false
+
   const handleCheckoutOneRow = (row: any) => {
     if (!checkoutRowEligible(row)) return
-    toast.custom(
-      (tid: string | number) => (
-        <div className="flex flex-col gap-3">
-          <div className="flex gap-2 items-start">
-            <LogOut className="w-5 h-5 text-amber-600 mt-0.5 shrink-0" />
-            <div>
-              <p className="font-semibold">Check Out Guest?</p>
-              <p className="text-sm text-muted-foreground">
-                {row.guests?.name || 'Guest'} —{' '}
-                {row.rooms?.room_number ? `Room ${row.rooms.room_number}` : 'Unassigned'}
-              </p>
-              {Number(row.balance || 0) > 0 && (
-                <p className="text-xs text-red-600 mt-1">
-                  Outstanding balance: {formatNaira(Number(row.balance))}
-                </p>
-              )}
-            </div>
-          </div>
-          <div className="flex gap-2 justify-end">
-            <Button variant="outline" size="sm" onClick={() => toast.dismiss(tid)}>
-              Cancel
-            </Button>
-            <Button
-              size="sm"
-              className="bg-amber-600 hover:bg-amber-700 text-white"
-              disabled={checkoutRowId === row.id}
-              onClick={async () => {
-                toast.dismiss(tid)
-                setCheckoutRowId(row.id)
-                try {
-                  await runCheckoutUpdates([row])
-                  toast.success(`${row.guests?.name || 'Guest'} checked out successfully`)
-                  await fetchBulkRows(groupId)
-                } catch (err: any) {
-                  toast.error(err.message || 'Failed to check out guest')
-                } finally {
-                  setCheckoutRowId(null)
-                }
-              }}
-            >
-              {checkoutRowId === row.id ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Confirm Checkout'}
-            </Button>
-          </div>
-        </div>
-      ),
-      { duration: Infinity },
-    )
+    setCheckoutDraft({ kind: 'row', row })
   }
 
   const handleCheckoutAllEligible = () => {
@@ -167,51 +132,40 @@ export default function BulkBookingDetailPage({ params }: { params: Promise<{ gr
       toast.message('No folios are available for checkout.')
       return
     }
-    const totalOutstanding = targets.reduce((s, r) => s + Number(r.balance || 0), 0)
-    toast.custom(
-      (tid: string | number) => (
-        <div className="flex flex-col gap-3">
-          <div className="flex gap-2 items-start">
-            <LogOut className="w-5 h-5 text-amber-600 mt-0.5 shrink-0" />
-            <div>
-              <p className="font-semibold">Check out {targets.length} room{targets.length === 1 ? '' : 's'}?</p>
-              <p className="text-sm text-muted-foreground">All eligible folios in this bulk group.</p>
-              {totalOutstanding > 0 && (
-                <p className="text-xs text-red-600 mt-1">
-                  Outstanding (sum): {formatNaira(totalOutstanding)}
-                </p>
-              )}
-            </div>
-          </div>
-          <div className="flex gap-2 justify-end">
-            <Button variant="outline" size="sm" onClick={() => toast.dismiss(tid)}>
-              Cancel
-            </Button>
-            <Button
-              size="sm"
-              className="bg-amber-600 hover:bg-amber-700 text-white"
-              disabled={checkoutAllLoading}
-              onClick={async () => {
-                toast.dismiss(tid)
-                setCheckoutAllLoading(true)
-                try {
-                  await runCheckoutUpdates(targets)
-                  toast.success(`Checked out ${targets.length} room${targets.length === 1 ? '' : 's'}`)
-                  await fetchBulkRows(groupId)
-                } catch (err: any) {
-                  toast.error(err.message || 'Failed to check out group')
-                } finally {
-                  setCheckoutAllLoading(false)
-                }
-              }}
-            >
-              {checkoutAllLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Confirm checkout'}
-            </Button>
-          </div>
-        </div>
-      ),
-      { duration: Infinity },
-    )
+    setCheckoutDraft({ kind: 'all', targets })
+  }
+
+  const confirmBulkCheckoutFromDialog = async () => {
+    if (!checkoutDraft || !userId) return
+
+    if (checkoutDraft.kind === 'row') {
+      const row = checkoutDraft.row
+      setCheckoutRowId(row.id)
+      try {
+        await runCheckoutUpdates([row])
+        toast.success(`${row.guests?.name || 'Guest'} checked out successfully`)
+        setCheckoutDraft(null)
+        await fetchBulkRows(groupId)
+      } catch (err: any) {
+        toast.error(err.message || 'Failed to check out guest')
+      } finally {
+        setCheckoutRowId(null)
+      }
+      return
+    }
+
+    const targets = checkoutDraft.targets
+    setCheckoutAllLoading(true)
+    try {
+      await runCheckoutUpdates(targets)
+      toast.success(`Checked out ${targets.length} room${targets.length === 1 ? '' : 's'}`)
+      setCheckoutDraft(null)
+      await fetchBulkRows(groupId)
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to check out group')
+    } finally {
+      setCheckoutAllLoading(false)
+    }
   }
 
   const first = rows[0]
@@ -230,6 +184,47 @@ export default function BulkBookingDetailPage({ params }: { params: Promise<{ gr
 
   return (
     <div className="space-y-6">
+      <CheckoutConfirmDialog
+        open={checkoutDraft !== null}
+        onClose={() => {
+          if (checkoutDialogBusy) return
+          setCheckoutDraft(null)
+        }}
+        title={
+          checkoutDraft?.kind === 'all'
+            ? `Check out ${checkoutDraft.targets.length} room${checkoutDraft.targets.length === 1 ? '' : 's'}?`
+            : 'Check out guest?'
+        }
+        description={
+          checkoutDraft?.kind === 'all' ? (
+            <>
+              <p>All eligible folios in this bulk group will be marked checked out.</p>
+            </>
+          ) : checkoutDraft?.kind === 'row' ? (
+            <>
+              <p>
+                <span className="font-medium text-foreground">{checkoutDraft.row.guests?.name || 'Guest'}</span>
+                {' — '}
+                {checkoutDraft.row.rooms?.room_number
+                  ? `Room ${checkoutDraft.row.rooms.room_number}`
+                  : 'Unassigned'}
+              </p>
+              <p className="mt-1">This closes the folio and frees the room.</p>
+            </>
+          ) : undefined
+        }
+        outstandingAmount={
+          checkoutDraft?.kind === 'all'
+            ? checkoutDraft.targets.reduce((s, r) => s + Number(r.balance ?? 0), 0)
+            : checkoutDraft?.kind === 'row'
+              ? Number(checkoutDraft.row.balance ?? 0)
+              : undefined
+        }
+        outstandingLabel={checkoutDraft?.kind === 'all' ? 'Outstanding (sum):' : 'Outstanding balance:'}
+        loading={checkoutDialogBusy}
+        onConfirm={confirmBulkCheckoutFromDialog}
+      />
+
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <Button variant="ghost" onClick={() => router.back()}>
           <ArrowLeft className="mr-2 h-4 w-4" />
@@ -239,7 +234,7 @@ export default function BulkBookingDetailPage({ params }: { params: Promise<{ gr
           <Button
             variant="outline"
             className="shrink-0 text-amber-700 border-amber-200 hover:bg-amber-50"
-            disabled={checkoutAllLoading}
+            disabled={checkoutAllLoading || checkoutDialogBusy}
             onClick={handleCheckoutAllEligible}
           >
             {checkoutAllLoading ? (
