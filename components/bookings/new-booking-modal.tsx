@@ -1,7 +1,7 @@
 'use client'
 
 // Cache bust marker: 2025-02-25-final-fix
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
@@ -19,6 +19,7 @@ import { resolveOrganizationLedgerAccount } from '@/lib/utils/resolve-ledger-acc
 import { formatPersonName } from '@/lib/utils/name-format'
 import { StayDateRangeFields } from '@/components/shared/stay-date-range-fields'
 import { useAuth } from '@/lib/auth-context'
+import { isRoomAssignable } from '@/lib/utils/room-bookability'
 
 interface NewBookingModalProps {
   open: boolean
@@ -145,8 +146,8 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
       ] = await Promise.all([
         // Guests table
         supabase.from('guests').select('id, name, phone, email, address').eq('organization_id', orgId).order('name'),
-        // All non-maintenance rooms — availability is checked by date range, not status
-        supabase.from('rooms').select('id, room_number, room_type, price_per_night, status').eq('organization_id', orgId).eq('status', 'available').order('room_number'),
+        // All inventory except maintenance — date conflicts + isRoomAssignable gate the picker
+        supabase.from('rooms').select('id, room_number, room_type, price_per_night, status').eq('organization_id', orgId).order('room_number'),
         // Active bookings to check date conflicts
         supabase.from('bookings').select('room_id, check_in, check_out').eq('organization_id', orgId).in('status', ['confirmed', 'reserved', 'checked_in']),
         // City ledger accounts — load ALL, split by type client-side
@@ -155,14 +156,19 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
         supabase.from('organizations').select('id, name, phone, email, org_type, created_by').neq('id', orgId).order('name'),
       ])
 
-      // Sanitize rooms — filter out any with empty id, room_type or room_number to prevent SelectItem crashes
+      // Sanitize rooms — filter out maintenance, empty id/type/number (prevents SelectItem crashes)
       const sanitizedRooms = (roomData || []).filter(
-        (r: any) => r.id && r.room_type && String(r.room_type).trim() !== '' && r.room_number && String(r.room_number).trim() !== ''
+        (r: any) =>
+          r.id &&
+          r.room_type &&
+          String(r.room_type).trim() !== '' &&
+          r.room_number &&
+          String(r.room_number).trim() !== '' &&
+          isRoomAssignable(r.status)
       )
       setGuests(guestData || [])
       setAllRooms(sanitizedRooms)
       setAllBookingsForRooms(bookingData || [])
-      setRooms(sanitizedRooms)
 
       // Individuals: city_ledger_accounts with type individual/guest
       const individualLedger: LedgerAccount[] = (cityLedgerData || [])
@@ -434,26 +440,34 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
     const d = String(date.getDate()).padStart(2, '0')
     return `${y}-${m}-${d}`
   }
-  const filterRoomsForDates = (ci: Date, co: Date) => {
-    const toStr = (d: Date) => {
-      const y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,'0'), dd = String(d.getDate()).padStart(2,'0')
-      return `${y}-${m}-${dd}`
-    }
-    const ciStr = toStr(ci), coStr = toStr(co)
-    const bookedRoomIds = new Set(
-      allBookingsForRooms
-        .filter(b => b.check_in < coStr && b.check_out > ciStr)
-        .map(b => b.room_id)
-    )
-    setRooms(allRooms.filter(r => r.status === 'available' && !bookedRoomIds.has(r.id) && r.id && r.room_type && String(r.room_type).trim() !== ''))
-    // Clear selected room if it's no longer available
-    setSelectedRoom(prev => prev && bookedRoomIds.has(prev.id) ? null : prev)
-    setSelectedRoomType(prev => {
-      if (!prev) return prev
-      const stillAvail = allRooms.some(r => r.room_type === prev && !bookedRoomIds.has(r.id))
-      return stillAvail ? prev : ''
-    })
-  }
+  const filterRoomsForDates = useCallback(
+    (ci: Date, co: Date) => {
+      const toStr = (d: Date) => {
+        const y = d.getFullYear(),
+          m = String(d.getMonth() + 1).padStart(2, '0'),
+          dd = String(d.getDate()).padStart(2, '0')
+        return `${y}-${m}-${dd}`
+      }
+      const ciStr = toStr(ci),
+        coStr = toStr(co)
+      const bookedRoomIds = new Set(
+        allBookingsForRooms.filter((b) => b.check_in < coStr && b.check_out > ciStr).map((b) => b.room_id)
+      )
+      setRooms(allRooms.filter((r) => !bookedRoomIds.has(r.id)))
+      setSelectedRoom((prev) => (prev && bookedRoomIds.has(prev.id) ? null : prev))
+      setSelectedRoomType((prev) => {
+        if (!prev) return prev
+        const stillAvail = allRooms.some((r) => r.room_type === prev && !bookedRoomIds.has(r.id))
+        return stillAvail ? prev : ''
+      })
+    },
+    [allRooms, allBookingsForRooms]
+  )
+
+  useEffect(() => {
+    if (!open || !checkInDate || !checkOutDate || allRooms.length === 0) return
+    filterRoomsForDates(checkInDate, checkOutDate)
+  }, [open, checkInDate, checkOutDate, allRooms, allBookingsForRooms, filterRoomsForDates])
 
   const handleStayDatesChange = (from: Date, to: Date | undefined) => {
     setCheckInDate(from)
@@ -561,7 +575,10 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
         return
       }
       if (!selectedRoom) { toast.error('Room required'); return }
-      if (selectedRoom.status && selectedRoom.status !== 'available') { toast.error('Selected room is not available'); return }
+      if (selectedRoom.status && String(selectedRoom.status).toLowerCase().trim() === 'maintenance') {
+        toast.error('Selected room is under maintenance — pick another')
+        return
+      }
       if (paymentMethod === 'city_ledger' && !ledgerAccount) { toast.error('Select a ledger account'); return }
 
       // Check for date conflicts one final time before submit
