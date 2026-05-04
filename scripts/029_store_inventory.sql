@@ -2,6 +2,7 @@
 -- Run after verifying organizations(id) exists for your hotel tenant.
 -- Optional: after this migration, run 030_store_monthly_report_seed.sql (set org_id in the DECLARE block)
 -- to load opening stock lines from scripts/data/monthly-report-store-september.csv.
+-- Run 031_store_accountability.sql for outlet/issue/receiver columns and category & item audit fields.
 
 -- ── Tables ───────────────────────────────────────────────────────────
 
