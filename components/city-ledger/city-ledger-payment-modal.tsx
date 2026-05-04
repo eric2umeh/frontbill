@@ -219,9 +219,7 @@ export default function CityLedgerPaymentModal({
                 <SelectContent>
                   <SelectItem value="cash">Cash</SelectItem>
                   <SelectItem value="transfer">Transfer</SelectItem>
-                  <SelectItem value="pos">POS / Card</SelectItem>
-                  <SelectItem value="cheque">Cheque</SelectItem>
-                  <SelectItem value="online">Online Payment</SelectItem>
+                  <SelectItem value="pos">POS</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -276,9 +274,7 @@ export default function CityLedgerPaymentModal({
                 <SelectContent>
                   <SelectItem value="cash">Cash</SelectItem>
                   <SelectItem value="transfer">Transfer</SelectItem>
-                  <SelectItem value="pos">POS / Card</SelectItem>
-                  <SelectItem value="cheque">Cheque</SelectItem>
-                  <SelectItem value="online">Online Payment</SelectItem>
+                  <SelectItem value="pos">POS</SelectItem>
                 </SelectContent>
               </Select>
             </div>
