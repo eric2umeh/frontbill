@@ -7,7 +7,11 @@ import { useAuth } from '@/lib/auth-context'
 import { hasPermission } from '@/lib/permissions'
 import { formatNaira } from '@/lib/utils/currency'
 import { cn } from '@/lib/utils'
-import { OUTLET_DEPARTMENTS } from '@/lib/store/outlet-departments'
+import {
+  CENTRAL_STORE_VIEW,
+  STORE_FOCUS_OUTLETS,
+  issueOutletPickerOptions,
+} from '@/lib/store/outlet-departments'
 import type {
   StoreCategoryRow,
   StoreItemRow,
@@ -52,6 +56,7 @@ import {
   ArrowDownRight,
   ArrowUpRight,
   BarChart3,
+  Building2,
   ClipboardList,
   History,
   Layers,
@@ -97,6 +102,10 @@ export function StoreManager() {
   const [categories, setCategories] = useState<StoreCategoryRow[]>([])
   const [items, setItems] = useState<StoreItemRow[]>([])
   const [movements, setMovements] = useState<MovementRow[]>([])
+  /** Issues / outs / sales to outlets — used for “stock at outlet” rollup. */
+  const [ledgerForOutlets, setLedgerForOutlets] = useState<MovementRow[]>([])
+  /** Central store vs focus outlet (STORE_FOCUS_OUTLETS). */
+  const [storeOutletContext, setStoreOutletContext] = useState<string>(CENTRAL_STORE_VIEW)
   const [loading, setLoading] = useState(true)
 
   const [search, setSearch] = useState('')
@@ -156,8 +165,14 @@ export function StoreManager() {
     }
 
     setLoading(true)
+    const OUTLET_LEDGER_LIMIT = 25_000
     try {
-      const [{ data: c, error: e1 }, { data: i, error: e2 }, { data: m, error: e3 }] = await Promise.all([
+      const [
+        { data: c, error: e1 },
+        { data: i, error: e2 },
+        { data: m, error: e3 },
+        { data: ledger, error: e4 },
+      ] = await Promise.all([
         supabase
           .from('store_categories')
           .select('*')
@@ -174,21 +189,32 @@ export function StoreManager() {
           .eq('organization_id', organizationId)
           .order('created_at', { ascending: false })
           .limit(200),
+        supabase
+          .from('store_stock_movements')
+          .select('*')
+          .eq('organization_id', organizationId)
+          .in('movement_type', ['issue', 'out', 'sale'])
+          .not('destination_department', 'is', null)
+          .order('created_at', { ascending: false })
+          .limit(OUTLET_LEDGER_LIMIT),
       ])
 
       if (e1) throw e1
       if (e2) throw e2
       if (e3) throw e3
+      if (e4) throw e4
 
       setCategories((c || []) as StoreCategoryRow[])
       setItems((i || []) as StoreItemRow[])
       setMovements((m || []) as MovementRow[])
+      setLedgerForOutlets((ledger || []) as MovementRow[])
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to load store data'
       toast.error(msg)
       setCategories([])
       setItems([])
       setMovements([])
+      setLedgerForOutlets([])
     } finally {
       setLoading(false)
     }
@@ -263,6 +289,73 @@ export function StoreManager() {
     return m
   }, [items])
 
+  const issueOutletOptions = useMemo(() => issueOutletPickerOptions(), [])
+
+  /** Per focus outlet: item_id -> cumulative qty issued there (issue / out / sale lines). */
+  const outletBalancesByItem = useMemo(() => {
+    const map = new Map<string, Map<string, number>>()
+    for (const o of STORE_FOCUS_OUTLETS) map.set(o, new Map())
+    for (const m of ledgerForOutlets) {
+      const d = (m.destination_department || '').trim()
+      if (!d) continue
+      const outlet = STORE_FOCUS_OUTLETS.find(x => x.toLowerCase() === d.toLowerCase())
+      if (!outlet) continue
+      const q = Math.abs(Number(m.quantity))
+      const inner = map.get(outlet)!
+      inner.set(m.item_id, (inner.get(m.item_id) || 0) + q)
+    }
+    return map
+  }, [ledgerForOutlets])
+
+  const outletInventoryRows = useMemo(() => {
+    if (storeOutletContext === CENTRAL_STORE_VIEW) return []
+    const bal = outletBalancesByItem.get(storeOutletContext)
+    if (!bal) return []
+    const rows: { item: StoreItemRow; qty: number }[] = []
+    for (const it of items) {
+      const qty = bal.get(it.id) || 0
+      if (qty <= 0) continue
+      rows.push({ item: it, qty })
+    }
+    return rows.sort((a, b) => a.item.name.localeCompare(b.item.name))
+  }, [storeOutletContext, outletBalancesByItem, items])
+
+  const outletViewStats = useMemo(() => {
+    if (storeOutletContext === CENTRAL_STORE_VIEW) return null
+    const value = outletInventoryRows.reduce(
+      (s, r) => s + r.qty * Number(r.item.unit_price || 0),
+      0
+    )
+    return { lines: outletInventoryRows.length, value }
+  }, [storeOutletContext, outletInventoryRows])
+
+  const filteredOutletInventoryRows = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    return outletInventoryRows.filter(({ item: it }) => {
+      if (!inactiveToo && !it.is_active) return false
+      if (catFilter !== 'all') {
+        if (catFilter === 'none') {
+          if (it.category_id) return false
+        } else if (it.category_id !== catFilter) return false
+      }
+      if (!q) return true
+      const sku = (it.sku || '').toLowerCase()
+      return (
+        it.name.toLowerCase().includes(q) ||
+        sku.includes(q) ||
+        (it.notes && it.notes.toLowerCase().includes(q))
+      )
+    })
+  }, [outletInventoryRows, search, catFilter, inactiveToo])
+
+  const movementsForContext = useMemo(() => {
+    if (storeOutletContext === CENTRAL_STORE_VIEW) return movements
+    const o = storeOutletContext.toLowerCase()
+    return movements.filter(m => {
+      const d = (m.destination_department || '').trim().toLowerCase()
+      return d === o
+    })
+  }, [movements, storeOutletContext])
   const dailyDeptSummary = useMemo(() => {
     const salesLike = dailyMovements.filter(m =>
       ['sale', 'issue', 'out'].includes(m.movement_type)
@@ -530,12 +623,13 @@ export function StoreManager() {
 
   const openAdjust = (it: StoreItemRow) => {
     setAdjustItem(it)
-    setAdjustType('in')
+    const atOutlet = storeOutletContext !== CENTRAL_STORE_VIEW
+    setAdjustType(atOutlet ? 'issue' : 'in')
     setAdjustQty('')
     setAdjustRef('')
     setAdjustNotes('')
     setAdjustTarget('')
-    setAdjustDept('')
+    setAdjustDept(atOutlet ? storeOutletContext : '')
     setAdjustReceivedBy('')
     setAdjustOpen(true)
   }
@@ -667,9 +761,37 @@ export function StoreManager() {
               Hotel store & inventory
             </div>
             <h1 className="text-3xl font-bold tracking-tight md:text-4xl">General store</h1>
-            <p className="max-w-xl text-sm text-muted-foreground md:text-base">
-              Receiving into categories, issuing to outlets, daily consumption, and full movement accountability.
-            </p>
+            <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+              <p className="max-w-xl text-sm text-muted-foreground md:text-base">
+                Receiving into categories, issuing to outlets, daily consumption, and full movement accountability. Most
+                stock enters here;{' '}
+                <span className="font-medium text-foreground/90">
+                  perishables (e.g. tomatoes, vegetables, fruits)
+                </span>{' '}
+                may bypass the store when handled directly by kitchens or purchasing.
+              </p>
+              <div className="flex min-w-[min(100%,260px)] flex-col gap-1.5 sm:ml-auto">
+                <Label htmlFor="store-outlet-context" className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Outlet context
+                </Label>
+                <Select value={storeOutletContext} onValueChange={setStoreOutletContext}>
+                  <SelectTrigger id="store-outlet-context" className="border-amber-200/80 bg-white/90 dark:bg-stone-900/90">
+                    <Building2 className="mr-2 h-4 w-4 shrink-0" />
+                    <SelectValue placeholder="View" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={CENTRAL_STORE_VIEW}>
+                      Central store — main stock on hand
+                    </SelectItem>
+                    {STORE_FOCUS_OUTLETS.map(o => (
+                      <SelectItem key={o} value={o}>
+                        {o} — issued balances (view and transfer)
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
             {canSystemAudit && (
               <p className="text-sm">
                 <Link
@@ -683,18 +805,37 @@ export function StoreManager() {
             )}
           </div>
           <div className="grid grid-cols-3 gap-3 text-center">
-            <div className="rounded-xl border bg-white/70 px-4 py-3 shadow-sm dark:bg-stone-900/70">
-              <p className="text-2xl font-bold tabular-nums">{stats.totalSku}</p>
-              <p className="text-xs text-muted-foreground">Active SKUs</p>
-            </div>
-            <div className="rounded-xl border bg-white/70 px-4 py-3 shadow-sm dark:bg-stone-900/70">
-              <p className="text-2xl font-bold tabular-nums text-amber-700 dark:text-amber-400">{stats.lowCount}</p>
-              <p className="text-xs text-muted-foreground">Low stock</p>
-            </div>
-            <div className="rounded-xl border bg-white/70 px-4 py-3 shadow-sm dark:bg-stone-900/70">
-              <p className="text-sm font-bold leading-tight">{formatNaira(stats.stockValue)}</p>
-              <p className="text-xs text-muted-foreground">Est. value</p>
-            </div>
+            {storeOutletContext !== CENTRAL_STORE_VIEW && outletViewStats ? (
+              <>
+                <div className="rounded-xl border bg-white/70 px-4 py-3 shadow-sm dark:bg-stone-900/70">
+                  <p className="text-2xl font-bold tabular-nums">{outletViewStats.lines}</p>
+                  <p className="text-xs text-muted-foreground">SKU lines @ outlet</p>
+                </div>
+                <div className="rounded-xl border bg-white/70 px-4 py-3 shadow-sm dark:bg-stone-900/70">
+                  <p className="text-sm font-bold leading-tight text-amber-800 dark:text-amber-300">{storeOutletContext}</p>
+                  <p className="text-xs text-muted-foreground">Selected outlet</p>
+                </div>
+                <div className="rounded-xl border bg-white/70 px-4 py-3 shadow-sm dark:bg-stone-900/70">
+                  <p className="text-sm font-bold leading-tight">{formatNaira(outletViewStats.value)}</p>
+                  <p className="text-xs text-muted-foreground">Est. at outlet</p>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="rounded-xl border bg-white/70 px-4 py-3 shadow-sm dark:bg-stone-900/70">
+                  <p className="text-2xl font-bold tabular-nums">{stats.totalSku}</p>
+                  <p className="text-xs text-muted-foreground">Active SKUs</p>
+                </div>
+                <div className="rounded-xl border bg-white/70 px-4 py-3 shadow-sm dark:bg-stone-900/70">
+                  <p className="text-2xl font-bold tabular-nums text-amber-700 dark:text-amber-400">{stats.lowCount}</p>
+                  <p className="text-xs text-muted-foreground">Low stock</p>
+                </div>
+                <div className="rounded-xl border bg-white/70 px-4 py-3 shadow-sm dark:bg-stone-900/70">
+                  <p className="text-sm font-bold leading-tight">{formatNaira(stats.stockValue)}</p>
+                  <p className="text-xs text-muted-foreground">Est. value</p>
+                </div>
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -766,7 +907,7 @@ export function StoreManager() {
                     <Switch checked={inactiveToo} onCheckedChange={setInactiveToo} />
                     Show inactive
                   </label>
-                  {canCreate && (
+                  {canCreate && storeOutletContext === CENTRAL_STORE_VIEW && (
                     <Button onClick={openNewItem} className="gap-2 bg-amber-600 hover:bg-amber-700">
                       <Plus className="h-4 w-4" />
                       Add item
@@ -776,29 +917,30 @@ export function StoreManager() {
               </CardContent>
             </Card>
 
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-lg">Stock sheet</CardTitle>
-                <CardDescription>
-                  {filteredItems.length} line{filteredItems.length !== 1 ? 's' : ''} — click adjust to record ins,
-                  outs, sales, or a physical count.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="p-0">
-                <ScrollArea className="h-[min(560px,70vh)] md:h-[min(640px,72vh)]">
-                  <Table>
-                    <TableHeader>
-                      <TableRow className="hover:bg-transparent">
-                        <TableHead>Item</TableHead>
-                        <TableHead className="hidden lg:table-cell">Category</TableHead>
-                        <TableHead className="text-right">Qty Stock</TableHead>
-                        <TableHead className="hidden md:table-cell text-right">Reorder</TableHead>
-                        <TableHead className="hidden sm:table-cell text-right">Unit price</TableHead>
-                        <TableHead className="w-[140px] text-right">Actions</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {filteredItems.map(it => {
+            {storeOutletContext === CENTRAL_STORE_VIEW ? (
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-lg">Stock sheet</CardTitle>
+                  <CardDescription>
+                    {filteredItems.length} line{filteredItems.length !== 1 ? 's' : ''} — click adjust to record ins,
+                    outs, sales, or a physical count.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="p-0">
+                  <ScrollArea className="h-[min(560px,70vh)] md:h-[min(640px,72vh)]">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="hover:bg-transparent">
+                          <TableHead>Item</TableHead>
+                          <TableHead className="hidden lg:table-cell">Category</TableHead>
+                          <TableHead className="text-right">Qty Stock</TableHead>
+                          <TableHead className="hidden md:table-cell text-right">Reorder</TableHead>
+                          <TableHead className="hidden sm:table-cell text-right">Unit price</TableHead>
+                          <TableHead className="w-[140px] text-right">Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {filteredItems.map(it => {
                         const cat = it.category_id ? categoryById.get(it.category_id) : null
                         const low =
                           it.is_active &&
@@ -874,11 +1016,96 @@ export function StoreManager() {
                     </TableBody>
                   </Table>
                 </ScrollArea>
-                {filteredItems.length === 0 && (
-                  <p className="py-12 text-center text-sm text-muted-foreground">No items match this view.</p>
-                )}
-              </CardContent>
-            </Card>
+                        {filteredItems.length === 0 && (
+                          <p className="py-12 text-center text-sm text-muted-foreground">
+                            No items match this view.
+                          </p>
+                        )}
+                      </CardContent>
+                    </Card>
+            ) : (
+              <>
+                <Card className="border-amber-200/60 bg-amber-50/40 dark:bg-amber-950/20 dark:border-amber-900/40">
+                  <CardContent className="p-4 text-sm text-muted-foreground">
+                    <p>
+                      Showing <strong className="text-foreground">{storeOutletContext}</strong> — totals are{' '}
+                      <strong>cumulative units</strong> recorded on movements (issue / out / sale) shipped to this
+                      outlet from the central store. Switch back to <strong>Central store</strong> to receive goods or
+                      add SKUs.
+                    </p>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-lg">At {storeOutletContext}</CardTitle>
+                    <CardDescription>
+                      {filteredOutletInventoryRows.length} line
+                      {filteredOutletInventoryRows.length !== 1 ? 's' : ''} — adjust opens an{' '}
+                      <strong>issue from central stock</strong> to this outlet (you can edit the movement type inside
+                      the dialog if needed).
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="p-0">
+                    <ScrollArea className="h-[min(560px,70vh)] md:h-[min(640px,72vh)]">
+                      <Table>
+                        <TableHeader>
+                          <TableRow className="hover:bg-transparent">
+                            <TableHead>Item</TableHead>
+                            <TableHead className="hidden lg:table-cell">Category</TableHead>
+                            <TableHead className="text-right">Qty @ outlet</TableHead>
+                            <TableHead className="hidden sm:table-cell text-right">Unit price</TableHead>
+                            <TableHead className="text-right">Est.</TableHead>
+                            <TableHead className="w-[120px] text-right">Issue more</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {filteredOutletInventoryRows.map(({ item: it, qty }) => {
+                            const cat = it.category_id ? categoryById.get(it.category_id) : null
+                            return (
+                              <TableRow key={it.id}>
+                                <TableCell>
+                                  <Link href={`/store/items/${it.id}`} className="font-medium hover:underline">
+                                    {it.name}
+                                  </Link>
+                                  <div className="mt-0.5 flex flex-wrap gap-2 text-xs text-muted-foreground">
+                                    <span>{it.unit}</span>
+                                    <span className="font-mono">Central now: {Number(it.quantity_on_hand).toLocaleString()}</span>
+                                  </div>
+                                </TableCell>
+                                <TableCell className="hidden lg:table-cell">{cat?.name ?? '—'}</TableCell>
+                                <TableCell className="text-right font-mono font-semibold tabular-nums">
+                                  {qty.toLocaleString()}
+                                </TableCell>
+                                <TableCell className="hidden sm:table-cell text-right">
+                                  {formatNaira(Number(it.unit_price))}
+                                </TableCell>
+                                <TableCell className="text-right text-sm">
+                                  {formatNaira(qty * Number(it.unit_price || 0))}
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  {canAdjust && (
+                                    <Button variant="outline" size="sm" className="h-8" onClick={() => openAdjust(it)}>
+                                      <TrendingDown className="mr-1 h-3.5 w-3.5" />
+                                      Issue
+                                    </Button>
+                                  )}
+                                </TableCell>
+                              </TableRow>
+                            )
+                          })}
+                        </TableBody>
+                      </Table>
+                    </ScrollArea>
+                    {filteredOutletInventoryRows.length === 0 && (
+                      <p className="py-12 text-center text-sm text-muted-foreground">
+                        No recorded stock at this outlet yet — issue items from Central store → this outlet using
+                        Inventory or Adjust on a SKU.
+                      </p>
+                    )}
+                  </CardContent>
+                </Card>
+              </>
+            )}
           </TabsContent>
 
           <TabsContent value="categories" className="space-y-4">
@@ -938,7 +1165,10 @@ export function StoreManager() {
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-lg">Recent movements</CardTitle>
-                <CardDescription>Last 200 transactions across the ledger.</CardDescription>
+                <CardDescription>
+                  Last 200 transactions
+                  {storeOutletContext === CENTRAL_STORE_VIEW ? ' across the ledger.' : ` (filtered to ${storeOutletContext}).`}
+                </CardDescription>
               </CardHeader>
               <CardContent className="p-0">
                 <ScrollArea className="h-[min(480px,60vh)]">
@@ -955,7 +1185,7 @@ export function StoreManager() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {movements.map(m => {
+                      {movementsForContext.map(m => {
                         const name = itemNameById.get(m.item_id) || '—'
                         const icon =
                           m.movement_type === 'in'
@@ -999,7 +1229,7 @@ export function StoreManager() {
                     </TableBody>
                   </Table>
                 </ScrollArea>
-                {movements.length === 0 && (
+                {movementsForContext.length === 0 && (
                   <p className="py-12 text-center text-sm text-muted-foreground">No movements recorded yet.</p>
                 )}
               </CardContent>
@@ -1402,7 +1632,7 @@ export function StoreManager() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="__none__">— Not specified —</SelectItem>
-                      {OUTLET_DEPARTMENTS.map(d => (
+                      {issueOutletOptions.map(d => (
                         <SelectItem key={d} value={d}>
                           {d}
                         </SelectItem>
