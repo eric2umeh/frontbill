@@ -19,8 +19,10 @@ import {
   BedDouble,
   Users,
   Building2,
+  ReceiptText,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { GuestDailyRevenueSummary } from '@/components/reports/guest-daily-revenue-summary'
 
 /* ------------------------------------------------------------------ */
 /*  Date Picker                                                       */
@@ -697,7 +699,7 @@ function CityLedgerReport({ organizationId }: { organizationId: string }) {
 /* ------------------------------------------------------------------ */
 
 export default function ReportsPage() {
-  const { organizationId } = useAuth()
+  const { organizationId, name } = useAuth()
 
   return (
     <div className="space-y-6">
@@ -733,6 +735,10 @@ export default function ReportsPage() {
           <TabsTrigger value="ledger" className="gap-1.5">
             <Building2 className="h-4 w-4" />
             City Ledger
+          </TabsTrigger>
+          <TabsTrigger value="guest-daily" className="gap-1.5">
+            <ReceiptText className="h-4 w-4" />
+            Guest daily summary
           </TabsTrigger>
         </TabsList>
 
@@ -788,6 +794,21 @@ export default function ReportsPage() {
             </CardHeader>
             <CardContent>
               <CityLedgerReport organizationId={organizationId} />
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="guest-daily">
+          <Card>
+            <CardHeader>
+              <CardTitle>Guest revenue summary (print)</CardTitle>
+              <CardDescription>
+                Classic daily revenue layout for one guest and one date: room revenue, added charges (restaurant/laundry
+                split comes later), VAT from 7.5% inclusive split, and totals for printing.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <GuestDailyRevenueSummary organizationId={organizationId} printedByName={name} />
             </CardContent>
           </Card>
         </TabsContent>
