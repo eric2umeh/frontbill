@@ -21,6 +21,7 @@ import { StayDateRangeFields } from '@/components/shared/stay-date-range-fields'
 import { useAuth } from '@/lib/auth-context'
 import { BOOKING_MODAL_ROOMS_LIMIT, normalizeRoomsForBookingPickers } from '@/lib/utils/room-bookability'
 import { Checkbox } from '@/components/ui/checkbox'
+import { insertFolioCharges } from '@/lib/utils/insert-folio-charges'
 import { applyPaymentToGuestCityLedger } from '@/lib/utils/guest-city-ledger'
 import { buildBackdateDedupeKey } from '@/lib/backdate/dedupe-key'
 import type { SerializedBookingPayload } from '@/lib/backdate/booking-payload'
@@ -751,7 +752,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
       await supabase.from('rooms').update({ status: 'occupied', updated_by: user?.id, updated_at: new Date().toISOString() }).eq('id', selectedRoom.id)
 
       // Insert folio charge (this is what the Transactions page reads from)
-      const { error: folioInsertError } = await supabase.from('folio_charges').insert([{
+      const { error: folioInsertError } = await insertFolioCharges(supabase, [{
         booking_id: booking.id,
         organization_id: organizationId,
         description: `Initial booking charge - ${nights} night${nights !== 1 ? 's' : ''}`,
@@ -771,7 +772,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
       if (folioInsertError) throw folioInsertError
 
       if (paidAmount > 0 && balanceAmount > 0) {
-        await supabase.from('folio_charges').insert([{
+        const { error: payFolioErr } = await insertFolioCharges(supabase, [{
           booking_id: booking.id,
           organization_id: organizationId,
           description: `Initial payment - ${paymentMethod}`,
@@ -781,6 +782,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
           payment_status: 'paid',
           created_by: user?.id,
         }])
+        if (payFolioErr) throw payFolioErr
       }
 
       // Record in transactions table (legacy)
