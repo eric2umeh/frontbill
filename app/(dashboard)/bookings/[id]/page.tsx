@@ -16,6 +16,8 @@ import { formatNaira } from '@/lib/utils/currency'
 import { toast } from 'sonner'
 import { ExtendStayModal } from '@/components/bookings/extend-stay-modal'
 import { CheckoutConfirmDialog } from '@/components/bookings/checkout-confirm-dialog'
+import { EditBookingModal } from '@/components/bookings/edit-booking-modal'
+import { canAdministerBookingRecord } from '@/lib/booking/can-administer-booking-record'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/lib/auth-context'
 import { getUserDisplayName } from '@/lib/utils/user-display'
@@ -54,6 +56,7 @@ import {
 export default function BookingDetailPage({ params }: { params: Promise<{ id: string }> | { id: string } }) {
   const router = useRouter()
   const { role, userId } = useAuth()
+  const canAdminBooking = canAdministerBookingRecord(role)
   const isSuperadmin = role === 'superadmin'
   const canManageFolio = isSuperadmin || role === 'front_desk'
   const [booking, setBooking] = useState<any>(null)
@@ -93,6 +96,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
   const [checkoutLoading, setCheckoutLoading] = useState(false)
   const [orgCheckoutTime, setOrgCheckoutTime] = useState(DEFAULT_ORG_CHECKOUT_TIME)
   const [checkoutConfirmOpen, setCheckoutConfirmOpen] = useState(false)
+  const [editBookingOpen, setEditBookingOpen] = useState(false)
   const autoCheckoutInFlight = useRef(false)
 
   useEffect(() => {
@@ -111,7 +115,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
       // Fetch booking with related data
       const { data: bookingData, error: bookingError } = await supabase
         .from('bookings')
-        .select('*, guests(name, phone, email, address, balance), rooms(room_number, room_type, price_per_night)')
+        .select('*, guests(name, phone, email, address, balance), rooms(id, room_number, room_type, price_per_night)')
         .eq('id', id)
         .single()
 
@@ -716,66 +720,20 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
   const handleCheckout = () => setCheckoutConfirmOpen(true)
 
   const performDeleteBooking = async () => {
+    if (!userId) {
+      toast.error('You must be signed in to delete a booking')
+      return
+    }
     setDeleteLoading(true)
     try {
-      const supabase = createClient()
-      const clearBookingChildren = async (table: string) => {
-        const { error: deleteError } = await supabase.from(table).delete().eq('booking_id', bookingId)
-        if (!deleteError) return
-
-        const { error: unlinkError } = await supabase.from(table).update({ booking_id: null }).eq('booking_id', bookingId)
-        if (unlinkError) {
-          throw deleteError
-        }
-      }
-
-      await clearBookingChildren('payments')
-      await clearBookingChildren('transactions')
-      await supabase.from('folio_charges').delete().eq('booking_id', bookingId)
-      let { error } = await supabase.from('bookings').delete().eq('id', bookingId)
-      if (error && /foreign key constraint/i.test(error.message || '')) {
-        await supabase.from('payments').update({ booking_id: null }).eq('booking_id', bookingId)
-        await supabase.from('transactions').update({ booking_id: null }).eq('booking_id', bookingId)
-        const retry = await supabase.from('bookings').delete().eq('id', bookingId)
-        error = retry.error
-      }
-      if (error) throw error
-
-      if (booking?.guest_id) {
-        const guestName = booking.guests?.name
-        const [{ data: otherBookings }, { data: guestPayments }, { data: guestTransactions }, { data: ledgerAccounts }] =
-          await Promise.all([
-            supabase.from('bookings').select('id').eq('guest_id', booking.guest_id).limit(1),
-            supabase.from('payments').select('id').eq('guest_id', booking.guest_id).limit(1),
-            supabase.from('transactions').select('id').eq('guest_id', booking.guest_id).limit(1),
-            guestName
-              ? supabase
-                  .from('city_ledger_accounts')
-                  .select('id, balance')
-                  .eq('organization_id', booking.organization_id)
-                  .ilike('account_name', guestName)
-                  .in('account_type', ['individual', 'guest'])
-              : Promise.resolve({ data: [] }),
-          ])
-
-        const hasLedgerBalance = (ledgerAccounts || []).some((account: any) => Number(account.balance || 0) !== 0)
-        if (
-          (otherBookings || []).length === 0 &&
-          (guestPayments || []).length === 0 &&
-          (guestTransactions || []).length === 0 &&
-          !hasLedgerBalance
-        ) {
-          if (ledgerAccounts?.length) {
-            await supabase
-              .from('city_ledger_accounts')
-              .delete()
-              .in(
-                'id',
-                ledgerAccounts.map((account: any) => account.id),
-              )
-          }
-          await supabase.from('guests').delete().eq('id', booking.guest_id)
-        }
+      const res = await fetch(`/api/bookings/${bookingId}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ caller_id: userId }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        throw new Error(typeof json?.error === 'string' ? json.error : 'Failed to delete booking')
       }
 
       toast.success('Booking deleted')
@@ -946,6 +904,14 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
           created_by: booking.created_by,
           folio_status: booking.folio_status,
         }}
+      />
+
+      <EditBookingModal
+        open={editBookingOpen}
+        onClose={() => setEditBookingOpen(false)}
+        userId={userId}
+        booking={booking}
+        onSaved={() => fetchBookingDetails(bookingId)}
       />
 
       <AlertDialog
@@ -1296,9 +1262,14 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
               ) : null}
             </>
           )}
-          {isSuperadmin && (
+          {canAdminBooking && (
             <>
-              <Button variant="outline" size="sm" disabled={booking?.folio_status === 'checked_out'}>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={booking?.folio_status === 'checked_out'}
+                onClick={() => setEditBookingOpen(true)}
+              >
                 <Edit className="mr-2 h-4 w-4" />
                 Edit
               </Button>
@@ -1435,7 +1406,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                       <div className={`font-semibold text-right min-w-[100px] ${charge.amount < 0 ? 'text-green-600' : charge.type !== 'payment' && charge.paymentStatus === 'paid' ? 'text-muted-foreground' : 'text-foreground'}`}>
                         {charge.amount < 0 ? '-' : '+'}{formatNaira(Math.abs(charge.amount))}
                       </div>
-                      {isSuperadmin && (
+                      {canAdminBooking && (
                         <div className="flex gap-1">
                           <Button
                             size="sm"
