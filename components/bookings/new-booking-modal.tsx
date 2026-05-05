@@ -16,7 +16,7 @@ import { formatNaira } from '@/lib/utils/currency'
 import { toast } from 'sonner'
 import { isOrganizationMenuRecord, isSelectableLedgerName } from '@/lib/utils/ledger-organization'
 import { resolveOrganizationLedgerAccount } from '@/lib/utils/resolve-ledger-account'
-import { formatPersonName } from '@/lib/utils/name-format'
+import { formatPersonName, normalizeNameKey } from '@/lib/utils/name-format'
 import { StayDateRangeFields } from '@/components/shared/stay-date-range-fields'
 import { useAuth } from '@/lib/auth-context'
 import { hasPermission } from '@/lib/permissions'
@@ -378,6 +378,30 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
         }
 
         // Create new city_ledger_accounts record (individual)
+        const normalizedGuestKey = normalizeNameKey(newAccountName)
+        const [{ data: guestDup }, { data: orgNameDup }] = await Promise.all([
+          supabase
+            .from('guests')
+            .select('id')
+            .eq('organization_id', organizationId)
+            .ilike('name', newAccountName.trim())
+            .maybeSingle(),
+          supabase
+            .from('organizations')
+            .select('id')
+            .neq('id', organizationId)
+            .ilike('name', newAccountName.trim())
+            .maybeSingle(),
+        ])
+        if (
+          guestDup ||
+          orgNameDup ||
+          guests.some((g) => normalizeNameKey(g.name) === normalizedGuestKey)
+        ) {
+          toast.error('This name already exists as a guest or organization')
+          return
+        }
+
         const { data: newAcct, error } = await supabase
           .from('city_ledger_accounts')
           .insert([{
@@ -399,7 +423,36 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
         toast.success(`Account "${newAcct.account_name}" created`)
 
       } else {
-        // Create new city_ledger_accounts record (organization)
+        // Create new organization row (for Organization menu) and linked city ledger account
+        const normalizedOrgKey = normalizeNameKey(newAccountName)
+        const { data: existingOrgRow } = await supabase
+          .from('organizations')
+          .select('id, name')
+          .neq('id', organizationId)
+          .ilike('name', newAccountName.trim())
+          .maybeSingle()
+        if (existingOrgRow || organizationAccounts.some((a) => normalizeNameKey(a.account_name) === normalizedOrgKey)) {
+          toast.error('An organization with this name already exists')
+          return
+        }
+
+        const { data: orgInserted, error: orgInsertError } = await supabase
+          .from('organizations')
+          .insert([{
+            name: newAccountName.trim(),
+            org_type: newAccountType || 'other',
+            email: newAccountEmail.trim() || null,
+            phone: newAccountPhone.trim() || null,
+            address: newAccountAddress.trim() || null,
+            city: newAccountCity.trim() || null,
+            contact_person: null,
+            current_balance: 0,
+            created_by: userId || null,
+          }])
+          .select('id, name, phone')
+          .single()
+        if (orgInsertError) throw orgInsertError
+
         const { data: newOrg, error } = await supabase
           .from('city_ledger_accounts')
           .insert([{
@@ -415,6 +468,13 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
 
         const acct: LedgerAccount = { id: newOrg.id, account_name: newOrg.account_name, account_type: 'organization', contact_phone: newOrg.contact_phone || '', balance: 0, source: 'city_ledger' }
         setOrganizationAccounts(prev => [acct, ...prev])
+        if (orgInserted) {
+          setOrganizationAccounts(prev =>
+            prev.some((item) => item.account_name.toLowerCase() === orgInserted.name.toLowerCase())
+              ? prev
+              : [{ id: orgInserted.id, account_name: orgInserted.name, account_type: 'organization', contact_phone: orgInserted.phone || '', balance: 0, source: 'organizations' }, ...prev],
+          )
+        }
         setLedgerAccount(newOrg.id)
         setLedgerAccountName(newOrg.account_name)
         setLedgerSearch(newOrg.account_name)

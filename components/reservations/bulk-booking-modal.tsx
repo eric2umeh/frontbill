@@ -195,6 +195,17 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
     setCreatingOrg(true)
     try {
       const supabase = createClient()
+      const normalizedOrgName = normalizeNameKey(newOrgName)
+      const { data: orgDup } = await supabase
+        .from('organizations')
+        .select('id')
+        .neq('id', orgId)
+        .ilike('name', newOrgName.trim())
+        .maybeSingle()
+      if (orgDup || allGuests.some((g: any) => normalizeNameKey(g.name) === normalizedOrgName)) {
+        toast.error('This name already exists as a guest or organization')
+        return
+      }
       const { data, error } = await supabase.from('organizations').insert([{
         name: newOrgName.trim(),
         org_type: newOrgType || 'other',
@@ -223,6 +234,28 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
     setCreatingLedgerOrg(true)
     try {
       const supabase = createClient()
+      const normalizedOrgName = normalizeNameKey(newLedgerOrgName)
+      const { data: orgDup } = await supabase
+        .from('organizations')
+        .select('id')
+        .neq('id', orgId)
+        .ilike('name', newLedgerOrgName.trim())
+        .maybeSingle()
+      if (orgDup || allGuests.some((g: any) => normalizeNameKey(g.name) === normalizedOrgName)) {
+        toast.error('This name already exists as a guest or organization')
+        return
+      }
+
+      const { error: orgInsertError } = await supabase.from('organizations').insert([{
+        name: newLedgerOrgName.trim(),
+        org_type: 'other',
+        email: newLedgerOrgEmail.trim() || null,
+        phone: newLedgerOrgPhone.trim() || null,
+        current_balance: 0,
+        created_by: currentUserId || null,
+      }])
+      if (orgInsertError) throw orgInsertError
+
       const { data, error } = await supabase.from('city_ledger_accounts').insert([{
         organization_id: orgId,
         account_name: newLedgerOrgName.trim(),

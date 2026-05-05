@@ -15,7 +15,7 @@ import { formatNaira } from '@/lib/utils/currency'
 import { toast } from 'sonner'
 import { isOrganizationMenuRecord, isSelectableLedgerName } from '@/lib/utils/ledger-organization'
 import { resolveOrganizationLedgerAccount } from '@/lib/utils/resolve-ledger-account'
-import { formatPersonName } from '@/lib/utils/name-format'
+import { formatPersonName, normalizeNameKey } from '@/lib/utils/name-format'
 import { StayDateRangeFields } from '@/components/shared/stay-date-range-fields'
 import { BOOKING_MODAL_ROOMS_LIMIT, isRoomAssignable, normalizeRoomsForBookingPickers } from '@/lib/utils/room-bookability'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -223,6 +223,52 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
     setCreatingLedgerOrg(true)
     try {
       const supabase = createClient()
+      const normalizedKey = normalizeNameKey(newLedgerOrgName)
+
+      if (ledgerType === 'individual') {
+        const [{ data: guestDup }, { data: orgNameDup }] = await Promise.all([
+          supabase
+            .from('guests')
+            .select('id')
+            .eq('organization_id', orgId)
+            .ilike('name', newLedgerOrgName.trim())
+            .maybeSingle(),
+          supabase
+            .from('organizations')
+            .select('id')
+            .neq('id', orgId)
+            .ilike('name', newLedgerOrgName.trim())
+            .maybeSingle(),
+        ])
+        if (guestDup || orgNameDup || guests.some((g) => normalizeNameKey(g.name) === normalizedKey)) {
+          toast.error('This name already exists as a guest or organization')
+          return
+        }
+      } else {
+        const { data: orgDup } = await supabase
+          .from('organizations')
+          .select('id')
+          .neq('id', orgId)
+          .ilike('name', newLedgerOrgName.trim())
+          .maybeSingle()
+        if (orgDup || ledgerResults.some((a: any) => normalizeNameKey(a.name || a.account_name) === normalizedKey)) {
+          toast.error('An organization with this name already exists')
+          return
+        }
+
+        const { error: orgInsertError } = await supabase
+          .from('organizations')
+          .insert([{
+            name: newLedgerOrgName.trim(),
+            org_type: 'other',
+            email: newLedgerOrgEmail.trim() || null,
+            phone: newLedgerOrgPhone.trim() || null,
+            current_balance: 0,
+            created_by: currentUserId || null,
+          }])
+        if (orgInsertError) throw orgInsertError
+      }
+
       const { data, error } = await supabase
         .from('city_ledger_accounts')
         .insert([{
