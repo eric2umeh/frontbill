@@ -197,6 +197,23 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
   }, [bookingId, loading, booking?.status, booking?.folio_status])
 
   useEffect(() => {
+    if (!editBookingOpen || loading || !booking) return
+    if (
+      folioGuestActionsLocked(
+        {
+          status: booking.status,
+          check_in: booking.check_in,
+          check_out: booking.check_out,
+          folio_status: booking.folio_status,
+        },
+        orgCheckoutTime,
+      )
+    ) {
+      setEditBookingOpen(false)
+    }
+  }, [editBookingOpen, loading, booking, orgCheckoutTime])
+
+  useEffect(() => {
     if (loading || !booking || !bookingId || !canManageFolio || !userId) return
     if (!shouldAutoCheckoutDueBooking(booking, orgCheckoutTime)) return
     if (autoCheckoutInFlight.current) return
@@ -1267,7 +1284,12 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
               <Button
                 variant="outline"
                 size="sm"
-                disabled={booking?.folio_status === 'checked_out'}
+                disabled={folioLocked}
+                title={
+                  folioLocked
+                    ? `Editing is disabled once the folio is closed or after ${formatCheckoutTimeLabel(orgCheckoutTime)} on the checkout date (${normalizeBookingCheckoutYmd(booking.check_out || '')}).`
+                    : 'Edit booking details'
+                }
                 onClick={() => setEditBookingOpen(true)}
               >
                 <Edit className="mr-2 h-4 w-4" />
