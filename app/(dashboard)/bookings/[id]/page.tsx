@@ -649,6 +649,61 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
         syncGuestProfile: true,
       })
 
+      // If this booking still has unpaid bill, apply this top-up as a booking payment too.
+      const { data: freshBk } = await supabase
+        .from('bookings')
+        .select('balance, deposit, total_amount')
+        .eq('id', bookingId)
+        .single()
+      const { data: fcPrior } = await supabase
+        .from('folio_charges')
+        .select('amount, charge_type, payment_status, payment_method')
+        .eq('booking_id', bookingId)
+      const fcForBill = (fcPrior || []).map((row: { amount?: unknown; charge_type?: unknown; payment_status?: unknown; payment_method?: unknown }) => ({
+        amount: row.amount,
+        charge_type: row.charge_type,
+        payment_status: row.payment_status,
+        payment_method: row.payment_method,
+      }))
+      const billBefore = Math.max(
+        0,
+        bookingDisplayBillBalance(
+          {
+            balance: freshBk?.balance,
+            deposit: freshBk?.deposit,
+            total_amount: freshBk?.total_amount,
+          },
+          fcForBill,
+        ),
+      )
+      const appliedToBooking = Math.min(amt, billBefore)
+      if (appliedToBooking > 0) {
+        await supabase.from('folio_charges').insert([{
+          booking_id: bookingId,
+          organization_id: booking.organization_id,
+          description: `Payment Received - ${creditPaymentMethod.replace('_', ' ')} (via Add Credit)`,
+          amount: -appliedToBooking,
+          charge_type: 'payment',
+          payment_method: creditPaymentMethod,
+          payment_status: 'paid',
+          created_by: user.id,
+        }])
+        const newBalance = Math.max(0, billBefore - appliedToBooking)
+        const newDeposit = Number(freshBk?.deposit || 0) + appliedToBooking
+        await supabase
+          .from('bookings')
+          .update({ balance: newBalance, deposit: newDeposit, payment_status: newBalance === 0 ? 'paid' : 'partial' })
+          .eq('id', bookingId)
+        if (newBalance === 0) {
+          await supabase
+            .from('folio_charges')
+            .update({ payment_status: 'paid' })
+            .eq('booking_id', bookingId)
+            .gt('amount', 0)
+            .not('charge_type', 'eq', 'payment')
+        }
+      }
+
       const row = await fetchGuestCityLedgerAccount(supabase, booking.organization_id, guestName)
       setBookingLedgerSnapshot({ id: row?.id ?? null, balance: Number(row?.balance) || 0 })
 
