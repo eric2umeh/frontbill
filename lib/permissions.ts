@@ -158,7 +158,7 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
   {
     key: 'manager',
     label: 'Manager',
-    description: 'Operations lead: dashboards, bookings and reservations including bulk/group flows, reserve check-in/cancel from lists, checkout, payments, ledger view, analytics, exports, housekeeping/maintenance oversight, night audit visibility and audit trails—and financial views accountants use except reconciliation management. Editing existing booking/reservation records themselves (not day-to-day front-desk actions), managing users/roles, destructive guest or organization profile edits, and physical room inventory changes stay superadmin-only.',
+    description: 'Operations lead: dashboards, bookings and reservations including bulk/group flows, reserve check-in/cancel from lists, checkout, payments, ledger view, analytics, exports, housekeeping/maintenance oversight, night audit visibility and audit trails—and financial views accountants use except reconciliation management. Editing or deleting existing booking records as master data, managing users/roles, destructive guest or organization profile edits, and physical room inventory changes stay administrator-only.',
     color: 'bg-purple-100 text-purple-800',
     permissions: ALL.filter(p => ![
       'roles:manage',
@@ -235,7 +235,7 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
     color: 'bg-green-100 text-green-800',
     permissions: [
       'dashboard:view',
-      'bookings:view', 'bookings:create', 'bookings:edit', 'bookings:checkin', 'bookings:checkout',
+      'bookings:view', 'bookings:create', 'bookings:checkin', 'bookings:checkout',
       'reservations:view', 'reservations:create', 'reservations:edit',
       'rooms:view',
       'guests:view', 'guests:create', 'guests:edit',
@@ -312,7 +312,10 @@ export function hasPermission(userRole: string | null | undefined, permission: P
   if (['rooms:create', 'rooms:edit', 'rooms:delete'].includes(permission)) {
     return userRole === 'superadmin'
   }
-  if (['bookings:edit', 'reservations:edit'].includes(permission)) {
+  if (permission === 'bookings:edit' || permission === 'bookings:delete') {
+    return userRole === 'superadmin' || userRole === 'admin'
+  }
+  if (permission === 'reservations:edit') {
     return userRole === 'superadmin'
   }
   if (['guests:edit', 'guests:delete', 'organizations:edit', 'organizations:delete'].includes(permission)) {
