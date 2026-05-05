@@ -53,3 +53,11 @@ export function bookingDisplayBillBalance(
   const fallbackOwed = Math.max(0, Number(booking.total_amount ?? 0) - Number(booking.deposit ?? 0))
   return Math.max(fromFolio, bookingBal, fallbackOwed)
 }
+
+/** True when the same rules as the folio “Bill balance” show nothing left to collect — DB `payment_status` should usually be `paid`. */
+export function billIsFullySettled(
+  booking: Parameters<typeof bookingDisplayBillBalance>[0],
+  charges: FolioLineForBalance[],
+): boolean {
+  return bookingDisplayBillBalance(booking, charges) <= 0
+}
