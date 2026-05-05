@@ -80,8 +80,7 @@ export default function BookingsPage() {
   const { initialLoading, startFetch, endFetch } = usePageData()
   const { organizationId, role, userId } = useAuth()
   const router = useRouter()
-  const isSuperadmin = role === 'superadmin'
-  const canManageFolio = isSuperadmin || role === 'front_desk'
+  const canManageFolio = role === 'superadmin' || role === 'admin' || role === 'front_desk'
   const canCheckInReserved = hasPermission(role, 'bookings:checkin')
   const canCancelReservation = hasPermission(role, 'reservations:delete')
 

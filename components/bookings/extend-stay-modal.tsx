@@ -14,6 +14,7 @@ import { toast } from 'sonner'
 import { CreditCard, Check, X } from 'lucide-react'
 import { format, differenceInDays } from 'date-fns'
 import { createClient } from '@/lib/supabase/client'
+import { insertFolioCharges } from '@/lib/utils/insert-folio-charges'
 import { isSelectableLedgerName } from '@/lib/utils/ledger-organization'
 import { resolveOrganizationLedgerAccount } from '@/lib/utils/resolve-ledger-account'
 
@@ -186,7 +187,7 @@ export function ExtendStayModal({ open, onClose, onSuccess, booking }: ExtendSta
       // For immediate payments (cash/pos/transfer): status = 'paid'
       // For deferred payments (city_ledger): status = 'pending'
       const isPaidNow = paymentMethod !== 'city_ledger'
-      const chargeData: any = {
+      const chargeData: Record<string, unknown> = {
         booking_id: booking.id,
         description: `Extended Stay - ${additionalNights} night${additionalNights !== 1 ? 's' : ''}`,
         amount: additionalAmount,
@@ -195,31 +196,14 @@ export function ExtendStayModal({ open, onClose, onSuccess, booking }: ExtendSta
         ledger_account_id: paymentMethod === 'city_ledger' ? selectedLedger?.id : null,
         ledger_account_type: paymentMethod === 'city_ledger' ? ledgerType : null,
         payment_status: isPaidNow ? 'paid' : 'pending',
-        created_by: currentUserId
+        created_by: currentUserId,
       }
-      
-      // Try to include organization_id if column exists
       if (booking.organization_id) {
         chargeData.organization_id = booking.organization_id
       }
-      
-      const { error: chargeError } = await supabase
-        .from('folio_charges')
-        .insert([chargeData])
 
-      if (chargeError) {
-        // If error includes "organization_id", try again without it
-        if (chargeError.message?.includes('organization_id')) {
-          const fallbackData = { ...chargeData }
-          delete fallbackData.organization_id
-          const { error: retryError } = await supabase
-            .from('folio_charges')
-            .insert([fallbackData])
-          if (retryError) throw retryError
-        } else {
-          throw chargeError
-        }
-      }
+      const { error: chargeError } = await insertFolioCharges(supabase, [chargeData])
+      if (chargeError) throw chargeError
 
       // Update booking checkout date
       await supabase

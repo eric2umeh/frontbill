@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { formatNaira } from '@/lib/utils/currency'
 import { usePageData } from '@/hooks/use-page-data'
 import { toast } from 'sonner'
+import { insertFolioCharges } from '@/lib/utils/insert-folio-charges'
 
 interface Payment {
   id: string
@@ -145,7 +146,7 @@ export default function PaymentsPage() {
       }])
       if (paymentError) throw paymentError
 
-      await supabase.from('folio_charges').insert([{
+      const { error: folioPaymentErr } = await insertFolioCharges(supabase, [{
         booking_id: booking.id,
         organization_id: organizationId,
         description: `Payment Received - ${paymentMethod.replace(/_/g, ' ')}`,
@@ -155,6 +156,7 @@ export default function PaymentsPage() {
         payment_status: 'paid',
         created_by: user?.id || null,
       }])
+      if (folioPaymentErr) throw folioPaymentErr
 
       await supabase.from('bookings').update({
         balance: newBalance,

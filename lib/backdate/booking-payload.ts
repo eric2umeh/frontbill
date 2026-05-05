@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { formatPersonName } from '@/lib/utils/name-format'
 import { applyPaymentToGuestCityLedger } from '@/lib/utils/guest-city-ledger'
+import { insertFolioCharges } from '@/lib/utils/insert-folio-charges'
+import { formatPersonName } from '@/lib/utils/name-format'
 
 export type SerializedBookingPayload = {
   organization_id: string
@@ -186,7 +187,7 @@ export async function createBookingFromPayload(
     .update({ status: 'occupied', updated_by: createdByUserId, updated_at: new Date().toISOString() })
     .eq('id', room_id)
 
-  const { error: folioInsertError } = await admin.from('folio_charges').insert([
+  const { error: folioInsertError } = await insertFolioCharges(admin, [
     {
       booking_id: booking.id,
       organization_id,
@@ -204,7 +205,7 @@ export async function createBookingFromPayload(
   if (folioInsertError) return { ok: false, error: folioInsertError.message }
 
   if (paidAmount > 0 && balanceAmount > 0) {
-    await admin.from('folio_charges').insert([
+    const { error: payErr } = await insertFolioCharges(admin, [
       {
         booking_id: booking.id,
         organization_id,
@@ -216,6 +217,7 @@ export async function createBookingFromPayload(
         created_by: createdByUserId,
       },
     ])
+    if (payErr) return { ok: false, error: payErr.message }
   }
 
   await admin.from('transactions').insert([

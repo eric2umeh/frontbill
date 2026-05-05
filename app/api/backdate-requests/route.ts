@@ -3,7 +3,7 @@ import { buildBackdateDedupeKey } from '@/lib/backdate/dedupe-key'
 import { createBookingFromPayload, type SerializedBookingPayload } from '@/lib/backdate/booking-payload'
 import { NextResponse } from 'next/server'
 
-const SUPERADMIN_ROLE = 'superadmin'
+const BACKDATE_DECIDER_ROLES = ['superadmin', 'admin']
 const DECISION_STATUSES = ['approved', 'rejected']
 
 function isUniqueViolation(err: { code?: string; message?: string } | null) {
@@ -39,7 +39,7 @@ export async function GET(request: Request) {
       .eq('organization_id', callerProfile.organization_id)
       .order('created_at', { ascending: false })
 
-    if (callerProfile.role !== SUPERADMIN_ROLE && callerProfile.role !== 'admin') {
+    if (!BACKDATE_DECIDER_ROLES.includes(String(callerProfile.role))) {
       query = query.eq('requested_by', callerId)
     }
 
@@ -180,8 +180,8 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: 'Caller profile not found' }, { status: 403 })
     }
 
-    if (callerProfile.role !== SUPERADMIN_ROLE) {
-      return NextResponse.json({ error: 'Only superadmins can approve or reject backdate requests' }, { status: 403 })
+    if (!BACKDATE_DECIDER_ROLES.includes(String(callerProfile.role))) {
+      return NextResponse.json({ error: 'Only a Superadmin or Administrator can approve or reject backdate requests' }, { status: 403 })
     }
 
     const { data: fullRow, error: loadErr } = await admin.from('backdate_requests').select('*').eq('id', request_id).single()

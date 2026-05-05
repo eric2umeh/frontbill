@@ -17,6 +17,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Separator } from '@/components/ui/separator'
 import { format, parseISO } from 'date-fns'
 import { useAuth } from '@/lib/auth-context'
+import { hasPermission } from '@/lib/permissions'
 
 const ROOM_TYPES = [
   'Deluxe', 'Royal', 'Kings', 'Mini Suite', 'Executive Suite', 'Diplomatic Suite',
@@ -58,7 +59,8 @@ export default function RoomDetailPage() {
   const params = useParams()
   const roomId = params.id as string
   const { role, organizationId } = useAuth()
-  const isSuperadmin = role === 'superadmin'
+  const canMutateRooms = hasPermission(role, 'rooms:edit')
+  const canDeleteRooms = hasPermission(role, 'rooms:delete')
   const canViewRoomFolio = ['superadmin', 'admin', 'manager', 'front_desk', 'accountant'].includes(role)
 
   const [room, setRoom] = useState<Room | null>(null)
@@ -211,8 +213,8 @@ export default function RoomDetailPage() {
   }
 
   const handleSaveChanges = async () => {
-    if (!isSuperadmin) {
-      toast.error('Only superadmins can edit rooms')
+    if (!canMutateRooms) {
+      toast.error('You do not have permission to edit rooms')
       return
     }
 
@@ -248,8 +250,8 @@ export default function RoomDetailPage() {
   }
 
   const handleDeleteClick = () => {
-    if (!isSuperadmin) {
-      toast.error('Only superadmins can delete rooms')
+    if (!hasPermission(role, 'rooms:delete')) {
+      toast.error('You do not have permission to delete rooms')
       return
     }
 
@@ -290,8 +292,8 @@ export default function RoomDetailPage() {
   }
 
   const handleDeleteConfirm = async () => {
-    if (!isSuperadmin) {
-      toast.error('Only superadmins can delete rooms')
+    if (!hasPermission(role, 'rooms:delete')) {
+      toast.error('You do not have permission to delete rooms')
       return
     }
 
@@ -346,7 +348,7 @@ export default function RoomDetailPage() {
 
   return (
     <div className="space-y-6">
-      {isSuperadmin && (
+      {canMutateRooms && (
       <Dialog open={editModalOpen} onOpenChange={setEditModalOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
@@ -454,16 +456,20 @@ export default function RoomDetailPage() {
           <ArrowLeft className="mr-2 h-4 w-4" />
           Back to Rooms
         </Button>
-        {isSuperadmin && (
+        {(canMutateRooms || canDeleteRooms) && (
         <div className="flex gap-2">
+          {canMutateRooms && (
           <Button variant="outline" size="sm" onClick={() => setEditModalOpen(true)}>
             <Edit className="mr-2 h-4 w-4" />
             Edit
           </Button>
+          )}
+          {canDeleteRooms && (
           <Button variant="destructive" size="sm" onClick={handleDeleteClick}>
             <Trash2 className="mr-2 h-4 w-4" />
             Delete
           </Button>
+          )}
         </div>
         )}
       </div>

@@ -10,6 +10,7 @@ import { CardContent } from '@/components/ui/card'
 import { formatNaira } from '@/lib/utils/currency'
 import { usePageData } from '@/hooks/use-page-data'
 import { useAuth } from '@/lib/auth-context'
+import { hasPermission } from '@/lib/permissions'
 import { Plus, Users, Loader2 } from 'lucide-react'
 import { AddRoomModal } from '@/components/rooms/add-room-modal'
 import { toast } from 'sonner'
@@ -39,8 +40,7 @@ export default function RoomsPage() {
   const { organizationId, role, userId } = useAuth()
   const router = useRouter()
 
-  // Only superadmins can create rooms. Other roles can view only.
-  const canAddRoom = role === 'superadmin'
+  const canAddRoom = hasPermission(role, 'rooms:create')
 
   useEffect(() => {
     fetchRooms()

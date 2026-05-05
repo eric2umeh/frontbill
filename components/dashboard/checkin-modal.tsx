@@ -14,6 +14,7 @@ import { toast } from 'sonner'
 import { isOrganizationMenuRecord, isSelectableLedgerName } from '@/lib/utils/ledger-organization'
 import { resolveOrganizationLedgerAccount } from '@/lib/utils/resolve-ledger-account'
 import { formatPersonName } from '@/lib/utils/name-format'
+import { insertFolioCharges } from '@/lib/utils/insert-folio-charges'
 import { StayDateRangeFields } from '@/components/shared/stay-date-range-fields'
 import { BOOKING_MODAL_ROOMS_LIMIT, normalizeRoomsForBookingPickers } from '@/lib/utils/room-bookability'
 
@@ -335,7 +336,7 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
 
       await supabase.from('rooms').update({ status: 'occupied', updated_by: user?.id, updated_at: new Date().toISOString() }).eq('id', selectedRoom.id)
 
-      await supabase.from('folio_charges').insert([{
+      const { error: folioErr } = await insertFolioCharges(supabase, [{
         booking_id: booking.id,
         organization_id: orgId,
         description: `Check-in charge — ${nights} night${nights !== 1 ? 's' : ''}`,
@@ -345,6 +346,7 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
         payment_status: isPaid ? 'paid' : 'unpaid',
         created_by: user?.id,
       }])
+      if (folioErr) throw folioErr
 
       await supabase.from('transactions').insert([{
         organization_id: orgId,

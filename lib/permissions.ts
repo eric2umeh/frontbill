@@ -1,6 +1,9 @@
 // Hotel Roles & Permissions configuration
 // All roles and their permissions are defined here in code
 // No DB tables needed - uses profiles.role column
+//
+// When you add/change a permission or role: update ROLE_DEFINITIONS descriptions, hasPermission() gates,
+// any hardcoded role checks in the app/API, and the in-app copy on Users & Roles → Roles & Permissions.
 
 export type Permission =
   | 'dashboard:view'
@@ -113,9 +116,9 @@ export const ALL_PERMISSIONS: { key: Permission; label: string; group: string }[
   { key: 'analytics:export', label: 'Export Analytics', group: 'Analytics' },
 
   { key: 'rooms:view', label: 'View Rooms', group: 'Rooms' },
-  { key: 'rooms:create', label: 'Create Rooms (Superadmin Only)', group: 'Rooms' },
-  { key: 'rooms:edit', label: 'Edit Rooms (Superadmin Only)', group: 'Rooms' },
-  { key: 'rooms:delete', label: 'Delete Rooms (Superadmin Only)', group: 'Rooms' },
+  { key: 'rooms:create', label: 'Create Rooms', group: 'Rooms' },
+  { key: 'rooms:edit', label: 'Edit Rooms', group: 'Rooms' },
+  { key: 'rooms:delete', label: 'Delete Rooms', group: 'Rooms' },
   { key: 'rooms:update_status', label: 'Update Room Status', group: 'Rooms' },
 
   { key: 'ledger:view', label: 'View City Ledger', group: 'City Ledger' },
@@ -135,7 +138,7 @@ export const ALL_PERMISSIONS: { key: Permission; label: string; group: string }[
   { key: 'settings:manage', label: 'Manage Hotel/System Settings', group: 'Settings' },
 
   { key: 'backdate:request', label: 'Request Backdated Booking/Reservation', group: 'Night Audit' },
-  { key: 'backdate:approve', label: 'Approve Backdated Booking/Reservation', group: 'Night Audit' },
+  { key: 'backdate:approve', label: 'Approve/Reject Backdates (Night Audit)', group: 'Night Audit' },
 ]
 
 const ALL: Permission[] = ALL_PERMISSIONS.map(p => p.key)
@@ -144,21 +147,23 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
   {
     key: 'superadmin',
     label: 'Superadmin',
-    description: 'Full system access—including Night Audit approvals for backdates, unrestricted user/role management, and superadmin-only code paths such as destructive guest/organization edits and room inventory changes.',
+    description:
+      'Full product access identical to Administrator, plus the only role that may create, edit, or remove another Superadmin account (enforced in the Users API). Use for platform owners.',
     color: 'bg-black text-white',
     permissions: ALL,
   },
   {
     key: 'admin',
     label: 'Administrator',
-    description: 'Runs the property day-to-day: same breadth as superadmin for operations except backdate approval (superadmin-only in Night Audit), role management, deleting users, editing core guest or organization profiles, and room create/edit/delete.',
+    description:
+      'Full hotel operations: same permission bundle as Superadmin—rooms, guests, organizations, bookings, reservations, backdate approvals, Night Audit, settings, and staff management. Cannot add, edit, or delete a Superadmin user (only a Superadmin can).',
     color: 'bg-red-100 text-red-800',
-    permissions: ALL.filter(p => !['backdate:approve'].includes(p)),
+    permissions: ALL,
   },
   {
     key: 'manager',
     label: 'Manager',
-    description: 'Operations lead: dashboards, bookings and reservations including bulk/group flows, reserve check-in/cancel from lists, checkout, payments, ledger view, analytics, exports, housekeeping/maintenance oversight, night audit visibility and audit trails—and financial views accountants use except reconciliation management. Editing existing booking/reservation records themselves (not day-to-day front-desk actions), managing users/roles, destructive guest or organization profile edits, and physical room inventory changes stay superadmin-only.',
+    description: 'Operations lead: dashboards, bookings and reservations including bulk/group flows, reserve check-in/cancel from lists, checkout, payments, ledger view, analytics, exports, housekeeping/maintenance oversight, night audit visibility and audit trails—and financial views accountants use except reconciliation management. Master edits to existing booking records, reservation record edits, destructive guest or organization profile edits, room inventory changes, backdate approvals, and full user/role administration stay with Administrator / Superadmin.',
     color: 'bg-purple-100 text-purple-800',
     permissions: ALL.filter(p => ![
       'roles:manage',
@@ -168,6 +173,9 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
       'rooms:edit',
       'rooms:delete',
       'backdate:approve',
+      'bookings:edit',
+      'bookings:delete',
+      'reservations:edit',
     ].includes(p)),
   },
   {
@@ -231,12 +239,12 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
   {
     key: 'front_desk',
     label: 'Front Desk',
-    description: 'Front office: new walk-ins and group/bulk bookings, reserve workflows and reserve check-ins from the operational lists, check-out, folio charges and extensions where policy allows, payments, city ledger posting, organization creation for corporates, night audit run plus audit trail review, and backdate requests. Editing an existing booking or reservation record and master guest/organization profiles is superadmin-only in this build; room inventory is superadmin-only.',
+    description: 'Front office: new walk-ins and group/bulk bookings, reserve workflows and reserve check-ins from operational lists, check-out, folio charges and extensions where policy allows, payments, city ledger posting, organization creation for corporates, night audit run plus audit trail review, and backdate requests. Master edits to bookings, reservations, guests, organizations, or room inventory are reserved for Administrators.',
     color: 'bg-green-100 text-green-800',
     permissions: [
       'dashboard:view',
-      'bookings:view', 'bookings:create', 'bookings:edit', 'bookings:checkin', 'bookings:checkout',
-      'reservations:view', 'reservations:create', 'reservations:edit',
+      'bookings:view', 'bookings:create', 'bookings:checkin', 'bookings:checkout',
+      'reservations:view', 'reservations:create',
       'rooms:view',
       'guests:view', 'guests:create', 'guests:edit',
       'transactions:view', 'transactions:create',
@@ -310,13 +318,16 @@ export function getRoleDefinition(roleKey: string): RoleDefinition | undefined {
 export function hasPermission(userRole: string | null | undefined, permission: Permission): boolean {
   if (!userRole) return false
   if (['rooms:create', 'rooms:edit', 'rooms:delete'].includes(permission)) {
-    return userRole === 'superadmin'
+    return userRole === 'superadmin' || userRole === 'admin'
   }
-  if (['bookings:edit', 'reservations:edit'].includes(permission)) {
-    return userRole === 'superadmin'
+  if (permission === 'bookings:edit' || permission === 'bookings:delete') {
+    return userRole === 'superadmin' || userRole === 'admin'
+  }
+  if (permission === 'reservations:edit') {
+    return userRole === 'superadmin' || userRole === 'admin'
   }
   if (['guests:edit', 'guests:delete', 'organizations:edit', 'organizations:delete'].includes(permission)) {
-    return userRole === 'superadmin'
+    return userRole === 'superadmin' || userRole === 'admin'
   }
   const role = getRoleDefinition(userRole)
   if (!role) return false
