@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -18,6 +19,8 @@ export interface BackdateRequest {
   approved_by_name?: string | null
   decision_note?: string | null
   created_at: string
+  created_booking_id?: string | null
+  metadata?: { created_folio_id?: string; [k: string]: unknown }
 }
 
 interface Props {
@@ -67,7 +70,15 @@ export function BackdateRequestsTab({ userId }: Props) {
         toast.error(json.error || 'Failed to update request')
         return
       }
-      toast.success(`Backdate request ${status}`)
+      if (status === 'approved' && json.created_booking_id) {
+        toast.success(
+          typeof json.request?.metadata?.created_folio_id === 'string'
+            ? `Booking created (${json.request.metadata.created_folio_id})`
+            : 'Booking created for this approval',
+        )
+      } else {
+        toast.success(`Backdate request ${status}`)
+      }
       setRequests((prev) => prev.map((item) => (item.id === requestId ? { ...item, ...json.request } : item)))
       load()
     } catch {
@@ -157,6 +168,11 @@ export function BackdateRequestsTab({ userId }: Props) {
                       Decision: {request.decision_note}
                       {request.approved_by_name ? ` · ${request.approved_by_name}` : ''}
                     </p>
+                  )}
+                  {request.status === 'approved' && request.created_booking_id && (
+                    <Button variant="link" className="h-auto p-0 text-sm" asChild>
+                      <Link href={`/bookings/${request.created_booking_id}`}>Open created booking</Link>
+                    </Button>
                   )}
                 </CardContent>
               </Card>
