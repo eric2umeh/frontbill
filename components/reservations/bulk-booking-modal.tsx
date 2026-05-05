@@ -23,6 +23,7 @@ import { appendBulkGroupNote, createBulkGroupId } from '@/lib/utils/bulk-booking
 import { StayDateRangeFields } from '@/components/shared/stay-date-range-fields'
 import { BOOKING_MODAL_ROOMS_LIMIT, normalizeRoomsForBookingPickers } from '@/lib/utils/room-bookability'
 import { applyPaymentToGuestCityLedger } from '@/lib/utils/guest-city-ledger'
+import { buildBackdateDedupeKey } from '@/lib/backdate/dedupe-key'
 
 const ROOM_TYPES_FALLBACK = ['Deluxe', 'Royal', 'Kings', 'Mini Suite', 'Executive Suite', 'Diplomatic Suite']
 
@@ -448,24 +449,51 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
           confirm: 'Confirm bulk reservation',
         }
 
+  const buildBulkBackdateFingerprint = () => {
+    if (!checkIn || !checkOut || !orgId || !currentUserId) return ''
+    const cin = toLocalDateStr(checkIn)
+    const cout = toLocalDateStr(checkOut)
+    const entryPart = fillLater
+      ? `later:${String(totalRoomsCount)}`
+      : entries
+          .map((e) => `${normalizeNameKey(e.roomType)}:${e.numberOfRooms}:${normalizeNameKey(e.guestName)}`)
+          .sort()
+          .join('|')
+    const roomsPart = pickedRoomIds.slice().sort().join(',')
+    return [bookingType, cin, cout, entryPart, String(customRate ?? ''), roomsPart].join('§')
+  }
+
   const hasApprovedBackdateRequest = async () => {
-    if (!checkIn) return false
+    if (!checkIn || !orgId || !currentUserId) return false
+    const fp = buildBulkBackdateFingerprint()
+    const dedupe = buildBackdateDedupeKey({
+      organizationId: orgId,
+      requestedBy: currentUserId,
+      requestType: 'bulk_booking',
+      requestedCheckIn: toLocalDateStr(checkIn),
+      requestedCheckOut: checkOut ? toLocalDateStr(checkOut) : undefined,
+      bulkFingerprint: fp,
+    })
     const res = await fetch(`/api/backdate-requests?caller_id=${currentUserId}`, { credentials: 'include' })
     const json = await res.json()
     if (!res.ok) return false
-    return (json.requests || []).some((request: any) =>
-      request.status === 'approved'
-      && request.request_type === 'bulk_booking'
-      && request.requested_check_in === toLocalDateStr(checkIn)
-      && (!checkOut || request.requested_check_out === toLocalDateStr(checkOut))
-    )
+    return (json.requests || []).some((request: any) => {
+      if (request.status !== 'approved' || request.request_type !== 'bulk_booking') return false
+      if (request.dedupe_key === dedupe) return true
+      return (
+        request.requested_check_in === toLocalDateStr(checkIn)
+        && (!checkOut || request.requested_check_out === toLocalDateStr(checkOut))
+      )
+    })
   }
 
   const handleRequestBackdate = async () => {
     if (!checkIn) { toast.error('Select a backdated check-in date'); return }
+    if (!checkOut) { toast.error('Select check-out date'); return }
     if (!backdateReason.trim()) { toast.error('Enter a reason for the superadmin'); return }
     setLoading(true)
     try {
+      const bulk_fingerprint = buildBulkBackdateFingerprint()
       const res = await fetch('/api/backdate-requests', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -480,10 +508,15 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
             booking_type: bookingType,
             organization_name: selectedOrg?.name || null,
             room_count: fillLater ? totalRoomsCount : entries.reduce((sum, entry) => sum + entry.numberOfRooms, 0),
+            bulk_fingerprint,
           },
         }),
       })
       const json = await res.json()
+      if (res.status === 409) {
+        toast.message(json.error || 'This backdate request is already pending')
+        return
+      }
       if (!res.ok) { toast.error(json.error || 'Failed to send backdate request'); return }
       toast.success('Backdate request sent to superadmin')
       setBackdateReason('')
