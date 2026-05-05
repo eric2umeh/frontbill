@@ -34,6 +34,15 @@ import {
   normalizeBookingCheckoutYmd,
 } from '@/lib/utils/booking-checkout-ui'
 import { bookingDisplayBillBalance } from '@/lib/utils/booking-bill-balance'
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Checkbox } from '@/components/ui/checkbox'
 import {
   fetchGuestCityLedgerAccount,
@@ -67,6 +76,10 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
   const [chargePaymentMethod, setChargePaymentMethod] = useState('')
   const [paymentMethod, setPaymentMethod] = useState('')
   const [deleteLoading, setDeleteLoading] = useState(false)
+  const [deleteBookingDialogOpen, setDeleteBookingDialogOpen] = useState(false)
+  const [deleteChargeTarget, setDeleteChargeTarget] = useState<{ chargeId: string; chargeAmount: number } | null>(
+    null,
+  )
   const [folioCharges, setFolioCharges] = useState<any[]>([])
   const [createdByUser, setCreatedByUser] = useState<any>(null)
   const [updatedByUser, setUpdatedByUser] = useState<any>(null)
@@ -613,65 +626,38 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
   }
 
   const handleDeleteCharge = (chargeId: string, chargeAmount: number) => {
-    toast.custom(
-      (t: string | number) => (
-        <div className="flex flex-col gap-3">
-          <div className="flex gap-2 items-start">
-            <AlertCircle className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" />
-            <div>
-              <p className="font-semibold">Delete this charge?</p>
-              <p className="text-sm text-muted-foreground">Amount: {formatNaira(chargeAmount)}. This cannot be undone.</p>
-            </div>
-          </div>
-          <div className="flex gap-2 justify-end">
-            <Button variant="outline" size="sm" onClick={() => toast.dismiss(t)}>Cancel</Button>
-            <Button
-              variant="destructive"
-              size="sm"
-              onClick={async () => {
-                toast.dismiss(t)
-  try {
-    setAddChargeLoading(true)
-    const supabase = createClient()
-                  
-                  // Get the charge to check its payment status
-                  const { data: chargeData } = await supabase
-                    .from('folio_charges')
-                    .select('payment_status, amount')
-                    .eq('id', chargeId)
-                    .single()
-                  
-                  // Delete the charge
-                  const { error: deleteError } = await supabase
-                    .from('folio_charges')
-                    .delete()
-                    .eq('id', chargeId)
-                  if (deleteError) throw deleteError
-                  
-                  // If this was a pending/city-ledger charge, reduce the booking balance
-                  if (chargeData?.payment_status === 'pending') {
-                    const newBalance = Math.max(0, (booking.balance || 0) - Math.abs(chargeData.amount))
-                    await supabase
-                      .from('bookings')
-                      .update({ balance: newBalance })
-                      .eq('id', bookingId)
-                  }
-                  // If this was a paid charge, don't touch balance
-                  
-                  await fetchBookingDetails(bookingId)
-                  toast.success('Charge deleted')
-                } catch (error: any) {
-                  toast.error(error.message || 'Failed to delete charge')
-                }
-              }}
-            >
-              Delete
-            </Button>
-          </div>
-        </div>
-      ),
-      { duration: Infinity }
-    )
+    setDeleteChargeTarget({ chargeId, chargeAmount })
+  }
+
+  const performDeleteCharge = async () => {
+    if (!deleteChargeTarget) return
+    const { chargeId } = deleteChargeTarget
+    try {
+      setAddChargeLoading(true)
+      const supabase = createClient()
+
+      const { data: chargeData } = await supabase
+        .from('folio_charges')
+        .select('payment_status, amount')
+        .eq('id', chargeId)
+        .single()
+
+      const { error: deleteError } = await supabase.from('folio_charges').delete().eq('id', chargeId)
+      if (deleteError) throw deleteError
+
+      if (chargeData?.payment_status === 'pending') {
+        const newBalance = Math.max(0, (booking?.balance || 0) - Math.abs(Number(chargeData.amount)))
+        await supabase.from('bookings').update({ balance: newBalance }).eq('id', bookingId)
+      }
+
+      await fetchBookingDetails(bookingId)
+      toast.success('Charge deleted')
+      setDeleteChargeTarget(null)
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to delete charge')
+    } finally {
+      setAddChargeLoading(false)
+    }
   }
 
   const openEditCharge = (charge: any) => {
@@ -729,102 +715,80 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
 
   const handleCheckout = () => setCheckoutConfirmOpen(true)
 
-  const handleDelete = () => {
-    toast.custom(
-      (t: string | number) => (
-        <div className="flex flex-col gap-3">
-          <div className="flex gap-2 items-start">
-            <AlertCircle className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" />
-            <div>
-              <p className="font-semibold">Delete Booking?</p>
-              <p className="text-sm text-muted-foreground">This action cannot be undone.</p>
-            </div>
-          </div>
-          <div className="flex gap-2 justify-end">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => toast.dismiss(t)}
-            >
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              size="sm"
-              disabled={deleteLoading}
-              onClick={async () => {
-                toast.dismiss(t)
-                setDeleteLoading(true)
-                try {
-                  const supabase = createClient()
-                  const clearBookingChildren = async (table: string) => {
-                    const { error: deleteError } = await supabase.from(table).delete().eq('booking_id', bookingId)
-                    if (!deleteError) return
+  const performDeleteBooking = async () => {
+    setDeleteLoading(true)
+    try {
+      const supabase = createClient()
+      const clearBookingChildren = async (table: string) => {
+        const { error: deleteError } = await supabase.from(table).delete().eq('booking_id', bookingId)
+        if (!deleteError) return
 
-                    // If RLS blocks deleting audit rows, unlink them so the booking FK can be removed.
-                    const { error: unlinkError } = await supabase.from(table).update({ booking_id: null }).eq('booking_id', bookingId)
-                    if (unlinkError) {
-                      throw deleteError
-                    }
-                  }
+        const { error: unlinkError } = await supabase.from(table).update({ booking_id: null }).eq('booking_id', bookingId)
+        if (unlinkError) {
+          throw deleteError
+        }
+      }
 
-                  await clearBookingChildren('payments')
-                  await clearBookingChildren('transactions')
-                  await supabase.from('folio_charges').delete().eq('booking_id', bookingId)
-                  let { error } = await supabase.from('bookings').delete().eq('id', bookingId)
-                  if (error && /foreign key constraint/i.test(error.message || '')) {
-                    await supabase.from('payments').update({ booking_id: null }).eq('booking_id', bookingId)
-                    await supabase.from('transactions').update({ booking_id: null }).eq('booking_id', bookingId)
-                    const retry = await supabase.from('bookings').delete().eq('id', bookingId)
-                    error = retry.error
-                  }
-                  if (error) throw error
+      await clearBookingChildren('payments')
+      await clearBookingChildren('transactions')
+      await supabase.from('folio_charges').delete().eq('booking_id', bookingId)
+      let { error } = await supabase.from('bookings').delete().eq('id', bookingId)
+      if (error && /foreign key constraint/i.test(error.message || '')) {
+        await supabase.from('payments').update({ booking_id: null }).eq('booking_id', bookingId)
+        await supabase.from('transactions').update({ booking_id: null }).eq('booking_id', bookingId)
+        const retry = await supabase.from('bookings').delete().eq('id', bookingId)
+        error = retry.error
+      }
+      if (error) throw error
 
-                  if (booking?.guest_id) {
-                    const guestName = booking.guests?.name
-                    const [{ data: otherBookings }, { data: guestPayments }, { data: guestTransactions }, { data: ledgerAccounts }] = await Promise.all([
-                      supabase.from('bookings').select('id').eq('guest_id', booking.guest_id).limit(1),
-                      supabase.from('payments').select('id').eq('guest_id', booking.guest_id).limit(1),
-                      supabase.from('transactions').select('id').eq('guest_id', booking.guest_id).limit(1),
-                      guestName
-                        ? supabase
-                            .from('city_ledger_accounts')
-                            .select('id, balance')
-                            .eq('organization_id', booking.organization_id)
-                            .ilike('account_name', guestName)
-                            .in('account_type', ['individual', 'guest'])
-                        : Promise.resolve({ data: [] }),
-                    ])
+      if (booking?.guest_id) {
+        const guestName = booking.guests?.name
+        const [{ data: otherBookings }, { data: guestPayments }, { data: guestTransactions }, { data: ledgerAccounts }] =
+          await Promise.all([
+            supabase.from('bookings').select('id').eq('guest_id', booking.guest_id).limit(1),
+            supabase.from('payments').select('id').eq('guest_id', booking.guest_id).limit(1),
+            supabase.from('transactions').select('id').eq('guest_id', booking.guest_id).limit(1),
+            guestName
+              ? supabase
+                  .from('city_ledger_accounts')
+                  .select('id, balance')
+                  .eq('organization_id', booking.organization_id)
+                  .ilike('account_name', guestName)
+                  .in('account_type', ['individual', 'guest'])
+              : Promise.resolve({ data: [] }),
+          ])
 
-                    const hasLedgerBalance = (ledgerAccounts || []).some((account: any) => Number(account.balance || 0) !== 0)
-                    if ((otherBookings || []).length === 0 && (guestPayments || []).length === 0 && (guestTransactions || []).length === 0 && !hasLedgerBalance) {
-                      if (ledgerAccounts?.length) {
-                        await supabase
-                          .from('city_ledger_accounts')
-                          .delete()
-                          .in('id', ledgerAccounts.map((account: any) => account.id))
-                      }
-                      await supabase.from('guests').delete().eq('id', booking.guest_id)
-                    }
-                  }
+        const hasLedgerBalance = (ledgerAccounts || []).some((account: any) => Number(account.balance || 0) !== 0)
+        if (
+          (otherBookings || []).length === 0 &&
+          (guestPayments || []).length === 0 &&
+          (guestTransactions || []).length === 0 &&
+          !hasLedgerBalance
+        ) {
+          if (ledgerAccounts?.length) {
+            await supabase
+              .from('city_ledger_accounts')
+              .delete()
+              .in(
+                'id',
+                ledgerAccounts.map((account: any) => account.id),
+              )
+          }
+          await supabase.from('guests').delete().eq('id', booking.guest_id)
+        }
+      }
 
-                  toast.success('Booking deleted')
-                  router.push('/bookings')
-                } catch (err: any) {
-                  toast.error(err.message || 'Failed to delete booking')
-                } finally {
-                  setDeleteLoading(false)
-                }
-              }}
-            >
-              {deleteLoading ? 'Deleting...' : 'Delete'}
-            </Button>
-          </div>
-        </div>
-      ),
-      { duration: Infinity }
-    )
+      toast.success('Booking deleted')
+      setDeleteBookingDialogOpen(false)
+      router.push('/bookings')
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to delete booking')
+    } finally {
+      setDeleteLoading(false)
+    }
   }
+
+  const handleDeleteBookingClick = () => setDeleteBookingDialogOpen(true)
 
   const totalCharges = folioCharges.reduce((sum: number, charge: any) => sum + charge.amount, 0)
 
@@ -973,6 +937,87 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
           folio_status: booking.folio_status,
         }}
       />
+
+      <AlertDialog
+        open={deleteBookingDialogOpen}
+        onOpenChange={(open) => {
+          if (!open && deleteLoading) return
+          setDeleteBookingDialogOpen(open)
+        }}
+      >
+        <AlertDialogContent className="border-2 border-destructive/35 shadow-2xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-destructive">
+              <AlertCircle className="h-5 w-5 shrink-0" />
+              Delete booking?
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-left text-foreground/90">
+              This permanently removes this folio, related charges, and linked payment rows where allowed. It cannot be
+              undone. Use Cancel to keep the booking, or Delete to remove it.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteLoading}>Cancel</AlertDialogCancel>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={deleteLoading}
+              onClick={() => void performDeleteBooking()}
+            >
+              {deleteLoading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Deleting…
+                </>
+              ) : (
+                'Delete booking'
+              )}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={deleteChargeTarget !== null}
+        onOpenChange={(open) => {
+          if (!open && addChargeLoading) return
+          if (!open) setDeleteChargeTarget(null)
+        }}
+      >
+        <AlertDialogContent className="border-2 border-destructive/35 shadow-2xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-destructive">
+              <AlertCircle className="h-5 w-5 shrink-0" />
+              Delete this charge?
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-left text-foreground/90">
+              Amount:{' '}
+              <span className="font-medium tabular-nums">
+                {deleteChargeTarget != null ? formatNaira(deleteChargeTarget.chargeAmount) : '—'}
+              </span>
+              . This cannot be undone. Cancel keeps the charge; Escape also closes without deleting.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={addChargeLoading}>Cancel</AlertDialogCancel>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={addChargeLoading}
+              onClick={() => void performDeleteCharge()}
+            >
+              {addChargeLoading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Deleting…
+                </>
+              ) : (
+                'Delete charge'
+              )}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       
       <Dialog open={folioChargeModalOpen} onOpenChange={setFolioChargeModalOpen}>
         <DialogContent>
@@ -1247,7 +1292,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                 <Edit className="mr-2 h-4 w-4" />
                 Edit
               </Button>
-              <Button variant="destructive" size="sm" onClick={handleDelete} disabled={booking?.folio_status === 'checked_out'}>
+              <Button variant="destructive" size="sm" onClick={handleDeleteBookingClick} disabled={booking?.folio_status === 'checked_out'}>
                 <Trash2 className="mr-2 h-4 w-4" />
                 Delete
               </Button>
