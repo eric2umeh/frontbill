@@ -22,6 +22,7 @@ import { useAuth } from '@/lib/auth-context'
 import { isOrganizationMenuRecord } from '@/lib/utils/ledger-organization'
 import { getUserDisplayName } from '@/lib/utils/user-display'
 import { fetchUserDisplayNameMap } from '@/lib/utils/fetch-user-display-names'
+import { normalizeNameKey } from '@/lib/utils/name-format'
 
 interface Organization {
   id: string
@@ -111,6 +112,31 @@ export default function OrganizationsPage() {
       setSubmitting(true)
       const supabase = createClient()
       if (!supabase) { toast.error('Database not configured'); setSubmitting(false); return }
+      const normalized = normalizeNameKey(formData.name)
+
+      const [{ data: existingOrg }, { data: existingGuest }] = await Promise.all([
+        supabase
+          .from('organizations')
+          .select('id')
+          .neq('id', organizationId)
+          .ilike('name', formData.name.trim())
+          .maybeSingle(),
+        supabase
+          .from('guests')
+          .select('id')
+          .eq('organization_id', organizationId)
+          .ilike('name', formData.name.trim())
+          .maybeSingle(),
+      ])
+
+      if (
+        existingOrg ||
+        existingGuest ||
+        organizations.some((org) => normalizeNameKey(org.name) === normalized)
+      ) {
+        toast.error('This name already exists as a guest or organization')
+        return
+      }
 
       const { error } = await supabase
         .from('organizations')

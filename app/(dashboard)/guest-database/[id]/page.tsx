@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
+import { Label } from '@/components/ui/label'
 import { formatNaira } from '@/lib/utils/currency'
 import {
   Loader2, ArrowLeft, User, Phone, Mail, MapPin,
@@ -15,6 +16,9 @@ import {
 } from 'lucide-react'
 import { format } from 'date-fns'
 import CityLedgerPaymentModal from '@/components/city-ledger/city-ledger-payment-modal'
+import { useAuth } from '@/lib/auth-context'
+import { hasPermission } from '@/lib/permissions'
+import { toast } from 'sonner'
 
 interface Guest {
   id: string
@@ -64,6 +68,10 @@ interface LedgerTransaction {
 export default function GuestDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
   const router = useRouter()
+  const { role } = useAuth()
+  /** Product rule: only Administrator / Superadmin edit guest profiles (see hasPermission hard gate). */
+  const canEditGuest = hasPermission(role, 'guests:edit')
+  const canViewGuests = hasPermission(role, 'guests:view')
   const [guest, setGuest] = useState<Guest | null>(null)
   const [bookings, setBookings] = useState<Booking[]>([])
   const [ledgerAccount, setLedgerAccount] = useState<LedgerAccount | null>(null)
@@ -75,6 +83,18 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
   const [guestPendingBalance, setGuestPendingBalance] = useState(0)
   const [selectedFolioId, setSelectedFolioId] = useState<string>('')
   const [isCheckingOut, setIsCheckingOut] = useState(false)
+  const [isEditingGuest, setIsEditingGuest] = useState(false)
+  const [savingGuest, setSavingGuest] = useState(false)
+  const [guestForm, setGuestForm] = useState({
+    name: '',
+    phone: '',
+    email: '',
+    address: '',
+    city: '',
+    country: '',
+    id_type: '',
+    id_number: '',
+  })
 
   useEffect(() => {
     if (id) loadGuest()
@@ -110,6 +130,16 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
 
       if (!guestData) { router.push('/guest-database'); return }
       setGuest(guestData)
+      setGuestForm({
+        name: guestData.name || '',
+        phone: guestData.phone || '',
+        email: guestData.email || '',
+        address: guestData.address || '',
+        city: guestData.city || '',
+        country: guestData.country || '',
+        id_type: guestData.id_type || '',
+        id_number: guestData.id_number || '',
+      })
 
       // Fetch all folio charges for this guest's bookings to derive accurate balances
       const rawBookings = bookingData || []
@@ -206,6 +236,44 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
     }
   }
 
+  const handleSaveGuest = async () => {
+    if (!guest) return
+    if (!canEditGuest) {
+      toast.error('Only superadmin and admin can edit guest details')
+      return
+    }
+    if (!guestForm.name.trim()) {
+      toast.error('Guest name is required')
+      return
+    }
+    try {
+      setSavingGuest(true)
+      const supabase = createClient()
+      const { error } = await supabase
+        .from('guests')
+        .update({
+          name: guestForm.name.trim(),
+          phone: guestForm.phone.trim() || null,
+          email: guestForm.email.trim() || null,
+          address: guestForm.address.trim() || null,
+          city: guestForm.city.trim() || null,
+          country: guestForm.country.trim() || null,
+          id_type: guestForm.id_type.trim() || null,
+          id_number: guestForm.id_number.trim() || null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', guest.id)
+      if (error) throw error
+      toast.success('Guest details updated')
+      setIsEditingGuest(false)
+      await loadGuest()
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to update guest')
+    } finally {
+      setSavingGuest(false)
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-96">
@@ -276,10 +344,37 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
             <p className="text-muted-foreground">Guest since {guest.created_at ? format(new Date(guest.created_at), 'MMMM yyyy') : '-'}</p>
           </div>
         </div>
-        <Button variant="outline" size="sm" onClick={() => loadGuest()} className="gap-2 self-start">
-          <RefreshCw className="h-4 w-4" />
-          Refresh
-        </Button>
+        <div className="flex flex-col items-end gap-2 self-start">
+          <div className="flex items-center gap-2">
+            {canEditGuest && (
+              <>
+                {isEditingGuest ? (
+                  <>
+                    <Button size="sm" variant="outline" onClick={() => { setIsEditingGuest(false); loadGuest() }} disabled={savingGuest}>
+                      Cancel
+                    </Button>
+                    <Button size="sm" onClick={handleSaveGuest} disabled={savingGuest}>
+                      {savingGuest ? 'Saving...' : 'Save Guest'}
+                    </Button>
+                  </>
+                ) : (
+                  <Button variant="outline" size="sm" onClick={() => setIsEditingGuest(true)}>
+                    Edit Guest
+                  </Button>
+                )}
+              </>
+            )}
+            <Button variant="outline" size="sm" onClick={() => loadGuest()} className="gap-2">
+              <RefreshCw className="h-4 w-4" />
+              Refresh
+            </Button>
+          </div>
+          {canViewGuests && !canEditGuest && (
+            <p className="text-xs text-muted-foreground max-w-sm text-right">
+              Only Administrator or Superadmin can edit guest profiles.
+            </p>
+          )}
+        </div>
       </div>
 
       {/* Summary cards */}
@@ -434,34 +529,110 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
             <CardTitle className="text-base">Guest Information</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="space-y-3">
-              <div className="flex items-center gap-3 text-sm">
-                <Phone className="h-4 w-4 text-muted-foreground shrink-0" />
-                <span>{guest.phone || '—'}</span>
-              </div>
-              <div className="flex items-center gap-3 text-sm">
-                <Mail className="h-4 w-4 text-muted-foreground shrink-0" />
-                <span>{guest.email || '—'}</span>
-              </div>
-              <div className="flex items-start gap-3 text-sm">
-                <MapPin className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
-                <span>{[guest.address, guest.city, guest.country].filter(Boolean).join(', ') || '—'}</span>
-              </div>
-            </div>
-
-            {guest.id_type && (
-              <>
-                <Separator />
+            {isEditingGuest && canEditGuest ? (
+              <div className="space-y-3">
                 <div className="space-y-2">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Identity Document</p>
-                  <div className="flex items-center gap-3 text-sm">
-                    <Hash className="h-4 w-4 text-muted-foreground" />
-                    <div>
-                      <span className="font-medium capitalize">{guest.id_type}: </span>
-                      <span className="text-muted-foreground">{guest.id_number || '—'}</span>
-                    </div>
+                  <Label>Full Name</Label>
+                  <input
+                    className="w-full px-3 py-2 border rounded-md text-sm bg-background"
+                    value={guestForm.name}
+                    onChange={(e) => setGuestForm((prev) => ({ ...prev, name: e.target.value }))}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Phone</Label>
+                  <input
+                    className="w-full px-3 py-2 border rounded-md text-sm bg-background"
+                    value={guestForm.phone}
+                    onChange={(e) => setGuestForm((prev) => ({ ...prev, phone: e.target.value }))}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Email</Label>
+                  <input
+                    className="w-full px-3 py-2 border rounded-md text-sm bg-background"
+                    value={guestForm.email}
+                    onChange={(e) => setGuestForm((prev) => ({ ...prev, email: e.target.value }))}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Address</Label>
+                  <input
+                    className="w-full px-3 py-2 border rounded-md text-sm bg-background"
+                    value={guestForm.address}
+                    onChange={(e) => setGuestForm((prev) => ({ ...prev, address: e.target.value }))}
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label>City</Label>
+                    <input
+                      className="w-full px-3 py-2 border rounded-md text-sm bg-background"
+                      value={guestForm.city}
+                      onChange={(e) => setGuestForm((prev) => ({ ...prev, city: e.target.value }))}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Country</Label>
+                    <input
+                      className="w-full px-3 py-2 border rounded-md text-sm bg-background"
+                      value={guestForm.country}
+                      onChange={(e) => setGuestForm((prev) => ({ ...prev, country: e.target.value }))}
+                    />
                   </div>
                 </div>
+                <Separator />
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label>ID Type</Label>
+                    <input
+                      className="w-full px-3 py-2 border rounded-md text-sm bg-background"
+                      value={guestForm.id_type}
+                      onChange={(e) => setGuestForm((prev) => ({ ...prev, id_type: e.target.value }))}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>ID Number</Label>
+                    <input
+                      className="w-full px-3 py-2 border rounded-md text-sm bg-background"
+                      value={guestForm.id_number}
+                      onChange={(e) => setGuestForm((prev) => ({ ...prev, id_number: e.target.value }))}
+                    />
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="space-y-3">
+                  <div className="flex items-center gap-3 text-sm">
+                    <Phone className="h-4 w-4 text-muted-foreground shrink-0" />
+                    <span>{guest.phone || '—'}</span>
+                  </div>
+                  <div className="flex items-center gap-3 text-sm">
+                    <Mail className="h-4 w-4 text-muted-foreground shrink-0" />
+                    <span>{guest.email || '—'}</span>
+                  </div>
+                  <div className="flex items-start gap-3 text-sm">
+                    <MapPin className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
+                    <span>{[guest.address, guest.city, guest.country].filter(Boolean).join(', ') || '—'}</span>
+                  </div>
+                </div>
+
+                {guest.id_type && (
+                  <>
+                    <Separator />
+                    <div className="space-y-2">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Identity Document</p>
+                      <div className="flex items-center gap-3 text-sm">
+                        <Hash className="h-4 w-4 text-muted-foreground" />
+                        <div>
+                          <span className="font-medium capitalize">{guest.id_type}: </span>
+                          <span className="text-muted-foreground">{guest.id_number || '—'}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                )}
               </>
             )}
           </CardContent>

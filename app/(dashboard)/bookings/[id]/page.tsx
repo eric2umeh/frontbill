@@ -35,7 +35,7 @@ import {
   isPastCheckoutCutoff,
   normalizeBookingCheckoutYmd,
 } from '@/lib/utils/booking-checkout-ui'
-import { bookingDisplayBillBalance } from '@/lib/utils/booking-bill-balance'
+import { bookingDisplayBillBalance, shouldReconcileBookingPaymentPaid } from '@/lib/utils/booking-bill-balance'
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -112,14 +112,14 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
       const supabase = createClient()
       
       // Fetch booking with related data
-      const { data: bookingData, error: bookingError } = await supabase
+      let { data: bookingData, error: bookingError } = await supabase
         .from('bookings')
         .select('*, guests(name, phone, email, address, balance), rooms(id, room_number, room_type, price_per_night)')
         .eq('id', id)
         .single()
 
       if (bookingError) throw bookingError
-      setBooking(bookingData)
+      if (!bookingData) throw new Error('Booking not found')
 
       if (bookingData.organization_id) {
         const { data: orgRow } = await supabase
@@ -169,8 +169,21 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
 
       setFolioCharges(chargesWithCreator)
 
+      if (shouldReconcileBookingPaymentPaid(bookingData, chargesWithCreator)) {
+        const { error: psFixErr } = await supabase
+          .from('bookings')
+          .update({ payment_status: 'paid' })
+          .eq('id', id)
+        if (!psFixErr) {
+          bookingData = { ...bookingData, payment_status: 'paid' }
+        }
+      }
+
+      setBooking(bookingData)
+
       // Note: booking.balance is maintained by handlers (add-charge, extend-stay, record-payment)
-      // We no longer sync/recalculate it here to avoid double-counting issues
+      // If the folio implies nothing owed but `payment_status` was stale (e.g. after auto-checkout + settle),
+      // we reconcile to `paid` above.
 
       setLoading(false)
   } catch (error: any) {
@@ -460,10 +473,34 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
       const supabase = createClient()
       const { data: freshBk2 } = await supabase
         .from('bookings')
-        .select('balance, deposit')
+        .select('balance, deposit, total_amount')
         .eq('id', bookingId)
         .single()
-      const billBefore = Math.max(0, Number(freshBk2?.balance) || 0)
+
+      const { data: fcPrior } = await supabase
+        .from('folio_charges')
+        .select('amount, charge_type, payment_status, payment_method')
+        .eq('booking_id', bookingId)
+
+      const fcForBill = (fcPrior || []).map((row: { amount?: unknown; charge_type?: unknown; payment_status?: unknown; payment_method?: unknown }) => ({
+        amount: row.amount,
+        charge_type: row.charge_type,
+        payment_status: row.payment_status,
+        payment_method: row.payment_method,
+      }))
+
+      const billBefore = Math.max(
+        0,
+        bookingDisplayBillBalance(
+          {
+            balance: freshBk2?.balance,
+            deposit: freshBk2?.deposit,
+            total_amount: freshBk2?.total_amount,
+          },
+          fcForBill,
+        ),
+      )
+
       if (P > billBefore && !applyOverpaymentAsCredit) {
         toast.error(
           'This amount is more than the current bill balance. Enable “Paying above bill — apply excess as account credit” or reduce the amount.',
@@ -472,7 +509,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
         return
       }
 
-      const paymentEntry = {
+      const paymentEntry: Record<string, unknown> = {
         booking_id: bookingId,
         description: `Payment Received - ${paymentMethod.replace('_', ' ')}`,
         amount: -P,
@@ -480,10 +517,17 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
         payment_method: paymentMethod,
         payment_status: 'paid',
       }
+      if (booking.organization_id) {
+        paymentEntry.organization_id = booking.organization_id
+      }
+      if (userId) {
+        paymentEntry.created_by = userId
+      }
       await supabase.from('folio_charges').insert([paymentEntry])
 
       const newBalance = Math.max(0, billBefore - P)
-      const newDeposit = (freshBk2?.deposit || 0) + P
+      const newDeposit = Number(freshBk2?.deposit || 0) + P
+
       await supabase
         .from('bookings')
         .update({
@@ -493,28 +537,15 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
         })
         .eq('id', bookingId)
 
-      setBooking((prev: any) => prev ? { ...prev, balance: newBalance, deposit: newDeposit, payment_status: newBalance === 0 ? 'paid' : 'partial' } : prev)
-
-      const { data: pendingCharges } = await supabase
-        .from('folio_charges')
-        .select('id')
-        .eq('booking_id', bookingId)
-        .eq('payment_status', 'pending')
-      if (pendingCharges && pendingCharges.length > 0) {
+      // When booking balance clears, settle every outstanding positive folio line (not only payment_status=pending).
+      if (newBalance === 0) {
         await supabase
           .from('folio_charges')
           .update({ payment_status: 'paid' })
           .eq('booking_id', bookingId)
-          .eq('payment_status', 'pending')
+          .gt('amount', 0)
+          .not('charge_type', 'eq', 'payment')
       }
-
-      setFolioCharges((prev: any[]) =>
-        prev.map((c: any) =>
-          (c.paymentStatus === 'pending' || c.paymentStatus === 'unpaid') && Number(c.amount) > 0
-            ? { ...c, paymentStatus: 'paid' }
-            : c
-        )
-      )
 
       const guestId = booking.guest_id || booking.guests?.id
       const guestName = (booking.guests?.name || '').trim()
@@ -554,6 +585,8 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
         }])
       } catch (_) { /* non-fatal */ }
 
+      await fetchBookingDetails(bookingId)
+
       const excess = Math.max(0, P - billBefore)
       const method = paymentMethod
       toast.success(
@@ -566,19 +599,6 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
       setChargeAmount('')
       setPaymentMethod('')
       setApplyOverpaymentAsCredit(false)
-
-      const newPaymentEntry = {
-        id: `local-${Date.now()}`,
-        description: `Payment Received - ${method.replace(/_/g, ' ')}`,
-        amount: -P,
-        type: 'payment',
-        chargeType: 'payment',
-        paymentMethod: method,
-        paymentStatus: 'paid',
-        timestamp: new Date().toISOString(),
-        createdBy: 'You',
-      }
-      setFolioCharges((prev: any[]) => [newPaymentEntry, ...prev])
     } catch (error: any) {
       toast.error(error.message || 'Failed to save')
     } finally {
@@ -628,6 +648,61 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
         currentLedgerBalance: bookingLedgerSnapshot.balance,
         syncGuestProfile: true,
       })
+
+      // If this booking still has unpaid bill, apply this top-up as a booking payment too.
+      const { data: freshBk } = await supabase
+        .from('bookings')
+        .select('balance, deposit, total_amount')
+        .eq('id', bookingId)
+        .single()
+      const { data: fcPrior } = await supabase
+        .from('folio_charges')
+        .select('amount, charge_type, payment_status, payment_method')
+        .eq('booking_id', bookingId)
+      const fcForBill = (fcPrior || []).map((row: { amount?: unknown; charge_type?: unknown; payment_status?: unknown; payment_method?: unknown }) => ({
+        amount: row.amount,
+        charge_type: row.charge_type,
+        payment_status: row.payment_status,
+        payment_method: row.payment_method,
+      }))
+      const billBefore = Math.max(
+        0,
+        bookingDisplayBillBalance(
+          {
+            balance: freshBk?.balance,
+            deposit: freshBk?.deposit,
+            total_amount: freshBk?.total_amount,
+          },
+          fcForBill,
+        ),
+      )
+      const appliedToBooking = Math.min(amt, billBefore)
+      if (appliedToBooking > 0) {
+        await supabase.from('folio_charges').insert([{
+          booking_id: bookingId,
+          organization_id: booking.organization_id,
+          description: `Payment Received - ${creditPaymentMethod.replace('_', ' ')} (via Add Credit)`,
+          amount: -appliedToBooking,
+          charge_type: 'payment',
+          payment_method: creditPaymentMethod,
+          payment_status: 'paid',
+          created_by: user.id,
+        }])
+        const newBalance = Math.max(0, billBefore - appliedToBooking)
+        const newDeposit = Number(freshBk?.deposit || 0) + appliedToBooking
+        await supabase
+          .from('bookings')
+          .update({ balance: newBalance, deposit: newDeposit, payment_status: newBalance === 0 ? 'paid' : 'partial' })
+          .eq('id', bookingId)
+        if (newBalance === 0) {
+          await supabase
+            .from('folio_charges')
+            .update({ payment_status: 'paid' })
+            .eq('booking_id', bookingId)
+            .gt('amount', 0)
+            .not('charge_type', 'eq', 'payment')
+        }
+      }
 
       const row = await fetchGuestCityLedgerAccount(supabase, booking.organization_id, guestName)
       setBookingLedgerSnapshot({ id: row?.id ?? null, balance: Number(row?.balance) || 0 })
@@ -717,9 +792,12 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
         .filter((c: any) => c.payment_status !== 'paid')
         .reduce((sum: number, c: any) => sum + Number(c.amount), 0)
 
+      const nextBal = Math.max(0, unpaidTotal)
+      const nextPaid = unpaidTotal <= 0
+
       await supabase
         .from('bookings')
-        .update({ balance: Math.max(0, unpaidTotal) })
+        .update({ balance: nextBal, payment_status: nextPaid ? 'paid' : 'partial' })
         .eq('id', bookingId)
 
       toast.success('Charge updated successfully')

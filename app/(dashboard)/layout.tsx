@@ -7,7 +7,7 @@ import { Header } from '@/components/layout/header'
 import { LoadingScreen } from '@/components/shared/loading-screen'
 import { createClient } from '@/lib/supabase/client'
 import { AuthProvider } from '@/lib/auth-context'
-import { hasPermission, type Permission } from '@/lib/permissions'
+import { hasPermission, type Permission, canonicalRoleKey } from '@/lib/permissions'
 
 interface DashboardUser {
   id: string
@@ -108,8 +108,21 @@ export default function DashboardLayout({
               organizationId: profile.organization_id || '',
             })
             // Check if role has dashboard access
-            const allowedRoles = ['superadmin', 'admin', 'manager', 'front_desk', 'receptionist', 'housekeeping', 'maintenance', 'accountant', 'auditor', 'store']
-            if (!allowedRoles.includes(profile.role || 'admin')) {
+            const rk = canonicalRoleKey(profile.role) || canonicalRoleKey('admin')
+            const roleForAccess = rk || ''
+            const allowedRoles: Array<NonNullable<ReturnType<typeof canonicalRoleKey>>> = [
+              'superadmin',
+              'admin',
+              'manager',
+              'front_desk',
+              'receptionist',
+              'housekeeping',
+              'maintenance',
+              'accountant',
+              'auditor',
+              'store',
+            ]
+            if (roleForAccess && !allowedRoles.includes(roleForAccess)) {
               if (isMounted) {
                 setRedirected(true)
                 router.push('/access-denied')

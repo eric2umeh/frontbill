@@ -315,21 +315,40 @@ export function getRoleDefinition(roleKey: string): RoleDefinition | undefined {
   return ROLE_DEFINITIONS.find(r => r.key === roleKey)
 }
 
+/**
+ * Maps `profiles.role` to a canonical RoleKey. Values may be stored as the key (`admin`)
+ * or as the display label (`Administrator`, `Front Desk`, etc.).
+ */
+export function canonicalRoleKey(userRole: string | null | undefined): RoleKey | null {
+  if (!userRole) return null
+  const s = String(userRole).trim().toLowerCase().replace(/[\s-]+/g, '_')
+  const byKey = ROLE_DEFINITIONS.find((r) => r.key === (s as RoleKey))
+  if (byKey) return byKey.key
+  const labelNorm = (label: string) =>
+    label.trim().toLowerCase().replace(/[\s-]+/g, '_')
+  const byLabel = ROLE_DEFINITIONS.find((r) => labelNorm(r.label) === s)
+  if (byLabel) return byLabel.key
+  if (s === 'administrator') return 'admin'
+  if (s === 'super_admin') return 'superadmin'
+  return null
+}
+
 export function hasPermission(userRole: string | null | undefined, permission: Permission): boolean {
-  if (!userRole) return false
+  const roleKey = canonicalRoleKey(userRole)
+  if (!roleKey) return false
   if (['rooms:create', 'rooms:edit', 'rooms:delete'].includes(permission)) {
-    return userRole === 'superadmin' || userRole === 'admin'
+    return roleKey === 'superadmin' || roleKey === 'admin'
   }
   if (permission === 'bookings:edit' || permission === 'bookings:delete') {
-    return userRole === 'superadmin' || userRole === 'admin'
+    return roleKey === 'superadmin' || roleKey === 'admin'
   }
   if (permission === 'reservations:edit') {
-    return userRole === 'superadmin' || userRole === 'admin'
+    return roleKey === 'superadmin' || roleKey === 'admin'
   }
   if (['guests:edit', 'guests:delete', 'organizations:edit', 'organizations:delete'].includes(permission)) {
-    return userRole === 'superadmin' || userRole === 'admin'
+    return roleKey === 'superadmin' || roleKey === 'admin'
   }
-  const role = getRoleDefinition(userRole)
+  const role = getRoleDefinition(roleKey)
   if (!role) return false
   return role.permissions.includes(permission)
 }
