@@ -20,6 +20,7 @@ import { StayDateRangeFields } from '@/components/shared/stay-date-range-fields'
 import { BOOKING_MODAL_ROOMS_LIMIT, isRoomAssignable, normalizeRoomsForBookingPickers } from '@/lib/utils/room-bookability'
 import { Checkbox } from '@/components/ui/checkbox'
 import { applyPaymentToGuestCityLedger } from '@/lib/utils/guest-city-ledger'
+import { buildBackdateDedupeKey } from '@/lib/backdate/dedupe-key'
 
 const toLocalDateStr = (date: Date) => {
   const y = date.getFullYear()
@@ -332,16 +333,28 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
   const isBackdated = checkInDate ? checkInDate < today() : false
 
   const hasApprovedBackdateRequest = async () => {
-    if (!checkInDate) return false
+    if (!checkInDate || !orgId || !selectedRoom?.id || !currentUserId) return false
+    const dedupe = buildBackdateDedupeKey({
+      organizationId: orgId,
+      requestedBy: currentUserId,
+      requestType: 'reservation',
+      requestedCheckIn: toLocalDateStr(checkInDate),
+      requestedCheckOut: checkOutDate ? toLocalDateStr(checkOutDate) : undefined,
+      roomId: selectedRoom.id,
+    })
     const res = await fetch(`/api/backdate-requests?caller_id=${currentUserId}`, { credentials: 'include' })
     const json = await res.json()
     if (!res.ok) return false
-    return (json.requests || []).some((request: any) =>
-      request.status === 'approved'
-      && request.request_type === 'reservation'
-      && request.requested_check_in === toLocalDateStr(checkInDate)
-      && (!checkOutDate || request.requested_check_out === toLocalDateStr(checkOutDate))
-    )
+    return (json.requests || []).some((request: any) => {
+      if (request.status !== 'approved' || request.request_type !== 'reservation') return false
+      if (request.dedupe_key === dedupe) return true
+      const md = request.metadata || {}
+      return (
+        request.requested_check_in === toLocalDateStr(checkInDate)
+        && (!checkOutDate || request.requested_check_out === toLocalDateStr(checkOutDate))
+        && (md.room_id ?? null) === (selectedRoom?.id ?? null)
+      )
+    })
   }
 
   const handleRequestBackdate = async () => {
@@ -363,6 +376,10 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
         }),
       })
       const json = await res.json()
+      if (res.status === 409) {
+        toast.message(json.error || 'This backdate request is already pending')
+        return
+      }
       if (!res.ok) { toast.error(json.error || 'Failed to send backdate request'); return }
       toast.success('Backdate request sent to superadmin')
       setBackdateReason('')
