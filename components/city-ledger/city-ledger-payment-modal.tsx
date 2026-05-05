@@ -15,6 +15,7 @@ import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { formatNaira } from '@/lib/utils/currency'
 import { createClient } from '@/lib/supabase/client'
+import { recordGuestLedgerCashMovement } from '@/lib/utils/guest-city-ledger'
 import { toast } from 'sonner'
 import { TrendingDown, TrendingUp, Loader2 } from 'lucide-react'
 
@@ -58,8 +59,7 @@ export default function CityLedgerPaymentModal({
 
   const amountNum = parseFloat(amount) || 0
 
-  const newBalanceAfterSettle = currentBalance - amountNum
-  const newBalanceAfterTopup = currentBalance + amountNum
+  const newBalanceAfterPayment = currentBalance - amountNum
 
   const handleSubmit = async () => {
     if (!amountNum || amountNum <= 0) {
@@ -79,77 +79,59 @@ export default function CityLedgerPaymentModal({
       if (!user) { toast.error('Session expired'); return }
 
       const isTopUp = tab === 'topup'
-      const balanceDelta = isTopUp ? amountNum : -amountNum
-      const newBalance = currentBalance + balanceDelta
+      const newBalance = currentBalance - amountNum
       const transactionType = isTopUp ? 'City Ledger Top-Up' : 'City Ledger Settlement'
 
-      // 1. Update city_ledger_accounts balance
-      if (ledgerAccountId) {
-        const { error } = await supabase
-          .from('city_ledger_accounts')
-          .update({
-            balance: newBalance,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', ledgerAccountId)
-        if (error) throw new Error(`Ledger update failed: ${error.message}`)
-      }
-
-      // 2. If organization account, also update organizations.current_balance
-      if (accountType === 'organization' && orgId) {
-        const { error } = await supabase
-          .from('organizations')
-          .update({ current_balance: newBalance })
-          .eq('id', orgId)
-        if (error) console.warn('Org balance update:', error.message)
-      }
-
-      // 3. If guest account, also update guests.balance AND clear booking balances
-      if (accountType === 'guest' && guestId) {
-        const newGuestBalance = Math.max(0, newBalance)
-        const { error: gErr } = await supabase
-          .from('guests')
-          .update({ balance: newGuestBalance })
-          .eq('id', guestId)
-        if (gErr) console.warn('Guest balance update:', gErr.message)
-
-        // If fully settled (balance reaches 0), clear all pending booking balances
-        // and mark pending folio_charges as paid for this guest
-        if (newGuestBalance === 0) {
-          // Get all bookings for this guest that have outstanding balance
-          const { data: pendingBookings } = await supabase
-            .from('bookings')
-            .select('id')
-            .eq('guest_id', guestId)
-            .gt('balance', 0)
-          if (pendingBookings && pendingBookings.length > 0) {
-            for (const bk of pendingBookings) {
-              await supabase.from('bookings').update({ balance: 0, payment_status: 'paid' }).eq('id', bk.id)
-              await supabase
-                .from('folio_charges')
-                .update({ payment_status: 'paid' })
-                .eq('booking_id', bk.id)
-                .eq('payment_status', 'pending')
-            }
-          }
+      if (accountType === 'guest') {
+        await recordGuestLedgerCashMovement(supabase, {
+          organizationId,
+          accountName,
+          guestId: guestId ?? null,
+          amount: amountNum,
+          paymentMethod,
+          notes,
+          transactionType,
+          userId: user.id,
+          ledgerAccountId,
+          currentLedgerBalance: currentBalance,
+          syncGuestProfile: true,
+        })
+      } else {
+        // Organization (or non-guest): city ledger row is required for update path
+        if (ledgerAccountId) {
+          const { error } = await supabase
+            .from('city_ledger_accounts')
+            .update({
+              balance: newBalance,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', ledgerAccountId)
+          if (error) throw new Error(`Ledger update failed: ${error.message}`)
         }
-      }
 
-      // 3. Insert into transactions table
-      const txId = `CLG-${Date.now()}`
-      const { error: txError } = await supabase.from('transactions').insert([{
-        organization_id: organizationId,
-        booking_id: null,
-        transaction_id: txId,
-        guest_name: accountName,
-        room: null,
-        amount: amountNum,
-        payment_method: paymentMethod,
-        status: 'paid',
-        description: `${transactionType} — ${accountName}${notes ? ` | ${notes}` : ''}`,
-        received_by: user.id,
-      }])
-      if (txError) console.warn('Transaction insert:', txError.message)
+        if (accountType === 'organization' && orgId) {
+          const { error } = await supabase
+            .from('organizations')
+            .update({ current_balance: newBalance })
+            .eq('id', orgId)
+          if (error) console.warn('Org balance update:', error.message)
+        }
+
+        const txId = `CLG-${Date.now()}`
+        const { error: txError } = await supabase.from('transactions').insert([{
+          organization_id: organizationId,
+          booking_id: null,
+          transaction_id: txId,
+          guest_name: accountName,
+          room: null,
+          amount: amountNum,
+          payment_method: paymentMethod,
+          status: 'paid',
+          description: `${transactionType} — ${accountName}${notes ? ` | ${notes}` : ''}`,
+          received_by: user.id,
+        }])
+        if (txError) console.warn('Transaction insert:', txError.message)
+      }
 
       toast.success(
         isTopUp
@@ -237,9 +219,7 @@ export default function CityLedgerPaymentModal({
                 <SelectContent>
                   <SelectItem value="cash">Cash</SelectItem>
                   <SelectItem value="transfer">Transfer</SelectItem>
-                  <SelectItem value="pos">POS / Card</SelectItem>
-                  <SelectItem value="cheque">Cheque</SelectItem>
-                  <SelectItem value="online">Online Payment</SelectItem>
+                  <SelectItem value="pos">POS</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -261,8 +241,8 @@ export default function CityLedgerPaymentModal({
                 </div>
                 <div className="flex justify-between font-semibold border-t pt-1 mt-1">
                   <span>New balance</span>
-                  <span className={newBalanceAfterSettle > 0 ? 'text-red-600' : newBalanceAfterSettle < 0 ? 'text-green-600' : ''}>
-                    {formatNaira(newBalanceAfterSettle)}
+                  <span className={newBalanceAfterPayment > 0 ? 'text-red-600' : newBalanceAfterPayment < 0 ? 'text-green-600' : ''}>
+                    {formatNaira(newBalanceAfterPayment)}
                   </span>
                 </div>
               </div>
@@ -294,9 +274,7 @@ export default function CityLedgerPaymentModal({
                 <SelectContent>
                   <SelectItem value="cash">Cash</SelectItem>
                   <SelectItem value="transfer">Transfer</SelectItem>
-                  <SelectItem value="pos">POS / Card</SelectItem>
-                  <SelectItem value="cheque">Cheque</SelectItem>
-                  <SelectItem value="online">Online Payment</SelectItem>
+                  <SelectItem value="pos">POS</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -314,12 +292,12 @@ export default function CityLedgerPaymentModal({
                 </div>
                 <div className="flex justify-between text-muted-foreground">
                   <span>Credit added</span>
-                  <span className="text-blue-600">+ {formatNaira(amountNum)}</span>
+                  <span className="text-blue-600">− {formatNaira(amountNum)}</span>
                 </div>
                 <div className="flex justify-between font-semibold border-t pt-1 mt-1">
                   <span>New balance</span>
-                  <span className={newBalanceAfterTopup > 0 ? 'text-red-600' : newBalanceAfterTopup < 0 ? 'text-green-600' : ''}>
-                    {formatNaira(newBalanceAfterTopup)}
+                  <span className={newBalanceAfterPayment > 0 ? 'text-red-600' : newBalanceAfterPayment < 0 ? 'text-green-600' : ''}>
+                    {formatNaira(newBalanceAfterPayment)}
                   </span>
                 </div>
               </div>

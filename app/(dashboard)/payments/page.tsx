@@ -285,7 +285,6 @@ export default function PaymentsPage() {
                   <SelectItem value="pos">POS</SelectItem>
                   <SelectItem value="card">Card</SelectItem>
                   <SelectItem value="transfer">Transfer</SelectItem>
-                  <SelectItem value="cheque">Cheque</SelectItem>
                 </SelectContent>
               </Select>
             </div>

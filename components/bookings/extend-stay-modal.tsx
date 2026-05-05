@@ -239,7 +239,7 @@ export function ExtendStayModal({ open, onClose, onSuccess, booking }: ExtendSta
           .update({ balance: (freshBk?.balance || 0) + additionalAmount, payment_status: 'pending' })
           .eq('id', booking.id)
       } else {
-        // Immediate payment (cash/pos/transfer/cheque) — increment deposit so Amount Paid is accurate
+        // Immediate payment (cash/pos/transfer/card) — increment deposit so Amount Paid is accurate
         const { data: freshBk } = await supabase
           .from('bookings')
           .select('deposit')

@@ -17,9 +17,11 @@ export function RevenueBreakdownTable({ payments }: RevenueBreakdownTableProps) 
     cash: 'bg-green-100 text-green-800',
     pos: 'bg-blue-100 text-blue-800',
     transfer: 'bg-purple-100 text-purple-800',
-    cheque: 'bg-orange-100 text-orange-800',
     credit: 'bg-yellow-100 text-yellow-800',
   }
+
+  const methodBadgeClass = (method: string) =>
+    methodColors[method] ?? 'bg-muted text-muted-foreground'
 
   const columns: Column<Payment>[] = [
     {
@@ -76,8 +78,8 @@ export function RevenueBreakdownTable({ payments }: RevenueBreakdownTableProps) 
       header: 'Method',
       accessor: 'payment_method',
       cell: (value) => (
-        <Badge className={methodColors[value]} variant="secondary">
-          {value.toUpperCase()}
+        <Badge className={methodBadgeClass(String(value))} variant="secondary">
+          {String(value).toUpperCase()}
         </Badge>
       ),
     },

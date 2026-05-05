@@ -22,6 +22,7 @@ import { formatPersonName, normalizeName, normalizeNameKey } from '@/lib/utils/n
 import { appendBulkGroupNote, createBulkGroupId } from '@/lib/utils/bulk-booking'
 import { StayDateRangeFields } from '@/components/shared/stay-date-range-fields'
 import { BOOKING_MODAL_ROOMS_LIMIT, normalizeRoomsForBookingPickers } from '@/lib/utils/room-bookability'
+import { applyPaymentToGuestCityLedger } from '@/lib/utils/guest-city-ledger'
 
 const ROOM_TYPES_FALLBACK = ['Deluxe', 'Royal', 'Kings', 'Mini Suite', 'Executive Suite', 'Diplomatic Suite']
 
@@ -113,6 +114,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'pos' | 'card' | 'transfer' | 'city_ledger'>('cash')
   const [paymentStatus, setPaymentStatus] = useState<'paid' | 'partial' | 'unpaid'>('unpaid')
   const [partialAmount, setPartialAmount] = useState<number | ''>('')
+  const [payAboveBulkRoomTotal, setPayAboveBulkRoomTotal] = useState(false)
   // City ledger
   const [ledgerType, setLedgerType] = useState<'individual' | 'organization'>('organization')
   const [ledgerSearch, setLedgerSearch] = useState('')
@@ -420,6 +422,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
   const canSubmit = () => {
     if (paymentMethod === 'city_ledger' && !selectedLedger) return false
     if (paymentStatus === 'partial' && (!partialAmount || Number(partialAmount) <= 0)) return false
+    if (paymentStatus === 'paid' && payAboveBulkRoomTotal && (!partialAmount || Number(partialAmount) <= 0)) return false
     return true
   }
 
@@ -748,8 +751,14 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
             const total = ratePn * nights
             if (paymentMethod === 'city_ledger' && selectedLedger?.id) ledgerAmountToAdd += total
 
-            const depositAmt = paymentStatus === 'paid' ? total : paymentStatus === 'partial' ? (Number(partialAmount) || 0) : 0
-            const balanceAmt = total - depositAmt
+            const depositAmt = paymentMethod === 'city_ledger'
+              ? 0
+              : paymentStatus === 'paid'
+                ? (payAboveBulkRoomTotal ? Math.max(total, Number(partialAmount) || total) : total)
+                : paymentStatus === 'partial'
+                  ? (Number(partialAmount) || 0)
+                  : 0
+            const balanceAmt = Math.max(0, total - depositAmt)
             const isCityLedger = paymentMethod === 'city_ledger'
             const folioId = `BLK-${Date.now().toString(36).toUpperCase()}`
             const bookingBalance = isOrganizationLedger ? 0 : balanceAmt
@@ -786,6 +795,20 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
               payment_status: isOrganizationLedger ? 'posted_to_ledger' : balanceAmt > 0 ? 'unpaid' : 'paid',
               created_by: currentUserId,
             }])
+            const prepayExcess = Math.max(0, depositAmt - total)
+            if (!isCityLedger && prepayExcess > 0 && finalGuestId) {
+              const gn = formatPersonName(entry.guestName) || ''
+              const { data: gRow } = await supabase.from('guests').select('name').eq('id', finalGuestId).maybeSingle()
+              const ledgerGuestName = (gRow?.name || gn || selectedGroupGuest?.name || '').trim()
+              if (ledgerGuestName) {
+                await applyPaymentToGuestCityLedger(supabase, {
+                  organizationId: orgId,
+                  guestName: ledgerGuestName,
+                  paymentAmount: prepayExcess,
+                  createIfMissingExcess: prepayExcess,
+                })
+              }
+            }
             await supabase.from('transactions').insert([{
               organization_id: orgId, booking_id: booking.id,
               transaction_id: `TXN-${Date.now().toString(36).toUpperCase()}`,
@@ -849,6 +872,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
     setGroupGuestSearch(''); setGroupGuestResults([]); setSelectedGroupGuest(null); setGroupGuestSearchOpen(false)
     setCheckIn(undefined); setCheckOut(undefined); setBackdateReason(''); setRoomAvailabilityChecked(false); setAvailableRooms([])
     setCustomRate(''); setPaymentMethod('cash'); setPaymentStatus('unpaid'); setPartialAmount('')
+    setPayAboveBulkRoomTotal(false)
     setLedgerSearch(''); setLedgerResults([]); setSelectedLedger(null); setLedgerSearchOpen(false)
     setShowNewLedgerOrgForm(false); setNewLedgerOrgName(''); setNewLedgerOrgEmail(''); setNewLedgerOrgPhone('')
     setEntries([makeEntry()]); setQuickRoomCount(''); setQuickRoomType(''); setFillLater(false); setTotalRoomsCount('')
@@ -1161,7 +1185,14 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
               </div>
               <div className="space-y-2">
                 <Label>Payment Method</Label>
-                <Select value={paymentMethod} onValueChange={(v: any) => { setPaymentMethod(v); if (v !== 'city_ledger') { setSelectedLedger(null); setShowNewLedgerOrgForm(false) } }}>
+                <Select value={paymentMethod} onValueChange={(v: any) => {
+                  setPaymentMethod(v)
+                  if (v !== 'city_ledger') {
+                    setSelectedLedger(null); setShowNewLedgerOrgForm(false)
+                  } else {
+                    setPayAboveBulkRoomTotal(false)
+                  }
+                }}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="cash">Cash</SelectItem>
@@ -1239,7 +1270,10 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
 
               <div className="space-y-2">
                 <Label>Payment Status</Label>
-                <Select value={paymentStatus} onValueChange={(v: any) => setPaymentStatus(v)}>
+                <Select value={paymentStatus} onValueChange={(v: any) => {
+                  setPaymentStatus(v)
+                  if (v !== 'paid') setPayAboveBulkRoomTotal(false)
+                }}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="unpaid">Unpaid — pay at check-in</SelectItem>
@@ -1248,6 +1282,32 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
                   </SelectContent>
                 </Select>
               </div>
+
+              {paymentStatus === 'paid' && paymentMethod !== 'city_ledger' && (
+                <div className="flex items-start gap-2 rounded-md border border-input p-3">
+                  <Checkbox
+                    id="bulk-pay-above"
+                    checked={payAboveBulkRoomTotal}
+                    onCheckedChange={(c) => setPayAboveBulkRoomTotal(Boolean(c))}
+                  />
+                  <Label htmlFor="bulk-pay-above" className="text-sm font-normal leading-snug cursor-pointer">
+                    Guest pays above the room total per booking — excess is saved as city ledger credit.
+                  </Label>
+                </div>
+              )}
+
+              {paymentStatus === 'paid' && payAboveBulkRoomTotal && paymentMethod !== 'city_ledger' && (
+                <div className="space-y-2">
+                  <Label>Cash received per room (at least each room&apos;s calculated total)</Label>
+                  <Input
+                    type="number"
+                    min={1}
+                    placeholder="Enter amount collected per room"
+                    value={partialAmount}
+                    onChange={(e) => setPartialAmount(e.target.value === '' ? '' : Number(e.target.value))}
+                  />
+                </div>
+              )}
 
               {paymentStatus === 'partial' && (
                 <div className="space-y-2">

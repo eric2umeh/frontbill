@@ -289,7 +289,7 @@ export default function AnalyticsPage() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {[
           { key: 'cash', label: 'Cash', icon: <Banknote className="h-4 w-4" />, color: 'text-green-700', bg: 'bg-green-50 border-green-200' },
-          { key: 'pos', label: 'POS / Card', icon: <Smartphone className="h-4 w-4" />, color: 'text-blue-700', bg: 'bg-blue-50 border-blue-200' },
+          { key: 'pos', label: 'POS', icon: <Smartphone className="h-4 w-4" />, color: 'text-blue-700', bg: 'bg-blue-50 border-blue-200' },
           { key: 'transfer', label: 'Transfer', icon: <ArrowRightLeft className="h-4 w-4" />, color: 'text-purple-700', bg: 'bg-purple-50 border-purple-200' },
           { key: 'city_ledger', label: 'City Ledger', icon: <Building2 className="h-4 w-4" />, color: 'text-orange-700', bg: 'bg-orange-50 border-orange-200' },
         ].map(m => {
