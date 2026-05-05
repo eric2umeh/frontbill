@@ -22,6 +22,7 @@ import { formatPersonName, normalizeName, normalizeNameKey } from '@/lib/utils/n
 import { appendBulkGroupNote, createBulkGroupId } from '@/lib/utils/bulk-booking'
 import { StayDateRangeFields } from '@/components/shared/stay-date-range-fields'
 import { BOOKING_MODAL_ROOMS_LIMIT, normalizeRoomsForBookingPickers } from '@/lib/utils/room-bookability'
+import { insertFolioCharges } from '@/lib/utils/insert-folio-charges'
 import { applyPaymentToGuestCityLedger } from '@/lib/utils/guest-city-ledger'
 import { buildBackdateDedupeKey } from '@/lib/backdate/dedupe-key'
 
@@ -814,7 +815,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
             if (be) throw be
 
             await supabase.from('rooms').update({ status: 'reserved', updated_by: currentUserId, updated_at: new Date().toISOString() }).eq('id', room.id)
-            await supabase.from('folio_charges').insert([{
+            const { error: fcErr } = await insertFolioCharges(supabase, [{
               booking_id: booking.id,
               organization_id: orgId,
               description: `${
@@ -828,6 +829,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
               payment_status: isOrganizationLedger ? 'posted_to_ledger' : balanceAmt > 0 ? 'unpaid' : 'paid',
               created_by: currentUserId,
             }])
+            if (fcErr) throw fcErr
             const prepayExcess = Math.max(0, depositAmt - total)
             if (!isCityLedger && prepayExcess > 0 && finalGuestId) {
               const gn = formatPersonName(entry.guestName) || ''
