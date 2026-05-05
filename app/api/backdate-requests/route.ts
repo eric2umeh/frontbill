@@ -1,8 +1,17 @@
 import { createAdminClient } from '@/lib/supabase/admin'
+import { buildBackdateDedupeKey } from '@/lib/backdate/dedupe-key'
+import { createBookingFromPayload, type SerializedBookingPayload } from '@/lib/backdate/booking-payload'
 import { NextResponse } from 'next/server'
 
 const SUPERADMIN_ROLE = 'superadmin'
 const DECISION_STATUSES = ['approved', 'rejected']
+
+function isUniqueViolation(err: { code?: string; message?: string } | null) {
+  if (!err) return false
+  if (err.code === '23505') return true
+  const m = err.message || ''
+  return m.includes('idx_backdate_requests_org_pending_dedupe') || m.includes('duplicate key')
+}
 
 export async function GET(request: Request) {
   try {
@@ -65,7 +74,8 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const body = await request.json()
-    const { caller_id, request_type, requested_check_in, requested_check_out, reason, metadata } = body
+    const { caller_id, request_type, requested_check_in, requested_check_out, reason, metadata: rawMetadata } = body
+    const metadata = rawMetadata && typeof rawMetadata === 'object' ? { ...rawMetadata } : {}
 
     if (!caller_id || !request_type || !requested_check_in || !reason?.trim()) {
       return NextResponse.json({ error: 'caller_id, request_type, requested_check_in and reason are required' }, { status: 400 })
@@ -89,21 +99,62 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Backdate requests are only needed for past check-in dates' }, { status: 400 })
     }
 
+    const roomId = (metadata as any).room_id ?? (metadata as any).booking_payload?.room_id ?? null
+    const bulkFingerprint = (metadata as any).bulk_fingerprint ?? null
+
+    const dedupe_key = buildBackdateDedupeKey({
+      organizationId: callerProfile.organization_id,
+      requestedBy: caller_id,
+      requestType: request_type,
+      requestedCheckIn: requested_check_in,
+      requestedCheckOut: requested_check_out || null,
+      roomId,
+      bulkFingerprint,
+    })
+
+    const { data: dup } = await admin
+      .from('backdate_requests')
+      .select('id')
+      .eq('organization_id', callerProfile.organization_id)
+      .eq('dedupe_key', dedupe_key)
+      .eq('status', 'pending')
+      .maybeSingle()
+
+    if (dup?.id) {
+      return NextResponse.json(
+        { error: 'A pending backdate request for this intent already exists', existing_request_id: dup.id },
+        { status: 409 },
+      )
+    }
+
+    ;(metadata as any).dedupe_key = dedupe_key
+
     const { data, error } = await admin
       .from('backdate_requests')
-      .insert([{
-        organization_id: callerProfile.organization_id,
-        requested_by: caller_id,
-        request_type,
-        requested_check_in,
-        requested_check_out: requested_check_out || null,
-        reason: reason.trim(),
-        metadata: metadata || {},
-      }])
+      .insert([
+        {
+          organization_id: callerProfile.organization_id,
+          requested_by: caller_id,
+          request_type,
+          requested_check_in,
+          requested_check_out: requested_check_out || null,
+          reason: reason.trim(),
+          metadata,
+          dedupe_key,
+        },
+      ])
       .select()
       .single()
 
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    if (error) {
+      if (isUniqueViolation(error)) {
+        return NextResponse.json(
+          { error: 'A pending backdate request for this intent already exists' },
+          { status: 409 },
+        )
+      }
+      return NextResponse.json({ error: error.message }, { status: 500 })
+    }
     return NextResponse.json({ request: data })
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 })
@@ -133,18 +184,44 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: 'Only superadmins can approve or reject backdate requests' }, { status: 403 })
     }
 
-    const { data: existing } = await admin
-      .from('backdate_requests')
-      .select('organization_id, status')
-      .eq('id', request_id)
-      .single()
+    const { data: fullRow, error: loadErr } = await admin.from('backdate_requests').select('*').eq('id', request_id).single()
 
-    if (!existing || existing.organization_id !== callerProfile.organization_id) {
+    if (loadErr || !fullRow) {
       return NextResponse.json({ error: 'Backdate request not found' }, { status: 404 })
     }
 
-    if (existing.status !== 'pending') {
+    if (fullRow.organization_id !== callerProfile.organization_id) {
+      return NextResponse.json({ error: 'Backdate request not found' }, { status: 404 })
+    }
+
+    if (fullRow.status !== 'pending') {
       return NextResponse.json({ error: 'This request has already been decided' }, { status: 400 })
+    }
+
+    const decidedAt = new Date().toISOString()
+    const meta = (fullRow.metadata && typeof fullRow.metadata === 'object' ? fullRow.metadata : {}) as Record<string, unknown>
+    let created_booking_id: string | null = fullRow.created_booking_id ?? null
+    let used_at: string | null = fullRow.used_at ?? null
+    let nextMetadata = { ...meta }
+
+    if (status === 'approved') {
+      if (fullRow.request_type === 'booking' && meta.booking_payload && !created_booking_id) {
+        const payload = meta.booking_payload as SerializedBookingPayload
+        if (payload.organization_id !== fullRow.organization_id) {
+          return NextResponse.json({ error: 'Booking payload does not match organization' }, { status: 400 })
+        }
+        const created = await createBookingFromPayload(admin, payload, fullRow.requested_by)
+        if (!created.ok) {
+          return NextResponse.json({ error: created.error }, { status: 422 })
+        }
+        created_booking_id = created.bookingId
+        used_at = decidedAt
+        nextMetadata = {
+          ...nextMetadata,
+          created_folio_id: created.folio_id,
+          created_booking_id: created.bookingId,
+        }
+      }
     }
 
     const { data, error } = await admin
@@ -153,14 +230,17 @@ export async function PATCH(request: Request) {
         status,
         decision_note: decision_note?.trim() || null,
         approved_by: caller_id,
-        decided_at: new Date().toISOString(),
+        decided_at: decidedAt,
+        ...(created_booking_id ? { created_booking_id } : {}),
+        ...(used_at ? { used_at } : {}),
+        metadata: nextMetadata,
       })
       .eq('id', request_id)
       .select()
       .single()
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-    return NextResponse.json({ request: data })
+    return NextResponse.json({ request: data, created_booking_id: created_booking_id || undefined })
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 })
   }
