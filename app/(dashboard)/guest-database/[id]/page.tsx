@@ -18,6 +18,7 @@ import { format } from 'date-fns'
 import CityLedgerPaymentModal from '@/components/city-ledger/city-ledger-payment-modal'
 import { useAuth } from '@/lib/auth-context'
 import { hasPermission } from '@/lib/permissions'
+import { toast } from 'sonner'
 
 interface Guest {
   id: string
@@ -68,7 +69,9 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
   const { id } = use(params)
   const router = useRouter()
   const { role } = useAuth()
+  /** Product rule: only Administrator / Superadmin edit guest profiles (see hasPermission hard gate). */
   const canEditGuest = hasPermission(role, 'guests:edit')
+  const canViewGuests = hasPermission(role, 'guests:view')
   const [guest, setGuest] = useState<Guest | null>(null)
   const [bookings, setBookings] = useState<Booking[]>([])
   const [ledgerAccount, setLedgerAccount] = useState<LedgerAccount | null>(null)
@@ -341,29 +344,36 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
             <p className="text-muted-foreground">Guest since {guest.created_at ? format(new Date(guest.created_at), 'MMMM yyyy') : '-'}</p>
           </div>
         </div>
-        <div className="flex items-center gap-2 self-start">
-          {canEditGuest && (
-            <>
-              {isEditingGuest ? (
-                <>
-                  <Button size="sm" variant="outline" onClick={() => { setIsEditingGuest(false); loadGuest() }} disabled={savingGuest}>
-                    Cancel
+        <div className="flex flex-col items-end gap-2 self-start">
+          <div className="flex items-center gap-2">
+            {canEditGuest && (
+              <>
+                {isEditingGuest ? (
+                  <>
+                    <Button size="sm" variant="outline" onClick={() => { setIsEditingGuest(false); loadGuest() }} disabled={savingGuest}>
+                      Cancel
+                    </Button>
+                    <Button size="sm" onClick={handleSaveGuest} disabled={savingGuest}>
+                      {savingGuest ? 'Saving...' : 'Save Guest'}
+                    </Button>
+                  </>
+                ) : (
+                  <Button variant="outline" size="sm" onClick={() => setIsEditingGuest(true)}>
+                    Edit Guest
                   </Button>
-                  <Button size="sm" onClick={handleSaveGuest} disabled={savingGuest}>
-                    {savingGuest ? 'Saving...' : 'Save Guest'}
-                  </Button>
-                </>
-              ) : (
-                <Button variant="outline" size="sm" onClick={() => setIsEditingGuest(true)}>
-                  Edit Guest
-                </Button>
-              )}
-            </>
+                )}
+              </>
+            )}
+            <Button variant="outline" size="sm" onClick={() => loadGuest()} className="gap-2">
+              <RefreshCw className="h-4 w-4" />
+              Refresh
+            </Button>
+          </div>
+          {canViewGuests && !canEditGuest && (
+            <p className="text-xs text-muted-foreground max-w-sm text-right">
+              Only Administrator or Superadmin can edit guest profiles.
+            </p>
           )}
-          <Button variant="outline" size="sm" onClick={() => loadGuest()} className="gap-2">
-            <RefreshCw className="h-4 w-4" />
-            Refresh
-          </Button>
         </div>
       </div>
 
