@@ -17,6 +17,7 @@ import { format } from 'date-fns'
 import CityLedgerPaymentModal from '@/components/city-ledger/city-ledger-payment-modal'
 import { calculateOrganizationBalancesBatch } from '@/lib/balance'
 import { useAuth } from '@/lib/auth-context'
+import { hasPermission } from '@/lib/permissions'
 import { getUserDisplayName } from '@/lib/utils/user-display'
 import { fetchUserDisplayNameMap } from '@/lib/utils/fetch-user-display-names'
 
@@ -45,7 +46,8 @@ export default function OrganizationDetailPage() {
   const params = useParams()
   const orgId = params.id as string
   const { role, userId, organizationId: authTenantOrgId } = useAuth()
-  const isSuperadmin = role === 'superadmin'
+  const canEditOrg = hasPermission(role, 'organizations:edit')
+  const canDeleteOrg = hasPermission(role, 'organizations:delete')
 
   const [organization, setOrganization] = useState<Organization | null>(null)
   const [createdByProfile, setCreatedByProfile] = useState<ProfileInfo | null>(null)
@@ -325,8 +327,9 @@ export default function OrganizationDetailPage() {
             </Badge>
           </div>
         </div>
-        {isSuperadmin && <div className="flex gap-2">
-          {isEditing ? (
+        {(canEditOrg || canDeleteOrg) && (
+        <div className="flex gap-2">
+          {isEditing && canEditOrg ? (
             <>
               <Button
                 variant="outline"
@@ -350,19 +353,24 @@ export default function OrganizationDetailPage() {
                 {saving ? 'Saving...' : 'Save'}
               </Button>
             </>
-          ) : (
+          ) : !isEditing ? (
             <>
-              <Button variant="outline" onClick={() => setIsEditing(true)}>
-                <Edit className="mr-2 h-4 w-4" />
-                Edit
-              </Button>
-              <Button variant="destructive" onClick={handleDelete}>
-                <Trash2 className="mr-2 h-4 w-4" />
-                Delete
-              </Button>
+              {canEditOrg && (
+                <Button variant="outline" onClick={() => setIsEditing(true)}>
+                  <Edit className="mr-2 h-4 w-4" />
+                  Edit
+                </Button>
+              )}
+              {canDeleteOrg && (
+                <Button variant="destructive" onClick={handleDelete}>
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  Delete
+                </Button>
+              )}
             </>
-          )}
-        </div>}
+          ) : null}
+        </div>
+        )}
       </div>
 
       {/* Content */}

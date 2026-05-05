@@ -25,6 +25,7 @@ import { BOOKING_MODAL_ROOMS_LIMIT, normalizeRoomsForBookingPickers } from '@/li
 import { insertFolioCharges } from '@/lib/utils/insert-folio-charges'
 import { applyPaymentToGuestCityLedger } from '@/lib/utils/guest-city-ledger'
 import { buildBackdateDedupeKey } from '@/lib/backdate/dedupe-key'
+import { hasPermission } from '@/lib/permissions'
 
 const ROOM_TYPES_FALLBACK = ['Deluxe', 'Royal', 'Kings', 'Mini Suite', 'Executive Suite', 'Diplomatic Suite']
 
@@ -428,7 +429,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
     return true
   }
 
-  const isSuperadmin = currentUserRole === 'superadmin'
+  const canApproveBackdates = hasPermission(currentUserRole, 'backdate:approve')
   const isBackdated = checkIn ? checkIn < todayDate() : false
 
   const copy =
@@ -436,17 +437,17 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
       ? {
           title: (step: number) => `Bulk booking — Step ${step} of 2`,
           typeLabel: 'Booking type',
-          backdateBlocked: 'Backdated bulk bookings require superadmin approval. Send a request first.',
-          backdatePlaceholder: 'Explain why this bulk booking must be backdated for superadmin approval',
-          backdateHelp: 'Only a superadmin can approve or directly create backdated bulk bookings.',
+          backdateBlocked: 'Backdated bulk bookings require Night Audit approval. Send a request first.',
+          backdatePlaceholder: 'Explain why this bulk booking must be backdated (for Night Audit approval)',
+          backdateHelp: 'A Superadmin or Administrator can approve or allow an approved backdated bulk booking.',
           confirm: 'Confirm bulk booking',
         }
       : {
           title: (step: number) => `Bulk reservation — Step ${step} of 2`,
           typeLabel: 'Reservation type',
-          backdateBlocked: 'Backdated bulk reservations require superadmin approval. Send a request first.',
-          backdatePlaceholder: 'Explain why this bulk reservation must be backdated for superadmin approval',
-          backdateHelp: 'Only a superadmin can approve or directly create backdated bulk reservations.',
+          backdateBlocked: 'Backdated bulk reservations require Night Audit approval. Send a request first.',
+          backdatePlaceholder: 'Explain why this bulk reservation must be backdated (for Night Audit approval)',
+          backdateHelp: 'A Superadmin or Administrator can approve or allow an approved backdated bulk reservation.',
           confirm: 'Confirm bulk reservation',
         }
 
@@ -491,7 +492,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
   const handleRequestBackdate = async () => {
     if (!checkIn) { toast.error('Select a backdated check-in date'); return }
     if (!checkOut) { toast.error('Select check-out date'); return }
-    if (!backdateReason.trim()) { toast.error('Enter a reason for the superadmin'); return }
+    if (!backdateReason.trim()) { toast.error('Enter a reason for the approver'); return }
     setLoading(true)
     try {
       const bulk_fingerprint = buildBulkBackdateFingerprint()
@@ -519,7 +520,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
         return
       }
       if (!res.ok) { toast.error(json.error || 'Failed to send backdate request'); return }
-      toast.success('Backdate request sent to superadmin')
+      toast.success('Backdate request submitted for approval')
       setBackdateReason('')
     } catch {
       toast.error('Failed to send backdate request')
@@ -539,7 +540,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
   const handleSubmit = async () => {
     if (!checkIn || !checkOut) { toast.error('Dates required'); return }
     if (!canSubmit()) { toast.error('Complete payment details'); return }
-    if (isBackdated && !isSuperadmin && !(await hasApprovedBackdateRequest())) {
+    if (isBackdated && !canApproveBackdates && !(await hasApprovedBackdateRequest())) {
       toast.error(copy.backdateBlocked)
       return
     }
@@ -1113,7 +1114,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
               <p className="text-sm text-muted-foreground">{nights} night(s) · {format(checkIn, 'dd MMM')} — {format(checkOut, 'dd MMM yyyy')}</p>
             )}
 
-            {isBackdated && !isSuperadmin && (
+            {isBackdated && !canApproveBackdates && (
               <div className="space-y-2 rounded-md border border-amber-200 bg-amber-50 p-3">
                 <Label>Reason for Backdate Request *</Label>
                 <Textarea
@@ -1503,11 +1504,11 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
             </Button>
           ) : (
             <Button
-              onClick={isBackdated && !isSuperadmin ? handleBackdatedBulkAction : handleSubmit}
+              onClick={isBackdated && !canApproveBackdates ? handleBackdatedBulkAction : handleSubmit}
               disabled={loading || !canSubmit()}
             >
               {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-              {loading ? 'Working...' : isBackdated && !isSuperadmin ? 'Request / Use Superadmin Approval' : copy.confirm}
+              {loading ? 'Working...' : isBackdated && !canApproveBackdates ? 'Request approval' : copy.confirm}
             </Button>
           )}
         </div>

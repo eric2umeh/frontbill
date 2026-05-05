@@ -342,7 +342,9 @@ export default function UsersRolesPage() {
         {/* ---- Roles tab ---- */}
         <TabsContent value="roles" className="mt-4 space-y-4">
           <p className="text-sm text-muted-foreground">
-            FrontBill assigns fixed permission bundles—there is no per-user toggling. Descriptions summarise what each role experiences in this product (bulk booking, reserves, extend/charge safeguards, Night Audit tooling, ledger rules, housekeeping/maintenance workspaces, etc.). Expand a row to inspect every granular permission grouped by sidebar area.
+            Bundles are fixed in code (<code className="text-xs bg-muted px-1 rounded">lib/permissions.ts</code>). This tab reflects the same matrix as production.
+            Administrator and Superadmin carry the same permission set; only a Superadmin may add, edit, or remove another Superadmin (enforced in Users & Roles and the admin API).
+            Select a role card to see every permission grouped by sidebar area.
           </p>
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
             {ROLE_DEFINITIONS.map(role => (

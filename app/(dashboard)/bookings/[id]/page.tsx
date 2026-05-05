@@ -57,8 +57,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
   const router = useRouter()
   const { role, userId } = useAuth()
   const canAdminBooking = canAdministerBookingRecord(role)
-  const isSuperadmin = role === 'superadmin'
-  const canManageFolio = isSuperadmin || role === 'front_desk'
+  const canManageFolio = role === 'superadmin' || role === 'admin' || role === 'front_desk'
   const [booking, setBooking] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [bookingId, setBookingId] = useState<string>('')

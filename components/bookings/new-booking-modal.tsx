@@ -19,6 +19,7 @@ import { resolveOrganizationLedgerAccount } from '@/lib/utils/resolve-ledger-acc
 import { formatPersonName } from '@/lib/utils/name-format'
 import { StayDateRangeFields } from '@/components/shared/stay-date-range-fields'
 import { useAuth } from '@/lib/auth-context'
+import { hasPermission } from '@/lib/permissions'
 import { BOOKING_MODAL_ROOMS_LIMIT, normalizeRoomsForBookingPickers } from '@/lib/utils/room-bookability'
 import { Checkbox } from '@/components/ui/checkbox'
 import { insertFolioCharges } from '@/lib/utils/insert-folio-charges'
@@ -510,7 +511,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
     return true
   }
 
-  const isSuperadmin = role === 'superadmin'
+  const canApproveBackdates = hasPermission(role, 'backdate:approve')
   const isBackdated = checkInDate ? checkInDate < new Date(new Date().setHours(0, 0, 0, 0)) : false
 
   const hasApprovedBackdateRequest = async () => {
@@ -572,7 +573,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
 
   const handleRequestBackdate = async () => {
     if (!checkInDate) { toast.error('Select a backdated check-in date'); return }
-    if (!backdateReason.trim()) { toast.error('Enter a reason for the superadmin'); return }
+    if (!backdateReason.trim()) { toast.error('Enter a reason for the approver'); return }
     if (!selectedRoom) { toast.error('Select a room before sending a backdate request'); return }
     const booking_payload = buildBookingBackdatePayload()
     if (!booking_payload) {
@@ -604,7 +605,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
         return
       }
       if (!res.ok) { toast.error(json.error || 'Failed to send backdate request'); return }
-      toast.success('Backdate request sent to superadmin')
+      toast.success('Backdate request submitted for approval')
       setBackdateReason('')
     } catch {
       toast.error('Failed to send backdate request')
@@ -625,8 +626,8 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
     try {
       setLoading(true)
       if (!checkInDate || !checkOutDate) { toast.error('Dates required'); return }
-      if (isBackdated && !isSuperadmin && !(await hasApprovedBackdateRequest())) {
-        toast.error('Backdated bookings require superadmin approval. Send a request first.')
+      if (isBackdated && !canApproveBackdates && !(await hasApprovedBackdateRequest())) {
+        toast.error('Backdated bookings require approval in Night Audit. Send a request first.')
         return
       }
       if (!selectedRoom) { toast.error('Room required'); return }
@@ -930,15 +931,15 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
               showNights
               disableCalendar={(d) => !!(checkInDate && !checkOutDate && d <= checkInDate)}
             />
-            {isBackdated && !isSuperadmin && (
+            {isBackdated && !canApproveBackdates && (
               <div className="space-y-2 rounded-md border border-amber-200 bg-amber-50 p-3">
                 <Label>Reason for Backdate Request *</Label>
                 <Textarea
                   value={backdateReason}
                   onChange={(e) => setBackdateReason(e.target.value)}
-                  placeholder="Explain why this booking must be backdated for superadmin approval"
+                  placeholder="Explain why this booking must be backdated (for Night Audit approval)"
                 />
-                <p className="text-xs text-amber-700">Only a superadmin can approve or directly create backdated bookings.</p>
+                <p className="text-xs text-amber-700">A Superadmin or Administrator can approve or directly create an approved backdated booking.</p>
               </div>
             )}
 
@@ -1163,10 +1164,10 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
           <div className="flex justify-end gap-2 pt-4 border-t">
             <Button variant="outline" onClick={onClose} disabled={loading}>Cancel</Button>
             <Button
-              onClick={isBackdated && !isSuperadmin ? handleBackdatedBookingAction : handleSubmit}
+              onClick={isBackdated && !canApproveBackdates ? handleBackdatedBookingAction : handleSubmit}
               disabled={!canSubmitForm() || loading}
             >
-              {loading ? 'Working...' : isBackdated && !isSuperadmin ? 'Request / Use Superadmin Approval' : 'Create Booking'}
+              {loading ? 'Working...' : isBackdated && !canApproveBackdates ? 'Request approval' : 'Create Booking'}
             </Button>
           </div>
         </DialogContent>

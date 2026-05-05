@@ -16,6 +16,7 @@ import { toast } from 'sonner'
 import { createClient } from '@/lib/supabase/client'
 import { format, isBefore, startOfDay } from 'date-fns'
 import { useAuth } from '@/lib/auth-context'
+import { hasPermission } from '@/lib/permissions'
 
 export default function ReservationDetailPage({
   params,
@@ -24,7 +25,7 @@ export default function ReservationDetailPage({
 }) {
   const router = useRouter()
   const { role, userId } = useAuth()
-  const isSuperadmin = role === 'superadmin'
+  const canCancelReservation = hasPermission(role, 'reservations:delete')
   const [rid, setRid] = useState('')
   const [reservation, setReservation] = useState<any>(null)
   const [loading, setLoading] = useState(true)
@@ -397,7 +398,7 @@ export default function ReservationDetailPage({
               ? `Check-in on ${format(new Date(reservation!.check_in), 'dd MMM')}`
               : 'Check-in Guest'}
           </Button>
-          {isSuperadmin && (
+          {canCancelReservation && (
             <Button
               variant="destructive"
               size="sm"
@@ -580,7 +581,7 @@ export default function ReservationDetailPage({
                   ? `Check-in on ${format(new Date(reservation!.check_in), 'dd MMM')}`
                   : 'Check-in Guest'}
               </Button>
-              {isSuperadmin && (
+              {canCancelReservation && (
                 <Button
                   className="w-full"
                   variant="destructive"

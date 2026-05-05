@@ -58,7 +58,7 @@ export function BackdateRequestsTab({ userId }: Props) {
   const decide = async (requestId: string, status: 'approved' | 'rejected') => {
     setDecidingId(requestId)
     try {
-      const decision_note = status === 'approved' ? 'Approved by superadmin' : 'Rejected by superadmin'
+      const decision_note = status === 'approved' ? 'Approved in Night Audit' : 'Rejected in Night Audit'
       const res = await fetch('/api/backdate-requests', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },

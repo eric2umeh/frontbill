@@ -20,7 +20,7 @@ type BulkPageCheckoutDraft = { kind: 'row'; row: any } | { kind: 'all'; targets:
 export default function BulkBookingDetailPage({ params }: { params: Promise<{ groupId: string }> | { groupId: string } }) {
   const router = useRouter()
   const { organizationId, userId, role } = useAuth()
-  const canManageFolio = role === 'superadmin' || role === 'front_desk'
+  const canManageFolio = role === 'superadmin' || role === 'admin' || role === 'front_desk'
   const [groupId, setGroupId] = useState('')
   const [rows, setRows] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
