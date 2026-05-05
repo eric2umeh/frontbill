@@ -432,7 +432,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
       toast.error('Please select a payment method')
       return
     }
-    if (!assertFolioEditable() || !booking) return
+    if (!canManageFolio || !booking) return
 
     const P = Number(chargeAmount)
     setAddChargeLoading(true)
@@ -584,7 +584,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
       return
     }
     const guestId = booking.guest_id || booking.guests?.id || null
-    if (!assertFolioEditable()) return
+    if (!canManageFolio) return
 
     setAddChargeLoading(true)
     try {
@@ -851,6 +851,16 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
   const checkoutBannerCoYmd = normalizeBookingCheckoutYmd(booking.check_out || '')
 
   const totalBillBalance = bookingDisplayBillBalance(booking, folioCharges)
+
+  const paymentStatusLower = String(booking.payment_status || '').toLowerCase()
+  const owesOrPending =
+    totalBillBalance > 0 ||
+    Number(booking.balance || 0) > 0 ||
+    paymentStatusLower === 'pending' ||
+    paymentStatusLower === 'partial' ||
+    paymentStatusLower === 'unpaid'
+
+  const showSettleTopUp = canManageFolio && owesOrPending
 
   return (
     <div className="space-y-6">
@@ -1487,20 +1497,27 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                   {formatNaira(totalBillBalance)}
                 </span>
               </div>
-              {totalBillBalance > 0 && !folioLocked && (
+              {showSettleTopUp && (
                 <Button
                   className="w-full mt-4"
                   disabled={addChargeLoading}
                   onClick={() => {
                     setPaymentCreditTab('payment')
                     setApplyOverpaymentAsCredit(false)
-                    setChargeAmount(String(totalBillBalance))
+                    const due = Math.max(totalBillBalance, Number(booking.balance) || 0)
+                    setChargeAmount(due > 0 ? String(due) : '')
                     setPaymentCreditModalOpen(true)
                   }}
                 >
                   <CreditCard className="mr-2 h-4 w-4" />
-                  Settle Balance
+                  Settle / Top Up
                 </Button>
+              )}
+              {showSettleTopUp && folioLocked && (
+                <p className="text-xs text-muted-foreground mt-2">
+                  Folio edits are restricted after checkout or past standard checkout time, but you can still record
+                  payment or add city ledger credit here.
+                </p>
               )}
             </CardContent>
           </Card>
