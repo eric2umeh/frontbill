@@ -23,6 +23,7 @@ import { getUserDisplayName } from '@/lib/utils/user-display'
 import { fetchUserDisplayNameMap } from '@/lib/utils/fetch-user-display-names'
 import { getBulkGroupId } from '@/lib/utils/bulk-booking'
 import { manualCheckoutEligible, resolvedCheckoutDateForClosing, hideChargeExtendInBookingsTable, DEFAULT_ORG_CHECKOUT_TIME } from '@/lib/utils/booking-checkout-ui'
+import { folioPositiveOutstandingSum, shouldReconcileBookingPaymentPaid } from '@/lib/utils/booking-bill-balance'
 
 interface Booking {
   id: string
@@ -161,6 +162,7 @@ export default function BookingsPage() {
         }
         return {
           ...booking,
+          _db_balance: Number(booking.balance ?? 0),
           payment_method,
           ledger_account_name,
           guestName: booking.guests?.name || '',
@@ -170,29 +172,64 @@ export default function BookingsPage() {
         }
       })
 
-      // Derive each booking's real balance from folio_charges (pending charges)
-      // This is the authoritative source — bookings.balance can be stale due to RLS timing
+      // Derive each booking's balance from folio (same rules as booking detail / bill card)
       const bookingIds = bookingsWithUsers.map((b: any) => b.id)
       if (bookingIds.length > 0) {
         const { data: allFolioCharges } = await supabase
           .from('folio_charges')
-          .select('booking_id, amount, payment_status')
+          .select('booking_id, amount, payment_status, charge_type, payment_method')
           .in('booking_id', bookingIds)
         if (allFolioCharges) {
-          // Build a map: booking_id -> sum of pending charges
-          const balanceMap: { [id: string]: number } = {}
-          allFolioCharges.forEach((c: any) => {
-            if ((c.payment_status === 'pending' || c.payment_status === 'unpaid') && Number(c.amount) > 0) {
-              balanceMap[c.booking_id] = (balanceMap[c.booking_id] || 0) + Number(c.amount)
-            }
-          })
-          // Override booking.balance with the folio-derived value for ALL bookings
-          // Default to 0 if no pending charges — never fall back to stale DB value
+          const chargesByBooking: Record<
+            string,
+            { amount?: unknown; type?: string | null; charge_type?: string | null; payment_status?: string | null; payment_method?: string | null }[]
+          > = {}
+          for (const c of allFolioCharges as any[]) {
+            const id = c.booking_id as string
+            if (!chargesByBooking[id]) chargesByBooking[id] = []
+            chargesByBooking[id].push({
+              amount: c.amount,
+              type: c.charge_type,
+              charge_type: c.charge_type,
+              payment_status: c.payment_status,
+              payment_method: c.payment_method,
+            })
+          }
           bookingsWithUsers.forEach((b: any) => {
-            b.balance = balanceMap[b.id] ?? 0
+            const ch = chargesByBooking[b.id] ?? []
+            b.balance = folioPositiveOutstandingSum(ch)
           })
+
+          const healIds = bookingsWithUsers
+            .filter((b: any) =>
+              shouldReconcileBookingPaymentPaid(
+                {
+                  total_amount: b.total_amount,
+                  deposit: b.deposit,
+                  balance: b._db_balance,
+                  payment_status: b.payment_status,
+                },
+                chargesByBooking[b.id] ?? [],
+              ),
+            )
+            .map((b: any) => b.id as string)
+
+          if (healIds.length > 0) {
+            await Promise.all(
+              healIds.map((id: string) =>
+                supabase.from('bookings').update({ payment_status: 'paid' }).eq('id', id),
+              ),
+            )
+            bookingsWithUsers.forEach((b: any) => {
+              if (healIds.includes(b.id)) b.payment_status = 'paid'
+            })
+          }
         }
       }
+
+      bookingsWithUsers.forEach((b: any) => {
+        delete b._db_balance
+      })
 
       setBookings(groupBulkRows(bookingsWithUsers))
     } catch (error: any) {

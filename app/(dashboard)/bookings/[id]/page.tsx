@@ -35,7 +35,7 @@ import {
   isPastCheckoutCutoff,
   normalizeBookingCheckoutYmd,
 } from '@/lib/utils/booking-checkout-ui'
-import { bookingDisplayBillBalance, billIsFullySettled } from '@/lib/utils/booking-bill-balance'
+import { bookingDisplayBillBalance, shouldReconcileBookingPaymentPaid } from '@/lib/utils/booking-bill-balance'
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -169,10 +169,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
 
       setFolioCharges(chargesWithCreator)
 
-      if (
-        billIsFullySettled(bookingData, chargesWithCreator) &&
-        String(bookingData.payment_status || '').toLowerCase() !== 'paid'
-      ) {
+      if (shouldReconcileBookingPaymentPaid(bookingData, chargesWithCreator)) {
         const { error: psFixErr } = await supabase
           .from('bookings')
           .update({ payment_status: 'paid' })

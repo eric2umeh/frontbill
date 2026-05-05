@@ -61,3 +61,18 @@ export function billIsFullySettled(
 ): boolean {
   return bookingDisplayBillBalance(booking, charges) <= 0
 }
+
+/**
+ * When to PATCH `bookings.payment_status` to `paid`: full bill math says settled, or booking balance and
+ * folio outstanding are both clear even if `total_amount`/`deposit` are stale (avoids stuck “pending” on lists).
+ */
+export function shouldReconcileBookingPaymentPaid(
+  booking: Parameters<typeof bookingDisplayBillBalance>[0],
+  folioCharges: FolioLineForBalance[],
+): boolean {
+  if (String(booking?.payment_status ?? '').toLowerCase() === 'paid') return false
+  if (billIsFullySettled(booking, folioCharges)) return true
+  const folioOwed = folioPositiveOutstandingSum(folioCharges ?? [])
+  const bookingBal = Number(booking?.balance ?? 0)
+  return bookingBal <= 0 && folioOwed <= 0
+}
