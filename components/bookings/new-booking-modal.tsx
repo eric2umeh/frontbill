@@ -22,6 +22,8 @@ import { useAuth } from '@/lib/auth-context'
 import { BOOKING_MODAL_ROOMS_LIMIT, normalizeRoomsForBookingPickers } from '@/lib/utils/room-bookability'
 import { Checkbox } from '@/components/ui/checkbox'
 import { applyPaymentToGuestCityLedger } from '@/lib/utils/guest-city-ledger'
+import { buildBackdateDedupeKey } from '@/lib/backdate/dedupe-key'
+import type { SerializedBookingPayload } from '@/lib/backdate/booking-payload'
 
 interface NewBookingModalProps {
   open: boolean
@@ -57,7 +59,7 @@ interface LedgerAccount {
 export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalProps) {
   const [loading, setLoading] = useState(false)
   const [organizationId, setOrganizationId] = useState('')
-  const { userId, role } = useAuth()
+  const { userId, role, organizationId: authOrganizationId } = useAuth()
 
   // Guest
   const [fullName, setFullName] = useState('')
@@ -512,20 +514,70 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
 
   const hasApprovedBackdateRequest = async () => {
     if (!checkInDate) return false
+    const orgKey = organizationId || authOrganizationId || ''
+    if (!orgKey || !selectedRoom?.id) return false
+    const dedupe = buildBackdateDedupeKey({
+      organizationId: orgKey,
+      requestedBy: userId,
+      requestType: 'booking',
+      requestedCheckIn: toLocalDateStr(checkInDate),
+      requestedCheckOut: checkOutDate ? toLocalDateStr(checkOutDate) : undefined,
+      roomId: selectedRoom.id,
+    })
     const res = await fetch(`/api/backdate-requests?caller_id=${userId}`, { credentials: 'include' })
     const json = await res.json()
     if (!res.ok) return false
-    return (json.requests || []).some((request: any) =>
-      request.status === 'approved'
-      && request.request_type === 'booking'
-      && request.requested_check_in === toLocalDateStr(checkInDate)
-      && (!checkOutDate || request.requested_check_out === toLocalDateStr(checkOutDate))
-    )
+    return (json.requests || []).some((request: any) => {
+      if (request.status !== 'approved' || request.request_type !== 'booking') return false
+      if (request.dedupe_key === dedupe) return true
+      const md = request.metadata || {}
+      return (
+        request.requested_check_in === toLocalDateStr(checkInDate)
+        && (!checkOutDate || request.requested_check_out === toLocalDateStr(checkOutDate))
+        && (md.room_id ?? null) === (selectedRoom?.id ?? null)
+      )
+    })
+  }
+
+  const buildBookingBackdatePayload = (): SerializedBookingPayload | null => {
+    if (!organizationId || !selectedRoom || !checkInDate || !checkOutDate || (!guestId && !fullName.trim())) return null
+    const ci = toLocalDateStr(checkInDate)
+    const co = toLocalDateStr(checkOutDate)
+    return {
+      organization_id: organizationId,
+      guest: {
+        guest_id: guestId || null,
+        full_name: fullName,
+        phone,
+        email: email || null,
+        address: address || null,
+      },
+      check_in: ci,
+      check_out: co,
+      nights,
+      room_id: selectedRoom.id,
+      room_number: selectedRoom.room_number,
+      price_per_night: pricePerNight,
+      custom_price: customPrice > 0 ? customPrice : 0,
+      payment_method: paymentMethod,
+      payment_status: paymentStatus,
+      amount_paid: Number(amountPaid) || 0,
+      pay_above_room_total: payAboveRoomTotal,
+      ledger_account: ledgerAccount || null,
+      ledger_tab: ledgerTab,
+      ledger_account_name: ledgerAccountName || '',
+    }
   }
 
   const handleRequestBackdate = async () => {
     if (!checkInDate) { toast.error('Select a backdated check-in date'); return }
     if (!backdateReason.trim()) { toast.error('Enter a reason for the superadmin'); return }
+    if (!selectedRoom) { toast.error('Select a room before sending a backdate request'); return }
+    const booking_payload = buildBookingBackdatePayload()
+    if (!booking_payload) {
+      toast.error('Complete guest, dates, room, and payment fields before requesting a backdate')
+      return
+    }
     setLoading(true)
     try {
       const res = await fetch('/api/backdate-requests', {
@@ -538,10 +590,18 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
           requested_check_in: toLocalDateStr(checkInDate),
           requested_check_out: checkOutDate ? toLocalDateStr(checkOutDate) : null,
           reason: backdateReason,
-          metadata: { guest_name: fullName || guestId, room_id: selectedRoom?.id || null },
+          metadata: {
+            guest_name: fullName || guestId,
+            room_id: selectedRoom.id,
+            booking_payload,
+          },
         }),
       })
       const json = await res.json()
+      if (res.status === 409) {
+        toast.message(json.error || 'This backdate request is already pending')
+        return
+      }
       if (!res.ok) { toast.error(json.error || 'Failed to send backdate request'); return }
       toast.success('Backdate request sent to superadmin')
       setBackdateReason('')
