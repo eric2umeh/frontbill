@@ -16,6 +16,7 @@ import { toast } from 'sonner'
 import { isOrganizationMenuRecord, isSelectableLedgerName } from '@/lib/utils/ledger-organization'
 import { resolveOrganizationLedgerAccount } from '@/lib/utils/resolve-ledger-account'
 import { formatPersonName, normalizeNameKey } from '@/lib/utils/name-format'
+import { guestOrOrganizationNameTaken } from '@/lib/utils/guest-org-name-uniqueness'
 import { StayDateRangeFields } from '@/components/shared/stay-date-range-fields'
 import { BOOKING_MODAL_ROOMS_LIMIT, isRoomAssignable, normalizeRoomsForBookingPickers } from '@/lib/utils/room-bookability'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -202,7 +203,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
 
     const fromOrgs = ledgerType === 'organization'
       ? (orgTableData || [])
-          .filter((o: any) => isOrganizationMenuRecord(o) && !fromLedger.some((l: any) => l.name.toLowerCase() === o.name.toLowerCase()))
+          .filter((o: any) => isOrganizationMenuRecord(o, effectiveOrgId) && !fromLedger.some((l: any) => l.name.toLowerCase() === o.name.toLowerCase()))
           .map((o: any) => ({
             id: o.id,
             name: o.name,
@@ -224,36 +225,27 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
     setCreatingLedgerOrg(true)
     try {
       const supabase = createClient()
-      const normalizedKey = normalizeNameKey(newLedgerOrgName)
+      const normalizedKey = normalizeNameKey(newLedgerOrgName.trim())
 
       if (ledgerType === 'individual') {
-        const [{ data: guestDup }, { data: orgNameDup }] = await Promise.all([
-          supabase
-            .from('guests')
-            .select('id')
-            .eq('organization_id', orgId)
-            .ilike('name', newLedgerOrgName.trim())
-            .maybeSingle(),
-          supabase
-            .from('organizations')
-            .select('id')
-            .neq('id', orgId)
-            .ilike('name', newLedgerOrgName.trim())
-            .maybeSingle(),
-        ])
-        if (guestDup || orgNameDup || guests.some((g) => normalizeNameKey(g.name) === normalizedKey)) {
+        const dupIndividual = await guestOrOrganizationNameTaken(supabase, {
+          hotelTenantOrganizationId: orgId,
+          candidateName: newLedgerOrgName.trim(),
+        })
+        if (dupIndividual || guests.some((g) => normalizeNameKey(g.name) === normalizedKey)) {
           toast.error('This name already exists as a guest or organization')
           return
         }
       } else {
-        const { data: orgDup } = await supabase
-          .from('organizations')
-          .select('id')
-          .neq('id', orgId)
-          .ilike('name', newLedgerOrgName.trim())
-          .maybeSingle()
-        if (orgDup || ledgerResults.some((a: any) => normalizeNameKey(a.name || a.account_name) === normalizedKey)) {
-          toast.error('An organization with this name already exists')
+        const dupOrg = await guestOrOrganizationNameTaken(supabase, {
+          hotelTenantOrganizationId: orgId,
+          candidateName: newLedgerOrgName.trim(),
+        })
+        if (
+          dupOrg ||
+          ledgerResults.some((a: any) => normalizeNameKey(a.name || a.account_name) === normalizedKey)
+        ) {
+          toast.error('An organization or guest with this name already exists')
           return
         }
 
@@ -475,6 +467,15 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
       const formattedGuestName = formatPersonName(fullName)
       let finalGuestId = guestId
       if (!guestId) {
+        const dupGuest = await guestOrOrganizationNameTaken(supabase, {
+          hotelTenantOrganizationId: orgId,
+          candidateName: formattedGuestName,
+        })
+        if (dupGuest) {
+          toast.error('This name is already used by a guest or organization')
+          return
+        }
+
         const { data: newGuest, error: ge } = await supabase
           .from('guests')
           .insert([{ organization_id: orgId, name: formattedGuestName, phone, email: email || null, address: address || null }])
