@@ -68,10 +68,12 @@ interface LedgerTransaction {
 export default function GuestDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
   const router = useRouter()
+  // Prefer DB profile.role (source of truth) once loaded; matches layout AuthProvider but fixes any drift.
+  const [resolvedRole, setResolvedRole] = useState<string | null>(null)
   const { role } = useAuth()
   /** Product rule: only Administrator / Superadmin edit guest profiles (see hasPermission hard gate). */
-  const canEditGuest = hasPermission(role, 'guests:edit')
-  const canViewGuests = hasPermission(role, 'guests:view')
+  const canEditGuest = hasPermission(resolvedRole ?? role, 'guests:edit')
+  const canViewGuests = hasPermission(resolvedRole ?? role, 'guests:view')
   const [guest, setGuest] = useState<Guest | null>(null)
   const [bookings, setBookings] = useState<Booking[]>([])
   const [ledgerAccount, setLedgerAccount] = useState<LedgerAccount | null>(null)
@@ -116,9 +118,10 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
       if (!user) { router.push('/auth/login'); return }
 
       const { data: profile } = await supabase
-        .from('profiles').select('organization_id').eq('id', user.id).single()
+        .from('profiles').select('organization_id, role').eq('id', user.id).single()
       if (!profile) return
       setOrgId(profile.organization_id)
+      setResolvedRole(profile.role ?? null)
 
       const [{ data: guestData }, { data: bookingData }] = await Promise.all([
         supabase.from('guests').select('*').eq('id', id).eq('organization_id', profile.organization_id).single(),
