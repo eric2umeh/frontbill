@@ -23,12 +23,12 @@ export async function guestOrOrganizationNameTaken(
     .limit(1)
   if (params.excludeGuestId) gQuery = gQuery.neq('id', params.excludeGuestId)
 
-  const { data: guestHit } = await gQuery.maybeSingle()
-  if (guestHit?.id) return true
+  const { data: guestHits } = await gQuery
+  if (guestHits && guestHits.length > 0) return true
 
-  let oQuery = supabase.from('organizations').select('id').ilike('name', raw).limit(1)
+  let oQuery = supabase.from('organizations').select('id').ilike('name', raw)
   if (params.excludeOrganizationId) oQuery = oQuery.neq('id', params.excludeOrganizationId)
 
-  const { data: orgHit } = await oQuery.maybeSingle()
-  return Boolean(orgHit?.id)
+  const { data: orgHits } = await oQuery.limit(1)
+  return Boolean(orgHits && orgHits.length > 0)
 }

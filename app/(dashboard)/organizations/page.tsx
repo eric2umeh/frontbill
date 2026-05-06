@@ -23,6 +23,7 @@ import { isOrganizationMenuRecord } from '@/lib/utils/ledger-organization'
 import { getUserDisplayName } from '@/lib/utils/user-display'
 import { fetchUserDisplayNameMap } from '@/lib/utils/fetch-user-display-names'
 import { normalizeNameKey } from '@/lib/utils/name-format'
+import { dedupeOrganizationsDisplayByNormalizedName } from '@/lib/utils/dedupe-organizations-display'
 import { guestOrOrganizationNameTaken } from '@/lib/utils/guest-org-name-uniqueness'
 import { syncLedgerOrgCounterpartiesToOrganizationsTable } from '@/lib/utils/sync-ledger-org-counterparties-to-organizations'
 
@@ -98,8 +99,8 @@ export default function OrganizationsPage() {
         current_balance: balanceMap[org.id] || 0,
         created_by_name: org.created_by ? creatorMap[org.created_by] || getUserDisplayName(null, org.created_by) : 'System'
       }))
-      
-      setOrganizations(transformed)
+
+      setOrganizations(dedupeOrganizationsDisplayByNormalizedName(transformed))
     } catch (error: any) {
       console.error('Error fetching organizations:', error)
       toast.error(error.message || 'Failed to load organizations')

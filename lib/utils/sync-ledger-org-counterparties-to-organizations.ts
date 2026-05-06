@@ -39,19 +39,23 @@ export async function syncLedgerOrgCounterpartiesToOrganizationsTable(
   }
 
   for (const trimmed of byKey.values()) {
-    const { data: existing, error: exErr } = await supabase
+    const { data: existingList, error: exErr } = await supabase
       .from('organizations')
       .select('id, org_type')
       .ilike('name', trimmed)
-      .maybeSingle()
 
     if (exErr) continue
 
-    if (existing?.id) {
-      if (existing.id === tid) continue
-      const ot = String((existing as { org_type?: string }).org_type ?? '').trim()
-      if (!ot) {
-        await supabase.from('organizations').update({ org_type: 'other' }).eq('id', existing.id)
+    const duplicates = ((existingList as { id?: string; org_type?: string }[]) ?? []).filter(
+      (row) => row.id && row.id !== tid,
+    )
+
+    if (duplicates.length > 0) {
+      for (const existing of duplicates) {
+        const ot = String(existing.org_type ?? '').trim()
+        if (!ot && existing.id) {
+          await supabase.from('organizations').update({ org_type: 'other' }).eq('id', existing.id)
+        }
       }
       continue
     }
