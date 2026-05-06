@@ -28,6 +28,7 @@ import { useAuth } from '@/lib/auth-context'
 import { hasPermission } from '@/lib/permissions'
 import { toast } from 'sonner'
 import { folioGuestCreditAmount, folioPositiveOutstandingSum } from '@/lib/utils/booking-bill-balance'
+import { guestOrOrganizationNameTaken } from '@/lib/utils/guest-org-name-uniqueness'
 
 interface Guest {
   id: string
@@ -284,6 +285,21 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
     try {
       setSavingGuest(true)
       const supabase = createClient()
+      if (!orgId) {
+        toast.error('Hotel context missing — refresh and try again')
+        return
+      }
+
+      const nameTaken = await guestOrOrganizationNameTaken(supabase, {
+        hotelTenantOrganizationId: orgId,
+        candidateName: guestForm.name.trim(),
+        excludeGuestId: guest.id,
+      })
+      if (nameTaken) {
+        toast.error('This name is already used by another guest or an organization')
+        return
+      }
+
       const { error } = await supabase
         .from('guests')
         .update({
