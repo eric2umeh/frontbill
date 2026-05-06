@@ -27,6 +27,7 @@ import CityLedgerPaymentModal from '@/components/city-ledger/city-ledger-payment
 import { useAuth } from '@/lib/auth-context'
 import { hasPermission } from '@/lib/permissions'
 import { toast } from 'sonner'
+import { folioGuestCreditAmount, folioPositiveOutstandingSum } from '@/lib/utils/booking-bill-balance'
 
 interface Guest {
   id: string
@@ -57,7 +58,7 @@ interface Booking {
 }
 
 interface LedgerAccount {
-  id: string
+  id: string | null
   balance: number
   account_name: string
   account_type: string
@@ -89,8 +90,8 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
   const [orgId, setOrgId] = useState<string>('')
   const [loading, setLoading] = useState(true)
   const [paymentModalOpen, setPaymentModalOpen] = useState(false)
-  const [folioPaymentsSum, setFolioPaymentsSum] = useState(0)
   const [guestPendingBalance, setGuestPendingBalance] = useState(0)
+  const [guestFolioCreditTotal, setGuestFolioCreditTotal] = useState(0)
   const [selectedFolioId, setSelectedFolioId] = useState<string>('')
   const [isCheckingOut, setIsCheckingOut] = useState(false)
   const [isEditingGuest, setIsEditingGuest] = useState(false)
@@ -155,42 +156,53 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
       // Fetch all folio charges for this guest's bookings to derive accurate balances
       const rawBookings = bookingData || []
       const bookingIds = rawBookings.map((b: any) => b.id)
-      let folioPaymentsTotal = 0
-      let folioPendingByBooking: { [id: string]: number } = {}
+      /** booking_id → folio rows (same net rules as booking list/detail) */
+      const chargesByBooking: Record<
+        string,
+        { amount?: unknown; type?: string | null; charge_type?: string | null; payment_status?: string | null; payment_method?: string | null }[]
+      > = {}
       if (bookingIds.length > 0) {
         const { data: allFolioCharges } = await supabase
           .from('folio_charges')
-          .select('booking_id, amount, payment_status, charge_type')
+          .select('booking_id, amount, payment_status, charge_type, payment_method')
           .in('booking_id', bookingIds)
-        if (allFolioCharges) {
-          allFolioCharges.forEach((c: any) => {
-            if ((c.payment_status === 'pending' || c.payment_status === 'unpaid') && Number(c.amount) > 0) {
-              folioPendingByBooking[c.booking_id] = (folioPendingByBooking[c.booking_id] || 0) + Number(c.amount)
-            }
-            if (c.charge_type === 'payment' && Number(c.amount) < 0) {
-              folioPaymentsTotal += Math.abs(Number(c.amount))
-            }
+        for (const c of allFolioCharges || []) {
+          const bid = (c as { booking_id?: string }).booking_id
+          if (!bid) continue
+          if (!chargesByBooking[bid]) chargesByBooking[bid] = []
+          const row = c as {
+            amount?: unknown
+            charge_type?: string | null
+            payment_status?: string | null
+            payment_method?: string | null
+          }
+          chargesByBooking[bid].push({
+            amount: row.amount,
+            type: row.charge_type,
+            charge_type: row.charge_type,
+            payment_status: row.payment_status,
+            payment_method: row.payment_method,
           })
         }
       }
 
-      // Build a NEW array with folio-derived balances (never mutate Supabase frozen objects)
-      const enrichedBookings = rawBookings.map((b: any) => ({
-        ...b,
-        balance: folioPendingByBooking[b.id] ?? 0,
-      }))
+      let pendingTotal = 0
+      let creditTotal = 0
+      const enrichedBookings = rawBookings.map((b: any) => {
+        const ch = chargesByBooking[b.id] ?? []
+        const net = folioPositiveOutstandingSum(ch)
+        pendingTotal += Math.max(0, net)
+        creditTotal += folioGuestCreditAmount(ch)
+        return { ...b, balance: net }
+      })
       setBookings(enrichedBookings)
-      setFolioPaymentsSum(folioPaymentsTotal)
+      setGuestPendingBalance(pendingTotal)
+      setGuestFolioCreditTotal(creditTotal)
 
       // Set selected folio to most recent booking's folio
       if (enrichedBookings.length > 0) {
         setSelectedFolioId(enrichedBookings[0].folio_id)
       }
-
-      // City ledger outstanding = sum of all pending folio charges across all bookings
-      // This is the authoritative value — avoids stale guests.balance DB writes
-      const pendingTotal = Object.values(folioPendingByBooking).reduce((s, v) => s + v, 0)
-      setGuestPendingBalance(pendingTotal)
 
       // City ledger account — fetch if exists for display
       const { data: ledgerData } = await supabase
@@ -201,8 +213,20 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
         .in('account_type', ['individual', 'guest'])
         .maybeSingle()
 
-      if (pendingTotal > 0) {
-        setLedgerAccount(ledgerData || { id: null, balance: pendingTotal, account_name: guestData.name, account_type: 'individual' })
+      if (ledgerData) {
+        setLedgerAccount({
+          id: ledgerData.id,
+          balance: Number(ledgerData.balance ?? 0),
+          account_name: ledgerData.account_name,
+          account_type: ledgerData.account_type,
+        })
+      } else if (pendingTotal > 0) {
+        setLedgerAccount({
+          id: null,
+          balance: pendingTotal,
+          account_name: guestData.name,
+          account_type: 'individual',
+        })
       } else {
         setLedgerAccount(null)
       }
@@ -311,17 +335,16 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
   if (!guest) return null
 
   // Total Paid = sum of bookings.deposit (includes initial payment + all record-payment increments)
-  // folioPaymentsSum is NOT added here — booking.deposit is already bumped when a payment is recorded,
-  // so adding folio payments would double-count them.
   const totalSpent = bookings.reduce((s, b) => s + Number(b.deposit || 0), 0)
-  // Clamp to 0 — negative means overpaid, show as settled
-  // Booking Balance (Outstanding) — use folio-derived pending total, same source as city ledger section
-  // Do NOT use bookings.reduce(b.balance) — that can lag by one render cycle after setBookings
   const totalBookingBalance = guestPendingBalance
   const lastVisit = bookings.length > 0 ? bookings[0].check_in : null
-  // Use folio-derived pending total as authoritative outstanding balance
   const guestOutstandingBalance = guestPendingBalance
-  const ledgerBalance = ledgerAccount ? guestOutstandingBalance : 0
+  /** Synthetic ledger (no DB row) tracks folio outstanding; real account uses city_ledger_accounts.balance */
+  const ledgerDisplayBalance = ledgerAccount
+    ? ledgerAccount.id == null
+      ? guestOutstandingBalance
+      : Number(ledgerAccount.balance ?? 0)
+    : 0
 
   const statusColor = (status: string) => {
     switch (status) {
@@ -334,7 +357,8 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
 
   const ledgerStatusBadge = () => {
     if (!ledgerAccount) return { label: 'No Account', color: 'text-muted-foreground', bg: 'bg-muted/40 border-border' }
-    if (ledgerBalance > 0) return { label: 'Debit', color: 'text-red-600', bg: 'bg-red-50 border-red-200' }
+    if (ledgerDisplayBalance > 0) return { label: 'Debit', color: 'text-red-600', bg: 'bg-red-50 border-red-200' }
+    if (ledgerDisplayBalance < 0) return { label: 'Credit', color: 'text-blue-700', bg: 'bg-blue-50 border-blue-200' }
     return { label: 'Settled', color: 'text-muted-foreground', bg: 'bg-muted/40 border-border' }
   }
 
@@ -427,8 +451,11 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
         </Card>
         <Card className={totalBookingBalance > 0 ? 'border-red-200' : ''}>
           <CardContent className="p-5 flex flex-col gap-1">
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <TrendingUp className="h-4 w-4" /> Booking Balance
+            <div className="flex items-center gap-2 text-sm text-muted-foreground flex-wrap">
+              <TrendingUp className="h-4 w-4 shrink-0" /> Booking Balance
+              {guestFolioCreditTotal > 0 && (
+                <span className="font-medium text-blue-600">Credit {formatNaira(guestFolioCreditTotal)}</span>
+              )}
             </div>
             <p className={`text-3xl font-bold ${totalBookingBalance > 0 ? 'text-red-600' : 'text-foreground'}`}>
               {totalBookingBalance > 0 ? formatNaira(totalBookingBalance) : 'Settled'}
@@ -508,7 +535,7 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
               <Wallet className="h-5 w-5 text-primary" />
               <CardTitle className="text-base">City Ledger Account</CardTitle>
               {ledgerAccount ? (
-                <Badge variant="outline" className={`text-xs ${ledgerBalance > 0 ? 'border-red-200 text-red-700 bg-red-50' : ledgerBalance < 0 ? 'border-green-200 text-green-700 bg-green-50' : ''}`}>
+                <Badge variant="outline" className={`text-xs ${ls.color} ${ls.bg} border font-normal`}>
                   {ls.label}
                 </Badge>
               ) : (
@@ -532,13 +559,13 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
               <div>
                 <p className="text-xs text-muted-foreground mb-1">Current Balance</p>
                 <p className={`text-4xl font-bold ${ls.color}`}>
-                  {formatNaira(Math.abs(ledgerBalance))}
+                  {formatNaira(Math.abs(ledgerDisplayBalance))}
                 </p>
                 <p className="text-xs text-muted-foreground mt-1">
-                  {ledgerBalance > 0
+                  {ledgerDisplayBalance > 0
                     ? 'Amount owed to hotel (debit)'
-                    : ledgerBalance < 0
-                    ? `Credit of ${formatNaira(Math.abs(ledgerBalance))} available`
+                    : ledgerDisplayBalance < 0
+                    ? `Credit of ${formatNaira(Math.abs(ledgerDisplayBalance))} available`
                     : 'Account fully settled'}
                 </p>
               </div>
@@ -627,8 +654,18 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
                       {b.balance > 0 && (
                         <div className="text-xs text-red-600">Balance: {formatNaira(b.balance)}</div>
                       )}
-                      <Badge variant="outline" className={`text-xs ${statusColor(b.payment_status)}`}>
-                        {b.payment_status}
+                      {b.balance < 0 && (
+                        <div className="text-xs font-medium text-blue-600">Credit: {formatNaira(-b.balance)}</div>
+                      )}
+                      <Badge
+                        variant="outline"
+                        className={`text-xs ${
+                          Number(b.balance) < 0
+                            ? 'text-blue-700 border-blue-200 bg-blue-50'
+                            : statusColor(b.payment_status)
+                        }`}
+                      >
+                        {Number(b.balance) < 0 ? 'credit' : b.payment_status}
                       </Badge>
                     </div>
                   </div>
@@ -791,7 +828,9 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
           accountType="guest"
           accountName={guest.name}
           ledgerAccountId={ledgerAccount.id}
-          currentBalance={guestOutstandingBalance}
+          currentBalance={
+            ledgerAccount?.id ? Number(ledgerAccount.balance ?? 0) : guestOutstandingBalance
+          }
           organizationId={orgId}
           guestId={guest.id}
         />
