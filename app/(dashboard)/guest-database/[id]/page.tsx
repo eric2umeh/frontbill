@@ -431,7 +431,11 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
       </div>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div
+        className={`grid grid-cols-1 gap-4 sm:grid-cols-2 ${
+          guestFolioCreditTotal > 0 ? 'lg:grid-cols-5' : 'lg:grid-cols-4'
+        }`}
+      >
         <Card>
           <CardContent className="p-5 flex flex-col gap-1">
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -451,17 +455,24 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
         </Card>
         <Card className={totalBookingBalance > 0 ? 'border-red-200' : ''}>
           <CardContent className="p-5 flex flex-col gap-1">
-            <div className="flex items-center gap-2 text-sm text-muted-foreground flex-wrap">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <TrendingUp className="h-4 w-4 shrink-0" /> Booking Balance
-              {guestFolioCreditTotal > 0 && (
-                <span className="font-medium text-blue-600">Credit {formatNaira(guestFolioCreditTotal)}</span>
-              )}
             </div>
             <p className={`text-3xl font-bold ${totalBookingBalance > 0 ? 'text-red-600' : 'text-foreground'}`}>
               {totalBookingBalance > 0 ? formatNaira(totalBookingBalance) : 'Settled'}
             </p>
           </CardContent>
         </Card>
+        {guestFolioCreditTotal > 0 && (
+          <Card className="border-blue-200 bg-blue-500/5">
+            <CardContent className="p-5 flex flex-col gap-1">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <ArrowUpCircle className="h-4 w-4 shrink-0 text-blue-600" /> Credit
+              </div>
+              <p className="text-3xl font-bold text-blue-600">{formatNaira(guestFolioCreditTotal)}</p>
+            </CardContent>
+          </Card>
+        )}
         <Card>
           <CardContent className="p-5 flex flex-col gap-1">
             <div className="flex items-center gap-2 text-sm text-muted-foreground">

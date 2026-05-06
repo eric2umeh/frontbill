@@ -68,6 +68,12 @@ export function billIsFullySettled(
   return Math.max(0, folioOwedNet) <= 0
 }
 
+/** Positive when folio nets to money in favour of guest (overage / credit within this folio). */
+export function folioGuestCreditAmount(charges: FolioLineForBalance[]): number {
+  const net = folioPositiveOutstandingSum(charges ?? [])
+  return net < 0 ? -net : 0
+}
+
 /**
  * When to PATCH `bookings.payment_status` to `paid`: full bill math says settled, or booking balance and
  * folio outstanding are both clear even if `total_amount`/`deposit` are stale (avoids stuck “pending” on lists).
