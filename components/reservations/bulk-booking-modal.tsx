@@ -19,6 +19,7 @@ import { formatNaira } from '@/lib/utils/currency'
 import { isOrganizationMenuRecord, isSelectableLedgerName } from '@/lib/utils/ledger-organization'
 import { resolveOrganizationLedgerAccount } from '@/lib/utils/resolve-ledger-account'
 import { formatPersonName, normalizeName, normalizeNameKey } from '@/lib/utils/name-format'
+import { guestOrOrganizationNameTaken } from '@/lib/utils/guest-org-name-uniqueness'
 import { appendBulkGroupNote, createBulkGroupId } from '@/lib/utils/bulk-booking'
 import { StayDateRangeFields } from '@/components/shared/stay-date-range-fields'
 import { BOOKING_MODAL_ROOMS_LIMIT, normalizeRoomsForBookingPickers } from '@/lib/utils/room-bookability'
@@ -26,6 +27,7 @@ import { insertFolioCharges } from '@/lib/utils/insert-folio-charges'
 import { applyPaymentToGuestCityLedger } from '@/lib/utils/guest-city-ledger'
 import { buildBackdateDedupeKey } from '@/lib/backdate/dedupe-key'
 import { hasPermission } from '@/lib/permissions'
+import { isStayCheckInConsideredBackdated, formatYMDInTimeZone, minSelectableCheckInYmdHotel, resolveHotelTimeZone } from '@/lib/hotel-date'
 
 const ROOM_TYPES_FALLBACK = ['Deluxe', 'Royal', 'Kings', 'Mini Suite', 'Executive Suite', 'Diplomatic Suite']
 
@@ -35,8 +37,6 @@ const toLocalDateStr = (date: Date) => {
   const d = String(date.getDate()).padStart(2, '0')
   return `${y}-${m}-${d}`
 }
-
-const todayDate = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d }
 
 interface RoomEntry {
   id: string
@@ -180,7 +180,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
         .ilike('name', `%${term}%`)
         .order('name')
         .limit(30)
-      const results = (data || []).filter((org: any) => isOrganizationMenuRecord(org))
+      const results = (data || []).filter((org: any) => isOrganizationMenuRecord(org, orgId))
       setOrgResults(results)
       setOrgSearchOpen(results.length > 0)
       if (results.length === 0) setShowNewOrgForm(false)
@@ -195,14 +195,12 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
     setCreatingOrg(true)
     try {
       const supabase = createClient()
-      const normalizedOrgName = normalizeNameKey(newOrgName)
-      const { data: orgDup } = await supabase
-        .from('organizations')
-        .select('id')
-        .neq('id', orgId)
-        .ilike('name', newOrgName.trim())
-        .maybeSingle()
-      if (orgDup || allGuests.some((g: any) => normalizeNameKey(g.name) === normalizedOrgName)) {
+      const normalizedOrgName = normalizeNameKey(newOrgName.trim())
+      const nameTaken = await guestOrOrganizationNameTaken(supabase, {
+        hotelTenantOrganizationId: orgId,
+        candidateName: newOrgName.trim(),
+      })
+      if (nameTaken || allGuests.some((g: any) => normalizeNameKey(g.name) === normalizedOrgName)) {
         toast.error('This name already exists as a guest or organization')
         return
       }
@@ -234,14 +232,12 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
     setCreatingLedgerOrg(true)
     try {
       const supabase = createClient()
-      const normalizedOrgName = normalizeNameKey(newLedgerOrgName)
-      const { data: orgDup } = await supabase
-        .from('organizations')
-        .select('id')
-        .neq('id', orgId)
-        .ilike('name', newLedgerOrgName.trim())
-        .maybeSingle()
-      if (orgDup || allGuests.some((g: any) => normalizeNameKey(g.name) === normalizedOrgName)) {
+      const normalizedOrgName = normalizeNameKey(newLedgerOrgName.trim())
+      const ledgerOrgTaken = await guestOrOrganizationNameTaken(supabase, {
+        hotelTenantOrganizationId: orgId,
+        candidateName: newLedgerOrgName.trim(),
+      })
+      if (ledgerOrgTaken || allGuests.some((g: any) => normalizeNameKey(g.name) === normalizedOrgName)) {
         toast.error('This name already exists as a guest or organization')
         return
       }
@@ -322,7 +318,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
         .map((d: any) => ({ ...d, name: d.account_name, phone: d.contact_phone, source: 'city_ledger' }))
       const ledgerNames = new Set(fromLedger.map((d: any) => String(d.name || '').toLowerCase()))
       const fromOrgs = (orgData || [])
-        .filter((d: any) => isOrganizationMenuRecord(d) && !ledgerNames.has(String(d.name || '').toLowerCase()))
+        .filter((d: any) => isOrganizationMenuRecord(d, orgId) && !ledgerNames.has(String(d.name || '').toLowerCase()))
         .map((d: any) => ({ ...d, source: 'organizations' }))
       const results = [...fromLedger, ...fromOrgs]
       setLedgerResults(results)
@@ -463,7 +459,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
   }
 
   const canApproveBackdates = hasPermission(currentUserRole, 'backdate:approve')
-  const isBackdated = checkIn ? checkIn < todayDate() : false
+  const isBackdated = checkIn ? isStayCheckInConsideredBackdated(toLocalDateStr(checkIn)) : false
 
   const copy =
     wording === 'booking'
@@ -554,6 +550,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
       }
       if (!res.ok) { toast.error(json.error || 'Failed to send backdate request'); return }
       toast.success('Backdate request submitted for approval')
+      if (typeof window !== 'undefined') window.dispatchEvent(new Event('frontbill-backdate-pending-changed'))
       setBackdateReason('')
     } catch {
       toast.error('Failed to send backdate request')
@@ -709,6 +706,14 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
         if (existingGuest) {
           guestCache.set(guestKey, existingGuest.id)
           return existingGuest.id
+        }
+
+        const orgNameDup = await guestOrOrganizationNameTaken(supabase, {
+          hotelTenantOrganizationId: orgId,
+          candidateName: formattedName,
+        })
+        if (orgNameDup) {
+          throw new Error(`Name "${formattedName}" is already used by a guest or organization`)
         }
 
         const { data: newGuest, error } = await supabase
@@ -1137,7 +1142,10 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
               }}
               showNights
               disableCalendar={(d) => {
-                if (!checkIn) return d < todayDate()
+                const tz = resolveHotelTimeZone()
+                const dayYmd = formatYMDInTimeZone(d, tz)
+                const minYmd = minSelectableCheckInYmdHotel(new Date(), tz)
+                if (!checkIn) return dayYmd < minYmd
                 if (!checkOut) return d <= checkIn
                 return false
               }}

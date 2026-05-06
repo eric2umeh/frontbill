@@ -15,7 +15,8 @@ import { CreditCard, Check, X } from 'lucide-react'
 import { format, differenceInDays } from 'date-fns'
 import { createClient } from '@/lib/supabase/client'
 import { insertFolioCharges } from '@/lib/utils/insert-folio-charges'
-import { isSelectableLedgerName } from '@/lib/utils/ledger-organization'
+import { guestOrOrganizationNameTaken } from '@/lib/utils/guest-org-name-uniqueness'
+import { isOrganizationMenuRecord, isSelectableLedgerName } from '@/lib/utils/ledger-organization'
 import { resolveOrganizationLedgerAccount } from '@/lib/utils/resolve-ledger-account'
 
 interface ExtendStayModalProps {
@@ -89,7 +90,11 @@ export function ExtendStayModal({ open, onClose, onSuccess, booking }: ExtendSta
         .map((d: any) => ({ id: d.id, name: d.account_name, current_balance: d.balance || 0, phone: d.contact_phone, source: 'city_ledger' }))
       const ledgerNames = new Set(ledgerOrgs.map((org: any) => org.name.toLowerCase()))
       const menuOrgs = (orgData || [])
-        .filter((d: any) => d.org_type && isSelectableLedgerName(d.name) && !ledgerNames.has(String(d.name || '').toLowerCase()))
+        .filter(
+          (d: any) =>
+            isOrganizationMenuRecord(d, booking.organization_id!) &&
+            !ledgerNames.has(String(d.name || '').toLowerCase()),
+        )
         .map((d: any) => ({ id: d.id, name: d.name, current_balance: 0, phone: d.phone, source: 'organizations' }))
       const accounts = [...ledgerOrgs, ...menuOrgs].sort((a, b) => a.name.localeCompare(b.name))
       setOrganizations(accounts)
@@ -119,6 +124,30 @@ export function ExtendStayModal({ open, onClose, onSuccess, booking }: ExtendSta
     setCreatingOrg(true)
     try {
       const supabase = createClient()
+      const tid = booking.organization_id
+      if (!tid) throw new Error('Missing organization')
+
+      const { data: { user } } = await supabase.auth.getUser()
+
+      const nameTaken = await guestOrOrganizationNameTaken(supabase, {
+        hotelTenantOrganizationId: tid,
+        candidateName: newOrgName.trim(),
+      })
+      if (nameTaken) {
+        toast.error('This name is already used by a guest or organization')
+        return
+      }
+
+      const { error: orgInsertError } = await supabase.from('organizations').insert([{
+        name: newOrgName.trim(),
+        org_type: 'other',
+        email: null,
+        phone: newOrgPhone.trim() || null,
+        current_balance: 0,
+        created_by: user?.id ?? null,
+      }])
+      if (orgInsertError) throw orgInsertError
+
       const { data, error } = await supabase
         .from('city_ledger_accounts')
         .insert([{

@@ -23,8 +23,8 @@ interface CityLedgerPaymentModalProps {
   open: boolean
   onClose: () => void
   onSuccess: () => void
-  /** "guest" or "organization" */
-  accountType: 'guest' | 'organization'
+  /** Guest profile vs city ledger account kind (individual is non-org ledger, no org.current_balance sync) */
+  accountType: 'guest' | 'organization' | 'individual'
   /** Display name used to look up city_ledger_accounts.account_name */
   accountName: string
   /** city_ledger_accounts.id (null if no ledger account exists yet) */

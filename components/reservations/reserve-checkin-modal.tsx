@@ -11,6 +11,7 @@ import { Badge } from '@/components/ui/badge'
 import { Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatPersonName, normalizeNameKey } from '@/lib/utils/name-format'
+import { guestOrOrganizationNameTaken } from '@/lib/utils/guest-org-name-uniqueness'
 
 export interface ReserveCheckInBooking {
   id: string
@@ -158,6 +159,15 @@ export function ReserveCheckInModal({ open, onClose, onSuccess, booking, userId 
           if (existing?.id) {
             finalGuestId = existing.id
           } else {
+            const dup = await guestOrOrganizationNameTaken(supabase, {
+              hotelTenantOrganizationId: orgId,
+              candidateName: formatted,
+            })
+            if (dup) {
+              toast.error('This name is already used by a guest or organization')
+              return
+            }
+
             const { data: inserted, error: ge } = await supabase
               .from('guests')
               .insert([{ organization_id: orgId, name: formatted, phone: phoneInput || null }])

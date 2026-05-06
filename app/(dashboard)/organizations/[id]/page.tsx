@@ -20,6 +20,7 @@ import { useAuth } from '@/lib/auth-context'
 import { hasPermission } from '@/lib/permissions'
 import { getUserDisplayName } from '@/lib/utils/user-display'
 import { fetchUserDisplayNameMap } from '@/lib/utils/fetch-user-display-names'
+import { guestOrOrganizationNameTaken } from '@/lib/utils/guest-org-name-uniqueness'
 
 interface Organization {
   id: string
@@ -182,13 +183,27 @@ export default function OrganizationDetailPage() {
       setSaving(true)
       const supabase = createClient()
 
+      const trimmedName = formData.name.trim()
+      const tenantForNames = authTenantOrgId || hotelOrgId
+      if (tenantForNames) {
+        const nameTaken = await guestOrOrganizationNameTaken(supabase, {
+          hotelTenantOrganizationId: tenantForNames,
+          candidateName: trimmedName,
+          excludeOrganizationId: orgId,
+        })
+        if (nameTaken) {
+          toast.error('This name is already used by a guest or another organization')
+          return
+        }
+      }
+
       // Get current user
       const { data: { user } } = await supabase.auth.getUser()
 
       const { data: result, error } = await supabase
         .from('organizations')
         .update({
-          name: formData.name,
+          name: trimmedName,
           org_type: formData.org_type,
           email: formData.email || null,
           phone: formData.phone || null,

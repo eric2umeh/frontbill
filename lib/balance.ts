@@ -195,11 +195,12 @@ export async function calculateOrganizationBalancesBatch(
     const { data: ledgerAccounts } = await q
 
     ;(ledgerAccounts || []).forEach((account: any) => {
-      const org = orgRows.find(
-        (item: any) => String(item.name || '').toLowerCase() === String(account.account_name || '').toLowerCase()
-      )
-      if (!org?.id) return
-      balanceMap[org.id] = Math.max(balanceMap[org.id] || 0, Number(account.balance || 0))
+      const acctName = String(account.account_name || '').toLowerCase()
+      const amt = Number(account.balance || 0)
+      orgRows.forEach((org: any) => {
+        if (String(org.name || '').toLowerCase() !== acctName) return
+        balanceMap[org.id] = Math.max(balanceMap[org.id] || 0, amt)
+      })
     })
   }
 

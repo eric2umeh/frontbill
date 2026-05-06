@@ -17,6 +17,7 @@ import { toast } from 'sonner'
 import { isOrganizationMenuRecord, isSelectableLedgerName } from '@/lib/utils/ledger-organization'
 import { resolveOrganizationLedgerAccount } from '@/lib/utils/resolve-ledger-account'
 import { formatPersonName, normalizeNameKey } from '@/lib/utils/name-format'
+import { guestOrOrganizationNameTaken } from '@/lib/utils/guest-org-name-uniqueness'
 import { StayDateRangeFields } from '@/components/shared/stay-date-range-fields'
 import { useAuth } from '@/lib/auth-context'
 import { hasPermission } from '@/lib/permissions'
@@ -26,6 +27,7 @@ import { insertFolioCharges } from '@/lib/utils/insert-folio-charges'
 import { applyPaymentToGuestCityLedger } from '@/lib/utils/guest-city-ledger'
 import { buildBackdateDedupeKey } from '@/lib/backdate/dedupe-key'
 import type { SerializedBookingPayload } from '@/lib/backdate/booking-payload'
+import { isStayCheckInConsideredBackdated } from '@/lib/hotel-date'
 
 interface NewBookingModalProps {
   open: boolean
@@ -196,7 +198,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
           }
         })
       const orgFromTable: LedgerAccount[] = (orgsData || [])
-        .filter((o: any) => isOrganizationMenuRecord(o) && !orgNames.has(o.name.toLowerCase()))
+        .filter((o: any) => isOrganizationMenuRecord(o, orgId) && !orgNames.has(o.name.toLowerCase()))
         .map((o: any) => ({
           id: o.id,
           account_name: o.name,
@@ -308,7 +310,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
         }))
     const ledgerNames = new Set(fromLedger.map(a => a.account_name.toLowerCase()))
     const fromOrgs: LedgerAccount[] = (orgSearchData || [])
-      .filter((o: any) => ledgerTab === 'organization' && isOrganizationMenuRecord(o) && !ledgerNames.has(o.name.toLowerCase()))
+      .filter((o: any) => ledgerTab === 'organization' && isOrganizationMenuRecord(o, organizationId) && !ledgerNames.has(o.name.toLowerCase()))
       .map((o: any) => ({
         id: o.id,
         account_name: o.name,
@@ -378,26 +380,12 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
         }
 
         // Create new city_ledger_accounts record (individual)
-        const normalizedGuestKey = normalizeNameKey(newAccountName)
-        const [{ data: guestDup }, { data: orgNameDup }] = await Promise.all([
-          supabase
-            .from('guests')
-            .select('id')
-            .eq('organization_id', organizationId)
-            .ilike('name', newAccountName.trim())
-            .maybeSingle(),
-          supabase
-            .from('organizations')
-            .select('id')
-            .neq('id', organizationId)
-            .ilike('name', newAccountName.trim())
-            .maybeSingle(),
-        ])
-        if (
-          guestDup ||
-          orgNameDup ||
-          guests.some((g) => normalizeNameKey(g.name) === normalizedGuestKey)
-        ) {
+        const normalizedGuestKey = normalizeNameKey(newAccountName.trim())
+        const dupName = await guestOrOrganizationNameTaken(supabase, {
+          hotelTenantOrganizationId: organizationId,
+          candidateName: newAccountName.trim(),
+        })
+        if (dupName || guests.some((g) => normalizeNameKey(g.name) === normalizedGuestKey)) {
           toast.error('This name already exists as a guest or organization')
           return
         }
@@ -424,14 +412,12 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
 
       } else {
         // Create new organization row (for Organization menu) and linked city ledger account
-        const normalizedOrgKey = normalizeNameKey(newAccountName)
-        const { data: existingOrgRow } = await supabase
-          .from('organizations')
-          .select('id, name')
-          .neq('id', organizationId)
-          .ilike('name', newAccountName.trim())
-          .maybeSingle()
-        if (existingOrgRow || organizationAccounts.some((a) => normalizeNameKey(a.account_name) === normalizedOrgKey)) {
+        const normalizedOrgKey = normalizeNameKey(newAccountName.trim())
+        const dupOrgName = await guestOrOrganizationNameTaken(supabase, {
+          hotelTenantOrganizationId: organizationId,
+          candidateName: newAccountName.trim(),
+        })
+        if (dupOrgName || organizationAccounts.some((a) => normalizeNameKey(a.account_name) === normalizedOrgKey)) {
           toast.error('An organization with this name already exists')
           return
         }
@@ -572,7 +558,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
   }
 
   const canApproveBackdates = hasPermission(role, 'backdate:approve')
-  const isBackdated = checkInDate ? checkInDate < new Date(new Date().setHours(0, 0, 0, 0)) : false
+  const isBackdated = checkInDate ? isStayCheckInConsideredBackdated(toLocalDateStr(checkInDate)) : false
 
   const hasApprovedBackdateRequest = async () => {
     if (!checkInDate) return false
@@ -666,6 +652,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
       }
       if (!res.ok) { toast.error(json.error || 'Failed to send backdate request'); return }
       toast.success('Backdate request submitted for approval')
+      if (typeof window !== 'undefined') window.dispatchEvent(new Event('frontbill-backdate-pending-changed'))
       setBackdateReason('')
     } catch {
       toast.error('Failed to send backdate request')
@@ -717,6 +704,15 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
       const formattedGuestName = formatPersonName(fullName)
       let finalGuestId = guestId
       if (!guestId) {
+        const dupGuest = await guestOrOrganizationNameTaken(supabase, {
+          hotelTenantOrganizationId: organizationId,
+          candidateName: formattedGuestName,
+        })
+        if (dupGuest) {
+          toast.error('This name is already used by a guest or organization')
+          return
+        }
+
         const { data: newGuest, error: ge } = await supabase
           .from('guests')
           .insert([{ organization_id: organizationId, name: formattedGuestName, phone, email: email || null, address: address || null }])

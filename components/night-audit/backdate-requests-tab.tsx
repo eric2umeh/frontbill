@@ -81,6 +81,7 @@ export function BackdateRequestsTab({ userId }: Props) {
       }
       setRequests((prev) => prev.map((item) => (item.id === requestId ? { ...item, ...json.request } : item)))
       load()
+      if (typeof window !== 'undefined') window.dispatchEvent(new Event('frontbill-backdate-pending-changed'))
     } catch {
       toast.error('Failed to update request')
     } finally {

@@ -8,6 +8,14 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
 import { Label } from '@/components/ui/label'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { formatNaira } from '@/lib/utils/currency'
 import {
   Loader2, ArrowLeft, User, Phone, Mail, MapPin,
@@ -19,6 +27,8 @@ import CityLedgerPaymentModal from '@/components/city-ledger/city-ledger-payment
 import { useAuth } from '@/lib/auth-context'
 import { hasPermission } from '@/lib/permissions'
 import { toast } from 'sonner'
+import { folioGuestCreditAmount, folioPositiveOutstandingSum } from '@/lib/utils/booking-bill-balance'
+import { guestOrOrganizationNameTaken } from '@/lib/utils/guest-org-name-uniqueness'
 
 interface Guest {
   id: string
@@ -49,7 +59,7 @@ interface Booking {
 }
 
 interface LedgerAccount {
-  id: string
+  id: string | null
   balance: number
   account_name: string
   account_type: string
@@ -68,10 +78,12 @@ interface LedgerTransaction {
 export default function GuestDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
   const router = useRouter()
+  // Prefer DB profile.role (source of truth) once loaded; matches layout AuthProvider but fixes any drift.
+  const [resolvedRole, setResolvedRole] = useState<string | null>(null)
   const { role } = useAuth()
   /** Product rule: only Administrator / Superadmin edit guest profiles (see hasPermission hard gate). */
-  const canEditGuest = hasPermission(role, 'guests:edit')
-  const canViewGuests = hasPermission(role, 'guests:view')
+  const canEditGuest = hasPermission(resolvedRole ?? role, 'guests:edit')
+  const canViewGuests = hasPermission(resolvedRole ?? role, 'guests:view')
   const [guest, setGuest] = useState<Guest | null>(null)
   const [bookings, setBookings] = useState<Booking[]>([])
   const [ledgerAccount, setLedgerAccount] = useState<LedgerAccount | null>(null)
@@ -79,8 +91,8 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
   const [orgId, setOrgId] = useState<string>('')
   const [loading, setLoading] = useState(true)
   const [paymentModalOpen, setPaymentModalOpen] = useState(false)
-  const [folioPaymentsSum, setFolioPaymentsSum] = useState(0)
   const [guestPendingBalance, setGuestPendingBalance] = useState(0)
+  const [guestFolioCreditTotal, setGuestFolioCreditTotal] = useState(0)
   const [selectedFolioId, setSelectedFolioId] = useState<string>('')
   const [isCheckingOut, setIsCheckingOut] = useState(false)
   const [isEditingGuest, setIsEditingGuest] = useState(false)
@@ -116,9 +128,10 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
       if (!user) { router.push('/auth/login'); return }
 
       const { data: profile } = await supabase
-        .from('profiles').select('organization_id').eq('id', user.id).single()
+        .from('profiles').select('organization_id, role').eq('id', user.id).single()
       if (!profile) return
       setOrgId(profile.organization_id)
+      setResolvedRole(profile.role ?? null)
 
       const [{ data: guestData }, { data: bookingData }] = await Promise.all([
         supabase.from('guests').select('*').eq('id', id).eq('organization_id', profile.organization_id).single(),
@@ -144,42 +157,53 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
       // Fetch all folio charges for this guest's bookings to derive accurate balances
       const rawBookings = bookingData || []
       const bookingIds = rawBookings.map((b: any) => b.id)
-      let folioPaymentsTotal = 0
-      let folioPendingByBooking: { [id: string]: number } = {}
+      /** booking_id → folio rows (same net rules as booking list/detail) */
+      const chargesByBooking: Record<
+        string,
+        { amount?: unknown; type?: string | null; charge_type?: string | null; payment_status?: string | null; payment_method?: string | null }[]
+      > = {}
       if (bookingIds.length > 0) {
         const { data: allFolioCharges } = await supabase
           .from('folio_charges')
-          .select('booking_id, amount, payment_status, charge_type')
+          .select('booking_id, amount, payment_status, charge_type, payment_method')
           .in('booking_id', bookingIds)
-        if (allFolioCharges) {
-          allFolioCharges.forEach((c: any) => {
-            if ((c.payment_status === 'pending' || c.payment_status === 'unpaid') && Number(c.amount) > 0) {
-              folioPendingByBooking[c.booking_id] = (folioPendingByBooking[c.booking_id] || 0) + Number(c.amount)
-            }
-            if (c.charge_type === 'payment' && Number(c.amount) < 0) {
-              folioPaymentsTotal += Math.abs(Number(c.amount))
-            }
+        for (const c of allFolioCharges || []) {
+          const bid = (c as { booking_id?: string }).booking_id
+          if (!bid) continue
+          if (!chargesByBooking[bid]) chargesByBooking[bid] = []
+          const row = c as {
+            amount?: unknown
+            charge_type?: string | null
+            payment_status?: string | null
+            payment_method?: string | null
+          }
+          chargesByBooking[bid].push({
+            amount: row.amount,
+            type: row.charge_type,
+            charge_type: row.charge_type,
+            payment_status: row.payment_status,
+            payment_method: row.payment_method,
           })
         }
       }
 
-      // Build a NEW array with folio-derived balances (never mutate Supabase frozen objects)
-      const enrichedBookings = rawBookings.map((b: any) => ({
-        ...b,
-        balance: folioPendingByBooking[b.id] ?? 0,
-      }))
+      let pendingTotal = 0
+      let creditTotal = 0
+      const enrichedBookings = rawBookings.map((b: any) => {
+        const ch = chargesByBooking[b.id] ?? []
+        const net = folioPositiveOutstandingSum(ch)
+        pendingTotal += Math.max(0, net)
+        creditTotal += folioGuestCreditAmount(ch)
+        return { ...b, balance: net }
+      })
       setBookings(enrichedBookings)
-      setFolioPaymentsSum(folioPaymentsTotal)
+      setGuestPendingBalance(pendingTotal)
+      setGuestFolioCreditTotal(creditTotal)
 
       // Set selected folio to most recent booking's folio
       if (enrichedBookings.length > 0) {
         setSelectedFolioId(enrichedBookings[0].folio_id)
       }
-
-      // City ledger outstanding = sum of all pending folio charges across all bookings
-      // This is the authoritative value — avoids stale guests.balance DB writes
-      const pendingTotal = Object.values(folioPendingByBooking).reduce((s, v) => s + v, 0)
-      setGuestPendingBalance(pendingTotal)
 
       // City ledger account — fetch if exists for display
       const { data: ledgerData } = await supabase
@@ -190,8 +214,20 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
         .in('account_type', ['individual', 'guest'])
         .maybeSingle()
 
-      if (pendingTotal > 0) {
-        setLedgerAccount(ledgerData || { id: null, balance: pendingTotal, account_name: guestData.name, account_type: 'individual' })
+      if (ledgerData) {
+        setLedgerAccount({
+          id: ledgerData.id,
+          balance: Number(ledgerData.balance ?? 0),
+          account_name: ledgerData.account_name,
+          account_type: ledgerData.account_type,
+        })
+      } else if (pendingTotal > 0) {
+        setLedgerAccount({
+          id: null,
+          balance: pendingTotal,
+          account_name: guestData.name,
+          account_type: 'individual',
+        })
       } else {
         setLedgerAccount(null)
       }
@@ -249,6 +285,21 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
     try {
       setSavingGuest(true)
       const supabase = createClient()
+      if (!orgId) {
+        toast.error('Hotel context missing — refresh and try again')
+        return
+      }
+
+      const nameTaken = await guestOrOrganizationNameTaken(supabase, {
+        hotelTenantOrganizationId: orgId,
+        candidateName: guestForm.name.trim(),
+        excludeGuestId: guest.id,
+      })
+      if (nameTaken) {
+        toast.error('This name is already used by another guest or an organization')
+        return
+      }
+
       const { error } = await supabase
         .from('guests')
         .update({
@@ -274,6 +325,21 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
     }
   }
 
+  const cancelGuestEditing = () => {
+    setIsEditingGuest(false)
+    if (!guest) return
+    setGuestForm({
+      name: guest.name || '',
+      phone: guest.phone || '',
+      email: guest.email || '',
+      address: guest.address || '',
+      city: guest.city || '',
+      country: guest.country || '',
+      id_type: guest.id_type || '',
+      id_number: guest.id_number || '',
+    })
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-96">
@@ -285,17 +351,23 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
   if (!guest) return null
 
   // Total Paid = sum of bookings.deposit (includes initial payment + all record-payment increments)
-  // folioPaymentsSum is NOT added here — booking.deposit is already bumped when a payment is recorded,
-  // so adding folio payments would double-count them.
   const totalSpent = bookings.reduce((s, b) => s + Number(b.deposit || 0), 0)
-  // Clamp to 0 — negative means overpaid, show as settled
-  // Booking Balance (Outstanding) — use folio-derived pending total, same source as city ledger section
-  // Do NOT use bookings.reduce(b.balance) — that can lag by one render cycle after setBookings
   const totalBookingBalance = guestPendingBalance
   const lastVisit = bookings.length > 0 ? bookings[0].check_in : null
-  // Use folio-derived pending total as authoritative outstanding balance
   const guestOutstandingBalance = guestPendingBalance
-  const ledgerBalance = ledgerAccount ? guestOutstandingBalance : 0
+  /** Synthetic ledger (no DB row) tracks folio outstanding; real account uses city_ledger_accounts.balance */
+  const ledgerDisplayBalance = ledgerAccount
+    ? ledgerAccount.id == null
+      ? guestOutstandingBalance
+      : Number(ledgerAccount.balance ?? 0)
+    : 0
+
+  /** Real city ledger only: negative DB balance = prepaid credit not always visible on folio totals. */
+  const ledgerAccountCreditAmount =
+    ledgerAccount?.id != null && ledgerDisplayBalance < 0 ? Math.abs(ledgerDisplayBalance) : 0
+  const effectiveGuestCreditAmount = Math.max(guestFolioCreditTotal, ledgerAccountCreditAmount)
+  const hasOutstandingDebit = totalBookingBalance > 0
+  const hasGuestCredit = effectiveGuestCreditAmount > 0
 
   const statusColor = (status: string) => {
     switch (status) {
@@ -308,7 +380,8 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
 
   const ledgerStatusBadge = () => {
     if (!ledgerAccount) return { label: 'No Account', color: 'text-muted-foreground', bg: 'bg-muted/40 border-border' }
-    if (ledgerBalance > 0) return { label: 'Debit', color: 'text-red-600', bg: 'bg-red-50 border-red-200' }
+    if (ledgerDisplayBalance > 0) return { label: 'Debit', color: 'text-red-600', bg: 'bg-red-50 border-red-200' }
+    if (ledgerDisplayBalance < 0) return { label: 'Credit', color: 'text-blue-700', bg: 'bg-blue-50 border-blue-200' }
     return { label: 'Settled', color: 'text-muted-foreground', bg: 'bg-muted/40 border-border' }
   }
 
@@ -347,22 +420,25 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
         <div className="flex flex-col items-end gap-2 self-start">
           <div className="flex items-center gap-2">
             {canEditGuest && (
-              <>
-                {isEditingGuest ? (
-                  <>
-                    <Button size="sm" variant="outline" onClick={() => { setIsEditingGuest(false); loadGuest() }} disabled={savingGuest}>
-                      Cancel
-                    </Button>
-                    <Button size="sm" onClick={handleSaveGuest} disabled={savingGuest}>
-                      {savingGuest ? 'Saving...' : 'Save Guest'}
-                    </Button>
-                  </>
-                ) : (
-                  <Button variant="outline" size="sm" onClick={() => setIsEditingGuest(true)}>
-                    Edit Guest
-                  </Button>
-                )}
-              </>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setGuestForm({
+                    name: guest.name || '',
+                    phone: guest.phone || '',
+                    email: guest.email || '',
+                    address: guest.address || '',
+                    city: guest.city || '',
+                    country: guest.country || '',
+                    id_type: guest.id_type || '',
+                    id_number: guest.id_number || '',
+                  })
+                  setIsEditingGuest(true)
+                }}
+              >
+                Edit Guest
+              </Button>
             )}
             <Button variant="outline" size="sm" onClick={() => loadGuest()} className="gap-2">
               <RefreshCw className="h-4 w-4" />
@@ -378,7 +454,7 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
       </div>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Card>
           <CardContent className="p-5 flex flex-col gap-1">
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -396,14 +472,57 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
             <p className="text-3xl font-bold text-green-600">{formatNaira(totalSpent)}</p>
           </CardContent>
         </Card>
-        <Card className={totalBookingBalance > 0 ? 'border-red-200' : ''}>
-          <CardContent className="p-5 flex flex-col gap-1">
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <TrendingUp className="h-4 w-4" /> Booking Balance
+        <Card
+          className={
+            hasOutstandingDebit
+              ? 'border-red-200'
+              : hasGuestCredit
+                ? 'border-blue-200 bg-blue-500/5'
+                : ''
+          }
+        >
+          <CardContent className="p-5 flex flex-col gap-2">
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground min-w-0">
+                <TrendingUp className="h-4 w-4 shrink-0" />
+                <span>Outstanding Balance</span>
+              </div>
+              {hasOutstandingDebit && (
+                <Badge variant="outline" className="shrink-0 text-xs border-red-200 bg-red-50 text-red-700 font-medium">
+                  Outstanding
+                </Badge>
+              )}
+              {!hasOutstandingDebit && hasGuestCredit && (
+                <Badge variant="outline" className="shrink-0 text-xs border-blue-200 bg-blue-50 text-blue-700 font-medium">
+                  Credit
+                </Badge>
+              )}
             </div>
-            <p className={`text-3xl font-bold ${totalBookingBalance > 0 ? 'text-red-600' : 'text-foreground'}`}>
-              {totalBookingBalance > 0 ? formatNaira(totalBookingBalance) : 'Settled'}
-            </p>
+            {hasOutstandingDebit ? (
+              <>
+                <p className="text-3xl font-bold text-red-600">{formatNaira(totalBookingBalance)}</p>
+                {hasGuestCredit && (
+                  <p className="text-sm font-semibold text-blue-600 tabular-nums">
+                    Credit · {formatNaira(effectiveGuestCreditAmount)}
+                  </p>
+                )}
+              </>
+            ) : hasGuestCredit ? (
+              <>
+                <p className="text-3xl font-bold text-blue-600 tabular-nums">
+                  {formatNaira(effectiveGuestCreditAmount)}
+                </p>
+                <p className="text-xs text-muted-foreground leading-snug">
+                  {guestFolioCreditTotal > 0 && ledgerAccountCreditAmount > 0
+                    ? 'Credit reflected on folio and on the city ledger account.'
+                    : ledgerAccountCreditAmount > 0 && guestFolioCreditTotal <= 0
+                      ? 'Prepaid balance on city ledger account.'
+                      : 'Overpayment held on folio(s).'}
+                </p>
+              </>
+            ) : (
+              <p className="text-3xl font-bold text-muted-foreground">Settled</p>
+            )}
           </CardContent>
         </Card>
         <Card>
@@ -479,7 +598,7 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
               <Wallet className="h-5 w-5 text-primary" />
               <CardTitle className="text-base">City Ledger Account</CardTitle>
               {ledgerAccount ? (
-                <Badge variant="outline" className={`text-xs ${ledgerBalance > 0 ? 'border-red-200 text-red-700 bg-red-50' : ledgerBalance < 0 ? 'border-green-200 text-green-700 bg-green-50' : ''}`}>
+                <Badge variant="outline" className={`text-xs ${ls.color} ${ls.bg} border font-normal`}>
                   {ls.label}
                 </Badge>
               ) : (
@@ -503,13 +622,13 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
               <div>
                 <p className="text-xs text-muted-foreground mb-1">Current Balance</p>
                 <p className={`text-4xl font-bold ${ls.color}`}>
-                  {formatNaira(Math.abs(ledgerBalance))}
+                  {formatNaira(Math.abs(ledgerDisplayBalance))}
                 </p>
                 <p className="text-xs text-muted-foreground mt-1">
-                  {ledgerBalance > 0
+                  {ledgerDisplayBalance > 0
                     ? 'Amount owed to hotel (debit)'
-                    : ledgerBalance < 0
-                    ? `Credit of ${formatNaira(Math.abs(ledgerBalance))} available`
+                    : ledgerDisplayBalance < 0
+                    ? `Credit of ${formatNaira(Math.abs(ledgerDisplayBalance))} available`
                     : 'Account fully settled'}
                 </p>
               </div>
@@ -529,110 +648,34 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
             <CardTitle className="text-base">Guest Information</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            {isEditingGuest && canEditGuest ? (
-              <div className="space-y-3">
-                <div className="space-y-2">
-                  <Label>Full Name</Label>
-                  <input
-                    className="w-full px-3 py-2 border rounded-md text-sm bg-background"
-                    value={guestForm.name}
-                    onChange={(e) => setGuestForm((prev) => ({ ...prev, name: e.target.value }))}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Phone</Label>
-                  <input
-                    className="w-full px-3 py-2 border rounded-md text-sm bg-background"
-                    value={guestForm.phone}
-                    onChange={(e) => setGuestForm((prev) => ({ ...prev, phone: e.target.value }))}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Email</Label>
-                  <input
-                    className="w-full px-3 py-2 border rounded-md text-sm bg-background"
-                    value={guestForm.email}
-                    onChange={(e) => setGuestForm((prev) => ({ ...prev, email: e.target.value }))}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Address</Label>
-                  <input
-                    className="w-full px-3 py-2 border rounded-md text-sm bg-background"
-                    value={guestForm.address}
-                    onChange={(e) => setGuestForm((prev) => ({ ...prev, address: e.target.value }))}
-                  />
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-2">
-                    <Label>City</Label>
-                    <input
-                      className="w-full px-3 py-2 border rounded-md text-sm bg-background"
-                      value={guestForm.city}
-                      onChange={(e) => setGuestForm((prev) => ({ ...prev, city: e.target.value }))}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Country</Label>
-                    <input
-                      className="w-full px-3 py-2 border rounded-md text-sm bg-background"
-                      value={guestForm.country}
-                      onChange={(e) => setGuestForm((prev) => ({ ...prev, country: e.target.value }))}
-                    />
-                  </div>
-                </div>
-                <Separator />
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-2">
-                    <Label>ID Type</Label>
-                    <input
-                      className="w-full px-3 py-2 border rounded-md text-sm bg-background"
-                      value={guestForm.id_type}
-                      onChange={(e) => setGuestForm((prev) => ({ ...prev, id_type: e.target.value }))}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>ID Number</Label>
-                    <input
-                      className="w-full px-3 py-2 border rounded-md text-sm bg-background"
-                      value={guestForm.id_number}
-                      onChange={(e) => setGuestForm((prev) => ({ ...prev, id_number: e.target.value }))}
-                    />
-                  </div>
-                </div>
+            <div className="space-y-3">
+              <div className="flex items-center gap-3 text-sm">
+                <Phone className="h-4 w-4 text-muted-foreground shrink-0" />
+                <span>{guest.phone || '—'}</span>
               </div>
-            ) : (
+              <div className="flex items-center gap-3 text-sm">
+                <Mail className="h-4 w-4 text-muted-foreground shrink-0" />
+                <span>{guest.email || '—'}</span>
+              </div>
+              <div className="flex items-start gap-3 text-sm">
+                <MapPin className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
+                <span>{[guest.address, guest.city, guest.country].filter(Boolean).join(', ') || '—'}</span>
+              </div>
+            </div>
+
+            {guest.id_type && (
               <>
-                <div className="space-y-3">
+                <Separator />
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Identity Document</p>
                   <div className="flex items-center gap-3 text-sm">
-                    <Phone className="h-4 w-4 text-muted-foreground shrink-0" />
-                    <span>{guest.phone || '—'}</span>
-                  </div>
-                  <div className="flex items-center gap-3 text-sm">
-                    <Mail className="h-4 w-4 text-muted-foreground shrink-0" />
-                    <span>{guest.email || '—'}</span>
-                  </div>
-                  <div className="flex items-start gap-3 text-sm">
-                    <MapPin className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
-                    <span>{[guest.address, guest.city, guest.country].filter(Boolean).join(', ') || '—'}</span>
+                    <Hash className="h-4 w-4 text-muted-foreground" />
+                    <div>
+                      <span className="font-medium capitalize">{guest.id_type}: </span>
+                      <span className="text-muted-foreground">{guest.id_number || '—'}</span>
+                    </div>
                   </div>
                 </div>
-
-                {guest.id_type && (
-                  <>
-                    <Separator />
-                    <div className="space-y-2">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Identity Document</p>
-                      <div className="flex items-center gap-3 text-sm">
-                        <Hash className="h-4 w-4 text-muted-foreground" />
-                        <div>
-                          <span className="font-medium capitalize">{guest.id_type}: </span>
-                          <span className="text-muted-foreground">{guest.id_number || '—'}</span>
-                        </div>
-                      </div>
-                    </div>
-                  </>
-                )}
               </>
             )}
           </CardContent>
@@ -674,8 +717,18 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
                       {b.balance > 0 && (
                         <div className="text-xs text-red-600">Balance: {formatNaira(b.balance)}</div>
                       )}
-                      <Badge variant="outline" className={`text-xs ${statusColor(b.payment_status)}`}>
-                        {b.payment_status}
+                      {b.balance < 0 && (
+                        <div className="text-xs font-medium text-blue-600">Credit: {formatNaira(-b.balance)}</div>
+                      )}
+                      <Badge
+                        variant="outline"
+                        className={`text-xs ${
+                          Number(b.balance) < 0
+                            ? 'text-blue-700 border-blue-200 bg-blue-50'
+                            : statusColor(b.payment_status)
+                        }`}
+                      >
+                        {Number(b.balance) < 0 ? 'credit' : b.payment_status}
                       </Badge>
                     </div>
                   </div>
@@ -723,6 +776,112 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
         </Card>
       )}
 
+      {canEditGuest && (
+        <Dialog
+          open={isEditingGuest}
+          onOpenChange={(open) => {
+            if (!open) cancelGuestEditing()
+          }}
+        >
+          <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Edit guest</DialogTitle>
+              <DialogDescription>
+                Update contact details and identification for this profile.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3 py-2">
+              <div className="space-y-2">
+                <Label htmlFor="guest-edit-name">Full Name</Label>
+                <input
+                  id="guest-edit-name"
+                  className="w-full px-3 py-2 border rounded-md text-sm bg-background"
+                  value={guestForm.name}
+                  onChange={(e) => setGuestForm((prev) => ({ ...prev, name: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="guest-edit-phone">Phone</Label>
+                <input
+                  id="guest-edit-phone"
+                  className="w-full px-3 py-2 border rounded-md text-sm bg-background"
+                  value={guestForm.phone}
+                  onChange={(e) => setGuestForm((prev) => ({ ...prev, phone: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="guest-edit-email">Email</Label>
+                <input
+                  id="guest-edit-email"
+                  type="email"
+                  className="w-full px-3 py-2 border rounded-md text-sm bg-background"
+                  value={guestForm.email}
+                  onChange={(e) => setGuestForm((prev) => ({ ...prev, email: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="guest-edit-address">Address</Label>
+                <input
+                  id="guest-edit-address"
+                  className="w-full px-3 py-2 border rounded-md text-sm bg-background"
+                  value={guestForm.address}
+                  onChange={(e) => setGuestForm((prev) => ({ ...prev, address: e.target.value }))}
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <Label htmlFor="guest-edit-city">City</Label>
+                  <input
+                    id="guest-edit-city"
+                    className="w-full px-3 py-2 border rounded-md text-sm bg-background"
+                    value={guestForm.city}
+                    onChange={(e) => setGuestForm((prev) => ({ ...prev, city: e.target.value }))}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="guest-edit-country">Country</Label>
+                  <input
+                    id="guest-edit-country"
+                    className="w-full px-3 py-2 border rounded-md text-sm bg-background"
+                    value={guestForm.country}
+                    onChange={(e) => setGuestForm((prev) => ({ ...prev, country: e.target.value }))}
+                  />
+                </div>
+              </div>
+              <Separator />
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <Label htmlFor="guest-edit-id-type">ID Type</Label>
+                  <input
+                    id="guest-edit-id-type"
+                    className="w-full px-3 py-2 border rounded-md text-sm bg-background"
+                    value={guestForm.id_type}
+                    onChange={(e) => setGuestForm((prev) => ({ ...prev, id_type: e.target.value }))}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="guest-edit-id-number">ID Number</Label>
+                  <input
+                    id="guest-edit-id-number"
+                    className="w-full px-3 py-2 border rounded-md text-sm bg-background"
+                    value={guestForm.id_number}
+                    onChange={(e) => setGuestForm((prev) => ({ ...prev, id_number: e.target.value }))}
+                  />
+                </div>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={cancelGuestEditing} disabled={savingGuest}>
+                Cancel
+              </Button>
+              <Button type="button" onClick={handleSaveGuest} disabled={savingGuest}>
+                {savingGuest ? 'Saving...' : 'Save changes'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+
       {/* City Ledger Payment Modal */}
       {ledgerAccount && (
         <CityLedgerPaymentModal
@@ -732,7 +891,9 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
           accountType="guest"
           accountName={guest.name}
           ledgerAccountId={ledgerAccount.id}
-          currentBalance={guestOutstandingBalance}
+          currentBalance={
+            ledgerAccount?.id ? Number(ledgerAccount.balance ?? 0) : guestOutstandingBalance
+          }
           organizationId={orgId}
           guestId={guest.id}
         />
