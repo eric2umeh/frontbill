@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, usePathname } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -24,6 +24,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { BackdateRequestsTab } from '@/components/night-audit/backdate-requests-tab'
+import { useBackdatePendingCount } from '@/hooks/use-backdate-pending-count'
 
 interface AuditTrailLog {
   id: string
@@ -41,6 +42,8 @@ interface AuditTrailLog {
 
 export default function NightAuditPage() {
   const router = useRouter()
+  const pathname = usePathname()
+  const [auditTab, setAuditTab] = useState('expected-arrivals')
   const [auditRunning, setAuditRunning] = useState(false)
   const [auditComplete, setAuditComplete] = useState(false)
   const { initialLoading, startFetch, endFetch } = usePageData()
@@ -60,6 +63,23 @@ export default function NightAuditPage() {
   })
   const canViewAuditTrails = hasPermission(role, 'audit_trails:view')
   const canApproveBackdates = hasPermission(role, 'backdate:approve')
+  const pendingBackdateBadge = useBackdatePendingCount(canApproveBackdates, userId)
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const q = new URLSearchParams(window.location.search).get('tab')
+    if (q === 'backdate-requests' && canApproveBackdates && userId) setAuditTab('backdate-requests')
+  }, [canApproveBackdates, userId])
+
+  const onAuditTabChange = (value: string) => {
+    setAuditTab(value)
+    if (typeof window === 'undefined') return
+    const u = new URLSearchParams(window.location.search)
+    if (value === 'backdate-requests') u.set('tab', 'backdate-requests')
+    else u.delete('tab')
+    const qs = u.toString()
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
+  }
 
   useEffect(() => {
     fetchAuditData()
@@ -472,7 +492,7 @@ export default function NightAuditPage() {
         </CardContent>
       </Card>
 
-      <Tabs defaultValue="expected-arrivals" className="space-y-4">
+      <Tabs value={auditTab} onValueChange={onAuditTabChange} className="space-y-4">
         <TabsList className="flex flex-wrap h-auto">
           <TabsTrigger value="expected-arrivals">Expected Arrivals</TabsTrigger>
           <TabsTrigger value="pending-checkouts">Pending Checkouts</TabsTrigger>
@@ -481,6 +501,11 @@ export default function NightAuditPage() {
             <TabsTrigger value="backdate-requests" className="gap-1.5">
               <CalendarClock className="h-3.5 w-3.5" />
               Backdate Requests
+              {pendingBackdateBadge > 0 && (
+                <Badge variant="destructive" className="h-5 min-w-5 rounded-full px-1.5 text-[11px] tabular-nums">
+                  {pendingBackdateBadge > 99 ? '99+' : pendingBackdateBadge}
+                </Badge>
+              )}
             </TabsTrigger>
           )}
         </TabsList>
