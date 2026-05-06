@@ -6,6 +6,7 @@ import { usePathname } from 'next/navigation'
 import { cn } from '@/lib/utils'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 import { useAuth } from '@/lib/auth-context'
 import { hasPermission, type Permission } from '@/lib/permissions'
 import { Sheet, SheetContent, SheetTitle, SheetDescription } from '@/components/ui/sheet'
@@ -30,6 +31,7 @@ import {
   Wrench,
   ShoppingBag,
 } from 'lucide-react'
+import { useBackdatePendingCount } from '@/hooks/use-backdate-pending-count'
 
 const routes: Array<{ label: string; icon: any; href: string; permission?: Permission }> = [
   {
@@ -132,7 +134,8 @@ interface SidebarProps {
 export function Sidebar({ mobileOpen, onMobileClose }: SidebarProps = {}) {
   const pathname = usePathname()
   const [collapsed, setCollapsed] = useState(false)
-  const { role } = useAuth()
+  const { role, userId } = useAuth()
+  const pendingBackdateCount = useBackdatePendingCount(hasPermission(role, 'backdate:approve'), userId)
 
   // Filter sidebar routes based on the logged-in user's role
   const visibleRoutes = routes.filter(route => {
@@ -140,7 +143,11 @@ export function Sidebar({ mobileOpen, onMobileClose }: SidebarProps = {}) {
     return hasPermission(role, route.permission)
   })
 
-  const SidebarContent = ({ isMobile = false }: { isMobile?: boolean }) => (
+  const SidebarContent = ({
+    isMobile = false,
+  }: {
+    isMobile?: boolean
+  }) => (
     <div className={cn(
       "h-full flex flex-col border-r bg-card",
       !isMobile && collapsed && "w-16",
@@ -177,19 +184,40 @@ export function Sidebar({ mobileOpen, onMobileClose }: SidebarProps = {}) {
             return (
               <Link
                 key={route.href}
-                href={route.href}
+                href={route.href === '/night-audit' && pendingBackdateCount > 0 ? '/night-audit?tab=backdate-requests' : route.href}
                 onClick={() => isMobile && onMobileClose?.()}
                 className={cn(
-                  'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors',
+                  'flex items-center rounded-lg px-3 py-2.5 text-sm font-medium transition-colors',
+                  (!collapsed || isMobile) ? 'gap-3' : 'justify-center gap-0',
                   isActive
                     ? 'bg-primary text-primary-foreground'
                     : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
-                  collapsed && !isMobile && 'justify-center'
                 )}
-                title={collapsed && !isMobile ? route.label : undefined}
+                title={
+                  collapsed && !isMobile
+                    ? (route.href === '/night-audit' && pendingBackdateCount > 0
+                      ? `${route.label} (${pendingBackdateCount} pending backdate)`
+                      : route.label)
+                    : undefined
+                }
               >
                 <Icon className="h-4 w-4 flex-shrink-0" />
-                {(!collapsed || isMobile) && <span>{route.label}</span>}
+                {(!collapsed || isMobile) && (
+                  <>
+                    <span className="flex-1 text-left">{route.label}</span>
+                    {route.href === '/night-audit' && pendingBackdateCount > 0 && (
+                      <Badge
+                        variant="destructive"
+                        className={cn(
+                          'tabular-nums shrink-0 rounded-full px-1.5 text-[11px] min-w-6 justify-center font-semibold',
+                          isActive && 'bg-primary-foreground/20 text-primary-foreground border-transparent',
+                        )}
+                      >
+                        {pendingBackdateCount > 99 ? '99+' : pendingBackdateCount}
+                      </Badge>
+                    )}
+                  </>
+                )}
               </Link>
             )
           })}

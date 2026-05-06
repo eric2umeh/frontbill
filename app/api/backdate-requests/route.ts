@@ -1,9 +1,17 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { buildBackdateDedupeKey } from '@/lib/backdate/dedupe-key'
 import { createBookingFromPayload, type SerializedBookingPayload } from '@/lib/backdate/booking-payload'
+import { canonicalRoleKey } from '@/lib/permissions'
+import { fetchOrganizationHotelTimeZone } from '@/lib/hotel-date-server'
+import { isCalendarDateBeforeHotelToday } from '@/lib/hotel-date'
+import { notifyApproversNewBackdateRequest } from '@/lib/email/backdate-request-notify'
 import { NextResponse } from 'next/server'
 
-const BACKDATE_DECIDER_ROLES = ['superadmin', 'admin']
+function isBackdateDeciderRole(role: string | null | undefined): boolean {
+  const k = canonicalRoleKey(role)
+  return k === 'admin' || k === 'superadmin'
+}
+
 const DECISION_STATUSES = ['approved', 'rejected']
 
 function isUniqueViolation(err: { code?: string; message?: string } | null) {
@@ -39,7 +47,7 @@ export async function GET(request: Request) {
       .eq('organization_id', callerProfile.organization_id)
       .order('created_at', { ascending: false })
 
-    if (!BACKDATE_DECIDER_ROLES.includes(String(callerProfile.role))) {
+    if (!isBackdateDeciderRole(callerProfile.role)) {
       query = query.eq('requested_by', callerId)
     }
 
@@ -92,11 +100,17 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Caller profile not found' }, { status: 403 })
     }
 
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
-    const requestedDate = new Date(`${requested_check_in}T00:00:00`)
-    if (Number.isNaN(requestedDate.getTime()) || requestedDate >= today) {
-      return NextResponse.json({ error: 'Backdate requests are only needed for past check-in dates' }, { status: 400 })
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(requested_check_in).trim())) {
+      return NextResponse.json({ error: 'requested_check_in must be YYYY-MM-DD' }, { status: 400 })
+    }
+
+    const orgTz = await fetchOrganizationHotelTimeZone(callerProfile.organization_id)
+    const now = new Date()
+    if (!isCalendarDateBeforeHotelToday(String(requested_check_in).trim(), now, orgTz)) {
+      return NextResponse.json(
+        { error: 'Backdate requests apply only when check-in is before today on the hotel calendar' },
+        { status: 400 },
+      )
     }
 
     const roomId = (metadata as any).room_id ?? (metadata as any).booking_payload?.room_id ?? null
@@ -155,6 +169,26 @@ export async function POST(request: Request) {
       }
       return NextResponse.json({ error: error.message }, { status: 500 })
     }
+
+    try {
+      const { data: requesterProf } = await admin
+        .from('profiles')
+        .select('full_name')
+        .eq('id', caller_id)
+        .maybeSingle()
+      const requesterLabel = requesterProf?.full_name?.trim() || `User ${String(caller_id).slice(0, 8)}`
+      void notifyApproversNewBackdateRequest({
+        organizationId: callerProfile.organization_id,
+        requestId: data.id,
+        requestType: String(request_type),
+        requestedCheckIn: requested_check_in,
+        requestedByLabel: requesterLabel,
+        reasonPreview: reason.trim(),
+      })
+    } catch (e) {
+      console.error('[backdate-requests] notify after insert:', e)
+    }
+
     return NextResponse.json({ request: data })
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 })
@@ -180,7 +214,7 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: 'Caller profile not found' }, { status: 403 })
     }
 
-    if (!BACKDATE_DECIDER_ROLES.includes(String(callerProfile.role))) {
+    if (!isBackdateDeciderRole(callerProfile.role)) {
       return NextResponse.json({ error: 'Only a Superadmin or Administrator can approve or reject backdate requests' }, { status: 403 })
     }
 
