@@ -35,7 +35,7 @@ import {
   isPastCheckoutCutoff,
   normalizeBookingCheckoutYmd,
 } from '@/lib/utils/booking-checkout-ui'
-import { bookingDisplayBillBalance, shouldReconcileBookingPaymentPaid } from '@/lib/utils/booking-bill-balance'
+import { bookingDisplayBillBalance, shouldReconcileBookingPaymentPaid, folioGuestCreditAmount } from '@/lib/utils/booking-bill-balance'
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -635,6 +635,28 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
         return
       }
 
+      const { data: bk0 } = await supabase.from('bookings').select('balance, deposit, total_amount').eq('id', bookingId).single()
+      const { data: fcPrior0 } = await supabase.from('folio_charges').select('amount, charge_type, payment_status, payment_method').eq('booking_id', bookingId)
+
+      const fcForBillBefore = (fcPrior0 || []).map((row: { amount?: unknown; charge_type?: unknown; payment_status?: unknown; payment_method?: unknown }) => ({
+        amount: row.amount,
+        charge_type: row.charge_type,
+        payment_status: row.payment_status,
+        payment_method: row.payment_method,
+      }))
+      const billBefore = Math.max(
+        0,
+        bookingDisplayBillBalance(
+          {
+            balance: bk0?.balance,
+            deposit: bk0?.deposit,
+            total_amount: bk0?.total_amount,
+          },
+          fcForBillBefore,
+        ),
+      )
+      const appliedToBooking = Math.min(amt, billBefore)
+
       await recordGuestLedgerCashMovement(supabase, {
         organizationId: booking.organization_id,
         accountName: guestName,
@@ -646,50 +668,25 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
         userId: user.id,
         ledgerAccountId: bookingLedgerSnapshot.id,
         currentLedgerBalance: bookingLedgerSnapshot.balance,
-        syncGuestProfile: true,
+        syncGuestProfile: false,
       })
 
-      // If this booking still has unpaid bill, apply this top-up as a booking payment too.
-      const { data: freshBk } = await supabase
-        .from('bookings')
-        .select('balance, deposit, total_amount')
-        .eq('id', bookingId)
-        .single()
-      const { data: fcPrior } = await supabase
-        .from('folio_charges')
-        .select('amount, charge_type, payment_status, payment_method')
-        .eq('booking_id', bookingId)
-      const fcForBill = (fcPrior || []).map((row: { amount?: unknown; charge_type?: unknown; payment_status?: unknown; payment_method?: unknown }) => ({
-        amount: row.amount,
-        charge_type: row.charge_type,
-        payment_status: row.payment_status,
-        payment_method: row.payment_method,
-      }))
-      const billBefore = Math.max(
-        0,
-        bookingDisplayBillBalance(
-          {
-            balance: freshBk?.balance,
-            deposit: freshBk?.deposit,
-            total_amount: freshBk?.total_amount,
-          },
-          fcForBill,
-        ),
-      )
-      const appliedToBooking = Math.min(amt, billBefore)
-      if (appliedToBooking > 0) {
-        await supabase.from('folio_charges').insert([{
+      await supabase.from('folio_charges').insert([
+        {
           booking_id: bookingId,
           organization_id: booking.organization_id,
           description: `Payment Received - ${creditPaymentMethod.replace('_', ' ')} (via Add Credit)`,
-          amount: -appliedToBooking,
+          amount: -amt,
           charge_type: 'payment',
           payment_method: creditPaymentMethod,
           payment_status: 'paid',
           created_by: user.id,
-        }])
+        },
+      ])
+
+      if (appliedToBooking > 0) {
         const newBalance = Math.max(0, billBefore - appliedToBooking)
-        const newDeposit = Number(freshBk?.deposit || 0) + appliedToBooking
+        const newDeposit = Number(bk0?.deposit || 0) + appliedToBooking
         await supabase
           .from('bookings')
           .update({ balance: newBalance, deposit: newDeposit, payment_status: newBalance === 0 ? 'paid' : 'partial' })
@@ -702,6 +699,12 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
             .gt('amount', 0)
             .not('charge_type', 'eq', 'payment')
         }
+      }
+
+      if (guestId) {
+        const rowLedgerSync = await fetchGuestCityLedgerAccount(supabase, booking.organization_id, guestName)
+        const nbSync = Number(rowLedgerSync?.balance ?? 0)
+        await supabase.from('guests').update({ balance: Math.max(0, nbSync) }).eq('id', guestId)
       }
 
       const row = await fetchGuestCityLedgerAccount(supabase, booking.organization_id, guestName)
@@ -865,14 +868,10 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
     .filter((c: any) => c.paymentStatus === 'paid' && c.amount > 0 && c.type === 'charge')
     .reduce((sum: number, c: any) => sum + c.amount, 0)
 
-  // Payments from folio (must run before booking null guards; booking may still be loading)
-  const paymentsFromFolio = folioCharges.reduce((sum: number, c: any) => {
-    const cType = c.chargeType || c.type
-    const amt = Number(c.amount)
-    if (cType === 'payment' && amt < 0) return sum + Math.abs(amt)
-    return sum
-  }, 0)
-  const totalAmountPaid = (booking?.deposit || 0) + paymentsFromFolio
+  const folioBookingCreditAmount = folioGuestCreditAmount(folioCharges)
+
+  // Deposit is bumped whenever a payment is recorded against the folio; summing payment rows too would double-count.
+  const totalAmountPaid = Number(booking?.deposit ?? 0)
 
   if (loading) {
     return (
@@ -1560,6 +1559,12 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                 <span className="text-muted-foreground">Amount Paid</span>
                 <span className="font-semibold text-green-600">{formatNaira(totalAmountPaid)}</span>
               </div>
+              {folioBookingCreditAmount > 0 && (
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Credit</span>
+                  <span className="font-semibold text-blue-600">{formatNaira(folioBookingCreditAmount)}</span>
+                </div>
+              )}
               <Separator />
               <div className="flex justify-between text-lg">
                 <span className="font-semibold">Bill Balance (Unpaid)</span>
