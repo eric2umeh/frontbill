@@ -346,6 +346,13 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
       : Number(ledgerAccount.balance ?? 0)
     : 0
 
+  /** Real city ledger only: negative DB balance = prepaid credit not always visible on folio totals. */
+  const ledgerAccountCreditAmount =
+    ledgerAccount?.id != null && ledgerDisplayBalance < 0 ? Math.abs(ledgerDisplayBalance) : 0
+  const effectiveGuestCreditAmount = Math.max(guestFolioCreditTotal, ledgerAccountCreditAmount)
+  const hasOutstandingDebit = totalBookingBalance > 0
+  const hasGuestCredit = effectiveGuestCreditAmount > 0
+
   const statusColor = (status: string) => {
     switch (status) {
       case 'paid': return 'text-green-700 border-green-200 bg-green-50'
@@ -431,11 +438,7 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
       </div>
 
       {/* Summary cards */}
-      <div
-        className={`grid grid-cols-1 gap-4 sm:grid-cols-2 ${
-          guestFolioCreditTotal > 0 ? 'lg:grid-cols-5' : 'lg:grid-cols-4'
-        }`}
-      >
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Card>
           <CardContent className="p-5 flex flex-col gap-1">
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -453,26 +456,59 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
             <p className="text-3xl font-bold text-green-600">{formatNaira(totalSpent)}</p>
           </CardContent>
         </Card>
-        <Card className={totalBookingBalance > 0 ? 'border-red-200' : ''}>
-          <CardContent className="p-5 flex flex-col gap-1">
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <TrendingUp className="h-4 w-4 shrink-0" /> Booking Balance
+        <Card
+          className={
+            hasOutstandingDebit
+              ? 'border-red-200'
+              : hasGuestCredit
+                ? 'border-blue-200 bg-blue-500/5'
+                : ''
+          }
+        >
+          <CardContent className="p-5 flex flex-col gap-2">
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground min-w-0">
+                <TrendingUp className="h-4 w-4 shrink-0" />
+                <span>Outstanding Balance</span>
+              </div>
+              {hasOutstandingDebit && (
+                <Badge variant="outline" className="shrink-0 text-xs border-red-200 bg-red-50 text-red-700 font-medium">
+                  Outstanding
+                </Badge>
+              )}
+              {!hasOutstandingDebit && hasGuestCredit && (
+                <Badge variant="outline" className="shrink-0 text-xs border-blue-200 bg-blue-50 text-blue-700 font-medium">
+                  Credit
+                </Badge>
+              )}
             </div>
-            <p className={`text-3xl font-bold ${totalBookingBalance > 0 ? 'text-red-600' : 'text-foreground'}`}>
-              {totalBookingBalance > 0 ? formatNaira(totalBookingBalance) : 'Settled'}
-            </p>
+            {hasOutstandingDebit ? (
+              <>
+                <p className="text-3xl font-bold text-red-600">{formatNaira(totalBookingBalance)}</p>
+                {hasGuestCredit && (
+                  <p className="text-sm font-semibold text-blue-600 tabular-nums">
+                    Credit · {formatNaira(effectiveGuestCreditAmount)}
+                  </p>
+                )}
+              </>
+            ) : hasGuestCredit ? (
+              <>
+                <p className="text-3xl font-bold text-blue-600 tabular-nums">
+                  {formatNaira(effectiveGuestCreditAmount)}
+                </p>
+                <p className="text-xs text-muted-foreground leading-snug">
+                  {guestFolioCreditTotal > 0 && ledgerAccountCreditAmount > 0
+                    ? 'Credit reflected on folio and on the city ledger account.'
+                    : ledgerAccountCreditAmount > 0 && guestFolioCreditTotal <= 0
+                      ? 'Prepaid balance on city ledger account.'
+                      : 'Overpayment held on folio(s).'}
+                </p>
+              </>
+            ) : (
+              <p className="text-3xl font-bold text-muted-foreground">Settled</p>
+            )}
           </CardContent>
         </Card>
-        {guestFolioCreditTotal > 0 && (
-          <Card className="border-blue-200 bg-blue-500/5">
-            <CardContent className="p-5 flex flex-col gap-1">
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <ArrowUpCircle className="h-4 w-4 shrink-0 text-blue-600" /> Credit
-              </div>
-              <p className="text-3xl font-bold text-blue-600">{formatNaira(guestFolioCreditTotal)}</p>
-            </CardContent>
-          </Card>
-        )}
         <Card>
           <CardContent className="p-5 flex flex-col gap-1">
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
