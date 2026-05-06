@@ -24,6 +24,7 @@ import { getUserDisplayName } from '@/lib/utils/user-display'
 import { fetchUserDisplayNameMap } from '@/lib/utils/fetch-user-display-names'
 import { normalizeNameKey } from '@/lib/utils/name-format'
 import { guestOrOrganizationNameTaken } from '@/lib/utils/guest-org-name-uniqueness'
+import { syncLedgerOrgCounterpartiesToOrganizationsTable } from '@/lib/utils/sync-ledger-org-counterparties-to-organizations'
 
 interface Organization {
   id: string
@@ -65,6 +66,12 @@ export default function OrganizationsPage() {
       startFetch()
       const supabase = createClient()
       if (!supabase) { setOrganizations([]); endFetch(); return }
+
+      // Ledger-only corporates get a counterpart organizations row so they appear here (historic booking/reservation inserts).
+      await syncLedgerOrgCounterpartiesToOrganizationsTable(supabase, {
+        hotelTenantOrganizationId: organizationId ?? undefined,
+        createdByUserId: userId ?? undefined,
+      })
 
       // Fetch organizations
       const { data, error } = await supabase
