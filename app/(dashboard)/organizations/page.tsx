@@ -23,6 +23,7 @@ import { isOrganizationMenuRecord } from '@/lib/utils/ledger-organization'
 import { getUserDisplayName } from '@/lib/utils/user-display'
 import { fetchUserDisplayNameMap } from '@/lib/utils/fetch-user-display-names'
 import { normalizeNameKey } from '@/lib/utils/name-format'
+import { guestOrOrganizationNameTaken } from '@/lib/utils/guest-org-name-uniqueness'
 
 interface Organization {
   id: string
@@ -56,8 +57,8 @@ export default function OrganizationsPage() {
   const [submitting, setSubmitting] = useState(false)
 
   useEffect(() => {
-    fetchOrganizations()
-  }, [])
+    if (organizationId) fetchOrganizations()
+  }, [organizationId])
 
   const fetchOrganizations = async () => {
     try {
@@ -74,7 +75,7 @@ export default function OrganizationsPage() {
       if (error) throw error
       
       // Show organizations created from the Organizations menu, regardless of which team role created them.
-      const menuOrganizations = (data || []).filter((org: any) => isOrganizationMenuRecord(org))
+      const menuOrganizations = (data || []).filter((org: any) => isOrganizationMenuRecord(org, organizationId))
       const orgIds = menuOrganizations.map((org: any) => org.id)
       const balanceMap = await calculateOrganizationBalancesBatch(supabase, orgIds, {
         hotelTenantId: organizationId,
@@ -107,33 +108,29 @@ export default function OrganizationsPage() {
       toast.error('Please fill in organization name')
       return
     }
+    if (!organizationId) {
+      toast.error('Missing organization — sign in again')
+      return
+    }
 
     try {
       setSubmitting(true)
       const supabase = createClient()
       if (!supabase) { toast.error('Database not configured'); setSubmitting(false); return }
-      const normalized = normalizeNameKey(formData.name)
 
-      const [{ data: existingOrg }, { data: existingGuest }] = await Promise.all([
-        supabase
-          .from('organizations')
-          .select('id')
-          .neq('id', organizationId)
-          .ilike('name', formData.name.trim())
-          .maybeSingle(),
-        supabase
-          .from('guests')
-          .select('id')
-          .eq('organization_id', organizationId)
-          .ilike('name', formData.name.trim())
-          .maybeSingle(),
-      ])
+      const trimmed = formData.name.trim()
+      const nameConflict = await guestOrOrganizationNameTaken(supabase, {
+        hotelTenantOrganizationId: organizationId,
+        candidateName: trimmed,
+      })
+      if (nameConflict) {
+        toast.error('This name already exists as a guest or organization')
+        return
+      }
 
-      if (
-        existingOrg ||
-        existingGuest ||
-        organizations.some((org) => normalizeNameKey(org.name) === normalized)
-      ) {
+      const normalized = normalizeNameKey(trimmed)
+
+      if (organizations.some((org) => normalizeNameKey(org.name) === normalized)) {
         toast.error('This name already exists as a guest or organization')
         return
       }
@@ -141,7 +138,7 @@ export default function OrganizationsPage() {
       const { error } = await supabase
         .from('organizations')
         .insert([{
-          name: formData.name,
+          name: trimmed,
           org_type: formData.org_type,
           email: formData.email || null,
           phone: formData.phone || null,
@@ -153,7 +150,7 @@ export default function OrganizationsPage() {
 
       if (error) throw error
 
-      toast.success(`${formData.org_type.charAt(0).toUpperCase() + formData.org_type.slice(1)} "${formData.name}" created successfully`)
+      toast.success(`${formData.org_type.charAt(0).toUpperCase() + formData.org_type.slice(1)} "${trimmed}" created successfully`)
       setFormData({ name: '', org_type: 'ngo', email: '', phone: '', contact_person: '', address: '' })
       setAddOrgModalOpen(false)
       fetchOrganizations()
