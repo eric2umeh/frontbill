@@ -14,6 +14,7 @@ import { toast } from 'sonner'
 import { isOrganizationMenuRecord, isSelectableLedgerName } from '@/lib/utils/ledger-organization'
 import { resolveOrganizationLedgerAccount } from '@/lib/utils/resolve-ledger-account'
 import { formatPersonName } from '@/lib/utils/name-format'
+import { guestOrOrganizationNameTaken } from '@/lib/utils/guest-org-name-uniqueness'
 import { insertFolioCharges } from '@/lib/utils/insert-folio-charges'
 import { StayDateRangeFields } from '@/components/shared/stay-date-range-fields'
 import { BOOKING_MODAL_ROOMS_LIMIT, normalizeRoomsForBookingPickers } from '@/lib/utils/room-bookability'
@@ -214,7 +215,7 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
       }))
     const ledgerNames = new Set(fromLedger.map((account: any) => String(account.name || '').toLowerCase()))
     const fromOrgs = (orgData || [])
-      .filter((org: any) => isOrganizationMenuRecord(org) && !ledgerNames.has(String(org.name || '').toLowerCase()))
+      .filter((org: any) => isOrganizationMenuRecord(org, orgId) && !ledgerNames.has(String(org.name || '').toLowerCase()))
       .map((org: any) => ({
         id: org.id,
         name: org.name,
@@ -237,6 +238,27 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
     setCreatingLedgerOrg(true)
     try {
       const supabase = createClient()
+      const { data: { user } } = await supabase.auth.getUser()
+
+      const nameTaken = await guestOrOrganizationNameTaken(supabase, {
+        hotelTenantOrganizationId: orgId,
+        candidateName: newLedgerOrgName.trim(),
+      })
+      if (nameTaken) {
+        toast.error('This name is already used by a guest or organization')
+        return
+      }
+
+      const { error: orgInsertError } = await supabase.from('organizations').insert([{
+        name: newLedgerOrgName.trim(),
+        org_type: 'other',
+        email: null,
+        phone: newLedgerOrgPhone.trim() || null,
+        current_balance: 0,
+        created_by: user?.id ?? null,
+      }])
+      if (orgInsertError) throw orgInsertError
+
       const { data, error } = await supabase
         .from('city_ledger_accounts')
         .insert([{
@@ -284,6 +306,15 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
       const formattedGuestName = formatPersonName(fullName)
       let finalGuestId = guestId
       if (!guestId) {
+        const dupGuest = await guestOrOrganizationNameTaken(supabase, {
+          hotelTenantOrganizationId: orgId,
+          candidateName: formattedGuestName,
+        })
+        if (dupGuest) {
+          toast.error('This name is already used by a guest or organization')
+          return
+        }
+
         const { data: newGuest, error: ge } = await supabase
           .from('guests')
           .insert([{ organization_id: orgId, name: formattedGuestName, phone: phone || null }])
