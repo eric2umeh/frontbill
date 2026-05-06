@@ -26,6 +26,7 @@ import { insertFolioCharges } from '@/lib/utils/insert-folio-charges'
 import { applyPaymentToGuestCityLedger } from '@/lib/utils/guest-city-ledger'
 import { buildBackdateDedupeKey } from '@/lib/backdate/dedupe-key'
 import type { SerializedBookingPayload } from '@/lib/backdate/booking-payload'
+import { isStayCheckInConsideredBackdated } from '@/lib/hotel-date'
 
 interface NewBookingModalProps {
   open: boolean
@@ -572,7 +573,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
   }
 
   const canApproveBackdates = hasPermission(role, 'backdate:approve')
-  const isBackdated = checkInDate ? checkInDate < new Date(new Date().setHours(0, 0, 0, 0)) : false
+  const isBackdated = checkInDate ? isStayCheckInConsideredBackdated(toLocalDateStr(checkInDate)) : false
 
   const hasApprovedBackdateRequest = async () => {
     if (!checkInDate) return false
@@ -666,6 +667,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
       }
       if (!res.ok) { toast.error(json.error || 'Failed to send backdate request'); return }
       toast.success('Backdate request submitted for approval')
+      if (typeof window !== 'undefined') window.dispatchEvent(new Event('frontbill-backdate-pending-changed'))
       setBackdateReason('')
     } catch {
       toast.error('Failed to send backdate request')

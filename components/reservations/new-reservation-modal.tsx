@@ -22,6 +22,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { applyPaymentToGuestCityLedger } from '@/lib/utils/guest-city-ledger'
 import { insertFolioCharges } from '@/lib/utils/insert-folio-charges'
 import { buildBackdateDedupeKey } from '@/lib/backdate/dedupe-key'
+import { isStayCheckInConsideredBackdated } from '@/lib/hotel-date'
 import { hasPermission } from '@/lib/permissions'
 
 const toLocalDateStr = (date: Date) => {
@@ -378,7 +379,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
   const depositAmount = isCityLedgerPayment ? 0 : depositCalc
   const balanceAmount = Math.max(0, totalAmount - depositAmount)
   const canApproveBackdates = hasPermission(currentUserRole, 'backdate:approve')
-  const isBackdated = checkInDate ? checkInDate < today() : false
+  const isBackdated = checkInDate ? isStayCheckInConsideredBackdated(toLocalDateStr(checkInDate)) : false
 
   const hasApprovedBackdateRequest = async () => {
     if (!checkInDate || !orgId || !selectedRoom?.id || !currentUserId) return false
@@ -430,6 +431,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
       }
       if (!res.ok) { toast.error(json.error || 'Failed to send backdate request'); return }
       toast.success('Backdate request submitted for approval')
+      if (typeof window !== 'undefined') window.dispatchEvent(new Event('frontbill-backdate-pending-changed'))
       setBackdateReason('')
     } catch {
       toast.error('Failed to send backdate request')

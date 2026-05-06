@@ -26,6 +26,7 @@ import { insertFolioCharges } from '@/lib/utils/insert-folio-charges'
 import { applyPaymentToGuestCityLedger } from '@/lib/utils/guest-city-ledger'
 import { buildBackdateDedupeKey } from '@/lib/backdate/dedupe-key'
 import { hasPermission } from '@/lib/permissions'
+import { isStayCheckInConsideredBackdated, formatYMDInTimeZone, minSelectableCheckInYmdHotel, resolveHotelTimeZone } from '@/lib/hotel-date'
 
 const ROOM_TYPES_FALLBACK = ['Deluxe', 'Royal', 'Kings', 'Mini Suite', 'Executive Suite', 'Diplomatic Suite']
 
@@ -35,8 +36,6 @@ const toLocalDateStr = (date: Date) => {
   const d = String(date.getDate()).padStart(2, '0')
   return `${y}-${m}-${d}`
 }
-
-const todayDate = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d }
 
 interface RoomEntry {
   id: string
@@ -463,7 +462,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
   }
 
   const canApproveBackdates = hasPermission(currentUserRole, 'backdate:approve')
-  const isBackdated = checkIn ? checkIn < todayDate() : false
+  const isBackdated = checkIn ? isStayCheckInConsideredBackdated(toLocalDateStr(checkIn)) : false
 
   const copy =
     wording === 'booking'
@@ -554,6 +553,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
       }
       if (!res.ok) { toast.error(json.error || 'Failed to send backdate request'); return }
       toast.success('Backdate request submitted for approval')
+      if (typeof window !== 'undefined') window.dispatchEvent(new Event('frontbill-backdate-pending-changed'))
       setBackdateReason('')
     } catch {
       toast.error('Failed to send backdate request')
@@ -1137,7 +1137,10 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
               }}
               showNights
               disableCalendar={(d) => {
-                if (!checkIn) return d < todayDate()
+                const tz = resolveHotelTimeZone()
+                const dayYmd = formatYMDInTimeZone(d, tz)
+                const minYmd = minSelectableCheckInYmdHotel(new Date(), tz)
+                if (!checkIn) return dayYmd < minYmd
                 if (!checkOut) return d <= checkIn
                 return false
               }}
