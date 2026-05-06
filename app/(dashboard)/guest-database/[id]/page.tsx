@@ -8,6 +8,14 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
 import { Label } from '@/components/ui/label'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { formatNaira } from '@/lib/utils/currency'
 import {
   Loader2, ArrowLeft, User, Phone, Mail, MapPin,
@@ -277,6 +285,21 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
     }
   }
 
+  const cancelGuestEditing = () => {
+    setIsEditingGuest(false)
+    if (!guest) return
+    setGuestForm({
+      name: guest.name || '',
+      phone: guest.phone || '',
+      email: guest.email || '',
+      address: guest.address || '',
+      city: guest.city || '',
+      country: guest.country || '',
+      id_type: guest.id_type || '',
+      id_number: guest.id_number || '',
+    })
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-96">
@@ -350,22 +373,25 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
         <div className="flex flex-col items-end gap-2 self-start">
           <div className="flex items-center gap-2">
             {canEditGuest && (
-              <>
-                {isEditingGuest ? (
-                  <>
-                    <Button size="sm" variant="outline" onClick={() => { setIsEditingGuest(false); loadGuest() }} disabled={savingGuest}>
-                      Cancel
-                    </Button>
-                    <Button size="sm" onClick={handleSaveGuest} disabled={savingGuest}>
-                      {savingGuest ? 'Saving...' : 'Save Guest'}
-                    </Button>
-                  </>
-                ) : (
-                  <Button variant="outline" size="sm" onClick={() => setIsEditingGuest(true)}>
-                    Edit Guest
-                  </Button>
-                )}
-              </>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setGuestForm({
+                    name: guest.name || '',
+                    phone: guest.phone || '',
+                    email: guest.email || '',
+                    address: guest.address || '',
+                    city: guest.city || '',
+                    country: guest.country || '',
+                    id_type: guest.id_type || '',
+                    id_number: guest.id_number || '',
+                  })
+                  setIsEditingGuest(true)
+                }}
+              >
+                Edit Guest
+              </Button>
             )}
             <Button variant="outline" size="sm" onClick={() => loadGuest()} className="gap-2">
               <RefreshCw className="h-4 w-4" />
@@ -532,110 +558,34 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
             <CardTitle className="text-base">Guest Information</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            {isEditingGuest && canEditGuest ? (
-              <div className="space-y-3">
-                <div className="space-y-2">
-                  <Label>Full Name</Label>
-                  <input
-                    className="w-full px-3 py-2 border rounded-md text-sm bg-background"
-                    value={guestForm.name}
-                    onChange={(e) => setGuestForm((prev) => ({ ...prev, name: e.target.value }))}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Phone</Label>
-                  <input
-                    className="w-full px-3 py-2 border rounded-md text-sm bg-background"
-                    value={guestForm.phone}
-                    onChange={(e) => setGuestForm((prev) => ({ ...prev, phone: e.target.value }))}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Email</Label>
-                  <input
-                    className="w-full px-3 py-2 border rounded-md text-sm bg-background"
-                    value={guestForm.email}
-                    onChange={(e) => setGuestForm((prev) => ({ ...prev, email: e.target.value }))}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Address</Label>
-                  <input
-                    className="w-full px-3 py-2 border rounded-md text-sm bg-background"
-                    value={guestForm.address}
-                    onChange={(e) => setGuestForm((prev) => ({ ...prev, address: e.target.value }))}
-                  />
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-2">
-                    <Label>City</Label>
-                    <input
-                      className="w-full px-3 py-2 border rounded-md text-sm bg-background"
-                      value={guestForm.city}
-                      onChange={(e) => setGuestForm((prev) => ({ ...prev, city: e.target.value }))}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Country</Label>
-                    <input
-                      className="w-full px-3 py-2 border rounded-md text-sm bg-background"
-                      value={guestForm.country}
-                      onChange={(e) => setGuestForm((prev) => ({ ...prev, country: e.target.value }))}
-                    />
-                  </div>
-                </div>
-                <Separator />
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-2">
-                    <Label>ID Type</Label>
-                    <input
-                      className="w-full px-3 py-2 border rounded-md text-sm bg-background"
-                      value={guestForm.id_type}
-                      onChange={(e) => setGuestForm((prev) => ({ ...prev, id_type: e.target.value }))}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>ID Number</Label>
-                    <input
-                      className="w-full px-3 py-2 border rounded-md text-sm bg-background"
-                      value={guestForm.id_number}
-                      onChange={(e) => setGuestForm((prev) => ({ ...prev, id_number: e.target.value }))}
-                    />
-                  </div>
-                </div>
+            <div className="space-y-3">
+              <div className="flex items-center gap-3 text-sm">
+                <Phone className="h-4 w-4 text-muted-foreground shrink-0" />
+                <span>{guest.phone || '—'}</span>
               </div>
-            ) : (
+              <div className="flex items-center gap-3 text-sm">
+                <Mail className="h-4 w-4 text-muted-foreground shrink-0" />
+                <span>{guest.email || '—'}</span>
+              </div>
+              <div className="flex items-start gap-3 text-sm">
+                <MapPin className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
+                <span>{[guest.address, guest.city, guest.country].filter(Boolean).join(', ') || '—'}</span>
+              </div>
+            </div>
+
+            {guest.id_type && (
               <>
-                <div className="space-y-3">
+                <Separator />
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Identity Document</p>
                   <div className="flex items-center gap-3 text-sm">
-                    <Phone className="h-4 w-4 text-muted-foreground shrink-0" />
-                    <span>{guest.phone || '—'}</span>
-                  </div>
-                  <div className="flex items-center gap-3 text-sm">
-                    <Mail className="h-4 w-4 text-muted-foreground shrink-0" />
-                    <span>{guest.email || '—'}</span>
-                  </div>
-                  <div className="flex items-start gap-3 text-sm">
-                    <MapPin className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
-                    <span>{[guest.address, guest.city, guest.country].filter(Boolean).join(', ') || '—'}</span>
+                    <Hash className="h-4 w-4 text-muted-foreground" />
+                    <div>
+                      <span className="font-medium capitalize">{guest.id_type}: </span>
+                      <span className="text-muted-foreground">{guest.id_number || '—'}</span>
+                    </div>
                   </div>
                 </div>
-
-                {guest.id_type && (
-                  <>
-                    <Separator />
-                    <div className="space-y-2">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Identity Document</p>
-                      <div className="flex items-center gap-3 text-sm">
-                        <Hash className="h-4 w-4 text-muted-foreground" />
-                        <div>
-                          <span className="font-medium capitalize">{guest.id_type}: </span>
-                          <span className="text-muted-foreground">{guest.id_number || '—'}</span>
-                        </div>
-                      </div>
-                    </div>
-                  </>
-                )}
               </>
             )}
           </CardContent>
@@ -724,6 +674,112 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
             </div>
           </CardContent>
         </Card>
+      )}
+
+      {canEditGuest && (
+        <Dialog
+          open={isEditingGuest}
+          onOpenChange={(open) => {
+            if (!open) cancelGuestEditing()
+          }}
+        >
+          <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Edit guest</DialogTitle>
+              <DialogDescription>
+                Update contact details and identification for this profile.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3 py-2">
+              <div className="space-y-2">
+                <Label htmlFor="guest-edit-name">Full Name</Label>
+                <input
+                  id="guest-edit-name"
+                  className="w-full px-3 py-2 border rounded-md text-sm bg-background"
+                  value={guestForm.name}
+                  onChange={(e) => setGuestForm((prev) => ({ ...prev, name: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="guest-edit-phone">Phone</Label>
+                <input
+                  id="guest-edit-phone"
+                  className="w-full px-3 py-2 border rounded-md text-sm bg-background"
+                  value={guestForm.phone}
+                  onChange={(e) => setGuestForm((prev) => ({ ...prev, phone: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="guest-edit-email">Email</Label>
+                <input
+                  id="guest-edit-email"
+                  type="email"
+                  className="w-full px-3 py-2 border rounded-md text-sm bg-background"
+                  value={guestForm.email}
+                  onChange={(e) => setGuestForm((prev) => ({ ...prev, email: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="guest-edit-address">Address</Label>
+                <input
+                  id="guest-edit-address"
+                  className="w-full px-3 py-2 border rounded-md text-sm bg-background"
+                  value={guestForm.address}
+                  onChange={(e) => setGuestForm((prev) => ({ ...prev, address: e.target.value }))}
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <Label htmlFor="guest-edit-city">City</Label>
+                  <input
+                    id="guest-edit-city"
+                    className="w-full px-3 py-2 border rounded-md text-sm bg-background"
+                    value={guestForm.city}
+                    onChange={(e) => setGuestForm((prev) => ({ ...prev, city: e.target.value }))}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="guest-edit-country">Country</Label>
+                  <input
+                    id="guest-edit-country"
+                    className="w-full px-3 py-2 border rounded-md text-sm bg-background"
+                    value={guestForm.country}
+                    onChange={(e) => setGuestForm((prev) => ({ ...prev, country: e.target.value }))}
+                  />
+                </div>
+              </div>
+              <Separator />
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <Label htmlFor="guest-edit-id-type">ID Type</Label>
+                  <input
+                    id="guest-edit-id-type"
+                    className="w-full px-3 py-2 border rounded-md text-sm bg-background"
+                    value={guestForm.id_type}
+                    onChange={(e) => setGuestForm((prev) => ({ ...prev, id_type: e.target.value }))}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="guest-edit-id-number">ID Number</Label>
+                  <input
+                    id="guest-edit-id-number"
+                    className="w-full px-3 py-2 border rounded-md text-sm bg-background"
+                    value={guestForm.id_number}
+                    onChange={(e) => setGuestForm((prev) => ({ ...prev, id_number: e.target.value }))}
+                  />
+                </div>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={cancelGuestEditing} disabled={savingGuest}>
+                Cancel
+              </Button>
+              <Button type="button" onClick={handleSaveGuest} disabled={savingGuest}>
+                {savingGuest ? 'Saving...' : 'Save changes'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       )}
 
       {/* City Ledger Payment Modal */}
