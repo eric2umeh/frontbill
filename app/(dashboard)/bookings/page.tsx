@@ -253,6 +253,40 @@ export default function BookingsPage() {
     partial: 'bg-yellow-500/10 text-yellow-700 border-yellow-200',
     pending: 'bg-orange-500/10 text-orange-700 border-orange-200',
     cancelled: 'bg-red-500/10 text-red-700 border-red-200',
+    credit: 'bg-blue-500/10 text-blue-700 border-blue-200',
+  }
+
+  const paymentCellForBooking = (booking: Booking) => {
+    const bal = Number(booking.balance ?? 0)
+    const owed = Math.max(0, bal)
+    const creditAmt = bal < 0 ? -bal : 0
+    const isCancelledLike = booking.status === 'cancelled'
+
+    if (creditAmt > 0) {
+      return {
+        badgeClass: paymentColors.credit,
+        badgeText: 'credit',
+        owedLine: null as number | null,
+        creditLine: creditAmt,
+      }
+    }
+
+    let effectiveStatus =
+      booking.payment_method === 'city_ledger' && booking.payment_status === 'paid' && owed > 0
+        ? 'pending'
+        : booking.payment_status
+
+    if (!isCancelledLike && owed <= 0) {
+      effectiveStatus = 'paid'
+    }
+
+    const key = String(effectiveStatus || 'pending').toLowerCase()
+    return {
+      badgeClass: paymentColors[key] ?? paymentColors.pending,
+      badgeText: key,
+      owedLine: owed > 0 ? owed : null,
+      creditLine: null as number | null,
+    }
   }
 
   const calculateNights = (checkIn: string | Date, checkOut: string | Date) => {
@@ -704,18 +738,20 @@ export default function BookingsPage() {
             key: 'payment_status',
             label: 'Payment',
             render: (booking) => {
-              // City ledger bookings should always show as pending (balance owed to ledger account)
-              const effectiveStatus = booking.payment_method === 'city_ledger' && booking.payment_status === 'paid'
-                ? 'pending'
-                : booking.payment_status
+              const { badgeClass, badgeText, owedLine, creditLine } = paymentCellForBooking(booking)
               return (
                 <div className="space-y-1">
-                  <Badge variant="outline" className={paymentColors[effectiveStatus]}>
-                    {effectiveStatus}
+                  <Badge variant="outline" className={badgeClass}>
+                    {badgeText}
                   </Badge>
-                  {booking.balance > 0 && (
+                  {owedLine !== null && (
                     <div className="text-xs text-muted-foreground">
-                      Bal: {formatNaira(booking.balance)}
+                      Bal: {formatNaira(owedLine)}
+                    </div>
+                  )}
+                  {creditLine !== null && creditLine > 0 && (
+                    <div className="text-xs text-muted-foreground">
+                      Credit: {formatNaira(creditLine)}
                     </div>
                   )}
                 </div>
@@ -941,17 +977,43 @@ export default function BookingsPage() {
                 </div>
                 <div>
                   <div className="text-muted-foreground">Payment</div>
-                  <Badge variant="outline" className={paymentColors[booking.payment_status]}>
-                    {booking.payment_status}
-                  </Badge>
+                  <div className="space-y-1">
+                    {(() => {
+                      const { badgeClass, badgeText, owedLine, creditLine } = paymentCellForBooking(booking)
+                      return (
+                        <>
+                          <Badge variant="outline" className={badgeClass}>
+                            {badgeText}
+                          </Badge>
+                          {owedLine !== null && (
+                            <div className="text-xs text-muted-foreground">
+                              Bal: {formatNaira(owedLine)}
+                            </div>
+                          )}
+                          {creditLine !== null && creditLine > 0 && (
+                            <div className="text-xs text-muted-foreground">
+                              Credit: {formatNaira(creditLine)}
+                            </div>
+                          )}
+                        </>
+                      )
+                    })()}
+                  </div>
                 </div>
               </div>
-              {booking.balance > 0 && (
-                <div className="pt-2 border-t text-sm">
-                  <span className="text-muted-foreground">Balance:</span>{' '}
-                  <span className="font-semibold text-destructive">{formatNaira(booking.balance)}</span>
-                </div>
-              )}
+              {(() => {
+                const owed = Math.max(0, Number(booking.balance ?? 0))
+                return (
+                  <>
+                    {owed > 0 && (
+                      <div className="pt-2 border-t text-sm">
+                        <span className="text-muted-foreground">Balance:</span>{' '}
+                        <span className="font-semibold text-destructive">{formatNaira(owed)}</span>
+                      </div>
+                    )}
+                  </>
+                )
+              })()}
             </div>
           </CardContent>
         )}
