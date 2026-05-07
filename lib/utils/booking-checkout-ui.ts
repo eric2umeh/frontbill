@@ -50,7 +50,8 @@ export function isBookingCheckedOut(b: Pick<FolioLockBooking, 'status' | 'folio_
 
 /**
  * True when the checkout calendar day has passed, or it's checkout day and local time
- * has reached the org standard checkout clock.
+ * has reached the org standard checkout clock. Used for reminders only — staff can still
+ * check out, extend, or post charges until `status`/`folio_status` is checked out.
  */
 export function isPastCheckoutCutoff(
   booking: Pick<FolioLockBooking, 'check_out'>,
@@ -66,13 +67,19 @@ export function isPastCheckoutCutoff(
   return nowMin >= hour * 60 + minute
 }
 
-/** Hide Add Charge, Extend Stay, Check Out — checked out or standard checkout cutoff passed */
-export function folioGuestActionsLocked(b: FolioLockBooking, checkoutClock?: string | null, now?: Date): boolean {
-  if (isBookingCheckedOut(b)) return true
-  return isPastCheckoutCutoff(b, checkoutClock, now)
+/**
+ * True only when the folio/guest is already checked out. Checkout *time* on the scheduled
+ * day does not lock staff actions — hotels handle late stays manually (extend or check out).
+ */
+export function folioGuestActionsLocked(
+  b: FolioLockBooking,
+  _checkoutClock?: string | null,
+  _now?: Date,
+): boolean {
+  return isBookingCheckedOut(b)
 }
 
-/** When past cutoff on the bookings table row, Charge / Extend are hidden like on the folio detail */
+/** Hide Charge / Extend when the folio is already checked out (same rule as folio detail). */
 export function hideChargeExtendInBookingsTable(
   booking: Pick<FolioLockBooking, 'check_out' | 'status' | 'check_in' | 'folio_status'>,
   checkoutClock?: string | null,
@@ -91,7 +98,8 @@ export function hideChargeExtendInBookingsTable(
 }
 
 /**
- * When manual Check out button should appear (lists, folio header). Auto-checkout replaces it after cutoff.
+ * When manual Check out should appear (lists, folio header). Stays visible for in-house/reserved
+ * folios until actually checked out — not hidden after the org checkout clock.
  */
 export function manualCheckoutEligible(b: CheckoutEligibilityBooking, checkoutClock?: string | null): boolean {
   const today = localTodayYmd(new Date())
