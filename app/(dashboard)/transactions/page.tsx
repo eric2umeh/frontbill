@@ -278,6 +278,7 @@ export default function TransactionsPage() {
 
       {/* Table */}
       <EnhancedDataTable
+        compactTable
         data={payments}
         searchKeys={['guest_name', 'folio_id', 'reference_number', 'notes']}
         onRowClick={(p) => router.push(`/transactions/${p.id}`)}
@@ -295,23 +296,55 @@ export default function TransactionsPage() {
         ]}
         columns={[
           {
-            key: 'folio_id',
-            label: 'Folio Ref',
-            render: (p) => <span className="font-mono text-xs text-muted-foreground">{p.folio_id}</span>,
-          },
-          {
             key: 'guest_name',
             label: 'Guest',
             render: (p) => (
               <div>
-                <div className="font-medium">{p.guest_name}</div>
-                {p.room && <div className="text-xs text-muted-foreground">{p.room}</div>}
+                <div className="font-medium max-md:text-[13px]">{p.guest_name}</div>
+                {p.room && <div className="text-[10px] text-muted-foreground">{p.room}</div>}
               </div>
             ),
           },
           {
+            key: 'amount',
+            label: 'Amount',
+            render: (p) => <span className="font-semibold text-xs md:text-sm whitespace-nowrap">{formatNaira(p.amount)}</span>,
+          },
+          {
+            key: 'payment_method',
+            label: 'Method',
+            render: (p) => {
+              const cfg =
+                methodConfig[p.payment_method] || {
+                  label: p.payment_method,
+                  color: 'text-gray-700',
+                  bg: 'bg-gray-50 border-gray-200',
+                  icon: null,
+                }
+              return (
+                <div className="space-y-1">
+                  <Badge variant="outline" className={`${cfg.bg} ${cfg.color} gap-1 max-md:text-[10px] px-1.5 py-0`}>
+                    {cfg.icon}
+                    {cfg.label}
+                  </Badge>
+                  {p.payment_method === 'city_ledger' && p.notes && (
+                    <div className="text-[10px] text-muted-foreground truncate max-w-[100px]">
+                      {p.notes.replace(/^City Ledger:\s*/, '')}
+                    </div>
+                  )}
+                </div>
+              )
+            },
+          },
+          {
+            key: 'received_by_name',
+            label: 'Received By',
+            render: (p) => <span className="text-xs md:text-sm text-muted-foreground max-w-[96px] inline-block truncate">{p.received_by_name}</span>,
+          },
+          {
             key: 'payment_date',
             label: 'Date & Time',
+            responsive: 'md+',
             render: (p) => (
               <div>
                 <div className="text-sm">{format(new Date(p.payment_date), 'dd MMM yyyy')}</div>
@@ -323,33 +356,10 @@ export default function TransactionsPage() {
             ),
           },
           {
-            key: 'amount',
-            label: 'Amount',
-            render: (p) => <span className="font-semibold">{formatNaira(p.amount)}</span>,
-          },
-          {
-            key: 'payment_method',
-            label: 'Method',
-            render: (p) => {
-              const cfg = methodConfig[p.payment_method] || { label: p.payment_method, color: 'text-gray-700', bg: 'bg-gray-50 border-gray-200', icon: null }
-              return (
-                <div className="space-y-1">
-                  <Badge variant="outline" className={`${cfg.bg} ${cfg.color} gap-1`}>
-                    {cfg.icon}{cfg.label}
-                  </Badge>
-                  {p.payment_method === 'city_ledger' && p.notes && (
-                    <div className="text-xs text-muted-foreground truncate max-w-[130px]">
-                      {p.notes.replace(/^City Ledger:\s*/, '')}
-                    </div>
-                  )}
-                </div>
-              )
-            },
-          },
-          {
-            key: 'received_by_name',
-            label: 'Received By',
-            render: (p) => <span className="text-sm text-muted-foreground">{p.received_by_name}</span>,
+            key: 'folio_id',
+            label: 'Ref',
+            responsive: 'lg+',
+            render: (p) => <span className="font-mono text-[10px] text-muted-foreground">{p.folio_id}</span>,
           },
         ]}
         renderCard={(p) => {
