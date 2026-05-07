@@ -644,26 +644,14 @@ export default function BookingsPage() {
         ]}
         columns={[
           {
-            key: 'folio_id',
-            label: 'Folio ID',
-            render: (booking) => (
-              <div 
-                className="font-mono text-sm cursor-pointer hover:text-primary"
-                onClick={() => router.push(booking.is_bulk ? `/bulk-bookings/${booking.bulk_group_id}` : `/bookings/${booking.id}`)}
-              >
-                {booking.is_bulk ? `Bulk Booking (${booking.room_count} rooms)` : booking.folio_id}
-              </div>
-            ),
-          },
-          {
             key: 'guest',
             label: 'Guest',
             render: (booking) => (
-              <div 
+              <div
                 className="cursor-pointer hover:text-primary"
                 onClick={() => router.push(booking.is_bulk ? `/bulk-bookings/${booking.bulk_group_id}` : `/bookings/${booking.id}`)}
               >
-                <div className="font-medium">{booking.guests?.name}</div>
+                <div className="font-medium max-md:text-[13px]">{booking.guests?.name}</div>
                 <div className="text-xs text-muted-foreground">{booking.guests?.phone}</div>
               </div>
             ),
@@ -673,24 +661,8 @@ export default function BookingsPage() {
             label: 'Room',
             render: (booking) => (
               <div>
-                <div className="font-medium">{booking.is_bulk ? `${booking.room_count} Rooms` : `Room ${booking.rooms?.room_number}`}</div>
+                <div className="font-medium max-md:text-[13px]">{booking.is_bulk ? `${booking.room_count} Rooms` : `Room ${booking.rooms?.room_number}`}</div>
                 <div className="text-xs text-muted-foreground">{booking.rooms?.room_type}</div>
-              </div>
-            ),
-          },
-          {
-            key: 'payment_method',
-            label: 'Method',
-            render: (booking) => (
-              <div className="space-y-1">
-                <Badge variant="outline" className="text-xs capitalize">
-                  {(booking.payment_method || 'cash').replace(/_/g, ' ')}
-                </Badge>
-                {booking.payment_method === 'city_ledger' && booking.ledger_account_name && (
-                  <div className="text-xs text-muted-foreground truncate max-w-[120px]">
-                    {booking.ledger_account_name}
-                  </div>
-                )}
               </div>
             ),
           },
@@ -698,8 +670,8 @@ export default function BookingsPage() {
             key: 'check_in',
             label: 'Check-in',
             render: (booking) => (
-              <div className="text-sm">
-                {new Date(booking.check_in).toLocaleDateString('en-GB')}
+              <div className="text-sm max-md:text-xs">
+                {new Date(booking.check_in).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}
               </div>
             ),
           },
@@ -719,15 +691,15 @@ export default function BookingsPage() {
               const isDueTodayBeforeCutoff =
                 booking.status === 'checked_in' && coYmd === today && !pastCut
               return (
-                <div className="text-sm space-y-1">
-                  <span>{new Date(booking.check_out).toLocaleDateString('en-GB')}</span>
+                <div className="text-sm space-y-1 max-md:text-xs">
+                  <span>{new Date(booking.check_out).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}</span>
                   {isDueTodayBeforeCutoff && (
-                    <Badge variant="outline" className="text-xs bg-amber-50 text-amber-700 border-amber-200 block w-fit">
+                    <Badge variant="outline" className="text-[10px] px-1 py-0 bg-amber-50 text-amber-700 border-amber-200 block w-fit">
                       Due today
                     </Badge>
                   )}
                   {isOverdue && (
-                    <Badge variant="outline" className="text-xs bg-red-50 text-red-600 border-red-200 block w-fit">
+                    <Badge variant="outline" className="text-[10px] px-1 py-0 bg-red-50 text-red-600 border-red-200 block w-fit">
                       Overdue
                     </Badge>
                   )}
@@ -738,11 +710,12 @@ export default function BookingsPage() {
           {
             key: 'payment_status',
             label: 'Payment',
+            responsive: 'md+',
             render: (booking) => {
               const { badgeClass, badgeText, owedLine, creditLine } = paymentCellForBooking(booking)
               return (
                 <div className="space-y-1">
-                  <Badge variant="outline" className={badgeClass}>
+                  <Badge variant="outline" className={`${badgeClass} max-md:text-[10px]`}>
                     {badgeText}
                   </Badge>
                   {owedLine !== null && (
@@ -760,11 +733,19 @@ export default function BookingsPage() {
             },
           },
           {
-            key: 'created_by_name',
-            label: 'Created By',
+            key: 'payment_method',
+            label: 'Method',
+            responsive: 'md+',
             render: (booking) => (
-              <div className="text-sm text-muted-foreground">
-                {booking.created_by_name}
+              <div className="space-y-1">
+                <Badge variant="outline" className="text-[10px] capitalize max-md:text-[10px]">
+                  {(booking.payment_method || 'cash').replace(/_/g, ' ')}
+                </Badge>
+                {booking.payment_method === 'city_ledger' && booking.ledger_account_name && (
+                  <div className="text-[10px] text-muted-foreground truncate max-w-[100px] md:max-w-[120px]">
+                    {booking.ledger_account_name}
+                  </div>
+                )}
               </div>
             ),
           },
@@ -949,6 +930,27 @@ export default function BookingsPage() {
                 </div>
               )
             },
+          },
+          {
+            key: 'folio_id',
+            label: 'Folio ID',
+            responsive: 'lg+',
+            render: (booking) => (
+              <div
+                className="font-mono text-xs cursor-pointer hover:text-primary lg:text-sm"
+                onClick={() => router.push(booking.is_bulk ? `/bulk-bookings/${booking.bulk_group_id}` : `/bookings/${booking.id}`)}
+              >
+                {booking.is_bulk ? `Bulk (${booking.room_count})` : booking.folio_id}
+              </div>
+            ),
+          },
+          {
+            key: 'created_by_name',
+            label: 'Created By',
+            responsive: 'lg+',
+            render: (booking) => (
+              <div className="text-sm text-muted-foreground">{booking.created_by_name}</div>
+            ),
           },
         ]}
         renderCard={(booking) => (
