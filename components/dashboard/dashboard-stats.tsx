@@ -8,10 +8,10 @@ import { createClient } from '@/lib/supabase/client'
 
 export function DashboardStats() {
   const [stats, setStats] = useState([
-    { title: "Today's Revenue", value: formatNaira(0), icon: DollarSign, trend: '—', trendUp: false },
-    { title: 'Total Guests', value: '0', icon: Users, trend: '—', trendUp: false },
-    { title: 'Available Rooms', value: '0', icon: Bed, trend: '—', trendUp: false },
-    { title: 'Occupancy Rate', value: '0%', icon: TrendingUp, trend: '—', trendUp: false },
+    { title: "Today's Revenue", value: formatNaira(0), icon: DollarSign, description: '—' },
+    { title: 'Occupied rooms', value: '0', icon: Users, description: '—' },
+    { title: 'Available Rooms', value: '0', icon: Bed, description: '—' },
+    { title: 'Occupancy Rate', value: '0%', icon: TrendingUp, description: '—' },
   ])
 
   useEffect(() => {
@@ -50,24 +50,44 @@ export function DashboardStats() {
         .select('*')
         .eq('organization_id', profile.organization_id)
 
-      // Fetch checked-in guests
       const { data: bookings } = await supabase
         .from('bookings')
-        .select('*')
+        .select('id')
         .eq('organization_id', profile.organization_id)
         .eq('status', 'checked_in')
 
-      const totalRevenue = payments?.reduce((sum, p) => sum + p.amount, 0) || 0
+      const totalRevenue =
+        payments?.reduce((sum: number, p: { amount?: unknown }) => sum + Number(p.amount ?? 0), 0) || 0
       const totalRooms = rooms?.length || 0
-      const availableRooms = rooms?.filter(r => r.status === 'available').length || 0
-      const occupiedRooms = bookings?.length || 0
+      const occupiedRooms =
+        rooms?.filter((r: { status?: string }) => String(r.status || '').toLowerCase() === 'occupied').length || 0
+      const availableRooms =
+        rooms?.filter((r: { status?: string }) => String(r.status || '').toLowerCase() === 'available').length || 0
       const occupancyRate = totalRooms > 0 ? Math.round((occupiedRooms / totalRooms) * 100) : 0
+      const checkedInFolios = bookings?.length || 0
 
       setStats([
-        { title: "Today's Revenue", value: formatNaira(totalRevenue), icon: DollarSign, trend: '—', trendUp: false },
-        { title: 'Total Guests', value: String(occupiedRooms), icon: Users, trend: 'checked in', trendUp: true },
-        { title: 'Available Rooms', value: String(availableRooms), icon: Bed, trend: `${totalRooms} total`, trendUp: false },
-        { title: 'Occupancy Rate', value: `${occupancyRate}%`, icon: TrendingUp, trend: `${occupiedRooms}/${totalRooms}`, trendUp: occupancyRate > 50 },
+        { title: "Today's Revenue", value: formatNaira(totalRevenue), icon: DollarSign, description: 'Today' },
+        {
+          title: 'Occupied rooms',
+          value: String(occupiedRooms),
+          icon: Users,
+          description: checkedInFolios
+            ? `${checkedInFolios} checked-in folio${checkedInFolios === 1 ? '' : 's'}`
+            : 'By room status',
+        },
+        {
+          title: 'Available Rooms',
+          value: String(availableRooms),
+          icon: Bed,
+          description: `${totalRooms} total`,
+        },
+        {
+          title: 'Occupancy Rate',
+          value: `${occupancyRate}%`,
+          icon: TrendingUp,
+          description: `${occupiedRooms} occupied / ${totalRooms}`,
+        },
       ])
     } catch (error) {
       console.error('Error fetching dashboard stats:', error)

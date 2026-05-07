@@ -37,3 +37,4 @@ This creates:
 - `pnpm install` warns about ignored build scripts for `core-js` and `sharp`; these are non-critical.
 - The `OPENAI_API_KEY` env var is optional; only needed for the three `/api/ai/*` routes.
 - SQL migration scripts in `/scripts/` (001–011) are for the Supabase SQL Editor; they are not run locally.
+- The `/api/cron/auto-checkout` job does nothing unless `ENABLE_AUTO_CHECKOUT=true` is set (staff checkout is manual by default).

@@ -4,7 +4,7 @@ import {
   mergeBookingPatch,
   roomHousekeepingAfterEdit,
 } from '@/lib/booking/edit-booking-patch'
-import { DEFAULT_ORG_CHECKOUT_TIME, folioGuestActionsLocked } from '@/lib/utils/booking-checkout-ui'
+import { isBookingCheckedOut } from '@/lib/utils/booking-checkout-ui'
 import { NextResponse } from 'next/server'
 
 const ADMIN_ROLES = new Set(['superadmin', 'admin'])
@@ -79,13 +79,6 @@ export async function PATCH(request: Request, ctx: { params: Promise<{ id: strin
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
-    const { data: orgRow } = await admin
-      .from('organizations')
-      .select('checkout_time')
-      .eq('id', (existing as { organization_id: string }).organization_id)
-      .maybeSingle()
-    const checkoutClock = orgRow?.checkout_time ?? DEFAULT_ORG_CHECKOUT_TIME
-
     const ex = existing as {
       status: string
       check_in: string
@@ -93,20 +86,14 @@ export async function PATCH(request: Request, ctx: { params: Promise<{ id: strin
       folio_status?: string | null
     }
     if (
-      folioGuestActionsLocked(
-        {
-          status: ex.status,
-          check_in: ex.check_in,
-          check_out: ex.check_out,
-          folio_status: ex.folio_status,
-        },
-        checkoutClock,
-      )
+      isBookingCheckedOut({
+        status: ex.status,
+        folio_status: ex.folio_status,
+      })
     ) {
       return NextResponse.json(
         {
-          error:
-            'Cannot edit this booking once the guest has checked out or after the organization checkout time on the checkout date.',
+          error: 'Cannot edit a booking that has already been checked out.',
         },
         { status: 400 },
       )
