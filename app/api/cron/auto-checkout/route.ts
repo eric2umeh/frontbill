@@ -11,11 +11,21 @@ import { NextResponse } from 'next/server'
  *     (Guests due tomorrow are excluded by lte check_out.)
  *  3. Applies late-checkout fee only for checked_in, same-calendar-day checkout past org time.
  *  4. Marks bookings checked_out, frees rooms (same-date late fee uses org checkout_time clock).
+ *
+ * Disabled by default: set ENABLE_AUTO_CHECKOUT=true to opt in. Most properties prefer manual checkout + extend.
  */
 export async function GET(request: Request) {
   const authHeader = request.headers.get('authorization')
   if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  if (process.env.ENABLE_AUTO_CHECKOUT !== 'true') {
+    return NextResponse.json({
+      message: 'Auto-checkout is disabled. Set ENABLE_AUTO_CHECKOUT=true to run. Staff should check guests out manually.',
+      checked_out: 0,
+      skipped: true,
+    })
   }
 
   let supabase: ReturnType<typeof createAdminClient>
