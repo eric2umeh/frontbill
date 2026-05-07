@@ -10,10 +10,14 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Search, Filter, LayoutGrid, List, ChevronLeft, ChevronRight, CalendarIcon } from 'lucide-react'
 import { format, isSameDay, isWithinInterval, startOfDay, endOfDay } from 'date-fns'
 
-interface Column<T> {
+/** `always`: all breakpoints (horizontal scroll). `md+` / `lg+`: hide below that breakpoint to prioritize key cols on phones. */
+export type ColumnResponsive = 'always' | 'md+' | 'lg+'
+
+export interface Column<T> {
   key: keyof T | string
   label: string
   render?: (item: T) => React.ReactNode
+  responsive?: ColumnResponsive
 }
 
 interface Filter {
@@ -48,6 +52,18 @@ export function EnhancedDataTable<T extends Record<string, any>>({
   onRowClick,
   compactTable = false,
 }: EnhancedDataTableProps<T>) {
+  const columnResponsiveClass = (responsive?: ColumnResponsive): string => {
+    switch (responsive) {
+      case 'md+':
+        return 'hidden md:table-cell'
+      case 'lg+':
+        return 'hidden lg:table-cell'
+      case 'always':
+      default:
+        return ''
+    }
+  }
+
   const [searchQuery, setSearchQuery] = useState('')
   const [activeFilters, setActiveFilters] = useState<Record<string, string>>({})
   const [viewMode, setViewMode] = useState<'table' | 'card'>('table')
@@ -93,9 +109,11 @@ export function EnhancedDataTable<T extends Record<string, any>>({
   }
 
   const thClass = compactTable
-    ? 'px-2 py-1.5 text-left text-xs font-medium'
-    : 'px-4 py-3 text-left text-sm font-medium'
-  const tdClass = compactTable ? 'px-2 py-1.5 text-sm' : 'px-4 py-3 text-sm'
+    ? 'px-2 py-1.5 text-left text-xs font-medium max-md:px-1.5 max-md:py-1 max-md:text-[11px]'
+    : 'px-4 py-3 text-left text-sm font-medium max-md:px-2 max-md:py-1.5 max-md:text-xs'
+  const tdClass = compactTable
+    ? 'px-2 py-1.5 text-sm max-md:px-1.5 max-md:py-1 max-md:text-[11px] align-top whitespace-nowrap'
+    : 'px-4 py-3 text-sm max-md:px-2 max-md:py-1.5 max-md:text-xs align-top whitespace-nowrap'
 
   return (
     <div className="space-y-4">
@@ -203,13 +221,13 @@ export function EnhancedDataTable<T extends Record<string, any>>({
               '[scrollbar-gutter:stable]',
             ].join(' ')}
           >
-            <table className="w-full min-w-[600px]">
+            <table className="w-full min-w-0 border-collapse">
               <thead className="bg-muted/50">
                 <tr>
-                  {columns.map((column, index) => (
+                  {columns.map((column) => (
                     <th
                       key={column.key.toString()}
-                      className={`${thClass} ${index >= 3 ? 'hidden lg:table-cell' : ''}`}
+                      className={`${thClass} ${columnResponsiveClass(column.responsive)}`}
                     >
                       {column.label}
                     </th>
@@ -223,10 +241,10 @@ export function EnhancedDataTable<T extends Record<string, any>>({
                     className={`hover:bg-muted/50 transition-colors ${onRowClick ? 'cursor-pointer' : ''}`}
                     onClick={() => onRowClick?.(item)}
                   >
-                    {columns.map((column, colIndex) => (
+                    {columns.map((column) => (
                       <td
                         key={column.key.toString()}
-                        className={`${tdClass} ${colIndex >= 3 ? 'hidden lg:table-cell' : ''}`}
+                        className={`${tdClass} ${columnResponsiveClass(column.responsive)}`}
                       >
                         {column.render ? column.render(item) : item[column.key]}
                       </td>
