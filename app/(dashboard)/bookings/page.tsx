@@ -22,7 +22,7 @@ import { toast } from 'sonner'
 import { getUserDisplayName } from '@/lib/utils/user-display'
 import { fetchUserDisplayNameMap } from '@/lib/utils/fetch-user-display-names'
 import { getBulkGroupId } from '@/lib/utils/bulk-booking'
-import { manualCheckoutEligible, resolvedCheckoutDateForClosing, hideChargeExtendInBookingsTable, DEFAULT_ORG_CHECKOUT_TIME } from '@/lib/utils/booking-checkout-ui'
+import { manualCheckoutEligible, resolvedCheckoutDateForClosing, hideChargeExtendInBookingsTable, DEFAULT_ORG_CHECKOUT_TIME, isPastCheckoutCutoff } from '@/lib/utils/booking-checkout-ui'
 import { folioPositiveOutstandingSum, shouldReconcileBookingPaymentPaid } from '@/lib/utils/booking-bill-balance'
 
 interface Booking {
@@ -708,24 +708,25 @@ export default function BookingsPage() {
             label: 'Check-out',
             render: (booking) => {
               const today = new Date().toISOString().split('T')[0]
-              const nowHour = new Date().getHours()
-              const isOverdue =
+              const coYmd =
+                typeof booking.check_out === 'string'
+                  ? booking.check_out.split('T')[0].slice(0, 10)
+                  : ''
+              const pastCut =
                 booking.status === 'checked_in' &&
-                booking.check_out <= today &&
-                nowHour >= 12
-              const isAutoCheckoutSoon =
-                booking.status === 'checked_in' &&
-                booking.check_out === today &&
-                nowHour >= 12 && nowHour < 14
+                isPastCheckoutCutoff({ check_out: booking.check_out }, orgCheckoutTime)
+              const isOverdue = booking.status === 'checked_in' && (coYmd < today || (coYmd === today && pastCut))
+              const isDueTodayBeforeCutoff =
+                booking.status === 'checked_in' && coYmd === today && !pastCut
               return (
                 <div className="text-sm space-y-1">
                   <span>{new Date(booking.check_out).toLocaleDateString('en-GB')}</span>
-                  {isAutoCheckoutSoon && (
+                  {isDueTodayBeforeCutoff && (
                     <Badge variant="outline" className="text-xs bg-amber-50 text-amber-700 border-amber-200 block w-fit">
                       Due today
                     </Badge>
                   )}
-                  {isOverdue && nowHour >= 14 && (
+                  {isOverdue && (
                     <Badge variant="outline" className="text-xs bg-red-50 text-red-600 border-red-200 block w-fit">
                       Overdue
                     </Badge>
