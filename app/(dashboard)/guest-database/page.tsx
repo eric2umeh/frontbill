@@ -90,6 +90,7 @@ export default function GuestDatabasePage() {
       </div>
 
       <EnhancedDataTable
+        compactTable
         data={guests}
         searchKeys={['name', 'phone', 'email', 'id_number']}
         filters={[]}
@@ -99,16 +100,32 @@ export default function GuestDatabasePage() {
             label: 'Guest',
             render: (guest) => (
               <div className="cursor-pointer hover:text-primary" onClick={() => goToGuest(guest)}>
-                <div className="font-semibold">{guest.name}</div>
+                <div className="font-semibold max-md:text-[13px]">{guest.name}</div>
                 <div className="text-xs text-muted-foreground">{guest.phone}</div>
               </div>
             ),
           },
           {
+            key: 'balance',
+            label: 'Balance',
+            render: (guest) => {
+              const balance = (guest as Guest).total_balance ?? 0
+              return (
+                <div
+                  className={`text-xs font-medium cursor-pointer md:text-sm ${balance > 0 ? 'text-red-600' : 'text-green-600'}`}
+                  onClick={() => goToGuest(guest)}
+                >
+                  {formatNaira(balance)}
+                </div>
+              )
+            },
+          },
+          {
             key: 'email',
             label: 'Email',
+            responsive: 'md+',
             render: (guest) => (
-              <div className="text-sm text-muted-foreground cursor-pointer" onClick={() => goToGuest(guest)}>
+              <div className="text-sm text-muted-foreground cursor-pointer max-md:text-xs" onClick={() => goToGuest(guest)}>
                 {guest.email || '—'}
               </div>
             ),
@@ -116,6 +133,7 @@ export default function GuestDatabasePage() {
           {
             key: 'address',
             label: 'Address',
+            responsive: 'lg+',
             render: (guest) => (
               <div className="text-sm text-muted-foreground cursor-pointer" onClick={() => goToGuest(guest)}>
                 {[guest.address, guest.city, guest.country].filter(Boolean).join(', ') || '—'}
@@ -125,6 +143,7 @@ export default function GuestDatabasePage() {
           {
             key: 'id_type',
             label: 'ID',
+            responsive: 'md+',
             render: (guest) => (
               <div className="text-sm cursor-pointer" onClick={() => goToGuest(guest)}>
                 {guest.id_type ? (
@@ -132,13 +151,16 @@ export default function GuestDatabasePage() {
                     <div className="font-medium capitalize">{guest.id_type}</div>
                     <div className="text-xs text-muted-foreground">{guest.id_number || '—'}</div>
                   </div>
-                ) : <span className="text-muted-foreground">—</span>}
+                ) : (
+                  <span className="text-muted-foreground">—</span>
+                )}
               </div>
             ),
           },
           {
             key: 'created_at',
             label: 'Registered',
+            responsive: 'lg+',
             render: (guest) => (
               <div className="text-sm text-muted-foreground cursor-pointer" onClick={() => goToGuest(guest)}>
                 {guest.created_at ? format(new Date(guest.created_at), 'dd MMM yyyy') : '—'}
@@ -146,25 +168,10 @@ export default function GuestDatabasePage() {
             ),
           },
           {
-            key: 'balance',
-            label: 'Outstanding Balance',
-            render: (guest) => {
-              const balance = (guest as any).total_balance || 0
-              return (
-                <div
-                  className={`text-sm font-medium cursor-pointer ${balance > 0 ? 'text-red-600' : 'text-green-600'}`}
-                  onClick={() => goToGuest(guest)}
-                >
-                  {formatNaira(balance)}
-                </div>
-              )
-            },
-          },
-          {
             key: 'actions',
             label: '',
             render: (guest) => (
-              <Button size="sm" variant="outline" onClick={() => goToGuest(guest)}>
+              <Button size="sm" variant="outline" className="h-8 px-2 text-xs" onClick={() => goToGuest(guest)}>
                 View
               </Button>
             ),
