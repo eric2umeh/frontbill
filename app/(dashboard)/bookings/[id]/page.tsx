@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -27,7 +27,6 @@ import {
   resolvedCheckoutDateForClosing,
   DEFAULT_ORG_CHECKOUT_TIME,
   folioGuestActionsLocked,
-  shouldAutoCheckoutDueBooking,
   formatCheckoutTimeLabel,
   parseCheckoutTimeHM,
   localTodayYmd,
@@ -96,7 +95,6 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
   const [orgCheckoutTime, setOrgCheckoutTime] = useState(DEFAULT_ORG_CHECKOUT_TIME)
   const [checkoutConfirmOpen, setCheckoutConfirmOpen] = useState(false)
   const [editBookingOpen, setEditBookingOpen] = useState(false)
-  const autoCheckoutInFlight = useRef(false)
 
   useEffect(() => {
     const getParamsAndFetch = async () => {
@@ -226,64 +224,6 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
   }, [editBookingOpen, loading, booking, orgCheckoutTime])
 
   useEffect(() => {
-    if (loading || !booking || !bookingId || !canManageFolio || !userId) return
-    if (!shouldAutoCheckoutDueBooking(booking, orgCheckoutTime)) return
-    if (autoCheckoutInFlight.current) return
-    autoCheckoutInFlight.current = true
-    ;(async () => {
-      setCheckoutLoading(true)
-      try {
-        const supabase = createClient()
-        const outDate = resolvedCheckoutDateForClosing({
-          check_out: booking.check_out ?? localTodayYmd(),
-        })
-
-        const { data: patched, error } = await supabase
-          .from('bookings')
-          .update({
-            status: 'checked_out',
-            check_out: outDate,
-            folio_status: 'checked_out',
-            updated_by: userId,
-          })
-          .eq('id', bookingId)
-          .in('status', ['checked_in', 'reserved'])
-          .select('id')
-
-        if (error) throw error
-        if (!patched?.length) {
-          await fetchBookingDetails(bookingId)
-          return
-        }
-
-        if (booking.room_id) {
-          await supabase.from('rooms').update({ status: 'available' }).eq('id', booking.room_id)
-        }
-
-        toast.success(`${booking?.guests?.name ?? 'Guest'} checked out automatically — past standard checkout (${formatCheckoutTimeLabel(orgCheckoutTime)}).`)
-        await fetchBookingDetails(bookingId)
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : 'Auto-checkout failed'
-        toast.error(msg)
-      } finally {
-        setCheckoutLoading(false)
-        autoCheckoutInFlight.current = false
-      }
-    })()
-  }, [
-    loading,
-    bookingId,
-    canManageFolio,
-    userId,
-    orgCheckoutTime,
-    booking?.id,
-    booking?.status,
-    booking?.folio_status,
-    booking?.check_out,
-    booking?.room_id,
-  ])
-
-  useEffect(() => {
     if (!paymentCreditModalOpen || !booking?.organization_id) return
     const guestName = (booking.guests?.name || '').trim()
     if (!guestName) return
@@ -307,7 +247,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
         orgCheckoutTime,
       )
     ) {
-      toast.error('This folio is closed or past standard checkout time — charges and payments cannot be edited here.')
+      toast.error('This folio is checked out — room charges cannot be added or edited here.')
       return false
     }
     return true
@@ -1361,11 +1301,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                 variant="outline"
                 size="sm"
                 disabled={folioLocked}
-                title={
-                  folioLocked
-                    ? `Editing is disabled once the folio is closed or after ${formatCheckoutTimeLabel(orgCheckoutTime)} on the checkout date (${normalizeBookingCheckoutYmd(booking.check_out || '')}).`
-                    : 'Edit booking details'
-                }
+                title={folioLocked ? 'Editing is disabled after the guest has checked out.' : 'Edit booking details'}
                 onClick={() => setEditBookingOpen(true)}
               >
                 <Edit className="mr-2 h-4 w-4" />
@@ -1590,8 +1526,8 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
               )}
               {showSettleTopUp && folioLocked && (
                 <p className="text-xs text-muted-foreground mt-2">
-                  Folio edits are restricted after checkout or past standard checkout time, but you can still record
-                  payment or add city ledger credit here.
+                  After checkout, new room charges are closed, but you can still record payment or city ledger credit
+                  here.
                 </p>
               )}
             </CardContent>
