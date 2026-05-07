@@ -311,6 +311,7 @@ export default function ReservationsPage() {
       </div>
 
       <EnhancedDataTable
+        compactTable
         data={reservations}
         searchKeys={['folio_id', 'guestName', 'guestPhone', 'ledger_account_name', 'rooms.room_number'] as any}
         dateField="check_in"
@@ -327,26 +328,14 @@ export default function ReservationsPage() {
         ]}
         columns={[
           {
-            key: 'folio_id',
-            label: 'Folio Ref',
-            render: (res) => (
-              <Link 
-                href={res.is_bulk ? `/bulk-bookings/${res.bulk_group_id}` : `/reservations/${res.id}`}
-                className="font-mono text-sm cursor-pointer hover:text-primary"
-              >
-                {res.is_bulk ? `Bulk reservation (${res.room_count} rooms)` : res.folio_id}
-              </Link>
-            ),
-          },
-          {
             key: 'guest',
             label: 'Guest',
             render: (res) => (
-              <Link 
+              <Link
                 href={res.is_bulk ? `/bulk-bookings/${res.bulk_group_id}` : `/reservations/${res.id}`}
                 className="cursor-pointer hover:text-primary block"
               >
-                <div className="font-medium">{res.guests?.name}</div>
+                <div className="font-medium max-md:text-[13px]">{res.guests?.name}</div>
                 <div className="text-xs text-muted-foreground">{res.guests?.phone}</div>
               </Link>
             ),
@@ -356,55 +345,40 @@ export default function ReservationsPage() {
             label: 'Room',
             render: (res) => (
               <Link href={res.is_bulk ? `/bulk-bookings/${res.bulk_group_id}` : `/reservations/${res.id}`} className="cursor-pointer block">
-                <div className="font-medium">{res.is_bulk ? `${res.room_count} Rooms` : `Room ${res.rooms?.room_number}`}</div>
+                <div className="font-medium max-md:text-[13px]">{res.is_bulk ? `${res.room_count} Rooms` : `Room ${res.rooms?.room_number}`}</div>
                 <div className="text-xs text-muted-foreground">{res.rooms?.room_type}</div>
               </Link>
             ),
           },
           {
-            key: 'payment_method',
-            label: 'Method',
-            render: (res) => (
-              <div className="space-y-1">
-                <Badge variant="outline" className="text-xs capitalize">
-                  {(res.payment_method || 'cash').replace(/_/g, ' ')}
-                </Badge>
-                {res.payment_method === 'city_ledger' && res.ledger_account_name && (
-                  <div className="text-xs text-muted-foreground truncate max-w-[120px]">
-                    {res.ledger_account_name}
-                  </div>
-                )}
-              </div>
-            ),
-          },
-          {
             key: 'check_in',
-            label: 'Check-in Date',
+            label: 'Check-in',
             render: (res) => (
-              <div className="text-sm">
-                {new Date(res.check_in).toLocaleDateString('en-GB')}
+              <div className="text-sm max-md:text-xs">
+                {new Date(res.check_in).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}
               </div>
             ),
           },
           {
             key: 'check_out',
-            label: 'Check-out Date',
+            label: 'Check-out',
             render: (res) => (
-              <div className="text-sm">
-                {new Date(res.check_out).toLocaleDateString('en-GB')}
+              <div className="text-sm max-md:text-xs">
+                {new Date(res.check_out).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}
               </div>
             ),
           },
           {
             key: 'payment_status',
             label: 'Payment',
+            responsive: 'md+',
             render: (res) => {
               const effectiveStatus = res.payment_method === 'city_ledger' && res.payment_status === 'paid'
                 ? 'pending'
                 : res.payment_status
               return (
                 <div className="space-y-1">
-                  <Badge variant="outline" className={(paymentColors as Record<string, string>)[effectiveStatus]}>
+                  <Badge variant="outline" className={`${(paymentColors as Record<string, string>)[effectiveStatus]} max-md:text-[10px]`}>
                     {effectiveStatus}
                   </Badge>
                   {res.balance > 0 && (
@@ -417,25 +391,18 @@ export default function ReservationsPage() {
             },
           },
           {
-            key: 'created_by_name',
-            label: 'Created By',
+            key: 'payment_method',
+            label: 'Method',
+            responsive: 'md+',
             render: (res) => (
-              <div className="text-sm text-muted-foreground">
-                {res.created_by_name}
-              </div>
-            ),
-          },
-          {
-            key: 'updated_by_name',
-            label: 'Last Updated',
-            render: (res) => (
-              <div className="text-sm">
-                {res.updated_by_name ? (
-                  <div className="text-muted-foreground">
-                    {res.updated_by_name}
+              <div className="space-y-1">
+                <Badge variant="outline" className="text-[10px] capitalize">
+                  {(res.payment_method || 'cash').replace(/_/g, ' ')}
+                </Badge>
+                {res.payment_method === 'city_ledger' && res.ledger_account_name && (
+                  <div className="text-[10px] text-muted-foreground truncate max-w-[100px]">
+                    {res.ledger_account_name}
                   </div>
-                ) : (
-                  <span className="text-muted-foreground">—</span>
                 )}
               </div>
             ),
@@ -472,6 +439,41 @@ export default function ReservationsPage() {
                 <Button asChild size="sm" variant="outline" className="h-7 px-2 text-[11px]">
                   <Link href={res.is_bulk ? `/bulk-bookings/${res.bulk_group_id}` : `/reservations/${res.id}`}>View</Link>
                 </Button>
+              </div>
+            ),
+          },
+          {
+            key: 'folio_id',
+            label: 'Folio Ref',
+            responsive: 'lg+',
+            render: (res) => (
+              <Link
+                href={res.is_bulk ? `/bulk-bookings/${res.bulk_group_id}` : `/reservations/${res.id}`}
+                className="font-mono text-xs cursor-pointer hover:text-primary"
+              >
+                {res.is_bulk ? `Bulk (${res.room_count})` : res.folio_id}
+              </Link>
+            ),
+          },
+          {
+            key: 'created_by_name',
+            label: 'Created By',
+            responsive: 'lg+',
+            render: (res) => (
+              <div className="text-sm text-muted-foreground">{res.created_by_name}</div>
+            ),
+          },
+          {
+            key: 'updated_by_name',
+            label: 'Last Updated',
+            responsive: 'lg+',
+            render: (res) => (
+              <div className="text-sm">
+                {res.updated_by_name ? (
+                  <div className="text-muted-foreground">{res.updated_by_name}</div>
+                ) : (
+                  <span className="text-muted-foreground">—</span>
+                )}
               </div>
             ),
           },
