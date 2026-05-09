@@ -31,9 +31,16 @@ import {
   Wrench,
   ShoppingBag,
 } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 import { useBackdatePendingCount } from '@/hooks/use-backdate-pending-count'
 
-const routes: Array<{ label: string; icon: any; href: string; permission?: Permission }> = [
+const routes: Array<{
+  label: string
+  icon: LucideIcon
+  href: string
+  permission?: Permission
+  permissionAny?: Permission[]
+}> = [
   {
     label: 'Dashboard',
     icon: LayoutDashboard,
@@ -98,7 +105,7 @@ const routes: Array<{ label: string; icon: any; href: string; permission?: Permi
     label: 'Store',
     icon: ShoppingBag,
     href: '/store',
-    permission: 'store:view',
+    permissionAny: ['store:view', 'store:requisition'],
   },
   {
     label: 'Analytics',
@@ -139,6 +146,9 @@ export function Sidebar({ mobileOpen, onMobileClose }: SidebarProps = {}) {
 
   // Filter sidebar routes based on the logged-in user's role
   const visibleRoutes = routes.filter(route => {
+    if (route.permissionAny?.length) {
+      return route.permissionAny.some((p) => hasPermission(role, p))
+    }
     if (!route.permission) return true
     return hasPermission(role, route.permission)
   })
@@ -179,7 +189,10 @@ export function Sidebar({ mobileOpen, onMobileClose }: SidebarProps = {}) {
         <div className="space-y-1">
           {visibleRoutes.map((route) => {
             const Icon = route.icon
-            const isActive = pathname === route.href || pathname.startsWith(`${route.href}/`)
+            const isActive =
+              route.href === '/store'
+                ? pathname === '/store' || pathname.startsWith('/store/')
+                : pathname === route.href || pathname.startsWith(`${route.href}/`)
             
             return (
               <Link
