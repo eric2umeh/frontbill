@@ -8,6 +8,7 @@ import { LoadingScreen } from '@/components/shared/loading-screen'
 import { createClient } from '@/lib/supabase/client'
 import { AuthProvider } from '@/lib/auth-context'
 import { hasPermission, type Permission, canonicalRoleKey } from '@/lib/permissions'
+import { BackdatePendingProvider } from '@/components/providers/backdate-pending-provider'
 
 interface DashboardUser {
   id: string
@@ -34,6 +35,8 @@ const ROUTE_PERMISSIONS: Array<{ path: string; permission: Permission }> = [
   { path: '/ledger', permission: 'ledger:view' },
   { path: '/housekeeping', permission: 'housekeeping:view' },
   { path: '/maintenance', permission: 'maintenance:view' },
+  /** Longer prefix wins: store requisitions allow departmental staff (`store:requisition`) or store team (`store:view`). */
+  { path: '/store/requisitions', permission: 'store:requisition' },
   { path: '/store', permission: 'store:view' },
   { path: '/rooms', permission: 'rooms:view' },
   { path: '/users-roles', permission: 'users:view' },
@@ -45,6 +48,21 @@ function getRequiredPermission(pathname: string) {
     .sort((a, b) => b.path.length - a.path.length)
     .find(route => pathname === route.path || pathname.startsWith(`${route.path}/`))
     ?.permission
+}
+
+function canAccessPath(pathname: string, userRole: string): boolean {
+  if (pathname === '/store/requisitions' || pathname.startsWith('/store/requisitions/')) {
+    return hasPermission(userRole, 'store:requisition') || hasPermission(userRole, 'store:view')
+  }
+  if (pathname === '/store/purchase-orders' || pathname.startsWith('/store/purchase-orders/')) {
+    return hasPermission(userRole, 'store:view')
+  }
+  if (pathname === '/store' || pathname.startsWith('/store/')) {
+    return hasPermission(userRole, 'store:view') || hasPermission(userRole, 'store:requisition')
+  }
+  const requiredPermission = getRequiredPermission(pathname)
+  if (!requiredPermission) return true
+  return hasPermission(userRole, requiredPermission)
 }
 
 export default function DashboardLayout({
@@ -121,6 +139,7 @@ export default function DashboardLayout({
               'accountant',
               'auditor',
               'store',
+              'staff',
             ]
             if (roleForAccess && !allowedRoles.includes(roleForAccess)) {
               if (isMounted) {
@@ -171,8 +190,7 @@ export default function DashboardLayout({
       return
     }
 
-    const requiredPermission = getRequiredPermission(pathname)
-    if (requiredPermission && !hasPermission(user.role, requiredPermission)) {
+    if (!canAccessPath(pathname, user.role)) {
       setRedirected(true)
       router.replace('/access-denied')
     }
@@ -182,8 +200,7 @@ export default function DashboardLayout({
     return <LoadingScreen />
   }
 
-  const requiredPermission = getRequiredPermission(pathname)
-  if (requiredPermission && !hasPermission(user.role, requiredPermission)) {
+  if (!canAccessPath(pathname, user.role)) {
     return <LoadingScreen />
   }
 
@@ -195,6 +212,7 @@ export default function DashboardLayout({
       role: user.role,
       organizationId: user.organizationId || '',
     }}>
+      <BackdatePendingProvider>
       <div className="flex h-screen overflow-hidden bg-background">
         <Sidebar mobileOpen={mobileMenuOpen} onMobileClose={() => setMobileMenuOpen(false)} />
         <div className="flex flex-1 flex-col overflow-hidden">
@@ -204,6 +222,7 @@ export default function DashboardLayout({
           </main>
         </div>
       </div>
+      </BackdatePendingProvider>
     </AuthProvider>
   )
 }

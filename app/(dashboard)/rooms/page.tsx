@@ -128,6 +128,7 @@ export default function RoomsPage() {
       </div>
 
       <EnhancedDataTable
+        compactTable
         data={rooms}
         searchKeys={['room_number', 'room_type']}
         filters={[
@@ -148,12 +149,12 @@ export default function RoomsPage() {
             key: 'room_number',
             label: 'Room',
             render: (room) => (
-              <div 
+              <div
                 className="cursor-pointer hover:text-primary"
                 onClick={() => router.push(`/rooms/${room.id}`)}
               >
-                <div className="font-semibold text-lg">Room {room.room_number}</div>
-                <div className="text-xs text-muted-foreground">{room.floor_number === 0 ? 'Ground Floor' : `Floor ${room.floor_number}`}</div>
+                <div className="font-semibold text-base max-md:text-sm">Room {room.room_number}</div>
+                <div className="text-[10px] text-muted-foreground">{room.floor_number === 0 ? 'G' : `Fl ${room.floor_number}`}</div>
               </div>
             ),
           },
@@ -161,8 +162,8 @@ export default function RoomsPage() {
             key: 'room_type',
             label: 'Type',
             render: (room) => (
-              <div 
-                className="cursor-pointer font-medium hover:text-primary"
+              <div
+                className="cursor-pointer font-medium hover:text-primary max-md:text-[13px]"
                 onClick={() => router.push(`/rooms/${room.id}`)}
               >
                 {room.room_type}
@@ -170,47 +171,43 @@ export default function RoomsPage() {
             ),
           },
           {
-            key: 'max_occupancy',
-            label: 'Capacity',
-            render: (room) => (
-              <div 
-                className="cursor-pointer flex items-center gap-1 hover:text-primary"
-                onClick={() => router.push(`/rooms/${room.id}`)}
-              >
-                <Users className="h-4 w-4 text-muted-foreground" />
-                <span>{room.max_occupancy}</span>
-              </div>
-            ),
-          },
-          {
-            key: 'price_per_night',
-            label: 'Rate/Night',
-            render: (room) => (
-              <div 
-                className="cursor-pointer font-semibold hover:text-primary"
-                onClick={() => router.push(`/rooms/${room.id}`)}
-              >
-                {formatNaira(room.price_per_night)}
-              </div>
-            ),
-          },
-          {
             key: 'status',
             label: 'Status',
             render: (room) => (
-              <div 
-                className="cursor-pointer"
-                onClick={() => router.push(`/rooms/${room.id}`)}
-              >
-                <Badge variant="outline" className={statusColors[room.status]}>
+              <div className="cursor-pointer" onClick={() => router.push(`/rooms/${room.id}`)}>
+                <Badge variant="outline" className={`${statusColors[room.status]} max-md:text-[10px] px-1.5 py-0`}>
                   {room.status}
                 </Badge>
               </div>
             ),
           },
           {
+            key: 'price_per_night',
+            label: 'Amount',
+            render: (room) => (
+              <div className="cursor-pointer font-semibold text-xs md:text-sm whitespace-nowrap" onClick={() => router.push(`/rooms/${room.id}`)}>
+                {formatNaira(room.price_per_night)}
+              </div>
+            ),
+          },
+          {
+            key: 'max_occupancy',
+            label: 'Capacity',
+            responsive: 'lg+',
+            render: (room) => (
+              <div
+                className="cursor-pointer flex items-center gap-1 hover:text-primary"
+                onClick={() => router.push(`/rooms/${room.id}`)}
+              >
+                <Users className="h-4 w-4 text-muted-foreground hidden lg:inline" />
+                <span>{room.max_occupancy}</span>
+              </div>
+            ),
+          },
+          {
             key: 'amenities',
             label: 'Amenities',
+            responsive: 'lg+',
             render: (room) => (
               <div className="flex flex-wrap gap-1 cursor-pointer" onClick={() => router.push(`/rooms/${room.id}`)}>
                 {room.amenities && room.amenities.length > 0 ? (
@@ -227,6 +224,7 @@ export default function RoomsPage() {
           {
             key: 'updated_at',
             label: 'Updated',
+            responsive: 'lg+',
             render: (room) => (
               <div className="text-sm text-muted-foreground cursor-pointer" onClick={() => router.push(`/rooms/${room.id}`)}>
                 {room.updated_at ? new Date(room.updated_at).toLocaleDateString('en-GB') : '—'}
@@ -236,6 +234,7 @@ export default function RoomsPage() {
           {
             key: 'created_by_name',
             label: 'Created By',
+            responsive: 'lg+',
             render: (room) => (
               <div className="text-sm text-muted-foreground">
                 {room.created_by_name}
@@ -245,6 +244,7 @@ export default function RoomsPage() {
           {
             key: 'updated_by_name',
             label: 'Last Updated',
+            responsive: 'lg+',
             render: (room) => (
               <div className="text-sm">
                 {room.updated_by_name ? (

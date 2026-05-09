@@ -184,6 +184,7 @@ export default function AccountsPage() {
       </div>
 
       <EnhancedDataTable
+        compactTable
         data={accounts}
         searchKeys={['name', 'phone', 'email']}
         filters={[
@@ -203,46 +204,54 @@ export default function AccountsPage() {
             label: 'Name',
             render: (row: UnifiedAccount) => (
               <div className="flex items-center gap-2">
-                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 shrink-0">
+                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 shrink-0 max-md:h-7 max-md:w-7">
                   {row.accountType === 'guest' ? (
-                    <User className="h-4 w-4 text-primary" />
+                    <User className="h-4 w-4 text-primary max-md:h-3.5 max-md:w-3.5" />
                   ) : (
-                    <Building2 className="h-4 w-4 text-primary" />
+                    <Building2 className="h-4 w-4 text-primary max-md:h-3.5 max-md:w-3.5" />
                   )}
                 </div>
-                <p className="font-medium">{row.name}</p>
+                <p className="font-medium max-md:text-[13px]">{row.name}</p>
               </div>
             ),
-          },
-          {
-            key: 'accountType',
-            label: 'Type',
-            render: (row: UnifiedAccount) => (
-              <Badge variant="secondary" className="capitalize">{row.accountType}</Badge>
-            ),
-          },
-          {
-            key: 'phone',
-            label: 'Phone',
-            render: (row: UnifiedAccount) => <span>{row.phone || '-'}</span>,
-          },
-          {
-            key: 'email',
-            label: 'Email',
-            render: (row: UnifiedAccount) => <span className="truncate max-w-[160px] block">{row.email || '-'}</span>,
           },
           {
             key: 'balance',
             label: 'Balance',
             render: (row: UnifiedAccount) => (
-              <span className={`font-semibold ${row.balance > 0 ? 'text-red-600' : 'text-green-600'}`}>
+              <span className={`font-semibold text-xs md:text-sm ${row.balance > 0 ? 'text-red-600' : 'text-green-600'}`}>
                 {formatNaira(row.balance)}
               </span>
             ),
           },
           {
+            key: 'accountType',
+            label: 'Type',
+            responsive: 'md+',
+            render: (row: UnifiedAccount) => (
+              <Badge variant="secondary" className="capitalize text-[10px] md:text-xs">
+                {row.accountType}
+              </Badge>
+            ),
+          },
+          {
+            key: 'phone',
+            label: 'Phone',
+            responsive: 'md+',
+            render: (row: UnifiedAccount) => <span>{row.phone || '-'}</span>,
+          },
+          {
+            key: 'email',
+            label: 'Email',
+            responsive: 'md+',
+            render: (row: UnifiedAccount) => (
+              <span className="truncate max-w-[160px] block">{row.email || '-'}</span>
+            ),
+          },
+          {
             key: 'created_at',
             label: 'Created',
+            responsive: 'lg+',
             render: (row: UnifiedAccount) => (
               <span>{row.created_at ? format(new Date(row.created_at), 'dd MMM yyyy') : '-'}</span>
             ),

@@ -310,6 +310,7 @@ export default function OrganizationsPage() {
         </div>
       ) : (
         <EnhancedDataTable
+          compactTable
           data={organizations}
           searchKeys={['name', 'email', 'contact_person', 'phone']}
           filters={[
@@ -329,8 +330,8 @@ export default function OrganizationsPage() {
               key: 'name',
               label: 'Name',
               render: (org) => (
-                <div 
-                  className="cursor-pointer hover:text-primary font-medium"
+                <div
+                  className="cursor-pointer hover:text-primary font-medium max-md:text-[13px]"
                   onClick={() => router.push(`/organizations/${org.id}`)}
                 >
                   {org.name}
@@ -341,19 +342,9 @@ export default function OrganizationsPage() {
               key: 'org_type',
               label: 'Type',
               render: (org) => (
-                <Badge className={getOrgTypeColor(org.org_type)}>
+                <Badge className={`${getOrgTypeColor(org.org_type)} max-md:text-[10px]`}>
                   {getOrgTypeLabel(org.org_type)}
                 </Badge>
-              ),
-            },
-            {
-              key: 'contact_person',
-              label: 'Contact',
-              render: (org) => (
-                <div className="text-sm">
-                  <div>{org.contact_person || '—'}</div>
-                  <div className="text-muted-foreground">{org.phone || '—'}</div>
-                </div>
               ),
             },
             {
@@ -363,12 +354,24 @@ export default function OrganizationsPage() {
                 const b = Number(org.current_balance || 0)
                 const cls =
                   b < 0 ? 'text-red-600' : b > 0 ? 'text-blue-600 font-semibold' : 'text-muted-foreground font-semibold'
-                return <div className={cls}>{formatNaira(b)}</div>
+                return <div className={`${cls} text-xs md:text-sm`}>{formatNaira(b)}</div>
               },
+            },
+            {
+              key: 'contact_person',
+              label: 'Contact',
+              responsive: 'md+',
+              render: (org) => (
+                <div className="text-sm">
+                  <div>{org.contact_person || '—'}</div>
+                  <div className="text-muted-foreground">{org.phone || '—'}</div>
+                </div>
+              ),
             },
             {
               key: 'created_at',
               label: 'Created',
+              responsive: 'lg+',
               render: (org) => (
                 <div className="text-sm">
                   <div>{format(new Date(org.created_at), 'MMM dd, yyyy')}</div>
