@@ -62,19 +62,32 @@ export async function GET(request: Request) {
         .in('id', addedByIds)
 
       ;(addedByProfiles || []).forEach((profile: any) => {
-        if (profile.full_name) addedByMap[profile.id] = profile.full_name
+        const name = String(profile.full_name || '').trim()
+        if (name) addedByMap[profile.id] = name
       })
-    }
 
-    const fallbackCreator = (users || []).find((user: any) => user.role === 'admin' && user.full_name)
-      || (users || []).find((user: any) => user.full_name)
-    const fallbackCreatorName = fallbackCreator?.full_name || 'Unknown User'
+      const missingForAuth = addedByIds.filter((id) => !addedByMap[id])
+
+      await Promise.all(
+        missingForAuth.map(async (id) => {
+          try {
+            const { data, error } = await admin.auth.admin.getUserById(id)
+            if (error || !data?.user) return
+            const u = data.user
+            const metadataName = String(u.user_metadata?.full_name || '').trim()
+            const emailFallback = u.email?.split('@')[0]?.replace(/[._-]+/g, ' ').trim() || ''
+            const label = metadataName || emailFallback
+            if (label) addedByMap[id] = label
+          } catch {
+            /* ignore */
+          }
+        }),
+      )
+    }
 
     const usersWithAddedBy = (users || []).map((user: any) => ({
       ...user,
-      added_by_name: user.added_by
-        ? addedByMap[user.added_by] || fallbackCreatorName
-        : fallbackCreatorName,
+      added_by_name: user.added_by ? addedByMap[user.added_by] ?? null : null,
     }))
 
     return NextResponse.json({ users: usersWithAddedBy })
