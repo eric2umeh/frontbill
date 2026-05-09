@@ -1,8 +1,15 @@
--- Store issues requisition (digital “STORE ISSUES REQUISITION” form)
--- Run in Supabase SQL Editor after 029/031 store migrations.
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Store requisitions (digital “STORE ISSUES REQUISITION” form)
+-- Run in Supabase SQL Editor: copy the ENTIRE file and click Run once.
+-- Do NOT run a highlighted selection only (that causes “syntax error at uuid”).
+-- Requires: public.organizations, public.profiles (same as rest of FrontBill).
+-- Run after scripts 029/031 store migrations if you use those.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 CREATE TABLE IF NOT EXISTS public.store_requisitions (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   organization_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
   reference TEXT NOT NULL,
   store_section TEXT NOT NULL,
@@ -24,7 +31,7 @@ CREATE TABLE IF NOT EXISTS public.store_requisitions (
 );
 
 CREATE TABLE IF NOT EXISTS public.store_requisition_lines (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   requisition_id UUID NOT NULL REFERENCES public.store_requisitions(id) ON DELETE CASCADE,
   line_no INT NOT NULL,
   item_description TEXT NOT NULL,

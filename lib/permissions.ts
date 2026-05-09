@@ -27,6 +27,8 @@ export type Permission =
   | 'maintenance:view' | 'maintenance:create' | 'maintenance:edit' | 'maintenance:assign' | 'maintenance:report'
   | 'store:view' | 'store:create' | 'store:edit' | 'store:delete' | 'store:adjust'
   | 'store:issue' | 'store:reports' | 'store:audit'
+  /** Submit / view store requisitions (department staff); fulfillment still uses store:issue / store:view */
+  | 'store:requisition'
 
 export type RoleKey =
   | 'superadmin'
@@ -111,6 +113,7 @@ export const ALL_PERMISSIONS: { key: Permission; label: string; group: string }[
   { key: 'store:issue', label: 'Issue Stock to Outlets / Departments', group: 'Store' },
   { key: 'store:reports', label: 'Store reports (daily closing & monthly management report)', group: 'Store' },
   { key: 'store:audit', label: 'Store Movement Audit Trail (Full Detail)', group: 'Store' },
+  { key: 'store:requisition', label: 'Store Requisitions (request items from store)', group: 'Store' },
 
   { key: 'analytics:view', label: 'View Analytics', group: 'Analytics' },
   { key: 'analytics:export', label: 'Export Analytics', group: 'Analytics' },
@@ -186,6 +189,7 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
     color: 'bg-amber-100 text-amber-950 dark:bg-amber-950/30 dark:text-amber-100',
     permissions: [
       'store:view',
+      'store:requisition',
       'store:create',
       'store:edit',
       'store:delete',
@@ -203,6 +207,7 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
     color: 'bg-slate-200 text-slate-900 dark:bg-slate-800 dark:text-slate-100',
     permissions: [
       'store:view',
+      'store:requisition',
       'store:reports',
       'store:audit',
       'night_audit:view',
@@ -231,6 +236,7 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
       'organizations:view',
       'rooms:view',
       'store:view',
+      'store:requisition',
       'store:reports',
       'store:audit',
       'settings:view',
@@ -253,6 +259,7 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
       'ledger:view',
       'night_audit:view', 'night_audit:run', 'audit_trails:view',
       'backdate:request',
+      'store:requisition',
       'settings:view',
     ],
   },
@@ -269,6 +276,7 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
       'guests:view', 'guests:create',
       'payments:view',
       'transactions:view',
+      'store:requisition',
       'settings:view',
     ],
   },
@@ -280,6 +288,7 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
     permissions: [
       'rooms:view',
       'bookings:view',
+      'store:requisition',
       'settings:view',
     ],
   },
@@ -293,6 +302,7 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
       'rooms:view', 'rooms:update_status',
       'bookings:view',
       'reservations:view',
+      'store:requisition',
       'settings:view',
     ],
   },
@@ -306,6 +316,7 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
       'rooms:view', 'rooms:update_status',
       'bookings:view',
       'reservations:view',
+      'store:requisition',
       'settings:view',
     ],
   },

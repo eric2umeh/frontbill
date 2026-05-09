@@ -51,6 +51,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { MonthlyStoreReport } from '@/components/store/monthly-store-report'
+import { RequisitionList } from '@/components/store/requisition-list'
 import { toast } from 'sonner'
 import { format, parseISO, startOfDay, endOfDay } from 'date-fns'
 import {
@@ -61,6 +62,7 @@ import {
   ClipboardList,
   FileSpreadsheet,
   History,
+  Inbox,
   Layers,
   Loader2,
   Package,
@@ -90,7 +92,7 @@ function randomSuffix() {
   return Math.random().toString(36).slice(2, 7)
 }
 
-export function StoreManager() {
+export function StoreManager({ initialTab }: { initialTab?: 'requisitions' } = {}) {
   const { role, userId, organizationId } = useAuth()
   const canCreate = hasPermission(role, 'store:create')
   const canEdit = hasPermission(role, 'store:edit')
@@ -100,6 +102,9 @@ export function StoreManager() {
   const canReports = hasPermission(role, 'store:reports')
   const canAuditTab = hasPermission(role, 'store:audit')
   const canSystemAudit = hasPermission(role, 'audit_trails:view')
+  const canViewStore = hasPermission(role, 'store:view')
+  const canRequisitionsTab =
+    hasPermission(role, 'store:requisition') || canViewStore
 
   const [categories, setCategories] = useState<StoreCategoryRow[]>([])
   const [items, setItems] = useState<StoreItemRow[]>([])
@@ -114,7 +119,13 @@ export function StoreManager() {
   const [catFilter, setCatFilter] = useState<string>('all')
   const [inactiveToo, setInactiveToo] = useState(false)
   const [tab, setTab] = useState<
-    'inventory' | 'categories' | 'movements' | 'daily' | 'monthly' | 'audit'
+    | 'requisitions'
+    | 'inventory'
+    | 'categories'
+    | 'movements'
+    | 'daily'
+    | 'monthly'
+    | 'audit'
   >('inventory')
 
   const [reportDate, setReportDate] = useState(() => format(new Date(), 'yyyy-MM-dd'))
@@ -225,6 +236,14 @@ export function StoreManager() {
   useEffect(() => {
     void fetchAll()
   }, [fetchAll])
+
+  useEffect(() => {
+    if (initialTab === 'requisitions' && canRequisitionsTab) setTab('requisitions')
+  }, [initialTab, canRequisitionsTab])
+
+  useEffect(() => {
+    if (tab === 'requisitions' && !canRequisitionsTab) setTab('inventory')
+  }, [tab, canRequisitionsTab])
 
   useEffect(() => {
     const supabase = createClient()
@@ -745,6 +764,28 @@ export function StoreManager() {
     )
   }
 
+  if (!canViewStore && canRequisitionsTab) {
+    return (
+      <div className="space-y-6">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">Store requisitions</h1>
+            <p className="text-sm text-muted-foreground">
+              Submit and track requests from your department.
+            </p>
+          </div>
+          <Button asChild>
+            <Link href="/store/requisitions/new">
+              <Plus className="mr-2 h-4 w-4" />
+              New requisition
+            </Link>
+          </Button>
+        </div>
+        <RequisitionList embedded />
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-8">
       <div
@@ -806,7 +847,16 @@ export function StoreManager() {
               </p>
             )}
           </div>
-          <div className="grid grid-cols-3 gap-3 text-center">
+          <div className="flex w-full flex-col items-stretch gap-3 md:w-auto md:items-end">
+            {canRequisitionsTab && (
+              <Button asChild size="default" className="shrink-0 self-end">
+                <Link href="/store/requisitions/new">
+                  <Plus className="mr-2 h-4 w-4" />
+                  New requisition
+                </Link>
+              </Button>
+            )}
+            <div className="grid grid-cols-3 gap-3 text-center">
             {storeOutletContext !== CENTRAL_STORE_VIEW && outletViewStats ? (
               <>
                 <div className="rounded-xl border bg-white/70 px-4 py-3 shadow-sm dark:bg-stone-900/70">
@@ -838,6 +888,7 @@ export function StoreManager() {
                 </div>
               </>
             )}
+            </div>
           </div>
         </div>
       </div>
@@ -849,6 +900,12 @@ export function StoreManager() {
       ) : (
         <Tabs value={tab} onValueChange={v => setTab(v as typeof tab)} className="space-y-6">
           <TabsList className="flex h-auto min-h-10 w-full flex-wrap gap-1 md:w-auto md:inline-flex">
+            {canRequisitionsTab && (
+              <TabsTrigger value="requisitions" className="gap-2">
+                <Inbox className="h-4 w-4" />
+                Requisitions
+              </TabsTrigger>
+            )}
             <TabsTrigger value="inventory" className="gap-2">
               <Package className="h-4 w-4" />
               Inventory
@@ -880,6 +937,12 @@ export function StoreManager() {
               </TabsTrigger>
             )}
           </TabsList>
+
+          {canRequisitionsTab && (
+            <TabsContent value="requisitions" className="space-y-4">
+              <RequisitionList embedded />
+            </TabsContent>
+          )}
 
           <TabsContent value="inventory" className="space-y-4">
             <Card className="border-dashed">
