@@ -8,7 +8,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { useAuth } from '@/lib/auth-context'
-import { hasPermission, type Permission } from '@/lib/permissions'
+import { canonicalRoleKey, hasPermission, type Permission } from '@/lib/permissions'
 import { Sheet, SheetContent, SheetTitle, SheetDescription } from '@/components/ui/sheet'
 import {
   LayoutDashboard,
@@ -145,7 +145,10 @@ export function Sidebar({ mobileOpen, onMobileClose }: SidebarProps = {}) {
   const pendingBackdateCount = useBackdatePendingCount()
 
   // Filter sidebar routes based on the logged-in user's role
-  const visibleRoutes = routes.filter(route => {
+  const visibleRoutes = routes.filter((route) => {
+    if (route.href === '/store' && canonicalRoleKey(role) === 'front_desk') {
+      return false
+    }
     if (route.permissionAny?.length) {
       return route.permissionAny.some((p) => hasPermission(role, p))
     }
