@@ -28,6 +28,8 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Separator } from '@/components/ui/separator'
+import { uploadStoreAttachment } from '@/lib/store/store-attachment-upload'
+import { StoreAttachmentField } from '@/components/store/store-attachment-field'
 import { ArrowLeft, Loader2 } from 'lucide-react'
 import { format, parseISO } from 'date-fns'
 import { toast } from 'sonner'
@@ -78,6 +80,8 @@ export function RequisitionDetail() {
   const [debitAccount, setDebitAccount] = useState('')
   const [creditAccount, setCreditAccount] = useState('')
   const [accountantNotes, setAccountantNotes] = useState('')
+
+  const [attachmentFile, setAttachmentFile] = useState<File | null>(null)
 
   const load = useCallback(async () => {
     const supabase = createClient()
@@ -277,6 +281,36 @@ export function RequisitionDetail() {
     }
   }
 
+  const saveRequisitionAttachment = async () => {
+    if (!req || !attachmentFile || !organizationId) return
+    const supabase = createClient()
+    if (!supabase) return
+    setSaving(true)
+    try {
+      const { publicUrl, error: uErr } = await uploadStoreAttachment(supabase, attachmentFile, {
+        organizationId,
+        folder: 'requisitions',
+        documentId: req.id,
+      })
+      if (uErr || !publicUrl) {
+        toast.error(uErr || 'Upload failed')
+        return
+      }
+      const { error } = await supabase
+        .from('store_requisitions')
+        .update({ attachment_url: publicUrl })
+        .eq('id', req.id)
+      if (error) throw error
+      setAttachmentFile(null)
+      toast.success('Attachment saved')
+      load()
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Upload failed')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   if (!canView) {
     return (
       <Card>
@@ -358,6 +392,43 @@ export function RequisitionDetail() {
           <CardContent className="pt-0 text-sm whitespace-pre-wrap">{req.notes}</CardContent>
         </Card>
       ) : null}
+
+      <Card>
+        <CardHeader className="py-3">
+          <CardTitle className="text-sm font-medium">Attachment</CardTitle>
+          <CardDescription>Optional photo or PDF of the paper form.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {req.attachment_url ? (
+            <p className="text-sm">
+              <a
+                href={req.attachment_url}
+                target="_blank"
+                rel="noreferrer"
+                className="text-primary underline underline-offset-4"
+              >
+                View attachment
+              </a>
+            </p>
+          ) : (
+            <p className="text-sm text-muted-foreground">No attachment uploaded.</p>
+          )}
+          {req.status !== 'cancelled' && (
+            <>
+              <StoreAttachmentField
+                label={req.attachment_url ? 'Replace attachment' : 'Add attachment'}
+                file={attachmentFile}
+                onFileChange={setAttachmentFile}
+              />
+              {attachmentFile ? (
+                <Button type="button" size="sm" disabled={saving} onClick={() => void saveRequisitionAttachment()}>
+                  Upload
+                </Button>
+              ) : null}
+            </>
+          )}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>

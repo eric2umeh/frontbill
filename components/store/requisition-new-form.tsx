@@ -8,6 +8,7 @@ import { useAuth } from '@/lib/auth-context'
 import { hasPermission } from '@/lib/permissions'
 import { allocateRequisitionReference } from '@/lib/store/requisition-reference'
 import { STORE_SECTION_OPTIONS, UNIT_OPTIONS } from '@/lib/store/requisition-types'
+import { uploadStoreAttachment } from '@/lib/store/store-attachment-upload'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -28,6 +29,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { StoreAttachmentField } from '@/components/store/store-attachment-field'
 import { ArrowLeft, Loader2, Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -73,6 +75,7 @@ export function RequisitionNewForm() {
   const [requestDate, setRequestDate] = useState(() => new Date().toISOString().slice(0, 10))
   const [notes, setNotes] = useState('')
   const [lines, setLines] = useState<DraftLine[]>(() => [emptyLine(), emptyLine()])
+  const [attachmentFile, setAttachmentFile] = useState<File | null>(null)
   const [saving, setSaving] = useState(false)
 
   const effectiveDepartment =
@@ -168,6 +171,19 @@ export function RequisitionNewForm() {
 
       const { error: lErr } = await supabase.from('store_requisition_lines').insert(lineRows)
       if (lErr) throw lErr
+
+      if (attachmentFile) {
+        const { publicUrl, error: uErr } = await uploadStoreAttachment(supabase, attachmentFile, {
+          organizationId,
+          folder: 'requisitions',
+          documentId: reqId,
+        })
+        if (uErr) {
+          toast.error(uErr)
+        } else if (publicUrl) {
+          await supabase.from('store_requisitions').update({ attachment_url: publicUrl }).eq('id', reqId)
+        }
+      }
 
       toast.success(`Requisition ${reference} submitted`)
       router.push(`/store/requisitions/${reqId}`)
@@ -385,6 +401,13 @@ export function RequisitionNewForm() {
             />
           </CardContent>
         </Card>
+
+        <StoreAttachmentField
+          label="Attachment (optional)"
+          description="Photo or scan of the signed paper requisition."
+          file={attachmentFile}
+          onFileChange={setAttachmentFile}
+        />
 
         <div className="flex flex-wrap gap-3 justify-end">
           <Button type="button" variant="outline" asChild>
