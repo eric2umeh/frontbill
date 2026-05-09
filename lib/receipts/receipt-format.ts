@@ -87,7 +87,7 @@ function receiptBlockStyles(): string {
 }
 
 function oneReceiptBlock(p: PaymentReceiptPayload): string {
-  const hotel = escapeHtml(p.hotelName)
+  const hotel = escapeHtml(String(p.hotelName ?? '').trim() || '\u2014')
   const addr = p.address ? escapeHtml(p.address) : ''
   const phone = p.phone ? escapeHtml(p.phone) : ''
   const email = p.email ? escapeHtml(p.email) : ''
