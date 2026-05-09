@@ -11,12 +11,14 @@ import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { ArrowLeft, CreditCard, Trash2, Edit, Plus, Clock, AlertCircle, Loader2, LogOut } from 'lucide-react'
+import { ArrowLeft, CreditCard, Trash2, Edit, Plus, Clock, AlertCircle, Loader2, LogOut, Receipt } from 'lucide-react'
 import { formatNaira } from '@/lib/utils/currency'
 import { toast } from 'sonner'
 import { ExtendStayModal } from '@/components/bookings/extend-stay-modal'
 import { CheckoutConfirmDialog } from '@/components/bookings/checkout-confirm-dialog'
 import { EditBookingModal } from '@/components/bookings/edit-booking-modal'
+import { PaymentReceiptDialog, type PaymentReceiptChargeRow } from '@/components/receipts/payment-receipt-dialog'
+import type { PaymentReceiptBranding } from '@/lib/receipts/receipt-format'
 import { canAdministerBookingRecord } from '@/lib/booking/can-administer-booking-record'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/lib/auth-context'
@@ -54,7 +56,7 @@ import {
 
 export default function BookingDetailPage({ params }: { params: Promise<{ id: string }> | { id: string } }) {
   const router = useRouter()
-  const { role, userId } = useAuth()
+  const { role, userId, name: authUserName } = useAuth()
   const canAdminBooking = canAdministerBookingRecord(role)
   const canManageFolio = role === 'superadmin' || role === 'admin' || role === 'front_desk'
   const [booking, setBooking] = useState<any>(null)
@@ -95,6 +97,8 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
   const [orgCheckoutTime, setOrgCheckoutTime] = useState(DEFAULT_ORG_CHECKOUT_TIME)
   const [checkoutConfirmOpen, setCheckoutConfirmOpen] = useState(false)
   const [editBookingOpen, setEditBookingOpen] = useState(false)
+  const [receiptOrg, setReceiptOrg] = useState<PaymentReceiptBranding | null>(null)
+  const [receiptCharge, setReceiptCharge] = useState<PaymentReceiptChargeRow | null>(null)
 
   useEffect(() => {
     const getParamsAndFetch = async () => {
@@ -122,10 +126,22 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
       if (bookingData.organization_id) {
         const { data: orgRow } = await supabase
           .from('organizations')
-          .select('checkout_time')
+          .select('checkout_time, name, address, phone, email')
           .eq('id', bookingData.organization_id)
           .maybeSingle()
         setOrgCheckoutTime(orgRow?.checkout_time ?? DEFAULT_ORG_CHECKOUT_TIME)
+        if (orgRow?.name) {
+          setReceiptOrg({
+            hotelName: orgRow.name,
+            address: orgRow.address ?? '',
+            phone: orgRow.phone ?? '',
+            email: orgRow.email ?? '',
+          })
+        } else {
+          setReceiptOrg(null)
+        }
+      } else {
+        setReceiptOrg(null)
       }
 
       const bookingUserIds = [bookingData.created_by, bookingData.updated_by].filter(Boolean)
@@ -947,6 +963,17 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
         onSaved={() => fetchBookingDetails(bookingId)}
       />
 
+      <PaymentReceiptDialog
+        open={!!receiptCharge}
+        onOpenChange={(open) => {
+          if (!open) setReceiptCharge(null)
+        }}
+        organization={receiptOrg}
+        booking={booking}
+        charge={receiptCharge}
+        currentUserName={authUserName || null}
+      />
+
       <AlertDialog
         open={deleteBookingDialogOpen}
         onOpenChange={(open) => {
@@ -1436,10 +1463,32 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                         <div>By {charge.createdBy}</div>
                       </div>
                     </div>
-                    <div className="flex items-center gap-3 ml-4">
+                    <div className="flex flex-wrap items-center justify-end gap-2 ml-4">
                       <div className={`font-semibold text-right min-w-[100px] ${charge.amount < 0 ? 'text-green-600' : charge.type !== 'payment' && charge.paymentStatus === 'paid' ? 'text-muted-foreground' : 'text-foreground'}`}>
                         {charge.amount < 0 ? '-' : '+'}{formatNaira(Math.abs(charge.amount))}
                       </div>
+                      {charge.type === 'payment' && canManageFolio && (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          className="shrink-0"
+                          type="button"
+                          onClick={() =>
+                            setReceiptCharge({
+                              id: charge.id,
+                              timestamp: charge.timestamp,
+                              description: charge.description,
+                              amount: charge.amount,
+                              type: charge.type,
+                              createdBy: charge.createdBy,
+                              paymentMethod: charge.paymentMethod,
+                            })
+                          }
+                        >
+                          <Receipt className="h-4 w-4 mr-1.5" />
+                          Receipt
+                        </Button>
+                      )}
                       {canAdminBooking && (
                         <div className="flex gap-1">
                           <Button
