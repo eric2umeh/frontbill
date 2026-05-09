@@ -1,5 +1,5 @@
-import { RequisitionList } from '@/components/store/requisition-list'
+import { redirect } from 'next/navigation'
 
-export default function StoreRequisitionsPage() {
-  return <RequisitionList />
+export default function StoreRequisitionsListRedirectPage() {
+  redirect('/store?tab=requisitions')
 }
