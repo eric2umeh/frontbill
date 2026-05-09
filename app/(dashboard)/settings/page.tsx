@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -12,9 +11,17 @@ import { toast } from 'sonner'
 import { Loader2, Building2, Shield, Eye, EyeOff, Clock } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
 import { createClient } from '@/lib/supabase/client'
+import { hasPermission } from '@/lib/permissions'
+
+/** PostgREST/Postgres when `organizations` has no checkout policy columns yet */
+function isOrgCheckoutPolicyColumnError(err: { message?: string } | null | undefined): boolean {
+  const m = (err?.message || '').toLowerCase()
+  if (!m) return false
+  const namesCheckout = m.includes('checkout_time') || m.includes('late_checkout_fee')
+  return namesCheckout && (m.includes('does not exist') || m.includes('undefined column'))
+}
 
 export default function SettingsPage() {
-  const router = useRouter()
   const { userId, email, name, role, organizationId } = useAuth()
   const supabase = createClient()
 
@@ -35,26 +42,62 @@ export default function SettingsPage() {
   const [checkoutTime, setCheckoutTime] = useState('12:00')
   const [lateCheckoutFeePerHour, setLateCheckoutFeePerHour] = useState('')
   const [checkoutPolicySaving, setCheckoutPolicySaving] = useState(false)
-  const isAdmin = role === 'admin'
+  const [hotelSaving, setHotelSaving] = useState(false)
+  /** False when DB has no `checkout_time` / `late_checkout_fee_per_hour` (run add-checkout-policy SQL) */
+  const [checkoutPolicyDbAvailable, setCheckoutPolicyDbAvailable] = useState(true)
+  /** Administrator + Superadmin (canonical); not strict string match on role label */
+  const canManageHotelSettings = hasPermission(role, 'settings:manage')
 
   useEffect(() => {
     async function fetchHotelInfo() {
       if (!organizationId || !supabase) return
       try {
-        const { data, error } = await supabase
+        let data: {
+          name?: string | null
+          email?: string | null
+          address?: string | null
+          phone?: string | null
+          checkout_time?: string | null
+          late_checkout_fee_per_hour?: number | null
+        } | null = null
+        /** Local flag — state updates are async, so avoid reading `checkoutPolicyDbAvailable` here */
+        let checkoutPolicyColsOk = true
+
+        const full = await supabase
           .from('organizations')
           .select('name, email, address, phone, checkout_time, late_checkout_fee_per_hour')
           .eq('id', organizationId)
           .maybeSingle()
 
-        if (error) throw error
+        if (full.error && isOrgCheckoutPolicyColumnError(full.error)) {
+          checkoutPolicyColsOk = false
+          setCheckoutPolicyDbAvailable(false)
+          const base = await supabase
+            .from('organizations')
+            .select('name, email, address, phone')
+            .eq('id', organizationId)
+            .maybeSingle()
+          if (base.error) throw base.error
+          data = base.data
+        } else if (full.error) {
+          throw full.error
+        } else {
+          setCheckoutPolicyDbAvailable(true)
+          data = full.data
+        }
+
         if (data) {
           setHotelName(data.name || '')
           setHotelEmail(data.email || '')
           setHotelAddress(data.address || '')
           setHotelPhone(data.phone || '')
-          setCheckoutTime(data.checkout_time || '12:00')
-          setLateCheckoutFeePerHour(data.late_checkout_fee_per_hour?.toString() || '')
+          if (checkoutPolicyColsOk) {
+            setCheckoutTime(data.checkout_time || '12:00')
+            setLateCheckoutFeePerHour(data.late_checkout_fee_per_hour?.toString() || '')
+          } else {
+            setCheckoutTime('12:00')
+            setLateCheckoutFeePerHour('')
+          }
         }
       } catch (err: any) {
         toast.error(err.message || 'Failed to load hotel information')
@@ -100,8 +143,46 @@ export default function SettingsPage() {
     }
   }
 
+  async function handleSaveHotelInformation() {
+    if (!organizationId || !canManageHotelSettings || !supabase) return
+    const name = hotelName.trim()
+    const em = hotelEmail.trim()
+    if (!name) {
+      toast.error('Hotel name is required')
+      return
+    }
+    if (!em) {
+      toast.error('Hotel email is required')
+      return
+    }
+    setHotelSaving(true)
+    try {
+      const { error } = await supabase
+        .from('organizations')
+        .update({
+          name,
+          email: em,
+          address: hotelAddress.trim() || null,
+          phone: hotelPhone.trim() || null,
+        })
+        .eq('id', organizationId)
+      if (error) throw error
+      toast.success('Hotel information saved')
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to save hotel information')
+    } finally {
+      setHotelSaving(false)
+    }
+  }
+
   async function handleSaveCheckoutPolicy() {
-    if (!organizationId || !isAdmin) return
+    if (!organizationId || !canManageHotelSettings) return
+    if (!checkoutPolicyDbAvailable) {
+      toast.error(
+        'Checkout policy is not available until the database has checkout columns. Run scripts/add-checkout-policy-to-organizations.sql in the Supabase SQL editor.',
+      )
+      return
+    }
     setCheckoutPolicySaving(true)
     try {
       const { error } = await supabase
@@ -135,10 +216,16 @@ export default function SettingsPage() {
           <div className="flex items-center gap-2">
             <Building2 className="h-5 w-5" />
             <CardTitle>Hotel Information</CardTitle>
-            <Badge variant="outline" className="ml-auto">View Only</Badge>
+            {!canManageHotelSettings && (
+              <Badge variant="outline" className="ml-auto">
+                View Only
+              </Badge>
+            )}
           </div>
           <CardDescription>
-            Hotel details are view-only here.
+            {canManageHotelSettings
+              ? 'Update the property name and contact details shown on receipts and organization records.'
+              : 'Hotel details can only be edited by an Administrator or Superadmin.'}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -155,7 +242,8 @@ export default function SettingsPage() {
                     id="hotel_name"
                     placeholder="Grand Hotel"
                     value={hotelName}
-                    disabled
+                    disabled={!canManageHotelSettings}
+                    onChange={(e) => setHotelName(e.target.value)}
                   />
                 </div>
                 <div className="space-y-2">
@@ -165,7 +253,8 @@ export default function SettingsPage() {
                     type="email"
                     placeholder="info@hotel.com"
                     value={hotelEmail}
-                    disabled
+                    disabled={!canManageHotelSettings}
+                    onChange={(e) => setHotelEmail(e.target.value)}
                   />
                 </div>
               </div>
@@ -175,7 +264,8 @@ export default function SettingsPage() {
                   id="hotel_address"
                   placeholder="123 Main Street, Lagos"
                   value={hotelAddress}
-                  disabled
+                  disabled={!canManageHotelSettings}
+                  onChange={(e) => setHotelAddress(e.target.value)}
                 />
               </div>
               <div className="grid gap-4 md:grid-cols-2">
@@ -185,7 +275,8 @@ export default function SettingsPage() {
                     id="hotel_phone"
                     placeholder="+234 800 000 0000"
                     value={hotelPhone}
-                    disabled
+                    disabled={!canManageHotelSettings}
+                    onChange={(e) => setHotelPhone(e.target.value)}
                   />
                 </div>
                 <div className="space-y-2">
@@ -193,6 +284,12 @@ export default function SettingsPage() {
                   <Input id="currency" value="Nigerian Naira (₦)" disabled />
                 </div>
               </div>
+              {canManageHotelSettings && (
+                <Button onClick={handleSaveHotelInformation} disabled={hotelSaving}>
+                  {hotelSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  Save Hotel Information
+                </Button>
+              )}
             </>
           )}
         </CardContent>
@@ -308,13 +405,22 @@ export default function SettingsPage() {
           <div className="flex items-center gap-2">
             <Clock className="h-5 w-5" />
             <CardTitle>Checkout Policy</CardTitle>
-            {!isAdmin && <Badge variant="outline" className="ml-auto">View Only</Badge>}
+            {!canManageHotelSettings && <Badge variant="outline" className="ml-auto">View Only</Badge>}
           </div>
           <CardDescription>
             Set the standard checkout time and the late checkout fee charged per extra hour. Auto-checkout runs at 2:00 PM for all overdue bookings.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          {!checkoutPolicyDbAvailable && (
+            <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              <p className="font-medium">Checkout policy columns are missing</p>
+              <p className="mt-1 text-xs">
+                Your database does not have <code className="rounded bg-amber-100 px-1">organizations.checkout_time</code> yet. Run{' '}
+                <code className="rounded bg-amber-100 px-1">scripts/add-checkout-policy-to-organizations.sql</code> in the Supabase SQL editor, then reload this page.
+              </p>
+            </div>
+          )}
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="checkout_time">Standard Checkout Time</Label>
@@ -323,7 +429,7 @@ export default function SettingsPage() {
                 type="time"
                 value={checkoutTime}
                 onChange={(e) => setCheckoutTime(e.target.value)}
-                disabled={!isAdmin}
+                disabled={!canManageHotelSettings || !checkoutPolicyDbAvailable}
               />
               <p className="text-xs text-muted-foreground">
                 Guests are expected to check out by this time. Auto-checkout enforces departure by 2:00 PM.
@@ -338,7 +444,7 @@ export default function SettingsPage() {
                 placeholder="e.g. 5000"
                 value={lateCheckoutFeePerHour}
                 onChange={(e) => setLateCheckoutFeePerHour(e.target.value)}
-                disabled={!isAdmin}
+                disabled={!canManageHotelSettings || !checkoutPolicyDbAvailable}
               />
               <p className="text-xs text-muted-foreground">
                 Charge per extra hour past the standard checkout time. Use &quot;Add Charge&quot; on the booking to apply it.
@@ -354,8 +460,8 @@ export default function SettingsPage() {
               <li>At 2:00 PM the system automatically checks out any remaining active bookings</li>
             </ul>
           </div>
-          {isAdmin && (
-            <Button onClick={handleSaveCheckoutPolicy} disabled={checkoutPolicySaving}>
+          {canManageHotelSettings && (
+            <Button onClick={handleSaveCheckoutPolicy} disabled={checkoutPolicySaving || !checkoutPolicyDbAvailable}>
               {checkoutPolicySaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Save Policy
             </Button>

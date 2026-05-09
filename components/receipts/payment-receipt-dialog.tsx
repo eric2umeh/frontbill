@@ -39,6 +39,8 @@ type BookingLike = {
   guests?: { name?: string | null }
   guestName?: string | null
   rooms?: { room_number?: string | null } | null
+  /** Supabase embed: bookings.organization_id → organizations */
+  organizations?: { name?: string | null; address?: string | null; phone?: string | null; email?: string | null } | null
 }
 
 function buildPayload(
@@ -48,12 +50,17 @@ function buildPayload(
   currentUserLabel: string,
 ): PaymentReceiptPayload {
   const amount = Math.abs(Number(charge.amount) || 0)
-  const hotelName = org?.hotelName?.trim() || 'Hotel'
+  const embeddedOrg =
+    booking.organizations && typeof booking.organizations === 'object' && !Array.isArray(booking.organizations)
+      ? booking.organizations
+      : null
+  const embeddedName = embeddedOrg ? String(embeddedOrg.name ?? '').trim() : ''
+  const hotelName = String(org?.hotelName ?? '').trim() || embeddedName || ''
   return {
     hotelName,
-    address: org?.address ?? '',
-    phone: org?.phone ?? '',
-    email: org?.email ?? '',
+    address: org?.address ?? embeddedOrg?.address ?? '',
+    phone: org?.phone ?? embeddedOrg?.phone ?? '',
+    email: org?.email ?? embeddedOrg?.email ?? '',
     guestName:
       String(booking.guests?.name || booking.guestName || 'Guest')
         .trim() || 'Guest',

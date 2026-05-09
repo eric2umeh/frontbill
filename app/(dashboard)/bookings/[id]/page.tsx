@@ -153,32 +153,93 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
       // Fetch booking with related data
       let { data: bookingData, error: bookingError } = await supabase
         .from('bookings')
-        .select('*, guests(name, phone, email, address, balance), rooms(id, room_number, room_type, price_per_night)')
+        .select(`
+          *,
+          guests(name, phone, email, address, balance),
+          rooms(id, room_number, room_type, price_per_night),
+          organizations(name, address, phone, email)
+        `)
         .eq('id', id)
         .single()
 
       if (bookingError) throw bookingError
       if (!bookingData) throw new Error('Booking not found')
 
+      const nestedOrgRaw = bookingData.organizations as unknown
+      const nestedOrg =
+        nestedOrgRaw && typeof nestedOrgRaw === 'object' && !Array.isArray(nestedOrgRaw)
+          ? (nestedOrgRaw as {
+              name?: string | null
+              address?: string | null
+              phone?: string | null
+              email?: string | null
+            })
+          : null
+
+      let orgRow: {
+        name?: string | null
+        address?: string | null
+        phone?: string | null
+        email?: string | null
+      } | null = null
+
+      let checkoutTime = DEFAULT_ORG_CHECKOUT_TIME
       if (bookingData.organization_id) {
-        const { data: orgRow } = await supabase
+        const { data, error } = await supabase
           .from('organizations')
-          .select('checkout_time, name, address, phone, email')
+          .select('name, address, phone, email')
           .eq('id', bookingData.organization_id)
           .maybeSingle()
-        setOrgCheckoutTime(orgRow?.checkout_time ?? DEFAULT_ORG_CHECKOUT_TIME)
-        if (orgRow?.name) {
-          setReceiptOrg({
-            hotelName: orgRow.name,
-            address: orgRow.address ?? '',
-            phone: orgRow.phone ?? '',
-            email: orgRow.email ?? '',
-          })
-        } else {
-          setReceiptOrg(null)
+        if (!error) {
+          orgRow = data ?? null
         }
-      } else {
-        setReceiptOrg(null)
+        const co = await supabase
+          .from('organizations')
+          .select('checkout_time')
+          .eq('id', bookingData.organization_id)
+          .maybeSingle()
+        if (!co.error && co.data != null && (co.data as { checkout_time?: string | null }).checkout_time != null) {
+          checkoutTime = String((co.data as { checkout_time: string }).checkout_time)
+        }
+      }
+      setOrgCheckoutTime(checkoutTime)
+
+      const hotelName = String(orgRow?.name ?? nestedOrg?.name ?? '').trim()
+      const hasOrgReceiptContext = !!(orgRow || nestedOrg || bookingData.organization_id)
+      const setBranding: PaymentReceiptBranding | null = hasOrgReceiptContext
+        ? {
+            hotelName,
+            address: String(orgRow?.address ?? nestedOrg?.address ?? ''),
+            phone: String(orgRow?.phone ?? nestedOrg?.phone ?? ''),
+            email: String(orgRow?.email ?? nestedOrg?.email ?? ''),
+          }
+        : null
+      setReceiptOrg(setBranding)
+
+      if (userId && userId !== 'placeholder') {
+        try {
+          const rb = await fetch(
+            `/api/bookings/${encodeURIComponent(id)}/receipt-branding?caller_id=${encodeURIComponent(userId)}`,
+            { credentials: 'include' },
+          )
+          if (rb.ok) {
+            const j = (await rb.json()) as {
+              hotelName?: string
+              address?: string
+              phone?: string
+              email?: string
+            }
+            const hn = String(j.hotelName ?? '').trim()
+            setReceiptOrg({
+              hotelName: hn,
+              address: String(j.address ?? ''),
+              phone: String(j.phone ?? ''),
+              email: String(j.email ?? ''),
+            })
+          }
+        } catch {
+          /* keep client-derived branding */
+        }
       }
 
       const bookingUserIds = [bookingData.created_by, bookingData.updated_by].filter(Boolean)
