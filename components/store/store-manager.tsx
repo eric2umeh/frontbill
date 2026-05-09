@@ -52,6 +52,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { MonthlyStoreReport } from '@/components/store/monthly-store-report'
 import { RequisitionList } from '@/components/store/requisition-list'
+import { PurchaseOrderList } from '@/components/store/purchase-order-list'
 import { toast } from 'sonner'
 import { format, parseISO, startOfDay, endOfDay } from 'date-fns'
 import {
@@ -64,6 +65,7 @@ import {
   History,
   Inbox,
   Layers,
+  ShoppingCart,
   Loader2,
   Package,
   Pencil,
@@ -92,7 +94,7 @@ function randomSuffix() {
   return Math.random().toString(36).slice(2, 7)
 }
 
-export function StoreManager({ initialTab }: { initialTab?: 'requisitions' } = {}) {
+export function StoreManager({ initialTab }: { initialTab?: 'requisitions' | 'purchase_orders' } = {}) {
   const { role, userId, organizationId } = useAuth()
   const canCreate = hasPermission(role, 'store:create')
   const canEdit = hasPermission(role, 'store:edit')
@@ -105,6 +107,7 @@ export function StoreManager({ initialTab }: { initialTab?: 'requisitions' } = {
   const canViewStore = hasPermission(role, 'store:view')
   const canRequisitionsTab =
     hasPermission(role, 'store:requisition') || canViewStore
+  const canPurchaseOrdersTab = canViewStore
 
   const [categories, setCategories] = useState<StoreCategoryRow[]>([])
   const [items, setItems] = useState<StoreItemRow[]>([])
@@ -120,6 +123,7 @@ export function StoreManager({ initialTab }: { initialTab?: 'requisitions' } = {
   const [inactiveToo, setInactiveToo] = useState(false)
   const [tab, setTab] = useState<
     | 'requisitions'
+    | 'purchase_orders'
     | 'inventory'
     | 'categories'
     | 'movements'
@@ -239,11 +243,13 @@ export function StoreManager({ initialTab }: { initialTab?: 'requisitions' } = {
 
   useEffect(() => {
     if (initialTab === 'requisitions' && canRequisitionsTab) setTab('requisitions')
-  }, [initialTab, canRequisitionsTab])
+    if (initialTab === 'purchase_orders' && canPurchaseOrdersTab) setTab('purchase_orders')
+  }, [initialTab, canRequisitionsTab, canPurchaseOrdersTab])
 
   useEffect(() => {
     if (tab === 'requisitions' && !canRequisitionsTab) setTab('inventory')
-  }, [tab, canRequisitionsTab])
+    if (tab === 'purchase_orders' && !canPurchaseOrdersTab) setTab('inventory')
+  }, [tab, canRequisitionsTab, canPurchaseOrdersTab])
 
   useEffect(() => {
     const supabase = createClient()
@@ -849,10 +855,18 @@ export function StoreManager({ initialTab }: { initialTab?: 'requisitions' } = {
           </div>
           <div className="flex w-full flex-col items-stretch gap-3 md:w-auto md:items-end">
             {canRequisitionsTab && (
-              <Button asChild size="default" className="shrink-0 self-end">
+              <Button asChild size="default" variant="outline" className="shrink-0 self-end">
                 <Link href="/store/requisitions/new">
                   <Plus className="mr-2 h-4 w-4" />
                   New requisition
+                </Link>
+              </Button>
+            )}
+            {canPurchaseOrdersTab && (
+              <Button asChild size="default" className="shrink-0 self-end">
+                <Link href="/store/purchase-orders/new">
+                  <ShoppingCart className="mr-2 h-4 w-4" />
+                  New purchase order
                 </Link>
               </Button>
             )}
@@ -906,6 +920,12 @@ export function StoreManager({ initialTab }: { initialTab?: 'requisitions' } = {
                 Requisitions
               </TabsTrigger>
             )}
+            {canPurchaseOrdersTab && (
+              <TabsTrigger value="purchase_orders" className="gap-2">
+                <ShoppingCart className="h-4 w-4" />
+                Purchase orders
+              </TabsTrigger>
+            )}
             <TabsTrigger value="inventory" className="gap-2">
               <Package className="h-4 w-4" />
               Inventory
@@ -941,6 +961,12 @@ export function StoreManager({ initialTab }: { initialTab?: 'requisitions' } = {
           {canRequisitionsTab && (
             <TabsContent value="requisitions" className="space-y-4">
               <RequisitionList embedded />
+            </TabsContent>
+          )}
+
+          {canPurchaseOrdersTab && (
+            <TabsContent value="purchase_orders" className="space-y-4">
+              <PurchaseOrderList embedded />
             </TabsContent>
           )}
 

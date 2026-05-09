@@ -8,7 +8,7 @@ import { hasPermission } from '@/lib/permissions'
 import { StoreManager } from '@/components/store/store-manager'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 
-function StorePageInner({ initialTab }: { initialTab?: 'requisitions' }) {
+function StorePageInner({ initialTab }: { initialTab?: 'requisitions' | 'purchase_orders' }) {
   const { role } = useAuth()
   const canUseStore =
     hasPermission(role, 'store:view') || hasPermission(role, 'store:requisition')
@@ -29,7 +29,9 @@ function StorePageInner({ initialTab }: { initialTab?: 'requisitions' }) {
 
 function StorePageWithQuery() {
   const searchParams = useSearchParams()
-  const initialTab = searchParams.get('tab') === 'requisitions' ? 'requisitions' : undefined
+  const t = searchParams.get('tab')
+  const initialTab =
+    t === 'requisitions' ? 'requisitions' : t === 'purchase_orders' ? 'purchase_orders' : undefined
   return <StorePageInner initialTab={initialTab} />
 }
 

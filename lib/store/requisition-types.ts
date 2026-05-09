@@ -46,6 +46,8 @@ export interface StoreRequisitionRow {
   debit_account: string | null
   credit_account: string | null
   accountant_notes: string | null
+  /** Optional scan/photo of the paper form */
+  attachment_url: string | null
   created_at: string
   updated_at: string
 }

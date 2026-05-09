@@ -53,6 +53,9 @@ function canAccessPath(pathname: string, userRole: string): boolean {
   if (pathname === '/store/requisitions' || pathname.startsWith('/store/requisitions/')) {
     return hasPermission(userRole, 'store:requisition') || hasPermission(userRole, 'store:view')
   }
+  if (pathname === '/store/purchase-orders' || pathname.startsWith('/store/purchase-orders/')) {
+    return hasPermission(userRole, 'store:view')
+  }
   if (pathname === '/store' || pathname.startsWith('/store/')) {
     return hasPermission(userRole, 'store:view') || hasPermission(userRole, 'store:requisition')
   }
