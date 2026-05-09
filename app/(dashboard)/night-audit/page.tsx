@@ -63,7 +63,7 @@ export default function NightAuditPage() {
   })
   const canViewAuditTrails = hasPermission(role, 'audit_trails:view')
   const canApproveBackdates = hasPermission(role, 'backdate:approve')
-  const pendingBackdateBadge = useBackdatePendingCount(canApproveBackdates, userId)
+  const pendingBackdateBadge = useBackdatePendingCount()
 
   useEffect(() => {
     if (typeof window === 'undefined') return

@@ -8,6 +8,7 @@ import { LoadingScreen } from '@/components/shared/loading-screen'
 import { createClient } from '@/lib/supabase/client'
 import { AuthProvider } from '@/lib/auth-context'
 import { hasPermission, type Permission, canonicalRoleKey } from '@/lib/permissions'
+import { BackdatePendingProvider } from '@/components/providers/backdate-pending-provider'
 
 interface DashboardUser {
   id: string
@@ -211,6 +212,7 @@ export default function DashboardLayout({
       role: user.role,
       organizationId: user.organizationId || '',
     }}>
+      <BackdatePendingProvider>
       <div className="flex h-screen overflow-hidden bg-background">
         <Sidebar mobileOpen={mobileMenuOpen} onMobileClose={() => setMobileMenuOpen(false)} />
         <div className="flex flex-1 flex-col overflow-hidden">
@@ -220,6 +222,7 @@ export default function DashboardLayout({
           </main>
         </div>
       </div>
+      </BackdatePendingProvider>
     </AuthProvider>
   )
 }

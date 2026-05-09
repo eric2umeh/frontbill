@@ -23,6 +23,11 @@ import { formatNaira } from '@/lib/utils/currency'
 import { playNotificationBeep } from '@/lib/utils/play-notification-beep'
 import { addDays, formatDistanceToNow, setHours, setMinutes } from 'date-fns'
 
+/** Supabase-backed notification slice (transactions, bookings, rooms, …) */
+const NOTIFICATION_CORE_POLL_MS = 60_000
+/** Heavy `/api/backdate-requests` list — decoupled from core polling */
+const NOTIFICATION_BACKDATE_POLL_MS = 180_000
+
 interface DashboardUser {
   id: string
   email: string
@@ -62,6 +67,9 @@ export function Header({ user, onMenuClick }: HeaderProps) {
   const [readIds, setReadIds] = useState<Set<string>>(new Set())
   const [notifOpen, setNotifOpen] = useState(false)
   const prevBackdatePendingRef = useRef<Set<string>>(new Set())
+  const nonBackdateNotificationsRef = useRef<Notification[]>([])
+  const backdateDecidedNotificationsRef = useRef<Notification[]>([])
+  const backdatePendingNotificationsRef = useRef<Notification[]>([])
   const router = useRouter()
   const { organizationId } = useAuth()
   const notificationStorageKey = `frontbill-read-notifications-${organizationId || user.id}`
@@ -83,7 +91,17 @@ export function Header({ user, onMenuClick }: HeaderProps) {
     }
   }
 
-  const fetchNotifications = useCallback(async () => {
+  const mergeNotificationSlices = useCallback(() => {
+    setNotifications(
+      [
+        ...backdateDecidedNotificationsRef.current,
+        ...backdatePendingNotificationsRef.current,
+        ...nonBackdateNotificationsRef.current,
+      ].slice(0, 20),
+    )
+  }, [])
+
+  const fetchCoreNotifications = useCallback(async () => {
     const supabase = createClient()
     if (!supabase || !organizationId) return
 
@@ -101,14 +119,16 @@ export function Header({ user, onMenuClick }: HeaderProps) {
       const checkinReminderTime = setMinutes(setHours(now, 9), 0)
       const eveningReminderTime = setMinutes(setHours(now, 21), 0)
 
-      const backdateFetchPromise =
-        user.id && user.id !== 'placeholder'
-          ? fetch(`/api/backdate-requests?caller_id=${user.id}`, { credentials: 'include' })
-              .then((r) => r.json())
-              .catch(() => ({ requests: [] as unknown[] }))
-          : Promise.resolve({ requests: [] as unknown[] })
-
-      const [transactionsRes, checkinsRes, tomorrowCheckinsRes, checkoutsRes, tomorrowCheckoutsRes, overdueRes, balancesRes, roomsRes, backdateJson] = await Promise.all([
+      const [
+        transactionsRes,
+        checkinsRes,
+        tomorrowCheckinsRes,
+        checkoutsRes,
+        tomorrowCheckoutsRes,
+        overdueRes,
+        balancesRes,
+        roomsRes,
+      ] = await Promise.all([
         supabase
         .from('transactions')
         .select('id, description, amount, created_at, booking_id, guest_id, folio_id')
@@ -156,47 +176,7 @@ export function Header({ user, onMenuClick }: HeaderProps) {
           .select('id, room_number, status, updated_at')
           .eq('organization_id', organizationId)
           .in('status', ['cleaning', 'maintenance']),
-        backdateFetchPromise,
       ])
-
-      const backdateRequests: any[] = Array.isArray((backdateJson as { requests?: unknown }).requests)
-        ? ((backdateJson as { requests: any[] }).requests)
-        : []
-
-      if (user.id && user.id !== 'placeholder' && typeof sessionStorage !== 'undefined') {
-        try {
-          const k = `frontbill-backdate-decision-toast-${user.id}`
-          let seenList: string[] = []
-          try {
-            seenList = JSON.parse(sessionStorage.getItem(k) || '[]')
-          } catch {
-            seenList = []
-          }
-          const seen = new Set(seenList)
-
-          for (const r of backdateRequests) {
-            if (r.requested_by !== user.id || r.status === 'pending' || !r.decided_at) continue
-            const mark = `${r.id}:${r.status}`
-            if (seen.has(mark)) continue
-            seen.add(mark)
-            if (r.status === 'approved') {
-              const folio = typeof r.metadata?.created_folio_id === 'string' ? r.metadata.created_folio_id : null
-              toast.success(
-                folio?.startsWith('FOL')
-                  ? `Backdate approved — booking created (${folio})`
-                  : r.created_booking_id
-                    ? 'Backdate approved — booking was created on the server.'
-                    : 'Your backdate request was approved.',
-              )
-            } else if (r.status === 'rejected') {
-              toast.error('Your backdate request was rejected.')
-            }
-          }
-          sessionStorage.setItem(k, JSON.stringify(Array.from(seen).slice(-50)))
-        } catch {
-          // ignore storage
-        }
-      }
 
       const getGuestName = (booking: any) => Array.isArray(booking.guests) ? booking.guests[0]?.name : booking.guests?.name
       const getGuestId = (booking: any) => Array.isArray(booking.guests) ? booking.guests[0]?.id : booking.guests?.id
@@ -314,10 +294,74 @@ export function Header({ user, onMenuClick }: HeaderProps) {
         actionLabel: 'View rooms',
       }))
 
-      const isDecisionRole = user.role === 'superadmin' || user.role === 'admin'
-      const pendingBackdates = isDecisionRole
-        ? backdateRequests.filter((r: any) => r.status === 'pending')
+      nonBackdateNotificationsRef.current = [
+        ...overdueNotifications,
+        ...checkoutNotifications,
+        ...tomorrowCheckoutNotifications,
+        ...checkinNotifications,
+        ...tomorrowCheckinNotifications,
+        ...balanceNotifications,
+        ...roomNotifications,
+        ...transactionNotifications,
+      ]
+      mergeNotificationSlices()
+    } catch (error) {
+      console.error('Error fetching notifications:', error)
+    }
+  }, [organizationId, readIds, user.id, user.role, mergeNotificationSlices])
+
+  const fetchBackdateNotifications = useCallback(async () => {
+    if (!organizationId) return
+    const now = new Date()
+    try {
+      const backdateJson =
+        user.id && user.id !== 'placeholder'
+          ? await fetch(`/api/backdate-requests?caller_id=${user.id}`, { credentials: 'include' })
+              .then((r) => r.json())
+              .catch(() => ({ requests: [] as unknown[] }))
+          : { requests: [] as unknown[] }
+
+      const backdateRequests: any[] = Array.isArray((backdateJson as { requests?: unknown }).requests)
+        ? ((backdateJson as { requests: any[] }).requests)
         : []
+
+      if (user.id && user.id !== 'placeholder' && typeof sessionStorage !== 'undefined') {
+        try {
+          const k = `frontbill-backdate-decision-toast-${user.id}`
+          let seenList: string[] = []
+          try {
+            seenList = JSON.parse(sessionStorage.getItem(k) || '[]')
+          } catch {
+            seenList = []
+          }
+          const seen = new Set(seenList)
+
+          for (const r of backdateRequests) {
+            if (r.requested_by !== user.id || r.status === 'pending' || !r.decided_at) continue
+            const mark = `${r.id}:${r.status}`
+            if (seen.has(mark)) continue
+            seen.add(mark)
+            if (r.status === 'approved') {
+              const folio = typeof r.metadata?.created_folio_id === 'string' ? r.metadata.created_folio_id : null
+              toast.success(
+                folio?.startsWith('FOL')
+                  ? `Backdate approved — booking created (${folio})`
+                  : r.created_booking_id
+                    ? 'Backdate approved — booking was created on the server.'
+                    : 'Your backdate request was approved.',
+              )
+            } else if (r.status === 'rejected') {
+              toast.error('Your backdate request was rejected.')
+            }
+          }
+          sessionStorage.setItem(k, JSON.stringify(Array.from(seen).slice(-50)))
+        } catch {
+          // ignore storage
+        }
+      }
+
+      const isDecisionRole = user.role === 'superadmin' || user.role === 'admin'
+      const pendingBackdates = isDecisionRole ? backdateRequests.filter((r: any) => r.status === 'pending') : []
       const pendingIds = new Set(pendingBackdates.map((r: any) => r.id))
       for (const id of pendingIds) {
         if (!prevBackdatePendingRef.current.has(id)) {
@@ -327,7 +371,7 @@ export function Header({ user, onMenuClick }: HeaderProps) {
       }
       prevBackdatePendingRef.current = pendingIds
 
-      const backdatePendingNotifications: Notification[] = pendingBackdates.map((r: any) => ({
+      backdatePendingNotificationsRef.current = pendingBackdates.map((r: any) => ({
         id: `backdate-pending-${r.id}`,
         description: `${String(r.request_type).replace(/_/g, ' ')} backdate from ${r.requested_by_name} · ${r.requested_check_in}`,
         amount: 0,
@@ -340,7 +384,7 @@ export function Header({ user, onMenuClick }: HeaderProps) {
         actionLabel: 'Night Audit',
       }))
 
-      const backdateDecidedNotifications: Notification[] =
+      backdateDecidedNotificationsRef.current =
         user.id !== 'placeholder'
           ? backdateRequests
               .filter((r: any) => r.requested_by === user.id && r.status !== 'pending' && r.decided_at)
@@ -373,30 +417,29 @@ export function Header({ user, onMenuClick }: HeaderProps) {
               })
           : []
 
-      const combined = [
-        ...backdateDecidedNotifications,
-        ...backdatePendingNotifications,
-        ...overdueNotifications,
-        ...checkoutNotifications,
-        ...tomorrowCheckoutNotifications,
-        ...checkinNotifications,
-        ...tomorrowCheckinNotifications,
-        ...balanceNotifications,
-        ...roomNotifications,
-        ...transactionNotifications,
-      ]
-
-      setNotifications(combined.slice(0, 20))
+      mergeNotificationSlices()
     } catch (error) {
-      console.error('Error fetching notifications:', error)
+      console.error('Error fetching backdate notifications:', error)
     }
-  }, [organizationId, readIds, user.id, user.role])
+  }, [organizationId, readIds, user.id, user.role, mergeNotificationSlices])
 
   useEffect(() => {
-    fetchNotifications()
-    const interval = setInterval(fetchNotifications, 30000)
-    return () => clearInterval(interval)
-  }, [fetchNotifications])
+    void fetchCoreNotifications()
+    const interval = window.setInterval(() => void fetchCoreNotifications(), NOTIFICATION_CORE_POLL_MS)
+    return () => window.clearInterval(interval)
+  }, [fetchCoreNotifications])
+
+  useEffect(() => {
+    void fetchBackdateNotifications()
+    const interval = window.setInterval(() => void fetchBackdateNotifications(), NOTIFICATION_BACKDATE_POLL_MS)
+    return () => window.clearInterval(interval)
+  }, [fetchBackdateNotifications])
+
+  useEffect(() => {
+    if (!notifOpen) return
+    void fetchCoreNotifications()
+    void fetchBackdateNotifications()
+  }, [notifOpen, fetchCoreNotifications, fetchBackdateNotifications])
 
   const unreadCount = notifications.filter((n) => !n.read).length
 

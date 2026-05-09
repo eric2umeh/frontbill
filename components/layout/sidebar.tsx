@@ -142,7 +142,7 @@ export function Sidebar({ mobileOpen, onMobileClose }: SidebarProps = {}) {
   const pathname = usePathname()
   const [collapsed, setCollapsed] = useState(false)
   const { role, userId } = useAuth()
-  const pendingBackdateCount = useBackdatePendingCount(hasPermission(role, 'backdate:approve'), userId)
+  const pendingBackdateCount = useBackdatePendingCount()
 
   // Filter sidebar routes based on the logged-in user's role
   const visibleRoutes = routes.filter(route => {
