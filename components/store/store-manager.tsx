@@ -50,6 +50,7 @@ import {
 } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { MonthlyStoreReport } from '@/components/store/monthly-store-report'
 import { toast } from 'sonner'
 import { format, parseISO, startOfDay, endOfDay } from 'date-fns'
 import {
@@ -58,6 +59,7 @@ import {
   BarChart3,
   Building2,
   ClipboardList,
+  FileSpreadsheet,
   History,
   Layers,
   Loader2,
@@ -112,7 +114,7 @@ export function StoreManager() {
   const [catFilter, setCatFilter] = useState<string>('all')
   const [inactiveToo, setInactiveToo] = useState(false)
   const [tab, setTab] = useState<
-    'inventory' | 'categories' | 'movements' | 'daily' | 'audit'
+    'inventory' | 'categories' | 'movements' | 'daily' | 'monthly' | 'audit'
   >('inventory')
 
   const [reportDate, setReportDate] = useState(() => format(new Date(), 'yyyy-MM-dd'))
@@ -865,6 +867,12 @@ export function StoreManager() {
                 Daily / closing
               </TabsTrigger>
             )}
+            {canReports && (
+              <TabsTrigger value="monthly" className="gap-2">
+                <FileSpreadsheet className="h-4 w-4" />
+                Monthly report
+              </TabsTrigger>
+            )}
             {canAuditTab && (
               <TabsTrigger value="audit" className="gap-2">
                 <ClipboardList className="h-4 w-4" />
@@ -1360,6 +1368,12 @@ export function StoreManager() {
                   )}
                 </CardContent>
               </Card>
+            </TabsContent>
+          )}
+
+          {canReports && (
+            <TabsContent value="monthly" className="space-y-4">
+              <MonthlyStoreReport />
             </TabsContent>
           )}
 
