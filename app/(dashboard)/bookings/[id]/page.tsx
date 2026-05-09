@@ -22,6 +22,7 @@ import type { PaymentReceiptBranding } from '@/lib/receipts/receipt-format'
 import { canAdministerBookingRecord } from '@/lib/booking/can-administer-booking-record'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/lib/auth-context'
+import { canonicalRoleKey } from '@/lib/permissions'
 import { getUserDisplayName } from '@/lib/utils/user-display'
 import { fetchUserDisplayNameMap } from '@/lib/utils/fetch-user-display-names'
 import {
@@ -54,11 +55,46 @@ import {
   recordGuestLedgerCashMovement,
 } from '@/lib/utils/guest-city-ledger'
 
+/** Row can generate a payment receipt (paid money in — negative folio amount or explicit payment type). */
+function folioRowEligibleForPaymentReceipt(charge: {
+  type?: string
+  amount?: number
+}): boolean {
+  if (charge.type === 'payment') return true
+  if (Number(charge.amount) < 0) return true
+  return false
+}
+
+type PaymentLedgerReceiptRow = {
+  id: string
+  created_at: string
+  amount: number
+  payment_method: string | null
+  description: string | null
+  transaction_id: string | null
+  receivedByLabel: string
+}
+
+function transactionToReceiptChargeRow(tx: PaymentLedgerReceiptRow): PaymentReceiptChargeRow {
+  const amt = Math.abs(Number(tx.amount) || 0)
+  return {
+    id: tx.id,
+    timestamp: tx.created_at,
+    description: tx.description || undefined,
+    amount: -amt,
+    type: 'payment',
+    createdBy: tx.receivedByLabel,
+    paymentMethod: tx.payment_method,
+  }
+}
+
 export default function BookingDetailPage({ params }: { params: Promise<{ id: string }> | { id: string } }) {
   const router = useRouter()
   const { role, userId, name: authUserName } = useAuth()
   const canAdminBooking = canAdministerBookingRecord(role)
-  const canManageFolio = role === 'superadmin' || role === 'admin' || role === 'front_desk'
+  const roleKey = canonicalRoleKey(role)
+  const canManageFolio =
+    roleKey === 'superadmin' || roleKey === 'admin' || roleKey === 'front_desk'
   const [booking, setBooking] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [bookingId, setBookingId] = useState<string>('')
@@ -99,6 +135,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
   const [editBookingOpen, setEditBookingOpen] = useState(false)
   const [receiptOrg, setReceiptOrg] = useState<PaymentReceiptBranding | null>(null)
   const [receiptCharge, setReceiptCharge] = useState<PaymentReceiptChargeRow | null>(null)
+  const [paymentLedgerRows, setPaymentLedgerRows] = useState<PaymentLedgerReceiptRow[]>([])
 
   useEffect(() => {
     const getParamsAndFetch = async () => {
@@ -182,6 +219,40 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
       })
 
       setFolioCharges(chargesWithCreator)
+
+      const { data: txRows } = await supabase
+        .from('transactions')
+        .select('id, created_at, amount, payment_method, description, received_by, transaction_id, status')
+        .eq('booking_id', id)
+        .order('created_at', { ascending: false })
+
+      const payLedgerRaw = (txRows || []).filter((t: { transaction_id?: string | null; description?: string | null; status?: string | null }) => {
+        const st = String(t.status || '').toLowerCase()
+        if (st === 'void' || st === 'cancelled') return false
+        const tid = String(t.transaction_id || '')
+        const desc = String(t.description || '').toLowerCase()
+        if (tid.startsWith('PAY-')) return true
+        if (desc.includes('payment received')) return true
+        if (desc.includes('booking created')) return true
+        if (desc.includes('city ledger top-up')) return true
+        if (desc.includes('add credit') || desc.includes('via add credit')) return true
+        return false
+      })
+
+      const receiverIds = [...new Set(payLedgerRaw.map((t: { received_by?: string | null }) => t.received_by).filter(Boolean))] as string[]
+      const receiverMap = receiverIds.length ? await fetchUserDisplayNameMap(receiverIds, userId) : {}
+      const ledgerRows: PaymentLedgerReceiptRow[] = payLedgerRaw.map((t: any) => ({
+        id: t.id,
+        created_at: t.created_at,
+        amount: Number(t.amount) || 0,
+        payment_method: t.payment_method ?? null,
+        description: t.description ?? null,
+        transaction_id: t.transaction_id ?? null,
+        receivedByLabel: t.received_by
+          ? receiverMap[t.received_by] || getUserDisplayName(null, t.received_by)
+          : 'Staff',
+      }))
+      setPaymentLedgerRows(ledgerRows)
 
       if (shouldReconcileBookingPaymentPaid(bookingData, chargesWithCreator)) {
         const { error: psFixErr } = await supabase
@@ -1467,7 +1538,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                       <div className={`font-semibold text-right min-w-[100px] ${charge.amount < 0 ? 'text-green-600' : charge.type !== 'payment' && charge.paymentStatus === 'paid' ? 'text-muted-foreground' : 'text-foreground'}`}>
                         {charge.amount < 0 ? '-' : '+'}{formatNaira(Math.abs(charge.amount))}
                       </div>
-                      {charge.type === 'payment' && canManageFolio && (
+                      {folioRowEligibleForPaymentReceipt(charge) && canManageFolio && (
                         <Button
                           size="sm"
                           variant="secondary"
@@ -1557,6 +1628,45 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                   {formatNaira(totalBillBalance)}
                 </span>
               </div>
+              {canManageFolio && paymentLedgerRows.length > 0 && (
+                <div className="space-y-2 pt-1">
+                  <div className="text-sm font-medium">Print payment receipts</div>
+                  <p className="text-xs text-muted-foreground">
+                    One row per payment recorded on the ledger (use if you do not see a Receipt on a folio line).
+                  </p>
+                  <div className="space-y-2">
+                    {paymentLedgerRows.map((tx) => (
+                      <div
+                        key={tx.id}
+                        className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-muted/30 px-3 py-2"
+                      >
+                        <div className="min-w-0 text-sm">
+                          <div className="font-semibold">{formatNaira(Math.abs(Number(tx.amount)))}</div>
+                          <div className="text-xs text-muted-foreground">
+                            {new Date(tx.created_at).toLocaleString('en-GB')} ·{' '}
+                            {String(tx.payment_method || '—').replace(/_/g, ' ')}
+                          </div>
+                          {tx.description && (
+                            <div className="text-xs text-muted-foreground truncate max-w-[220px] md:max-w-none" title={tx.description}>
+                              {tx.description}
+                            </div>
+                          )}
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          className="shrink-0"
+                          type="button"
+                          onClick={() => setReceiptCharge(transactionToReceiptChargeRow(tx))}
+                        >
+                          <Receipt className="h-4 w-4 mr-1.5" />
+                          Receipt
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
               {showSettleTopUp && (
                 <Button
                   className="w-full mt-4"
