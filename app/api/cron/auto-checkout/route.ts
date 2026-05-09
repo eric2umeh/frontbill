@@ -105,6 +105,13 @@ export async function GET(request: Request) {
   const normalizedCheckOutDay = (v: unknown) =>
     typeof v === 'string' ? (v.includes('T') ? v.split('T')[0] : v.slice(0, 10)) : ''
 
+  const relatedString = (relation: unknown, key: string): string => {
+    const row = Array.isArray(relation) ? relation[0] : relation
+    if (!row || typeof row !== 'object') return ''
+    const value = (row as Record<string, unknown>)[key]
+    return typeof value === 'string' ? value : ''
+  }
+
   const dueForCheckout = toCheckout.filter((b) => {
     const coDay = normalizedCheckOutDay(b.check_out)
     if (coDay < todayWAT) return true
@@ -150,8 +157,8 @@ export async function GET(request: Request) {
     const lateHours = Math.ceil(lateMinutes / 60)
     const feeAmount = lateHours * policy.late_checkout_fee_per_hour
 
-    const guestName = Array.isArray(booking.guests) ? booking.guests[0]?.name : booking.guests?.name
-    const roomNumber = Array.isArray(booking.rooms) ? booking.rooms[0]?.room_number : booking.rooms?.room_number
+    const guestName = relatedString(booking.guests, 'name')
+    const roomNumber = relatedString(booking.rooms, 'room_number')
 
     lateFees.push({
       bookingId: booking.id,
