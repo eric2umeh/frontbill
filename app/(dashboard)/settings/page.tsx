@@ -12,6 +12,7 @@ import { toast } from 'sonner'
 import { Loader2, Building2, Shield, Eye, EyeOff, Clock } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
 import { createClient } from '@/lib/supabase/client'
+import { hasPermission } from '@/lib/permissions'
 
 export default function SettingsPage() {
   const router = useRouter()
@@ -35,7 +36,9 @@ export default function SettingsPage() {
   const [checkoutTime, setCheckoutTime] = useState('12:00')
   const [lateCheckoutFeePerHour, setLateCheckoutFeePerHour] = useState('')
   const [checkoutPolicySaving, setCheckoutPolicySaving] = useState(false)
-  const isAdmin = role === 'admin'
+  const [hotelSaving, setHotelSaving] = useState(false)
+  /** Administrator + Superadmin (canonical); not strict string match on role label */
+  const canManageHotelSettings = hasPermission(role, 'settings:manage')
 
   useEffect(() => {
     async function fetchHotelInfo() {
@@ -100,8 +103,40 @@ export default function SettingsPage() {
     }
   }
 
+  async function handleSaveHotelInformation() {
+    if (!organizationId || !canManageHotelSettings || !supabase) return
+    const name = hotelName.trim()
+    const em = hotelEmail.trim()
+    if (!name) {
+      toast.error('Hotel name is required')
+      return
+    }
+    if (!em) {
+      toast.error('Hotel email is required')
+      return
+    }
+    setHotelSaving(true)
+    try {
+      const { error } = await supabase
+        .from('organizations')
+        .update({
+          name,
+          email: em,
+          address: hotelAddress.trim() || null,
+          phone: hotelPhone.trim() || null,
+        })
+        .eq('id', organizationId)
+      if (error) throw error
+      toast.success('Hotel information saved')
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to save hotel information')
+    } finally {
+      setHotelSaving(false)
+    }
+  }
+
   async function handleSaveCheckoutPolicy() {
-    if (!organizationId || !isAdmin) return
+    if (!organizationId || !canManageHotelSettings) return
     setCheckoutPolicySaving(true)
     try {
       const { error } = await supabase
@@ -135,10 +170,16 @@ export default function SettingsPage() {
           <div className="flex items-center gap-2">
             <Building2 className="h-5 w-5" />
             <CardTitle>Hotel Information</CardTitle>
-            <Badge variant="outline" className="ml-auto">View Only</Badge>
+            {!canManageHotelSettings && (
+              <Badge variant="outline" className="ml-auto">
+                View Only
+              </Badge>
+            )}
           </div>
           <CardDescription>
-            Hotel details are view-only here.
+            {canManageHotelSettings
+              ? 'Update the property name and contact details shown on receipts and organization records.'
+              : 'Hotel details can only be edited by an Administrator or Superadmin.'}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -155,7 +196,8 @@ export default function SettingsPage() {
                     id="hotel_name"
                     placeholder="Grand Hotel"
                     value={hotelName}
-                    disabled
+                    disabled={!canManageHotelSettings}
+                    onChange={(e) => setHotelName(e.target.value)}
                   />
                 </div>
                 <div className="space-y-2">
@@ -165,7 +207,8 @@ export default function SettingsPage() {
                     type="email"
                     placeholder="info@hotel.com"
                     value={hotelEmail}
-                    disabled
+                    disabled={!canManageHotelSettings}
+                    onChange={(e) => setHotelEmail(e.target.value)}
                   />
                 </div>
               </div>
@@ -175,7 +218,8 @@ export default function SettingsPage() {
                   id="hotel_address"
                   placeholder="123 Main Street, Lagos"
                   value={hotelAddress}
-                  disabled
+                  disabled={!canManageHotelSettings}
+                  onChange={(e) => setHotelAddress(e.target.value)}
                 />
               </div>
               <div className="grid gap-4 md:grid-cols-2">
@@ -185,7 +229,8 @@ export default function SettingsPage() {
                     id="hotel_phone"
                     placeholder="+234 800 000 0000"
                     value={hotelPhone}
-                    disabled
+                    disabled={!canManageHotelSettings}
+                    onChange={(e) => setHotelPhone(e.target.value)}
                   />
                 </div>
                 <div className="space-y-2">
@@ -193,6 +238,12 @@ export default function SettingsPage() {
                   <Input id="currency" value="Nigerian Naira (₦)" disabled />
                 </div>
               </div>
+              {canManageHotelSettings && (
+                <Button onClick={handleSaveHotelInformation} disabled={hotelSaving}>
+                  {hotelSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  Save Hotel Information
+                </Button>
+              )}
             </>
           )}
         </CardContent>
@@ -308,7 +359,7 @@ export default function SettingsPage() {
           <div className="flex items-center gap-2">
             <Clock className="h-5 w-5" />
             <CardTitle>Checkout Policy</CardTitle>
-            {!isAdmin && <Badge variant="outline" className="ml-auto">View Only</Badge>}
+            {!canManageHotelSettings && <Badge variant="outline" className="ml-auto">View Only</Badge>}
           </div>
           <CardDescription>
             Set the standard checkout time and the late checkout fee charged per extra hour. Auto-checkout runs at 2:00 PM for all overdue bookings.
@@ -323,7 +374,7 @@ export default function SettingsPage() {
                 type="time"
                 value={checkoutTime}
                 onChange={(e) => setCheckoutTime(e.target.value)}
-                disabled={!isAdmin}
+                disabled={!canManageHotelSettings}
               />
               <p className="text-xs text-muted-foreground">
                 Guests are expected to check out by this time. Auto-checkout enforces departure by 2:00 PM.
@@ -338,7 +389,7 @@ export default function SettingsPage() {
                 placeholder="e.g. 5000"
                 value={lateCheckoutFeePerHour}
                 onChange={(e) => setLateCheckoutFeePerHour(e.target.value)}
-                disabled={!isAdmin}
+                disabled={!canManageHotelSettings}
               />
               <p className="text-xs text-muted-foreground">
                 Charge per extra hour past the standard checkout time. Use &quot;Add Charge&quot; on the booking to apply it.
@@ -354,7 +405,7 @@ export default function SettingsPage() {
               <li>At 2:00 PM the system automatically checks out any remaining active bookings</li>
             </ul>
           </div>
-          {isAdmin && (
+          {canManageHotelSettings && (
             <Button onClick={handleSaveCheckoutPolicy} disabled={checkoutPolicySaving}>
               {checkoutPolicySaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Save Policy
