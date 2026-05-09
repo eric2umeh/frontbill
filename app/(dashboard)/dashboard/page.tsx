@@ -13,6 +13,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { UserCheck } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
 import { createClient } from '@/lib/supabase/client'
+import { hasPermission } from '@/lib/permissions'
 
 function StatsLoader() {
   return (
@@ -49,7 +50,8 @@ export default function DashboardPage() {
     expectedArrivals: 0,
     outstandingBalance: 0,
   })
-  const { organizationId } = useAuth()
+  const { organizationId, role } = useAuth()
+  const canCheckInGuest = hasPermission(role, 'bookings:checkin')
 
   const fetchDashboardData = useCallback(async () => {
     const supabase = createClient()
@@ -112,8 +114,10 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <NewBookingModal open={bookingModalOpen} onClose={() => { setBookingModalOpen(false) }} onSuccess={handleBookingSuccess} />
-      
+      {canCheckInGuest && (
+        <NewBookingModal open={bookingModalOpen} onClose={() => { setBookingModalOpen(false) }} onSuccess={handleBookingSuccess} />
+      )}
+
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
@@ -121,10 +125,12 @@ export default function DashboardPage() {
             Monitor your hotel operations and financial performance
           </p>
         </div>
-        <Button onClick={() => setBookingModalOpen(true)}>
-          <UserCheck className="mr-2 h-4 w-4" />
-          Check-in Guest
-        </Button>
+        {canCheckInGuest && (
+          <Button onClick={() => setBookingModalOpen(true)}>
+            <UserCheck className="mr-2 h-4 w-4" />
+            Check-in Guest
+          </Button>
+        )}
       </div>
 
       <Suspense fallback={<StatsLoader />}>
