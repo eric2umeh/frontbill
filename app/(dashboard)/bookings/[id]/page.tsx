@@ -11,18 +11,19 @@ import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { ArrowLeft, CreditCard, Trash2, Edit, Plus, Clock, AlertCircle, Loader2, LogOut, Receipt } from 'lucide-react'
+import { ArrowLeft, CreditCard, Trash2, Edit, Plus, Clock, AlertCircle, Loader2, LogOut, Receipt, DoorOpen } from 'lucide-react'
 import { formatNaira } from '@/lib/utils/currency'
 import { toast } from 'sonner'
 import { ExtendStayModal } from '@/components/bookings/extend-stay-modal'
 import { CheckoutConfirmDialog } from '@/components/bookings/checkout-confirm-dialog'
 import { EditBookingModal } from '@/components/bookings/edit-booking-modal'
+import { RoomChangeRequestModal } from '@/components/bookings/room-change-request-modal'
 import { PaymentReceiptDialog, type PaymentReceiptChargeRow } from '@/components/receipts/payment-receipt-dialog'
 import type { PaymentReceiptBranding } from '@/lib/receipts/receipt-format'
 import { canAdministerBookingRecord } from '@/lib/booking/can-administer-booking-record'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/lib/auth-context'
-import { canonicalRoleKey } from '@/lib/permissions'
+import { canonicalRoleKey, hasPermission } from '@/lib/permissions'
 import { getUserDisplayName } from '@/lib/utils/user-display'
 import { fetchUserDisplayNameMap } from '@/lib/utils/fetch-user-display-names'
 import {
@@ -95,6 +96,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
   const roleKey = canonicalRoleKey(role)
   const canManageFolio =
     roleKey === 'superadmin' || roleKey === 'admin' || roleKey === 'front_desk'
+  const canRequestRoomChange = hasPermission(role, 'room_change:request')
   const [booking, setBooking] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [bookingId, setBookingId] = useState<string>('')
@@ -132,6 +134,8 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
   const [checkoutLoading, setCheckoutLoading] = useState(false)
   const [orgCheckoutTime, setOrgCheckoutTime] = useState(DEFAULT_ORG_CHECKOUT_TIME)
   const [checkoutConfirmOpen, setCheckoutConfirmOpen] = useState(false)
+  const [roomChangeModalOpen, setRoomChangeModalOpen] = useState(false)
+  const [roomChangePending, setRoomChangePending] = useState(false)
   const [editBookingOpen, setEditBookingOpen] = useState(false)
   const [receiptOrg, setReceiptOrg] = useState<PaymentReceiptBranding | null>(null)
   const [receiptCharge, setReceiptCharge] = useState<PaymentReceiptChargeRow | null>(null)
@@ -327,6 +331,25 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
 
       setBooking(bookingData)
 
+      if (userId) {
+        try {
+          const pr = await fetch(
+            `/api/room-change-requests?caller_id=${userId}&booking_id=${id}`,
+            { credentials: 'include' },
+          )
+          const pj = await pr.json()
+          if (pr.ok) {
+            setRoomChangePending((pj.requests || []).some((r: { status?: string }) => r.status === 'pending'))
+          } else {
+            setRoomChangePending(false)
+          }
+        } catch {
+          setRoomChangePending(false)
+        }
+      } else {
+        setRoomChangePending(false)
+      }
+
       // Note: booking.balance is maintained by handlers (add-charge, extend-stay, record-payment)
       // If the folio implies nothing owed but `payment_status` was stale (e.g. after auto-checkout + settle),
       // we reconcile to `paid` above.
@@ -353,6 +376,31 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
     }, 60_000)
     return () => window.clearInterval(iv)
   }, [bookingId, loading, booking?.status, booking?.folio_status])
+
+  useEffect(() => {
+    if (!bookingId || !userId || String(booking?.status) !== 'checked_in') {
+      if (!bookingId || !userId) return
+      if (booking && String(booking.status) !== 'checked_in') setRoomChangePending(false)
+      return
+    }
+    let cancelled = false
+    ;(async () => {
+      try {
+        const pr = await fetch(
+          `/api/room-change-requests?caller_id=${userId}&booking_id=${bookingId}`,
+          { credentials: 'include' },
+        )
+        const pj = await pr.json()
+        if (cancelled || !pr.ok) return
+        setRoomChangePending((pj.requests || []).some((r: { status?: string }) => r.status === 'pending'))
+      } catch {
+        if (!cancelled) setRoomChangePending(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [bookingId, userId, booking?.status])
 
   useEffect(() => {
     if (!editBookingOpen || loading || !booking) return
@@ -1069,6 +1117,19 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
         }}
       />
 
+      <RoomChangeRequestModal
+        open={roomChangeModalOpen}
+        onClose={() => setRoomChangeModalOpen(false)}
+        onSuccess={() => fetchBookingDetails(bookingId)}
+        userId={userId}
+        organizationId={booking.organization_id}
+        bookingId={booking.id}
+        currentRoomId={booking.room_id}
+        currentRoomLabel={`Room ${booking.rooms?.room_number ?? '—'}`}
+        checkIn={booking.check_in}
+        checkOut={booking.check_out}
+      />
+
       <ExtendStayModal
         open={extendStayModalOpen}
         onClose={() => setExtendStayModalOpen(false)}
@@ -1422,6 +1483,20 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
           {(booking?.folio_status || 'active') === 'checked_out' && (
             <Badge variant="secondary" className="bg-gray-100 text-gray-700">Folio Checked Out</Badge>
           )}
+          {canRequestRoomChange &&
+            String(booking.status) === 'checked_in' &&
+            !folioLocked &&
+            booking.room_id && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setRoomChangeModalOpen(true)}
+                disabled={roomChangePending}
+              >
+                <DoorOpen className="mr-2 h-4 w-4" />
+                {roomChangePending ? 'Room change pending' : 'Request room change'}
+              </Button>
+            )}
           {canManageFolio && (
             <>
               <Button
@@ -1575,6 +1650,9 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                         {charge.type === 'payment' && (
                           <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200">Payment</Badge>
                         )}
+                        {charge.type === 'folio_note' && (
+                          <Badge variant="outline" className="text-xs bg-slate-100 text-slate-800 border-slate-200">Folio note</Badge>
+                        )}
                         {charge.type !== 'payment' && Number(charge.amount) > 0 && charge.paymentStatus === 'paid' && (
                           <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200">Paid on Spot</Badge>
                         )}
@@ -1621,7 +1699,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                           Receipt
                         </Button>
                       )}
-                      {canAdminBooking && (
+                      {canAdminBooking && charge.type !== 'folio_note' && (
                         <div className="flex gap-1">
                           <Button
                             size="sm"
