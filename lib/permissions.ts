@@ -109,7 +109,7 @@ export const ALL_PERMISSIONS: { key: Permission; label: string; group: string }[
   { key: 'store:delete', label: 'Delete Store Items', group: 'Store' },
   { key: 'store:adjust', label: 'Stock In / Out & Adjustments', group: 'Store' },
   { key: 'store:issue', label: 'Issue Stock to Outlets / Departments', group: 'Store' },
-  { key: 'store:reports', label: 'Store Daily Sales & Closing by Category', group: 'Store' },
+  { key: 'store:reports', label: 'Store reports (daily closing & monthly management report)', group: 'Store' },
   { key: 'store:audit', label: 'Store Movement Audit Trail (Full Detail)', group: 'Store' },
 
   { key: 'analytics:view', label: 'View Analytics', group: 'Analytics' },
