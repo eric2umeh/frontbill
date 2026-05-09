@@ -1,4 +1,5 @@
 import { createAdminClient } from '@/lib/supabase/admin'
+import { insertFolioCharges } from '@/lib/utils/insert-folio-charges'
 import { NextResponse } from 'next/server'
 
 /**
@@ -123,16 +124,14 @@ export async function GET(request: Request) {
   const ids = dueForCheckout.map((b) => b.id)
   const roomIds = [...new Set(dueForCheckout.map((b) => b.room_id).filter(Boolean))]
 
-  const lateCharges: Array<{
-    organization_id: string
-    booking_id: string
-    folio_id: string | null
-    guest_id: string | null
+  const lateFees: Array<{
+    bookingId: string
+    organizationId: string
     amount: number
     description: string
-    transaction_type: string
-    payment_method: string
-    created_at: string
+    transactionId: string
+    guestName: string
+    roomNumber: string | null
   }> = []
 
   for (const booking of dueForCheckout) {
@@ -151,23 +150,105 @@ export async function GET(request: Request) {
     const lateHours = Math.ceil(lateMinutes / 60)
     const feeAmount = lateHours * policy.late_checkout_fee_per_hour
 
-    lateCharges.push({
-      organization_id: booking.organization_id,
-      booking_id: booking.id,
-      folio_id: booking.folio_id ?? null,
-      guest_id: booking.guest_id ?? null,
+    const guestName = Array.isArray(booking.guests) ? booking.guests[0]?.name : booking.guests?.name
+    const roomNumber = Array.isArray(booking.rooms) ? booking.rooms[0]?.room_number : booking.rooms?.room_number
+
+    lateFees.push({
+      bookingId: booking.id,
+      organizationId: booking.organization_id,
       amount: feeAmount,
       description: `Late checkout fee — ${lateHours} hour${lateHours > 1 ? 's' : ''} past ${policy.checkout_time} (auto-checkout run)`,
-      transaction_type: 'charge',
-      payment_method: 'cash',
-      created_at: nowUTC.toISOString(),
+      transactionId: `AUTO-LATE-${booking.id}-${todayWAT}`,
+      guestName: guestName || 'Guest',
+      roomNumber: roomNumber || null,
     })
   }
 
-  if (lateCharges.length > 0) {
-    const { error: chargeErr } = await supabase.from('transactions').insert(lateCharges)
-    if (chargeErr) {
-      console.error('[auto-checkout] Late charge insert error:', chargeErr.message)
+  let lateFeesRecorded = 0
+  let lateFeesAlreadyRecorded = 0
+  if (lateFees.length > 0) {
+    const { data: existingLateFees, error: existingLateFeeErr } = await supabase
+      .from('folio_charges')
+      .select('booking_id')
+      .in('booking_id', lateFees.map((fee) => fee.bookingId))
+      .eq('charge_type', 'late_checkout')
+
+    if (existingLateFeeErr) {
+      console.error('[auto-checkout] Late charge lookup error:', existingLateFeeErr.message)
+      return NextResponse.json({ error: existingLateFeeErr.message }, { status: 500 })
+    }
+
+    const existingLateFeeBookingIds = new Set((existingLateFees ?? []).map((fee) => fee.booking_id))
+    const newLateFees = lateFees.filter((fee) => !existingLateFeeBookingIds.has(fee.bookingId))
+    lateFeesAlreadyRecorded = lateFees.length - newLateFees.length
+
+    if (newLateFees.length > 0) {
+      const folioChargeRows = newLateFees.map((fee) => ({
+        booking_id: fee.bookingId,
+        organization_id: fee.organizationId,
+        description: fee.description,
+        amount: fee.amount,
+        charge_type: 'late_checkout',
+        payment_method: null,
+        payment_status: 'pending',
+        created_at: nowUTC.toISOString(),
+      }))
+
+      const { error: chargeErr } = await insertFolioCharges(supabase, folioChargeRows)
+      if (chargeErr) {
+        console.error('[auto-checkout] Late charge insert error:', chargeErr.message)
+        return NextResponse.json({ error: chargeErr.message }, { status: 500 })
+      }
+
+      lateFeesRecorded = newLateFees.length
+
+      for (const fee of newLateFees) {
+        const { data: bookingBalance, error: balanceFetchErr } = await supabase
+          .from('bookings')
+          .select('balance')
+          .eq('id', fee.bookingId)
+          .single()
+
+        if (balanceFetchErr) {
+          console.error('[auto-checkout] Late charge balance fetch error:', balanceFetchErr.message)
+          continue
+        }
+
+        const { error: balanceUpdateErr } = await supabase
+          .from('bookings')
+          .update({
+            balance: (Number(bookingBalance?.balance) || 0) + fee.amount,
+            payment_status: 'pending',
+            updated_at: nowUTC.toISOString(),
+          })
+          .eq('id', fee.bookingId)
+
+        if (balanceUpdateErr) {
+          console.error('[auto-checkout] Late charge balance update error:', balanceUpdateErr.message)
+        }
+      }
+
+      const transactionRows = newLateFees.map((fee) => ({
+        organization_id: fee.organizationId,
+        booking_id: fee.bookingId,
+        transaction_id: fee.transactionId,
+        guest_name: fee.guestName,
+        room: fee.roomNumber,
+        amount: fee.amount,
+        payment_method: 'late_checkout',
+        status: 'pending',
+        description: fee.description,
+        received_by: 'System',
+        created_at: nowUTC.toISOString(),
+      }))
+
+      const { error: transactionErr } = await supabase
+        .from('transactions')
+        .upsert(transactionRows, { onConflict: 'transaction_id', ignoreDuplicates: true })
+
+      if (transactionErr) {
+        console.error('[auto-checkout] Late charge transaction mirror error:', transactionErr.message)
+      }
     }
   }
 
@@ -190,13 +271,14 @@ export async function GET(request: Request) {
   }
 
   console.log(
-    `[auto-checkout] Checked out ${dueForCheckout.length} booking(s) (incl. overdue reserved), ${lateCharges.length} late fee(s).`
+    `[auto-checkout] Checked out ${dueForCheckout.length} booking(s) (incl. overdue reserved), ${lateFeesRecorded} late fee(s) recorded, ${lateFeesAlreadyRecorded} already present.`
   )
 
   return NextResponse.json({
     message: 'Auto-checkout complete.',
     checked_out: dueForCheckout.length,
-    late_charges_applied: lateCharges.length,
+    late_charges_applied: lateFeesRecorded,
+    late_charges_already_recorded: lateFeesAlreadyRecorded,
     booking_ids: ids,
   })
 }
