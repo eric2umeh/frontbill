@@ -8,6 +8,7 @@
 export type Permission =
   | 'dashboard:view'
   | 'bookings:view' | 'bookings:create' | 'bookings:edit' | 'bookings:delete' | 'bookings:checkin' | 'bookings:checkout'
+  | 'room_change:request' | 'room_change:approve'
   | 'reservations:view' | 'reservations:create' | 'reservations:edit' | 'reservations:delete'
   | 'rooms:view' | 'rooms:create' | 'rooms:edit' | 'rooms:delete' | 'rooms:update_status'
   | 'guests:view' | 'guests:create' | 'guests:edit' | 'guests:delete'
@@ -60,6 +61,8 @@ export const ALL_PERMISSIONS: { key: Permission; label: string; group: string }[
   { key: 'bookings:delete', label: 'Delete Bookings', group: 'Bookings' },
   { key: 'bookings:checkin', label: 'Check In Guests', group: 'Bookings' },
   { key: 'bookings:checkout', label: 'Check Out Folios', group: 'Bookings' },
+  { key: 'room_change:request', label: 'Request Guest Room Change (checked-in)', group: 'Bookings' },
+  { key: 'room_change:approve', label: 'Approve Room Change Requests', group: 'Bookings' },
 
   { key: 'reservations:view', label: 'View Reservations', group: 'Reservations' },
   { key: 'reservations:create', label: 'Create Reservations & Bulk Reservation', group: 'Reservations' },
@@ -259,6 +262,7 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
       'ledger:view',
       'night_audit:view', 'night_audit:run', 'audit_trails:view',
       'backdate:request',
+      'room_change:request',
       'store:requisition',
       'settings:view',
     ],
@@ -276,6 +280,7 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
       'guests:view', 'guests:create',
       'payments:view',
       'transactions:view',
+      'room_change:request',
       'store:requisition',
       'settings:view',
     ],
@@ -295,28 +300,24 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
   {
     key: 'housekeeping',
     label: 'Housekeeper',
-    description: 'Housekeeping board, room status updates with notes, and daily housekeeping reporting. Can see bookings/reservations only for coordination—no dashboards, billing, or front-office edits.',
+    description:
+      'Housekeeping board, room status updates with notes, and daily housekeeping reporting. Operational context stays on housekeeping and rooms; no Bookings, Reservations, Store, dashboards, billing, or front-office edits.',
     color: 'bg-teal-100 text-teal-800',
     permissions: [
       'housekeeping:view', 'housekeeping:create', 'housekeeping:edit', 'housekeeping:report',
       'rooms:view', 'rooms:update_status',
-      'bookings:view',
-      'reservations:view',
-      'store:requisition',
       'settings:view',
     ],
   },
   {
     key: 'maintenance',
     label: 'Maintenance',
-    description: 'Maintenance queue, updating linked room statuses with notes, and maintenance reporting. Shares the same read-only booking/reservation context as housekeeping without billing access.',
+    description:
+      'Maintenance queue, updating linked room statuses with notes, and maintenance reporting. Work stays on maintenance and rooms; no Bookings, Reservations, Store, or billing access.',
     color: 'bg-orange-100 text-orange-800',
     permissions: [
       'maintenance:view', 'maintenance:create', 'maintenance:edit', 'maintenance:report',
       'rooms:view', 'rooms:update_status',
-      'bookings:view',
-      'reservations:view',
-      'store:requisition',
       'settings:view',
     ],
   },
@@ -327,12 +328,32 @@ export function getRoleDefinition(roleKey: string): RoleDefinition | undefined {
 }
 
 /**
+ * Legacy / import / shorthand values for `profiles.role` that are not exact keys or labels.
+ * Keys are normalized like `canonicalRoleKey` (`trim`, lower, spaces/hyphens → `_`).
+ */
+const PROFILE_ROLE_ALIASES: Record<string, RoleKey> = {
+  frontdesk: 'front_desk',
+  front_office: 'front_desk',
+  frontoffice: 'front_desk',
+  reception: 'receptionist',
+  reception_staff: 'receptionist',
+  housekeeper: 'housekeeping',
+  housekeeping_staff: 'housekeeping',
+  maint: 'maintenance',
+  maintenance_staff: 'maintenance',
+}
+
+/** Every role that may use the signed-in hotel app shell (same set as `ROLE_DEFINITIONS`). */
+export const APP_LOGIN_ROLE_KEYS: readonly RoleKey[] = ROLE_DEFINITIONS.map((r) => r.key)
+
+/**
  * Maps `profiles.role` to a canonical RoleKey. Values may be stored as the key (`admin`)
  * or as the display label (`Administrator`, `Front Desk`, etc.).
  */
 export function canonicalRoleKey(userRole: string | null | undefined): RoleKey | null {
   if (!userRole) return null
   const s = String(userRole).trim().toLowerCase().replace(/[\s-]+/g, '_')
+  if (!s) return null
   const byKey = ROLE_DEFINITIONS.find((r) => r.key === (s as RoleKey))
   if (byKey) return byKey.key
   const labelNorm = (label: string) =>
@@ -341,6 +362,8 @@ export function canonicalRoleKey(userRole: string | null | undefined): RoleKey |
   if (byLabel) return byLabel.key
   if (s === 'administrator') return 'admin'
   if (s === 'super_admin') return 'superadmin'
+  const fromAlias = PROFILE_ROLE_ALIASES[s]
+  if (fromAlias) return fromAlias
   return null
 }
 

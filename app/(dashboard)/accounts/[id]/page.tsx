@@ -10,7 +10,7 @@ import { Separator } from '@/components/ui/separator'
 import { Label } from '@/components/ui/label'
 import { formatNaira } from '@/lib/utils/currency'
 import {
-  Loader2, ArrowLeft, User, Phone, Mail, MapPin,
+  ArrowLeft, User, Phone, Mail, MapPin,
   Calendar, CreditCard, TrendingUp, FileText, Building2, Hash,
   Wallet, ArrowDownCircle, ArrowUpCircle, Clock, RefreshCw,
 } from 'lucide-react'
@@ -19,6 +19,7 @@ import CityLedgerPaymentModal from '@/components/city-ledger/city-ledger-payment
 import { useAuth } from '@/lib/auth-context'
 import { hasPermission } from '@/lib/permissions'
 import { toast } from 'sonner'
+import { PageLoadingState } from '@/components/shared/loading-screen'
 
 interface GuestAccount {
   id: string
@@ -316,11 +317,7 @@ export default function AccountDetailPage() {
   }
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center h-96">
-        <Loader2 className="h-8 w-8 animate-spin" />
-      </div>
-    )
+    return <PageLoadingState />
   }
 
   const account = isGuest ? guestData : ledgerData

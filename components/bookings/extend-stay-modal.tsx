@@ -14,6 +14,7 @@ import { toast } from 'sonner'
 import { CreditCard, Check, X } from 'lucide-react'
 import { format, differenceInDays } from 'date-fns'
 import { createClient } from '@/lib/supabase/client'
+import { useAuth } from '@/lib/auth-context'
 import { insertFolioCharges } from '@/lib/utils/insert-folio-charges'
 import { guestOrOrganizationNameTaken } from '@/lib/utils/guest-org-name-uniqueness'
 import { isOrganizationMenuRecord, isSelectableLedgerName } from '@/lib/utils/ledger-organization'
@@ -24,6 +25,7 @@ interface ExtendStayModalProps {
   onClose: () => void
   onSuccess?: () => void
   booking: {
+    /** Booking row id (same as booking id used by API) */
     id: string
     folioId: string
     guestName: string
@@ -39,6 +41,7 @@ interface ExtendStayModalProps {
 }
 
 export function ExtendStayModal({ open, onClose, onSuccess, booking }: ExtendStayModalProps) {
+  const { userId } = useAuth()
   const [newCheckOutDate, setNewCheckOutDate] = useState<Date | undefined>()
   const [paymentMethod, setPaymentMethod] = useState('')
   const [loading, setLoading] = useState(false)
@@ -52,6 +55,10 @@ export function ExtendStayModal({ open, onClose, onSuccess, booking }: ExtendSta
   const [newOrgName, setNewOrgName] = useState('')
   const [newOrgPhone, setNewOrgPhone] = useState('')
   const [creatingOrg, setCreatingOrg] = useState(false)
+  const [wantDiscountRequest, setWantDiscountRequest] = useState(false)
+  const [discountedTotalInput, setDiscountedTotalInput] = useState('')
+  const [discountReason, setDiscountReason] = useState('')
+  const [discountSubmitting, setDiscountSubmitting] = useState(false)
 
   // When modal opens with city_ledger, auto-select the current guest
   useEffect(() => {
@@ -183,6 +190,55 @@ export function ExtendStayModal({ open, onClose, onSuccess, booking }: ExtendSta
   })()
   const additionalNights = newCheckOutDate ? differenceInDays(newCheckOutDate, currentCheckOut) : 0
   const additionalAmount = additionalNights * booking.ratePerNight
+
+  const handleDiscountRequest = async () => {
+    if (!newCheckOutDate || !paymentMethod || paymentMethod === 'city_ledger') {
+      toast.error('Discount requests use cash, POS, or transfer only (not city ledger in this version)')
+      return
+    }
+    if (!discountReason.trim()) {
+      toast.error('Enter a reason for approvers')
+      return
+    }
+    const disc = Number(discountedTotalInput)
+    if (!Number.isFinite(disc) || disc <= 0 || disc >= additionalAmount) {
+      toast.error(`Discounted total must be greater than 0 and less than standard ${formatNaira(additionalAmount)}`)
+      return
+    }
+    if (!userId) {
+      toast.error('You must be signed in')
+      return
+    }
+    setDiscountSubmitting(true)
+    try {
+      const res = await fetch('/api/extend-stay-discount-requests', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          caller_id: userId,
+          booking_id: booking.id,
+          new_check_out: format(newCheckOutDate, 'yyyy-MM-dd'),
+          additional_nights: additionalNights,
+          discounted_total: disc,
+          payment_method: paymentMethod,
+          reason: discountReason.trim(),
+        }),
+      })
+      const json = await res.json()
+      if (!res.ok) {
+        toast.error(json.error || 'Request failed')
+        return
+      }
+      toast.success('Discount request sent — check Night Audit → Extend discounts')
+      onClose()
+      resetForm()
+    } catch {
+      toast.error('Network error')
+    } finally {
+      setDiscountSubmitting(false)
+    }
+  }
 
   const handleExtend = async () => {
     if (!newCheckOutDate || !paymentMethod) {
@@ -366,6 +422,9 @@ export function ExtendStayModal({ open, onClose, onSuccess, booking }: ExtendSta
   }
 
   const resetForm = () => {
+    setWantDiscountRequest(false)
+    setDiscountedTotalInput('')
+    setDiscountReason('')
     setNewCheckOutDate(undefined)
     setPaymentMethod('')
     setLedgerType('individual')
@@ -588,6 +647,47 @@ export function ExtendStayModal({ open, onClose, onSuccess, booking }: ExtendSta
                 </div>
               )}
           </div>
+
+          {newCheckOutDate && additionalNights > 0 && (
+            <div className="mt-3 space-y-2 rounded-lg border border-amber-200 bg-amber-50/80 p-3 text-xs sm:text-sm">
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="mt-1"
+                  checked={wantDiscountRequest}
+                  onChange={(e) => setWantDiscountRequest(e.target.checked)}
+                />
+                <span>
+                  <span className="font-medium">Request discounted extension</span> — requires Superadmin /
+                  Administrator / Manager approval. Standard total {formatNaira(additionalAmount)}.
+                </span>
+              </label>
+              {wantDiscountRequest && (
+                <div className="space-y-2 pt-1">
+                  <div>
+                    <Label className="text-xs">Discounted total (₦) *</Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      className="h-9 mt-1"
+                      placeholder={`Less than ${additionalAmount}`}
+                      value={discountedTotalInput}
+                      onChange={(e) => setDiscountedTotalInput(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs">Reason for approvers *</Label>
+                    <Input
+                      className="h-9 mt-1"
+                      placeholder="e.g. Loyalty / AC issue compensation"
+                      value={discountReason}
+                      onChange={(e) => setDiscountReason(e.target.value)}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="shrink-0 space-y-3 border-t bg-background px-4 py-3 shadow-[0_-8px_24px_-12px_rgba(0,0,0,0.15)] sm:px-5 sm:py-4">
@@ -617,15 +717,32 @@ export function ExtendStayModal({ open, onClose, onSuccess, booking }: ExtendSta
             </div>
           </div>
 
-          <Button
-            type="button"
-            onClick={handleExtend}
-            className="h-10 w-full text-sm font-semibold sm:h-11"
-            disabled={!paymentMethod || !newCheckOutDate || additionalNights <= 0 || loading}
-          >
-            <CreditCard className="mr-2 h-4 w-4 shrink-0" />
-            {loading ? 'Processing…' : 'Confirm extension'}
-          </Button>
+          {wantDiscountRequest ? (
+            <Button
+              type="button"
+              onClick={() => void handleDiscountRequest()}
+              className="h-10 w-full text-sm font-semibold sm:h-11"
+              disabled={
+                !paymentMethod ||
+                !newCheckOutDate ||
+                additionalNights <= 0 ||
+                discountSubmitting ||
+                paymentMethod === 'city_ledger'
+              }
+            >
+              {discountSubmitting ? 'Submitting…' : 'Submit discount request'}
+            </Button>
+          ) : (
+            <Button
+              type="button"
+              onClick={handleExtend}
+              className="h-10 w-full text-sm font-semibold sm:h-11"
+              disabled={!paymentMethod || !newCheckOutDate || additionalNights <= 0 || loading}
+            >
+              <CreditCard className="mr-2 h-4 w-4 shrink-0" />
+              {loading ? 'Processing…' : 'Confirm extension'}
+            </Button>
+          )}
         </div>
 
         <DialogClose

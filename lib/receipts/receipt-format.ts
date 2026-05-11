@@ -59,9 +59,33 @@ export type PaymentReceiptPayload = PaymentReceiptBranding & {
   amountInWords: string
   remark: string
   staffName: string
+  /** Folio line shown under payment (e.g. extended stay, add charge description) */
+  serviceDescription?: string | null
+  /** Shown under title — default "Receipt" */
+  receiptTitle?: string
+  /** Room / add-on / extension lines listed on payment receipts for guest context. */
+  folioContextLines?: string[] | null
 }
 
 export function defaultPaymentRemark(): string {
+  return 'ACCOMMODATION'
+}
+
+/** Map folio charge types to receipt remark / purpose line */
+export function remarkFromChargeType(type: string | null | undefined, description?: string | null): string {
+  const t = String(type || '').toLowerCase()
+  if (t === 'extended_stay') return 'EXTENDED STAY'
+  if (t === 'room_charge' || t === 'reservation') return 'ACCOMMODATION'
+  if (t === 'additional_charge' && description) {
+    const d = String(description).slice(0, 80).toUpperCase()
+    return d || 'ADD-ON CHARGE'
+  }
+  if (t === 'charge' && description) {
+    const d = String(description).slice(0, 80).toUpperCase()
+    return d || 'FOLIO CHARGE'
+  }
+  if (t === 'late_checkout') return 'LATE CHECKOUT'
+  if (t === 'payment') return 'ACCOMMODATION'
   return 'ACCOMMODATION'
 }
 
@@ -101,12 +125,19 @@ function oneReceiptBlock(p: PaymentReceiptPayload): string {
   const staff = escapeHtml(p.staffName || '—')
   const dateStr = escapeHtml(formatReceiptDateTime(p.issuedAtIso))
   const amountStr = formatAmountReceipt(p.amount)
+  const title = escapeHtml((p.receiptTitle || 'Receipt').trim() || 'Receipt')
+  const svc = p.serviceDescription ? escapeHtml(String(p.serviceDescription).trim()) : ''
+  const ctxLines = (p.folioContextLines || []).map((line) => escapeHtml(String(line).trim())).filter(Boolean)
+  const ctxBlock =
+    ctxLines.length > 0
+      ? `<div class="words" style="margin-top:8px;"><span class="label">Folio activity (room, add-on and extension charges):</span>${ctxLines.map((l) => `<div style="margin-top:3px;padding-left:8px;">• ${l}</div>`).join('')}</div>`
+      : ''
 
   return `
     <div class="block">
       <div class="hotel">${hotel}</div>
       <div class="sub">${addr ? `${addr}<br/>` : ''}${phone ? `# ${phone}<br/>` : ''}${email ? `${email}` : ''}</div>
-      <div class="title">Receipt</div>
+      <div class="title">${title}</div>
       <div class="row">
         <div class="col-left">
           <div><span class="label">Room:</span> ${room}</div>
@@ -119,6 +150,8 @@ function oneReceiptBlock(p: PaymentReceiptPayload): string {
         </div>
       </div>
       <div class="hr"></div>
+      ${ctxBlock}
+      ${svc ? `<div class="pay-row"><span class="label">Service / folio line:</span><span style="text-align:right;max-width:65%;">${svc}</span></div>` : ''}
       <div class="pay-row">
         <span class="label">Payment Info.:</span>
         <span>${pm}</span>

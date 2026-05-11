@@ -294,7 +294,10 @@ export default function UsersRolesPage() {
                         </div>
                         <div className="text-xs text-muted-foreground mt-0.5">
                           Added {new Date(user.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
-                          {' '}| Added By: {user.added_by_name || user.full_name || 'Unknown User'}
+                          {' '}| Added By:{' '}
+                          {user.added_by
+                            ? user.added_by_name || 'Unknown staff'
+                            : '—'}
                         </div>
                       </div>
                       {/* Permissions quick-view */}

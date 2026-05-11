@@ -8,10 +8,11 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { CardContent } from '@/components/ui/card'
 import { formatNaira } from '@/lib/utils/currency'
+import { PageLoadingState } from '@/components/shared/loading-screen'
 import { usePageData } from '@/hooks/use-page-data'
 import { useAuth } from '@/lib/auth-context'
 import { hasPermission } from '@/lib/permissions'
-import { Plus, Users, Loader2, DoorOpen } from 'lucide-react'
+import { Plus, Users, DoorOpen } from 'lucide-react'
 import { BulkBookingModal } from '@/components/reservations/bulk-booking-modal'
 import { NewReservationModal } from '@/components/reservations/new-reservation-modal'
 import { ReserveCheckInModal, type ReserveCheckInBooking } from '@/components/reservations/reserve-checkin-modal'
@@ -272,11 +273,7 @@ export default function ReservationsPage() {
   }
 
   if (initialLoading) {
-    return (
-      <div className="flex items-center justify-center h-96">
-        <Loader2 className="h-8 w-8 animate-spin" />
-      </div>
-    )
+    return <PageLoadingState />
   }
 
   return (

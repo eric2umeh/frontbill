@@ -18,7 +18,7 @@ import {
 } from '@/components/ui/dialog'
 import { formatNaira } from '@/lib/utils/currency'
 import {
-  Loader2, ArrowLeft, User, Phone, Mail, MapPin,
+  ArrowLeft, User, Phone, Mail, MapPin,
   Calendar, CreditCard, TrendingUp, FileText, Building2, Hash,
   Wallet, ArrowDownCircle, ArrowUpCircle, Clock, RefreshCw,
 } from 'lucide-react'
@@ -29,6 +29,7 @@ import { hasPermission } from '@/lib/permissions'
 import { toast } from 'sonner'
 import { folioGuestCreditAmount, folioPositiveOutstandingSum } from '@/lib/utils/booking-bill-balance'
 import { guestOrOrganizationNameTaken } from '@/lib/utils/guest-org-name-uniqueness'
+import { PageLoadingState } from '@/components/shared/loading-screen'
 
 interface Guest {
   id: string
@@ -341,11 +342,7 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
   }
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center h-96">
-        <Loader2 className="h-8 w-8 animate-spin" />
-      </div>
-    )
+    return <PageLoadingState />
   }
 
   if (!guest) return null

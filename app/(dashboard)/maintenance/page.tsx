@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/lib/auth-context'
+import { LoadingSpinner } from '@/components/shared/loading-screen'
 import { hasPermission } from '@/lib/permissions'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -392,8 +393,8 @@ export default function MaintenancePage() {
           </p>
 
           {loading ? (
-            <div className="flex items-center justify-center py-16 text-muted-foreground">
-              <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> Loading work orders...
+            <div className="flex flex-col items-center justify-center py-16 gap-3" role="status" aria-label="Loading">
+              <LoadingSpinner size="lg" />
             </div>
           ) : filteredTasks.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-muted-foreground gap-2">

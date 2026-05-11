@@ -12,12 +12,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { toast } from 'sonner'
 import { createClient } from '@/lib/supabase/client'
 import { formatNaira } from '@/lib/utils/currency'
-import { AlertCircle, X, ArrowLeft, Edit, Trash2, Users, DollarSign, MapPin, CalendarDays, Clock, Search, SlidersHorizontal } from 'lucide-react'
+import { AlertCircle, X, ArrowLeft, Edit, Trash2, Users, DollarSign, MapPin, CalendarDays, Search, SlidersHorizontal } from 'lucide-react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Separator } from '@/components/ui/separator'
 import { format, parseISO } from 'date-fns'
 import { useAuth } from '@/lib/auth-context'
 import { hasPermission } from '@/lib/permissions'
+import { PageLoadingState, LoadingSpinner } from '@/components/shared/loading-screen'
 
 const ROOM_TYPES = [
   'Deluxe', 'Royal', 'Kings', 'Mini Suite', 'Executive Suite', 'Diplomatic Suite',
@@ -326,11 +327,7 @@ export default function RoomDetailPage() {
   }
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <p className="text-muted-foreground">Loading room details...</p>
-      </div>
-    )
+    return <PageLoadingState />
   }
 
   if (!room) {
@@ -670,9 +667,8 @@ export default function RoomDetailPage() {
 
               {/* List */}
               {historyLoading ? (
-                <div className="flex items-center justify-center py-12 text-muted-foreground">
-                  <Clock className="mr-2 h-4 w-4 animate-spin" />
-                  Loading history...
+                <div className="flex flex-col items-center justify-center py-12 gap-3" role="status" aria-label="Loading">
+                  <LoadingSpinner size="lg" />
                 </div>
               ) : guestHistory.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-12 text-muted-foreground gap-2">
