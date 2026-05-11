@@ -16,6 +16,7 @@ import {
   defaultPaymentRemark,
   formatReceiptPaymentMethod,
   receiptNumberFromId,
+  remarkFromChargeType,
   type PaymentReceiptPayload,
   type PaymentReceiptBranding,
 } from '@/lib/receipts/receipt-format'
@@ -56,6 +57,10 @@ function buildPayload(
       : null
   const embeddedName = embeddedOrg ? String(embeddedOrg.name ?? '').trim() : ''
   const hotelName = String(org?.hotelName ?? '').trim() || embeddedName || ''
+  const ctype = String(charge.type || '').toLowerCase()
+  const desc = String(charge.description || '').trim()
+  const isNonPaymentFolio =
+    ctype === 'extended_stay' || ctype === 'charge' || ctype === 'room_charge' || ctype === 'reservation'
   return {
     hotelName,
     address: org?.address ?? embeddedOrg?.address ?? '',
@@ -71,8 +76,10 @@ function buildPayload(
     paymentMethodLabel: formatReceiptPaymentMethod(charge.paymentMethod),
     amount,
     amountInWords: amountInWordsNgn(amount).toUpperCase(),
-    remark: defaultPaymentRemark(),
+    remark: isNonPaymentFolio ? remarkFromChargeType(charge.type, charge.description) : defaultPaymentRemark(),
     staffName: (charge.createdBy || currentUserLabel || 'Staff').toUpperCase(),
+    serviceDescription: desc || null,
+    receiptTitle: ctype === 'payment' ? 'Payment receipt' : 'Folio service receipt',
   }
 }
 
