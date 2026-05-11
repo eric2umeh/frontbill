@@ -60,9 +60,13 @@ import {
 function folioRowEligibleForPaymentReceipt(charge: {
   type?: string
   amount?: number
+  paymentStatus?: string
 }): boolean {
   if (charge.type === 'payment') return true
   if (Number(charge.amount) < 0) return true
+  const t = String(charge.type || '').toLowerCase()
+  const paid = String(charge.paymentStatus || '').toLowerCase() === 'paid'
+  if (paid && (t === 'extended_stay' || t === 'charge')) return true
   return false
 }
 
@@ -1652,6 +1656,9 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                         )}
                         {charge.type === 'folio_note' && (
                           <Badge variant="outline" className="text-xs bg-slate-100 text-slate-800 border-slate-200">Folio note</Badge>
+                        )}
+                        {charge.type === 'extended_stay' && String(charge.description || '').toUpperCase().includes('DISCOUNT') && (
+                          <Badge variant="outline" className="text-xs bg-violet-50 text-violet-800 border-violet-200">Discounted</Badge>
                         )}
                         {charge.type !== 'payment' && Number(charge.amount) > 0 && charge.paymentStatus === 'paid' && (
                           <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200">Paid on Spot</Badge>
