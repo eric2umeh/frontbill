@@ -63,6 +63,8 @@ export type PaymentReceiptPayload = PaymentReceiptBranding & {
   serviceDescription?: string | null
   /** Shown under title — default "Receipt" */
   receiptTitle?: string
+  /** Room / add-on / extension lines listed on payment receipts for guest context. */
+  folioContextLines?: string[] | null
 }
 
 export function defaultPaymentRemark(): string {
@@ -74,10 +76,15 @@ export function remarkFromChargeType(type: string | null | undefined, descriptio
   const t = String(type || '').toLowerCase()
   if (t === 'extended_stay') return 'EXTENDED STAY'
   if (t === 'room_charge' || t === 'reservation') return 'ACCOMMODATION'
+  if (t === 'additional_charge' && description) {
+    const d = String(description).slice(0, 80).toUpperCase()
+    return d || 'ADD-ON CHARGE'
+  }
   if (t === 'charge' && description) {
     const d = String(description).slice(0, 80).toUpperCase()
     return d || 'FOLIO CHARGE'
   }
+  if (t === 'late_checkout') return 'LATE CHECKOUT'
   if (t === 'payment') return 'ACCOMMODATION'
   return 'ACCOMMODATION'
 }
@@ -120,6 +127,11 @@ function oneReceiptBlock(p: PaymentReceiptPayload): string {
   const amountStr = formatAmountReceipt(p.amount)
   const title = escapeHtml((p.receiptTitle || 'Receipt').trim() || 'Receipt')
   const svc = p.serviceDescription ? escapeHtml(String(p.serviceDescription).trim()) : ''
+  const ctxLines = (p.folioContextLines || []).map((line) => escapeHtml(String(line).trim())).filter(Boolean)
+  const ctxBlock =
+    ctxLines.length > 0
+      ? `<div class="words" style="margin-top:8px;"><span class="label">Folio activity (room, add-on and extension charges):</span>${ctxLines.map((l) => `<div style="margin-top:3px;padding-left:8px;">• ${l}</div>`).join('')}</div>`
+      : ''
 
   return `
     <div class="block">
@@ -138,6 +150,7 @@ function oneReceiptBlock(p: PaymentReceiptPayload): string {
         </div>
       </div>
       <div class="hr"></div>
+      ${ctxBlock}
       ${svc ? `<div class="pay-row"><span class="label">Service / folio line:</span><span style="text-align:right;max-width:65%;">${svc}</span></div>` : ''}
       <div class="pay-row">
         <span class="label">Payment Info.:</span>

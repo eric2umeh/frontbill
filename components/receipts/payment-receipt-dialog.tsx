@@ -49,6 +49,7 @@ function buildPayload(
   booking: BookingLike,
   charge: PaymentReceiptChargeRow,
   currentUserLabel: string,
+  folioContextLines?: string[] | null,
 ): PaymentReceiptPayload {
   const amount = Math.abs(Number(charge.amount) || 0)
   const embeddedOrg =
@@ -60,7 +61,14 @@ function buildPayload(
   const ctype = String(charge.type || '').toLowerCase()
   const desc = String(charge.description || '').trim()
   const isNonPaymentFolio =
-    ctype === 'extended_stay' || ctype === 'charge' || ctype === 'room_charge' || ctype === 'reservation'
+    ctype === 'extended_stay' ||
+    ctype === 'charge' ||
+    ctype === 'room_charge' ||
+    ctype === 'reservation' ||
+    ctype === 'additional_charge' ||
+    ctype === 'late_checkout'
+  const ctx =
+    ctype === 'payment' && folioContextLines && folioContextLines.length > 0 ? folioContextLines : null
   return {
     hotelName,
     address: org?.address ?? embeddedOrg?.address ?? '',
@@ -80,6 +88,7 @@ function buildPayload(
     staffName: (charge.createdBy || currentUserLabel || 'Staff').toUpperCase(),
     serviceDescription: desc || null,
     receiptTitle: ctype === 'payment' ? 'Payment receipt' : 'Folio service receipt',
+    folioContextLines: ctx,
   }
 }
 
@@ -90,6 +99,8 @@ type PaymentReceiptDialogProps = {
   booking: BookingLike | null
   charge: PaymentReceiptChargeRow | null
   currentUserName: string | null
+  /** Listed on payment receipts: room, add-on, extension, etc. */
+  folioContextLines?: string[] | null
 }
 
 export function PaymentReceiptDialog({
@@ -99,6 +110,7 @@ export function PaymentReceiptDialog({
   booking,
   charge,
   currentUserName,
+  folioContextLines = null,
 }: PaymentReceiptDialogProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const [pdfLoading, setPdfLoading] = useState(false)
@@ -107,8 +119,8 @@ export function PaymentReceiptDialog({
 
   const payload = useMemo(() => {
     if (!booking || !charge) return null
-    return buildPayload(organization, booking, charge, currentUserLabel)
-  }, [organization, booking, charge, currentUserLabel])
+    return buildPayload(organization, booking, charge, currentUserLabel, folioContextLines)
+  }, [organization, booking, charge, currentUserLabel, folioContextLines])
 
   const html = useMemo(() => (payload ? buildPaymentReceiptHtml(payload) : ''), [payload])
 
