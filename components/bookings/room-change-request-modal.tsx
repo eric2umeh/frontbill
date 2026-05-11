@@ -160,9 +160,8 @@ export function RoomChangeRequestModal({
           <div className="space-y-2">
             <Label>Move to room</Label>
             {loadingRooms ? (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground py-2">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Loading rooms…
+              <div className="flex items-center gap-2 py-2" role="status" aria-label="Loading rooms">
+                <Loader2 className="h-5 w-5 animate-spin text-primary" />
               </div>
             ) : (
               <Select value={toRoomId} onValueChange={setToRoomId}>
