@@ -20,11 +20,12 @@ import { hasPermission } from '@/lib/permissions'
 import { 
   CheckCircle2, AlertTriangle, TrendingUp, Users,
   Bed, DollarSign, Clock, Play, Loader2, Sparkles, ClipboardList, Search,
-  CalendarClock, DoorOpen,
+  CalendarClock, DoorOpen, Percent,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { BackdateRequestsTab } from '@/components/night-audit/backdate-requests-tab'
 import { RoomChangeRequestsTab } from '@/components/night-audit/room-change-requests-tab'
+import { ExtendStayDiscountTab } from '@/components/night-audit/extend-stay-discount-tab'
 import { useBackdatePendingCount } from '@/hooks/use-backdate-pending-count'
 
 interface AuditTrailLog {
@@ -65,6 +66,7 @@ export default function NightAuditPage() {
   const canViewAuditTrails = hasPermission(role, 'audit_trails:view')
   const canApproveBackdates = hasPermission(role, 'backdate:approve')
   const canApproveRoomChanges = hasPermission(role, 'room_change:approve')
+  const canApproveExtendDiscount = canApproveRoomChanges
   const pendingBackdateBadge = useBackdatePendingCount()
 
   useEffect(() => {
@@ -72,7 +74,8 @@ export default function NightAuditPage() {
     const q = new URLSearchParams(window.location.search).get('tab')
     if (q === 'backdate-requests' && canApproveBackdates && userId) setAuditTab('backdate-requests')
     if (q === 'room-change-requests' && canApproveRoomChanges && userId) setAuditTab('room-change-requests')
-  }, [canApproveBackdates, canApproveRoomChanges, userId])
+    if (q === 'extend-discount' && canApproveExtendDiscount && userId) setAuditTab('extend-discount')
+  }, [canApproveBackdates, canApproveRoomChanges, canApproveExtendDiscount, userId])
 
   const onAuditTabChange = (value: string) => {
     setAuditTab(value)
@@ -80,6 +83,7 @@ export default function NightAuditPage() {
     const u = new URLSearchParams(window.location.search)
     if (value === 'backdate-requests') u.set('tab', 'backdate-requests')
     else if (value === 'room-change-requests') u.set('tab', 'room-change-requests')
+    else if (value === 'extend-discount') u.set('tab', 'extend-discount')
     else u.delete('tab')
     const qs = u.toString()
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
@@ -518,6 +522,12 @@ export default function NightAuditPage() {
               Room Changes
             </TabsTrigger>
           )}
+          {canApproveExtendDiscount && !!userId && (
+            <TabsTrigger value="extend-discount" className="gap-1.5">
+              <Percent className="h-3.5 w-3.5" />
+              Extend discounts
+            </TabsTrigger>
+          )}
         </TabsList>
 
         <TabsContent value="expected-arrivals">
@@ -750,6 +760,12 @@ export default function NightAuditPage() {
         {canApproveRoomChanges && userId ? (
           <TabsContent value="room-change-requests">
             <RoomChangeRequestsTab userId={userId} />
+          </TabsContent>
+        ) : null}
+
+        {canApproveExtendDiscount && userId ? (
+          <TabsContent value="extend-discount">
+            <ExtendStayDiscountTab userId={userId} />
           </TabsContent>
         ) : null}
       </Tabs>
