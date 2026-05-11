@@ -1039,6 +1039,28 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
     orgCheckoutTime,
   )
 
+  /** Room change API only allows checked-in folios; keep UI aligned and avoid hiding the control. */
+  const bookingStatusNorm = String(booking.status ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, '_')
+  const isCheckedInForRoomChange = bookingStatusNorm === 'checked_in'
+  let roomChangeDisabledReason = ''
+  if (!isCheckedInForRoomChange) {
+    roomChangeDisabledReason =
+      'Available after check-in. Open this folio once the guest is checked in, then request a room change for Night Audit approval.'
+  } else if (folioLocked) {
+    roomChangeDisabledReason =
+      'Guest folio is locked for this action (for example after checkout).'
+  } else if (!booking.room_id) {
+    roomChangeDisabledReason = 'Assign a room on this booking before requesting a move.'
+  } else if (roomChangePending) {
+    roomChangeDisabledReason =
+      'A room change is already pending. Managers or admins can approve it under Night Audit → Room Changes.'
+  }
+  const roomChangeActionEnabled =
+    isCheckedInForRoomChange && !folioLocked && !!booking.room_id && !roomChangePending
+
   const checkoutBannerCoYmd = normalizeBookingCheckoutYmd(booking.check_out || '')
 
   const totalBillBalance = bookingDisplayBillBalance(booking, folioCharges)
@@ -1487,20 +1509,18 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
           {(booking?.folio_status || 'active') === 'checked_out' && (
             <Badge variant="secondary" className="bg-gray-100 text-gray-700">Folio Checked Out</Badge>
           )}
-          {canRequestRoomChange &&
-            String(booking.status) === 'checked_in' &&
-            !folioLocked &&
-            booking.room_id && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setRoomChangeModalOpen(true)}
-                disabled={roomChangePending}
-              >
-                <DoorOpen className="mr-2 h-4 w-4" />
-                {roomChangePending ? 'Room change pending' : 'Request room change'}
-              </Button>
-            )}
+          {canRequestRoomChange && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setRoomChangeModalOpen(true)}
+              disabled={!roomChangeActionEnabled}
+              title={roomChangeActionEnabled ? 'Send a room move for manager or admin approval' : roomChangeDisabledReason}
+            >
+              <DoorOpen className="mr-2 h-4 w-4" />
+              {roomChangePending ? 'Room change pending' : 'Request room change'}
+            </Button>
+          )}
           {canManageFolio && (
             <>
               <Button
