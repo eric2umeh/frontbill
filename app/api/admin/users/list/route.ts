@@ -1,5 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
+import { canonicalRoleKey } from '@/lib/permissions'
 
 // GET /api/admin/users/list?caller_id=xxx
 // Returns all profiles in the same organization as the caller.
@@ -27,7 +28,8 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'Caller profile not found' }, { status: 403 })
     }
 
-    if (!['superadmin', 'admin', 'manager'].includes(callerProfile.role)) {
+    const callerKey = canonicalRoleKey(callerProfile.role)
+    if (!callerKey || !['superadmin', 'admin', 'manager'].includes(callerKey)) {
       return NextResponse.json({ error: 'Only superadmins, admins or managers can list users' }, { status: 403 })
     }
 

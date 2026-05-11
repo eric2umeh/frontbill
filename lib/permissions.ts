@@ -328,12 +328,32 @@ export function getRoleDefinition(roleKey: string): RoleDefinition | undefined {
 }
 
 /**
+ * Legacy / import / shorthand values for `profiles.role` that are not exact keys or labels.
+ * Keys are normalized like `canonicalRoleKey` (`trim`, lower, spaces/hyphens → `_`).
+ */
+const PROFILE_ROLE_ALIASES: Record<string, RoleKey> = {
+  frontdesk: 'front_desk',
+  front_office: 'front_desk',
+  frontoffice: 'front_desk',
+  reception: 'receptionist',
+  reception_staff: 'receptionist',
+  housekeeper: 'housekeeping',
+  housekeeping_staff: 'housekeeping',
+  maint: 'maintenance',
+  maintenance_staff: 'maintenance',
+}
+
+/** Every role that may use the signed-in hotel app shell (same set as `ROLE_DEFINITIONS`). */
+export const APP_LOGIN_ROLE_KEYS: readonly RoleKey[] = ROLE_DEFINITIONS.map((r) => r.key)
+
+/**
  * Maps `profiles.role` to a canonical RoleKey. Values may be stored as the key (`admin`)
  * or as the display label (`Administrator`, `Front Desk`, etc.).
  */
 export function canonicalRoleKey(userRole: string | null | undefined): RoleKey | null {
   if (!userRole) return null
   const s = String(userRole).trim().toLowerCase().replace(/[\s-]+/g, '_')
+  if (!s) return null
   const byKey = ROLE_DEFINITIONS.find((r) => r.key === (s as RoleKey))
   if (byKey) return byKey.key
   const labelNorm = (label: string) =>
@@ -342,6 +362,8 @@ export function canonicalRoleKey(userRole: string | null | undefined): RoleKey |
   if (byLabel) return byLabel.key
   if (s === 'administrator') return 'admin'
   if (s === 'super_admin') return 'superadmin'
+  const fromAlias = PROFILE_ROLE_ALIASES[s]
+  if (fromAlias) return fromAlias
   return null
 }
 

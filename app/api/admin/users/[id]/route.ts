@@ -1,6 +1,7 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
 import { formatPersonName } from '@/lib/utils/name-format'
+import { canonicalRoleKey } from '@/lib/permissions'
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -27,7 +28,8 @@ export async function PATCH(request: Request, { params }: Params) {
       return NextResponse.json({ error: 'Caller profile not found' }, { status: 403 })
     }
 
-    if (!['superadmin', 'admin', 'manager'].includes(callerProfile.role)) {
+    const callerKey = canonicalRoleKey(callerProfile.role)
+    if (!callerKey || !['superadmin', 'admin', 'manager'].includes(callerKey)) {
       return NextResponse.json({ error: 'Only superadmins, admins or managers can update users' }, { status: 403 })
     }
 
@@ -42,8 +44,12 @@ export async function PATCH(request: Request, { params }: Params) {
       return NextResponse.json({ error: 'User not found in your organization' }, { status: 404 })
     }
 
-    if ((updates.role === 'superadmin' || targetProfile.role === 'superadmin') && callerProfile.role !== 'superadmin') {
-      return NextResponse.json({ error: 'Only a superadmin can assign or edit a superadmin' }, { status: 403 })
+    const targetKey = canonicalRoleKey(targetProfile.role)
+    const updatesRoleKey = updates.role != null ? canonicalRoleKey(String(updates.role)) : null
+    if (updatesRoleKey === 'superadmin' || targetKey === 'superadmin') {
+      if (callerKey !== 'superadmin') {
+        return NextResponse.json({ error: 'Only a superadmin can assign or edit a superadmin' }, { status: 403 })
+      }
     }
 
     // Update auth user (password and/or metadata)
@@ -59,7 +65,13 @@ export async function PATCH(request: Request, { params }: Params) {
 
     // Update profile row
     const profileUpdates: Record<string, any> = { updated_at: new Date().toISOString() }
-    if (updates.role) profileUpdates.role = updates.role
+    if (updates.role != null && String(updates.role).trim() !== '') {
+      const rk = canonicalRoleKey(String(updates.role))
+      if (!rk) {
+        return NextResponse.json({ error: 'Invalid role value' }, { status: 400 })
+      }
+      profileUpdates.role = rk
+    }
     if (updates.full_name) profileUpdates.full_name = formattedFullName
 
     const { error: profileError } = await admin
@@ -101,7 +113,8 @@ export async function DELETE(request: Request, { params }: Params) {
       return NextResponse.json({ error: 'Caller profile not found' }, { status: 403 })
     }
 
-    if (!['superadmin', 'admin', 'manager'].includes(callerProfile.role)) {
+    const callerKey = canonicalRoleKey(callerProfile.role)
+    if (!callerKey || !['superadmin', 'admin', 'manager'].includes(callerKey)) {
       return NextResponse.json({ error: 'Only superadmins, admins or managers can delete users' }, { status: 403 })
     }
 
@@ -116,7 +129,8 @@ export async function DELETE(request: Request, { params }: Params) {
       return NextResponse.json({ error: 'User not found in your organization' }, { status: 404 })
     }
 
-    if (targetProfile.role === 'superadmin' && callerProfile.role !== 'superadmin') {
+    const targetKey = canonicalRoleKey(targetProfile.role)
+    if (targetKey === 'superadmin' && callerKey !== 'superadmin') {
       return NextResponse.json({ error: 'Only a superadmin can delete another superadmin' }, { status: 403 })
     }
 

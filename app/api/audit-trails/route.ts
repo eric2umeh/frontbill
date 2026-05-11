@@ -1,5 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
+import { canonicalRoleKey } from '@/lib/permissions'
 
 type AuditItem = {
   id: string
@@ -60,7 +61,8 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'Caller profile not found' }, { status: 403 })
     }
 
-    if (!ALLOWED_ROLES.includes(callerProfile.role)) {
+    const callerRoleKey = canonicalRoleKey(callerProfile.role)
+    if (!callerRoleKey || !ALLOWED_ROLES.includes(callerRoleKey)) {
       return NextResponse.json({ error: 'You do not have access to audit trails' }, { status: 403 })
     }
 
