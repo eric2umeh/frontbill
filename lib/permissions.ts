@@ -300,28 +300,24 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
   {
     key: 'housekeeping',
     label: 'Housekeeper',
-    description: 'Housekeeping board, room status updates with notes, and daily housekeeping reporting. Can see bookings/reservations only for coordination—no dashboards, billing, or front-office edits.',
+    description:
+      'Housekeeping board, room status updates with notes, and daily housekeeping reporting. Operational context stays on housekeeping and rooms; no Bookings, Reservations, Store, dashboards, billing, or front-office edits.',
     color: 'bg-teal-100 text-teal-800',
     permissions: [
       'housekeeping:view', 'housekeeping:create', 'housekeeping:edit', 'housekeeping:report',
       'rooms:view', 'rooms:update_status',
-      'bookings:view',
-      'reservations:view',
-      'store:requisition',
       'settings:view',
     ],
   },
   {
     key: 'maintenance',
     label: 'Maintenance',
-    description: 'Maintenance queue, updating linked room statuses with notes, and maintenance reporting. Shares the same read-only booking/reservation context as housekeeping without billing access.',
+    description:
+      'Maintenance queue, updating linked room statuses with notes, and maintenance reporting. Work stays on maintenance and rooms; no Bookings, Reservations, Store, or billing access.',
     color: 'bg-orange-100 text-orange-800',
     permissions: [
       'maintenance:view', 'maintenance:create', 'maintenance:edit', 'maintenance:report',
       'rooms:view', 'rooms:update_status',
-      'bookings:view',
-      'reservations:view',
-      'store:requisition',
       'settings:view',
     ],
   },
