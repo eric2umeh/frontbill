@@ -182,12 +182,26 @@ export default function DashboardLayout({
   useEffect(() => {
     if (!user) return
 
-    if (
-      user.role === 'store' &&
-      (pathname === '/dashboard' || pathname.startsWith('/dashboard/'))
-    ) {
-      router.replace('/store')
-      return
+    const rk = canonicalRoleKey(user.role) || ''
+    const onDashboard = pathname === '/dashboard' || pathname.startsWith('/dashboard/')
+
+    if (onDashboard) {
+      if (rk === 'store' || rk === 'auditor') {
+        router.replace('/store')
+        return
+      }
+      if (rk === 'housekeeping') {
+        router.replace('/housekeeping')
+        return
+      }
+      if (rk === 'maintenance') {
+        router.replace('/maintenance')
+        return
+      }
+      if (rk === 'staff') {
+        router.replace('/bookings')
+        return
+      }
     }
 
     if (!canAccessPath(pathname, user.role)) {
