@@ -8,7 +8,8 @@ import { calculateGuestBalancesBatch } from '@/lib/balance'
 import { formatNaira } from '@/lib/utils/currency'
 import { usePageData } from '@/hooks/use-page-data'
 import { useAuth } from '@/lib/auth-context'
-import { Loader2, Building2, User } from 'lucide-react'
+import { Building2, User } from 'lucide-react'
+import { PageLoadingState } from '@/components/shared/loading-screen'
 import { format } from 'date-fns'
 import { Badge } from '@/components/ui/badge'
 import { isSelectableLedgerName } from '@/lib/utils/ledger-organization'
@@ -167,11 +168,7 @@ export default function AccountsPage() {
   }
 
   if (initialLoading) {
-    return (
-      <div className="flex items-center justify-center h-96">
-        <Loader2 className="h-8 w-8 animate-spin" />
-      </div>
-    )
+    return <PageLoadingState />
   }
 
   return (

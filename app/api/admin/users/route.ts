@@ -2,6 +2,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { sendWelcomeEmail } from '@/lib/email/welcome-user'
 import { NextResponse } from 'next/server'
 import { formatPersonName } from '@/lib/utils/name-format'
+import { canonicalRoleKey } from '@/lib/permissions'
 
 // POST /api/admin/users — create a new user in the same organization
 // caller_id is passed from the client (already authenticated in browser) and validated server-side
@@ -27,11 +28,17 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Caller profile not found' }, { status: 403 })
     }
 
-    if (!['superadmin', 'admin', 'manager'].includes(callerProfile.role)) {
+    const callerKey = canonicalRoleKey(callerProfile.role)
+    if (!callerKey || !['superadmin', 'admin', 'manager'].includes(callerKey)) {
       return NextResponse.json({ error: 'Only superadmins, admins or managers can create users' }, { status: 403 })
     }
 
-    if (role === 'superadmin' && callerProfile.role !== 'superadmin') {
+    const newRoleKey = canonicalRoleKey(role)
+    if (!newRoleKey) {
+      return NextResponse.json({ error: 'Invalid role value' }, { status: 400 })
+    }
+
+    if (newRoleKey === 'superadmin' && callerKey !== 'superadmin') {
       return NextResponse.json({ error: 'Only a superadmin can create a superadmin' }, { status: 403 })
     }
 
@@ -60,7 +67,7 @@ export async function POST(request: Request) {
       id: newUser.user.id,
       organization_id: callerProfile.organization_id,
       full_name: formattedFullName,
-      role,
+      role: newRoleKey,
       added_by: caller_id,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
@@ -90,7 +97,7 @@ export async function POST(request: Request) {
     let emailSent = false
     let emailError: string | null = null
     try {
-      await sendWelcomeEmail({ full_name: formattedFullName, email, password, role, site_url, org_name })
+      await sendWelcomeEmail({ full_name: formattedFullName, email, password, role: newRoleKey, site_url, org_name })
       emailSent = true
     } catch (emailErr: any) {
       // Log but don't fail — user was created successfully
@@ -104,7 +111,7 @@ export async function POST(request: Request) {
         id: newUser.user.id,
         email,
         full_name: formattedFullName,
-        role,
+        role: newRoleKey,
         added_by: caller_id,
         added_by_name: callerProfile.full_name || formattedFullName,
         created_at: newUser.user.created_at,

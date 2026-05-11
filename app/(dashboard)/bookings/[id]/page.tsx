@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState, useEffect, useRef } from 'react'
+import { useRouter, useParams } from 'next/navigation'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -11,18 +11,19 @@ import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { ArrowLeft, CreditCard, Trash2, Edit, Plus, Clock, AlertCircle, Loader2, LogOut, Receipt } from 'lucide-react'
+import { ArrowLeft, CreditCard, Trash2, Edit, Plus, Clock, AlertCircle, Loader2, LogOut, Receipt, DoorOpen } from 'lucide-react'
 import { formatNaira } from '@/lib/utils/currency'
 import { toast } from 'sonner'
 import { ExtendStayModal } from '@/components/bookings/extend-stay-modal'
 import { CheckoutConfirmDialog } from '@/components/bookings/checkout-confirm-dialog'
 import { EditBookingModal } from '@/components/bookings/edit-booking-modal'
+import { RoomChangeRequestModal } from '@/components/bookings/room-change-request-modal'
 import { PaymentReceiptDialog, type PaymentReceiptChargeRow } from '@/components/receipts/payment-receipt-dialog'
 import type { PaymentReceiptBranding } from '@/lib/receipts/receipt-format'
 import { canAdministerBookingRecord } from '@/lib/booking/can-administer-booking-record'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/lib/auth-context'
-import { canonicalRoleKey } from '@/lib/permissions'
+import { canonicalRoleKey, hasPermission } from '@/lib/permissions'
 import { getUserDisplayName } from '@/lib/utils/user-display'
 import { fetchUserDisplayNameMap } from '@/lib/utils/fetch-user-display-names'
 import {
@@ -48,6 +49,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { Checkbox } from '@/components/ui/checkbox'
+import { PageLoadingState } from '@/components/shared/loading-screen'
 import {
   fetchGuestCityLedgerAccount,
   applyBookingPaymentToGuestLedger,
@@ -59,9 +61,13 @@ import {
 function folioRowEligibleForPaymentReceipt(charge: {
   type?: string
   amount?: number
+  paymentStatus?: string
 }): boolean {
   if (charge.type === 'payment') return true
   if (Number(charge.amount) < 0) return true
+  const t = String(charge.type || '').toLowerCase()
+  const paid = String(charge.paymentStatus || '').toLowerCase() === 'paid'
+  if (paid && (t === 'extended_stay' || t === 'charge')) return true
   return false
 }
 
@@ -88,13 +94,43 @@ function transactionToReceiptChargeRow(tx: PaymentLedgerReceiptRow): PaymentRece
   }
 }
 
-export default function BookingDetailPage({ params }: { params: Promise<{ id: string }> | { id: string } }) {
+/** Lines printed on payment receipts so room, add-on and extension charges are visible to the guest. */
+function buildFolioContextLinesForReceipt(
+  charges: Array<{
+    id?: string
+    type?: string
+    description?: string
+    amount?: number
+    paymentStatus?: string
+  }>,
+): string[] {
+  const types = new Set(['room_charge', 'additional_charge', 'extended_stay', 'reservation', 'late_checkout', 'charge'])
+  const lines: string[] = []
+  for (const c of charges) {
+    const t = String(c.type || '').toLowerCase()
+    if (t === 'payment' || t === 'folio_note') continue
+    if (!types.has(t)) continue
+    const desc = String(c.description || '').trim() || t.replace(/_/g, ' ')
+    const amt = Math.abs(Number(c.amount) || 0)
+    const ps = String(c.paymentStatus || '').toLowerCase()
+    let tag = ''
+    if (ps === 'paid') tag = ' · Paid on spot'
+    else if (ps === 'city_ledger') tag = ' · City ledger'
+    else if (['pending', 'unpaid', 'partial'].includes(ps)) tag = ' · On folio / unpaid'
+    lines.push(`${desc}: +${formatNaira(amt)}${tag}`)
+  }
+  return lines.slice(-24)
+}
+
+export default function BookingDetailPage({ params: _params }: { params: Promise<{ id: string }> | { id: string } }) {
   const router = useRouter()
   const { role, userId, name: authUserName } = useAuth()
   const canAdminBooking = canAdministerBookingRecord(role)
   const roleKey = canonicalRoleKey(role)
   const canManageFolio =
     roleKey === 'superadmin' || roleKey === 'admin' || roleKey === 'front_desk'
+  const canRequestRoomChange =
+    hasPermission(role, 'room_change:request') || roleKey === 'front_desk' || roleKey === 'receptionist'
   const [booking, setBooking] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [bookingId, setBookingId] = useState<string>('')
@@ -132,21 +168,33 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
   const [checkoutLoading, setCheckoutLoading] = useState(false)
   const [orgCheckoutTime, setOrgCheckoutTime] = useState(DEFAULT_ORG_CHECKOUT_TIME)
   const [checkoutConfirmOpen, setCheckoutConfirmOpen] = useState(false)
+  const [roomChangeModalOpen, setRoomChangeModalOpen] = useState(false)
+  const [roomChangePending, setRoomChangePending] = useState(false)
   const [editBookingOpen, setEditBookingOpen] = useState(false)
   const [receiptOrg, setReceiptOrg] = useState<PaymentReceiptBranding | null>(null)
   const [receiptCharge, setReceiptCharge] = useState<PaymentReceiptChargeRow | null>(null)
+  const [receiptFolioContextLines, setReceiptFolioContextLines] = useState<string[] | null>(null)
   const [paymentLedgerRows, setPaymentLedgerRows] = useState<PaymentLedgerReceiptRow[]>([])
 
+  const routeParams = useParams()
+  const routeBookingId = typeof routeParams?.id === 'string' ? routeParams.id : ''
+  const userIdRef = useRef(userId)
   useEffect(() => {
-    const getParamsAndFetch = async () => {
-      const resolvedParams = await Promise.resolve(params)
-      setBookingId(resolvedParams.id)
-      await fetchBookingDetails(resolvedParams.id)
-    }
-    getParamsAndFetch()
-  }, [])
+    userIdRef.current = userId
+  }, [userId])
+
+  useEffect(() => {
+    if (!routeBookingId) return
+    setBookingId(routeBookingId)
+    setRoomChangePending(false)
+    setLoading(true)
+    setBooking(null)
+    void fetchBookingDetails(routeBookingId)
+    // Re-run when `userId` becomes available so room-change + display-name fetches use auth.
+  }, [routeBookingId, userId])
 
   const fetchBookingDetails = async (id: string) => {
+    const uid = userIdRef.current
     try {
       const supabase = createClient()
       
@@ -216,10 +264,10 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
         : null
       setReceiptOrg(setBranding)
 
-      if (userId && userId !== 'placeholder') {
+      if (uid && uid !== 'placeholder') {
         try {
           const rb = await fetch(
-            `/api/bookings/${encodeURIComponent(id)}/receipt-branding?caller_id=${encodeURIComponent(userId)}`,
+            `/api/bookings/${encodeURIComponent(id)}/receipt-branding?caller_id=${encodeURIComponent(uid)}`,
             { credentials: 'include' },
           )
           if (rb.ok) {
@@ -243,7 +291,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
       }
 
       const bookingUserIds = [bookingData.created_by, bookingData.updated_by].filter(Boolean)
-      const bookingUserMap = await fetchUserDisplayNameMap(bookingUserIds, userId)
+      const bookingUserMap = await fetchUserDisplayNameMap(bookingUserIds, uid)
       if (bookingData.created_by) {
         setCreatedByUser({ id: bookingData.created_by, full_name: bookingUserMap[bookingData.created_by] })
       }
@@ -262,7 +310,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
 
       // Fetch creator info for each charge
       const chargeCreatorIds = chargesData.map((charge: any) => charge.created_by).filter(Boolean)
-      const chargeCreatorMap = await fetchUserDisplayNameMap(chargeCreatorIds, userId)
+      const chargeCreatorMap = await fetchUserDisplayNameMap(chargeCreatorIds, uid)
       const chargesWithCreator = chargesData.map((charge: any) => {
         const creatorName = charge.created_by ? chargeCreatorMap[charge.created_by] || getUserDisplayName(null, charge.created_by) : 'System'
 
@@ -301,7 +349,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
       })
 
       const receiverIds = [...new Set(payLedgerRaw.map((t: { received_by?: string | null }) => t.received_by).filter(Boolean))] as string[]
-      const receiverMap = receiverIds.length ? await fetchUserDisplayNameMap(receiverIds, userId) : {}
+      const receiverMap = receiverIds.length ? await fetchUserDisplayNameMap(receiverIds, uid) : {}
       const ledgerRows: PaymentLedgerReceiptRow[] = payLedgerRaw.map((t: any) => ({
         id: t.id,
         created_at: t.created_at,
@@ -326,6 +374,25 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
       }
 
       setBooking(bookingData)
+
+      if (uid) {
+        try {
+          const pr = await fetch(
+            `/api/room-change-requests?caller_id=${uid}&booking_id=${id}`,
+            { credentials: 'include' },
+          )
+          const pj = await pr.json()
+          if (pr.ok) {
+            setRoomChangePending((pj.requests || []).some((r: { status?: string }) => String(r.status || '').toLowerCase() === 'pending'))
+          } else {
+            setRoomChangePending(false)
+          }
+        } catch {
+          setRoomChangePending(false)
+        }
+      } else {
+        setRoomChangePending(false)
+      }
 
       // Note: booking.balance is maintained by handlers (add-charge, extend-stay, record-payment)
       // If the folio implies nothing owed but `payment_status` was stale (e.g. after auto-checkout + settle),
@@ -353,6 +420,39 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
     }, 60_000)
     return () => window.clearInterval(iv)
   }, [bookingId, loading, booking?.status, booking?.folio_status])
+
+  useEffect(() => {
+    if (!bookingId || !userId) return
+    const st = String(booking?.status ?? '')
+      .trim()
+      .toLowerCase()
+      .replace(/[\s-]+/g, '_')
+    if (st !== 'checked_in') {
+      if (booking) setRoomChangePending(false)
+      return
+    }
+    let cancelled = false
+    ;(async () => {
+      try {
+        const pr = await fetch(
+          `/api/room-change-requests?caller_id=${userId}&booking_id=${bookingId}`,
+          { credentials: 'include' },
+        )
+        const pj = await pr.json()
+        if (cancelled) return
+        if (!pr.ok) {
+          setRoomChangePending(false)
+          return
+        }
+        setRoomChangePending((pj.requests || []).some((r: { status?: string }) => String(r.status || '').toLowerCase() === 'pending'))
+      } catch {
+        if (!cancelled) setRoomChangePending(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [bookingId, userId, booking?.status, booking?.id])
 
   useEffect(() => {
     if (!editBookingOpen || loading || !booking) return
@@ -962,11 +1062,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
   const totalAmountPaid = Number(booking?.deposit ?? 0)
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <p>Loading booking details...</p>
-      </div>
-    )
+    return <PageLoadingState />
   }
 
   if (!booking) {
@@ -986,6 +1082,36 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
     },
     orgCheckoutTime,
   )
+
+  const roomsRaw = booking.rooms as { id?: string | null } | { id?: string | null }[] | null | undefined
+  let roomIdFromJoin: string | null = null
+  if (Array.isArray(roomsRaw) && roomsRaw.length > 0 && roomsRaw[0]?.id) {
+    roomIdFromJoin = String(roomsRaw[0].id)
+  } else if (roomsRaw && typeof roomsRaw === 'object' && !Array.isArray(roomsRaw) && roomsRaw.id) {
+    roomIdFromJoin = String(roomsRaw.id)
+  }
+  const effectiveRoomId =
+    (booking.room_id ? String(booking.room_id) : null) || roomIdFromJoin || null
+
+  /** Room change API only allows checked-in folios; keep UI aligned and avoid hiding the control. */
+  const bookingStatusNorm = String(booking.status ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, '_')
+  const isCheckedInForRoomChange = bookingStatusNorm === 'checked_in'
+  let roomChangeDisabledReason = ''
+  if (!isCheckedInForRoomChange) {
+    roomChangeDisabledReason =
+      'Available after check-in. Open this folio once the guest is checked in, then request a room change for Night Audit approval.'
+  } else if (folioLocked) {
+    roomChangeDisabledReason =
+      'Guest folio is locked for this action (for example after checkout).'
+  } else if (!effectiveRoomId) {
+    roomChangeDisabledReason = 'Assign a room on this booking before requesting a move.'
+  } else if (roomChangePending) {
+    roomChangeDisabledReason =
+      'A room change is already pending. Managers or admins can approve it under Night Audit → Room Changes.'
+  }
 
   const checkoutBannerCoYmd = normalizeBookingCheckoutYmd(booking.check_out || '')
 
@@ -1069,6 +1195,19 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
         }}
       />
 
+      <RoomChangeRequestModal
+        open={roomChangeModalOpen}
+        onClose={() => setRoomChangeModalOpen(false)}
+        onSuccess={() => fetchBookingDetails(bookingId)}
+        userId={userId}
+        organizationId={booking.organization_id}
+        bookingId={booking.id}
+        currentRoomId={effectiveRoomId || undefined}
+        currentRoomLabel={`Room ${booking.rooms?.room_number ?? '—'}`}
+        checkIn={booking.check_in}
+        checkOut={booking.check_out}
+      />
+
       <ExtendStayModal
         open={extendStayModalOpen}
         onClose={() => setExtendStayModalOpen(false)}
@@ -1098,12 +1237,16 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
       <PaymentReceiptDialog
         open={!!receiptCharge}
         onOpenChange={(open) => {
-          if (!open) setReceiptCharge(null)
+          if (!open) {
+            setReceiptCharge(null)
+            setReceiptFolioContextLines(null)
+          }
         }}
         organization={receiptOrg}
         booking={booking}
         charge={receiptCharge}
         currentUserName={authUserName || null}
+        folioContextLines={receiptFolioContextLines}
       />
 
       <AlertDialog
@@ -1422,6 +1565,31 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
           {(booking?.folio_status || 'active') === 'checked_out' && (
             <Badge variant="secondary" className="bg-gray-100 text-gray-700">Folio Checked Out</Badge>
           )}
+          {canRequestRoomChange && (
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={roomChangePending}
+              title={
+                roomChangePending
+                  ? roomChangeDisabledReason
+                  : isCheckedInForRoomChange && !folioLocked && effectiveRoomId
+                    ? 'Send a room move for manager or admin approval'
+                    : roomChangeDisabledReason
+              }
+              onClick={() => {
+                if (roomChangePending) return
+                if (!isCheckedInForRoomChange || folioLocked || !effectiveRoomId) {
+                  toast.error(roomChangeDisabledReason || 'Cannot request a room change right now.')
+                  return
+                }
+                setRoomChangeModalOpen(true)
+              }}
+            >
+              <DoorOpen className="mr-2 h-4 w-4" />
+              {roomChangePending ? 'Room change pending' : 'Request room change'}
+            </Button>
+          )}
           {canManageFolio && (
             <>
               <Button
@@ -1575,6 +1743,12 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                         {charge.type === 'payment' && (
                           <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200">Payment</Badge>
                         )}
+                        {charge.type === 'folio_note' && (
+                          <Badge variant="outline" className="text-xs bg-slate-100 text-slate-800 border-slate-200">Folio note</Badge>
+                        )}
+                        {charge.type === 'extended_stay' && String(charge.description || '').toUpperCase().includes('DISCOUNT') && (
+                          <Badge variant="outline" className="text-xs bg-violet-50 text-violet-800 border-violet-200">Discounted</Badge>
+                        )}
                         {charge.type !== 'payment' && Number(charge.amount) > 0 && charge.paymentStatus === 'paid' && (
                           <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200">Paid on Spot</Badge>
                         )}
@@ -1605,8 +1779,8 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                           variant="secondary"
                           className="shrink-0"
                           type="button"
-                          onClick={() =>
-                            setReceiptCharge({
+                          onClick={() => {
+                            const row: PaymentReceiptChargeRow = {
                               id: charge.id,
                               timestamp: charge.timestamp,
                               description: charge.description,
@@ -1614,14 +1788,20 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                               type: charge.type,
                               createdBy: charge.createdBy,
                               paymentMethod: charge.paymentMethod,
-                            })
-                          }
+                            }
+                            if (String(charge.type || '').toLowerCase() === 'payment') {
+                              setReceiptFolioContextLines(buildFolioContextLinesForReceipt(folioCharges))
+                            } else {
+                              setReceiptFolioContextLines(null)
+                            }
+                            setReceiptCharge(row)
+                          }}
                         >
                           <Receipt className="h-4 w-4 mr-1.5" />
                           Receipt
                         </Button>
                       )}
-                      {canAdminBooking && (
+                      {canAdminBooking && charge.type !== 'folio_note' && (
                         <div className="flex gap-1">
                           <Button
                             size="sm"
@@ -1718,7 +1898,10 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                           variant="secondary"
                           className="shrink-0"
                           type="button"
-                          onClick={() => setReceiptCharge(transactionToReceiptChargeRow(tx))}
+                          onClick={() => {
+                            setReceiptFolioContextLines(buildFolioContextLinesForReceipt(folioCharges))
+                            setReceiptCharge(transactionToReceiptChargeRow(tx))
+                          }}
                         >
                           <Receipt className="h-4 w-4 mr-1.5" />
                           Receipt

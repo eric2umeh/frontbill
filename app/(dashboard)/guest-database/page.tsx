@@ -10,7 +10,7 @@ import { calculateGuestBalancesBatch } from '@/lib/balance'
 import { formatNaira } from '@/lib/utils/currency'
 import { usePageData } from '@/hooks/use-page-data'
 import { useAuth } from '@/lib/auth-context'
-import { Loader2 } from 'lucide-react'
+import { PageLoadingState } from '@/components/shared/loading-screen'
 import { format } from 'date-fns'
 
 interface Guest {
@@ -73,11 +73,7 @@ export default function GuestDatabasePage() {
   const goToGuest = (guest: Guest) => router.push(`/guest-database/${guest.id}`)
 
   if (initialLoading) {
-    return (
-      <div className="flex items-center justify-center h-96">
-        <Loader2 className="h-8 w-8 animate-spin" />
-      </div>
-    )
+    return <PageLoadingState />
   }
 
   return (

@@ -7,7 +7,7 @@ import { Header } from '@/components/layout/header'
 import { LoadingScreen } from '@/components/shared/loading-screen'
 import { createClient } from '@/lib/supabase/client'
 import { AuthProvider } from '@/lib/auth-context'
-import { hasPermission, type Permission, canonicalRoleKey } from '@/lib/permissions'
+import { hasPermission, type Permission, canonicalRoleKey, APP_LOGIN_ROLE_KEYS } from '@/lib/permissions'
 import { BackdatePendingProvider } from '@/components/providers/backdate-pending-provider'
 
 interface DashboardUser {
@@ -118,36 +118,21 @@ export default function DashboardLayout({
 
         if (isMounted) {
           if (!profileError && profile) {
-            setUser({
-              id: authUser.id,
-              email: authUser.email || '',
-              name: profile.full_name || authUser.email?.split('@')[0] || 'User',
-              role: profile.role || 'admin',
-              organizationId: profile.organization_id || '',
-            })
-            // Check if role has dashboard access
-            const rk = canonicalRoleKey(profile.role) || canonicalRoleKey('admin')
-            const roleForAccess = rk || ''
-            const allowedRoles: Array<NonNullable<ReturnType<typeof canonicalRoleKey>>> = [
-              'superadmin',
-              'admin',
-              'manager',
-              'front_desk',
-              'receptionist',
-              'housekeeping',
-              'maintenance',
-              'accountant',
-              'auditor',
-              'store',
-              'staff',
-            ]
-            if (roleForAccess && !allowedRoles.includes(roleForAccess)) {
+            const rk = canonicalRoleKey(profile.role)
+            if (!rk || !APP_LOGIN_ROLE_KEYS.includes(rk)) {
               if (isMounted) {
                 setRedirected(true)
                 router.push('/access-denied')
               }
               return
             }
+            setUser({
+              id: authUser.id,
+              email: authUser.email || '',
+              name: profile.full_name || authUser.email?.split('@')[0] || 'User',
+              role: rk,
+              organizationId: profile.organization_id || '',
+            })
           } else {
             setUser({
               id: authUser.id,
@@ -182,12 +167,26 @@ export default function DashboardLayout({
   useEffect(() => {
     if (!user) return
 
-    if (
-      user.role === 'store' &&
-      (pathname === '/dashboard' || pathname.startsWith('/dashboard/'))
-    ) {
-      router.replace('/store')
-      return
+    const rk = canonicalRoleKey(user.role) || ''
+    const onDashboard = pathname === '/dashboard' || pathname.startsWith('/dashboard/')
+
+    if (onDashboard) {
+      if (rk === 'store' || rk === 'auditor') {
+        router.replace('/store')
+        return
+      }
+      if (rk === 'housekeeping') {
+        router.replace('/housekeeping')
+        return
+      }
+      if (rk === 'maintenance') {
+        router.replace('/maintenance')
+        return
+      }
+      if (rk === 'staff') {
+        router.replace('/bookings')
+        return
+      }
     }
 
     if (!canAccessPath(pathname, user.role)) {

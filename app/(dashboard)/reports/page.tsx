@@ -20,9 +20,19 @@ import {
   Users,
   Building2,
   ReceiptText,
+  Wallet,
+  Undo2,
+  PieChart,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { GuestDailyRevenueSummary } from '@/components/reports/guest-daily-revenue-summary'
+import {
+  DailyRevenueAccrualPanel,
+  OccupancyRangePanel,
+  SalesCollectionPanel,
+  AccountantChargeSummaryPanel,
+  RefundsPanel,
+} from '@/components/reports/financial-and-refund-panels'
 
 /* ------------------------------------------------------------------ */
 /*  Date Picker                                                       */
@@ -92,299 +102,6 @@ function PrintButton({ label }: { label?: string }) {
 /* ------------------------------------------------------------------ */
 /*  Daily Revenue Report                                              */
 /* ------------------------------------------------------------------ */
-
-interface PaymentRow {
-  id: string
-  amount: number
-  payment_method: string
-  payment_date: string
-  reference_number: string | null
-  guest_name: string
-  folio_id: string
-}
-
-function DailyRevenueReport({ organizationId }: { organizationId: string }) {
-  const [date, setDate] = useState<Date>(new Date())
-  const [loading, setLoading] = useState(false)
-  const [rows, setRows] = useState<PaymentRow[]>([])
-  const [fetched, setFetched] = useState(false)
-
-  const fetchData = useCallback(async () => {
-    try {
-      setLoading(true)
-      const supabase = createClient()
-      if (!supabase) { setRows([]); return }
-
-      const dayStart = startOfDay(date).toISOString()
-      const dayEnd = endOfDay(date).toISOString()
-
-      const { data: payments, error } = await supabase
-        .from('payments')
-        .select('id, amount, payment_method, payment_date, reference_number, booking_id, guest_id')
-        .eq('organization_id', organizationId)
-        .gte('payment_date', dayStart)
-        .lte('payment_date', dayEnd)
-        .order('payment_date', { ascending: true })
-
-      if (error) throw error
-
-      const guestIds = [...new Set((payments || []).map((p: any) => p.guest_id).filter(Boolean))]
-      const bookingIds = [...new Set((payments || []).map((p: any) => p.booking_id).filter(Boolean))]
-
-      let guestMap: Record<string, string> = {}
-      let bookingMap: Record<string, string> = {}
-
-      if (guestIds.length > 0) {
-        const { data: guests } = await supabase
-          .from('guests')
-          .select('id, name')
-          .in('id', guestIds)
-        if (guests) {
-          guestMap = Object.fromEntries(guests.map((g: any) => [g.id, g.name]))
-        }
-      }
-
-      if (bookingIds.length > 0) {
-        const { data: bookings } = await supabase
-          .from('bookings')
-          .select('id, folio_id')
-          .in('id', bookingIds)
-        if (bookings) {
-          bookingMap = Object.fromEntries(bookings.map((b: any) => [b.id, b.folio_id]))
-        }
-      }
-
-      const mapped: PaymentRow[] = (payments || []).map((p: any) => ({
-        id: p.id,
-        amount: Number(p.amount),
-        payment_method: p.payment_method || 'unknown',
-        payment_date: p.payment_date,
-        reference_number: p.reference_number,
-        guest_name: guestMap[p.guest_id] || '—',
-        folio_id: bookingMap[p.booking_id] || '—',
-      }))
-
-      setRows(mapped)
-      setFetched(true)
-    } catch (err: any) {
-      console.error('Error fetching revenue data:', err)
-      toast.error('Failed to fetch revenue data')
-      setRows([])
-    } finally {
-      setLoading(false)
-    }
-  }, [date, organizationId])
-
-  useEffect(() => {
-    fetchData()
-  }, [fetchData])
-
-  const totalRevenue = rows.reduce((sum, r) => sum + r.amount, 0)
-  const methodBreakdown = rows.reduce<Record<string, number>>((acc, r) => {
-    const m = r.payment_method
-    acc[m] = (acc[m] || 0) + r.amount
-    return acc
-  }, {})
-
-  return (
-    <div className="space-y-4 print-section">
-      <div className="flex flex-wrap items-center gap-3 print:hidden">
-        <DatePicker date={date} onSelect={setDate} />
-        <PrintButton />
-      </div>
-
-      <div className="print:block hidden text-lg font-bold mb-2">
-        Daily Revenue Report — {format(date, 'PPP')}
-      </div>
-
-      {loading ? (
-        <div className="flex justify-center py-12">
-          <Loader2 className="h-6 w-6 animate-spin" />
-        </div>
-      ) : (
-        <>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <StatCard label="Total Revenue" value={formatNaira(totalRevenue)} />
-            <StatCard label="Transactions" value={rows.length} />
-            {Object.entries(methodBreakdown).map(([method, total]) => (
-              <StatCard
-                key={method}
-                label={method.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}
-                value={formatNaira(total)}
-              />
-            ))}
-          </div>
-
-          {fetched && rows.length === 0 && (
-            <p className="text-muted-foreground text-center py-8">
-              No payments recorded for {format(date, 'PPP')}.
-            </p>
-          )}
-
-          {rows.length > 0 && (
-            <div className="border rounded-lg overflow-auto">
-              <div className="min-w-[640px]">
-                <div className="grid grid-cols-5 gap-2 px-4 py-2 bg-muted text-sm font-medium">
-                  <div>Guest</div>
-                  <div>Folio</div>
-                  <div className="text-right">Amount</div>
-                  <div>Method</div>
-                  <div>Time</div>
-                </div>
-                {rows.map((r) => (
-                  <div
-                    key={r.id}
-                    className="grid grid-cols-5 gap-2 px-4 py-2 border-t text-sm"
-                  >
-                    <div className="font-medium truncate">{r.guest_name}</div>
-                    <div className="text-muted-foreground truncate">{r.folio_id}</div>
-                    <div className="text-right font-medium">{formatNaira(r.amount)}</div>
-                    <div className="capitalize">{r.payment_method.replace(/_/g, ' ')}</div>
-                    <div className="text-muted-foreground">
-                      {r.payment_date ? format(parseISO(r.payment_date), 'HH:mm') : '—'}
-                    </div>
-                  </div>
-                ))}
-                <div className="grid grid-cols-5 gap-2 px-4 py-2 border-t bg-muted font-medium text-sm">
-                  <div className="col-span-2">Total</div>
-                  <div className="text-right">{formatNaira(totalRevenue)}</div>
-                  <div className="col-span-2">{rows.length} transaction(s)</div>
-                </div>
-              </div>
-            </div>
-          )}
-        </>
-      )}
-    </div>
-  )
-}
-
-/* ------------------------------------------------------------------ */
-/*  Occupancy Report                                                  */
-/* ------------------------------------------------------------------ */
-
-interface RoomTypeStats {
-  type: string
-  total: number
-  occupied: number
-}
-
-function OccupancyReport({ organizationId }: { organizationId: string }) {
-  const [date, setDate] = useState<Date>(new Date())
-  const [loading, setLoading] = useState(false)
-  const [totalRooms, setTotalRooms] = useState(0)
-  const [occupiedRooms, setOccupiedRooms] = useState(0)
-  const [breakdown, setBreakdown] = useState<RoomTypeStats[]>([])
-
-  const fetchData = useCallback(async () => {
-    try {
-      setLoading(true)
-      const supabase = createClient()
-      if (!supabase) return
-
-      const dateStr = format(date, 'yyyy-MM-dd')
-
-      const [{ data: rooms, error: rErr }, { data: bookings, error: bErr }] = await Promise.all([
-        supabase
-          .from('rooms')
-          .select('id, room_type')
-          .eq('organization_id', organizationId),
-        supabase
-          .from('bookings')
-          .select('room_id')
-          .eq('organization_id', organizationId)
-          .in('status', ['active', 'checked_in', 'confirmed'])
-          .lte('check_in', dateStr)
-          .gte('check_out', dateStr),
-      ])
-
-      if (rErr) throw rErr
-      if (bErr) throw bErr
-
-      const allRooms = rooms || []
-      const occupiedRoomIds = new Set((bookings || []).map((b: any) => b.room_id))
-
-      setTotalRooms(allRooms.length)
-      setOccupiedRooms(occupiedRoomIds.size)
-
-      const byType: Record<string, { total: number; occupied: number }> = {}
-      for (const room of allRooms) {
-        const t = (room as any).room_type || 'Unknown'
-        if (!byType[t]) byType[t] = { total: 0, occupied: 0 }
-        byType[t].total++
-        if (occupiedRoomIds.has((room as any).id)) byType[t].occupied++
-      }
-
-      setBreakdown(
-        Object.entries(byType).map(([type, v]) => ({ type, ...v }))
-      )
-    } catch (err: any) {
-      console.error('Error fetching occupancy data:', err)
-      toast.error('Failed to fetch occupancy data')
-    } finally {
-      setLoading(false)
-    }
-  }, [date, organizationId])
-
-  useEffect(() => {
-    fetchData()
-  }, [fetchData])
-
-  const available = totalRooms - occupiedRooms
-  const rate = totalRooms > 0 ? ((occupiedRooms / totalRooms) * 100).toFixed(1) : '0.0'
-
-  return (
-    <div className="space-y-4 print-section">
-      <div className="flex flex-wrap items-center gap-3 print:hidden">
-        <DatePicker date={date} onSelect={setDate} />
-        <PrintButton />
-      </div>
-
-      <div className="print:block hidden text-lg font-bold mb-2">
-        Occupancy Report — {format(date, 'PPP')}
-      </div>
-
-      {loading ? (
-        <div className="flex justify-center py-12">
-          <Loader2 className="h-6 w-6 animate-spin" />
-        </div>
-      ) : (
-        <>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <StatCard label="Total Rooms" value={totalRooms} />
-            <StatCard label="Occupied" value={occupiedRooms} />
-            <StatCard label="Available" value={available} />
-            <StatCard label="Occupancy Rate" value={`${rate}%`} />
-          </div>
-
-          {breakdown.length > 0 && (
-            <div className="border rounded-lg overflow-auto">
-              <div className="min-w-[400px]">
-                <div className="grid grid-cols-4 gap-2 px-4 py-2 bg-muted text-sm font-medium">
-                  <div>Room Type</div>
-                  <div className="text-right">Total</div>
-                  <div className="text-right">Occupied</div>
-                  <div className="text-right">Available</div>
-                </div>
-                {breakdown.map((b) => (
-                  <div
-                    key={b.type}
-                    className="grid grid-cols-4 gap-2 px-4 py-2 border-t text-sm"
-                  >
-                    <div className="font-medium capitalize">{b.type.replace(/_/g, ' ')}</div>
-                    <div className="text-right">{b.total}</div>
-                    <div className="text-right">{b.occupied}</div>
-                    <div className="text-right">{b.total - b.occupied}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </>
-      )}
-    </div>
-  )
-}
 
 /* ------------------------------------------------------------------ */
 /*  Guest Report                                                      */
@@ -699,7 +416,7 @@ function CityLedgerReport({ organizationId }: { organizationId: string }) {
 /* ------------------------------------------------------------------ */
 
 export default function ReportsPage() {
-  const { organizationId, name } = useAuth()
+  const { organizationId, name, userId } = useAuth()
 
   return (
     <div className="space-y-6">
@@ -722,7 +439,19 @@ export default function ReportsPage() {
         <TabsList className="flex flex-wrap h-auto gap-1">
           <TabsTrigger value="revenue" className="gap-1.5">
             <FileBarChart className="h-4 w-4" />
-            Daily Revenue
+            Daily revenue
+          </TabsTrigger>
+          <TabsTrigger value="sales-collection" className="gap-1.5">
+            <Wallet className="h-4 w-4" />
+            Sales collection
+          </TabsTrigger>
+          <TabsTrigger value="refunds" className="gap-1.5">
+            <Undo2 className="h-4 w-4" />
+            Refunds
+          </TabsTrigger>
+          <TabsTrigger value="accountant-charges" className="gap-1.5">
+            <PieChart className="h-4 w-4" />
+            Charge summary
           </TabsTrigger>
           <TabsTrigger value="occupancy" className="gap-1.5">
             <BedDouble className="h-4 w-4" />
@@ -745,13 +474,71 @@ export default function ReportsPage() {
         <TabsContent value="revenue">
           <Card>
             <CardHeader>
-              <CardTitle>Daily Revenue Report</CardTitle>
+              <CardTitle>Daily revenue (earned)</CardTitle>
               <CardDescription>
-                Revenue breakdown by payment method for a selected date
+                Room-rate accrual for each night guests are in-house (even if prepaid earlier) plus folio charges posted
+                that day. VAT 7.5% on top of the daily subtotal. Use date range and department filter.
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <DailyRevenueReport organizationId={organizationId} />
+              {userId ? (
+                <DailyRevenueAccrualPanel userId={userId} organizationId={organizationId} />
+              ) : (
+                <p className="text-sm text-muted-foreground">Sign in to load reports.</p>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="sales-collection">
+          <Card>
+            <CardHeader>
+              <CardTitle>Sales collection (cash in)</CardTitle>
+              <CardDescription>
+                Payments and transaction receipts in the period minus refunds. Contrast with Daily revenue: a ₦200,000
+                prepayment counts here in full; earned room revenue counts in Daily revenue at ₦100,000/night.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {userId ? <SalesCollectionPanel userId={userId} /> : <p className="text-sm text-muted-foreground">Sign in to load.</p>}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="refunds">
+          <Card>
+            <CardHeader>
+              <CardTitle>Refunds</CardTitle>
+              <CardDescription>
+                Refunds reduce guest balance and net sales collection. They are excluded from earned revenue.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {userId ? (
+                <RefundsPanel userId={userId} organizationId={organizationId} />
+              ) : (
+                <p className="text-sm text-muted-foreground">Sign in to load.</p>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="accountant-charges">
+          <Card>
+            <CardHeader>
+              <CardTitle>Charge &amp; accommodation summary</CardTitle>
+              <CardDescription>
+                Totals by department (restaurant, bar, laundry, halls, gym, etc.) plus room-night accrual. Tag lines with
+                optional <code className="text-xs">revenue_category</code> on folio charges (migration 040) or keywords
+                in descriptions.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {userId ? (
+                <AccountantChargeSummaryPanel userId={userId} />
+              ) : (
+                <p className="text-sm text-muted-foreground">Sign in to load.</p>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -759,13 +546,17 @@ export default function ReportsPage() {
         <TabsContent value="occupancy">
           <Card>
             <CardHeader>
-              <CardTitle>Occupancy Report</CardTitle>
+              <CardTitle>Occupancy</CardTitle>
               <CardDescription>
-                Room occupancy breakdown by type for a selected date
+                Day-by-day occupancy with out-of-order (maintenance) rooms excluded from the denominator.
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <OccupancyReport organizationId={organizationId} />
+              {userId ? (
+                <OccupancyRangePanel userId={userId} organizationId={organizationId} />
+              ) : (
+                <p className="text-sm text-muted-foreground">Sign in to load.</p>
+              )}
             </CardContent>
           </Card>
         </TabsContent>

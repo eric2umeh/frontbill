@@ -11,6 +11,7 @@ import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ArrowLeft, UserCheck, Trash2, CreditCard, AlertCircle, Loader2 } from 'lucide-react'
+import { PageLoadingState } from '@/components/shared/loading-screen'
 import { formatNaira } from '@/lib/utils/currency'
 import { toast } from 'sonner'
 import { createClient } from '@/lib/supabase/client'
@@ -279,11 +280,7 @@ export default function ReservationDetailPage({
   }
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-      </div>
-    )
+    return <PageLoadingState />
   }
 
   if (error) {

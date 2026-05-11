@@ -1,5 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
+import { canonicalRoleKey } from '@/lib/permissions'
 
 type AuditItem = {
   id: string
@@ -17,7 +18,7 @@ type AuditItem = {
 }
 
 const ALLOWED_ROLES = ['superadmin', 'admin', 'manager', 'front_desk']
-const TYPE_OPTIONS = ['all', 'backdate', 'booking', 'payment', 'transaction', 'night_audit']
+const TYPE_OPTIONS = ['all', 'backdate', 'room_change', 'booking', 'payment', 'transaction', 'night_audit']
 
 const asNumber = (value: any) => {
   const parsed = Number(value || 0)
@@ -60,7 +61,8 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'Caller profile not found' }, { status: 403 })
     }
 
-    if (!ALLOWED_ROLES.includes(callerProfile.role)) {
+    const callerRoleKey = canonicalRoleKey(callerProfile.role)
+    if (!callerRoleKey || !ALLOWED_ROLES.includes(callerRoleKey)) {
       return NextResponse.json({ error: 'You do not have access to audit trails' }, { status: 403 })
     }
 
@@ -95,6 +97,45 @@ export async function GET(request: Request) {
           created_at: row.decided_at || row.created_at,
         })
       })
+    }
+
+    if (shouldLoad('room_change')) {
+      let query = admin
+        .from('room_change_requests')
+        .select(
+          'id, booking_id, from_room_label, to_room_label, reason, status, requested_by, approved_by, created_at, decided_at',
+        )
+        .eq('organization_id', orgId)
+        .order('created_at', { ascending: false })
+        .limit(limit)
+      query = inRangeQuery(query, 'created_at', startDate, endDate)
+      if (status !== 'all') query = query.eq('status', status)
+      const { data: rcRows, error: rcErr } = await query
+      if (!rcErr) {
+        ;(rcRows || []).forEach((row: any) => {
+          if (row.requested_by) actorIds.add(row.requested_by)
+          if (row.approved_by) actorIds.add(row.approved_by)
+          items.push({
+            id: row.id,
+            source: 'room_change',
+            category: 'Room change',
+            action:
+              row.status === 'pending'
+                ? 'Room change requested'
+                : row.status === 'approved'
+                  ? 'Room change approved'
+                  : 'Room change rejected',
+            status: row.status,
+            actor_id: row.approved_by || row.requested_by || null,
+            actor_name: 'Loading...',
+            reference: row.booking_id ? row.booking_id.slice(0, 8) : row.id.slice(0, 8),
+            description: `${row.from_room_label} → ${row.to_room_label} · ${row.reason || ''}`.trim(),
+            amount: null,
+            created_at: row.decided_at || row.created_at,
+            href: row.booking_id ? `/bookings/${row.booking_id}` : undefined,
+          })
+        })
+      }
     }
 
     if (shouldLoad('transaction')) {
