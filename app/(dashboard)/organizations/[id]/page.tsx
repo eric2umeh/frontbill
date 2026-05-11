@@ -21,6 +21,7 @@ import { hasPermission } from '@/lib/permissions'
 import { getUserDisplayName } from '@/lib/utils/user-display'
 import { fetchUserDisplayNameMap } from '@/lib/utils/fetch-user-display-names'
 import { guestOrOrganizationNameTaken } from '@/lib/utils/guest-org-name-uniqueness'
+import { PageLoadingState } from '@/components/shared/loading-screen'
 
 interface Organization {
   id: string
@@ -308,11 +309,7 @@ export default function OrganizationDetailPage() {
   }
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center h-screen">
-        <p className="text-muted-foreground">Loading organization...</p>
-      </div>
-    )
+    return <PageLoadingState />
   }
 
   if (!organization) {

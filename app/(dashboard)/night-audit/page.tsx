@@ -27,6 +27,7 @@ import { BackdateRequestsTab } from '@/components/night-audit/backdate-requests-
 import { RoomChangeRequestsTab } from '@/components/night-audit/room-change-requests-tab'
 import { ExtendStayDiscountTab } from '@/components/night-audit/extend-stay-discount-tab'
 import { useBackdatePendingCount } from '@/hooks/use-backdate-pending-count'
+import { LoadingSpinner } from '@/components/shared/loading-screen'
 
 interface AuditTrailLog {
   id: string
@@ -706,8 +707,10 @@ export default function NightAuditPage() {
                   <TableBody>
                     {logsLoading ? (
                       <TableRow>
-                        <TableCell colSpan={7} className="py-8 text-center text-muted-foreground">
-                          Loading audit trails...
+                        <TableCell colSpan={7} className="py-10">
+                          <div className="flex justify-center" role="status" aria-label="Loading audit trails">
+                            <LoadingSpinner size="lg" />
+                          </div>
                         </TableCell>
                       </TableRow>
                     ) : auditLogs.length === 0 ? (

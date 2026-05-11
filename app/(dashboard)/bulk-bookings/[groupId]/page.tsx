@@ -14,6 +14,7 @@ import { getBulkGroupId, isLegacyBulkGroupId } from '@/lib/utils/bulk-booking'
 import { manualCheckoutEligible, resolvedCheckoutDateForClosing, DEFAULT_ORG_CHECKOUT_TIME } from '@/lib/utils/booking-checkout-ui'
 import { CheckoutConfirmDialog } from '@/components/bookings/checkout-confirm-dialog'
 import { toast } from 'sonner'
+import { PageLoadingState } from '@/components/shared/loading-screen'
 
 type BulkPageCheckoutDraft = { kind: 'row'; row: any } | { kind: 'all'; targets: any[] }
 
@@ -175,11 +176,7 @@ export default function BulkBookingDetailPage({ params }: { params: Promise<{ gr
   const ledgerName = first?.notes?.match(/City Ledger:\s*([^|]+)/i)?.[1]?.trim()
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center h-96">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-      </div>
-    )
+    return <PageLoadingState />
   }
 
   return (

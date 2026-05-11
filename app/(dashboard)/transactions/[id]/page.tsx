@@ -10,6 +10,7 @@ import { Badge } from '@/components/ui/badge'
 import { formatNaira } from '@/lib/utils/currency'
 import { format } from 'date-fns'
 import { toast } from 'sonner'
+import { PageLoadingState } from '@/components/shared/loading-screen'
 
 export default function TransactionDetailPage() {
   const params = useParams()
@@ -94,11 +95,7 @@ export default function TransactionDetailPage() {
   }
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <p className="text-muted-foreground">Loading transaction details...</p>
-      </div>
-    )
+    return <PageLoadingState />
   }
 
   if (!transaction) {

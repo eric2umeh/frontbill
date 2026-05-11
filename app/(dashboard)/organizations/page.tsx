@@ -18,6 +18,7 @@ import { EnhancedDataTable } from '@/components/shared/enhanced-data-table'
 import { Badge } from '@/components/ui/badge'
 import { format } from 'date-fns'
 import { usePageData } from '@/hooks/use-page-data'
+import { PageLoadingState } from '@/components/shared/loading-screen'
 import { useAuth } from '@/lib/auth-context'
 import { isOrganizationMenuRecord } from '@/lib/utils/ledger-organization'
 import { getUserDisplayName } from '@/lib/utils/user-display'
@@ -305,9 +306,7 @@ export default function OrganizationsPage() {
 
       {/* Data Table */}
       {initialLoading ? (
-        <div className="text-center py-12">
-          <p className="text-muted-foreground">Loading organizations...</p>
-        </div>
+        <PageLoadingState />
       ) : (
         <EnhancedDataTable
           compactTable
