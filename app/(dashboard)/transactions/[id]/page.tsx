@@ -10,7 +10,7 @@ import { Badge } from '@/components/ui/badge'
 import { formatNaira } from '@/lib/utils/currency'
 import { format } from 'date-fns'
 import { toast } from 'sonner'
-import { PageLoadingState } from '@/components/shared/loading-screen'
+import { PageLoadingState } from '@/components/loading-screen'
 
 export default function TransactionDetailPage() {
   const params = useParams()

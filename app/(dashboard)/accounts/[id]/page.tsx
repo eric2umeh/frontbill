@@ -19,7 +19,7 @@ import CityLedgerPaymentModal from '@/components/city-ledger/city-ledger-payment
 import { useAuth } from '@/lib/auth-context'
 import { hasPermission } from '@/lib/permissions'
 import { toast } from 'sonner'
-import { PageLoadingState } from '@/components/shared/loading-screen'
+import { PageLoadingState } from '@/components/loading-screen'
 
 interface GuestAccount {
   id: string

@@ -29,7 +29,7 @@ import { hasPermission } from '@/lib/permissions'
 import { toast } from 'sonner'
 import { folioGuestCreditAmount, folioPositiveOutstandingSum } from '@/lib/utils/booking-bill-balance'
 import { guestOrOrganizationNameTaken } from '@/lib/utils/guest-org-name-uniqueness'
-import { PageLoadingState } from '@/components/shared/loading-screen'
+import { PageLoadingState } from '@/components/loading-screen'
 
 interface Guest {
   id: string

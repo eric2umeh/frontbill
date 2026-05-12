@@ -27,7 +27,7 @@ import { BackdateRequestsTab } from '@/components/night-audit/backdate-requests-
 import { RoomChangeRequestsTab } from '@/components/night-audit/room-change-requests-tab'
 import { ExtendStayDiscountTab } from '@/components/night-audit/extend-stay-discount-tab'
 import { useBackdatePendingCount } from '@/hooks/use-backdate-pending-count'
-import { LoadingSpinner } from '@/components/shared/loading-screen'
+import { LoadingSpinner } from '@/components/loading-screen'
 
 interface AuditTrailLog {
   id: string

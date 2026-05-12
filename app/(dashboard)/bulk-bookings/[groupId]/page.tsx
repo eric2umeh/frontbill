@@ -14,7 +14,7 @@ import { getBulkGroupId, isLegacyBulkGroupId } from '@/lib/utils/bulk-booking'
 import { manualCheckoutEligible, resolvedCheckoutDateForClosing, DEFAULT_ORG_CHECKOUT_TIME } from '@/lib/utils/booking-checkout-ui'
 import { CheckoutConfirmDialog } from '@/components/bookings/checkout-confirm-dialog'
 import { toast } from 'sonner'
-import { PageLoadingState } from '@/components/shared/loading-screen'
+import { PageLoadingState } from '@/components/loading-screen'
 
 type BulkPageCheckoutDraft = { kind: 'row'; row: any } | { kind: 'all'; targets: any[] }
 

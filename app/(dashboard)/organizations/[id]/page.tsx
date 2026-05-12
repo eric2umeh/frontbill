@@ -21,7 +21,7 @@ import { hasPermission } from '@/lib/permissions'
 import { getUserDisplayName } from '@/lib/utils/user-display'
 import { fetchUserDisplayNameMap } from '@/lib/utils/fetch-user-display-names'
 import { guestOrOrganizationNameTaken } from '@/lib/utils/guest-org-name-uniqueness'
-import { PageLoadingState } from '@/components/shared/loading-screen'
+import { PageLoadingState } from '@/components/loading-screen'
 
 interface Organization {
   id: string
