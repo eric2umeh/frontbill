@@ -313,11 +313,11 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
     key: 'maintenance',
     label: 'Maintenance',
     description:
-      'Maintenance queue, updating linked room statuses with notes, and maintenance reporting. Work stays on maintenance and rooms; no Bookings, Reservations, Store, or billing access.',
+      'Maintenance queue, work orders, notes, and maintenance reporting. Operational room status (available, out of order, etc.) is set by Housekeeping after handoff; no Bookings, Reservations, Store, or billing access.',
     color: 'bg-orange-100 text-orange-800',
     permissions: [
       'maintenance:view', 'maintenance:create', 'maintenance:edit', 'maintenance:report',
-      'rooms:view', 'rooms:update_status',
+      'rooms:view',
       'settings:view',
     ],
   },
