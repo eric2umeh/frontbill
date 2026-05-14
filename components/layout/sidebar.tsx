@@ -141,7 +141,7 @@ interface SidebarProps {
 export function Sidebar({ mobileOpen, onMobileClose }: SidebarProps = {}) {
   const pathname = usePathname()
   const [collapsed, setCollapsed] = useState(false)
-  const { role, userId } = useAuth()
+  const { role, userId, organizationLogoUrl } = useAuth()
   const pendingBackdateCount = useBackdatePendingCount()
 
   // Filter sidebar routes based on the logged-in user's role
@@ -177,8 +177,16 @@ export function Sidebar({ mobileOpen, onMobileClose }: SidebarProps = {}) {
             <X className="h-4 w-4" />
           </Button>
         )}
-        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary flex-shrink-0">
-          <Hotel className="h-6 w-6 text-primary-foreground" />
+        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary flex-shrink-0 overflow-hidden">
+          {organizationLogoUrl ? (
+            <img
+              src={organizationLogoUrl}
+              alt=""
+              className="h-full w-full object-contain bg-white p-1"
+            />
+          ) : (
+            <Hotel className="h-6 w-6 text-primary-foreground" />
+          )}
         </div>
         {(!collapsed || isMobile) && (
           <div>
