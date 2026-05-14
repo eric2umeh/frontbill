@@ -124,8 +124,16 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Booking not found' }, { status: 404 })
     }
 
-    if (String(booking.status) !== 'checked_in') {
-      return NextResponse.json({ error: 'Room changes can only be requested for checked-in guests' }, { status: 400 })
+    const bookingStatus = String(booking.status || '')
+      .trim()
+      .toLowerCase()
+      .replace(/[\s-]+/g, '_')
+    const roomChangeEligible = ['checked_in', 'confirmed', 'reserved'].includes(bookingStatus)
+    if (!roomChangeEligible) {
+      return NextResponse.json(
+        { error: 'Room changes can only be requested for reserved, confirmed, or checked-in bookings' },
+        { status: 400 },
+      )
     }
 
     const fromRoomId = booking.room_id as string | null
@@ -301,8 +309,15 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: 'Booking no longer exists' }, { status: 400 })
     }
 
-    if (String(booking.status) !== 'checked_in') {
-      return NextResponse.json({ error: 'Guest is no longer checked in; cannot apply room change' }, { status: 400 })
+    const bookingStatus = String(booking.status || '')
+      .trim()
+      .toLowerCase()
+      .replace(/[\s-]+/g, '_')
+    if (!['checked_in', 'confirmed', 'reserved'].includes(bookingStatus)) {
+      return NextResponse.json(
+        { error: 'This booking is no longer active; reject this request and open a new one if needed' },
+        { status: 400 },
+      )
     }
 
     if (booking.room_id !== row.from_room_id) {
