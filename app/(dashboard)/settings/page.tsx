@@ -52,6 +52,14 @@ export default function SettingsPage() {
   const canManageHotelSettings = hasPermission(role, 'settings:manage')
   const canUpdateHotelLogo = canonicalRoleKey(role) === 'superadmin'
 
+  /** Server routes read cookies; browser auth uses localStorage — send the access token for API auth. */
+  async function logoApiHeaders(): Promise<Record<string, string>> {
+    if (!supabase) return {}
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session?.access_token) return {}
+    return { Authorization: `Bearer ${session.access_token}` }
+  }
+
   useEffect(() => {
     async function fetchHotelInfo() {
       if (!organizationId || !supabase) return
@@ -155,9 +163,18 @@ export default function SettingsPage() {
     if (!file || !canUpdateHotelLogo) return
     setLogoBusy(true)
     try {
+      const authHeaders = await logoApiHeaders()
+      if (!authHeaders.Authorization) {
+        toast.error('Your session is not available. Please refresh the page and try again.')
+        return
+      }
       const fd = new FormData()
       fd.append('file', file)
-      const res = await fetch('/api/organizations/logo', { method: 'POST', body: fd })
+      const res = await fetch('/api/organizations/logo', {
+        method: 'POST',
+        body: fd,
+        headers: authHeaders,
+      })
       const body = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(body.error || 'Upload failed')
       const url = String(body.logo_url || '')
@@ -175,7 +192,12 @@ export default function SettingsPage() {
     if (!canUpdateHotelLogo) return
     setLogoBusy(true)
     try {
-      const res = await fetch('/api/organizations/logo', { method: 'DELETE' })
+      const authHeaders = await logoApiHeaders()
+      if (!authHeaders.Authorization) {
+        toast.error('Your session is not available. Please refresh the page and try again.')
+        return
+      }
+      const res = await fetch('/api/organizations/logo', { method: 'DELETE', headers: authHeaders })
       const body = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(body.error || 'Failed to remove logo')
       setHotelLogoUrl('')
