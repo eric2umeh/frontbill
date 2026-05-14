@@ -84,7 +84,7 @@ export function StoreItemDetail() {
         .select('*')
         .eq('item_id', id)
         .eq('organization_id', organizationId)
-        .order('created_at', { ascending: false })
+        .order('movement_at', { ascending: false })
         .limit(500)
 
       if (me) throw me
@@ -262,7 +262,7 @@ export function StoreItemDetail() {
                 {movements.map(m => (
                     <TableRow key={m.id}>
                       <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
-                        {format(parseISO(m.created_at), 'MMM d, HH:mm')}
+                        {format(parseISO(m.movement_at || m.created_at), 'MMM d, HH:mm')}
                       </TableCell>
                       <TableCell className="capitalize">{m.movement_type}</TableCell>
                       <TableCell className="text-right font-mono text-sm">
