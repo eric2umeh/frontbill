@@ -61,7 +61,7 @@ export const ALL_PERMISSIONS: { key: Permission; label: string; group: string }[
   { key: 'bookings:delete', label: 'Delete Bookings', group: 'Bookings' },
   { key: 'bookings:checkin', label: 'Check In Guests', group: 'Bookings' },
   { key: 'bookings:checkout', label: 'Check Out Folios', group: 'Bookings' },
-  { key: 'room_change:request', label: 'Request Guest Room Change (checked-in)', group: 'Bookings' },
+  { key: 'room_change:request', label: 'Request guest room change (approval)', group: 'Bookings' },
   { key: 'room_change:approve', label: 'Approve Room Change Requests', group: 'Bookings' },
 
   { key: 'reservations:view', label: 'View Reservations', group: 'Reservations' },
@@ -301,7 +301,7 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
     key: 'housekeeping',
     label: 'Housekeeper',
     description:
-      'Housekeeping board, room status updates with notes, and daily housekeeping reporting. Operational context stays on housekeeping and rooms; no Bookings, Reservations, Store, dashboards, billing, or front-office edits.',
+      'Housekeeping board, room status updates with notes, and daily housekeeping reporting. Administrator, Superadmin, or Housekeeping may mark a room out of order; Occupied and Reserved are set from bookings only. No Bookings, Reservations, Store, dashboards, billing, or front-office edits.',
     color: 'bg-teal-100 text-teal-800',
     permissions: [
       'housekeeping:view', 'housekeeping:create', 'housekeeping:edit', 'housekeeping:report',
@@ -313,7 +313,7 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
     key: 'maintenance',
     label: 'Maintenance',
     description:
-      'Maintenance queue, work orders, notes, and maintenance reporting. Operational room status (available, out of order, etc.) is set by Housekeeping after handoff; no Bookings, Reservations, Store, or billing access.',
+      'Maintenance queue, work orders, notes, and maintenance reporting. From the maintenance screen only Available or Maintenance room status may be set; cleaning, out of order, occupied, and reserved are handled elsewhere. No Bookings, Reservations, Store, or billing access.',
     color: 'bg-orange-100 text-orange-800',
     permissions: [
       'maintenance:view', 'maintenance:create', 'maintenance:edit', 'maintenance:report',

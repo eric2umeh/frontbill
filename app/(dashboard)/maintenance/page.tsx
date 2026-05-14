@@ -82,13 +82,19 @@ const PRIORITY_CONFIG: Record<OrderPriority, { label: string; color: string }> =
   critical: { label: 'Critical', color: 'bg-red-100 text-red-700' },
 }
 
-const ROOM_STATUS_OPTIONS = [
-  { value: 'available',    label: 'Available',    color: 'bg-green-100 text-green-800' },
-  { value: 'occupied',     label: 'Occupied',     color: 'bg-blue-100 text-blue-800' },
-  { value: 'cleaning',     label: 'Cleaning',     color: 'bg-yellow-100 text-yellow-800' },
-  { value: 'maintenance',  label: 'Maintenance',  color: 'bg-red-100 text-red-800' },
-  { value: 'reserved',     label: 'Reserved',     color: 'bg-purple-100 text-purple-800' },
-  { value: 'out_of_order', label: 'Out of Order', color: 'bg-gray-200 text-gray-700' },
+const ROOM_STATUS_DISPLAY: Record<string, { label: string; color: string }> = {
+  available: { label: 'Available', color: 'bg-green-100 text-green-800' },
+  occupied: { label: 'Occupied', color: 'bg-blue-100 text-blue-800' },
+  cleaning: { label: 'Cleaning', color: 'bg-yellow-100 text-yellow-800' },
+  maintenance: { label: 'Maintenance', color: 'bg-red-100 text-red-800' },
+  reserved: { label: 'Reserved', color: 'bg-purple-100 text-purple-800' },
+  out_of_order: { label: 'Out of Order', color: 'bg-gray-200 text-gray-700' },
+}
+
+/** Maintenance screen: handoff statuses only (Housekeeping handles cleaning and OOO). */
+const MAINTENANCE_STATUS_PICKER: { value: string; label: string; color: string }[] = [
+  { value: 'available', label: 'Available', color: 'bg-green-100 text-green-800' },
+  { value: 'maintenance', label: 'Maintenance', color: 'bg-red-100 text-red-800' },
 ]
 
 export default function MaintenancePage() {
@@ -243,6 +249,13 @@ export default function MaintenancePage() {
   }
 
   const handleRoomStatusChange = async (roomId: string, newStatus: string) => {
+    const allowed = new Set(MAINTENANCE_STATUS_PICKER.map((o) => o.value))
+    if (!allowed.has(newStatus)) {
+      toast.error(
+        'From Maintenance, only Available or Maintenance may be set. Ask Housekeeping for cleaning or out-of-order, or front desk for occupied/reserved.',
+      )
+      return
+    }
     if (!canUpdateRoomStatus) {
       toast.error('Only Housekeeping or an Administrator may change operational room status.')
       return
@@ -478,13 +491,19 @@ export default function MaintenancePage() {
         <TabsContent value="rooms" className="space-y-4">
           <p className="text-sm text-muted-foreground">
             {canUpdateRoomStatus
-              ? 'Click any room status badge to quickly update it.'
+              ? 'Set Available or Maintenance only. Cleaning, out of order, occupied, and reserved are handled by Housekeeping or front desk / bookings.'
               : 'Room status is read-only here. Housekeeping sets rooms out of order and back to available after maintenance confirms the fix.'}
           </p>
           <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
             {rooms.map(room => {
-              const sc = ROOM_STATUS_OPTIONS.find(o => o.value === room.status)
-              const badgeClass = `w-full rounded-md px-3 py-1.5 text-xs font-medium flex items-center justify-between ${sc?.color ?? 'bg-gray-100 text-gray-600'}`
+              const key = String(room.status || '')
+                .toLowerCase()
+                .replace(/-/g, '_')
+              const sc = ROOM_STATUS_DISPLAY[key] ?? {
+                label: room.status,
+                color: 'bg-gray-100 text-gray-600',
+              }
+              const badgeClass = `w-full rounded-md px-3 py-1.5 text-xs font-medium flex items-center justify-between ${sc.color}`
               return (
                 <Card key={room.id} className="hover:shadow-md transition-shadow">
                   <CardContent className="pt-4 pb-4 space-y-3">
@@ -501,12 +520,12 @@ export default function MaintenancePage() {
                         onClick={() => setStatusChangeRoom(room)}
                         className={`${badgeClass} hover:opacity-80 transition-opacity`}
                       >
-                        <span>{sc?.label ?? room.status}</span>
+                        <span>{sc.label}</span>
                         <ChevronDown className="h-3 w-3" />
                       </button>
                     ) : (
                       <div className={badgeClass} role="status" aria-label={`Room ${room.room_number} status`}>
-                        <span>{sc?.label ?? room.status}</span>
+                        <span>{sc.label}</span>
                       </div>
                     )}
                   </CardContent>
@@ -621,9 +640,10 @@ export default function MaintenancePage() {
               <p className="text-xs text-muted-foreground">Created by {currentUserName}. Last updated by {currentUserName}.</p>
             </div>
             <div className="grid grid-cols-2 gap-2">
-              {ROOM_STATUS_OPTIONS.map(opt => (
+              {MAINTENANCE_STATUS_PICKER.map(opt => (
                 <button
                   key={opt.value}
+                  type="button"
                   onClick={() => handleRoomStatusChange(statusChangeRoom.id, opt.value)}
                   className={`rounded-lg px-4 py-3 text-sm font-medium text-left transition-all hover:scale-105 active:scale-95 ${opt.color} ${statusChangeRoom.status === opt.value ? 'ring-2 ring-offset-1 ring-primary' : ''}`}
                 >

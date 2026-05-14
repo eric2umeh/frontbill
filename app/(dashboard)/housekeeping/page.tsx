@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/lib/auth-context'
 import { LoadingSpinner } from '@/components/loading-screen'
-import { hasPermission } from '@/lib/permissions'
+import { hasPermission, canonicalRoleKey } from '@/lib/permissions'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -73,20 +73,40 @@ const PRIORITY_CONFIG: Record<TaskPriority, { label: string; color: string }> = 
   urgent: { label: 'Urgent', color: 'bg-red-100 text-red-700' },
 }
 
-const ROOM_STATUS_OPTIONS = [
-  { value: 'available',   label: 'Available',    color: 'bg-green-100 text-green-800' },
-  { value: 'occupied',    label: 'Occupied',     color: 'bg-blue-100 text-blue-800' },
-  { value: 'cleaning',    label: 'Cleaning',     color: 'bg-yellow-100 text-yellow-800' },
-  { value: 'maintenance', label: 'Maintenance',  color: 'bg-red-100 text-red-800' },
-  { value: 'reserved',    label: 'Reserved',     color: 'bg-purple-100 text-purple-800' },
-  { value: 'out_of_order',label: 'Out of Order', color: 'bg-gray-200 text-gray-700' },
+const ROOM_STATUS_DISPLAY: Record<string, { label: string; color: string }> = {
+  available: { label: 'Available', color: 'bg-green-100 text-green-800' },
+  occupied: { label: 'Occupied', color: 'bg-blue-100 text-blue-800' },
+  cleaning: { label: 'Cleaning', color: 'bg-yellow-100 text-yellow-800' },
+  maintenance: { label: 'Maintenance', color: 'bg-red-100 text-red-800' },
+  reserved: { label: 'Reserved', color: 'bg-purple-100 text-purple-800' },
+  out_of_order: { label: 'Out of Order', color: 'bg-gray-200 text-gray-700' },
+}
+
+/** Statuses housekeeping may set from this screen (not Occupied / Reserved — those come from bookings only). */
+const HK_STATUS_PICKER_BASE: { value: string; label: string; color: string }[] = [
+  { value: 'available', label: 'Available', color: 'bg-green-100 text-green-800' },
+  { value: 'cleaning', label: 'Cleaning', color: 'bg-yellow-100 text-yellow-800' },
+  { value: 'maintenance', label: 'Maintenance', color: 'bg-red-100 text-red-800' },
 ]
+
+const HK_OUT_OF_ORDER_OPTION = {
+  value: 'out_of_order',
+  label: 'Out of Order',
+  color: 'bg-gray-200 text-gray-700',
+} as const
 
 export default function HousekeepingPage() {
   const { role, userId, organizationId, name: currentUserName } = useAuth()
   const canCreate = hasPermission(role, 'housekeeping:create')
   const canAssign = hasPermission(role, 'housekeeping:assign')
   const canReport = hasPermission(role, 'housekeeping:report')
+  const canUpdateRoomStatus = hasPermission(role, 'rooms:update_status')
+  const rk = canonicalRoleKey(role)
+  const canSetOutOfOrder = rk === 'superadmin' || rk === 'admin' || rk === 'housekeeping'
+
+  const housekeepingStatusPickerOptions = useMemo(() => {
+    return canSetOutOfOrder ? [...HK_STATUS_PICKER_BASE, HK_OUT_OF_ORDER_OPTION] : [...HK_STATUS_PICKER_BASE]
+  }, [canSetOutOfOrder])
 
   const [tasks, setTasks] = useState<HousekeepingTask[]>([])
   const [rooms, setRooms] = useState<Room[]>([])
@@ -218,6 +238,19 @@ export default function HousekeepingPage() {
   }
 
   const handleRoomStatusChange = async (roomId: string, newStatus: string) => {
+    const disallowed = ['occupied', 'reserved']
+    if (disallowed.includes(newStatus)) {
+      toast.error('Occupied and Reserved are set from bookings / front desk only.')
+      return
+    }
+    if (newStatus === 'out_of_order' && !canSetOutOfOrder) {
+      toast.error('Only Administrator, Superadmin, or Housekeeping can mark a room out of order.')
+      return
+    }
+    if (!canUpdateRoomStatus) {
+      toast.error('You do not have permission to update room status.')
+      return
+    }
     const supabase = createClient()
     const room = rooms.find(r => r.id === roomId)
     const { error } = await supabase
@@ -424,10 +457,19 @@ export default function HousekeepingPage() {
 
         {/* Room Status Panel */}
         <TabsContent value="rooms" className="space-y-4">
-          <p className="text-sm text-muted-foreground">Click any room status badge to quickly update it.</p>
+          <p className="text-sm text-muted-foreground">
+            Occupied and Reserved are controlled from bookings only. Out of order: Administrator, Superadmin, or
+            Housekeeping only.
+          </p>
           <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
             {rooms.map(room => {
-              const sc = ROOM_STATUS_OPTIONS.find(o => o.value === room.status)
+              const key = String(room.status || '')
+                .toLowerCase()
+                .replace(/-/g, '_')
+              const sc = ROOM_STATUS_DISPLAY[key] ?? {
+                label: room.status,
+                color: 'bg-gray-100 text-gray-600',
+              }
               return (
                 <Card key={room.id} className="hover:shadow-md transition-shadow">
                   <CardContent className="pt-4 pb-4 space-y-3">
@@ -438,13 +480,22 @@ export default function HousekeepingPage() {
                       </div>
                       <Bed className="h-5 w-5 text-muted-foreground" />
                     </div>
-                    <button
-                      onClick={() => setStatusChangeRoom(room)}
-                      className={`w-full rounded-md px-3 py-1.5 text-xs font-medium flex items-center justify-between ${sc?.color ?? 'bg-gray-100 text-gray-600'} hover:opacity-80 transition-opacity`}
-                    >
-                      <span>{sc?.label ?? room.status}</span>
-                      <ChevronDown className="h-3 w-3" />
-                    </button>
+                    {canUpdateRoomStatus ? (
+                      <button
+                        type="button"
+                        onClick={() => setStatusChangeRoom(room)}
+                        className={`w-full rounded-md px-3 py-1.5 text-xs font-medium flex items-center justify-between ${sc.color} hover:opacity-80 transition-opacity`}
+                      >
+                        <span>{sc.label}</span>
+                        <ChevronDown className="h-3 w-3" />
+                      </button>
+                    ) : (
+                      <div
+                        className={`w-full rounded-md px-3 py-1.5 text-xs font-medium flex items-center justify-between ${sc.color}`}
+                      >
+                        <span>{sc.label}</span>
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
               )
@@ -541,9 +592,10 @@ export default function HousekeepingPage() {
               <p className="text-xs text-muted-foreground">Created by {currentUserName}. Last updated by {currentUserName}.</p>
             </div>
             <div className="grid grid-cols-2 gap-2">
-              {ROOM_STATUS_OPTIONS.map(opt => (
+              {housekeepingStatusPickerOptions.map(opt => (
                 <button
                   key={opt.value}
+                  type="button"
                   onClick={() => handleRoomStatusChange(statusChangeRoom.id, opt.value)}
                   className={`rounded-lg px-4 py-3 text-sm font-medium text-left transition-all hover:scale-105 active:scale-95 ${opt.color} ${statusChangeRoom.status === opt.value ? 'ring-2 ring-offset-1 ring-primary' : ''}`}
                 >

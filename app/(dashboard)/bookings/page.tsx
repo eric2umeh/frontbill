@@ -16,7 +16,7 @@ import { formatNaira } from '@/lib/utils/currency'
 import { usePageData } from '@/hooks/use-page-data'
 import { useAuth } from '@/lib/auth-context'
 import { hasPermission } from '@/lib/permissions'
-import { Plus, Loader2, Users, LogOut, DoorOpen, Bed } from 'lucide-react'
+import { Plus, Loader2, Users, LogOut, DoorOpen, Bed, AlertTriangle, CalendarClock } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { getUserDisplayName } from '@/lib/utils/user-display'
@@ -24,7 +24,7 @@ import { fetchUserDisplayNameMap } from '@/lib/utils/fetch-user-display-names'
 import { getBulkGroupId } from '@/lib/utils/bulk-booking'
 import { manualCheckoutEligible, resolvedCheckoutDateForClosing, hideChargeExtendInBookingsTable, DEFAULT_ORG_CHECKOUT_TIME, isPastCheckoutCutoff } from '@/lib/utils/booking-checkout-ui'
 import { folioPositiveOutstandingSum, shouldReconcileBookingPaymentPaid } from '@/lib/utils/booking-bill-balance'
-import { isInHouseOnCalendarDay, todayYmdHotel } from '@/lib/utils/booking-in-house-dates'
+import { bookingYmdHotel, isInHouseOnCalendarDay, todayYmdHotel } from '@/lib/utils/booking-in-house-dates'
 import { resolveHotelTimeZone } from '@/lib/hotel-date'
 
 interface Booking {
@@ -93,7 +93,13 @@ export default function BookingsPage() {
     status: 'checked_in',
     payment_status: 'all',
   })
-  const [roomStats, setRoomStats] = useState<{ total: number; occupied: number; available: number } | null>(null)
+  const [roomStats, setRoomStats] = useState<{
+    total: number
+    occupied: number
+    availableForCheckin: number
+    outOfOrder: number
+    dueOutToday: number
+  } | null>(null)
 
   useEffect(() => {
     if (!organizationId) return
@@ -119,15 +125,54 @@ export default function BookingsPage() {
     if (!organizationId) return
     const supabase = createClient()
     if (!supabase) return
-    const { data, error } = await supabase.from('rooms').select('status').eq('organization_id', organizationId)
-    if (error) {
-      console.warn('[bookings] room stats:', error.message)
+    const tz = resolveHotelTimeZone()
+    const today = todayYmdHotel(tz)
+
+    const [{ data: roomRows, error: roomErr }, { data: dueBookings, error: dueErr }] = await Promise.all([
+      supabase.from('rooms').select('status').eq('organization_id', organizationId),
+      supabase
+        .from('bookings')
+        .select('check_in, check_out, status')
+        .eq('organization_id', organizationId)
+        .in('status', ['checked_in', 'confirmed', 'reserved']),
+    ])
+
+    if (roomErr) {
+      console.warn('[bookings] room stats:', roomErr.message)
       return
     }
-    const list = data || []
-    const occupied = list.filter((r: { status?: string }) => String(r.status || '').toLowerCase() === 'occupied').length
-    const available = list.filter((r: { status?: string }) => String(r.status || '').toLowerCase() === 'available').length
-    setRoomStats({ total: list.length, occupied, available })
+    if (dueErr) {
+      console.warn('[bookings] due-out stats:', dueErr.message)
+    }
+
+    const norm = (s: string | null | undefined) => String(s || '').toLowerCase().replace(/-/g, '_')
+    const list = roomRows || []
+    const occupied = list.filter((r: { status?: string }) => norm(r.status) === 'occupied').length
+    const outOfOrder = list.filter((r: { status?: string }) => norm(r.status) === 'out_of_order').length
+    const unavailableForCheckin = list.filter((r: { status?: string }) => {
+      const s = norm(r.status)
+      return s === 'occupied' || s === 'out_of_order'
+    }).length
+    const availableForCheckin = list.length - unavailableForCheckin
+
+    let dueOutToday = 0
+    for (const b of dueBookings || []) {
+      const row = b as { check_in?: string; check_out?: string; status?: string }
+      const ci = row.check_in
+      const co = row.check_out
+      if (!ci || !co) continue
+      if (bookingYmdHotel(co, tz) !== today) continue
+      if (!isInHouseOnCalendarDay(ci, co, today, tz)) continue
+      dueOutToday += 1
+    }
+
+    setRoomStats({
+      total: list.length,
+      occupied,
+      availableForCheckin,
+      outOfOrder,
+      dueOutToday,
+    })
   }, [organizationId])
 
   const fetchBookings = useCallback(async () => {
@@ -668,38 +713,54 @@ export default function BookingsPage() {
             Default: <strong>in-house</strong> stays only (fast). Change Status for history. Checkout frees the room.
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2 shrink-0">
+        <div className="flex flex-wrap items-center gap-1.5 shrink-0">
           {roomStats !== null && (
             <>
               <div
-                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-input bg-background px-2.5 text-xs font-medium shadow-sm"
-                title={`${roomStats.total} rooms in inventory · occupied = room status`}
+                className="inline-flex h-7 items-center gap-1 rounded-md border border-input bg-background px-1.5 text-[10px] font-medium leading-none shadow-sm"
+                title="Rooms with status Occupied (set from bookings / front desk)"
               >
-                <Users className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
-                <span className="text-muted-foreground">Occupied</span>
+                <Bed className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden />
+                <span className="text-muted-foreground">Occ</span>
                 <span className="tabular-nums text-foreground">{roomStats.occupied}</span>
               </div>
               <div
-                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-input bg-background px-2.5 text-xs font-medium shadow-sm"
-                title={`${roomStats.total} rooms in inventory · available = room status`}
+                className="inline-flex h-7 items-center gap-1 rounded-md border border-input bg-background px-1.5 text-[10px] font-medium leading-none shadow-sm"
+                title="Rooms not Occupied and not Out of order — available for check-in"
               >
-                <Bed className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
-                <span className="text-muted-foreground">Available</span>
-                <span className="tabular-nums text-foreground">{roomStats.available}</span>
+                <DoorOpen className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden />
+                <span className="text-muted-foreground">Avail</span>
+                <span className="tabular-nums text-foreground">{roomStats.availableForCheckin}</span>
               </div>
-              <span className="text-[10px] text-muted-foreground tabular-nums hidden sm:inline" title="Total rooms">
-                of {roomStats.total}
+              <div
+                className="inline-flex h-7 items-center gap-1 rounded-md border border-input bg-background px-1.5 text-[10px] font-medium leading-none shadow-sm"
+                title="In-house folios with checkout today (hotel date)"
+              >
+                <CalendarClock className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden />
+                <span className="text-muted-foreground">Due</span>
+                <span className="tabular-nums text-foreground">{roomStats.dueOutToday}</span>
+              </div>
+              <div
+                className="inline-flex h-7 items-center gap-1 rounded-md border border-input bg-background px-1.5 text-[10px] font-medium leading-none shadow-sm"
+                title="Rooms marked Out of order"
+              >
+                <AlertTriangle className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden />
+                <span className="text-muted-foreground">OOO</span>
+                <span className="tabular-nums text-foreground">{roomStats.outOfOrder}</span>
+              </div>
+              <span className="text-[9px] text-muted-foreground tabular-nums hidden sm:inline px-0.5" title="Total rooms">
+                /{roomStats.total}
               </span>
             </>
           )}
           {hasPermission(role, 'bookings:create') && (
             <>
-              <Button variant="outline" size="sm" className="h-8 text-xs px-2.5 sm:px-3" onClick={() => setBulkModalOpen(true)}>
-                <Users className="mr-1.5 h-3.5 w-3.5" />
+              <Button variant="outline" size="sm" className="h-7 text-[10px] px-2" onClick={() => setBulkModalOpen(true)}>
+                <Users className="mr-1 h-3 w-3" />
                 Bulk Booking
               </Button>
-              <Button size="sm" className="h-8 text-xs px-2.5 sm:px-3" onClick={() => setModalOpen(true)}>
-                <Plus className="mr-1.5 h-3.5 w-3.5" />
+              <Button size="sm" className="h-7 text-[10px] px-2" onClick={() => setModalOpen(true)}>
+                <Plus className="mr-1 h-3 w-3" />
                 New Booking
               </Button>
             </>
