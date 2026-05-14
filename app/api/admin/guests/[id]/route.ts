@@ -153,7 +153,10 @@ export async function DELETE(request: Request, ctx: RouteCtx) {
     }
 
     if (!hasPermission(callerProfile.role, 'guests:delete')) {
-      return NextResponse.json({ error: 'Only an Administrator or Superadmin may delete guest profiles' }, { status: 403 })
+      return NextResponse.json(
+        { error: 'Only a Manager, Administrator, or Superadmin may delete guest profiles' },
+        { status: 403 },
+      )
     }
 
     const { data: guestRow, error: ge } = await admin

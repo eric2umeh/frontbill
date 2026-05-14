@@ -169,7 +169,7 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
   {
     key: 'manager',
     label: 'Manager',
-    description: 'Operations lead: dashboards, bookings and reservations including bulk/group flows, reserve check-in/cancel from lists, checkout, payments, ledger view, analytics, exports, housekeeping/maintenance oversight, night audit visibility and audit trails—and financial views accountants use except reconciliation management. Master edits to existing booking records, reservation record edits, destructive guest or organization profile edits, room inventory changes, backdate approvals, and full user/role administration stay with Administrator / Superadmin.',
+    description: 'Operations lead: dashboards, bookings and reservations including bulk/group flows, reserve check-in/cancel from lists, checkout, payments, ledger view, analytics, exports, housekeeping/maintenance oversight, night audit visibility and audit trails—and financial views accountants use except reconciliation management. May edit or delete guest profiles alongside Administrator / Superadmin. Master edits to existing booking records, reservation record edits, organization profile edits, room inventory changes, backdate approvals, and full user/role administration stay with Administrator / Superadmin.',
     color: 'bg-purple-100 text-purple-800',
     permissions: ALL.filter(p => ![
       'roles:manage',
@@ -248,14 +248,14 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
   {
     key: 'front_desk',
     label: 'Front Desk',
-    description: 'Front office: new walk-ins and group/bulk bookings, reserve workflows and reserve check-ins from operational lists, check-out, folio charges and extensions where policy allows, payments, city ledger posting, organization creation for corporates, night audit run plus audit trail review, and backdate requests. Master edits to bookings, reservations, guests, organizations, or room inventory are reserved for Administrators.',
+    description: 'Front office: new walk-ins and group/bulk bookings, reserve workflows and reserve check-ins from operational lists, check-out, folio charges and extensions where policy allows, payments, city ledger posting, organization creation for corporates, night audit run plus audit trail review, and backdate requests. Creating guest profiles is allowed; editing or deleting guest profiles is reserved for Manager, Administrator, or Superadmin. Master edits to bookings, reservations, organizations, or room inventory are reserved for Administrators.',
     color: 'bg-green-100 text-green-800',
     permissions: [
       'dashboard:view',
       'bookings:view', 'bookings:create', 'bookings:checkin', 'bookings:checkout',
       'reservations:view', 'reservations:create',
       'rooms:view',
-      'guests:view', 'guests:create', 'guests:edit',
+      'guests:view', 'guests:create',
       'transactions:view', 'transactions:create',
       'payments:view', 'payments:create',
       'organizations:view', 'organizations:create',
@@ -379,7 +379,10 @@ export function hasPermission(userRole: string | null | undefined, permission: P
   if (permission === 'reservations:edit') {
     return roleKey === 'superadmin' || roleKey === 'admin'
   }
-  if (['guests:edit', 'guests:delete', 'organizations:edit', 'organizations:delete'].includes(permission)) {
+  if (permission === 'guests:edit' || permission === 'guests:delete') {
+    return roleKey === 'superadmin' || roleKey === 'admin' || roleKey === 'manager'
+  }
+  if (permission === 'organizations:edit' || permission === 'organizations:delete') {
     return roleKey === 'superadmin' || roleKey === 'admin'
   }
   const role = getRoleDefinition(roleKey)
