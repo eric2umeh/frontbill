@@ -8,6 +8,9 @@ interface AuthContextValue {
   name: string
   role: string
   organizationId: string
+  /** Public URL for hotel logo; empty when none */
+  organizationLogoUrl: string
+  setOrganizationLogoUrl: (url: string) => void
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
