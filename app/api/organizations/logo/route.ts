@@ -15,16 +15,7 @@ function extForMime(mime: string) {
   return ''
 }
 
-async function requireSuperadminOrg() {
-  const supabase = await createClient()
-  const {
-    data: { user },
-    error: authError,
-  } = await supabase.auth.getUser()
-  if (authError || !user?.id) {
-    return { error: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) }
-  }
-
+async function requireSuperadminOrg(request: Request) {
   let admin
   try {
     admin = createAdminClient()
@@ -37,10 +28,36 @@ async function requireSuperadminOrg() {
     }
   }
 
+  /**
+   * Browser `createClient()` persists the session in localStorage, while the server
+   * client only reads cookies — so `getUser()` is often empty for same-origin fetch().
+   * Accept `Authorization: Bearer <access_token>` from the client and validate with the service role.
+   */
+  const cookieSb = await createClient()
+  const { data: { user: cookieUser } } = await cookieSb.auth.getUser()
+
+  let userId: string | null = cookieUser?.id ?? null
+  if (!userId) {
+    const raw = request.headers.get('authorization')?.trim()
+    const bearer = raw?.toLowerCase().startsWith('bearer ') ? raw.slice(7).trim() : null
+    if (!bearer) {
+      return { error: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) }
+    }
+    const { data: jwtUserData, error: jwtError } = await admin.auth.getUser(bearer)
+    if (jwtError || !jwtUserData.user?.id) {
+      return { error: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) }
+    }
+    userId = jwtUserData.user.id
+  }
+
+  if (!userId) {
+    return { error: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) }
+  }
+
   const { data: profile, error: profileError } = await admin
     .from('profiles')
     .select('role, organization_id')
-    .eq('id', user.id)
+    .eq('id', userId)
     .maybeSingle()
 
   if (profileError || !profile?.organization_id) {
@@ -55,7 +72,7 @@ async function requireSuperadminOrg() {
 }
 
 export async function POST(request: Request) {
-  const gate = await requireSuperadminOrg()
+  const gate = await requireSuperadminOrg(request)
   if ('error' in gate) return gate.error
   const { admin, organizationId } = gate
 
@@ -125,8 +142,8 @@ export async function POST(request: Request) {
   return NextResponse.json({ logo_url: publicUrl })
 }
 
-export async function DELETE() {
-  const gate = await requireSuperadminOrg()
+export async function DELETE(request: Request) {
+  const gate = await requireSuperadminOrg(request)
   if ('error' in gate) return gate.error
   const { admin, organizationId } = gate
 
