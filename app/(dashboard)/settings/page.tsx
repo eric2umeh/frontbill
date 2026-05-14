@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -8,10 +8,10 @@ import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { Badge } from '@/components/ui/badge'
 import { toast } from 'sonner'
-import { Loader2, Building2, Shield, Eye, EyeOff, Clock } from 'lucide-react'
+import { Loader2, Building2, Shield, Eye, EyeOff, Clock, ImageIcon, Trash2 } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
 import { createClient } from '@/lib/supabase/client'
-import { hasPermission } from '@/lib/permissions'
+import { canonicalRoleKey, hasPermission } from '@/lib/permissions'
 
 /** PostgREST/Postgres when `organizations` has no checkout policy columns yet */
 function isOrgCheckoutPolicyColumnError(err: { message?: string } | null | undefined): boolean {
@@ -22,7 +22,7 @@ function isOrgCheckoutPolicyColumnError(err: { message?: string } | null | undef
 }
 
 export default function SettingsPage() {
-  const { userId, email, name, role, organizationId } = useAuth()
+  const { userId, email, name, role, organizationId, organizationLogoUrl, setOrganizationLogoUrl } = useAuth()
   const supabase = createClient()
 
   const [hotelName, setHotelName] = useState('')
@@ -43,10 +43,14 @@ export default function SettingsPage() {
   const [lateCheckoutFeePerHour, setLateCheckoutFeePerHour] = useState('')
   const [checkoutPolicySaving, setCheckoutPolicySaving] = useState(false)
   const [hotelSaving, setHotelSaving] = useState(false)
+  const [hotelLogoUrl, setHotelLogoUrl] = useState('')
+  const [logoBusy, setLogoBusy] = useState(false)
+  const hotelLogoInputRef = useRef<HTMLInputElement>(null)
   /** False when DB has no `checkout_time` / `late_checkout_fee_per_hour` (run add-checkout-policy SQL) */
   const [checkoutPolicyDbAvailable, setCheckoutPolicyDbAvailable] = useState(true)
   /** Administrator + Superadmin (canonical); not strict string match on role label */
   const canManageHotelSettings = hasPermission(role, 'settings:manage')
+  const canUpdateHotelLogo = canonicalRoleKey(role) === 'superadmin'
 
   useEffect(() => {
     async function fetchHotelInfo() {
@@ -59,13 +63,14 @@ export default function SettingsPage() {
           phone?: string | null
           checkout_time?: string | null
           late_checkout_fee_per_hour?: number | null
+          logo_url?: string | null
         } | null = null
         /** Local flag — state updates are async, so avoid reading `checkoutPolicyDbAvailable` here */
         let checkoutPolicyColsOk = true
 
         const full = await supabase
           .from('organizations')
-          .select('name, email, address, phone, checkout_time, late_checkout_fee_per_hour')
+          .select('name, email, address, phone, checkout_time, late_checkout_fee_per_hour, logo_url')
           .eq('id', organizationId)
           .maybeSingle()
 
@@ -74,7 +79,7 @@ export default function SettingsPage() {
           setCheckoutPolicyDbAvailable(false)
           const base = await supabase
             .from('organizations')
-            .select('name, email, address, phone')
+            .select('name, email, address, phone, logo_url')
             .eq('id', organizationId)
             .maybeSingle()
           if (base.error) throw base.error
@@ -98,6 +103,7 @@ export default function SettingsPage() {
             setCheckoutTime('12:00')
             setLateCheckoutFeePerHour('')
           }
+          setHotelLogoUrl((data.logo_url as string) || '')
         }
       } catch (err: any) {
         toast.error(err.message || 'Failed to load hotel information')
@@ -140,6 +146,45 @@ export default function SettingsPage() {
       toast.error(err.message || 'Failed to update password')
     } finally {
       setPasswordSaving(false)
+    }
+  }
+
+  async function handleHotelLogoFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file || !canUpdateHotelLogo) return
+    setLogoBusy(true)
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      const res = await fetch('/api/organizations/logo', { method: 'POST', body: fd })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(body.error || 'Upload failed')
+      const url = String(body.logo_url || '')
+      setHotelLogoUrl(url)
+      setOrganizationLogoUrl(url)
+      toast.success('Hotel logo updated')
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to upload logo')
+    } finally {
+      setLogoBusy(false)
+    }
+  }
+
+  async function handleRemoveHotelLogo() {
+    if (!canUpdateHotelLogo) return
+    setLogoBusy(true)
+    try {
+      const res = await fetch('/api/organizations/logo', { method: 'DELETE' })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(body.error || 'Failed to remove logo')
+      setHotelLogoUrl('')
+      setOrganizationLogoUrl('')
+      toast.success('Hotel logo removed')
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to remove logo')
+    } finally {
+      setLogoBusy(false)
     }
   }
 
@@ -284,6 +329,72 @@ export default function SettingsPage() {
                   <Input id="currency" value="Nigerian Naira (₦)" disabled />
                 </div>
               </div>
+
+              <Separator />
+
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <ImageIcon className="h-4 w-4 text-muted-foreground" />
+                  <Label className="text-base font-medium">Hotel logo</Label>
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  Shown in the app sidebar, browser tab, and on the sign-in page for returning users on this device. PNG, JPEG, WebP, or GIF — up to 2&nbsp;MB.
+                </p>
+                {!canUpdateHotelLogo && (
+                  <p className="text-sm text-muted-foreground">
+                    Only a <strong>Superadmin</strong> may upload or remove the hotel logo.
+                  </p>
+                )}
+                <div className="flex flex-wrap items-center gap-4">
+                  <div className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-lg border bg-muted">
+                    {(hotelLogoUrl || organizationLogoUrl) ? (
+                      <img
+                        src={hotelLogoUrl || organizationLogoUrl}
+                        alt=""
+                        className="max-h-full max-w-full object-contain p-1"
+                      />
+                    ) : (
+                      <Building2 className="h-10 w-10 text-muted-foreground" />
+                    )}
+                  </div>
+                  {canUpdateHotelLogo && (
+                    <div className="flex flex-wrap gap-2">
+                      <input
+                        ref={hotelLogoInputRef}
+                        type="file"
+                        accept="image/png,image/jpeg,image/jpg,image/webp,image/gif"
+                        className="sr-only"
+                        onChange={handleHotelLogoFileChange}
+                        disabled={logoBusy}
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={logoBusy}
+                        onClick={() => hotelLogoInputRef.current?.click()}
+                      >
+                        {logoBusy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                        {logoBusy ? 'Working…' : 'Choose image'}
+                      </Button>
+                      {(hotelLogoUrl || organizationLogoUrl) ? (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="text-destructive hover:text-destructive"
+                          disabled={logoBusy}
+                          onClick={handleRemoveHotelLogo}
+                        >
+                          <Trash2 className="mr-2 h-4 w-4" />
+                          Remove logo
+                        </Button>
+                      ) : null}
+                    </div>
+                  )}
+                </div>
+              </div>
+
               {canManageHotelSettings && (
                 <Button onClick={handleSaveHotelInformation} disabled={hotelSaving}>
                   {hotelSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
