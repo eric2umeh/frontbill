@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { EnhancedDataTable } from '@/components/shared/enhanced-data-table'
 import { Badge } from '@/components/ui/badge'
@@ -16,7 +16,7 @@ import { formatNaira } from '@/lib/utils/currency'
 import { usePageData } from '@/hooks/use-page-data'
 import { useAuth } from '@/lib/auth-context'
 import { hasPermission } from '@/lib/permissions'
-import { Plus, Loader2, Users, LogOut, DoorOpen } from 'lucide-react'
+import { Plus, Loader2, Users, LogOut, DoorOpen, Bed } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { getUserDisplayName } from '@/lib/utils/user-display'
@@ -24,6 +24,8 @@ import { fetchUserDisplayNameMap } from '@/lib/utils/fetch-user-display-names'
 import { getBulkGroupId } from '@/lib/utils/bulk-booking'
 import { manualCheckoutEligible, resolvedCheckoutDateForClosing, hideChargeExtendInBookingsTable, DEFAULT_ORG_CHECKOUT_TIME, isPastCheckoutCutoff } from '@/lib/utils/booking-checkout-ui'
 import { folioPositiveOutstandingSum, shouldReconcileBookingPaymentPaid } from '@/lib/utils/booking-bill-balance'
+import { isInHouseOnCalendarDay, todayYmdHotel } from '@/lib/utils/booking-in-house-dates'
+import { resolveHotelTimeZone } from '@/lib/hotel-date'
 
 interface Booking {
   id: string
@@ -86,6 +88,12 @@ export default function BookingsPage() {
   const canCancelReservation = hasPermission(role, 'reservations:delete')
 
   const [orgCheckoutTime, setOrgCheckoutTime] = useState(DEFAULT_ORG_CHECKOUT_TIME)
+  /** Drives server fetch scope; default shows only in-house checked-in guests (fast). */
+  const [tableFilters, setTableFilters] = useState<Record<string, string>>({
+    status: 'checked_in',
+    payment_status: 'all',
+  })
+  const [roomStats, setRoomStats] = useState<{ total: number; occupied: number; available: number } | null>(null)
 
   useEffect(() => {
     if (!organizationId) return
@@ -107,44 +115,74 @@ export default function BookingsPage() {
     }
   }, [organizationId])
 
-  useEffect(() => {
-    if (organizationId) fetchBookings()
-  }, [organizationId, userId])
+  const refreshRoomStats = useCallback(async () => {
+    if (!organizationId) return
+    const supabase = createClient()
+    if (!supabase) return
+    const { data, error } = await supabase.from('rooms').select('status').eq('organization_id', organizationId)
+    if (error) {
+      console.warn('[bookings] room stats:', error.message)
+      return
+    }
+    const list = data || []
+    const occupied = list.filter((r: { status?: string }) => String(r.status || '').toLowerCase() === 'occupied').length
+    const available = list.filter((r: { status?: string }) => String(r.status || '').toLowerCase() === 'available').length
+    setRoomStats({ total: list.length, occupied, available })
+  }, [organizationId])
 
-  const fetchBookings = async () => {
+  const fetchBookings = useCallback(async () => {
     try {
       startFetch()
       const supabase = createClient()
-      
+
       if (!supabase) {
         setBookings([])
         return
       }
 
+      const statusKey = tableFilters.status
+      const tz = resolveHotelTimeZone()
+      const today = todayYmdHotel(tz)
+      const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+      const fortyFiveDaysAgo = new Date(Date.now() - 45 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+      const sixtyDaysAgo = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+
       let query = supabase
         .from('bookings')
         .select('*, guests(name, phone), rooms(id, room_number, room_type), created_by, updated_by, updated_at')
         .eq('organization_id', organizationId)
-        .in('status', ['confirmed', 'checked_in', 'reserved', 'checked_out'])
 
-      // Default: show bookings from 90 days ago to future (narrow further with table date picker)
-      const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
-      query = query.gte('check_in', ninetyDaysAgo)
+      if (statusKey === 'checked_in') {
+        // In-house: folio often stays "confirmed" after walk-in; avoid strict timestamp filters (TZ/casts).
+        query = query.in('status', ['checked_in', 'confirmed', 'reserved']).gte('check_out', today)
+      } else if (statusKey === 'all') {
+        query = query
+          .in('status', ['confirmed', 'checked_in', 'reserved', 'checked_out'])
+          .gte('check_in', ninetyDaysAgo)
+      } else if (statusKey === 'checked_out') {
+        query = query.eq('status', 'checked_out').gte('check_out', sixtyDaysAgo)
+      } else {
+        query = query.eq('status', statusKey).gte('check_in', fortyFiveDaysAgo)
+      }
 
       const { data, error } = await query
         .order('check_in', { ascending: false })
         .order('created_at', { ascending: false })
 
       if (error) throw error
-      
+
       // Fetch creator and updater profiles for all bookings
-      const userIds = Array.from(new Set(
-        [...(data || []).map((b: any) => b.created_by), ...(data || []).map((b: any) => b.updated_by)].filter(Boolean)
-      ))
+      const userIds = Array.from(
+        new Set(
+          [...(data || []).map((b: any) => b.created_by), ...(data || []).map((b: any) => b.updated_by)].filter(
+            Boolean,
+          ),
+        ),
+      )
       const userMap = await fetchUserDisplayNameMap(userIds as string[], userId)
-      
+
       // Derive payment_method from notes field (since there's no payment_method column on bookings)
-      const bookingsWithUsers = (data || []).map((booking: any) => {
+      let bookingsWithUsers = (data || []).map((booking: any) => {
         let payment_method = 'cash'
         let ledger_account_name = ''
         if (booking.notes) {
@@ -167,10 +205,22 @@ export default function BookingsPage() {
           ledger_account_name,
           guestName: booking.guests?.name || '',
           guestPhone: booking.guests?.phone || '',
-          created_by_name: booking.created_by ? userMap[booking.created_by] || getUserDisplayName(null, booking.created_by) : 'System',
-          updated_by_name: booking.updated_by ? userMap[booking.updated_by] || getUserDisplayName(null, booking.updated_by) : null,
+          created_by_name: booking.created_by
+            ? userMap[booking.created_by] || getUserDisplayName(null, booking.created_by)
+            : 'System',
+          updated_by_name: booking.updated_by
+            ? userMap[booking.updated_by] || getUserDisplayName(null, booking.updated_by)
+            : null,
         }
       })
+
+      if (statusKey === 'checked_in') {
+        bookingsWithUsers = bookingsWithUsers.filter((b: any) => {
+          const st = String(b.status || '').toLowerCase()
+          if (!['checked_in', 'confirmed', 'reserved'].includes(st)) return false
+          return isInHouseOnCalendarDay(b.check_in, b.check_out, today, tz)
+        })
+      }
 
       // Derive each booking's balance from folio (same rules as booking detail / bill card)
       const bookingIds = bookingsWithUsers.map((b: any) => b.id)
@@ -236,12 +286,26 @@ export default function BookingsPage() {
       console.error('Error fetching bookings:', error)
       toast.error('Failed to load bookings')
     } finally {
+      void refreshRoomStats()
       endFetch()
     }
-  }
+  }, [organizationId, userId, tableFilters.status, refreshRoomStats])
+
+  useEffect(() => {
+    if (organizationId) fetchBookings()
+  }, [organizationId, userId, fetchBookings])
+
+  useEffect(() => {
+    if (!organizationId) {
+      setRoomStats(null)
+      return
+    }
+    void refreshRoomStats()
+  }, [organizationId, refreshRoomStats])
 
   const statusColors: Record<string, string> = {
     reserved: 'bg-blue-500/10 text-blue-700 border-blue-200',
+    confirmed: 'bg-sky-500/10 text-sky-800 border-sky-200',
     checked_in: 'bg-green-500/10 text-green-700 border-green-200',
     checked_out: 'bg-gray-500/10 text-gray-700 border-gray-200',
     no_show: 'bg-orange-500/10 text-orange-700 border-orange-200',
@@ -597,30 +661,91 @@ export default function BookingsPage() {
         </>
       )}
       
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Bookings</h1>
-          <p className="text-muted-foreground">Manage active bookings and check-ins</p>
+      <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between lg:gap-3">
+        <div className="min-w-0 space-y-1">
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Bookings</h1>
+          <p className="text-muted-foreground text-xs sm:text-sm leading-snug max-w-3xl">
+            Default: <strong>in-house</strong> stays only (fast). Change Status for history. Checkout frees the room.
+          </p>
         </div>
-        {hasPermission(role, 'bookings:create') && (
-          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
-            <Button variant="outline" size="sm" className="w-full text-xs sm:w-auto sm:text-sm" onClick={() => setBulkModalOpen(true)}>
-              <Users className="mr-2 h-3.5 w-3.5 sm:h-4 sm:w-4" />
-              Bulk Booking
-            </Button>
-            <Button size="sm" className="w-full text-xs sm:w-auto sm:text-sm" onClick={() => setModalOpen(true)}>
-              <Plus className="mr-2 h-3.5 w-3.5 sm:h-4 sm:w-4" />
-              New Booking
-            </Button>
-          </div>
-        )}
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
+          {roomStats !== null && (
+            <>
+              <div
+                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-input bg-background px-2.5 text-xs font-medium shadow-sm"
+                title={`${roomStats.total} rooms in inventory · occupied = room status`}
+              >
+                <Users className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                <span className="text-muted-foreground">Occupied</span>
+                <span className="tabular-nums text-foreground">{roomStats.occupied}</span>
+              </div>
+              <div
+                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-input bg-background px-2.5 text-xs font-medium shadow-sm"
+                title={`${roomStats.total} rooms in inventory · available = room status`}
+              >
+                <Bed className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                <span className="text-muted-foreground">Available</span>
+                <span className="tabular-nums text-foreground">{roomStats.available}</span>
+              </div>
+              <span className="text-[10px] text-muted-foreground tabular-nums hidden sm:inline" title="Total rooms">
+                of {roomStats.total}
+              </span>
+            </>
+          )}
+          {hasPermission(role, 'bookings:create') && (
+            <>
+              <Button variant="outline" size="sm" className="h-8 text-xs px-2.5 sm:px-3" onClick={() => setBulkModalOpen(true)}>
+                <Users className="mr-1.5 h-3.5 w-3.5" />
+                Bulk Booking
+              </Button>
+              <Button size="sm" className="h-8 text-xs px-2.5 sm:px-3" onClick={() => setModalOpen(true)}>
+                <Plus className="mr-1.5 h-3.5 w-3.5" />
+                New Booking
+              </Button>
+            </>
+          )}
+        </div>
       </div>
 
       <EnhancedDataTable
         data={bookings}
         compactTable
-        searchKeys={['folio_id', 'guestName', 'guestPhone', 'ledger_account_name', 'rooms.room_number'] as any}
-        dateField="check_in"
+        rowKey={(b) => (b.is_bulk && b.bulk_group_id ? `bulk-${b.bulk_group_id}` : String(b.id))}
+        controlledActiveFilters={tableFilters}
+        onControlledActiveFiltersChange={setTableFilters}
+        searchMatch={(b, query) => {
+          const q = query.trim().toLowerCase()
+          if (!q) return true
+          const parts: string[] = [
+            String(b.folio_id ?? ''),
+            String(b.guestName ?? ''),
+            String(b.guestPhone ?? ''),
+            String(b.ledger_account_name ?? ''),
+            String(b.rooms?.room_number ?? ''),
+            String(b.rooms?.room_type ?? ''),
+          ]
+          if (b.is_bulk && b.bulk_members) {
+            for (const m of b.bulk_members) {
+              parts.push(
+                String(m.guests?.name ?? ''),
+                String(m.guests?.phone ?? ''),
+                String(m.rooms?.room_number ?? ''),
+              )
+            }
+          }
+          return parts.some((p) => p.toLowerCase().includes(q))
+        }}
+        resolveFilterMatch={(row, key, val) => {
+          if (key !== 'status' || val.trim().toLowerCase() !== 'checked_in') return undefined
+          const r = row as Booking
+          if (r.is_bulk && r.bulk_members?.length) {
+            return r.bulk_members.some((m) =>
+              ['checked_in', 'confirmed', 'reserved'].includes(String(m.status || '').toLowerCase()),
+            )
+          }
+          const st = String(r.status || '').toLowerCase()
+          return ['checked_in', 'confirmed', 'reserved'].includes(st)
+        }}
         filters={[
           {
             key: 'payment_status',
@@ -635,13 +760,19 @@ export default function BookingsPage() {
             key: 'status',
             label: 'Status',
             options: [
+              { value: 'checked_in', label: 'Checked in (in house)' },
               { value: 'reserved', label: 'Reserved' },
               { value: 'confirmed', label: 'Confirmed' },
-              { value: 'checked_in', label: 'Checked In' },
-              { value: 'checked_out', label: 'Checked Out' },
+              { value: 'checked_out', label: 'Checked out' },
             ],
           },
         ]}
+        emptyState={{
+          title: 'No bookings match your filters',
+          description:
+            'Uses the hotel calendar (Africa/Lagos by default). In-house includes folios still marked Confirmed. Try another status or clear the check-in date picker.',
+        }}
+        dateField="check_in"
         columns={[
           {
             key: 'guest',

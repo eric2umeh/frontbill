@@ -7,8 +7,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Card, CardContent } from '@/components/ui/card'
 import { Calendar } from '@/components/ui/calendar'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { Search, Filter, LayoutGrid, List, ChevronLeft, ChevronRight, CalendarIcon } from 'lucide-react'
-import { format, isSameDay, isWithinInterval, startOfDay, endOfDay } from 'date-fns'
+import { Search, LayoutGrid, List, ChevronLeft, ChevronRight, CalendarIcon } from 'lucide-react'
+import { format, isSameDay } from 'date-fns'
 
 /** `always`: all breakpoints (horizontal scroll). `md+` / `lg+`: hide below that breakpoint to prioritize key cols on phones. */
 export type ColumnResponsive = 'always' | 'md+' | 'lg+'
@@ -31,11 +31,24 @@ interface EnhancedDataTableProps<T> {
   columns: Column<T>[]
   filters?: Filter[]
   searchKeys?: (keyof T)[]
+  /** When set, used for search (overrides searchKeys substring logic when query non-empty). */
+  searchMatch?: (item: T, query: string) => boolean
+  /**
+   * Controlled filter values (e.g. parent refetches when `status` changes).
+   * When set, `onControlledActiveFiltersChange` must be provided to update them.
+   */
+  controlledActiveFilters?: Record<string, string>
+  onControlledActiveFiltersChange?: (next: Record<string, string>) => void
   renderCard?: (item: T) => React.ReactNode
   itemsPerPage?: number
   dateField?: keyof T
   onDateFilterChange?: (date: Date | undefined) => void
   onRowClick?: (item: T) => void
+  /** Stable row keys (defaults to row index). */
+  rowKey?: (item: T, index: number) => string
+  emptyState?: { title: string; description?: string }
+  /** When not `undefined`, overrides default equality for that filter key + value. */
+  resolveFilterMatch?: (item: T, filterKey: string, filterValue: string) => boolean | undefined
   /** Tighter cell padding (e.g. Bookings table with many actions). */
   compactTable?: boolean
 }
@@ -45,11 +58,17 @@ export function EnhancedDataTable<T extends Record<string, any>>({
   columns,
   filters = [],
   searchKeys = [],
+  searchMatch,
+  controlledActiveFilters,
+  onControlledActiveFiltersChange,
   renderCard,
   itemsPerPage = 10,
   dateField,
   onDateFilterChange,
   onRowClick,
+  rowKey,
+  emptyState,
+  resolveFilterMatch,
   compactTable = false,
 }: EnhancedDataTableProps<T>) {
   const columnResponsiveClass = (responsive?: ColumnResponsive): string => {
@@ -65,22 +84,32 @@ export function EnhancedDataTable<T extends Record<string, any>>({
   }
 
   const [searchQuery, setSearchQuery] = useState('')
-  const [activeFilters, setActiveFilters] = useState<Record<string, string>>({})
+  const [internalFilters, setInternalFilters] = useState<Record<string, string>>({})
+  const isControlled = controlledActiveFilters !== undefined && onControlledActiveFiltersChange !== undefined
+  const activeFilters = isControlled ? controlledActiveFilters : internalFilters
   const [viewMode, setViewMode] = useState<'table' | 'card'>('table')
   const [currentPage, setCurrentPage] = useState(1)
   const [selectedDate, setSelectedDate] = useState<Date | undefined>()
 
   // Filter and search logic
   const filteredData = data.filter((item) => {
-    // Search filter
-    const matchesSearch = searchKeys.length === 0 || searchKeys.some((key) => {
-      const value = item[key]
-      return String(value || '').toLowerCase().includes(searchQuery.toLowerCase())
-    })
+    const q = searchQuery.trim().toLowerCase()
+    const matchesSearch =
+      !q ||
+      (searchMatch
+        ? searchMatch(item, searchQuery)
+        : searchKeys.length === 0
+          ? true
+          : searchKeys.some((key) => {
+              const value = item[key]
+              return String(value || '').toLowerCase().includes(q)
+            }))
 
     // Active filters
     const matchesFilters = Object.entries(activeFilters).every(([key, value]) => {
       if (!value || value === 'all') return true
+      const custom = resolveFilterMatch?.(item, key, value)
+      if (custom !== undefined) return custom
       return String(item[key] || '').toLowerCase() === value.toLowerCase()
     })
 
@@ -96,9 +125,14 @@ export function EnhancedDataTable<T extends Record<string, any>>({
   const totalPages = Math.ceil(filteredData.length / itemsPerPage)
   const startIndex = (currentPage - 1) * itemsPerPage
   const paginatedData = filteredData.slice(startIndex, startIndex + itemsPerPage)
+  const rowId = (item: T, index: number) => (rowKey ? rowKey(item, index) : String(index))
 
   const handleFilterChange = (key: string, value: string) => {
-    setActiveFilters(prev => ({ ...prev, [key]: value }))
+    if (isControlled) {
+      onControlledActiveFiltersChange?.({ ...controlledActiveFilters!, [key]: value })
+    } else {
+      setInternalFilters((prev) => ({ ...prev, [key]: value }))
+    }
     setCurrentPage(1)
   }
 
@@ -208,7 +242,14 @@ export function EnhancedDataTable<T extends Record<string, any>>({
 
       {/* Results count */}
       <div className="text-sm text-muted-foreground">
-        Showing {startIndex + 1}-{Math.min(startIndex + itemsPerPage, filteredData.length)} of {filteredData.length} results
+        {filteredData.length === 0 ? (
+          <span>No matching results</span>
+        ) : (
+          <span>
+            Showing {startIndex + 1}-{Math.min(startIndex + itemsPerPage, filteredData.length)} of{' '}
+            {filteredData.length} results
+          </span>
+        )}
       </div>
 
       {/* Table or Card View */}
@@ -235,31 +276,51 @@ export function EnhancedDataTable<T extends Record<string, any>>({
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {paginatedData.map((item, index) => (
-                  <tr
-                    key={index}
-                    className={`hover:bg-muted/50 transition-colors ${onRowClick ? 'cursor-pointer' : ''}`}
-                    onClick={() => onRowClick?.(item)}
-                  >
-                    {columns.map((column) => (
-                      <td
-                        key={column.key.toString()}
-                        className={`${tdClass} ${columnResponsiveClass(column.responsive)}`}
-                      >
-                        {column.render ? column.render(item) : item[column.key]}
-                      </td>
-                    ))}
+                {paginatedData.length === 0 ? (
+                  <tr>
+                    <td colSpan={columns.length} className={`${tdClass} text-center py-12 text-muted-foreground`}>
+                      <p className="font-medium text-foreground">{emptyState?.title ?? 'No rows to display'}</p>
+                      {emptyState?.description && (
+                        <p className="text-sm mt-2 max-w-md mx-auto">{emptyState.description}</p>
+                      )}
+                    </td>
                   </tr>
-                ))}
+                ) : (
+                  paginatedData.map((item, index) => (
+                    <tr
+                      key={rowId(item, index)}
+                      className={`hover:bg-muted/50 transition-colors ${onRowClick ? 'cursor-pointer' : ''}`}
+                      onClick={() => onRowClick?.(item)}
+                    >
+                      {columns.map((column) => (
+                        <td
+                          key={column.key.toString()}
+                          className={`${tdClass} ${columnResponsiveClass(column.responsive)}`}
+                        >
+                          {column.render ? column.render(item) : item[column.key]}
+                        </td>
+                      ))}
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>
         </div>
       ) : renderCard ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {paginatedData.map((item, index) => (
-            <Card key={index}>{renderCard(item)}</Card>
-          ))}
+          {paginatedData.length === 0 ? (
+            <div className="col-span-full border rounded-lg p-10 text-center text-muted-foreground">
+              <p className="font-medium text-foreground">{emptyState?.title ?? 'No rows to display'}</p>
+              {emptyState?.description && (
+                <p className="text-sm mt-2 max-w-md mx-auto">{emptyState.description}</p>
+              )}
+            </div>
+          ) : (
+            paginatedData.map((item, index) => (
+              <Card key={rowId(item, index)}>{renderCard(item)}</Card>
+            ))
+          )}
         </div>
       ) : null}
 

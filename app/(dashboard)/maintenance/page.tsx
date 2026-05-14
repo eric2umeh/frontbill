@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/lib/auth-context'
-import { LoadingSpinner } from '@/components/shared/loading-screen'
+import { LoadingSpinner } from '@/components/loading-screen'
 import { hasPermission } from '@/lib/permissions'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -96,6 +96,7 @@ export default function MaintenancePage() {
   const canCreate = hasPermission(role, 'maintenance:create')
   const canAssign = hasPermission(role, 'maintenance:assign')
   const canReport = hasPermission(role, 'maintenance:report')
+  const canUpdateRoomStatus = hasPermission(role, 'rooms:update_status')
 
   const [tasks, setTasks] = useState<MaintenanceTask[]>([])
   const [rooms, setRooms] = useState<Room[]>([])
@@ -213,8 +214,8 @@ export default function MaintenancePage() {
       }])
       if (error) throw error
 
-      // Auto-set room to 'maintenance' status if critical or high priority
-      if (['critical', 'high'].includes(orderForm.priority)) {
+      // Only roles with rooms:update_status (e.g. Housekeeping, Admin) may change operational room status
+      if (canUpdateRoomStatus && ['critical', 'high'].includes(orderForm.priority)) {
         await supabase.from('rooms').update({ status: 'maintenance', updated_by: userId, updated_at: new Date().toISOString() }).eq('id', orderForm.room_id)
         setRooms(prev => prev.map(r => r.id === orderForm.room_id ? { ...r, status: 'maintenance' } : r))
       }
@@ -242,6 +243,10 @@ export default function MaintenancePage() {
   }
 
   const handleRoomStatusChange = async (roomId: string, newStatus: string) => {
+    if (!canUpdateRoomStatus) {
+      toast.error('Only Housekeeping or an Administrator may change operational room status.')
+      return
+    }
     const supabase = createClient()
     const room = rooms.find(r => r.id === roomId)
     const { error } = await supabase
@@ -471,10 +476,15 @@ export default function MaintenancePage() {
 
         {/* Room Status Panel */}
         <TabsContent value="rooms" className="space-y-4">
-          <p className="text-sm text-muted-foreground">Click any room status badge to quickly update it.</p>
+          <p className="text-sm text-muted-foreground">
+            {canUpdateRoomStatus
+              ? 'Click any room status badge to quickly update it.'
+              : 'Room status is read-only here. Housekeeping sets rooms out of order and back to available after maintenance confirms the fix.'}
+          </p>
           <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
             {rooms.map(room => {
               const sc = ROOM_STATUS_OPTIONS.find(o => o.value === room.status)
+              const badgeClass = `w-full rounded-md px-3 py-1.5 text-xs font-medium flex items-center justify-between ${sc?.color ?? 'bg-gray-100 text-gray-600'}`
               return (
                 <Card key={room.id} className="hover:shadow-md transition-shadow">
                   <CardContent className="pt-4 pb-4 space-y-3">
@@ -485,13 +495,20 @@ export default function MaintenancePage() {
                       </div>
                       <Bed className="h-5 w-5 text-muted-foreground" />
                     </div>
-                    <button
-                      onClick={() => setStatusChangeRoom(room)}
-                      className={`w-full rounded-md px-3 py-1.5 text-xs font-medium flex items-center justify-between ${sc?.color ?? 'bg-gray-100 text-gray-600'} hover:opacity-80 transition-opacity`}
-                    >
-                      <span>{sc?.label ?? room.status}</span>
-                      <ChevronDown className="h-3 w-3" />
-                    </button>
+                    {canUpdateRoomStatus ? (
+                      <button
+                        type="button"
+                        onClick={() => setStatusChangeRoom(room)}
+                        className={`${badgeClass} hover:opacity-80 transition-opacity`}
+                      >
+                        <span>{sc?.label ?? room.status}</span>
+                        <ChevronDown className="h-3 w-3" />
+                      </button>
+                    ) : (
+                      <div className={badgeClass} role="status" aria-label={`Room ${room.room_number} status`}>
+                        <span>{sc?.label ?? room.status}</span>
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
               )
@@ -568,9 +585,14 @@ export default function MaintenancePage() {
               <Label>Additional Notes</Label>
               <Textarea placeholder="Parts needed, access requirements..." value={orderForm.notes} onChange={e => setOrderForm(f => ({ ...f, notes: e.target.value }))} rows={2} />
             </div>
-            {['critical', 'high'].includes(orderForm.priority) && orderForm.room_id && (
+            {canUpdateRoomStatus && ['critical', 'high'].includes(orderForm.priority) && orderForm.room_id && (
               <p className="text-xs text-orange-600 bg-orange-50 border border-orange-200 rounded px-3 py-2">
                 Room will be automatically set to "Maintenance" status due to {orderForm.priority} priority.
+              </p>
+            )}
+            {!canUpdateRoomStatus && ['critical', 'high'].includes(orderForm.priority) && orderForm.room_id && (
+              <p className="text-xs text-muted-foreground bg-muted/50 border rounded px-3 py-2">
+                Ask Housekeeping to set the room out of order or to maintenance if it must be taken off sale; they update operational room status after your work is done.
               </p>
             )}
           </div>

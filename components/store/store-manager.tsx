@@ -18,6 +18,7 @@ import type {
   MovementRow,
   StoreMovementType,
 } from '@/lib/store/types'
+import { parseBulkStockLines, resolveBulkItemKey } from '@/lib/store/bulk-stock-parse'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -92,6 +93,11 @@ function slugify(name: string) {
 
 function randomSuffix() {
   return Math.random().toString(36).slice(2, 7)
+}
+
+function movementDisplayAt(m: MovementRow): string {
+  const raw = m.movement_at || m.created_at
+  return raw
 }
 
 export function StoreManager({ initialTab }: { initialTab?: 'requisitions' | 'purchase_orders' } = {}) {
@@ -170,6 +176,19 @@ export function StoreManager({ initialTab }: { initialTab?: 'requisitions' | 'pu
   const [adjustNotes, setAdjustNotes] = useState('')
   const [adjustTarget, setAdjustTarget] = useState('')
   const [adjustSaving, setAdjustSaving] = useState(false)
+  const [adjustMovementAt, setAdjustMovementAt] = useState(() => format(new Date(), "yyyy-MM-dd'T'HH:mm"))
+  const [adjustUnitPrice, setAdjustUnitPrice] = useState('0')
+
+  const [bulkOpen, setBulkOpen] = useState(false)
+  const [bulkText, setBulkText] = useState('')
+  const [bulkType, setBulkType] = useState<'in' | 'out'>('in')
+  const [bulkMovementAt, setBulkMovementAt] = useState(() => format(new Date(), "yyyy-MM-dd'T'HH:mm"))
+  const [bulkRef, setBulkRef] = useState('')
+  const [bulkNotes, setBulkNotes] = useState('')
+  const [bulkPreview, setBulkPreview] = useState<
+    { lineNo: number; key: string; qty: number; item?: StoreItemRow; error?: string }[]
+  >([])
+  const [bulkSaving, setBulkSaving] = useState(false)
 
   const [deleteCat, setDeleteCat] = useState<StoreCategoryRow | null>(null)
   const [deleteItem, setDeleteItem] = useState<StoreItemRow | null>(null)
@@ -204,7 +223,7 @@ export function StoreManager({ initialTab }: { initialTab?: 'requisitions' | 'pu
           .from('store_stock_movements')
           .select('*')
           .eq('organization_id', organizationId)
-          .order('created_at', { ascending: false })
+          .order('movement_at', { ascending: false })
           .limit(200),
         supabase
           .from('store_stock_movements')
@@ -212,7 +231,7 @@ export function StoreManager({ initialTab }: { initialTab?: 'requisitions' | 'pu
           .eq('organization_id', organizationId)
           .in('movement_type', ['issue', 'out', 'sale'])
           .not('destination_department', 'is', null)
-          .order('created_at', { ascending: false })
+          .order('movement_at', { ascending: false })
           .limit(OUTLET_LEDGER_LIMIT),
       ])
 
@@ -279,8 +298,8 @@ export function StoreManager({ initialTab }: { initialTab?: 'requisitions' | 'pu
       .from('store_stock_movements')
       .select('*')
       .eq('organization_id', organizationId)
-      .gte('created_at', start)
-      .lte('created_at', end)
+      .gte('movement_at', start)
+      .lte('movement_at', end)
       .then((res: { data: unknown; error: { message: string } | null }) => {
         if (!res.error) setDailyMovements((res.data as MovementRow[]) || [])
         setLoadingDaily(false)
@@ -296,7 +315,7 @@ export function StoreManager({ initialTab }: { initialTab?: 'requisitions' | 'pu
       .from('store_stock_movements')
       .select('*')
       .eq('organization_id', organizationId)
-      .order('created_at', { ascending: false })
+      .order('movement_at', { ascending: false })
       .limit(1500)
       .then((res: { data: unknown; error: { message: string } | null }) => {
         if (!res.error) setAuditMovements((res.data as MovementRow[]) || [])
@@ -658,7 +677,85 @@ export function StoreManager({ initialTab }: { initialTab?: 'requisitions' | 'pu
     setAdjustTarget('')
     setAdjustDept(atOutlet ? storeOutletContext : '')
     setAdjustReceivedBy('')
+    setAdjustMovementAt(format(new Date(), "yyyy-MM-dd'T'HH:mm"))
+    setAdjustUnitPrice(String(Number(it.unit_price ?? 0)))
     setAdjustOpen(true)
+  }
+
+  async function sessionBearerHeaders(): Promise<Record<string, string>> {
+    const supabase = createClient()
+    if (!supabase) return {}
+    const {
+      data: { session },
+    } = await supabase.auth.getSession()
+    if (!session?.access_token) return {}
+    return { Authorization: `Bearer ${session.access_token}` }
+  }
+
+  const runBulkPreview = () => {
+    const parsed = parseBulkStockLines(bulkText)
+    if (parsed.length === 0) {
+      setBulkPreview([])
+      toast.error('No valid lines — use SKU or name, then tab or comma, then quantity.')
+      return
+    }
+    const rows = parsed.map((p) => {
+      const res = resolveBulkItemKey(p.key, items)
+      if (!res.ok) return { ...p, error: res.reason }
+      return { ...p, item: res.item }
+    })
+    setBulkPreview(rows)
+    const bad = rows.filter((r) => r.error).length
+    if (bad > 0) toast.info(`${rows.length - bad} OK, ${bad} need fixing`)
+    else toast.success(`${rows.length} line(s) ready to apply`)
+  }
+
+  const applyBulkMovements = async () => {
+    if (!organizationId || !userId) return
+    const okRows = bulkPreview.filter((r) => r.item && !r.error)
+    if (okRows.length === 0) {
+      toast.error('Preview first and fix any errors.')
+      return
+    }
+    const movementIso = new Date(bulkMovementAt).toISOString()
+    if (Number.isNaN(new Date(bulkMovementAt).getTime())) {
+      toast.error('Invalid movement date/time')
+      return
+    }
+    setBulkSaving(true)
+    try {
+      const auth = await sessionBearerHeaders()
+      if (!auth.Authorization) {
+        toast.error('Session missing — refresh and try again.')
+        return
+      }
+      const res = await fetch('/api/store/bulk-movements', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...auth },
+        body: JSON.stringify({
+          caller_id: userId,
+          movement_type: bulkType,
+          movement_at: movementIso,
+          reference: bulkRef.trim(),
+          notes: bulkNotes.trim(),
+          lines: okRows.map((r) => ({ item_id: r.item!.id, qty: r.qty })),
+        }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        toast.error(json.error || 'Bulk apply failed')
+        return
+      }
+      toast.success(`Applied ${json.result?.applied ?? okRows.length} movement(s).`)
+      setBulkOpen(false)
+      setBulkText('')
+      setBulkPreview([])
+      await fetchAll()
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Bulk apply failed')
+    } finally {
+      setBulkSaving(false)
+    }
   }
 
   const applyMovement = async () => {
@@ -712,6 +809,14 @@ export function StoreManager({ initialTab }: { initialTab?: 'requisitions' | 'pu
     const dept = adjustDept.trim() || null
     const recv = adjustReceivedBy || null
 
+    const atMs = new Date(adjustMovementAt).getTime()
+    if (Number.isNaN(atMs)) {
+      toast.error('Invalid movement date / time')
+      return
+    }
+    const movementIso = new Date(adjustMovementAt).toISOString()
+    const unitPrice = Math.max(0, Number(String(adjustUnitPrice).replace(/,/g, '.')) || 0)
+
     setAdjustSaving(true)
     try {
       const { data: inserted, error: insErr } = await supabase
@@ -727,16 +832,27 @@ export function StoreManager({ initialTab }: { initialTab?: 'requisitions' | 'pu
           created_by: userId,
           destination_department: dept,
           received_by: recv,
+          movement_at: movementIso,
         })
         .select('id')
         .single()
 
-      if (insErr) throw insErr
+      if (insErr) {
+        const msg = insErr.message || ''
+        if (/movement_at|column/i.test(msg) && /does not exist|schema cache/i.test(msg)) {
+          toast.error(
+            'Database needs updating: run scripts/043_store_movement_at_and_bulk_rpc.sql in the Supabase SQL editor.',
+          )
+          return
+        }
+        throw insErr
+      }
 
       const { error: upErr } = await supabase
         .from('store_items')
         .update({
           quantity_on_hand: nextQty,
+          unit_price: unitPrice,
           updated_at: new Date().toISOString(),
           updated_by: userId,
         })
@@ -1013,6 +1129,31 @@ export function StoreManager({ initialTab }: { initialTab?: 'requisitions' | 'pu
                 </div>
               </CardContent>
             </Card>
+
+            {canAdjust && storeOutletContext === CENTRAL_STORE_VIEW && (
+              <Card className="border-amber-200/50 bg-amber-50/30 dark:bg-amber-950/15">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-base">Bulk stock in / out</CardTitle>
+                  <CardDescription>
+                    Paste many lines at once (tab, comma, or pipe between item and quantity). Items match by SKU first,
+                    then name. All lines apply in a single database transaction.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => {
+                      setBulkMovementAt(format(new Date(), "yyyy-MM-dd'T'HH:mm"))
+                      setBulkOpen(true)
+                    }}
+                  >
+                    Open bulk entry
+                  </Button>
+                </CardContent>
+              </Card>
+            )}
 
             {storeOutletContext === CENTRAL_STORE_VIEW ? (
               <Card>
@@ -1294,7 +1435,7 @@ export function StoreManager({ initialTab }: { initialTab?: 'requisitions' | 'pu
                         return (
                           <TableRow key={m.id}>
                             <TableCell className="whitespace-nowrap text-sm text-muted-foreground">
-                              {format(parseISO(m.created_at), 'MMM d, HH:mm')}
+                              {format(parseISO(movementDisplayAt(m)), 'MMM d, HH:mm')}
                             </TableCell>
                             <TableCell className="font-medium">
                               <Link href={`/store/items/${m.item_id}`} className="hover:underline">
@@ -1501,7 +1642,7 @@ export function StoreManager({ initialTab }: { initialTab?: 'requisitions' | 'pu
                           {auditMovements.map(m => (
                               <TableRow key={m.id}>
                                 <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
-                                  {format(parseISO(m.created_at), 'MMM d, HH:mm')}
+                                  {format(parseISO(movementDisplayAt(m)), 'MMM d, HH:mm')}
                                 </TableCell>
                                 <TableCell className="max-w-[140px] truncate text-sm font-medium">
                                   {itemNameById.get(m.item_id) || '—'}
@@ -1723,6 +1864,17 @@ export function StoreManager({ initialTab }: { initialTab?: 'requisitions' | 'pu
                 </SelectContent>
               </Select>
             </div>
+            <div className="space-y-2">
+              <Label>When did this happen?</Label>
+              <Input
+                type="datetime-local"
+                value={adjustMovementAt}
+                onChange={e => setAdjustMovementAt(e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">
+                Defaults to now. Choose a past date/time to backdate the movement (daily report uses this date).
+              </p>
+            </div>
             {adjustType !== 'adjustment' && adjustType !== 'in' && (
               <>
                 <div className="space-y-2">
@@ -1792,6 +1944,19 @@ export function StoreManager({ initialTab }: { initialTab?: 'requisitions' | 'pu
               </div>
             )}
             <div className="space-y-2">
+              <Label>Unit price (₦)</Label>
+              <Input
+                type="number"
+                min={0}
+                step="0.01"
+                value={adjustUnitPrice}
+                onChange={e => setAdjustUnitPrice(e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">
+                Current catalog price for this SKU. Edit to match market price — it updates the item for the whole app.
+              </p>
+            </div>
+            <div className="space-y-2">
               <Label>Reference (invoice, transfer #)</Label>
               <Input value={adjustRef} onChange={e => setAdjustRef(e.target.value)} />
             </div>
@@ -1806,6 +1971,106 @@ export function StoreManager({ initialTab }: { initialTab?: 'requisitions' | 'pu
             </Button>
             <Button className="bg-amber-600 hover:bg-amber-700" onClick={() => void applyMovement()} disabled={adjustSaving}>
               {adjustSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Apply'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={bulkOpen} onOpenChange={setBulkOpen}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Bulk stock in / out</DialogTitle>
+            <DialogDescription>
+              One item per line. Use a tab, comma, or pipe before the quantity. Items resolve by SKU first, then by exact
+              name (case-insensitive if unique).
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label>Direction</Label>
+                <Select value={bulkType} onValueChange={v => setBulkType(v as 'in' | 'out')}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="in">Stock in</SelectItem>
+                    <SelectItem value="out">Stock out</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Movement date &amp; time</Label>
+                <Input
+                  type="datetime-local"
+                  value={bulkMovementAt}
+                  onChange={e => setBulkMovementAt(e.target.value)}
+                />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Paste lines</Label>
+              <Textarea
+                value={bulkText}
+                onChange={e => setBulkText(e.target.value)}
+                rows={8}
+                className="font-mono text-sm"
+                placeholder={'SKU-100\t24\nTomatoes, 10\nRice 25kg | 2'}
+              />
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label>Reference (optional)</Label>
+                <Input value={bulkRef} onChange={e => setBulkRef(e.target.value)} />
+              </div>
+              <div className="space-y-2">
+                <Label>Notes (optional)</Label>
+                <Input value={bulkNotes} onChange={e => setBulkNotes(e.target.value)} />
+              </div>
+            </div>
+            <Button type="button" variant="secondary" size="sm" onClick={runBulkPreview}>
+              Preview
+            </Button>
+            {bulkPreview.length > 0 && (
+              <ScrollArea className="h-[min(220px,40vh)] rounded-md border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-10">#</TableHead>
+                      <TableHead>Key</TableHead>
+                      <TableHead className="text-right">Qty</TableHead>
+                      <TableHead>Item</TableHead>
+                      <TableHead>Status</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {bulkPreview.map((row) => (
+                      <TableRow key={`${row.lineNo}-${row.key}`}>
+                        <TableCell className="text-muted-foreground text-xs">{row.lineNo}</TableCell>
+                        <TableCell className="font-mono text-xs">{row.key}</TableCell>
+                        <TableCell className="text-right font-mono text-sm">{row.qty}</TableCell>
+                        <TableCell className="text-sm">{row.item?.name ?? '—'}</TableCell>
+                        <TableCell className="text-xs">
+                          {row.error ? <span className="text-destructive">{row.error}</span> : <span className="text-green-700">OK</span>}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </ScrollArea>
+            )}
+          </div>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button type="button" variant="outline" onClick={() => setBulkOpen(false)}>
+              Close
+            </Button>
+            <Button
+              type="button"
+              className="bg-amber-600 hover:bg-amber-700"
+              onClick={() => void applyBulkMovements()}
+              disabled={bulkSaving}
+            >
+              {bulkSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Apply all valid lines'}
             </Button>
           </DialogFooter>
         </DialogContent>

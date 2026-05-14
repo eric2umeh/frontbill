@@ -8,18 +8,27 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
 import { Label } from '@/components/ui/label'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { formatNaira } from '@/lib/utils/currency'
 import {
   ArrowLeft, User, Phone, Mail, MapPin,
   Calendar, CreditCard, TrendingUp, FileText, Building2, Hash,
   Wallet, ArrowDownCircle, ArrowUpCircle, Clock, RefreshCw,
+  Trash2,
 } from 'lucide-react'
 import { format } from 'date-fns'
 import CityLedgerPaymentModal from '@/components/city-ledger/city-ledger-payment-modal'
 import { useAuth } from '@/lib/auth-context'
 import { hasPermission } from '@/lib/permissions'
 import { toast } from 'sonner'
-import { PageLoadingState } from '@/components/shared/loading-screen'
+import { PageLoadingState } from '@/components/loading-screen'
 
 interface GuestAccount {
   id: string
@@ -73,9 +82,10 @@ interface LedgerTransaction {
 export default function AccountDetailPage() {
   const params = useParams()
   const router = useRouter()
-  const { role: authRole } = useAuth()
+  const { role: authRole, userId: currentUserId } = useAuth()
   const [resolvedRole, setResolvedRole] = useState<string | null>(null)
   const canEditGuest = hasPermission(resolvedRole ?? authRole, 'guests:edit')
+  const canDeleteGuest = hasPermission(resolvedRole ?? authRole, 'guests:delete')
   const canViewGuests = hasPermission(resolvedRole ?? authRole, 'guests:view')
   const id = params.id as string
 
@@ -97,6 +107,8 @@ export default function AccountDetailPage() {
   const [isCheckingOut, setIsCheckingOut] = useState(false)
   const [isEditingGuest, setIsEditingGuest] = useState(false)
   const [savingGuest, setSavingGuest] = useState(false)
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [deletingGuest, setDeletingGuest] = useState(false)
   const [guestForm, setGuestForm] = useState({
     name: '',
     phone: '',
@@ -278,34 +290,58 @@ export default function AccountDetailPage() {
     }
   }
 
+  async function adminGuestApiHeaders(): Promise<Record<string, string>> {
+    const supabase = createClient()
+    if (!supabase) return {}
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session?.access_token) return {}
+    return { Authorization: `Bearer ${session.access_token}` }
+  }
+
   const handleSaveGuestProfile = async () => {
     if (!isGuest || !guestData) return
     if (!canEditGuest) {
-      toast.error('Only Administrator or Superadmin can edit guest details')
+      toast.error('Only Manager, Administrator, or Superadmin can edit guest details')
       return
     }
     if (!guestForm.name.trim()) {
       toast.error('Guest name is required')
       return
     }
+    if (!currentUserId) {
+      toast.error('Not signed in')
+      return
+    }
     try {
       setSavingGuest(true)
-      const supabase = createClient()
-      const { error } = await supabase
-        .from('guests')
-        .update({
-          name: guestForm.name.trim(),
-          phone: guestForm.phone.trim() || null,
-          email: guestForm.email.trim() || null,
-          address: guestForm.address.trim() || null,
-          city: guestForm.city.trim() || null,
-          country: guestForm.country.trim() || null,
-          id_type: guestForm.id_type.trim() || null,
-          id_number: guestForm.id_number.trim() || null,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', actualId)
-      if (error) throw error
+      const authHeaders = await adminGuestApiHeaders()
+      if (!authHeaders.Authorization) {
+        toast.error('Your session is not available. Please refresh the page and try again.')
+        return
+      }
+      const res = await fetch(`/api/admin/guests/${actualId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
+        body: JSON.stringify({
+          caller_id: currentUserId,
+          previous_name: guestData.name,
+          guest: {
+            name: guestForm.name.trim(),
+            phone: guestForm.phone.trim() || null,
+            email: guestForm.email.trim() || null,
+            address: guestForm.address.trim() || null,
+            city: guestForm.city.trim() || null,
+            country: guestForm.country.trim() || null,
+            id_type: guestForm.id_type.trim() || null,
+            id_number: guestForm.id_number.trim() || null,
+          },
+        }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        toast.error(json.error || 'Failed to update guest')
+        return
+      }
       toast.success('Guest details updated')
       setIsEditingGuest(false)
       await loadAccount()
@@ -313,6 +349,36 @@ export default function AccountDetailPage() {
       toast.error(error.message || 'Failed to update guest')
     } finally {
       setSavingGuest(false)
+    }
+  }
+
+  const handleDeleteGuest = async () => {
+    if (!isGuest || !guestData || !currentUserId) return
+    setDeletingGuest(true)
+    try {
+      const authHeaders = await adminGuestApiHeaders()
+      if (!authHeaders.Authorization) {
+        toast.error('Your session is not available. Please refresh the page and try again.')
+        return
+      }
+      const res = await fetch(`/api/admin/guests/${actualId}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
+        body: JSON.stringify({ caller_id: currentUserId }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        toast.error(json.error || 'Failed to delete guest')
+        return
+      }
+      const n = typeof json.deleted_bookings === 'number' ? json.deleted_bookings : 0
+      toast.success(n > 0 ? `Guest removed with ${n} booking(s).` : 'Guest removed.')
+      setDeleteDialogOpen(false)
+      router.push('/accounts')
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to delete guest')
+    } finally {
+      setDeletingGuest(false)
     }
   }
 
@@ -394,9 +460,22 @@ export default function AccountDetailPage() {
                     </Button>
                   </>
                 ) : (
-                  <Button variant="outline" size="sm" onClick={() => setIsEditingGuest(true)}>
-                    Edit Guest
-                  </Button>
+                  <>
+                    <Button variant="outline" size="sm" onClick={() => setIsEditingGuest(true)}>
+                      Edit Guest
+                    </Button>
+                    {canDeleteGuest && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="text-destructive border-destructive/40 hover:bg-destructive/10"
+                        onClick={() => setDeleteDialogOpen(true)}
+                      >
+                        <Trash2 className="h-4 w-4 mr-1.5" />
+                        Delete Guest
+                      </Button>
+                    )}
+                  </>
                 )}
               </>
             )}
@@ -407,7 +486,7 @@ export default function AccountDetailPage() {
           </div>
           {isGuest && canViewGuests && !canEditGuest && (
             <p className="text-xs text-muted-foreground max-w-sm text-right">
-              Only Administrator or Superadmin can edit guest profiles.
+              Only Manager, Administrator, or Superadmin can edit or delete guest profiles.
             </p>
           )}
         </div>
@@ -764,6 +843,29 @@ export default function AccountDetailPage() {
           organizationId={orgId}
           guestId={isGuest ? actualId : undefined}
         />
+      )}
+
+      {isGuest && guestData && (
+        <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Delete guest profile?</DialogTitle>
+              <DialogDescription>
+                This permanently removes <strong>{guestData.name}</strong> from the guest database and deletes all of
+                their bookings (folios, charges, and booking-linked payments). City ledger rows for this guest name are
+                removed. This cannot be undone.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button type="button" variant="outline" onClick={() => setDeleteDialogOpen(false)} disabled={deletingGuest}>
+                Cancel
+              </Button>
+              <Button type="button" variant="destructive" onClick={handleDeleteGuest} disabled={deletingGuest}>
+                {deletingGuest ? 'Deleting…' : 'Delete guest'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       )}
     </div>
   )

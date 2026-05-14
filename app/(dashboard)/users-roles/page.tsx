@@ -1,8 +1,8 @@
 'use client'
 
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState, useMemo, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { ROLE_DEFINITIONS, getPermissionGroups, type RoleKey, type Permission } from '@/lib/permissions'
+import { ROLE_DEFINITIONS, getPermissionGroups, type RoleKey, type Permission, canonicalRoleKey } from '@/lib/permissions'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -67,11 +67,11 @@ export default function UsersRolesPage() {
 
   // Roles view
   const [viewingRole, setViewingRole] = useState<RoleKey | null>(null)
+  const [repairingAttribution, setRepairingAttribution] = useState(false)
   const router = useRouter()
 
-  useEffect(() => { fetchUsers() }, [])
-
-  const fetchUsers = async () => {
+  const fetchUsers = useCallback(async () => {
+    if (!currentUserId) return
     startFetch()
     try {
       if (!['superadmin', 'admin', 'manager'].includes(currentUserRole || '')) {
@@ -87,6 +87,36 @@ export default function UsersRolesPage() {
       setUsers(json.users || [])
     } finally {
       endFetch()
+    }
+  }, [currentUserId, currentUserRole, router, startFetch, endFetch])
+
+  useEffect(() => {
+    void fetchUsers()
+  }, [fetchUsers])
+
+  async function handleRepairAttribution() {
+    const rk = canonicalRoleKey(currentUserRole)
+    if (!currentUserId || (rk !== 'superadmin' && rk !== 'admin')) return
+    setRepairingAttribution(true)
+    try {
+      const res = await fetch('/api/admin/users/repair-attribution', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ caller_id: currentUserId }),
+      })
+      const json = await res.json()
+      if (!res.ok) {
+        toast.error(json.error || 'Repair failed')
+        return
+      }
+      const n = typeof json.updated === 'number' ? json.updated : 0
+      toast.success(n > 0 ? `Attributed ${n} user(s) to you for "Added by".` : 'No users needed updating.')
+      await fetchUsers()
+    } catch {
+      toast.error('Network error, please try again')
+    } finally {
+      setRepairingAttribution(false)
     }
   }
 
@@ -261,16 +291,31 @@ export default function UsersRolesPage() {
             </div>
             <Badge variant="outline" className="text-muted-foreground">{filteredUsers.length} users</Badge>
             {canManageUsers && (
-              <Button size="sm" className="gap-2 ml-auto" onClick={() => { setAddOpen(true); setAddForm(EMPTY_ADD_FORM) }}>
-                <Plus className="h-4 w-4" />
-                Add User
-              </Button>
+              <div className="flex flex-wrap gap-2 ml-auto">
+                {(canonicalRoleKey(currentUserRole) === 'superadmin' || canonicalRoleKey(currentUserRole) === 'admin') && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={repairingAttribution}
+                    onClick={handleRepairAttribution}
+                  >
+                    {repairingAttribution ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                    Fix missing &quot;Added by&quot;
+                  </Button>
+                )}
+                <Button size="sm" className="gap-2" onClick={() => { setAddOpen(true); setAddForm(EMPTY_ADD_FORM) }}>
+                  <Plus className="h-4 w-4" />
+                  Add User
+                </Button>
+              </div>
             )}
           </div>
 
           <div className="grid gap-3">
             {filteredUsers.map(user => {
-              const role = ROLE_DEFINITIONS.find(r => r.key === user.role)
+              const roleKey = canonicalRoleKey(user.role)
+              const role = roleKey ? ROLE_DEFINITIONS.find(r => r.key === roleKey) : undefined
               const isCurrentUser = user.id === currentUserId
               const canActOnUser = canManageUsers && (currentUserRole === 'superadmin' || user.role !== 'superadmin')
               return (
@@ -295,9 +340,11 @@ export default function UsersRolesPage() {
                         <div className="text-xs text-muted-foreground mt-0.5">
                           Added {new Date(user.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
                           {' '}| Added By:{' '}
-                          {user.added_by
-                            ? user.added_by_name || 'Unknown staff'
-                            : '—'}
+                          {user.added_by && user.added_by === user.id
+                            ? 'Self'
+                            : user.added_by
+                              ? (user.added_by_name?.trim() || 'Unknown staff')
+                              : (user.added_by_name?.trim() || '—')}
                         </div>
                       </div>
                       {/* Permissions quick-view */}

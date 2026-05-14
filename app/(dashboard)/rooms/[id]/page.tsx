@@ -18,7 +18,7 @@ import { Separator } from '@/components/ui/separator'
 import { format, parseISO } from 'date-fns'
 import { useAuth } from '@/lib/auth-context'
 import { hasPermission } from '@/lib/permissions'
-import { PageLoadingState, LoadingSpinner } from '@/components/shared/loading-screen'
+import { PageLoadingState, LoadingSpinner } from '@/components/loading-screen'
 
 const ROOM_TYPES = [
   'Deluxe', 'Royal', 'Kings', 'Mini Suite', 'Executive Suite', 'Diplomatic Suite',

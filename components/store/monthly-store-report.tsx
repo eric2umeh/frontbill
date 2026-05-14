@@ -73,9 +73,9 @@ export function MonthlyStoreReport() {
           .from('store_stock_movements')
           .select('*')
           .eq('organization_id', organizationId)
-          .gte('created_at', startIso)
-          .lte('created_at', endIso)
-          .order('created_at', { ascending: true })
+          .gte('movement_at', startIso)
+          .lte('movement_at', endIso)
+          .order('movement_at', { ascending: true })
           .range(offset, offset + pageSize - 1)
         if (e3) throw e3
         const chunk = (page || []) as MovementRow[]

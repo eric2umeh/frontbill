@@ -1,6 +1,7 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
 import { canonicalRoleKey } from '@/lib/permissions'
+import { resolveStaffDisplayName } from '@/lib/utils/resolve-staff-display-name'
 
 // GET /api/admin/users/list?caller_id=xxx
 // Returns all profiles in the same organization as the caller.
@@ -33,14 +34,17 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'Only superadmins, admins or managers can list users' }, { status: 403 })
     }
 
-    // Fetch all profiles in the same org — admin client bypasses RLS
+    const profileListSelect = 'id, full_name, role, avatar_url, created_at, added_by'
+
+    let hasAddedByColumn = true
     let { data: users, error: usersError }: { data: any[] | null; error: any } = await admin
       .from('profiles')
-      .select('id, full_name, role, avatar_url, created_at, added_by')
+      .select(profileListSelect)
       .eq('organization_id', callerProfile.organization_id)
       .order('created_at', { ascending: true })
 
     if (usersError && /added_by/i.test(usersError.message || '')) {
+      hasAddedByColumn = false
       const retry = await admin
         .from('profiles')
         .select('id, full_name, role, avatar_url, created_at')
@@ -54,7 +58,38 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: usersError.message }, { status: 500 })
     }
 
-    const addedByIds = Array.from(new Set((users || []).map((user: any) => user.added_by).filter(Boolean)))
+    // Administrator or Superadmin viewing the list: repair NULL added_by for other profiles in the org (legacy rows).
+    // (Many accounts use role "admin" / Administrator, not the superadmin key — the old "sole superadmin" check never ran.)
+    const canAttributeOrphans = callerKey === 'superadmin' || callerKey === 'admin'
+    if (hasAddedByColumn && users?.length && canAttributeOrphans) {
+      const hasOrphans = (users as { id: string; added_by?: string | null }[]).some(
+        (u) => u.added_by == null && String(u.id) !== String(caller_id),
+      )
+      if (hasOrphans) {
+        const { error: fixErr } = await admin
+          .from('profiles')
+          .update({ added_by: caller_id, updated_at: new Date().toISOString() })
+          .eq('organization_id', callerProfile.organization_id)
+          .is('added_by', null)
+          .neq('id', caller_id)
+        if (fixErr) {
+          console.error('[users/list] added_by repair failed:', fixErr.message)
+        } else {
+          const refetch = await admin
+            .from('profiles')
+            .select(profileListSelect)
+            .eq('organization_id', callerProfile.organization_id)
+            .order('created_at', { ascending: true })
+          if (!refetch.error && refetch.data) {
+            users = refetch.data
+          }
+        }
+      }
+    }
+
+    const addedByIds = Array.from(
+      new Set((users || []).map((user: any) => user.added_by).filter(Boolean).map((id: string) => String(id))),
+    )
     const addedByMap: Record<string, string> = {}
 
     if (addedByIds.length > 0) {
@@ -63,34 +98,28 @@ export async function GET(request: Request) {
         .select('id, full_name')
         .in('id', addedByIds)
 
-      ;(addedByProfiles || []).forEach((profile: any) => {
-        const name = String(profile.full_name || '').trim()
-        if (name) addedByMap[profile.id] = name
-      })
+      for (const profile of addedByProfiles || []) {
+        const id = String((profile as { id: string }).id)
+        const name = String((profile as { full_name?: string | null }).full_name || '').trim()
+        if (name) addedByMap[id] = name
+      }
 
-      const missingForAuth = addedByIds.filter((id) => !addedByMap[id])
-
+      const unresolved = addedByIds.filter((id) => !addedByMap[id])
       await Promise.all(
-        missingForAuth.map(async (id) => {
-          try {
-            const { data, error } = await admin.auth.admin.getUserById(id)
-            if (error || !data?.user) return
-            const u = data.user
-            const metadataName = String(u.user_metadata?.full_name || '').trim()
-            const emailFallback = u.email?.split('@')[0]?.replace(/[._-]+/g, ' ').trim() || ''
-            const label = metadataName || emailFallback
-            if (label) addedByMap[id] = label
-          } catch {
-            /* ignore */
-          }
+        unresolved.map(async (id) => {
+          addedByMap[id] = await resolveStaffDisplayName(admin, id, null)
         }),
       )
     }
 
-    const usersWithAddedBy = (users || []).map((user: any) => ({
-      ...user,
-      added_by_name: user.added_by ? addedByMap[user.added_by] ?? null : null,
-    }))
+    const usersWithAddedBy = (users || []).map((user: any) => {
+      const addedByKey = user.added_by != null ? String(user.added_by) : null
+      return {
+        ...user,
+        added_by: addedByKey,
+        added_by_name: addedByKey ? addedByMap[addedByKey] ?? null : null,
+      }
+    })
 
     return NextResponse.json({ users: usersWithAddedBy })
   } catch (err: any) {

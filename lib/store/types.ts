@@ -41,6 +41,8 @@ export interface MovementRow {
   notes: string | null
   created_by: string | null
   created_at: string
+  /** Business time of movement (backdating). Same as created_at when unset in DB. */
+  movement_at?: string | null
   destination_department?: string | null
   received_by?: string | null
 }

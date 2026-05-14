@@ -3,6 +3,7 @@ import { sendWelcomeEmail } from '@/lib/email/welcome-user'
 import { NextResponse } from 'next/server'
 import { formatPersonName } from '@/lib/utils/name-format'
 import { canonicalRoleKey } from '@/lib/permissions'
+import { resolveStaffDisplayName } from '@/lib/utils/resolve-staff-display-name'
 
 // POST /api/admin/users — create a new user in the same organization
 // caller_id is passed from the client (already authenticated in browser) and validated server-side
@@ -62,32 +63,56 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: createError.message }, { status: 400 })
     }
 
-    // Upsert profile row with organization and role
-    const profilePayload = {
-      id: newUser.user.id,
+    // `handle_new_user` inserts a bare profile row first; PostgREST upserts often fail to persist `added_by`.
+    // Replace that stub with a full row so "Added by" is reliable in Users & Roles.
+    const newId = newUser.user.id
+    const now = new Date().toISOString()
+    const profileRow = {
+      id: newId,
       organization_id: callerProfile.organization_id,
       full_name: formattedFullName,
       role: newRoleKey,
       added_by: caller_id,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
+      created_at: now,
+      updated_at: now,
     }
-    let { error: profileError } = await admin
-      .from('profiles')
-      .upsert(profilePayload)
+
+    await admin.from('profiles').delete().eq('id', newId)
+
+    let { error: profileError } = await admin.from('profiles').insert(profileRow)
+
+    if (profileError && /23505|duplicate key/i.test(profileError.message || '')) {
+      const { error: upErr } = await admin
+        .from('profiles')
+        .update({
+          organization_id: profileRow.organization_id,
+          full_name: profileRow.full_name,
+          role: profileRow.role,
+          added_by: caller_id,
+          updated_at: profileRow.updated_at,
+        })
+        .eq('id', newId)
+      profileError = upErr
+    }
 
     if (profileError && /added_by/i.test(profileError.message || '')) {
-      const fallbackPayload = { ...profilePayload } as any
-      delete fallbackPayload.added_by
-      const retry = await admin.from('profiles').upsert(fallbackPayload)
-      profileError = retry.error
+      const { added_by: _drop, ...withoutAddedBy } = profileRow
+      const { error: ins2 } = await admin.from('profiles').insert(withoutAddedBy)
+      profileError = ins2
     }
 
     if (profileError) {
-      // Rollback auth user if profile insert fails
-      await admin.auth.admin.deleteUser(newUser.user.id)
+      await admin.auth.admin.deleteUser(newId)
       return NextResponse.json({ error: profileError.message }, { status: 500 })
     }
+
+    const addedByName = await resolveStaffDisplayName(admin, caller_id, callerProfile.full_name)
+
+    const { data: freshProfile } = await admin
+      .from('profiles')
+      .select('added_by, created_at')
+      .eq('id', newUser.user.id)
+      .maybeSingle()
 
     // Send welcome email with login credentials — fire and forget (don't fail user creation if email fails)
     const site_url = process.env.NEXT_PUBLIC_SITE_URL || process.env.VERCEL_URL
@@ -112,9 +137,9 @@ export async function POST(request: Request) {
         email,
         full_name: formattedFullName,
         role: newRoleKey,
-        added_by: caller_id,
-        added_by_name: callerProfile.full_name || formattedFullName,
-        created_at: newUser.user.created_at,
+        added_by: freshProfile?.added_by ?? caller_id,
+        added_by_name: addedByName,
+        created_at: freshProfile?.created_at ?? newUser.user.created_at,
       },
       emailSent,
       emailError,
