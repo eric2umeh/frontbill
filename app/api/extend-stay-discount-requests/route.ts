@@ -209,9 +209,9 @@ export async function PATCH(request: Request) {
 
     const folioRow: Record<string, unknown> = {
       booking_id: row.booking_id,
-      description: `Extended Stay — ${nights} night(s) (DISCOUNTED). Approved by ${approverLabel}. ${String(row.reason || '').slice(0, 200)}`,
+      description: `Extended Stay — ${nights} night(s) · discounted (approved). Approved by ${approverLabel}. ${String(row.reason || '').slice(0, 200)}`,
       amount: discTotal,
-      charge_type: 'extended_stay',
+      charge_type: 'extended_stay_discounted',
       payment_method: row.payment_method,
       payment_status: 'paid',
       created_by: caller_id,
