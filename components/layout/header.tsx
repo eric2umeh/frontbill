@@ -22,6 +22,7 @@ import { useAuth } from '@/lib/auth-context'
 import { formatNaira } from '@/lib/utils/currency'
 import { playNotificationBeep } from '@/lib/utils/play-notification-beep'
 import { addDays, formatDistanceToNow, setHours, setMinutes } from 'date-fns'
+import { BRAND_LOGO_SESSION_KEY } from '@/lib/branding/constants'
 
 /** Supabase-backed notification slice (transactions, bookings, rooms, …) */
 const NOTIFICATION_CORE_POLL_MS = 60_000
@@ -495,6 +496,12 @@ export function Header({ user, onMenuClick }: HeaderProps) {
 
       const { error } = await supabase.auth.signOut()
       if (error) throw error
+
+      try {
+        sessionStorage.removeItem(BRAND_LOGO_SESSION_KEY)
+      } catch {
+        /* ignore */
+      }
 
       toast.success('Logged out successfully')
       router.push('/auth/login')

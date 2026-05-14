@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { AlertCircle, LogOut, Home } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
+import { BRAND_LOGO_SESSION_KEY } from '@/lib/branding/constants'
 
 export default function AccessDeniedPage() {
   const router = useRouter()
@@ -35,6 +36,11 @@ export default function AccessDeniedPage() {
     try {
       const supabase = createClient()
       await supabase.auth.signOut()
+      try {
+        sessionStorage.removeItem(BRAND_LOGO_SESSION_KEY)
+      } catch {
+        /* ignore */
+      }
       router.push('/auth/login')
     } catch (error) {
       console.error('Error logging out:', error)
