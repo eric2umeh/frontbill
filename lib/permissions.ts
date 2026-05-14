@@ -61,7 +61,7 @@ export const ALL_PERMISSIONS: { key: Permission; label: string; group: string }[
   { key: 'bookings:delete', label: 'Delete Bookings', group: 'Bookings' },
   { key: 'bookings:checkin', label: 'Check In Guests', group: 'Bookings' },
   { key: 'bookings:checkout', label: 'Check Out Folios', group: 'Bookings' },
-  { key: 'room_change:request', label: 'Request Guest Room Change (checked-in)', group: 'Bookings' },
+  { key: 'room_change:request', label: 'Request guest room change (approval)', group: 'Bookings' },
   { key: 'room_change:approve', label: 'Approve Room Change Requests', group: 'Bookings' },
 
   { key: 'reservations:view', label: 'View Reservations', group: 'Reservations' },

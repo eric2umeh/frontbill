@@ -1,92 +1,101 @@
-import { escapeHtml } from '@/lib/utils/html-escape'
+import { escapeHtml } from "@/lib/utils/html-escape";
 
 /** Stable 5–8 digit display number from folio payment / charge id */
 export function receiptNumberFromId(id: string): string {
-  const hex = id.replace(/-/g, '').slice(0, 16)
-  if (hex.length < 8) return '1000'
+  const hex = id.replace(/-/g, "").slice(0, 16);
+  if (hex.length < 8) return "1000";
   try {
-    const slice = hex.slice(0, 12)
-    let n = 0
+    const slice = hex.slice(0, 12);
+    let n = 0;
     for (let i = 0; i < slice.length; i += 1) {
-      n = (n * 16 + parseInt(slice[i]!, 16)) % 99_000_000
+      n = (n * 16 + parseInt(slice[i]!, 16)) % 99_000_000;
     }
-    return String(Math.max(1000, n + 1_000_000))
+    return String(Math.max(1000, n + 1_000_000));
   } catch {
-    return String(Math.abs(id.split('').reduce((a, c) => a + c.charCodeAt(0), 0) % 99_000_000) + 1000)
+    return String(
+      Math.abs(
+        id.split("").reduce((a, c) => a + c.charCodeAt(0), 0) % 99_000_000,
+      ) + 1000,
+    );
   }
 }
 
-export function formatReceiptPaymentMethod(method: string | null | undefined): string {
-  const m = String(method || '')
+export function formatReceiptPaymentMethod(
+  method: string | null | undefined,
+): string {
+  const m = String(method || "")
     .trim()
-    .toLowerCase()
+    .toLowerCase();
   const map: Record<string, string> = {
-    cash: 'Cash',
-    pos: 'POS',
-    card: 'Card',
-    transfer: 'Transfer',
-    cheque: 'Cheque',
-    check: 'Cheque',
-    city_ledger: 'City Ledger',
-    deferred: 'Deferred',
-    pending: 'Pending',
-  }
-  if (map[m]) return map[m]
-  if (!m) return '—'
+    cash: "Cash",
+    pos: "POS",
+    card: "Card",
+    transfer: "Transfer",
+    cheque: "Cheque",
+    check: "Cheque",
+    city_ledger: "City Ledger",
+    deferred: "Deferred",
+    pending: "Pending",
+  };
+  if (map[m]) return map[m];
+  if (!m) return "—";
   return m
     .split(/[\s_]+/)
     .filter(Boolean)
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-    .join(' ')
+    .join(" ");
 }
 
 export type PaymentReceiptBranding = {
-  hotelName: string
-  address?: string | null
-  phone?: string | null
-  email?: string | null
-}
+  hotelName: string;
+  address?: string | null;
+  phone?: string | null;
+  email?: string | null;
+};
 
 export type PaymentReceiptPayload = PaymentReceiptBranding & {
-  guestName: string
-  roomNumber: string
-  folioNumber: string
-  receiptNumber: string
+  guestName: string;
+  roomNumber: string;
+  folioNumber: string;
+  receiptNumber: string;
   /** ISO or parseable date string for display */
-  issuedAtIso: string
-  paymentMethodLabel: string
-  amount: number
-  amountInWords: string
-  remark: string
-  staffName: string
+  issuedAtIso: string;
+  paymentMethodLabel: string;
+  amount: number;
+  amountInWords: string;
+  remark: string;
+  staffName: string;
   /** Folio line shown under payment (e.g. extended stay, add charge description) */
-  serviceDescription?: string | null
+  serviceDescription?: string | null;
   /** Shown under title — default "Receipt" */
-  receiptTitle?: string
+  receiptTitle?: string;
   /** Room / add-on / extension lines listed on payment receipts for guest context. */
-  folioContextLines?: string[] | null
-}
+  folioContextLines?: string[] | null;
+};
 
 export function defaultPaymentRemark(): string {
-  return 'ACCOMMODATION'
+  return "ACCOMMODATION";
 }
 
 /** Map folio charge types to receipt remark / purpose line */
-export function remarkFromChargeType(type: string | null | undefined, description?: string | null): string {
-  const t = String(type || '').toLowerCase()
-  if (t === 'extended_stay') return 'EXTENDED STAY'
-  if (t === 'room_charge' || t === 'reservation') return 'ACCOMMODATION'
-  if (t === 'additional_charge' && description) {
-    const d = String(description).slice(0, 80).toUpperCase()
-    return d || 'ADD-ON CHARGE'
+export function remarkFromChargeType(
+  type: string | null | undefined,
+  description?: string | null,
+): string {
+  const t = String(type || "").toLowerCase();
+  if (t === "extended_stay") return "EXTENDED STAY";
+  if (t === "room_charge" || t === "reservation") return "ACCOMMODATION";
+  if (t === "additional_charge" && description) {
+    const d = String(description).slice(0, 80).toUpperCase();
+    return d || "ADD-ON CHARGE";
   }
-  if (t === 'charge' && description) {
-    const d = String(description).slice(0, 80).toUpperCase()
-    return d || 'FOLIO CHARGE'
+  if (t === "charge" && description) {
+    const d = String(description).slice(0, 80).toUpperCase();
+    return d || "FOLIO CHARGE";
   }
-  if (t === 'late_checkout') return 'LATE CHECKOUT'
-  if (t === 'payment') return 'ACCOMMODATION'
-  return 'ACCOMMODATION'
+  if (t === "late_checkout") return "LATE CHECKOUT";
+  if (t === "payment") return "ACCOMMODATION";
+  return "ACCOMMODATION";
 }
 
 function receiptBlockStyles(): string {
@@ -107,36 +116,40 @@ function receiptBlockStyles(): string {
     .words { font-size: 11px; margin-top: 8px; line-height: 1.4; }
     .footer { display: flex; justify-content: space-between; margin-top: 24px; font-size: 12px; align-items: flex-end; }
     .sig { min-width: 140px; text-align: right; border-top: 1px solid #333; padding-top: 4px; margin-top: 28px; font-size: 11px; }
-  `
+  `;
 }
 
 function oneReceiptBlock(p: PaymentReceiptPayload): string {
-  const hotel = escapeHtml(String(p.hotelName ?? '').trim() || '\u2014')
-  const addr = p.address ? escapeHtml(p.address) : ''
-  const phone = p.phone ? escapeHtml(p.phone) : ''
-  const email = p.email ? escapeHtml(p.email) : ''
-  const guest = escapeHtml((p.guestName || 'Guest').toUpperCase())
-  const room = escapeHtml(String(p.roomNumber || '—'))
-  const folio = escapeHtml(String(p.folioNumber || '—'))
-  const rno = escapeHtml(String(p.receiptNumber))
-  const pm = escapeHtml(p.paymentMethodLabel)
-  const words = escapeHtml(p.amountInWords)
-  const remark = escapeHtml(p.remark)
-  const staff = escapeHtml(p.staffName || '—')
-  const dateStr = escapeHtml(formatReceiptDateTime(p.issuedAtIso))
-  const amountStr = formatAmountReceipt(p.amount)
-  const title = escapeHtml((p.receiptTitle || 'Receipt').trim() || 'Receipt')
-  const svc = p.serviceDescription ? escapeHtml(String(p.serviceDescription).trim()) : ''
-  const ctxLines = (p.folioContextLines || []).map((line) => escapeHtml(String(line).trim())).filter(Boolean)
+  const hotel = escapeHtml(String(p.hotelName ?? "").trim() || "\u2014");
+  const addr = p.address ? escapeHtml(p.address) : "";
+  const phone = p.phone ? escapeHtml(p.phone) : "";
+  const email = p.email ? escapeHtml(p.email) : "";
+  const guest = escapeHtml((p.guestName || "Guest").toUpperCase());
+  const room = escapeHtml(String(p.roomNumber || "—"));
+  const folio = escapeHtml(String(p.folioNumber || "—"));
+  const rno = escapeHtml(String(p.receiptNumber));
+  const pm = escapeHtml(p.paymentMethodLabel);
+  const words = escapeHtml(p.amountInWords);
+  const remark = escapeHtml(p.remark);
+  const staff = escapeHtml(p.staffName || "—");
+  const dateStr = escapeHtml(formatReceiptDateTime(p.issuedAtIso));
+  const amountStr = formatAmountReceipt(p.amount);
+  const title = escapeHtml((p.receiptTitle || "Receipt").trim() || "Receipt");
+  const svc = p.serviceDescription
+    ? escapeHtml(String(p.serviceDescription).trim())
+    : "";
+  const ctxLines = (p.folioContextLines || [])
+    .map((line) => escapeHtml(String(line).trim()))
+    .filter(Boolean);
   const ctxBlock =
     ctxLines.length > 0
-      ? `<div class="words" style="margin-top:8px;"><span class="label">Folio activity (room, add-on and extension charges):</span>${ctxLines.map((l) => `<div style="margin-top:3px;padding-left:8px;">• ${l}</div>`).join('')}</div>`
-      : ''
+      ? `<div class="words" style="margin-top:8px;"><span class="label">Folio activity (room, add-on and extension charges):</span>${ctxLines.map((l) => `<div style="margin-top:3px;padding-left:8px;">• ${l}</div>`).join("")}</div>`
+      : "";
 
   return `
     <div class="block">
       <div class="hotel">${hotel}</div>
-      <div class="sub">${addr ? `${addr}<br/>` : ''}${phone ? `# ${phone}<br/>` : ''}${email ? `${email}` : ''}</div>
+      <div class="sub">${addr ? `${addr}<br/>` : ""}${phone ? `# ${phone}<br/>` : ""}${email ? `${email}` : ""}</div>
       <div class="title">${title}</div>
       <div class="row">
         <div class="col-left">
@@ -151,7 +164,7 @@ function oneReceiptBlock(p: PaymentReceiptPayload): string {
       </div>
       <div class="hr"></div>
       ${ctxBlock}
-      ${svc ? `<div class="pay-row"><span class="label">Service / folio line:</span><span style="text-align:right;max-width:65%;">${svc}</span></div>` : ''}
+      ${svc ? `<div class="pay-row"><span class="label">Service / folio line:</span><span style="text-align:right;max-width:65%;">${svc}</span></div>` : ""}
       <div class="pay-row">
         <span class="label">Payment Info.:</span>
         <span>${pm}</span>
@@ -168,41 +181,41 @@ function oneReceiptBlock(p: PaymentReceiptPayload): string {
         <div class="sig">Authorized Signatory</div>
       </div>
     </div>
-  `
+  `;
 }
 
 export function buildPaymentReceiptHtml(p: PaymentReceiptPayload): string {
-  const styles = receiptBlockStyles()
-  const first = oneReceiptBlock(p)
-  const second = oneReceiptBlock(p)
+  const styles = receiptBlockStyles();
+  const first = oneReceiptBlock(p);
+  const second = oneReceiptBlock(p);
   const cut =
-    '<div style="border-top:1px dashed #888;margin:16px 0 20px;max-width:720px;margin-left:auto;margin-right:auto;"></div>'
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width"/><style>${styles}</style></head><body>${first}${cut}${second}</body></html>`
+    '<div style="border-top:1px dashed #888;margin:16px 0 20px;max-width:720px;margin-left:auto;margin-right:auto;"></div>';
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width"/><style>${styles}</style></head><body>${first}${cut}${second}</body></html>`;
 }
 
 export function formatReceiptDateTime(iso: string): string {
   try {
-    const d = new Date(iso)
-    if (Number.isNaN(d.getTime())) return iso
-    return d.toLocaleString('en-US', {
-      month: 'numeric',
-      day: 'numeric',
-      year: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-      second: '2-digit',
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return iso;
+    return d.toLocaleString("en-US", {
+      month: "numeric",
+      day: "numeric",
+      year: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      second: "2-digit",
       hour12: true,
-    })
+    });
   } catch {
-    return iso
+    return iso;
   }
 }
 
 export function formatAmountReceipt(amount: number): string {
-  const abs = Math.abs(Number(amount) || 0)
-  const formatted = abs.toLocaleString('en-NG', {
+  const abs = Math.abs(Number(amount) || 0);
+  const formatted = abs.toLocaleString("en-NG", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
-  })
-  return `${formatted} N`
+  });
+  return `${formatted} N`;
 }
