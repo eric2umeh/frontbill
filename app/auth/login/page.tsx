@@ -24,6 +24,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { getPostLoginPath } from '@/lib/utils/post-login-path'
+import { BRAND_LOGO_SESSION_KEY } from '@/lib/branding/constants'
 
 export default function Page() {
   const [email, setEmail] = useState('')
@@ -34,7 +35,17 @@ export default function Page() {
   const [showForgotPassword, setShowForgotPassword] = useState(false)
   const [resetEmail, setResetEmail] = useState('')
   const [resetLoading, setResetLoading] = useState(false)
+  const [sessionBrandLogo, setSessionBrandLogo] = useState<string | null>(null)
   const router = useRouter()
+
+  useEffect(() => {
+    try {
+      const u = sessionStorage.getItem(BRAND_LOGO_SESSION_KEY)
+      if (u && /^https?:\/\//i.test(u)) setSessionBrandLogo(u)
+    } catch {
+      /* ignore */
+    }
+  }, [])
 
   useEffect(() => {
     const supabase = createClient()
@@ -114,8 +125,12 @@ export default function Page() {
         <div className="flex flex-col gap-6">
           <Card>
             <CardHeader className="space-y-4">
-              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-primary">
-                <Hotel className="h-6 w-6 text-primary-foreground" />
+              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-primary overflow-hidden">
+                {sessionBrandLogo ? (
+                  <img src={sessionBrandLogo} alt="" className="h-full w-full object-contain p-1.5 bg-white" />
+                ) : (
+                  <Hotel className="h-6 w-6 text-primary-foreground" />
+                )}
               </div>
               <div className="text-center">
                 <CardTitle className="text-2xl">FrontBill</CardTitle>
