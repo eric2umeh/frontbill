@@ -9,6 +9,8 @@ import { createClient } from '@/lib/supabase/client'
 import { AuthProvider } from '@/lib/auth-context'
 import { hasPermission, type Permission, canonicalRoleKey, APP_LOGIN_ROLE_KEYS } from '@/lib/permissions'
 import { BackdatePendingProvider } from '@/components/providers/backdate-pending-provider'
+import { BrandingFavicon } from '@/components/branding/branding-favicon'
+import { BRAND_LOGO_SESSION_KEY } from '@/lib/branding/constants'
 
 interface DashboardUser {
   id: string
@@ -16,6 +18,7 @@ interface DashboardUser {
   name: string
   role: string
   organizationId?: string
+  organizationLogoUrl?: string
 }
 
 const ROUTE_PERMISSIONS: Array<{ path: string; permission: Permission }> = [
@@ -72,6 +75,10 @@ export default function DashboardLayout({
 }) {
   const [user, setUser] = useState<DashboardUser | null>(null)
   const [loading, setLoading] = useState(true)
+
+  const setOrganizationLogoUrl = (url: string) => {
+    setUser((prev) => (prev ? { ...prev, organizationLogoUrl: url } : prev))
+  }
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [redirected, setRedirected] = useState(false)
   const router = useRouter()
@@ -92,6 +99,7 @@ export default function DashboardLayout({
               email: 'user@example.com',
               name: 'User',
               role: 'admin',
+              organizationLogoUrl: '',
             })
             setLoading(false)
           }
@@ -126,12 +134,25 @@ export default function DashboardLayout({
               }
               return
             }
+            let organizationLogoUrl = ''
+            const oid = profile.organization_id
+            if (oid) {
+              const { data: orgRow, error: orgErr } = await supabase
+                .from('organizations')
+                .select('logo_url')
+                .eq('id', oid)
+                .maybeSingle()
+              if (!orgErr && orgRow?.logo_url) {
+                organizationLogoUrl = String(orgRow.logo_url)
+              }
+            }
             setUser({
               id: authUser.id,
               email: authUser.email || '',
               name: profile.full_name || authUser.email?.split('@')[0] || 'User',
               role: rk,
               organizationId: profile.organization_id || '',
+              organizationLogoUrl,
             })
           } else {
             setUser({
@@ -139,6 +160,7 @@ export default function DashboardLayout({
               email: authUser.email || '',
               name: authUser.email?.split('@')[0] || 'User',
               role: 'admin',
+              organizationLogoUrl: '',
             })
           }
           setLoading(false)
@@ -151,6 +173,7 @@ export default function DashboardLayout({
             email: 'user@example.com',
             name: 'User',
             role: 'staff',
+            organizationLogoUrl: '',
           })
           setLoading(false)
         }
@@ -195,6 +218,19 @@ export default function DashboardLayout({
     }
   }, [pathname, router, user])
 
+  useEffect(() => {
+    if (typeof window === 'undefined' || !user?.organizationId) return
+    try {
+      if (user.organizationLogoUrl) {
+        sessionStorage.setItem(BRAND_LOGO_SESSION_KEY, user.organizationLogoUrl)
+      } else {
+        sessionStorage.removeItem(BRAND_LOGO_SESSION_KEY)
+      }
+    } catch {
+      /* ignore quota / private mode */
+    }
+  }, [user?.organizationId, user?.organizationLogoUrl])
+
   if (loading || !user) {
     return <LoadingScreen />
   }
@@ -210,7 +246,10 @@ export default function DashboardLayout({
       name: user.name,
       role: user.role,
       organizationId: user.organizationId || '',
+      organizationLogoUrl: user.organizationLogoUrl || '',
+      setOrganizationLogoUrl,
     }}>
+      <BrandingFavicon href={user.organizationLogoUrl} />
       <BackdatePendingProvider>
       <div className="flex h-screen overflow-hidden bg-background">
         <Sidebar mobileOpen={mobileMenuOpen} onMobileClose={() => setMobileMenuOpen(false)} />
