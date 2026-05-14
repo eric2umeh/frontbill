@@ -16,7 +16,7 @@ import { formatNaira } from '@/lib/utils/currency'
 import { usePageData } from '@/hooks/use-page-data'
 import { useAuth } from '@/lib/auth-context'
 import { hasPermission } from '@/lib/permissions'
-import { Plus, Loader2, Users, LogOut, DoorOpen } from 'lucide-react'
+import { Plus, Loader2, Users, LogOut, DoorOpen, Bed } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { getUserDisplayName } from '@/lib/utils/user-display'
@@ -93,6 +93,7 @@ export default function BookingsPage() {
     status: 'checked_in',
     payment_status: 'all',
   })
+  const [roomStats, setRoomStats] = useState<{ total: number; occupied: number; available: number } | null>(null)
 
   useEffect(() => {
     if (!organizationId) return
@@ -112,6 +113,21 @@ export default function BookingsPage() {
     return () => {
       cancelled = true
     }
+  }, [organizationId])
+
+  const refreshRoomStats = useCallback(async () => {
+    if (!organizationId) return
+    const supabase = createClient()
+    if (!supabase) return
+    const { data, error } = await supabase.from('rooms').select('status').eq('organization_id', organizationId)
+    if (error) {
+      console.warn('[bookings] room stats:', error.message)
+      return
+    }
+    const list = data || []
+    const occupied = list.filter((r: { status?: string }) => String(r.status || '').toLowerCase() === 'occupied').length
+    const available = list.filter((r: { status?: string }) => String(r.status || '').toLowerCase() === 'available').length
+    setRoomStats({ total: list.length, occupied, available })
   }, [organizationId])
 
   const fetchBookings = useCallback(async () => {
@@ -270,13 +286,22 @@ export default function BookingsPage() {
       console.error('Error fetching bookings:', error)
       toast.error('Failed to load bookings')
     } finally {
+      void refreshRoomStats()
       endFetch()
     }
-  }, [organizationId, userId, tableFilters.status])
+  }, [organizationId, userId, tableFilters.status, refreshRoomStats])
 
   useEffect(() => {
     if (organizationId) fetchBookings()
   }, [organizationId, userId, fetchBookings])
+
+  useEffect(() => {
+    if (!organizationId) {
+      setRoomStats(null)
+      return
+    }
+    void refreshRoomStats()
+  }, [organizationId, refreshRoomStats])
 
   const statusColors: Record<string, string> = {
     reserved: 'bg-blue-500/10 text-blue-700 border-blue-200',
@@ -636,25 +661,50 @@ export default function BookingsPage() {
         </>
       )}
       
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Bookings</h1>
-          <p className="text-muted-foreground">
-            Default view loads only <strong>checked-in guests still on stay</strong> (by check-in / check-out dates) for speed. Use Status for history; checkout removes a guest from this list and frees the room.
+      <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between lg:gap-3">
+        <div className="min-w-0 space-y-1">
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Bookings</h1>
+          <p className="text-muted-foreground text-xs sm:text-sm leading-snug max-w-3xl">
+            Default: <strong>in-house</strong> stays only (fast). Change Status for history. Checkout frees the room.
           </p>
         </div>
-        {hasPermission(role, 'bookings:create') && (
-          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
-            <Button variant="outline" size="sm" className="w-full text-xs sm:w-auto sm:text-sm" onClick={() => setBulkModalOpen(true)}>
-              <Users className="mr-2 h-3.5 w-3.5 sm:h-4 sm:w-4" />
-              Bulk Booking
-            </Button>
-            <Button size="sm" className="w-full text-xs sm:w-auto sm:text-sm" onClick={() => setModalOpen(true)}>
-              <Plus className="mr-2 h-3.5 w-3.5 sm:h-4 sm:w-4" />
-              New Booking
-            </Button>
-          </div>
-        )}
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
+          {roomStats !== null && (
+            <>
+              <div
+                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-input bg-background px-2.5 text-xs font-medium shadow-sm"
+                title={`${roomStats.total} rooms in inventory · occupied = room status`}
+              >
+                <Users className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                <span className="text-muted-foreground">Occupied</span>
+                <span className="tabular-nums text-foreground">{roomStats.occupied}</span>
+              </div>
+              <div
+                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-input bg-background px-2.5 text-xs font-medium shadow-sm"
+                title={`${roomStats.total} rooms in inventory · available = room status`}
+              >
+                <Bed className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                <span className="text-muted-foreground">Available</span>
+                <span className="tabular-nums text-foreground">{roomStats.available}</span>
+              </div>
+              <span className="text-[10px] text-muted-foreground tabular-nums hidden sm:inline" title="Total rooms">
+                of {roomStats.total}
+              </span>
+            </>
+          )}
+          {hasPermission(role, 'bookings:create') && (
+            <>
+              <Button variant="outline" size="sm" className="h-8 text-xs px-2.5 sm:px-3" onClick={() => setBulkModalOpen(true)}>
+                <Users className="mr-1.5 h-3.5 w-3.5" />
+                Bulk Booking
+              </Button>
+              <Button size="sm" className="h-8 text-xs px-2.5 sm:px-3" onClick={() => setModalOpen(true)}>
+                <Plus className="mr-1.5 h-3.5 w-3.5" />
+                New Booking
+              </Button>
+            </>
+          )}
+        </div>
       </div>
 
       <EnhancedDataTable
