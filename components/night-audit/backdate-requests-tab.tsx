@@ -1,12 +1,15 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
+import { format, parseISO } from 'date-fns'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Loader2, CalendarClock } from 'lucide-react'
 import { toast } from 'sonner'
+import { formatNaira } from '@/lib/utils/currency'
+import type { BackdateRequestSummary } from '@/lib/backdate/request-summary'
 
 export interface BackdateRequest {
   id: string
@@ -19,12 +22,105 @@ export interface BackdateRequest {
   approved_by_name?: string | null
   decision_note?: string | null
   created_at: string
+  decided_at?: string | null
   created_booking_id?: string | null
   metadata?: { created_folio_id?: string; [k: string]: unknown }
+  summary?: BackdateRequestSummary | null
 }
 
 interface Props {
   userId: string
+}
+
+function formatRequestInstant(iso: string | null | undefined): string {
+  if (!iso) return '—'
+  try {
+    return format(parseISO(iso), 'dd MMM yyyy · h:mm a')
+  } catch {
+    return iso
+  }
+}
+
+function formatStayDate(ymd: string | null | undefined): string {
+  if (!ymd) return '—'
+  try {
+    return format(parseISO(`${ymd}T12:00:00`), 'dd MMM yyyy')
+  } catch {
+    return ymd
+  }
+}
+
+function DetailItem({ label, value }: { label: string; value: ReactNode }) {
+  if (value == null || value === '' || value === '—') return null
+  return (
+    <div className="space-y-0.5">
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className="text-sm font-medium">{value}</p>
+    </div>
+  )
+}
+
+function BackdateRequestDetails({ request }: { request: BackdateRequest }) {
+  const s = request.summary
+  const isBulk =
+    request.request_type === 'bulk_booking' ||
+    request.request_type === 'bulk_reservation' ||
+    (s?.room_count != null && s.room_count > 0)
+
+  if (isBulk) {
+    return (
+      <div className="grid gap-3 rounded-md border bg-muted/30 p-3 sm:grid-cols-2">
+        <DetailItem label="Submitted" value={formatRequestInstant(request.created_at)} />
+        <DetailItem label="Requested by" value={request.requested_by_name} />
+        <DetailItem label="Stay check-in" value={formatStayDate(request.requested_check_in)} />
+        <DetailItem label="Stay check-out" value={formatStayDate(request.requested_check_out)} />
+        <DetailItem label="Type" value={s?.booking_type?.replace('_', ' ') || request.request_type.replace('_', ' ')} />
+        <DetailItem label="Rooms" value={s?.room_count != null ? String(s.room_count) : null} />
+        <DetailItem label="Organization" value={s?.organization_name} />
+      </div>
+    )
+  }
+
+  return (
+    <div className="grid gap-3 rounded-md border bg-muted/30 p-3 sm:grid-cols-2">
+      <DetailItem label="Submitted" value={formatRequestInstant(request.created_at)} />
+      <DetailItem label="Requested by" value={request.requested_by_name} />
+      <DetailItem label="Guest" value={s?.guest_name} />
+      <DetailItem label="Guest phone" value={s?.guest_phone} />
+      <DetailItem
+        label="Room"
+        value={
+          s?.room_number
+            ? `Room ${s.room_number}${s.room_type ? ` · ${s.room_type}` : ''}`
+            : s?.room_type || null
+        }
+      />
+      <DetailItem
+        label="Stay dates"
+        value={`${formatStayDate(request.requested_check_in)} → ${formatStayDate(request.requested_check_out)}`}
+      />
+      <DetailItem label="Nights" value={s?.nights != null ? String(s.nights) : null} />
+      <DetailItem
+        label="Rate / night"
+        value={s?.rate_per_night != null ? formatNaira(s.rate_per_night) : null}
+      />
+      <DetailItem
+        label="Estimated total"
+        value={s?.total_amount != null ? formatNaira(s.total_amount) : null}
+      />
+      <DetailItem
+        label="Payment"
+        value={
+          s?.payment_method
+            ? `${String(s.payment_method).replace('_', ' ')}${s.payment_status ? ` · ${s.payment_status}` : ''}`
+            : null
+        }
+      />
+      {s?.amount_paid != null && s.amount_paid > 0 ? (
+        <DetailItem label="Amount paid" value={formatNaira(s.amount_paid)} />
+      ) : null}
+    </div>
+  )
 }
 
 export function BackdateRequestsTab({ userId }: Props) {
@@ -80,7 +176,7 @@ export function BackdateRequestsTab({ userId }: Props) {
         toast.success(`Backdate request ${status}`)
       }
       setRequests((prev) => prev.map((item) => (item.id === requestId ? { ...item, ...json.request } : item)))
-      load()
+      void load()
       if (typeof window !== 'undefined') window.dispatchEvent(new Event('frontbill-backdate-pending-changed'))
     } catch {
       toast.error('Failed to update request')
@@ -99,8 +195,7 @@ export function BackdateRequestsTab({ userId }: Props) {
           <div>
             <CardTitle className="text-base">Backdate requests</CardTitle>
             <CardDescription>
-              Approve or reject staff requests to record bookings or reservations with past check-in dates. Approved
-              requests remain in the audit trail.
+              Approve or reject staff requests to record bookings or reservations with past check-in dates.
               {pendingCount > 0 && (
                 <Badge variant="secondary" className="ml-2">
                   {pendingCount} pending
@@ -121,11 +216,13 @@ export function BackdateRequestsTab({ userId }: Props) {
           <div className="grid gap-3">
             {requests.map((request) => (
               <Card key={request.id} className="border-muted shadow-none">
-                <CardContent className="p-4 space-y-3">
+                <CardContent className="space-y-3 p-4">
                   <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <p className="font-medium capitalize">{request.request_type.replace('_', ' ')} backdate</p>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="font-medium capitalize">
+                          {request.request_type.replace(/_/g, ' ')} backdate
+                        </p>
                         <Badge
                           variant={
                             request.status === 'pending'
@@ -138,32 +235,44 @@ export function BackdateRequestsTab({ userId }: Props) {
                           {request.status}
                         </Badge>
                       </div>
-                      <p className="text-sm text-muted-foreground mt-1">
-                        Requested by {request.requested_by_name} for {request.requested_check_in}
-                        {request.requested_check_out ? ` to ${request.requested_check_out}` : ''}
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Request ID {request.id.slice(0, 8)}…
+                        {request.decided_at
+                          ? ` · Decided ${formatRequestInstant(request.decided_at)}`
+                          : ''}
                       </p>
                     </div>
                     {request.status === 'pending' && (
-                      <div className="flex gap-2 shrink-0">
+                      <div className="flex shrink-0 gap-2">
                         <Button
                           size="sm"
                           variant="outline"
-                          onClick={() => decide(request.id, 'rejected')}
+                          onClick={() => void decide(request.id, 'rejected')}
                           disabled={decidingId === request.id}
                         >
                           Reject
                         </Button>
-                        <Button size="sm" onClick={() => decide(request.id, 'approved')} disabled={decidingId === request.id}>
-                          {decidingId === request.id ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                        <Button
+                          size="sm"
+                          onClick={() => void decide(request.id, 'approved')}
+                          disabled={decidingId === request.id}
+                        >
+                          {decidingId === request.id ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          ) : null}
                           Approve
                         </Button>
                       </div>
                     )}
                   </div>
+
+                  <BackdateRequestDetails request={request} />
+
                   <div className="rounded-md bg-muted/40 p-3 text-sm">
                     <span className="font-medium">Reason: </span>
                     {request.reason}
                   </div>
+
                   {request.decision_note && (
                     <p className="text-xs text-muted-foreground">
                       Decision: {request.decision_note}
