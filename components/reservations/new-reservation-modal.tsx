@@ -413,7 +413,19 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
           requested_check_in: toLocalDateStr(checkInDate),
           requested_check_out: checkOutDate ? toLocalDateStr(checkOutDate) : null,
           reason: backdateReason,
-          metadata: { guest_name: fullName || guestId, room_id: selectedRoom?.id || null },
+          metadata: {
+            guest_name: fullName || guestId,
+            guest_phone: phone || null,
+            room_id: selectedRoom?.id || null,
+            room_number: selectedRoom?.room_number || null,
+            room_type: selectedRoom?.room_type || null,
+            price_per_night: pricePerNight,
+            custom_price: customPrice !== '' ? Number(customPrice) : 0,
+            nights,
+            payment_method: paymentMethod,
+            payment_status: paymentStatus,
+            amount_paid: partialAmount !== '' ? Number(partialAmount) : 0,
+          },
         }),
       })
       const json = await res.json()
