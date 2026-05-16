@@ -28,6 +28,11 @@ import { RoomChangeRequestsTab } from '@/components/night-audit/room-change-requ
 import { ExtendStayDiscountTab } from '@/components/night-audit/extend-stay-discount-tab'
 import { useBackdatePendingCount } from '@/hooks/use-backdate-pending-count'
 import { LoadingSpinner } from '@/components/loading-screen'
+import {
+  formatHotelDateDisplayGB,
+  nightAuditClosingDateYmd,
+  nightAuditNextBusinessDateYmd,
+} from '@/lib/hotel-date'
 
 interface AuditTrailLog {
   id: string
@@ -49,8 +54,11 @@ export default function NightAuditPage() {
   const [auditTab, setAuditTab] = useState('expected-arrivals')
   const [auditRunning, setAuditRunning] = useState(false)
   const [auditComplete, setAuditComplete] = useState(false)
+  const [closingDateYmd, setClosingDateYmd] = useState(() => nightAuditClosingDateYmd())
+  const [rolledToYmd, setRolledToYmd] = useState<string | null>(null)
   const { initialLoading, startFetch, endFetch } = usePageData()
   const { organizationId, userId, role } = useAuth()
+  const canRunNightAudit = hasPermission(role, 'night_audit:run')
   const [auditData, setAuditData] = useState<any>(null)
   const [aiSummary, setAiSummary] = useState<any>(null)
   const [aiLoading, setAiLoading] = useState(false)
@@ -90,15 +98,19 @@ export default function NightAuditPage() {
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
   }
 
+  const nextBusinessDateYmd = nightAuditNextBusinessDateYmd(closingDateYmd)
+
   useEffect(() => {
-    fetchAuditData()
-  }, [])
+    setAuditComplete(false)
+    setRolledToYmd(null)
+    void fetchAuditData(closingDateYmd, nextBusinessDateYmd)
+  }, [closingDateYmd, organizationId])
 
   useEffect(() => {
     if (canViewAuditTrails && userId) fetchAuditLogs()
   }, [canViewAuditTrails, userId])
 
-  const fetchAuditData = async () => {
+  const fetchAuditData = async (closingDate: string, arrivalsDate: string) => {
     try {
       startFetch()
       const supabase = createClient()
@@ -108,8 +120,6 @@ export default function NightAuditPage() {
         pendingCheckouts: [], expectedArrivals: [], anomalies: []
       }
       if (!supabase) { setAuditData(emptyData); endFetch(); return }
-
-      const today = new Date().toISOString().split('T')[0]
 
       const [{ data: bookings }, { data: payments }, { data: allRooms }, { data: arrivals }] = await Promise.all([
         supabase
@@ -121,7 +131,7 @@ export default function NightAuditPage() {
           .from('payments')
           .select('*')
           .eq('organization_id', organizationId)
-          .gte('payment_date', today),
+          .eq('payment_date', closingDate),
         supabase
           .from('rooms')
           .select('id, room_number, status')
@@ -132,7 +142,7 @@ export default function NightAuditPage() {
           .select('id, folio_id, guests:guest_id(name), rooms:room_id(room_number), check_in')
           .eq('organization_id', organizationId)
           .eq('status', 'reserved')
-          .eq('check_in', today),
+          .eq('check_in', arrivalsDate),
       ])
 
       const totalRooms = allRooms?.length || 0
@@ -149,7 +159,7 @@ export default function NightAuditPage() {
           transfer: payments?.filter((p: any) => ['transfer', 'bank_transfer'].includes(p.payment_method)).reduce((sum: number, p: any) => sum + p.amount, 0) || 0,
           cityLedger: payments?.filter((p: any) => p.payment_method === 'city_ledger').reduce((sum: number, p: any) => sum + p.amount, 0) || 0,
         },
-        pendingCheckouts: bookings?.filter((b: any) => b.check_out === today) || [],
+        pendingCheckouts: bookings?.filter((b: any) => String(b.check_out).slice(0, 10) === closingDate) || [],
         expectedArrivals: arrivals || [],
         anomalies: []
       })
@@ -162,114 +172,37 @@ export default function NightAuditPage() {
   }
 
   const handleRunAudit = async () => {
+    if (!canRunNightAudit || !userId) {
+      toast.error('You do not have permission to run night audit')
+      return
+    }
+
     setAuditRunning(true)
     setAiSummary(null)
     toast.loading('Running night audit...', { id: 'audit' })
 
     try {
-      const supabase = createClient()
-      if (!supabase) {
-        toast.error('Database connection unavailable', { id: 'audit' })
-        setAuditRunning(false)
-        return
-      }
-
-      const today = new Date().toISOString().split('T')[0]
-
-      const [
-        { data: checkedInBookings },
-        { data: payments },
-        { data: allRooms },
-        { data: arrivals },
-        { data: overdueBookings },
-        { data: occupiedRooms },
-      ] = await Promise.all([
-        supabase.from('bookings')
-          .select('*, rooms(id, room_number), guests:guest_id(name)')
-          .eq('organization_id', organizationId)
-          .eq('status', 'checked_in'),
-        supabase.from('payments')
-          .select('*')
-          .eq('organization_id', organizationId)
-          .gte('payment_date', today),
-        supabase.from('rooms')
-          .select('id, room_number, status')
-          .eq('organization_id', organizationId)
-          .neq('status', 'maintenance'),
-        supabase.from('bookings')
-          .select('id, folio_id, guests:guest_id(name), rooms:room_id(room_number), check_in')
-          .eq('organization_id', organizationId)
-          .eq('status', 'reserved')
-          .eq('check_in', today),
-        supabase.from('bookings')
-          .select('id, folio_id, guests:guest_id(name), rooms:room_id(room_number), check_out, balance, payment_status')
-          .eq('organization_id', organizationId)
-          .eq('payment_status', 'pending')
-          .lt('check_out', today),
-        supabase.from('rooms')
-          .select('id, room_number')
-          .eq('organization_id', organizationId)
-          .eq('status', 'occupied'),
-      ])
-
-      const anomalies: any[] = []
-
-      overdueBookings?.forEach((b: any) => {
-        anomalies.push({
-          type: 'Overdue checkout',
-          severity: 'high',
-          description: `Booking ${b.folio_id || b.id.slice(0, 8)} – ${b.guests?.name || 'Unknown guest'} (Room ${b.rooms?.room_number || '?'}) was due to check out on ${b.check_out} but payment is still pending.`,
-          bookingId: b.id,
-        })
+      const res = await fetch('/api/night-audit/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ caller_id: userId, audit_date: closingDateYmd }),
       })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error || 'Night audit failed')
 
-      checkedInBookings?.forEach((b: any) => {
-        if (b.balance > b.total_amount * 0.5) {
-          anomalies.push({
-            type: 'High outstanding balance',
-            severity: 'medium',
-            description: `Booking ${b.folio_id || b.booking_number || b.id.slice(0, 8)} – ${b.guests?.name || 'Unknown guest'} has ${formatNaira(b.balance)} outstanding (>50% of ${formatNaira(b.total_amount)}).`,
-            bookingId: b.id,
-          })
-        }
-      })
-
-      const checkedInRoomIds = new Set(checkedInBookings?.map((b: any) => b.room_id) || [])
-      occupiedRooms?.forEach((room: any) => {
-        if (!checkedInRoomIds.has(room.id)) {
-          anomalies.push({
-            type: 'Room status mismatch',
-            severity: 'high',
-            description: `Room ${room.room_number} is marked as occupied but has no active checked-in booking.`,
-          })
-        }
-      })
-
-      const totalRooms = allRooms?.length || 0
-      const occupiedCount = checkedInBookings?.length || 0
-      const totalRevenue = payments?.reduce((sum: number, p: any) => sum + p.amount, 0) || 0
-
-      setAuditData({
-        occupancyRate: totalRooms > 0 ? Math.round((occupiedCount / totalRooms) * 100) : 0,
-        totalRooms,
-        occupiedRooms: occupiedCount,
-        totalRevenue,
-        revenues: {
-          cash: payments?.filter((p: any) => p.payment_method === 'cash').reduce((sum: number, p: any) => sum + p.amount, 0) || 0,
-          pos: payments?.filter((p: any) => p.payment_method === 'pos').reduce((sum: number, p: any) => sum + p.amount, 0) || 0,
-          transfer: payments?.filter((p: any) => ['transfer', 'bank_transfer'].includes(p.payment_method)).reduce((sum: number, p: any) => sum + p.amount, 0) || 0,
-          cityLedger: payments?.filter((p: any) => p.payment_method === 'city_ledger').reduce((sum: number, p: any) => sum + p.amount, 0) || 0,
-        },
-        pendingCheckouts: checkedInBookings?.filter((b: any) => b.check_out === today) || [],
-        expectedArrivals: arrivals || [],
-        anomalies,
-      })
-
-      toast.success(`Night audit completed – ${anomalies.length} anomal${anomalies.length === 1 ? 'y' : 'ies'} found`, { id: 'audit' })
+      setAuditData(json.summary)
+      setRolledToYmd(json.next_business_date)
       setAuditComplete(true)
-    } catch (error: any) {
+      toast.success(
+        `Night audit completed for ${formatHotelDateDisplayGB(json.closing_date)} – ${json.summary?.anomalies?.length || 0} anomal${(json.summary?.anomalies?.length || 0) === 1 ? 'y' : 'ies'}`,
+        { id: 'audit' },
+      )
+    } catch (error: unknown) {
       console.error('Night audit error:', error)
-      toast.error('Night audit failed: ' + error.message, { id: 'audit' })
+      toast.error('Night audit failed: ' + (error instanceof Error ? error.message : 'Unknown error'), {
+        id: 'audit',
+      })
     } finally {
       setAuditRunning(false)
     }
@@ -283,7 +216,7 @@ export default function NightAuditPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          date: new Date().toISOString().split('T')[0],
+          date: closingDateYmd,
           dailyData: {
             checkouts: auditData.pendingCheckouts?.length || 0,
             checkIns: auditData.occupiedRooms || 0,
@@ -340,7 +273,8 @@ export default function NightAuditPage() {
     )
   }
 
-  const auditDate = new Date().toLocaleDateString('en-GB')
+  const auditDateLabel = formatHotelDateDisplayGB(closingDateYmd)
+  const nextBusinessLabel = formatHotelDateDisplayGB(rolledToYmd || nextBusinessDateYmd)
   const occupancyPercent = auditData?.totalRooms ? Math.round((auditData.occupiedRooms / auditData.totalRooms) * 100) : 0
 
   const revenueRows = [
@@ -356,7 +290,7 @@ export default function NightAuditPage() {
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Night Audit</h1>
           <p className="text-muted-foreground">
-            End-of-day financial reconciliation and system rollover
+            Close the previous business day (typical morning run) and roll the hotel date forward
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -375,10 +309,10 @@ export default function NightAuditPage() {
               AI Summary
             </Button>
           )}
-          <Button 
-            size="lg" 
-            onClick={handleRunAudit}
-            disabled={auditRunning || auditComplete}
+          <Button
+            size="lg"
+            onClick={() => void handleRunAudit()}
+            disabled={auditRunning || auditComplete || !canRunNightAudit}
             className="gap-2"
           >
             {auditRunning ? (
@@ -401,13 +335,37 @@ export default function NightAuditPage() {
         </div>
       </div>
 
+      <Card>
+        <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-end">
+          <div className="space-y-1.5 flex-1">
+            <Label htmlFor="closing_date">Business date to close</Label>
+            <Input
+              id="closing_date"
+              type="date"
+              value={closingDateYmd}
+              onChange={(e) => setClosingDateYmd(e.target.value)}
+              disabled={auditComplete}
+            />
+            <p className="text-xs text-muted-foreground">
+              Morning audit (before 6pm hotel time) defaults to yesterday — e.g. run on 16 May closes 15 May.
+              Revenue and departures use this date; arrivals use {formatHotelDateDisplayGB(nextBusinessDateYmd)}.
+            </p>
+          </div>
+          {!auditComplete && (
+            <Button type="button" variant="outline" onClick={() => setClosingDateYmd(nightAuditClosingDateYmd())}>
+              Reset to suggested date
+            </Button>
+          )}
+        </CardContent>
+      </Card>
+
       {auditComplete && (
         <Card className="border-green-200 bg-green-50">
           <CardContent className="flex items-center gap-3 p-4">
             <CheckCircle2 className="h-5 w-5 text-green-600" />
             <div>
-              <p className="font-semibold text-green-900">Night audit completed for {auditDate}</p>
-              <p className="text-sm text-green-700">System date rolled to {new Date(Date.now() + 86400000).toLocaleDateString('en-GB')}</p>
+              <p className="font-semibold text-green-900">Night audit completed for {auditDateLabel}</p>
+              <p className="text-sm text-green-700">Hotel business date is now {nextBusinessLabel}</p>
             </div>
           </CardContent>
         </Card>
@@ -440,7 +398,7 @@ export default function NightAuditPage() {
             <div className="text-2xl font-bold">{formatNaira(auditData?.totalRevenue || 0)}</div>
             <p className="text-xs text-green-600 mt-1 flex items-center gap-1">
               <TrendingUp className="h-3 w-3" />
-              Today&apos;s revenue
+              Revenue on {auditDateLabel}
             </p>
           </CardContent>
         </Card>
@@ -479,7 +437,7 @@ export default function NightAuditPage() {
       <Card>
         <CardHeader>
           <CardTitle>Revenue Breakdown</CardTitle>
-          <CardDescription>Payment method distribution for {auditDate}</CardDescription>
+          <CardDescription>Payment method distribution for {auditDateLabel}</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
