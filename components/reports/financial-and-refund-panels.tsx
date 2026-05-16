@@ -41,7 +41,7 @@ import {
 import { CalendarIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-function DatePick({
+export function DatePick({
   date,
   onSelect,
   label,

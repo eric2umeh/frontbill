@@ -7,7 +7,13 @@ import { Header } from '@/components/layout/header'
 import { LoadingScreen } from '@/components/loading-screen'
 import { createClient } from '@/lib/supabase/client'
 import { AuthProvider } from '@/lib/auth-context'
-import { hasPermission, type Permission, canonicalRoleKey, APP_LOGIN_ROLE_KEYS } from '@/lib/permissions'
+import {
+  hasPermission,
+  canAccessExpenseMenu,
+  type Permission,
+  canonicalRoleKey,
+  APP_LOGIN_ROLE_KEYS,
+} from '@/lib/permissions'
 import { BackdatePendingProvider } from '@/components/providers/backdate-pending-provider'
 import { BrandingFavicon } from '@/components/branding/branding-favicon'
 import { BRAND_LOGO_SESSION_KEY } from '@/lib/branding/constants'
@@ -32,6 +38,7 @@ const ROUTE_PERMISSIONS: Array<{ path: string; permission: Permission }> = [
   { path: '/transactions', permission: 'transactions:view' },
   { path: '/payments', permission: 'payments:view' },
   { path: '/reports', permission: 'reports:view' },
+  { path: '/expenses', permission: 'expenses:view' },
   { path: '/analytics', permission: 'analytics:view' },
   { path: '/night-audit', permission: 'night_audit:view' },
   { path: '/reconciliation', permission: 'reconciliation:view' },
@@ -54,6 +61,9 @@ function getRequiredPermission(pathname: string) {
 }
 
 function canAccessPath(pathname: string, userRole: string): boolean {
+  if (pathname === '/expenses' || pathname.startsWith('/expenses/')) {
+    return canAccessExpenseMenu(userRole) && hasPermission(userRole, 'expenses:view')
+  }
   if (pathname === '/store/requisitions' || pathname.startsWith('/store/requisitions/')) {
     return hasPermission(userRole, 'store:requisition') || hasPermission(userRole, 'store:view')
   }

@@ -5,6 +5,10 @@ import { canonicalRoleKey } from '@/lib/permissions'
 import { fetchOrganizationHotelTimeZone } from '@/lib/hotel-date-server'
 import { isCalendarDateBeforeHotelToday } from '@/lib/hotel-date'
 import { notifyApproversNewBackdateRequest } from '@/lib/email/backdate-request-notify'
+import {
+  buildBackdateRequestSummary,
+  collectRoomIdsFromRequests,
+} from '@/lib/backdate/request-summary'
 import { NextResponse } from 'next/server'
 
 function isBackdateDeciderRole(role: string | null | undefined): boolean {
@@ -67,11 +71,29 @@ export async function GET(request: Request) {
       })
     }
 
+    const roomIds = collectRoomIdsFromRequests(requests || [])
+    const roomLookup: Record<string, { room_number?: string; room_type?: string; price_per_night?: number }> = {}
+    if (roomIds.length > 0) {
+      const { data: rooms } = await admin
+        .from('rooms')
+        .select('id, room_number, room_type, price_per_night')
+        .eq('organization_id', callerProfile.organization_id)
+        .in('id', roomIds)
+      for (const r of rooms || []) {
+        roomLookup[r.id] = {
+          room_number: r.room_number,
+          room_type: r.room_type,
+          price_per_night: Number(r.price_per_night) || 0,
+        }
+      }
+    }
+
     return NextResponse.json({
       requests: (requests || []).map((item: any) => ({
         ...item,
         requested_by_name: nameMap[item.requested_by] || 'Unknown User',
         approved_by_name: item.approved_by ? nameMap[item.approved_by] || 'Unknown User' : null,
+        summary: buildBackdateRequestSummary(item, roomLookup),
       })),
     })
   } catch (err: any) {

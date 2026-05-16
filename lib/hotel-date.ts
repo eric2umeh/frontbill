@@ -120,3 +120,63 @@ export function minSelectableCheckInYmdHotel(now: Date = new Date(), timeZone: s
   }
   return todayHotel
 }
+
+/** Add one calendar day to YYYY-MM-DD. */
+export function calendarDatePlusOneDay(ymd: string): string {
+  const [y, m, d] = ymd.split('-').map(Number)
+  if (!y || !m || !d) return ymd
+  const ref = new Date(Date.UTC(y, m - 1, d))
+  ref.setUTCDate(ref.getUTCDate() + 1)
+  const yy = ref.getUTCFullYear()
+  const mm = String(ref.getUTCMonth() + 1).padStart(2, '0')
+  const dd = String(ref.getUTCDate()).padStart(2, '0')
+  return `${yy}-${mm}-${dd}`
+}
+
+/**
+ * From 6pm hotel time onward, night audit defaults to closing *today* (pre-midnight audit).
+ * Before that, default is *yesterday* (morning audit for the night that just ended).
+ */
+export function nightAuditClosesTodayAfterHour(): number {
+  const raw =
+    (typeof process !== 'undefined' &&
+      (process.env.NEXT_PUBLIC_NIGHT_AUDIT_CLOSES_TODAY_AFTER_HOUR ||
+        process.env.NIGHT_AUDIT_CLOSES_TODAY_AFTER_HOUR)) ||
+    '18'
+  const n = parseInt(String(raw), 10)
+  if (Number.isNaN(n) || n < 0 || n > 23) return 18
+  return n
+}
+
+/**
+ * Business day being *closed* when night audit runs (hotel timezone).
+ * Example: 7am on 16 May → closes 15 May; 11pm on 15 May → closes 15 May.
+ */
+export function nightAuditClosingDateYmd(
+  now: Date = new Date(),
+  timeZone: string = resolveHotelTimeZone(),
+): string {
+  const tz = resolveHotelTimeZone(timeZone)
+  const todayHotel = formatYMDInTimeZone(now, tz)
+  const hour = getHourInTimeZone(now, tz)
+  if (hour >= nightAuditClosesTodayAfterHour()) {
+    return todayHotel
+  }
+  return calendarDateMinusOneDay(todayHotel)
+}
+
+/** First business day *after* the closed audit date. */
+export function nightAuditNextBusinessDateYmd(closingYmd: string): string {
+  return calendarDatePlusOneDay(closingYmd)
+}
+
+/** en-GB display for audit UI (dd/MM/yyyy). */
+export function formatHotelDateDisplayGB(ymd: string): string {
+  const [y, m, d] = ymd.split('-').map(Number)
+  if (!y || !m || !d) return ymd
+  return new Intl.DateTimeFormat('en-GB', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  }).format(new Date(Date.UTC(y, m - 1, d)))
+}

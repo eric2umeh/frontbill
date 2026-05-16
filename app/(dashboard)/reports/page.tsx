@@ -23,7 +23,11 @@ import {
   Wallet,
   Undo2,
   PieChart,
+  TrendingDown,
+  Scale,
 } from 'lucide-react'
+import { DailyExpenditurePanel } from '@/components/reports/daily-expenditure-panel'
+import { MonthlyPlPanel } from '@/components/reports/monthly-pl-panel'
 import { cn } from '@/lib/utils'
 import { GuestDailyRevenueSummary } from '@/components/reports/guest-daily-revenue-summary'
 import {
@@ -469,6 +473,14 @@ export default function ReportsPage() {
             <ReceiptText className="h-4 w-4" />
             Guest daily summary
           </TabsTrigger>
+          <TabsTrigger value="daily-expenditure" className="gap-1.5">
+            <TrendingDown className="h-4 w-4" />
+            Daily expenditure
+          </TabsTrigger>
+          <TabsTrigger value="monthly-pl" className="gap-1.5">
+            <Scale className="h-4 w-4" />
+            Monthly P&amp;L
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="revenue">
@@ -585,6 +597,40 @@ export default function ReportsPage() {
             </CardHeader>
             <CardContent>
               <CityLedgerReport organizationId={organizationId} />
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="daily-expenditure">
+          <Card>
+            <CardHeader>
+              <CardTitle>Daily expenditure</CardTitle>
+              <CardDescription>
+                Operating expenses by day and category (matches your accountant&apos;s spreadsheet). Record
+                data under Expenses → Daily grid.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {userId ? (
+                <DailyExpenditurePanel userId={userId} />
+              ) : (
+                <p className="text-sm text-muted-foreground">Sign in to load.</p>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="monthly-pl">
+          <Card>
+            <CardHeader>
+              <CardTitle>Monthly profit &amp; loss</CardTitle>
+              <CardDescription>
+                Earned revenue vs operating expenses for the selected month, margin %, cash collection
+                comparison, category breakdown, and budget alerts.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {userId ? <MonthlyPlPanel userId={userId} /> : <p className="text-sm text-muted-foreground">Sign in.</p>}
             </CardContent>
           </Card>
         </TabsContent>

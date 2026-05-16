@@ -5,6 +5,7 @@ __v0_jsx-dev-runtime.ts
 
 # Dependencies
 node_modules/
+.pnpm-store/
 .pnp
 .pnp.js
 package-lock.json

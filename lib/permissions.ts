@@ -16,6 +16,7 @@ export type Permission =
   | 'analytics:view' | 'analytics:export'
   | 'payments:view' | 'payments:create' | 'payments:refund'
   | 'reports:view' | 'reports:export'
+  | 'expenses:view' | 'expenses:create' | 'expenses:edit' | 'expenses:export' | 'expenses:budget'
   | 'organizations:view' | 'organizations:create' | 'organizations:edit' | 'organizations:delete'
   | 'ledger:view' | 'ledger:manage'
   | 'night_audit:view' | 'night_audit:run' | 'audit_trails:view'
@@ -91,6 +92,12 @@ export const ALL_PERMISSIONS: { key: Permission; label: string; group: string }[
 
   { key: 'reports:view', label: 'View Reports', group: 'Reports' },
   { key: 'reports:export', label: 'Export/Print Reports', group: 'Reports' },
+
+  { key: 'expenses:view', label: 'View Operating Expenses', group: 'Expenses' },
+  { key: 'expenses:create', label: 'Record Operating Expenses', group: 'Expenses' },
+  { key: 'expenses:edit', label: 'Edit Operating Expenses', group: 'Expenses' },
+  { key: 'expenses:export', label: 'Import/Export Expenses', group: 'Expenses' },
+  { key: 'expenses:budget', label: 'Manage Expense Budgets', group: 'Expenses' },
 
   { key: 'night_audit:view', label: 'View Night Audit', group: 'Night Audit' },
   { key: 'night_audit:run', label: 'Run Night Audit', group: 'Night Audit' },
@@ -229,6 +236,7 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
       'analytics:view', 'analytics:export',
       'payments:view', 'payments:create', 'payments:refund',
       'reports:view', 'reports:export',
+      'expenses:view', 'expenses:create', 'expenses:edit', 'expenses:export', 'expenses:budget',
       'ledger:view', 'ledger:manage',
       'reconciliation:view', 'reconciliation:manage',
       'night_audit:view',
@@ -367,9 +375,25 @@ export function canonicalRoleKey(userRole: string | null | undefined): RoleKey |
   return null
 }
 
+/** Roles that may open the Expenses menu and use expense APIs. */
+export const EXPENSE_MENU_ROLE_KEYS: readonly RoleKey[] = [
+  'superadmin',
+  'admin',
+  'manager',
+  'accountant',
+]
+
+export function canAccessExpenseMenu(userRole: string | null | undefined): boolean {
+  const roleKey = canonicalRoleKey(userRole)
+  return roleKey != null && EXPENSE_MENU_ROLE_KEYS.includes(roleKey)
+}
+
 export function hasPermission(userRole: string | null | undefined, permission: Permission): boolean {
   const roleKey = canonicalRoleKey(userRole)
   if (!roleKey) return false
+  if (permission.startsWith('expenses:') && !canAccessExpenseMenu(userRole)) {
+    return false
+  }
   if (['rooms:create', 'rooms:edit', 'rooms:delete'].includes(permission)) {
     return roleKey === 'superadmin' || roleKey === 'admin'
   }
