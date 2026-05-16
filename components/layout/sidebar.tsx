@@ -84,6 +84,12 @@ const routes: Array<{
     permission: 'reports:view',
   },
   {
+    label: 'Expenses',
+    icon: Receipt,
+    href: '/expenses',
+    permission: 'expenses:view',
+  },
+  {
     label: 'Night Audit',
     icon: Moon,
     href: '/night-audit',

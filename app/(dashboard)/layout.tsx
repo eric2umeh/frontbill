@@ -32,6 +32,7 @@ const ROUTE_PERMISSIONS: Array<{ path: string; permission: Permission }> = [
   { path: '/transactions', permission: 'transactions:view' },
   { path: '/payments', permission: 'payments:view' },
   { path: '/reports', permission: 'reports:view' },
+  { path: '/expenses', permission: 'expenses:view' },
   { path: '/analytics', permission: 'analytics:view' },
   { path: '/night-audit', permission: 'night_audit:view' },
   { path: '/reconciliation', permission: 'reconciliation:view' },
