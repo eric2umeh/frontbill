@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { format, startOfMonth, endOfMonth, subMonths, addMonths } from 'date-fns'
+import { format, startOfMonth, endOfMonth, subMonths, addMonths, parseISO } from 'date-fns'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -31,11 +31,17 @@ import {
   type ExpenseEntryRecord,
 } from '@/components/expenses/expense-entry-form-dialog'
 
+type PeriodMode = 'month' | 'day' | 'range'
+
 interface Props {
   userId: string
   canAdd: boolean
   canModify: boolean
   canDelete: boolean
+}
+
+function todayIso() {
+  return format(new Date(), 'yyyy-MM-dd')
 }
 
 function categoryName(entry: ExpenseEntryRecord): string {
@@ -46,7 +52,11 @@ function categoryName(entry: ExpenseEntryRecord): string {
 }
 
 export function ExpenseLedger({ userId, canAdd, canModify, canDelete }: Props) {
+  const [periodMode, setPeriodMode] = useState<PeriodMode>('month')
   const [month, setMonth] = useState(() => startOfMonth(new Date()))
+  const [singleDay, setSingleDay] = useState(todayIso)
+  const [rangeFrom, setRangeFrom] = useState(() => format(startOfMonth(new Date()), 'yyyy-MM-dd'))
+  const [rangeTo, setRangeTo] = useState(todayIso)
   const [categories, setCategories] = useState<ExpenseCategoryOption[]>([])
   const [entries, setEntries] = useState<ExpenseEntryRecord[]>([])
   const [loading, setLoading] = useState(true)
@@ -57,8 +67,32 @@ export function ExpenseLedger({ userId, canAdd, canModify, canDelete }: Props) {
   const [deleteTarget, setDeleteTarget] = useState<ExpenseEntryRecord | null>(null)
   const [deleting, setDeleting] = useState(false)
 
-  const monthStart = format(month, 'yyyy-MM-dd')
-  const monthEnd = format(endOfMonth(month), 'yyyy-MM-dd')
+  const { startDate, endDate, periodLabel } = useMemo(() => {
+    if (periodMode === 'day') {
+      const d = singleDay || todayIso()
+      return {
+        startDate: d,
+        endDate: d,
+        periodLabel: format(parseISO(d), 'EEEE, d MMM yyyy'),
+      }
+    }
+    if (periodMode === 'range') {
+      const from = rangeFrom || todayIso()
+      const to = rangeTo || from
+      const start = from <= to ? from : to
+      const end = from <= to ? to : from
+      return {
+        startDate: start,
+        endDate: end,
+        periodLabel: `${format(parseISO(start), 'd MMM yyyy')} – ${format(parseISO(end), 'd MMM yyyy')}`,
+      }
+    }
+    return {
+      startDate: format(month, 'yyyy-MM-dd'),
+      endDate: format(endOfMonth(month), 'yyyy-MM-dd'),
+      periodLabel: format(month, 'MMMM yyyy'),
+    }
+  }, [periodMode, month, singleDay, rangeFrom, rangeTo])
 
   const load = useCallback(async () => {
     if (!userId) return
@@ -67,7 +101,7 @@ export function ExpenseLedger({ userId, canAdd, canModify, canDelete }: Props) {
       const [catRes, entRes] = await Promise.all([
         fetch(`/api/expenses/categories?caller_id=${userId}`, { credentials: 'include' }),
         fetch(
-          `/api/expenses?caller_id=${userId}&start_date=${monthStart}&end_date=${monthEnd}`,
+          `/api/expenses?caller_id=${userId}&start_date=${startDate}&end_date=${endDate}`,
           { credentials: 'include' },
         ),
       ])
@@ -83,7 +117,7 @@ export function ExpenseLedger({ userId, canAdd, canModify, canDelete }: Props) {
     } finally {
       setLoading(false)
     }
-  }, [userId, monthStart, monthEnd])
+  }, [userId, startDate, endDate])
 
   useEffect(() => {
     void load()
@@ -146,18 +180,56 @@ export function ExpenseLedger({ userId, canAdd, canModify, canDelete }: Props) {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center justify-center gap-2 sm:justify-start">
-          <Button type="button" variant="outline" size="icon" onClick={() => setMonth((m) => subMonths(m, 1))}>
-            <ChevronLeft className="h-4 w-4" />
-          </Button>
-          <span className="min-w-[130px] text-center font-semibold">{format(month, 'MMMM yyyy')}</span>
-          <Button type="button" variant="outline" size="icon" onClick={() => setMonth((m) => addMonths(m, 1))}>
-            <ChevronRight className="h-4 w-4" />
-          </Button>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="w-full space-y-3 sm:flex-1">
+          <Select value={periodMode} onValueChange={(v) => setPeriodMode(v as PeriodMode)}>
+            <SelectTrigger className="w-full sm:max-w-[200px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="month">This month</SelectItem>
+              <SelectItem value="day">Single day</SelectItem>
+              <SelectItem value="range">Date range</SelectItem>
+            </SelectContent>
+          </Select>
+
+          {periodMode === 'month' && (
+            <div className="flex items-center justify-center gap-2 sm:justify-start">
+              <Button type="button" variant="outline" size="icon" onClick={() => setMonth((m) => subMonths(m, 1))}>
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <span className="min-w-[130px] text-center font-semibold">{periodLabel}</span>
+              <Button type="button" variant="outline" size="icon" onClick={() => setMonth((m) => addMonths(m, 1))}>
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+          )}
+
+          {periodMode === 'day' && (
+            <Input
+              type="date"
+              className="w-full sm:max-w-[220px]"
+              value={singleDay}
+              onChange={(e) => setSingleDay(e.target.value)}
+            />
+          )}
+
+          {periodMode === 'range' && (
+            <div className="grid grid-cols-2 gap-2 sm:max-w-md">
+              <div className="space-y-1">
+                <label className="text-xs text-muted-foreground">From</label>
+                <Input type="date" value={rangeFrom} onChange={(e) => setRangeFrom(e.target.value)} />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs text-muted-foreground">To</label>
+                <Input type="date" value={rangeTo} onChange={(e) => setRangeTo(e.target.value)} />
+              </div>
+            </div>
+          )}
         </div>
+
         {canAdd && (
-          <Button type="button" className="w-full sm:w-auto" onClick={openAdd}>
+          <Button type="button" className="w-full shrink-0 sm:w-auto" onClick={openAdd}>
             <Plus className="mr-2 h-4 w-4" />
             Add expense
           </Button>
@@ -194,7 +266,7 @@ export function ExpenseLedger({ userId, canAdd, canModify, canDelete }: Props) {
       <Card>
         <CardContent className="flex flex-wrap items-center justify-between gap-2 p-4">
           <p className="text-sm text-muted-foreground">
-            {filtered.length} line{filtered.length === 1 ? '' : 's'} this month
+            {filtered.length} line{filtered.length === 1 ? '' : 's'} · {periodLabel}
           </p>
           <p className="text-lg font-bold tabular-nums">{formatNaira(monthTotal)}</p>
         </CardContent>
@@ -239,7 +311,15 @@ export function ExpenseLedger({ userId, canAdd, canModify, canDelete }: Props) {
                   ) : null}
                   {entry.reference ? <span>Ref: {entry.reference}</span> : null}
                   {entry.created_at ? (
-                    <span>Recorded {format(new Date(entry.created_at), 'dd MMM · h:mm a')}</span>
+                    <span>
+                      Recorded {format(new Date(entry.created_at), 'dd MMM · h:mm a')}
+                      {entry.created_by_name ? ` · ${entry.created_by_name}` : ''}
+                    </span>
+                  ) : null}
+                  {entry.updated_by_name &&
+                  entry.updated_at &&
+                  entry.updated_at !== entry.created_at ? (
+                    <span>Edited by {entry.updated_by_name}</span>
                   ) : null}
                 </div>
 
