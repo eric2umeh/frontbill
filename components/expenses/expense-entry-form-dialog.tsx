@@ -259,11 +259,17 @@ export function ExpenseEntryFormDialog({
           </div>
 
           {isEdit && initial?.created_at && (
-            <div className="sm:col-span-2 rounded-md bg-muted/60 px-3 py-2 text-xs text-muted-foreground">
-              Recorded {format(new Date(initial.created_at), 'dd MMM yyyy · h:mm a')}
-              {initial.updated_at && initial.updated_at !== initial.created_at
-                ? ` · Updated ${format(new Date(initial.updated_at), 'dd MMM yyyy · h:mm a')}`
-                : ''}
+            <div className="sm:col-span-2 space-y-0.5 rounded-md bg-muted/60 px-3 py-2 text-xs text-muted-foreground">
+              <p>
+                Recorded {format(new Date(initial.created_at), 'dd MMM yyyy · h:mm a')}
+                {initial.created_by_name ? ` · by ${initial.created_by_name}` : ''}
+              </p>
+              {initial.updated_at && initial.updated_at !== initial.created_at ? (
+                <p>
+                  Updated {format(new Date(initial.updated_at), 'dd MMM yyyy · h:mm a')}
+                  {initial.updated_by_name ? ` · by ${initial.updated_by_name}` : ''}
+                </p>
+              ) : null}
             </div>
           )}
         </div>

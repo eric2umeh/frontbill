@@ -33,6 +33,8 @@ type Category = {
   sort_order: number
   department_hint?: string | null
   is_active?: boolean
+  created_by_name?: string | null
+  updated_by_name?: string | null
 }
 
 interface Props {
@@ -347,6 +349,12 @@ function CategoryRow({
             <p className="text-xs text-muted-foreground mt-0.5">{cat.department_hint}</p>
           ) : null}
           <p className="text-xs text-muted-foreground mt-0.5">Code: {cat.code}</p>
+          {cat.created_by_name ? (
+            <p className="text-xs text-muted-foreground mt-0.5">Added by {cat.created_by_name}</p>
+          ) : null}
+          {cat.updated_by_name && cat.updated_by_name !== cat.created_by_name ? (
+            <p className="text-xs text-muted-foreground">Last changed by {cat.updated_by_name}</p>
+          ) : null}
         </div>
         {canManage && (
           <div className="flex flex-wrap gap-2">
