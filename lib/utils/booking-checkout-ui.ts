@@ -48,6 +48,30 @@ export function isBookingCheckedOut(b: Pick<FolioLockBooking, 'status' | 'folio_
   return (b.folio_status || 'active') === 'checked_out'
 }
 
+function normalizeBookingStatusKey(status: string): string {
+  return String(status || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, '_')
+}
+
+/** Same in-house set as room-change requests: reserved / confirmed / checked-in, not checked out. */
+export const EXTEND_STAY_ELIGIBLE_STATUSES = ['checked_in', 'confirmed', 'reserved'] as const
+
+export function canRequestExtendStayDiscount(
+  b: Pick<FolioLockBooking, 'status' | 'folio_status' | 'check_in'>,
+): boolean {
+  if (isBookingCheckedOut(b)) return false
+  const st = normalizeBookingStatusKey(b.status)
+  if (!EXTEND_STAY_ELIGIBLE_STATUSES.includes(st as (typeof EXTEND_STAY_ELIGIBLE_STATUSES)[number])) {
+    return false
+  }
+  const today = localTodayYmd()
+  const ci = bookingCheckOutYmd(String(b.check_in || ''))
+  if ((st === 'reserved' || st === 'confirmed') && ci > today) return false
+  return true
+}
+
 /**
  * True when the checkout calendar day has passed, or it's checkout day and local time
  * has reached the org standard checkout clock. Used for reminders only — staff can still
