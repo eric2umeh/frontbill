@@ -20,11 +20,12 @@ import { hasPermission } from '@/lib/permissions'
 import { 
   CheckCircle2, AlertTriangle, TrendingUp, Users,
   Bed, DollarSign, Clock, Play, Loader2, Sparkles, ClipboardList, Search,
-  CalendarClock, DoorOpen, Percent,
+  CalendarClock, DoorOpen, Percent, CalendarRange,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { BackdateRequestsTab } from '@/components/night-audit/backdate-requests-tab'
 import { RoomChangeRequestsTab } from '@/components/night-audit/room-change-requests-tab'
+import { RescheduleStayRequestsTab } from '@/components/night-audit/reschedule-stay-requests-tab'
 import { ExtendStayDiscountTab } from '@/components/night-audit/extend-stay-discount-tab'
 import { useBackdatePendingCount } from '@/hooks/use-backdate-pending-count'
 import { LoadingSpinner } from '@/components/loading-screen'
@@ -75,6 +76,7 @@ export default function NightAuditPage() {
   const canViewAuditTrails = hasPermission(role, 'audit_trails:view')
   const canApproveBackdates = hasPermission(role, 'backdate:approve')
   const canApproveRoomChanges = hasPermission(role, 'room_change:approve')
+  const canApproveRescheduleStay = hasPermission(role, 'reschedule_stay:approve')
   const canApproveExtendDiscount = canApproveRoomChanges
   const pendingBackdateBadge = useBackdatePendingCount()
 
@@ -84,7 +86,8 @@ export default function NightAuditPage() {
     if (q === 'backdate-requests' && canApproveBackdates && userId) setAuditTab('backdate-requests')
     if (q === 'room-change-requests' && canApproveRoomChanges && userId) setAuditTab('room-change-requests')
     if (q === 'extend-discount' && canApproveExtendDiscount && userId) setAuditTab('extend-discount')
-  }, [canApproveBackdates, canApproveRoomChanges, canApproveExtendDiscount, userId])
+    if (q === 'reschedule-stay-requests' && canApproveRescheduleStay && userId) setAuditTab('reschedule-stay-requests')
+  }, [canApproveBackdates, canApproveRoomChanges, canApproveExtendDiscount, canApproveRescheduleStay, userId])
 
   const onAuditTabChange = (value: string) => {
     setAuditTab(value)
@@ -93,6 +96,7 @@ export default function NightAuditPage() {
     if (value === 'backdate-requests') u.set('tab', 'backdate-requests')
     else if (value === 'room-change-requests') u.set('tab', 'room-change-requests')
     else if (value === 'extend-discount') u.set('tab', 'extend-discount')
+    else if (value === 'reschedule-stay-requests') u.set('tab', 'reschedule-stay-requests')
     else u.delete('tab')
     const qs = u.toString()
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
@@ -487,6 +491,12 @@ export default function NightAuditPage() {
               Extend discounts
             </TabsTrigger>
           )}
+          {canApproveRescheduleStay && !!userId && (
+            <TabsTrigger value="reschedule-stay-requests" className="gap-1.5">
+              <CalendarRange className="h-3.5 w-3.5" />
+              Move dates
+            </TabsTrigger>
+          )}
         </TabsList>
 
         <TabsContent value="expected-arrivals">
@@ -609,6 +619,7 @@ export default function NightAuditPage() {
                         <SelectItem value="all">All Logs</SelectItem>
                         <SelectItem value="backdate">Backdate Requests</SelectItem>
                         <SelectItem value="room_change">Room change requests</SelectItem>
+                        <SelectItem value="reschedule_stay">Move stay dates</SelectItem>
                         <SelectItem value="booking">Bookings/Reservations</SelectItem>
                         <SelectItem value="payment">Payments</SelectItem>
                         <SelectItem value="transaction">Transactions</SelectItem>
@@ -727,6 +738,12 @@ export default function NightAuditPage() {
         {canApproveExtendDiscount && userId ? (
           <TabsContent value="extend-discount">
             <ExtendStayDiscountTab userId={userId} />
+          </TabsContent>
+        ) : null}
+
+        {canApproveRescheduleStay && userId ? (
+          <TabsContent value="reschedule-stay-requests">
+            <RescheduleStayRequestsTab userId={userId} />
           </TabsContent>
         ) : null}
       </Tabs>
