@@ -28,6 +28,11 @@ import { applyPaymentToGuestCityLedger } from '@/lib/utils/guest-city-ledger'
 import { buildBackdateDedupeKey } from '@/lib/backdate/dedupe-key'
 import type { SerializedBookingPayload } from '@/lib/backdate/booking-payload'
 import { isStayCheckInConsideredBackdated } from '@/lib/hotel-date'
+import {
+  FolioRemarksAttachmentsField,
+  type FolioRemarksAttachmentsValue,
+} from '@/components/folio/folio-remarks-attachments-field'
+import { persistFolioAttachments } from '@/lib/folio/persist-folio-attachments'
 
 interface NewBookingModalProps {
   open: boolean
@@ -84,6 +89,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
   })
   const [nights, setNights] = useState(1)
   const [backdateReason, setBackdateReason] = useState('')
+  const [folioExtras, setFolioExtras] = useState<FolioRemarksAttachmentsValue>({ remarks: '', files: [] })
 
   // Room & Payment
   const [rooms, setRooms] = useState<Room[]>([]) // date-filtered available rooms
@@ -882,6 +888,18 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
         }
       }
 
+      const attachResult = await persistFolioAttachments(supabase, {
+        organizationId,
+        bookingId: booking.id,
+        source: 'booking_create',
+        remarks: folioExtras.remarks,
+        files: folioExtras.files,
+        createdBy: user?.id || null,
+      })
+      if (!attachResult.ok) {
+        toast.warning(`Booking saved but attachment failed: ${attachResult.error}`)
+      }
+
       toast.success(`Booking created! Ref: ${booking.folio_id}`)
       onSuccess?.()
       onClose()
@@ -903,6 +921,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
     setLedgerTab('individual')
     setNewAccountName(''); setNewAccountPhone(''); setNewAccountEmail('')
     setNewAccountAddress(''); setNewAccountCity(''); setNewAccountType('')
+    setFolioExtras({ remarks: '', files: [] })
   }
 
   const activeLedgerSource = ledgerTab === 'individual' ? individualAccounts : organizationAccounts
@@ -1215,6 +1234,12 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
               )}
             </div>
           </div>
+
+          <FolioRemarksAttachmentsField
+            value={folioExtras}
+            onChange={setFolioExtras}
+            disabled={loading}
+          />
 
           {/* Submit */}
           <div className="flex justify-end gap-2 pt-4 border-t">

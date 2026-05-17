@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge'
 import { Loader2, Percent } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatNaira } from '@/lib/utils/currency'
+import { FolioAttachmentLinks } from '@/components/folio/folio-attachment-links'
 
 interface Row {
   id: string
@@ -142,6 +143,12 @@ export function ExtendStayDiscountTab({ userId }: { userId: string }) {
                     <span className="font-medium">Reason: </span>
                     {r.reason}
                   </div>
+                  <FolioAttachmentLinks
+                    bookingId={r.booking_id}
+                    userId={userId}
+                    source="extend_stay_discount"
+                    sourceId={r.id}
+                  />
                   <Button variant="link" className="h-auto p-0 text-xs" asChild>
                     <Link href={`/bookings/${r.booking_id}`}>Open folio</Link>
                   </Button>

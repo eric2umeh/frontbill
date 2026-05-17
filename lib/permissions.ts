@@ -9,6 +9,7 @@ export type Permission =
   | 'dashboard:view'
   | 'bookings:view' | 'bookings:create' | 'bookings:edit' | 'bookings:delete' | 'bookings:checkin' | 'bookings:checkout'
   | 'room_change:request' | 'room_change:approve'
+  | 'reschedule_stay:request' | 'reschedule_stay:approve'
   | 'reservations:view' | 'reservations:create' | 'reservations:edit' | 'reservations:delete'
   | 'rooms:view' | 'rooms:create' | 'rooms:edit' | 'rooms:delete' | 'rooms:update_status'
   | 'guests:view' | 'guests:create' | 'guests:edit' | 'guests:delete'
@@ -64,6 +65,8 @@ export const ALL_PERMISSIONS: { key: Permission; label: string; group: string }[
   { key: 'bookings:checkout', label: 'Check Out Folios', group: 'Bookings' },
   { key: 'room_change:request', label: 'Request guest room change (approval)', group: 'Bookings' },
   { key: 'room_change:approve', label: 'Approve Room Change Requests', group: 'Bookings' },
+  { key: 'reschedule_stay:request', label: 'Request move stay dates (approval)', group: 'Bookings' },
+  { key: 'reschedule_stay:approve', label: 'Approve Move Stay Dates Requests', group: 'Bookings' },
 
   { key: 'reservations:view', label: 'View Reservations', group: 'Reservations' },
   { key: 'reservations:create', label: 'Create Reservations & Bulk Reservation', group: 'Reservations' },
@@ -271,6 +274,7 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
       'night_audit:view', 'night_audit:run', 'audit_trails:view',
       'backdate:request',
       'room_change:request',
+      'reschedule_stay:request',
       'store:requisition',
       'settings:view',
     ],
@@ -289,6 +293,7 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
       'payments:view',
       'transactions:view',
       'room_change:request',
+      'reschedule_stay:request',
       'store:requisition',
       'settings:view',
     ],

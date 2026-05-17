@@ -10,13 +10,16 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { ArrowLeft, UserCheck, Trash2, CreditCard, AlertCircle, Loader2 } from 'lucide-react'
+import { ArrowLeft, UserCheck, Trash2, CreditCard, AlertCircle, Loader2, CalendarRange } from 'lucide-react'
+import { RescheduleStayModal } from '@/components/bookings/reschedule-stay-modal'
+import { canRequestRescheduleStay, canRescheduleStayBooking } from '@/lib/booking/can-reschedule-stay'
 import { PageLoadingState } from '@/components/loading-screen'
 import { formatNaira } from '@/lib/utils/currency'
 import { toast } from 'sonner'
 import { createClient } from '@/lib/supabase/client'
 import { format, isBefore, startOfDay } from 'date-fns'
 import { useAuth } from '@/lib/auth-context'
+import { FolioAttachmentsPanel } from '@/components/folio/folio-attachments-panel'
 import { hasPermission } from '@/lib/permissions'
 
 export default function ReservationDetailPage({
@@ -25,8 +28,10 @@ export default function ReservationDetailPage({
   params: Promise<{ id: string }> | { id: string }
 }) {
   const router = useRouter()
-  const { role, userId } = useAuth()
+  const { role, userId, organizationId } = useAuth()
   const canCancelReservation = hasPermission(role, 'reservations:delete')
+  const [rescheduleOpen, setRescheduleOpen] = useState(false)
+  const [reschedulePending, setReschedulePending] = useState(false)
   const [rid, setRid] = useState('')
   const [reservation, setReservation] = useState<any>(null)
   const [loading, setLoading] = useState(true)
@@ -61,7 +66,7 @@ export default function ReservationDetailPage({
       const { data, error } = await supabase
         .from('bookings')
         .select(
-          `id, folio_id, check_in, check_out, status, payment_status,
+          `id,            folio_id, check_in, check_out, status, folio_status, payment_status,
            rate_per_night, total_amount, deposit, balance, number_of_nights,
            notes, created_at,
            guests:guest_id(id, name, phone, email, address),
@@ -79,6 +84,27 @@ export default function ReservationDetailPage({
         return
       }
       setReservation(data)
+
+      if (userId) {
+        try {
+          const pr = await fetch(
+            `/api/reschedule-stay-requests?caller_id=${userId}&booking_id=${bookingId}`,
+            { credentials: 'include' },
+          )
+          const pj = await pr.json()
+          if (pr.ok) {
+            setReschedulePending(
+              (pj.requests || []).some(
+                (r: { status?: string }) => String(r.status || '').toLowerCase() === 'pending',
+              ),
+            )
+          } else {
+            setReschedulePending(false)
+          }
+        } catch {
+          setReschedulePending(false)
+        }
+      }
     } catch (err: any) {
       setError(err.message || 'Failed to load reservation')
     } finally {
@@ -377,12 +403,56 @@ export default function ReservationDetailPage({
         </DialogContent>
       </Dialog>
 
-      <div className="flex items-center justify-between">
+      <RescheduleStayModal
+        open={rescheduleOpen}
+        onClose={() => setRescheduleOpen(false)}
+        onSuccess={() => {
+          setReschedulePending(true)
+          loadReservation(rid)
+        }}
+        userId={userId}
+        organizationId={organizationId}
+        booking={
+          reservation
+            ? {
+                id: reservation.id,
+                check_in: reservation.check_in,
+                check_out: reservation.check_out,
+                rate_per_night: reservation.rate_per_night || 0,
+                deposit: reservation.deposit,
+                total_amount: reservation.total_amount,
+                balance: reservation.balance,
+              }
+            : null
+        }
+      />
+
+      <div className="flex items-center justify-between gap-3 flex-wrap">
         <Button variant="ghost" onClick={() => router.push('/reservations')}>
           <ArrowLeft className="mr-2 h-4 w-4" />
           {'Back to Reservations'}
         </Button>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap justify-end">
+          {canRequestRescheduleStay(role) &&
+            canRescheduleStayBooking({
+              status: reservation.status,
+              folio_status: reservation.folio_status,
+            }) && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => !reschedulePending && setRescheduleOpen(true)}
+              disabled={actionLoading || reschedulePending}
+              title={
+                reschedulePending
+                  ? 'A move-dates request is pending approval in Night Audit'
+                  : 'Request new check-in / check-out dates'
+              }
+            >
+              <CalendarRange className="mr-2 h-4 w-4" />
+              {reschedulePending ? 'Move dates pending' : 'Request move dates'}
+            </Button>
+          )}
           <Button
             variant="default"
             size="sm"
@@ -560,6 +630,8 @@ export default function ReservationDetailPage({
               )}
             </CardContent>
           </Card>
+
+          <FolioAttachmentsPanel bookingId={reservation.id} />
 
           <Card>
             <CardHeader>

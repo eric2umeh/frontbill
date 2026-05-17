@@ -1,6 +1,7 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
 import { canonicalRoleKey, hasPermission } from '@/lib/permissions'
+import { canRequestExtendStayDiscount } from '@/lib/utils/booking-checkout-ui'
 
 const DECISION = ['approved', 'rejected'] as const
 
@@ -93,8 +94,14 @@ export async function POST(request: Request) {
     if (!booking || booking.organization_id !== prof.organization_id) {
       return NextResponse.json({ error: 'Booking not found' }, { status: 404 })
     }
-    if (String(booking.status) !== 'checked_in' || String(booking.folio_status || '') === 'checked_out') {
-      return NextResponse.json({ error: 'Only active checked-in folios can request a discounted extension' }, { status: 400 })
+    if (!canRequestExtendStayDiscount(booking)) {
+      return NextResponse.json(
+        {
+          error:
+            'Discounted extensions are only for in-house folios (reserved, confirmed, or checked-in). If the guest is in the room but status is still confirmed, use Check In first or extend at standard rate.',
+        },
+        { status: 400 },
+      )
     }
 
     const rate = Number(booking.rate_per_night) || 0

@@ -25,6 +25,11 @@ import { insertFolioCharges } from '@/lib/utils/insert-folio-charges'
 import { buildBackdateDedupeKey } from '@/lib/backdate/dedupe-key'
 import { isStayCheckInConsideredBackdated } from '@/lib/hotel-date'
 import { hasPermission } from '@/lib/permissions'
+import {
+  FolioRemarksAttachmentsField,
+  type FolioRemarksAttachmentsValue,
+} from '@/components/folio/folio-remarks-attachments-field'
+import { persistFolioAttachments } from '@/lib/folio/persist-folio-attachments'
 
 const toLocalDateStr = (date: Date) => {
   const y = date.getFullYear()
@@ -66,6 +71,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
   const [checkOutDate, setCheckOutDate] = useState<Date>()
   const [nights, setNights] = useState(0)
   const [backdateReason, setBackdateReason] = useState('')
+  const [folioExtras, setFolioExtras] = useState<FolioRemarksAttachmentsValue>({ remarks: '', files: [] })
 
   // Step 3: Room & Payment
   const [rooms, setRooms] = useState<any[]>([])
@@ -636,6 +642,18 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
         }
       }
 
+      const attachResult = await persistFolioAttachments(supabase, {
+        organizationId: orgId,
+        bookingId: booking.id,
+        source: 'reservation_create',
+        remarks: folioExtras.remarks,
+        files: folioExtras.files,
+        createdBy: currentUserId,
+      })
+      if (!attachResult.ok) {
+        toast.warning(`Reservation saved but attachment failed: ${attachResult.error}`)
+      }
+
       toast.success(`Reservation created — Ref: ${folioId}`)
       onSuccess?.()
       onClose()
@@ -656,6 +674,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
     setLedgerType('individual'); setLedgerSearch(''); setLedgerResults([])
     setSelectedLedger(null); setLedgerSearchOpen(false)
     setShowNewLedgerOrgForm(false); setNewLedgerOrgName(''); setNewLedgerOrgEmail(''); setNewLedgerOrgPhone(''); setNewLedgerOrgAddress('')
+    setFolioExtras({ remarks: '', files: [] })
   }
 
   // Combined room dropdown: each item shows "Room Type — Room Number"
@@ -925,6 +944,11 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
               </div>
             )}
           </div>
+          <FolioRemarksAttachmentsField
+            value={folioExtras}
+            onChange={setFolioExtras}
+            disabled={loading}
+          />
         </div>
 
         <div className="flex justify-end gap-2 pt-4 border-t">

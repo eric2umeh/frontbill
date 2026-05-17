@@ -4,6 +4,7 @@ import {
   mergeBookingPatch,
   roomHousekeepingAfterEdit,
 } from '@/lib/booking/edit-booking-patch'
+import { hasRoomDateConflict } from '@/lib/booking/room-date-conflict'
 import { isBookingCheckedOut } from '@/lib/utils/booking-checkout-ui'
 import { NextResponse } from 'next/server'
 
@@ -13,36 +14,6 @@ async function loadCaller(admin: ReturnType<typeof createAdminClient>, callerId:
   const { data: profile, error } = await admin.from('profiles').select('role, organization_id').eq('id', callerId).single()
   if (error || !profile?.organization_id) return null
   return profile as { role: string; organization_id: string }
-}
-
-/** Overlapping active stays on the same room (excluding one booking). */
-async function hasRoomDateConflict(
-  admin: ReturnType<typeof createAdminClient>,
-  orgId: string,
-  roomId: string,
-  checkIn: string,
-  checkOut: string,
-  excludeBookingId: string,
-): Promise<boolean> {
-  const { data: rows, error } = await admin
-    .from('bookings')
-    .select('id, check_in, check_out, status, folio_status')
-    .eq('organization_id', orgId)
-    .eq('room_id', roomId)
-    .neq('id', excludeBookingId)
-
-  if (error) throw new Error(error.message)
-
-  for (const row of rows || []) {
-    const st = String((row as { status?: string }).status || '').toLowerCase()
-    const fs = String((row as { folio_status?: string }).folio_status || '').toLowerCase()
-    if (st === 'cancelled' || st === 'checked_out') continue
-    if (fs === 'checked_out') continue
-    const oi = (row as { check_in: string }).check_in
-    const oo = (row as { check_out: string }).check_out
-    if (oi < checkOut && oo > checkIn) return true
-  }
-  return false
 }
 
 export async function PATCH(request: Request, ctx: { params: Promise<{ id: string }> }) {
