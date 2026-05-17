@@ -35,6 +35,7 @@ import {
   isSelectableLedgerName,
 } from "@/lib/utils/ledger-organization";
 import { resolveOrganizationLedgerAccount } from "@/lib/utils/resolve-ledger-account";
+import { canRequestExtendStayDiscount } from "@/lib/utils/booking-checkout-ui";
 
 interface ExtendStayModalProps {
   open: boolean;
@@ -52,6 +53,8 @@ interface ExtendStayModalProps {
     guestBalance?: number;
     organization_id?: string;
     created_by?: string;
+    status?: string;
+    check_in?: string;
     folio_status?: string;
   };
 }
@@ -269,6 +272,18 @@ export function ExtendStayModal({
     }
     if (!userId) {
       toast.error("You must be signed in");
+      return;
+    }
+    if (
+      !canRequestExtendStayDiscount({
+        status: booking.status || "",
+        folio_status: booking.folio_status,
+        check_in: booking.check_in,
+      })
+    ) {
+      toast.error(
+        "Discounted extensions need an in-house folio (reserved, confirmed, or checked-in). If the guest is in the room, run Check In on the folio, or extend at the standard rate without discount.",
+      );
       return;
     }
     setDiscountSubmitting(true);
