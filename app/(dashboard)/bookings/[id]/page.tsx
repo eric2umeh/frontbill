@@ -35,6 +35,7 @@ import {
   LogOut,
   Receipt,
   DoorOpen,
+  CalendarRange,
 } from "lucide-react";
 import { formatNaira } from "@/lib/utils/currency";
 import { toast } from "sonner";
@@ -42,6 +43,11 @@ import { ExtendStayModal } from "@/components/bookings/extend-stay-modal";
 import { CheckoutConfirmDialog } from "@/components/bookings/checkout-confirm-dialog";
 import { EditBookingModal } from "@/components/bookings/edit-booking-modal";
 import { RoomChangeRequestModal } from "@/components/bookings/room-change-request-modal";
+import { RescheduleStayModal } from "@/components/bookings/reschedule-stay-modal";
+import {
+  canRequestRescheduleStay,
+  canRescheduleStayBooking,
+} from "@/lib/booking/can-reschedule-stay";
 import {
   PaymentReceiptDialog,
   type PaymentReceiptChargeRow,
@@ -199,6 +205,8 @@ export default function BookingDetailPage({
   const [creditPaymentMethod, setCreditPaymentMethod] = useState("");
   const [creditNotes, setCreditNotes] = useState("");
   const [extendStayModalOpen, setExtendStayModalOpen] = useState(false);
+  const [rescheduleStayOpen, setRescheduleStayOpen] = useState(false);
+  const [rescheduleStayPending, setRescheduleStayPending] = useState(false);
   const [chargeAmount, setChargeAmount] = useState("");
   const [chargeDescription, setChargeDescription] = useState("");
   const [chargePaymentMethod, setChargePaymentMethod] = useState("");
@@ -492,14 +500,19 @@ export default function BookingDetailPage({
 
       if (uid) {
         try {
-          const pr = await fetch(
-            `/api/room-change-requests?caller_id=${uid}&booking_id=${id}`,
-            { credentials: "include" },
-          );
-          const pj = await pr.json();
-          if (pr.ok) {
+          const [rcRes, rsRes] = await Promise.all([
+            fetch(`/api/room-change-requests?caller_id=${uid}&booking_id=${id}`, {
+              credentials: "include",
+            }),
+            fetch(`/api/reschedule-stay-requests?caller_id=${uid}&booking_id=${id}`, {
+              credentials: "include",
+            }),
+          ]);
+          const rcJson = await rcRes.json();
+          const rsJson = await rsRes.json();
+          if (rcRes.ok) {
             setRoomChangePending(
-              (pj.requests || []).some(
+              (rcJson.requests || []).some(
                 (r: { status?: string }) =>
                   String(r.status || "").toLowerCase() === "pending",
               ),
@@ -507,8 +520,19 @@ export default function BookingDetailPage({
           } else {
             setRoomChangePending(false);
           }
+          if (rsRes.ok) {
+            setRescheduleStayPending(
+              (rsJson.requests || []).some(
+                (r: { status?: string }) =>
+                  String(r.status || "").toLowerCase() === "pending",
+              ),
+            );
+          } else {
+            setRescheduleStayPending(false);
+          }
         } catch {
           setRoomChangePending(false);
+          setRescheduleStayPending(false);
         }
       } else {
         setRoomChangePending(false);
@@ -1324,6 +1348,15 @@ export default function BookingDetailPage({
     orgCheckoutTime,
   );
 
+  const showRescheduleStay =
+    canRequestRescheduleStay(role) &&
+    !folioLocked &&
+    !rescheduleStayPending &&
+    canRescheduleStayBooking({
+      status: booking.status,
+      folio_status: booking.folio_status,
+    });
+
   const roomsRaw = booking.rooms as
     | { id?: string | null }
     | { id?: string | null }[]
@@ -1459,6 +1492,25 @@ export default function BookingDetailPage({
         currentRoomLabel={`Room ${booking.rooms?.room_number ?? "—"}`}
         checkIn={booking.check_in}
         checkOut={booking.check_out}
+      />
+
+      <RescheduleStayModal
+        open={rescheduleStayOpen}
+        onClose={() => setRescheduleStayOpen(false)}
+        onSuccess={() => {
+          setRescheduleStayPending(true);
+          fetchBookingDetails(bookingId);
+        }}
+        userId={userId}
+        booking={{
+          id: booking.id,
+          check_in: booking.check_in,
+          check_out: booking.check_out,
+          rate_per_night: booking.rate_per_night || 0,
+          deposit: booking.deposit,
+          total_amount: booking.total_amount,
+          balance: booking.balance,
+        }}
       />
 
       <ExtendStayModal
@@ -1952,6 +2004,22 @@ export default function BookingDetailPage({
               {roomChangePending
                 ? "Room change pending"
                 : "Request room change"}
+            </Button>
+          )}
+          {(showRescheduleStay || rescheduleStayPending) && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setRescheduleStayOpen(true)}
+              disabled={rescheduleStayPending}
+              title={
+                rescheduleStayPending
+                  ? "Move-dates request pending approval in Night Audit"
+                  : "Request new check-in / check-out dates"
+              }
+            >
+              <CalendarRange className="mr-2 h-4 w-4" />
+              {rescheduleStayPending ? "Move dates pending" : "Request move dates"}
             </Button>
           )}
           {canManageFolio && (
