@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge'
 import { Loader2, CalendarRange } from 'lucide-react'
 import { toast } from 'sonner'
 import { format } from 'date-fns'
+import { FolioAttachmentLinks } from '@/components/folio/folio-attachment-links'
 
 export interface RescheduleStayRequestRow {
   id: string
@@ -163,6 +164,12 @@ export function RescheduleStayRequestsTab({ userId }: Props) {
                         </span>
                       </p>
                       <p className="text-sm text-muted-foreground mt-1">Reason: {request.reason}</p>
+                      <FolioAttachmentLinks
+                        bookingId={request.booking_id}
+                        userId={userId}
+                        source="reschedule_stay"
+                        sourceId={request.id}
+                      />
                     </div>
                     {request.status === 'pending' && (
                       <div className="flex flex-col gap-2 shrink-0">

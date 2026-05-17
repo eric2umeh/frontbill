@@ -20,6 +20,12 @@ import { Loader2 } from 'lucide-react'
 import { parseISO } from 'date-fns'
 import { calendarNightsBetween } from '@/lib/booking/edit-booking-patch'
 import { isStayCheckInConsideredBackdated } from '@/lib/hotel-date'
+import {
+  FolioRemarksAttachmentsField,
+  type FolioRemarksAttachmentsValue,
+} from '@/components/folio/folio-remarks-attachments-field'
+import { persistFolioAttachments } from '@/lib/folio/persist-folio-attachments'
+import { createClient } from '@/lib/supabase/client'
 
 export type RescheduleStayModalBooking = {
   id: string
@@ -48,6 +54,7 @@ interface RescheduleStayModalProps {
   onSuccess: () => void | Promise<void>
   booking: RescheduleStayModalBooking | null
   userId: string | null | undefined
+  organizationId?: string | null
 }
 
 export function RescheduleStayModal({
@@ -56,10 +63,12 @@ export function RescheduleStayModal({
   onSuccess,
   booking,
   userId,
+  organizationId,
 }: RescheduleStayModalProps) {
   const [checkIn, setCheckIn] = useState<Date | undefined>()
   const [checkOut, setCheckOut] = useState<Date | undefined>()
   const [reason, setReason] = useState('')
+  const [folioExtras, setFolioExtras] = useState<FolioRemarksAttachmentsValue>({ remarks: '', files: [] })
   const [submitting, setSubmitting] = useState(false)
 
   useEffect(() => {
@@ -67,6 +76,7 @@ export function RescheduleStayModal({
     setCheckIn(ymdToDate(booking.check_in))
     setCheckOut(ymdToDate(booking.check_out))
     setReason('')
+    setFolioExtras({ remarks: '', files: [] })
   }, [open, booking])
 
   const nights = useMemo(() => {
@@ -134,6 +144,25 @@ export function RescheduleStayModal({
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
         throw new Error(data.error || 'Failed to submit request')
+      }
+      const orgId = organizationId
+      if (orgId && userId) {
+        const supabase = createClient()
+        const combinedRemarks = [reason.trim(), folioExtras.remarks.trim()]
+          .filter(Boolean)
+          .join('\n\n')
+        const attachResult = await persistFolioAttachments(supabase, {
+          organizationId: orgId,
+          bookingId: booking.id,
+          source: 'reschedule_stay',
+          sourceId: data.request?.id || null,
+          remarks: combinedRemarks || undefined,
+          files: folioExtras.files,
+          createdBy: userId,
+        })
+        if (!attachResult.ok) {
+          toast.warning(`Request sent but attachment failed: ${attachResult.error}`)
+        }
       }
       toast.success('Move-dates request sent for manager approval')
       await onSuccess()
@@ -214,6 +243,15 @@ export function RescheduleStayModal({
               rows={2}
             />
           </div>
+
+          <FolioRemarksAttachmentsField
+            value={folioExtras}
+            onChange={setFolioExtras}
+            disabled={submitting}
+            compact
+            remarksLabel="Additional remarks (optional)"
+            remarksPlaceholder="Extra context for approvers…"
+          />
         </div>
 
         <DialogFooter className="gap-2 sm:gap-0">

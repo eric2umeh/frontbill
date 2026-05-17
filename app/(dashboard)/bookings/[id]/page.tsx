@@ -44,6 +44,7 @@ import { CheckoutConfirmDialog } from "@/components/bookings/checkout-confirm-di
 import { EditBookingModal } from "@/components/bookings/edit-booking-modal";
 import { RoomChangeRequestModal } from "@/components/bookings/room-change-request-modal";
 import { RescheduleStayModal } from "@/components/bookings/reschedule-stay-modal";
+import { FolioAttachmentsPanel } from "@/components/folio/folio-attachments-panel";
 import {
   canRequestRescheduleStay,
   canRescheduleStayBooking,
@@ -1502,6 +1503,7 @@ export default function BookingDetailPage({
           fetchBookingDetails(bookingId);
         }}
         userId={userId}
+        organizationId={booking.organization_id}
         booking={{
           id: booking.id,
           check_in: booking.check_in,
@@ -2506,6 +2508,8 @@ export default function BookingDetailPage({
               )}
             </CardContent>
           </Card>
+
+          <FolioAttachmentsPanel bookingId={booking.id} canAdd={canManageFolio} />
 
           <Card>
             <CardHeader>

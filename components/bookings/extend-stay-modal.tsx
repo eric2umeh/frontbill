@@ -36,6 +36,11 @@ import {
 } from "@/lib/utils/ledger-organization";
 import { resolveOrganizationLedgerAccount } from "@/lib/utils/resolve-ledger-account";
 import { canRequestExtendStayDiscount } from "@/lib/utils/booking-checkout-ui";
+import {
+  FolioRemarksAttachmentsField,
+  type FolioRemarksAttachmentsValue,
+} from "@/components/folio/folio-remarks-attachments-field";
+import { persistFolioAttachments } from "@/lib/folio/persist-folio-attachments";
 
 interface ExtendStayModalProps {
   open: boolean;
@@ -83,6 +88,10 @@ export function ExtendStayModal({
   const [discountedTotalInput, setDiscountedTotalInput] = useState("");
   const [discountReason, setDiscountReason] = useState("");
   const [discountSubmitting, setDiscountSubmitting] = useState(false);
+  const [folioExtras, setFolioExtras] = useState<FolioRemarksAttachmentsValue>({
+    remarks: "",
+    files: [],
+  });
 
   // When modal opens with city_ledger, auto-select the current guest
   useEffect(() => {
@@ -307,6 +316,21 @@ export function ExtendStayModal({
         toast.error(json.error || "Request failed");
         return;
       }
+      if (booking.organization_id) {
+        const supabase = createClient();
+        const attachResult = await persistFolioAttachments(supabase, {
+          organizationId: booking.organization_id,
+          bookingId: booking.id,
+          source: "extend_stay_discount",
+          sourceId: json.request?.id || null,
+          remarks: folioExtras.remarks,
+          files: folioExtras.files,
+          createdBy: userId,
+        });
+        if (!attachResult.ok) {
+          toast.warning(`Request sent but attachment failed: ${attachResult.error}`);
+        }
+      }
       toast.success(
         "Discount request sent — check Night Audit → Extend discounts",
       );
@@ -515,6 +539,20 @@ export function ExtendStayModal({
           ? ` to ${selectedLedger.name}`
           : "";
 
+      if (booking.organization_id) {
+        const attachResult = await persistFolioAttachments(supabase, {
+          organizationId: booking.organization_id,
+          bookingId: booking.id,
+          source: "extend_stay",
+          remarks: folioExtras.remarks,
+          files: folioExtras.files,
+          createdBy: currentUserId,
+        });
+        if (!attachResult.ok) {
+          toast.warning(`Stay extended but attachment failed: ${attachResult.error}`);
+        }
+      }
+
       toast.success(
         `Stay extended to ${format(newCheckOutDate, "PPP")}${accountInfo}`,
       );
@@ -541,6 +579,7 @@ export function ExtendStayModal({
     setShowNewOrgForm(false);
     setNewOrgName("");
     setNewOrgPhone("");
+    setFolioExtras({ remarks: "", files: [] });
   };
 
   return (
@@ -879,6 +918,13 @@ export function ExtendStayModal({
               )}
             </div>
           )}
+
+          <FolioRemarksAttachmentsField
+            value={folioExtras}
+            onChange={setFolioExtras}
+            disabled={loading || discountSubmitting}
+            compact
+          />
         </div>
 
         <div className="shrink-0 space-y-3 border-t bg-background px-4 py-3 shadow-[0_-8px_24px_-12px_rgba(0,0,0,0.15)] sm:px-5 sm:py-4">

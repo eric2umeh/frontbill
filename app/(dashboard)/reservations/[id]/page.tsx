@@ -19,6 +19,7 @@ import { toast } from 'sonner'
 import { createClient } from '@/lib/supabase/client'
 import { format, isBefore, startOfDay } from 'date-fns'
 import { useAuth } from '@/lib/auth-context'
+import { FolioAttachmentsPanel } from '@/components/folio/folio-attachments-panel'
 import { hasPermission } from '@/lib/permissions'
 
 export default function ReservationDetailPage({
@@ -27,7 +28,7 @@ export default function ReservationDetailPage({
   params: Promise<{ id: string }> | { id: string }
 }) {
   const router = useRouter()
-  const { role, userId } = useAuth()
+  const { role, userId, organizationId } = useAuth()
   const canCancelReservation = hasPermission(role, 'reservations:delete')
   const [rescheduleOpen, setRescheduleOpen] = useState(false)
   const [reschedulePending, setReschedulePending] = useState(false)
@@ -410,6 +411,7 @@ export default function ReservationDetailPage({
           loadReservation(rid)
         }}
         userId={userId}
+        organizationId={organizationId}
         booking={
           reservation
             ? {
@@ -628,6 +630,8 @@ export default function ReservationDetailPage({
               )}
             </CardContent>
           </Card>
+
+          <FolioAttachmentsPanel bookingId={reservation.id} />
 
           <Card>
             <CardHeader>
