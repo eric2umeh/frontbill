@@ -1475,6 +1475,8 @@ export default function BookingDetailPage({
           guestId: booking.guest_id,
           organization_id: booking.organization_id,
           created_by: booking.created_by,
+          status: booking.status,
+          check_in: booking.check_in,
           folio_status: booking.folio_status,
         }}
       />
