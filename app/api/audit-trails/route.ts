@@ -18,7 +18,7 @@ type AuditItem = {
 }
 
 const ALLOWED_ROLES = ['superadmin', 'admin', 'manager', 'front_desk']
-const TYPE_OPTIONS = ['all', 'backdate', 'room_change', 'booking', 'payment', 'transaction', 'night_audit']
+const TYPE_OPTIONS = ['all', 'backdate', 'room_change', 'reschedule_stay', 'booking', 'payment', 'transaction', 'night_audit']
 
 const asNumber = (value: any) => {
   const parsed = Number(value || 0)
@@ -97,6 +97,45 @@ export async function GET(request: Request) {
           created_at: row.decided_at || row.created_at,
         })
       })
+    }
+
+    if (shouldLoad('reschedule_stay')) {
+      let query = admin
+        .from('reschedule_stay_requests')
+        .select(
+          'id, booking_id, from_check_in, from_check_out, to_check_in, to_check_out, is_backdate, guest_label, folio_label, reason, status, requested_by, approved_by, created_at, decided_at',
+        )
+        .eq('organization_id', orgId)
+        .order('created_at', { ascending: false })
+        .limit(limit)
+      query = inRangeQuery(query, 'created_at', startDate, endDate)
+      if (status !== 'all') query = query.eq('status', status)
+      const { data: rsRows, error: rsErr } = await query
+      if (!rsErr) {
+        ;(rsRows || []).forEach((row: any) => {
+          if (row.requested_by) actorIds.add(row.requested_by)
+          if (row.approved_by) actorIds.add(row.approved_by)
+          items.push({
+            id: row.id,
+            source: 'reschedule_stay',
+            category: 'Move stay dates',
+            action:
+              row.status === 'pending'
+                ? 'Move dates requested'
+                : row.status === 'approved'
+                  ? 'Move dates approved'
+                  : 'Move dates rejected',
+            status: row.status,
+            actor_id: row.approved_by || row.requested_by || null,
+            actor_name: 'Loading...',
+            reference: row.folio_label || (row.booking_id ? row.booking_id.slice(0, 8) : row.id.slice(0, 8)),
+            description: `${row.guest_label || 'Guest'}: ${row.from_check_in}–${row.from_check_out} → ${row.to_check_in}–${row.to_check_out}${row.is_backdate ? ' (backdated)' : ''} · ${row.reason || ''}`,
+            amount: null,
+            created_at: row.decided_at || row.created_at,
+            href: row.booking_id ? `/bookings/${row.booking_id}` : undefined,
+          })
+        })
+      }
     }
 
     if (shouldLoad('room_change')) {
