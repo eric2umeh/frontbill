@@ -6,10 +6,13 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
-  DialogHeader,
+  DialogScrollableBody,
+  DialogScrollableFooter,
+  DialogScrollableHeader,
   DialogTitle,
+  dialogScrollableContentClass,
 } from '@/components/ui/dialog'
+import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -158,17 +161,17 @@ export function ExpenseEntryFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && !submitting && onClose()}>
-      <DialogContent className="max-w-lg w-[calc(100vw-1.5rem)] max-h-[min(92dvh,640px)] overflow-y-auto">
-        <DialogHeader>
+      <DialogContent className={cn(dialogScrollableContentClass, 'max-w-lg w-[calc(100vw-1.5rem)]')}>
+        <DialogScrollableHeader>
           <DialogTitle>{isEdit ? 'Edit expense' : 'Add expense'}</DialogTitle>
           <DialogDescription>
             {isEdit
               ? 'Update this line. The original recorded time is kept; last update time refreshes on save.'
               : 'Each save creates a new expense line with a timestamp.'}
           </DialogDescription>
-        </DialogHeader>
+        </DialogScrollableHeader>
 
-        <div className="grid gap-4 py-2 sm:grid-cols-2">
+        <DialogScrollableBody className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-2 sm:col-span-2">
             <Label>Category *</Label>
             <Select
@@ -272,9 +275,9 @@ export function ExpenseEntryFormDialog({
               ) : null}
             </div>
           )}
-        </div>
+        </DialogScrollableBody>
 
-        <DialogFooter className="flex-col gap-2 sm:flex-row">
+        <DialogScrollableFooter className="flex-col gap-2 sm:flex-row">
           <Button type="button" variant="outline" className="w-full sm:w-auto" onClick={onClose} disabled={submitting}>
             Cancel
           </Button>
@@ -290,7 +293,7 @@ export function ExpenseEntryFormDialog({
               'Record expense'
             )}
           </Button>
-        </DialogFooter>
+        </DialogScrollableFooter>
       </DialogContent>
     </Dialog>
   )

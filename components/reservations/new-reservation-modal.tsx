@@ -2,7 +2,17 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogScrollableBody,
+  DialogScrollableFooter,
+  DialogScrollableHeader,
+  DialogTitle,
+  dialogScrollableContentClass,
+} from '@/components/ui/dialog'
+import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -688,13 +698,13 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) { setLoading(false); onClose() } }}>
-      <DialogContent className="max-w-2xl max-h-[92vh] overflow-y-auto">
-        <DialogHeader>
+      <DialogContent className={cn(dialogScrollableContentClass, 'max-w-2xl')}>
+        <DialogScrollableHeader>
           <DialogTitle>New Reservation</DialogTitle>
           <DialogDescription>Fill in guest details, dates, room and payment</DialogDescription>
-        </DialogHeader>
+        </DialogScrollableHeader>
 
-        <div className="space-y-5 py-2">
+        <DialogScrollableBody className="space-y-5">
 
           {/* Guest Information */}
           <div className="rounded-lg border p-4 space-y-4">
@@ -949,9 +959,9 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
             onChange={setFolioExtras}
             disabled={loading}
           />
-        </div>
+        </DialogScrollableBody>
 
-        <div className="flex justify-end gap-2 pt-4 border-t">
+        <DialogScrollableFooter>
           <Button variant="outline" onClick={onClose} disabled={loading}>Cancel</Button>
           <Button
             onClick={isBackdated && !canApproveBackdates ? handleBackdatedReservationAction : handleSubmit}
@@ -959,7 +969,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
           >
             {loading ? 'Working...' : isBackdated && !canApproveBackdates ? 'Request approval' : 'Create Reservation'}
           </Button>
-        </div>
+        </DialogScrollableFooter>
       </DialogContent>
     </Dialog>
   )

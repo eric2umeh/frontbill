@@ -5,10 +5,13 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
-  DialogHeader,
+  DialogScrollableBody,
+  DialogScrollableFooter,
+  DialogScrollableHeader,
   DialogTitle,
+  dialogScrollableContentClass,
 } from '@/components/ui/dialog'
+import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
@@ -233,16 +236,16 @@ export function EditBookingModal({ open, onClose, booking, userId, onSaved }: Ed
 
   return (
     <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
-      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
+      <DialogContent className={cn(dialogScrollableContentClass, 'max-w-lg')}>
+        <DialogScrollableHeader>
           <DialogTitle>Edit booking</DialogTitle>
           <DialogDescription>
             Change stay dates, room assignment, rates, folio totals, payment flags, or status. Guest identity is unchanged.
             Structural edits require an administrator role and are enforced on the server.
           </DialogDescription>
-        </DialogHeader>
+        </DialogScrollableHeader>
 
-        <div className="grid gap-4 py-2">
+        <DialogScrollableBody className="grid gap-4">
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-2">
               <Label htmlFor="eb-check-in">Check-in</Label>
@@ -378,16 +381,16 @@ export function EditBookingModal({ open, onClose, booking, userId, onSaved }: Ed
             <Label htmlFor="eb-notes">Notes</Label>
             <Textarea id="eb-notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
           </div>
-        </div>
+        </DialogScrollableBody>
 
-        <DialogFooter className="gap-2 sm:gap-0">
+        <DialogScrollableFooter className="gap-2 sm:gap-0">
           <Button type="button" variant="outline" onClick={onClose} disabled={saving}>
             Cancel
           </Button>
           <Button type="button" onClick={handleSave} disabled={saving || loadingRooms}>
             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save changes'}
           </Button>
-        </DialogFooter>
+        </DialogScrollableFooter>
       </DialogContent>
     </Dialog>
   )

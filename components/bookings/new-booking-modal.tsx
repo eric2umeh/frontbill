@@ -3,7 +3,18 @@
 // Cache bust marker: 2025-02-25-final-fix
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogScrollableBody,
+  DialogScrollableFooter,
+  DialogScrollableHeader,
+  DialogTitle,
+  dialogScrollableContentClass,
+} from '@/components/ui/dialog'
+import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -932,13 +943,13 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
   return (
     <>
       <Dialog open={open} onOpenChange={(o) => { if (!o) { setLoading(false); onClose() } }}>
-        <DialogContent className="max-w-2xl max-h-[92vh] overflow-y-auto">
-          <DialogHeader>
+        <DialogContent className={cn(dialogScrollableContentClass, 'max-w-2xl')}>
+          <DialogScrollableHeader>
             <DialogTitle>New Booking</DialogTitle>
             <DialogDescription>Fill in guest details, dates, room and payment</DialogDescription>
-          </DialogHeader>
+          </DialogScrollableHeader>
 
-          <div className="space-y-5 py-2">
+          <DialogScrollableBody className="space-y-5">
 
             {/* Guest Information */}
             <div className="rounded-lg border p-4 space-y-4">
@@ -1233,16 +1244,15 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
                 </div>
               )}
             </div>
-          </div>
 
           <FolioRemarksAttachmentsField
             value={folioExtras}
             onChange={setFolioExtras}
             disabled={loading}
           />
+          </DialogScrollableBody>
 
-          {/* Submit */}
-          <div className="flex justify-end gap-2 pt-4 border-t">
+          <DialogScrollableFooter>
             <Button variant="outline" onClick={onClose} disabled={loading}>Cancel</Button>
             <Button
               onClick={isBackdated && !canApproveBackdates ? handleBackdatedBookingAction : handleSubmit}
@@ -1250,7 +1260,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
             >
               {loading ? 'Working...' : isBackdated && !canApproveBackdates ? 'Request approval' : 'Create Booking'}
             </Button>
-          </div>
+          </DialogScrollableFooter>
         </DialogContent>
       </Dialog>
 
