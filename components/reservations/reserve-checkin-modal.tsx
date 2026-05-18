@@ -2,7 +2,17 @@
 
 import { useState, useEffect, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogScrollableBody,
+  DialogScrollableFooter,
+  DialogScrollableHeader,
+  DialogTitle,
+  dialogScrollableContentClass,
+} from '@/components/ui/dialog'
+import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
@@ -214,16 +224,16 @@ export function ReserveCheckInModal({ open, onClose, onSuccess, booking, userId 
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) onClose() }}>
-      <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
+      <DialogContent className={cn(dialogScrollableContentClass, 'max-w-md')}>
+        <DialogScrollableHeader>
           <DialogTitle>Check in from reservation</DialogTitle>
           <DialogDescription>
             Folio {booking.folio_id} · {booking.check_in} → {booking.check_out}. Pick an available room for today’s stay.
             Guest details are optional if the reservation already has a contact.
           </DialogDescription>
-        </DialogHeader>
+        </DialogScrollableHeader>
 
-        <div className="space-y-4 py-2">
+        <DialogScrollableBody className="space-y-4">
           <div>
             <p className="text-xs font-medium text-muted-foreground mb-2">Available by type</p>
             <div className="flex flex-wrap gap-2">
@@ -267,9 +277,9 @@ export function ReserveCheckInModal({ open, onClose, onSuccess, booking, userId 
             <Label>Phone (optional)</Label>
             <Input value={guestPhoneOpt} onChange={(e) => setGuestPhoneOpt(e.target.value)} placeholder="Guest phone" />
           </div>
-        </div>
+        </DialogScrollableBody>
 
-        <div className="flex justify-end gap-2 pt-2">
+        <DialogScrollableFooter>
           <Button variant="outline" onClick={onClose} disabled={loading}>
             Cancel
           </Button>
@@ -277,7 +287,7 @@ export function ReserveCheckInModal({ open, onClose, onSuccess, booking, userId 
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
             Confirm check-in
           </Button>
-        </div>
+        </DialogScrollableFooter>
       </DialogContent>
     </Dialog>
   )

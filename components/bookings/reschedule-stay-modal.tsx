@@ -5,10 +5,13 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
-  DialogHeader,
+  DialogScrollableBody,
+  DialogScrollableFooter,
+  DialogScrollableHeader,
   DialogTitle,
+  dialogScrollableContentClass,
 } from '@/components/ui/dialog'
+import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
@@ -177,16 +180,16 @@ export function RescheduleStayModal({
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
+      <DialogContent className={cn(dialogScrollableContentClass, 'sm:max-w-md')}>
+        <DialogScrollableHeader>
           <DialogTitle>Request move stay dates</DialogTitle>
           <DialogDescription>
             Proposed dates are sent to a Manager, Administrator, or Superadmin for approval before the
             folio and room hold are updated.
           </DialogDescription>
-        </DialogHeader>
+        </DialogScrollableHeader>
 
-        <div className="space-y-4 py-2">
+        <DialogScrollableBody className="space-y-4">
           <StayDateRangeFields
             layout="inline"
             checkIn={checkIn}
@@ -252,9 +255,9 @@ export function RescheduleStayModal({
             remarksLabel="Additional remarks (optional)"
             remarksPlaceholder="Extra context for approvers…"
           />
-        </div>
+        </DialogScrollableBody>
 
-        <DialogFooter className="gap-2 sm:gap-0">
+        <DialogScrollableFooter className="gap-2 sm:gap-0">
           <Button type="button" variant="outline" onClick={onClose} disabled={submitting}>
             Cancel
           </Button>
@@ -279,7 +282,7 @@ export function RescheduleStayModal({
               'Submit for approval'
             )}
           </Button>
-        </DialogFooter>
+        </DialogScrollableFooter>
       </DialogContent>
     </Dialog>
   )

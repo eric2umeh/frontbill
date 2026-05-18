@@ -14,8 +14,13 @@ import {
   DialogDescription,
   DialogFooter,
   DialogHeader,
+  DialogScrollableBody,
+  DialogScrollableFooter,
+  DialogScrollableHeader,
   DialogTitle,
+  dialogScrollableContentClass,
 } from '@/components/ui/dialog'
+import { cn } from '@/lib/utils'
 import { formatNaira } from '@/lib/utils/currency'
 import {
   ArrowLeft, User, Phone, Mail, MapPin,
@@ -834,15 +839,15 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
             if (!open) cancelGuestEditing()
           }}
         >
-          <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
+          <DialogContent className={cn(dialogScrollableContentClass, 'sm:max-w-lg')}>
+            <DialogScrollableHeader>
               <DialogTitle>Edit guest</DialogTitle>
               <DialogDescription>
                 Update contact details and identification. Changing the full name also updates this guest&apos;s
                 city ledger account title and transaction labels tied to their bookings, so lists stay consistent.
               </DialogDescription>
-            </DialogHeader>
-            <div className="space-y-3 py-2">
+            </DialogScrollableHeader>
+            <DialogScrollableBody className="space-y-3">
               <div className="space-y-2">
                 <Label htmlFor="guest-edit-name">Full Name</Label>
                 <input
@@ -921,15 +926,15 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
                   />
                 </div>
               </div>
-            </div>
-            <DialogFooter>
+            </DialogScrollableBody>
+            <DialogScrollableFooter>
               <Button type="button" variant="outline" onClick={cancelGuestEditing} disabled={savingGuest}>
                 Cancel
               </Button>
               <Button type="button" onClick={handleSaveGuest} disabled={savingGuest}>
                 {savingGuest ? 'Saving...' : 'Save changes'}
               </Button>
-            </DialogFooter>
+            </DialogScrollableFooter>
           </DialogContent>
         </Dialog>
       )}

@@ -5,10 +5,13 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
-  DialogHeader,
+  DialogScrollableBody,
+  DialogScrollableFooter,
+  DialogScrollableHeader,
   DialogTitle,
+  dialogScrollableContentClass,
 } from "@/components/ui/dialog";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -154,8 +157,8 @@ export function RoomChangeRequestModal({
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
+      <DialogContent className={cn(dialogScrollableContentClass, "sm:max-w-md")}>
+        <DialogScrollableHeader>
           <DialogTitle>Request room change</DialogTitle>
           <DialogDescription>
             Current room assignment:{" "}
@@ -167,8 +170,8 @@ export function RoomChangeRequestModal({
             the guest is checked in (for example wrong room type or
             maintenance). Dates and rates stay the same.
           </DialogDescription>
-        </DialogHeader>
-        <div className="space-y-4 py-2">
+        </DialogScrollableHeader>
+        <DialogScrollableBody className="space-y-4">
           <div className="text-xs text-muted-foreground">
             Stay {overlapSet.cin} → {overlapSet.cout} (only available rooms are
             listed)
@@ -214,8 +217,8 @@ export function RoomChangeRequestModal({
               rows={3}
             />
           </div>
-        </div>
-        <DialogFooter className="gap-2 sm:gap-0">
+        </DialogScrollableBody>
+        <DialogScrollableFooter className="gap-2 sm:gap-0">
           <Button
             type="button"
             variant="outline"
@@ -238,7 +241,7 @@ export function RoomChangeRequestModal({
               "Submit request"
             )}
           </Button>
-        </DialogFooter>
+        </DialogScrollableFooter>
       </DialogContent>
     </Dialog>
   );

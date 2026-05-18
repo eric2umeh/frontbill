@@ -40,6 +40,10 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  DialogScrollableBody,
+  DialogScrollableFooter,
+  DialogScrollableHeader,
+  dialogScrollableContentClass,
 } from '@/components/ui/dialog'
 import {
   Table,
@@ -1721,12 +1725,12 @@ export function StoreManager({ initialTab }: { initialTab?: 'requisitions' | 'pu
       </Dialog>
 
       <Dialog open={itemDialog} onOpenChange={setItemDialog}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
+        <DialogContent className={cn(dialogScrollableContentClass, 'max-w-lg')}>
+          <DialogScrollableHeader>
             <DialogTitle>{editingItem ? 'Edit item' : 'New item'}</DialogTitle>
             <DialogDescription>SKU, units, and pricing in Nigerian Naira.</DialogDescription>
-          </DialogHeader>
-          <div className="grid max-h-[70vh] gap-4 overflow-y-auto py-2 pr-1">
+          </DialogScrollableHeader>
+          <DialogScrollableBody className="grid gap-4 pr-1">
             <div className="space-y-2">
               <Label>Name</Label>
               <Input
@@ -1820,21 +1824,21 @@ export function StoreManager({ initialTab }: { initialTab?: 'requisitions' | 'pu
                 rows={3}
               />
             </div>
-          </div>
-          <DialogFooter>
+          </DialogScrollableBody>
+          <DialogScrollableFooter>
             <Button variant="outline" onClick={() => setItemDialog(false)}>
               Cancel
             </Button>
             <Button onClick={() => void saveItem()} disabled={itemSaving}>
               {itemSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save'}
             </Button>
-          </DialogFooter>
+          </DialogScrollableFooter>
         </DialogContent>
       </Dialog>
 
       <Dialog open={adjustOpen} onOpenChange={setAdjustOpen}>
-        <DialogContent>
-          <DialogHeader>
+        <DialogContent className={dialogScrollableContentClass}>
+          <DialogScrollableHeader>
             <DialogTitle>Adjust stock</DialogTitle>
             <DialogDescription>
               {adjustItem ? (
@@ -1845,8 +1849,8 @@ export function StoreManager({ initialTab }: { initialTab?: 'requisitions' | 'pu
                 </>
               ) : null}
             </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
+          </DialogScrollableHeader>
+          <DialogScrollableBody className="space-y-4">
             <div className="space-y-2">
               <Label>Movement type</Label>
               <Select value={adjustType} onValueChange={v => setAdjustType(v as StoreMovementType)}>
@@ -1964,28 +1968,28 @@ export function StoreManager({ initialTab }: { initialTab?: 'requisitions' | 'pu
               <Label>Notes</Label>
               <Textarea value={adjustNotes} onChange={e => setAdjustNotes(e.target.value)} rows={2} />
             </div>
-          </div>
-          <DialogFooter>
+          </DialogScrollableBody>
+          <DialogScrollableFooter>
             <Button variant="outline" onClick={() => setAdjustOpen(false)}>
               Cancel
             </Button>
             <Button className="bg-amber-600 hover:bg-amber-700" onClick={() => void applyMovement()} disabled={adjustSaving}>
               {adjustSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Apply'}
             </Button>
-          </DialogFooter>
+          </DialogScrollableFooter>
         </DialogContent>
       </Dialog>
 
       <Dialog open={bulkOpen} onOpenChange={setBulkOpen}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
+        <DialogContent className={cn(dialogScrollableContentClass, 'max-w-2xl')}>
+          <DialogScrollableHeader>
             <DialogTitle>Bulk stock in / out</DialogTitle>
             <DialogDescription>
               One item per line. Use a tab, comma, or pipe before the quantity. Items resolve by SKU first, then by exact
               name (case-insensitive if unique).
             </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
+          </DialogScrollableHeader>
+          <DialogScrollableBody className="space-y-4">
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label>Direction</Label>
@@ -2059,8 +2063,8 @@ export function StoreManager({ initialTab }: { initialTab?: 'requisitions' | 'pu
                 </Table>
               </ScrollArea>
             )}
-          </div>
-          <DialogFooter className="gap-2 sm:gap-0">
+          </DialogScrollableBody>
+          <DialogScrollableFooter className="gap-2 sm:gap-0">
             <Button type="button" variant="outline" onClick={() => setBulkOpen(false)}>
               Close
             </Button>
@@ -2072,7 +2076,7 @@ export function StoreManager({ initialTab }: { initialTab?: 'requisitions' | 'pu
             >
               {bulkSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Apply all valid lines'}
             </Button>
-          </DialogFooter>
+          </DialogScrollableFooter>
         </DialogContent>
       </Dialog>
 

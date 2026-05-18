@@ -88,6 +88,52 @@ const DialogFooter = ({
 )
 DialogFooter.displayName = 'DialogFooter'
 
+/** Use on DialogContent for long forms so the footer (Apply / Save) stays visible on desktop. */
+export const dialogScrollableContentClass =
+  'flex max-h-[min(92dvh,880px)] flex-col gap-0 overflow-hidden p-0'
+
+export function DialogScrollableHeader({
+  className,
+  ...props
+}: React.HTMLAttributes<HTMLDivElement>) {
+  return (
+    <DialogHeader
+      className={cn('shrink-0 space-y-1.5 px-6 pt-6 pb-2 text-left', className)}
+      {...props}
+    />
+  )
+}
+
+export function DialogScrollableBody({
+  className,
+  ...props
+}: React.HTMLAttributes<HTMLDivElement>) {
+  return (
+    <div
+      className={cn(
+        'min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-6 py-2',
+        className,
+      )}
+      {...props}
+    />
+  )
+}
+
+export function DialogScrollableFooter({
+  className,
+  ...props
+}: React.HTMLAttributes<HTMLDivElement>) {
+  return (
+    <DialogFooter
+      className={cn(
+        'shrink-0 gap-2 border-t bg-background px-6 py-4 sm:flex-row sm:justify-end sm:space-x-2',
+        className,
+      )}
+      {...props}
+    />
+  )
+}
+
 const DialogTitle = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Title>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Title>

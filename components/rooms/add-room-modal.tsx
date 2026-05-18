@@ -2,7 +2,17 @@
 
 import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogScrollableBody,
+  DialogScrollableFooter,
+  DialogScrollableHeader,
+  DialogTitle,
+  dialogScrollableContentClass,
+} from '@/components/ui/dialog'
+import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -134,13 +144,14 @@ export function AddRoomModal({ open, onClose, onSuccess }: AddRoomModalProps) {
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>Add New Room</DialogTitle>
-          <DialogDescription>Fill in the room details and select amenities</DialogDescription>
-        </DialogHeader>
+      <DialogContent className={cn(dialogScrollableContentClass, 'sm:max-w-lg')}>
+        <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <DialogScrollableHeader>
+            <DialogTitle>Add New Room</DialogTitle>
+            <DialogDescription>Fill in the room details and select amenities</DialogDescription>
+          </DialogScrollableHeader>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+          <DialogScrollableBody className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="number">Room Number *</Label>
@@ -261,15 +272,16 @@ export function AddRoomModal({ open, onClose, onSuccess }: AddRoomModalProps) {
               {selectedAmenities.length} amenity selected
             </p>
           </div>
+          </DialogScrollableBody>
 
-          <DialogFooter>
+          <DialogScrollableFooter>
             <Button type="button" variant="outline" onClick={onClose} disabled={loading}>
               Cancel
             </Button>
             <Button type="submit" disabled={loading}>
               {loading ? 'Adding...' : 'Add Room'}
             </Button>
-          </DialogFooter>
+          </DialogScrollableFooter>
         </form>
       </DialogContent>
     </Dialog>

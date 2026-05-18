@@ -1,7 +1,17 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogScrollableBody,
+  DialogScrollableFooter,
+  DialogScrollableHeader,
+  DialogTitle,
+  dialogScrollableContentClass,
+} from '@/components/ui/dialog'
+import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
@@ -307,13 +317,13 @@ export function AddChargeModal({ open, onClose, booking }: AddChargeModalProps) 
         resetForm()
       }
     }}>
-      <DialogContent className="sm:max-w-xl">
-        <DialogHeader>
+      <DialogContent className={cn(dialogScrollableContentClass, 'sm:max-w-xl')}>
+        <DialogScrollableHeader>
           <DialogTitle>Add Charge - {booking.folioId}</DialogTitle>
           <DialogDescription className="sr-only">Add miscellaneous charge to booking</DialogDescription>
-        </DialogHeader>
+        </DialogScrollableHeader>
 
-        <div className="space-y-4 py-4">
+        <DialogScrollableBody className="space-y-4">
           {/* Guest Info Summary */}
           <div className="p-3 bg-muted rounded-lg space-y-1 text-sm">
             <div className="flex justify-between">
@@ -452,15 +462,17 @@ export function AddChargeModal({ open, onClose, booking }: AddChargeModalProps) 
                 </div>
               </div>
 
-            <Button 
-              onClick={handleAddCharge} 
-              disabled={loading || !amount || !description.trim()}
-              className="w-full"
-            >
-              {loading ? 'Adding...' : 'Add Charge'}
-            </Button>
           </div>
-        </div>
+        </DialogScrollableBody>
+
+        <DialogScrollableFooter>
+          <Button type="button" variant="outline" onClick={onClose} disabled={loading}>
+            Cancel
+          </Button>
+          <Button onClick={handleAddCharge} disabled={loading || !amount || !description.trim()}>
+            {loading ? 'Adding...' : 'Add Charge'}
+          </Button>
+        </DialogScrollableFooter>
       </DialogContent>
     </Dialog>
   )

@@ -2,7 +2,17 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogScrollableBody,
+  DialogScrollableFooter,
+  DialogScrollableHeader,
+  DialogTitle,
+  dialogScrollableContentClass,
+} from '@/components/ui/dialog'
+import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -13,7 +23,6 @@ import { Separator } from '@/components/ui/separator'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Plus, Trash2, Loader2, Users, Building2, ChevronLeft, ChevronRight, X } from 'lucide-react'
 import { format, differenceInDays, addDays } from 'date-fns'
-import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 import { formatNaira } from '@/lib/utils/currency'
 import { isOrganizationMenuRecord, isSelectableLedgerName } from '@/lib/utils/ledger-organization'
@@ -958,12 +967,13 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="max-w-3xl max-h-[92vh] overflow-y-auto">
-        <DialogHeader>
+      <DialogContent className={cn(dialogScrollableContentClass, 'max-w-3xl')}>
+        <DialogScrollableHeader>
           <DialogTitle>{copy.title(step)}</DialogTitle>
           <DialogDescription>{stepLabel}</DialogDescription>
-        </DialogHeader>
+        </DialogScrollableHeader>
 
+        <DialogScrollableBody className="space-y-4">
         <div className="flex items-center gap-2 pb-1">
           {[1,2].map(s => (
             <div key={s} className={`flex-1 h-1.5 rounded-full transition-colors ${s <= step ? 'bg-primary' : 'bg-muted'}`} />
@@ -1532,9 +1542,9 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
             </div>
           </div>
         )}
+        </DialogScrollableBody>
 
-        {/* Navigation */}
-        <div className="flex justify-between pt-4 border-t">
+        <DialogScrollableFooter className="flex justify-between sm:justify-between">
           <Button variant="outline" onClick={() => step > 1 ? setStep(step - 1) : handleClose()} disabled={loading}>
             <ChevronLeft className="mr-2 h-4 w-4" />
             {step > 1 ? 'Back' : 'Cancel'}
@@ -1552,7 +1562,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
               {loading ? 'Working...' : isBackdated && !canApproveBackdates ? 'Request approval' : copy.confirm}
             </Button>
           )}
-        </div>
+        </DialogScrollableFooter>
       </DialogContent>
     </Dialog>
   )
