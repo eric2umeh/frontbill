@@ -18,7 +18,7 @@ import type {
   MovementRow,
   StoreMovementType,
 } from '@/lib/store/types'
-import { parseBulkStockLines, resolveBulkItemKey } from '@/lib/store/bulk-stock-parse'
+import { BulkStockDialog } from '@/components/store/bulk-stock-dialog'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -184,15 +184,6 @@ export function StoreManager({ initialTab }: { initialTab?: 'requisitions' | 'pu
   const [adjustUnitPrice, setAdjustUnitPrice] = useState('0')
 
   const [bulkOpen, setBulkOpen] = useState(false)
-  const [bulkText, setBulkText] = useState('')
-  const [bulkType, setBulkType] = useState<'in' | 'out'>('in')
-  const [bulkMovementAt, setBulkMovementAt] = useState(() => format(new Date(), "yyyy-MM-dd'T'HH:mm"))
-  const [bulkRef, setBulkRef] = useState('')
-  const [bulkNotes, setBulkNotes] = useState('')
-  const [bulkPreview, setBulkPreview] = useState<
-    { lineNo: number; key: string; qty: number; item?: StoreItemRow; error?: string }[]
-  >([])
-  const [bulkSaving, setBulkSaving] = useState(false)
 
   const [deleteCat, setDeleteCat] = useState<StoreCategoryRow | null>(null)
   const [deleteItem, setDeleteItem] = useState<StoreItemRow | null>(null)
@@ -696,72 +687,6 @@ export function StoreManager({ initialTab }: { initialTab?: 'requisitions' | 'pu
     return { Authorization: `Bearer ${session.access_token}` }
   }
 
-  const runBulkPreview = () => {
-    const parsed = parseBulkStockLines(bulkText)
-    if (parsed.length === 0) {
-      setBulkPreview([])
-      toast.error('No valid lines — use SKU or name, then tab or comma, then quantity.')
-      return
-    }
-    const rows = parsed.map((p) => {
-      const res = resolveBulkItemKey(p.key, items)
-      if (!res.ok) return { ...p, error: res.reason }
-      return { ...p, item: res.item }
-    })
-    setBulkPreview(rows)
-    const bad = rows.filter((r) => r.error).length
-    if (bad > 0) toast.info(`${rows.length - bad} OK, ${bad} need fixing`)
-    else toast.success(`${rows.length} line(s) ready to apply`)
-  }
-
-  const applyBulkMovements = async () => {
-    if (!organizationId || !userId) return
-    const okRows = bulkPreview.filter((r) => r.item && !r.error)
-    if (okRows.length === 0) {
-      toast.error('Preview first and fix any errors.')
-      return
-    }
-    const movementIso = new Date(bulkMovementAt).toISOString()
-    if (Number.isNaN(new Date(bulkMovementAt).getTime())) {
-      toast.error('Invalid movement date/time')
-      return
-    }
-    setBulkSaving(true)
-    try {
-      const auth = await sessionBearerHeaders()
-      if (!auth.Authorization) {
-        toast.error('Session missing — refresh and try again.')
-        return
-      }
-      const res = await fetch('/api/store/bulk-movements', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...auth },
-        body: JSON.stringify({
-          caller_id: userId,
-          movement_type: bulkType,
-          movement_at: movementIso,
-          reference: bulkRef.trim(),
-          notes: bulkNotes.trim(),
-          lines: okRows.map((r) => ({ item_id: r.item!.id, qty: r.qty })),
-        }),
-      })
-      const json = await res.json().catch(() => ({}))
-      if (!res.ok) {
-        toast.error(json.error || 'Bulk apply failed')
-        return
-      }
-      toast.success(`Applied ${json.result?.applied ?? okRows.length} movement(s).`)
-      setBulkOpen(false)
-      setBulkText('')
-      setBulkPreview([])
-      await fetchAll()
-    } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : 'Bulk apply failed')
-    } finally {
-      setBulkSaving(false)
-    }
-  }
-
   const applyMovement = async () => {
     if (!adjustItem || !organizationId || !userId) return
     const supabase = createClient()
@@ -1139,8 +1064,8 @@ export function StoreManager({ initialTab }: { initialTab?: 'requisitions' | 'pu
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base">Bulk stock in / out</CardTitle>
                   <CardDescription>
-                    Paste many lines at once (tab, comma, or pipe between item and quantity). Items match by SKU first,
-                    then name. All lines apply in a single database transaction.
+                    Filter by department or category, pick items from a list, enter quantities, and apply in one
+                    transaction. Paste lines is still available for quick imports.
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
@@ -1148,10 +1073,7 @@ export function StoreManager({ initialTab }: { initialTab?: 'requisitions' | 'pu
                     type="button"
                     variant="secondary"
                     size="sm"
-                    onClick={() => {
-                      setBulkMovementAt(format(new Date(), "yyyy-MM-dd'T'HH:mm"))
-                      setBulkOpen(true)
-                    }}
+                    onClick={() => setBulkOpen(true)}
                   >
                     Open bulk entry
                   </Button>
@@ -1980,105 +1902,15 @@ export function StoreManager({ initialTab }: { initialTab?: 'requisitions' | 'pu
         </DialogContent>
       </Dialog>
 
-      <Dialog open={bulkOpen} onOpenChange={setBulkOpen}>
-        <DialogContent className={cn(dialogScrollableContentClass, 'max-w-2xl')}>
-          <DialogScrollableHeader>
-            <DialogTitle>Bulk stock in / out</DialogTitle>
-            <DialogDescription>
-              One item per line. Use a tab, comma, or pipe before the quantity. Items resolve by SKU first, then by exact
-              name (case-insensitive if unique).
-            </DialogDescription>
-          </DialogScrollableHeader>
-          <DialogScrollableBody className="space-y-4">
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-2">
-                <Label>Direction</Label>
-                <Select value={bulkType} onValueChange={v => setBulkType(v as 'in' | 'out')}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="in">Stock in</SelectItem>
-                    <SelectItem value="out">Stock out</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>Movement date &amp; time</Label>
-                <Input
-                  type="datetime-local"
-                  value={bulkMovementAt}
-                  onChange={e => setBulkMovementAt(e.target.value)}
-                />
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label>Paste lines</Label>
-              <Textarea
-                value={bulkText}
-                onChange={e => setBulkText(e.target.value)}
-                rows={8}
-                className="font-mono text-sm"
-                placeholder={'SKU-100\t24\nTomatoes, 10\nRice 25kg | 2'}
-              />
-            </div>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-2">
-                <Label>Reference (optional)</Label>
-                <Input value={bulkRef} onChange={e => setBulkRef(e.target.value)} />
-              </div>
-              <div className="space-y-2">
-                <Label>Notes (optional)</Label>
-                <Input value={bulkNotes} onChange={e => setBulkNotes(e.target.value)} />
-              </div>
-            </div>
-            <Button type="button" variant="secondary" size="sm" onClick={runBulkPreview}>
-              Preview
-            </Button>
-            {bulkPreview.length > 0 && (
-              <ScrollArea className="h-[min(220px,40vh)] rounded-md border">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="w-10">#</TableHead>
-                      <TableHead>Key</TableHead>
-                      <TableHead className="text-right">Qty</TableHead>
-                      <TableHead>Item</TableHead>
-                      <TableHead>Status</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {bulkPreview.map((row) => (
-                      <TableRow key={`${row.lineNo}-${row.key}`}>
-                        <TableCell className="text-muted-foreground text-xs">{row.lineNo}</TableCell>
-                        <TableCell className="font-mono text-xs">{row.key}</TableCell>
-                        <TableCell className="text-right font-mono text-sm">{row.qty}</TableCell>
-                        <TableCell className="text-sm">{row.item?.name ?? '—'}</TableCell>
-                        <TableCell className="text-xs">
-                          {row.error ? <span className="text-destructive">{row.error}</span> : <span className="text-green-700">OK</span>}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </ScrollArea>
-            )}
-          </DialogScrollableBody>
-          <DialogScrollableFooter className="gap-2 sm:gap-0">
-            <Button type="button" variant="outline" onClick={() => setBulkOpen(false)}>
-              Close
-            </Button>
-            <Button
-              type="button"
-              className="bg-amber-600 hover:bg-amber-700"
-              onClick={() => void applyBulkMovements()}
-              disabled={bulkSaving}
-            >
-              {bulkSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Apply all valid lines'}
-            </Button>
-          </DialogScrollableFooter>
-        </DialogContent>
-      </Dialog>
+      <BulkStockDialog
+        open={bulkOpen}
+        onOpenChange={setBulkOpen}
+        items={items}
+        categories={categories}
+        organizationId={organizationId}
+        userId={userId}
+        onApplied={fetchAll}
+      />
 
       <Dialog open={!!deleteCat} onOpenChange={o => !o && setDeleteCat(null)}>
         <DialogContent>
