@@ -66,6 +66,7 @@ export interface OutletOrderRow {
   table_label: string | null
   booking_id: string | null
   subtotal: number
+  room_service_fee?: number | null
   payment_method: string | null
   folio_charge_id: string | null
   notes: string | null
