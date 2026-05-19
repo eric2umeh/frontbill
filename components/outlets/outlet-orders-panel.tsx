@@ -6,12 +6,16 @@ import { formatNaira } from '@/lib/utils/currency'
 import type { OutletOrderRow } from '@/lib/outlets/types'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Printer } from 'lucide-react'
 
 type Props = {
   orders: OutletOrderRow[]
+  canPrintReceipt?: boolean
+  onPrintReceipt?: (order: OutletOrderRow) => void
 }
 
-export function OutletOrdersPanel({ orders }: Props) {
+export function OutletOrdersPanel({ orders, canPrintReceipt, onPrintReceipt }: Props) {
   const todayTotal = useMemo(() => {
     const today = format(new Date(), 'yyyy-MM-dd')
     return orders
@@ -41,6 +45,7 @@ export function OutletOrdersPanel({ orders }: Props) {
               <th className="text-right p-2">Total</th>
               <th className="p-2">Pay</th>
               <th className="p-2">Status</th>
+              {canPrintReceipt && <th className="p-2 w-20" />}
             </tr>
           </thead>
           <tbody>
@@ -60,6 +65,22 @@ export function OutletOrdersPanel({ orders }: Props) {
                 <td className="p-2">
                   <Badge variant={o.status === 'settled' ? 'default' : 'secondary'}>{o.status}</Badge>
                 </td>
+                {canPrintReceipt && (
+                  <td className="p-2">
+                    {o.status === 'settled' && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8"
+                        title="Print receipt"
+                        onClick={() => onPrintReceipt?.(o)}
+                      >
+                        <Printer className="h-4 w-4" />
+                      </Button>
+                    )}
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>
