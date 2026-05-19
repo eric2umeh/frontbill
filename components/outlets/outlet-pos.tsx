@@ -56,6 +56,7 @@ export function OutletPos({
   const [ledgerSearch, setLedgerSearch] = useState('')
   const [ledgerResults, setLedgerResults] = useState<LedgerOption[]>([])
   const [selectedLedger, setSelectedLedger] = useState<LedgerOption | null>(null)
+  const [roomServiceFee, setRoomServiceFee] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
   const rootCategories = useMemo(
@@ -113,7 +114,12 @@ export function OutletPos({
     }))
   }, [filteredItems, categories, activeCategoryFilter, parentCategoryId])
 
-  const cartTotal = cart.reduce((s, l) => s + l.item.unit_price * l.qty, 0)
+  const cartItemsTotal = cart.reduce((s, l) => s + l.item.unit_price * l.qty, 0)
+  const parsedRoomServiceFee =
+    orderType === 'room_service' && roomServiceFee.trim() !== ''
+      ? Math.max(0, Math.round(parseFloat(roomServiceFee) * 100) / 100) || 0
+      : 0
+  const orderTotal = Math.round((cartItemsTotal + parsedRoomServiceFee) * 100) / 100
 
   const addToCart = (item: OutletMenuItemRow) => {
     setCart((prev) => {
@@ -221,6 +227,10 @@ export function OutletPos({
           table_label: tableLabel.trim() || null,
           booking_id: bookingId.trim() || null,
           city_ledger_account_id: selectedLedger?.id || null,
+          room_service_fee:
+            orderType === 'room_service' && roomServiceFee.trim() !== ''
+              ? parsedRoomServiceFee
+              : null,
         }),
       })
       const json = await res.json().catch(() => ({}))
@@ -241,6 +251,7 @@ export function OutletPos({
       setSelectedLedger(null)
       setLedgerSearch('')
       setLedgerResults([])
+      setRoomServiceFee('')
       onSettled()
     } catch {
       toast.error('Network error')
@@ -287,13 +298,32 @@ export function OutletPos({
           )}
         </ScrollArea>
         <div className="border-t pt-3 space-y-3">
-          <div className="flex justify-between text-lg font-bold">
-            <span>Total</span>
-            <span>{formatNaira(cartTotal)}</span>
+          <div className="space-y-1 text-sm">
+            <div className="flex justify-between text-muted-foreground">
+              <span>Items</span>
+              <span>{formatNaira(cartItemsTotal)}</span>
+            </div>
+            {orderType === 'room_service' && parsedRoomServiceFee > 0 && (
+              <div className="flex justify-between text-muted-foreground">
+                <span>Room service fee</span>
+                <span>{formatNaira(parsedRoomServiceFee)}</span>
+              </div>
+            )}
+            <div className="flex justify-between text-lg font-bold pt-1 border-t">
+              <span>Total</span>
+              <span>{formatNaira(orderTotal)}</span>
+            </div>
           </div>
           <div className="grid gap-2">
             <Label>Order type</Label>
-            <Select value={orderType} onValueChange={(v) => setOrderType(v as typeof orderType)}>
+            <Select
+              value={orderType}
+              onValueChange={(v) => {
+                const next = v as typeof orderType
+                setOrderType(next)
+                if (next !== 'room_service') setRoomServiceFee('')
+              }}
+            >
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="takeaway">Take-away</SelectItem>
@@ -302,6 +332,24 @@ export function OutletPos({
               </SelectContent>
             </Select>
           </div>
+          {orderType === 'room_service' && (
+            <div className="space-y-1 rounded-lg border border-amber-200/80 bg-amber-50/50 dark:bg-amber-950/20 p-3">
+              <Label htmlFor="room-service-fee">Room service fee (optional)</Label>
+              <Input
+                id="room-service-fee"
+                type="number"
+                min={0}
+                step="0.01"
+                inputMode="decimal"
+                placeholder="e.g. 500"
+                value={roomServiceFee}
+                onChange={(e) => setRoomServiceFee(e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">
+                Optional delivery or tray charge when the order is taken to the guest&apos;s room.
+              </p>
+            </div>
+          )}
           <div className="grid gap-2 sm:grid-cols-2">
             <div className="space-y-1">
               <Label>Guest name</Label>
