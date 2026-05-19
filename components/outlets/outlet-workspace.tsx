@@ -13,17 +13,21 @@ import { Button } from '@/components/ui/button'
 import { OutletPos } from '@/components/outlets/outlet-pos'
 import { OutletMenuManager } from '@/components/outlets/outlet-menu-manager'
 import { OutletOrdersPanel } from '@/components/outlets/outlet-orders-panel'
+import { OutletOrderReceiptDialog } from '@/components/outlets/outlet-order-receipt-dialog'
 import { ChevronLeft, ShoppingCart, UtensilsCrossed, ClipboardList, BarChart3 } from 'lucide-react'
 import { toast } from 'sonner'
 
 export function OutletWorkspace({ department }: { department: OutletDepartmentKey }) {
-  const { organizationId, role } = useAuth()
+  const { organizationId, role, name: staffName } = useAuth()
   const def = getOutletDepartment(department)
   const [loading, setLoading] = useState(true)
   const [categories, setCategories] = useState<OutletMenuCategoryRow[]>([])
   const [items, setItems] = useState<OutletMenuItemRow[]>([])
   const [orders, setOrders] = useState<OutletOrderRow[]>([])
   const [tab, setTab] = useState('sell')
+  const [receiptOrder, setReceiptOrder] = useState<OutletOrderRow | null>(null)
+  const [receiptOpen, setReceiptOpen] = useState(false)
+  const [receiptAutoPrint, setReceiptAutoPrint] = useState(false)
 
   const load = useCallback(async () => {
     if (!organizationId) return
@@ -68,6 +72,13 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
 
   const canMenu = hasPermission(role, 'outlet:menu')
   const canReports = hasPermission(role, 'outlet:reports')
+  const canReceipt = hasPermission(role, 'outlet:receipt')
+
+  const openReceipt = (order: OutletOrderRow, autoPrint: boolean) => {
+    setReceiptOrder(order)
+    setReceiptAutoPrint(autoPrint)
+    setReceiptOpen(true)
+  }
 
   return (
     <div className="space-y-4">
@@ -115,7 +126,9 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
             organizationId={organizationId ?? ''}
             categories={categories}
             items={items}
+            canPrintReceipt={canReceipt}
             onSettled={() => void load()}
+            onOrderSettled={(order) => openReceipt(order, true)}
           />
         </TabsContent>
 
@@ -126,7 +139,11 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
         )}
 
         <TabsContent value="orders" className="mt-4">
-          <OutletOrdersPanel orders={orders} />
+          <OutletOrdersPanel
+            orders={orders}
+            canPrintReceipt={canReceipt}
+            onPrintReceipt={(order) => openReceipt(order, false)}
+          />
         </TabsContent>
 
         {canReports && (
@@ -138,6 +155,19 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
           </TabsContent>
         )}
       </Tabs>
+
+      {canReceipt && (
+        <OutletOrderReceiptDialog
+          open={receiptOpen}
+          onOpenChange={setReceiptOpen}
+          order={receiptOrder}
+          department={department}
+          departmentLabel={def.label}
+          organizationId={organizationId ?? ''}
+          staffName={staffName}
+          autoPrint={receiptAutoPrint}
+        />
+      )}
     </div>
   )
 }

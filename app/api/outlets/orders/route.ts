@@ -234,7 +234,8 @@ export async function POST(request: Request) {
     order: {
       ...order,
       ...orderPatch,
-      outlet_order_lines: orderLines,
+      room_service_fee: roomServiceFee,
+      outlet_order_lines: linesToInsert,
     },
   })
 }

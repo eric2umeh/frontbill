@@ -4,7 +4,7 @@ import { useCallback, useMemo, useState } from 'react'
 import { formatNaira } from '@/lib/utils/currency'
 import { cn } from '@/lib/utils'
 import { createClient } from '@/lib/supabase/client'
-import type { OutletMenuCategoryRow, OutletMenuItemRow, CartLine } from '@/lib/outlets/types'
+import type { OutletMenuCategoryRow, OutletMenuItemRow, OutletOrderRow, CartLine } from '@/lib/outlets/types'
 import type { OutletDepartmentKey } from '@/lib/outlets/departments'
 import { OUTLET_ITEM_TAGS } from '@/lib/outlets/types'
 import { Button } from '@/components/ui/button'
@@ -31,6 +31,8 @@ type Props = {
   categories: OutletMenuCategoryRow[]
   items: OutletMenuItemRow[]
   onSettled: () => void
+  canPrintReceipt?: boolean
+  onOrderSettled?: (order: OutletOrderRow) => void
 }
 
 export function OutletPos({
@@ -40,6 +42,8 @@ export function OutletPos({
   categories,
   items,
   onSettled,
+  canPrintReceipt = false,
+  onOrderSettled,
 }: Props) {
   const [search, setSearch] = useState('')
   const [categoryId, setCategoryId] = useState<string>('all')
@@ -253,6 +257,9 @@ export function OutletPos({
       setLedgerResults([])
       setRoomServiceFee('')
       onSettled()
+      if (canPrintReceipt && onOrderSettled && json.order) {
+        onOrderSettled(json.order as OutletOrderRow)
+      }
     } catch {
       toast.error('Network error')
     } finally {

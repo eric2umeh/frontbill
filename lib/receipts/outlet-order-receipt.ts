@@ -141,7 +141,7 @@ export function buildOutletOrderReceiptHtml(p: OutletOrderReceiptPayload): strin
     <div class="title">SALES RECEIPT</div>
     <div class="meta">
       <div><span>Printed By:</span><span>${printedBy}</span></div>
-      <div><span>Printed Date:</span><span>${printedAt}</span></motion>
+      <div><span>Printed Date:</span><span>${printedAt}</span></div>
       <div><span>Outlet:</span><span>${outlet}</span></div>
       <div><span>Receipt #:</span><span>${receiptNo}</span></div>
       ${metaRows.join('')}
