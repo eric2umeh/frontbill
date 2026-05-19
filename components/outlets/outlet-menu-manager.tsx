@@ -18,6 +18,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { toast } from 'sonner'
 import { Loader2, Plus, Sparkles } from 'lucide-react'
 import { formatNaira } from '@/lib/utils/currency'
+import { outletApiHeaders } from '@/lib/outlets/outlet-api-headers'
 
 type Props = {
   department: OutletDepartmentKey
@@ -44,7 +45,8 @@ export function OutletMenuManager({ department, categories, items, onRefresh }: 
     try {
       const res = await fetch('/api/outlets/seed-menu', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await outletApiHeaders({ 'Content-Type': 'application/json' }),
+        credentials: 'include',
         body: JSON.stringify({ department }),
       })
       const json = await res.json().catch(() => ({}))
@@ -65,7 +67,8 @@ export function OutletMenuManager({ department, categories, items, onRefresh }: 
     try {
       const res = await fetch('/api/outlets/menu/categories', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await outletApiHeaders({ 'Content-Type': 'application/json' }),
+        credentials: 'include',
         body: JSON.stringify({ department, name: newCatName.trim() }),
       })
       const json = await res.json().catch(() => ({}))
@@ -90,7 +93,8 @@ export function OutletMenuManager({ department, categories, items, onRefresh }: 
     try {
       const res = await fetch('/api/outlets/menu/items', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await outletApiHeaders({ 'Content-Type': 'application/json' }),
+        credentials: 'include',
         body: JSON.stringify({
           department,
           name: form.name.trim(),
@@ -116,7 +120,8 @@ export function OutletMenuManager({ department, categories, items, onRefresh }: 
   const toggleActive = async (item: OutletMenuItemRow, active: boolean) => {
     const res = await fetch('/api/outlets/menu/items', {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: await outletApiHeaders({ 'Content-Type': 'application/json' }),
+      credentials: 'include',
       body: JSON.stringify({ id: item.id, is_active: active }),
     })
     if (!res.ok) {

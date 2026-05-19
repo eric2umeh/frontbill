@@ -16,6 +16,7 @@ import { OutletOrdersPanel } from '@/components/outlets/outlet-orders-panel'
 import { OutletOrderReceiptDialog } from '@/components/outlets/outlet-order-receipt-dialog'
 import { ChevronLeft, ShoppingCart, UtensilsCrossed, ClipboardList, BarChart3 } from 'lucide-react'
 import { toast } from 'sonner'
+import { outletApiHeaders } from '@/lib/outlets/outlet-api-headers'
 
 export function OutletWorkspace({ department }: { department: OutletDepartmentKey }) {
   const { organizationId, role, name: staffName } = useAuth()
@@ -48,7 +49,10 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
           .eq('organization_id', organizationId)
           .eq('department', department)
           .order('sort_order'),
-        fetch(`/api/outlets/orders?department=${department}`),
+        fetch(`/api/outlets/orders?department=${department}`, {
+          headers: await outletApiHeaders(),
+          credentials: 'include',
+        }),
       ])
       setCategories((c as OutletMenuCategoryRow[]) ?? [])
       setItems((i as OutletMenuItemRow[]) ?? [])
