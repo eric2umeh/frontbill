@@ -32,6 +32,13 @@ export type Permission =
   | 'store:issue' | 'store:reports' | 'store:audit'
   /** Submit / view store requisitions (department staff); fulfillment still uses store:issue / store:view */
   | 'store:requisition'
+  /** FnB, laundry, gym POS — view outlet hub and assigned departments */
+  | 'outlet:view'
+  | 'outlet:menu'
+  | 'outlet:sell'
+  | 'outlet:void'
+  | 'outlet:reports'
+  | 'outlet:receipt'
 
 export type RoleKey =
   | 'superadmin'
@@ -45,6 +52,10 @@ export type RoleKey =
   | 'housekeeping'
   | 'maintenance'
   | 'store'
+  | 'restaurant'
+  | 'bar'
+  | 'laundry'
+  | 'gym'
 
 export interface RoleDefinition {
   key: RoleKey
@@ -128,6 +139,13 @@ export const ALL_PERMISSIONS: { key: Permission; label: string; group: string }[
   { key: 'store:audit', label: 'Store Movement Audit Trail (Full Detail)', group: 'Store' },
   { key: 'store:requisition', label: 'Store Requisitions (request items from store)', group: 'Store' },
 
+  { key: 'outlet:view', label: 'View Outlets (FnB / Laundry / Gym)', group: 'Outlets' },
+  { key: 'outlet:menu', label: 'Manage Outlet Menu (categories & items)', group: 'Outlets' },
+  { key: 'outlet:sell', label: 'Take Orders & Sell (POS)', group: 'Outlets' },
+  { key: 'outlet:void', label: 'Void Outlet Orders', group: 'Outlets' },
+  { key: 'outlet:reports', label: 'Outlet Sales Reports', group: 'Outlets' },
+  { key: 'outlet:receipt', label: 'Print / View Outlet Receipts', group: 'Outlets' },
+
   { key: 'analytics:view', label: 'View Analytics', group: 'Analytics' },
   { key: 'analytics:export', label: 'Export Analytics', group: 'Analytics' },
 
@@ -192,6 +210,7 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
       'bookings:edit',
       'bookings:delete',
       'reservations:edit',
+      'outlet:void',
     ].includes(p)),
   },
   {
@@ -253,6 +272,11 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
       'store:requisition',
       'store:reports',
       'store:audit',
+      'outlet:view',
+      'outlet:menu',
+      'outlet:sell',
+      'outlet:reports',
+      'outlet:receipt',
       'settings:view',
     ],
   },
@@ -334,6 +358,65 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
       'settings:view',
     ],
   },
+  {
+    key: 'restaurant',
+    label: 'Restaurant',
+    description:
+      'Restaurant POS only: sell, receipts, daily outlet reports, and menu maintenance for the restaurant. No front desk, store, or other outlets.',
+    color: 'bg-rose-100 text-rose-900 dark:bg-rose-950/40 dark:text-rose-100',
+    permissions: [
+      'outlet:view',
+      'outlet:menu',
+      'outlet:sell',
+      'outlet:reports',
+      'outlet:receipt',
+      'settings:view',
+    ],
+  },
+  {
+    key: 'bar',
+    label: 'Bar',
+    description:
+      'Main Bar and Pool Bar POS: take orders, print receipts, outlet sales reports, and manage bar menus. No restaurant, laundry, or front-office access.',
+    color: 'bg-violet-100 text-violet-900 dark:bg-violet-950/40 dark:text-violet-100',
+    permissions: [
+      'outlet:view',
+      'outlet:menu',
+      'outlet:sell',
+      'outlet:reports',
+      'outlet:receipt',
+      'settings:view',
+    ],
+  },
+  {
+    key: 'laundry',
+    label: 'Laundry',
+    description:
+      'Laundry POS: guest laundry tickets, receipts, daily reports, and laundry price list (categories & items). No bar, restaurant, or front desk.',
+    color: 'bg-sky-100 text-sky-900 dark:bg-sky-950/40 dark:text-sky-100',
+    permissions: [
+      'outlet:view',
+      'outlet:menu',
+      'outlet:sell',
+      'outlet:reports',
+      'outlet:receipt',
+      'settings:view',
+    ],
+  },
+  {
+    key: 'gym',
+    label: 'Gym',
+    description:
+      'Gym & wellness payments: memberships, day passes, and retail at the gym desk. Receipts and outlet reports for gym only.',
+    color: 'bg-emerald-100 text-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-100',
+    permissions: [
+      'outlet:view',
+      'outlet:sell',
+      'outlet:reports',
+      'outlet:receipt',
+      'settings:view',
+    ],
+  },
 ]
 
 export function getRoleDefinition(roleKey: string): RoleDefinition | undefined {
@@ -354,6 +437,13 @@ const PROFILE_ROLE_ALIASES: Record<string, RoleKey> = {
   housekeeping_staff: 'housekeeping',
   maint: 'maintenance',
   maintenance_staff: 'maintenance',
+  waiter: 'restaurant',
+  restaurant_staff: 'restaurant',
+  bartender: 'bar',
+  bar_staff: 'bar',
+  pool_bar: 'bar',
+  laundry_staff: 'laundry',
+  gym_staff: 'gym',
 }
 
 /** Every role that may use the signed-in hotel app shell (same set as `ROLE_DEFINITIONS`). */
@@ -412,6 +502,9 @@ export function hasPermission(userRole: string | null | undefined, permission: P
     return roleKey === 'superadmin' || roleKey === 'admin' || roleKey === 'manager'
   }
   if (permission === 'organizations:edit' || permission === 'organizations:delete') {
+    return roleKey === 'superadmin' || roleKey === 'admin'
+  }
+  if (permission === 'outlet:void') {
     return roleKey === 'superadmin' || roleKey === 'admin'
   }
   const role = getRoleDefinition(roleKey)
