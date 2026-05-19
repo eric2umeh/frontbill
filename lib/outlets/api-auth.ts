@@ -14,19 +14,30 @@ export async function resolveOutletAuthed(
   request: Request,
   opts?: { permission?: Permission; department?: string },
 ): Promise<{ ctx: OutletAuthedContext } | { error: string; status: number }> {
+  const admin = createAdminClient()
   const cookieSb = await createClient()
   const {
-    data: { user },
+    data: { user: cookieUser },
   } = await cookieSb.auth.getUser()
-  if (!user?.id) {
+
+  let userId: string | null = cookieUser?.id ?? null
+  if (!userId) {
+    const raw = request.headers.get('authorization')?.trim()
+    const bearer = raw?.toLowerCase().startsWith('bearer ') ? raw.slice(7).trim() : null
+    if (bearer) {
+      const { data: jwtUserData, error: jwtError } = await admin.auth.getUser(bearer)
+      if (!jwtError && jwtUserData.user?.id) userId = jwtUserData.user.id
+    }
+  }
+
+  if (!userId) {
     return { error: 'Unauthorized', status: 401 }
   }
 
-  const admin = createAdminClient()
   const { data: profile, error: pe } = await admin
     .from('profiles')
     .select('role, organization_id')
-    .eq('id', user.id)
+    .eq('id', userId)
     .single()
 
   if (pe || !profile?.organization_id) {
@@ -50,7 +61,7 @@ export async function resolveOutletAuthed(
 
   return {
     ctx: {
-      userId: user.id,
+      userId,
       organizationId: profile.organization_id as string,
       role,
     },

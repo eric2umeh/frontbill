@@ -21,6 +21,7 @@ import {
 } from '@/components/ui/select'
 import { Search, Minus, Plus, Loader2, Receipt } from 'lucide-react'
 import { toast } from 'sonner'
+import { outletApiHeaders } from '@/lib/outlets/outlet-api-headers'
 
 type LedgerOption = { id: string; name: string; balance: number }
 
@@ -155,7 +156,10 @@ export function OutletPos({
     setRoomGuestLabel(null)
     setBookingId('')
     try {
-      const res = await fetch(`/api/outlets/active-booking?room=${encodeURIComponent(room)}`)
+      const res = await fetch(`/api/outlets/active-booking?room=${encodeURIComponent(room)}`, {
+        headers: await outletApiHeaders(),
+        credentials: 'include',
+      })
       const json = await res.json().catch(() => ({}))
       if (!res.ok) {
         toast.error(json.error || 'Room lookup failed')
@@ -220,7 +224,8 @@ export function OutletPos({
     try {
       const res = await fetch('/api/outlets/orders', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await outletApiHeaders({ 'Content-Type': 'application/json' }),
+        credentials: 'include',
         body: JSON.stringify({
           department,
           lines: cart.map((l) => ({ item_id: l.item.id, qty: l.qty })),
