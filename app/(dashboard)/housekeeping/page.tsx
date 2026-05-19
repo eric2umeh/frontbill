@@ -82,11 +82,10 @@ const ROOM_STATUS_DISPLAY: Record<string, { label: string; color: string }> = {
   out_of_order: { label: 'Out of Order', color: 'bg-gray-200 text-gray-700' },
 }
 
-/** Statuses housekeeping may set from this screen (not Occupied / Reserved — those come from bookings only). */
+/** Statuses housekeeping may set from this screen (not Occupied / Reserved / Maintenance — those come from bookings or the maintenance team). */
 const HK_STATUS_PICKER_BASE: { value: string; label: string; color: string }[] = [
   { value: 'available', label: 'Available', color: 'bg-green-100 text-green-800' },
   { value: 'cleaning', label: 'Cleaning', color: 'bg-yellow-100 text-yellow-800' },
-  { value: 'maintenance', label: 'Maintenance', color: 'bg-red-100 text-red-800' },
 ]
 
 const HK_OUT_OF_ORDER_OPTION = {
@@ -124,6 +123,11 @@ export default function HousekeepingPage() {
   const [reportOpen, setReportOpen] = useState(false)
   const [statusChangeRoom, setStatusChangeRoom] = useState<Room | null>(null)
   const [statusComment, setStatusComment] = useState('')
+  const [pendingRoomStatus, setPendingRoomStatus] = useState<string | null>(null)
+  const [roomStatusSaving, setRoomStatusSaving] = useState(false)
+  const [taskStatusModal, setTaskStatusModal] = useState<{ task: HousekeepingTask; newStatus: TaskStatus } | null>(null)
+  const [taskStatusRemark, setTaskStatusRemark] = useState('')
+  const [taskStatusSaving, setTaskStatusSaving] = useState(false)
 
   // New task form
   const [taskForm, setTaskForm] = useState({
@@ -226,21 +230,86 @@ export default function HousekeepingPage() {
     }
   }
 
-  const handleUpdateStatus = async (taskId: string, newStatus: TaskStatus) => {
+  const saveHousekeepingRemark = async (params: {
+    roomId: string
+    roomNumber: string
+    noteText: string
+    taskType: string
+    taskStatus?: TaskStatus
+  }) => {
+    if (!organizationId) throw new Error('Organization not loaded')
     const supabase = createClient()
-    const { error } = await supabase
-      .from('housekeeping_tasks')
-      .update({ status: newStatus, completed_at: newStatus === 'done' ? new Date().toISOString() : null })
-      .eq('id', taskId)
-    if (error) return toast.error(error.message)
-    toast.success('Status updated')
-    setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: newStatus } : t))
+    const { error } = await supabase.from('housekeeping_tasks').insert([{
+      organization_id: organizationId,
+      room_id: params.roomId,
+      room_number: params.roomNumber,
+      task_type: params.taskType,
+      priority: 'normal',
+      notes: params.noteText,
+      created_by: userId,
+      created_by_name: currentUserName,
+      scheduled_date: filterDate,
+      status: params.taskStatus ?? 'done',
+      completed_at: params.taskStatus === 'done' || !params.taskStatus ? new Date().toISOString() : null,
+    }])
+    if (error) throw error
   }
 
-  const handleRoomStatusChange = async (roomId: string, newStatus: string) => {
-    const disallowed = ['occupied', 'reserved']
+  const handleConfirmTaskStatus = async () => {
+    if (!taskStatusModal) return
+    const { task, newStatus } = taskStatusModal
+    const remark = taskStatusRemark.trim()
+    setTaskStatusSaving(true)
+    try {
+      const supabase = createClient()
+      const patch: { status: TaskStatus; completed_at: string | null; notes?: string } = {
+        status: newStatus,
+        completed_at: newStatus === 'done' ? new Date().toISOString() : null,
+      }
+      if (remark) {
+        const prefix = `[${STATUS_CONFIG[newStatus].label}]`
+        patch.notes = task.notes ? `${task.notes}\n${prefix} ${remark}` : `${prefix} ${remark}`
+      }
+      const { error } = await supabase.from('housekeeping_tasks').update(patch).eq('id', task.id)
+      if (error) throw error
+      toast.success(remark ? 'Status and remark saved' : 'Status updated')
+      setTasks(prev =>
+        prev.map(t =>
+          t.id === task.id
+            ? { ...t, status: newStatus, notes: patch.notes ?? t.notes, completed_at: patch.completed_at }
+            : t,
+        ),
+      )
+      setTaskStatusModal(null)
+      setTaskStatusRemark('')
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Could not update task')
+    } finally {
+      setTaskStatusSaving(false)
+    }
+  }
+
+  const openRoomStatusModal = (room: Room) => {
+    setStatusChangeRoom(room)
+    setPendingRoomStatus(room.status)
+    setStatusComment('')
+  }
+
+  const closeRoomStatusModal = () => {
+    setStatusChangeRoom(null)
+    setPendingRoomStatus(null)
+    setStatusComment('')
+  }
+
+  const handleConfirmRoomStatusChange = async () => {
+    if (!statusChangeRoom || !pendingRoomStatus) {
+      toast.error('Select a room status')
+      return
+    }
+    const newStatus = pendingRoomStatus
+    const disallowed = ['occupied', 'reserved', 'maintenance']
     if (disallowed.includes(newStatus)) {
-      toast.error('Occupied and Reserved are set from bookings / front desk only.')
+      toast.error('That status cannot be set from housekeeping. Use front desk or maintenance.')
       return
     }
     if (newStatus === 'out_of_order' && !canSetOutOfOrder) {
@@ -251,32 +320,45 @@ export default function HousekeepingPage() {
       toast.error('You do not have permission to update room status.')
       return
     }
-    const supabase = createClient()
-    const room = rooms.find(r => r.id === roomId)
-    const { error } = await supabase
-      .from('rooms')
-      .update({ status: newStatus, updated_by: userId, updated_at: new Date().toISOString() })
-      .eq('id', roomId)
-    if (error) return toast.error(error.message)
-    if (statusComment.trim() && room) {
-      await supabase.from('housekeeping_tasks').insert([{
-        organization_id: organizationId,
-        room_id: roomId,
-        room_number: room.room_number,
-        task_type: 'Room Status Change',
-        priority: 'normal',
-        notes: statusComment.trim(),
-        created_by: userId,
-        created_by_name: currentUserName,
-        scheduled_date: filterDate,
-        status: 'done',
-        completed_at: new Date().toISOString(),
-      }])
+    if (!organizationId) {
+      toast.error('Organization not loaded')
+      return
     }
-    toast.success('Room status updated')
-    setRooms(prev => prev.map(r => r.id === roomId ? { ...r, status: newStatus } : r))
-    setStatusChangeRoom(null)
-    setStatusComment('')
+
+    setRoomStatusSaving(true)
+    try {
+      const supabase = createClient()
+      const room = statusChangeRoom
+      const remark = statusComment.trim()
+      const statusLabel =
+        housekeepingStatusPickerOptions.find((o) => o.value === newStatus)?.label ?? newStatus
+
+      const { error: roomError } = await supabase
+        .from('rooms')
+        .update({ status: newStatus, updated_by: userId, updated_at: new Date().toISOString() })
+        .eq('id', room.id)
+      if (roomError) throw roomError
+
+      const noteText = remark
+        ? `Status → ${statusLabel}: ${remark}`
+        : `Status → ${statusLabel}`
+
+      await saveHousekeepingRemark({
+        roomId: room.id,
+        roomNumber: room.room_number,
+        noteText,
+        taskType: 'Room Status Change',
+      })
+
+      toast.success(remark ? 'Room status and remark saved' : 'Room status updated')
+      setRooms((prev) => prev.map((r) => (r.id === room.id ? { ...r, status: newStatus } : r)))
+      await fetchAll()
+      closeRoomStatusModal()
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Could not update room status')
+    } finally {
+      setRoomStatusSaving(false)
+    }
   }
 
   const handleSubmitReport = async () => {
@@ -435,7 +517,12 @@ export default function HousekeepingPage() {
                         </span>
                         <Select
                           value={task.status}
-                          onValueChange={(v) => handleUpdateStatus(task.id, v as TaskStatus)}
+                          onValueChange={(v) => {
+                            const next = v as TaskStatus
+                            if (next === task.status) return
+                            setTaskStatusRemark('')
+                            setTaskStatusModal({ task, newStatus: next })
+                          }}
                         >
                           <SelectTrigger className="h-7 text-xs w-32 pr-2">
                             <SelectValue />
@@ -458,8 +545,8 @@ export default function HousekeepingPage() {
         {/* Room Status Panel */}
         <TabsContent value="rooms" className="space-y-4">
           <p className="text-sm text-muted-foreground">
-            Occupied and Reserved are controlled from bookings only. Out of order: Administrator, Superadmin, or
-            Housekeeping only.
+            Occupied, Reserved, and Maintenance are controlled from bookings or the maintenance team. Out of order:
+            Administrator, Superadmin, or Housekeeping only.
           </p>
           <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
             {rooms.map(room => {
@@ -483,7 +570,7 @@ export default function HousekeepingPage() {
                     {canUpdateRoomStatus ? (
                       <button
                         type="button"
-                        onClick={() => setStatusChangeRoom(room)}
+                        onClick={() => openRoomStatusModal(room)}
                         className={`w-full rounded-md px-3 py-1.5 text-xs font-medium flex items-center justify-between ${sc.color} hover:opacity-80 transition-opacity`}
                       >
                         <span>{sc.label}</span>
@@ -574,41 +661,109 @@ export default function HousekeepingPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Room Status Quick-Change Modal */}
-      {statusChangeRoom && (
-        <Dialog open={!!statusChangeRoom} onOpenChange={() => setStatusChangeRoom(null)}>
-          <DialogContent className="max-w-sm">
-            <DialogHeader>
-              <DialogTitle>Update Room {statusChangeRoom.room_number} Status</DialogTitle>
-            </DialogHeader>
-            <div className="space-y-2 mb-3">
-              <Label>Comment</Label>
-              <Textarea
-                placeholder="Add note for this room status change..."
-                value={statusComment}
-                onChange={(e) => setStatusComment(e.target.value)}
-                rows={2}
-              />
-              <p className="text-xs text-muted-foreground">Created by {currentUserName}. Last updated by {currentUserName}.</p>
+      {/* Task status + remark */}
+      <Dialog
+        open={!!taskStatusModal}
+        onOpenChange={(open) => {
+          if (!open) {
+            setTaskStatusModal(null)
+            setTaskStatusRemark('')
+          }
+        }}
+      >
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>
+              {taskStatusModal
+                ? `Update task — Room ${taskStatusModal.task.room_number}`
+                : 'Update task'}
+            </DialogTitle>
+          </DialogHeader>
+          {taskStatusModal && (
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                {taskStatusModal.task.task_type} →{' '}
+                <span className="font-medium text-foreground">
+                  {STATUS_CONFIG[taskStatusModal.newStatus].label}
+                </span>
+              </p>
+              <div className="space-y-2">
+                <Label>Remark / comment</Label>
+                <Textarea
+                  placeholder="Optional note for this status change…"
+                  value={taskStatusRemark}
+                  onChange={(e) => setTaskStatusRemark(e.target.value)}
+                  rows={3}
+                />
+              </div>
             </div>
-            <div className="grid grid-cols-2 gap-2">
-              {housekeepingStatusPickerOptions.map(opt => (
-                <button
-                  key={opt.value}
-                  type="button"
-                  onClick={() => handleRoomStatusChange(statusChangeRoom.id, opt.value)}
-                  className={`rounded-lg px-4 py-3 text-sm font-medium text-left transition-all hover:scale-105 active:scale-95 ${opt.color} ${statusChangeRoom.status === opt.value ? 'ring-2 ring-offset-1 ring-primary' : ''}`}
-                >
-                  {opt.label}
-                  {statusChangeRoom.status === opt.value && (
-                    <span className="block text-xs font-normal opacity-70 mt-0.5">Current</span>
-                  )}
-                </button>
-              ))}
+          )}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setTaskStatusModal(null)
+                setTaskStatusRemark('')
+              }}
+            >
+              Cancel
+            </Button>
+            <Button onClick={() => void handleConfirmTaskStatus()} disabled={taskStatusSaving}>
+              {taskStatusSaving ? 'Saving…' : 'Save'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Room status + remark */}
+      <Dialog open={!!statusChangeRoom} onOpenChange={(open) => !open && closeRoomStatusModal()}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>
+              {statusChangeRoom ? `Update Room ${statusChangeRoom.room_number} Status` : 'Update room'}
+            </DialogTitle>
+          </DialogHeader>
+          {statusChangeRoom && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-2">
+                {housekeepingStatusPickerOptions.map((opt) => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => setPendingRoomStatus(opt.value)}
+                    className={`rounded-lg px-4 py-3 text-sm font-medium text-left transition-all hover:scale-[1.02] active:scale-95 ${opt.color} ${pendingRoomStatus === opt.value ? 'ring-2 ring-offset-1 ring-primary' : ''}`}
+                  >
+                    {opt.label}
+                    {statusChangeRoom.status === opt.value && (
+                      <span className="block text-xs font-normal opacity-70 mt-0.5">Current</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+              <div className="space-y-2">
+                <Label>Remark / comment</Label>
+                <Textarea
+                  placeholder="Add note for this room status change…"
+                  value={statusComment}
+                  onChange={(e) => setStatusComment(e.target.value)}
+                  rows={3}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Saved on the task board as a housekeeping log entry.
+                </p>
+              </div>
             </div>
-          </DialogContent>
-        </Dialog>
-      )}
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={closeRoomStatusModal} disabled={roomStatusSaving}>
+              Cancel
+            </Button>
+            <Button onClick={() => void handleConfirmRoomStatusChange()} disabled={roomStatusSaving || !pendingRoomStatus}>
+              {roomStatusSaving ? 'Saving…' : 'Update status'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Daily Report Modal */}
       <Dialog open={reportOpen} onOpenChange={setReportOpen}>

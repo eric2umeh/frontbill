@@ -2,6 +2,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
 import { canonicalRoleKey, hasPermission } from '@/lib/permissions'
 import { canRequestExtendStayDiscount } from '@/lib/utils/booking-checkout-ui'
+import { insertFolioCharges } from '@/lib/utils/insert-folio-charges'
 
 const DECISION = ['approved', 'rejected'] as const
 
@@ -225,7 +226,7 @@ export async function PATCH(request: Request) {
     }
     if (booking.organization_id) folioRow.organization_id = booking.organization_id
 
-    const { error: fcErr } = await admin.from('folio_charges').insert([folioRow])
+    const { error: fcErr } = await insertFolioCharges(admin, [folioRow])
     if (fcErr) return NextResponse.json({ error: fcErr.message }, { status: 500 })
 
     await admin

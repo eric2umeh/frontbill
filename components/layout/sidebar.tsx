@@ -30,6 +30,7 @@ import {
   Sparkles,
   Wrench,
   ShoppingBag,
+  UtensilsCrossed,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useBackdatePendingCount } from '@/hooks/use-backdate-pending-count'
@@ -112,6 +113,12 @@ const routes: Array<{
     icon: ShoppingBag,
     href: '/store',
     permissionAny: ['store:view', 'store:requisition'],
+  },
+  {
+    label: 'Outlets',
+    icon: UtensilsCrossed,
+    href: '/outlets',
+    permission: 'outlet:view',
   },
   {
     label: 'Analytics',

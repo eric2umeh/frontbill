@@ -48,6 +48,7 @@ const ROUTE_PERMISSIONS: Array<{ path: string; permission: Permission }> = [
   /** Longer prefix wins: store requisitions allow departmental staff (`store:requisition`) or store team (`store:view`). */
   { path: '/store/requisitions', permission: 'store:requisition' },
   { path: '/store', permission: 'store:view' },
+  { path: '/outlets', permission: 'outlet:view' },
   { path: '/rooms', permission: 'rooms:view' },
   { path: '/users-roles', permission: 'users:view' },
   { path: '/settings', permission: 'settings:view' },
@@ -72,6 +73,9 @@ function canAccessPath(pathname: string, userRole: string): boolean {
   }
   if (pathname === '/store' || pathname.startsWith('/store/')) {
     return hasPermission(userRole, 'store:view') || hasPermission(userRole, 'store:requisition')
+  }
+  if (pathname === '/outlets' || pathname.startsWith('/outlets/')) {
+    return hasPermission(userRole, 'outlet:view')
   }
   const requiredPermission = getRequiredPermission(pathname)
   if (!requiredPermission) return true
@@ -214,6 +218,22 @@ export default function DashboardLayout({
       }
       if (rk === 'maintenance') {
         router.replace('/maintenance')
+        return
+      }
+      if (rk === 'restaurant') {
+        router.replace('/outlets/restaurant')
+        return
+      }
+      if (rk === 'bar') {
+        router.replace('/outlets/main_bar')
+        return
+      }
+      if (rk === 'laundry') {
+        router.replace('/outlets/laundry')
+        return
+      }
+      if (rk === 'gym') {
+        router.replace('/outlets/gym')
         return
       }
       if (rk === 'staff') {
