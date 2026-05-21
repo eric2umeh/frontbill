@@ -22,6 +22,7 @@ import { useAuth } from '@/lib/auth-context'
 import { FolioAttachmentsPanel } from '@/components/folio/folio-attachments-panel'
 import { BookingPaymentReceiptPanel } from '@/components/receipts/booking-payment-receipt-panel'
 import { hasPermission } from '@/lib/permissions'
+import { cancelBookingReservation } from '@/lib/reservations/cancel-reservation'
 
 export default function ReservationDetailPage({
   params,
@@ -278,16 +279,14 @@ export default function ReservationDetailPage({
                 setActionLoading(true)
                 try {
                   const supabase = createClient()
-                  await supabase
-                    .from('bookings')
-                    .update({ status: 'cancelled' })
-                    .eq('id', rid)
-                  if (reservation?.rooms?.id) {
-                    await supabase
-                      .from('rooms')
-                      .update({ status: 'available', updated_at: new Date().toISOString() })
-                      .eq('id', reservation.rooms.id)
-                  }
+                  if (!supabase) throw new Error('Unable to connect')
+                  const roomId = reservation?.rooms?.id ?? reservation?.room_id
+                  const { error } = await cancelBookingReservation(supabase, {
+                    bookingId: rid,
+                    roomId,
+                    userId,
+                  })
+                  if (error) throw new Error(error)
                   toast.success('Reservation cancelled')
                   router.push('/reservations')
                 } catch (err: any) {
@@ -382,7 +381,6 @@ export default function ReservationDetailPage({
                   <SelectItem value="pos">POS</SelectItem>
                   <SelectItem value="transfer">Transfer</SelectItem>
                   <SelectItem value="card">Card</SelectItem>
-                  <SelectItem value="city_ledger">City Ledger</SelectItem>
                 </SelectContent>
               </Select>
             </div>
