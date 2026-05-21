@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useReservationsEventsHeader } from '@/components/reservations/reservations-events-header'
 import { format, parseISO } from 'date-fns'
 import { useAuth } from '@/lib/auth-context'
@@ -10,6 +10,8 @@ import {
   type EventPaymentFormValue,
 } from '@/components/events/event-payment-section'
 import { computeEventPayment } from '@/lib/events/compute-event-payment'
+import { effectiveEventEndDate } from '@/lib/events/event-date-overlap'
+import { EventDateAvailability } from '@/components/events/event-date-availability'
 import { canManageEvents } from '@/lib/events/access'
 import { eventsApiHeaders } from '@/lib/events/events-api-headers'
 import type { HotelEventRow } from '@/lib/events/types'
@@ -210,11 +212,12 @@ export function EventsPanel() {
       toast.error('Event title is required')
       return
     }
-    if (!form.start_date || !form.end_date) {
-      toast.error('Start and end dates are required')
+    if (!form.start_date) {
+      toast.error('Start date is required')
       return
     }
-    if (form.end_date < form.start_date) {
+    const resolvedEnd = effectiveEventEndDate(form.start_date, form.end_date)
+    if (resolvedEnd < form.start_date) {
       toast.error('End date must be on or after start date')
       return
     }
@@ -240,7 +243,7 @@ export function EventsPanel() {
         description: form.description,
         venue: form.venue.trim() || null,
         start_date: form.start_date,
-        end_date: form.end_date,
+        end_date: resolvedEnd,
         start_time: form.start_time,
         end_time: form.end_time,
         client_name: form.client_name,
@@ -337,6 +340,11 @@ export function EventsPanel() {
       return `${ev.start_date} – ${ev.end_date}`
     }
   }
+
+  const resolvedFormEnd = useMemo(
+    () => (form.start_date ? effectiveEventEndDate(form.start_date, form.end_date) : ''),
+    [form.start_date, form.end_date],
+  )
 
   if (loading) return <PageLoadingState />
 
@@ -452,19 +460,39 @@ export function EventsPanel() {
                 <Input
                   type="date"
                   value={form.start_date}
-                  onChange={(e) => setForm((f) => ({ ...f, start_date: e.target.value }))}
+                  onChange={(e) => {
+                    const start = e.target.value
+                    setForm((f) => ({
+                      ...f,
+                      start_date: start,
+                      end_date: start,
+                    }))
+                  }}
                 />
               </div>
               <div className="space-y-1">
-                <Label>End date *</Label>
+                <Label>End date (optional)</Label>
                 <Input
                   type="date"
                   value={form.end_date}
-                  min={form.start_date}
+                  min={form.start_date || undefined}
                   onChange={(e) => setForm((f) => ({ ...f, end_date: e.target.value }))}
                 />
+                {form.start_date && (
+                  <p className="text-xs text-muted-foreground">
+                    Leave blank or same as start for a single-day event.
+                  </p>
+                )}
               </div>
             </div>
+            {form.start_date && /^\d{4}-\d{2}-\d{2}$/.test(form.start_date) && (
+              <EventDateAvailability
+                events={events}
+                startDate={form.start_date}
+                endDate={resolvedFormEnd}
+                excludeEventId={editing?.id}
+              />
+            )}
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
                 <Label>Start time</Label>
