@@ -20,6 +20,7 @@ import { getUserDisplayName } from '@/lib/utils/user-display'
 import { fetchUserDisplayNameMap } from '@/lib/utils/fetch-user-display-names'
 import { getBulkGroupId, isLegacyBulkGroupId } from '@/lib/utils/bulk-booking'
 import { cancelBookingReservation } from '@/lib/reservations/cancel-reservation'
+import { formatReservationPaymentMethodLabel } from '@/lib/reservations/reservation-payment-methods'
 import { toast } from 'sonner'
 import { useReservationsEventsHeader } from '@/components/reservations/reservations-events-header'
 
@@ -415,9 +416,11 @@ export default function ReservationsPage() {
             label: 'Payment',
             responsive: 'md+',
             render: (res) => {
-              const effectiveStatus = res.payment_method === 'city_ledger' && res.payment_status === 'paid'
-                ? 'pending'
-                : res.payment_status
+              const effectiveStatus =
+                res.payment_method === 'pending' ||
+                (res.payment_method === 'city_ledger' && res.payment_status === 'paid')
+                  ? 'pending'
+                  : res.payment_status
               return (
                 <div className="space-y-1">
                   <Badge variant="outline" className={`${(paymentColors as Record<string, string>)[effectiveStatus]} max-md:text-[10px]`}>
@@ -438,8 +441,8 @@ export default function ReservationsPage() {
             responsive: 'md+',
             render: (res) => (
               <div className="space-y-1">
-                <Badge variant="outline" className="text-[10px] capitalize">
-                  {(res.payment_method || 'cash').replace(/_/g, ' ')}
+                <Badge variant="outline" className="text-[10px]">
+                  {formatReservationPaymentMethodLabel(res.payment_method || 'cash')}
                 </Badge>
                 {res.payment_method === 'city_ledger' && res.ledger_account_name && (
                   <div className="text-[10px] text-muted-foreground truncate max-w-[100px]">
