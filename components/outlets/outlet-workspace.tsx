@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/button'
 import { OutletPos } from '@/components/outlets/outlet-pos'
 import { OutletMenuManager } from '@/components/outlets/outlet-menu-manager'
 import { OutletOrdersPanel } from '@/components/outlets/outlet-orders-panel'
+import { OutletDailyReportPanel } from '@/components/outlets/outlet-daily-report-panel'
 import { OutletOrderReceiptDialog } from '@/components/outlets/outlet-order-receipt-dialog'
 import { ChevronLeft, ShoppingCart, UtensilsCrossed, ClipboardList, BarChart3 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -163,9 +164,13 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
         </TabsContent>
 
         {canReports && (
-          <TabsContent value="reports" className="mt-4">
-            <OutletOrdersPanel orders={orders} />
-            <p className="text-xs text-muted-foreground mt-4">
+          <TabsContent value="reports" className="mt-4 space-y-6">
+            <OutletDailyReportPanel department={department} departmentLabel={def.label} />
+            <div>
+              <h3 className="text-sm font-semibold mb-3">Recent orders</h3>
+              <OutletOrdersPanel orders={orders} />
+            </div>
+            <p className="text-xs text-muted-foreground">
               Charge to room posts to city ledger with the outlet name (e.g. Restaurant) on folio, transactions, and accounts — same as booking add charge.
             </p>
           </TabsContent>
