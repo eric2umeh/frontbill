@@ -29,7 +29,10 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
   const [items, setItems] = useState<OutletMenuItemRow[]>([])
   const [orders, setOrders] = useState<OutletOrderRow[]>([])
   const canSell = hasPermission(role, 'outlet:sell')
-  const [tab, setTab] = useState(canSell ? 'sell' : 'orders')
+  const canReceipt = hasPermission(role, 'outlet:receipt')
+  const [tab, setTab] = useState(
+    canSell ? 'sell' : canReceipt ? 'orders' : 'menu',
+  )
   const [receiptOrder, setReceiptOrder] = useState<OutletOrderRow | null>(null)
   const [receiptOpen, setReceiptOpen] = useState(false)
   const [receiptAutoPrint, setReceiptAutoPrint] = useState(false)
@@ -81,8 +84,6 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
   const canViewMenu = hasPermission(role, 'outlet:view')
   const canManageMenu = canManageOutletMenu(role)
   const canReports = hasPermission(role, 'outlet:reports')
-  const canReceipt = hasPermission(role, 'outlet:receipt')
-
   const openReceipt = (order: OutletOrderRow, autoPrint: boolean) => {
     setReceiptOrder(order)
     setReceiptAutoPrint(autoPrint)
@@ -173,7 +174,11 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
             <OutletDailyReportPanel department={department} departmentLabel={def.label} />
             <div>
               <h3 className="text-sm font-semibold mb-3">Recent orders</h3>
-              <OutletOrdersPanel orders={orders} />
+              <OutletOrdersPanel
+                orders={orders}
+                canPrintReceipt={canReceipt}
+                onPrintReceipt={(order) => openReceipt(order, false)}
+              />
             </div>
             <p className="text-xs text-muted-foreground">
               Charge to room posts to city ledger with the outlet name (e.g. Restaurant) on folio, transactions, and accounts — same as booking add charge.
