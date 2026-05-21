@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { format, parseISO } from 'date-fns'
 import { useAuth } from '@/lib/auth-context'
+import { EventClientSearchField } from '@/components/events/event-client-search-field'
 import { canManageEvents } from '@/lib/events/access'
 import { eventsApiHeaders } from '@/lib/events/events-api-headers'
 import type { HotelEventRow } from '@/lib/events/types'
@@ -58,7 +59,7 @@ const emptyForm = {
 }
 
 export function EventsPanel() {
-  const { role } = useAuth()
+  const { role, organizationId } = useAuth()
   const canManage = canManageEvents(role)
   const [events, setEvents] = useState<HotelEventRow[]>([])
   const [loading, setLoading] = useState(true)
@@ -106,6 +107,14 @@ export function EventsPanel() {
     const today = format(new Date(), 'yyyy-MM-dd')
     setForm({ ...emptyForm, start_date: today, end_date: today })
     setDialogOpen(true)
+  }
+
+  const setClientFields = (client: {
+    client_name: string
+    client_phone: string
+    client_email: string
+  }) => {
+    setForm((f) => ({ ...f, ...client }))
   }
 
   const openEdit = (ev: HotelEventRow) => {
@@ -379,30 +388,26 @@ export function EventsPanel() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-1">
-              <Label>Client name</Label>
-              <Input
-                value={form.client_name}
-                onChange={(e) => setForm((f) => ({ ...f, client_name: e.target.value }))}
+            {organizationId ? (
+              <EventClientSearchField
+                key={editing?.id ?? 'create'}
+                organizationId={organizationId}
+                value={{
+                  client_name: form.client_name,
+                  client_phone: form.client_phone,
+                  client_email: form.client_email,
+                }}
+                onChange={setClientFields}
               />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
+            ) : (
               <div className="space-y-1">
-                <Label>Phone</Label>
+                <Label>Client name</Label>
                 <Input
-                  value={form.client_phone}
-                  onChange={(e) => setForm((f) => ({ ...f, client_phone: e.target.value }))}
+                  value={form.client_name}
+                  onChange={(e) => setForm((f) => ({ ...f, client_name: e.target.value }))}
                 />
               </div>
-              <div className="space-y-1">
-                <Label>Email</Label>
-                <Input
-                  type="email"
-                  value={form.client_email}
-                  onChange={(e) => setForm((f) => ({ ...f, client_email: e.target.value }))}
-                />
-              </div>
-            </div>
+            )}
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
                 <Label>Expected guests</Label>
