@@ -35,7 +35,12 @@ export async function PATCH(
   if (body.description !== undefined) patch.description = String(body.description || '').trim() || null
   if (body.venue !== undefined) patch.venue = String(body.venue || '').trim() || null
   if (body.start_date != null) patch.start_date = String(body.start_date).trim()
-  if (body.end_date != null) patch.end_date = String(body.end_date).trim()
+  if (body.end_date !== undefined) {
+    const startForEnd = String(patch.start_date ?? existing.start_date).trim()
+    const endRaw = String(body.end_date || '').trim()
+    patch.end_date =
+      endRaw && /^\d{4}-\d{2}-\d{2}$/.test(endRaw) ? endRaw : startForEnd
+  }
   if (body.start_time !== undefined) patch.start_time = String(body.start_time || '').trim() || null
   if (body.end_time !== undefined) patch.end_time = String(body.end_time || '').trim() || null
   if (body.client_name !== undefined) patch.client_name = String(body.client_name || '').trim() || null
