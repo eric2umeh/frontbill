@@ -12,9 +12,13 @@ const STATUSES: HotelEventStatus[] = ['planned', 'confirmed', 'cancelled', 'comp
 function parseEventBody(body: Record<string, unknown>) {
   const title = String(body.title || '').trim()
   const start_date = String(body.start_date || '').trim()
-  const end_date = String(body.end_date || '').trim()
-  if (!title || !/^\d{4}-\d{2}-\d{2}$/.test(start_date) || !/^\d{4}-\d{2}-\d{2}$/.test(end_date)) {
-    return { error: 'title, start_date, and end_date (YYYY-MM-DD) are required' }
+  const endRaw = String(body.end_date || '').trim()
+  const end_date = endRaw && /^\d{4}-\d{2}-\d{2}$/.test(endRaw) ? endRaw : start_date
+  if (!title || !/^\d{4}-\d{2}-\d{2}$/.test(start_date)) {
+    return { error: 'title and start_date (YYYY-MM-DD) are required' }
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(end_date)) {
+    return { error: 'end_date must be YYYY-MM-DD when provided' }
   }
   if (end_date < start_date) {
     return { error: 'end_date must be on or after start_date' }
