@@ -1,5 +1,1 @@
-import { redirect } from 'next/navigation'
-
-export default function AnalyticsIndexPage() {
-  redirect('/analytics/revenue')
-}
+export { default } from './revenue/page'
