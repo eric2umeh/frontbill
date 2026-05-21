@@ -123,7 +123,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
 
   // Step 3: Payment
   const [customRate, setCustomRate] = useState<number | ''>('')
-  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'pos' | 'card' | 'transfer' | 'city_ledger'>('pos')
+  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'pos' | 'card' | 'transfer'>('pos')
   const [paymentStatus, setPaymentStatus] = useState<'paid' | 'partial' | 'unpaid'>('unpaid')
   const [partialAmount, setPartialAmount] = useState<number | ''>('')
   const [payAboveBulkRoomTotal, setPayAboveBulkRoomTotal] = useState(false)
@@ -461,7 +461,6 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
     return true
   }
   const canSubmit = () => {
-    if (paymentMethod === 'city_ledger' && !selectedLedger) return false
     if (paymentStatus === 'partial' && (!partialAmount || Number(partialAmount) <= 0)) return false
     if (paymentStatus === 'paid' && payAboveBulkRoomTotal && (!partialAmount || Number(partialAmount) <= 0)) return false
     return true
@@ -668,7 +667,6 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
     try {
       const supabase = createClient()
       let createdCount = 0
-      let ledgerAmountToAdd = 0
 
       /** When Step 1 rooms are locked, dequeue by type in numeric room-number order */
       let pickedQueues: Record<string, any[]> | null = null
@@ -690,8 +688,6 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
       const guestCache = new Map<string, string | null>()
       const orgNameKey = normalizeNameKey(selectedOrg?.name || '')
       const bulkGroupId = createBulkGroupId()
-      const isOrganizationLedger = paymentMethod === 'city_ledger' && ledgerType === 'organization'
-
       const findOrCreateGuest = async (name: string, phone?: string | null) => {
         const formattedName = formatPersonName(name)
         const guestKey = normalizeNameKey(formattedName)
@@ -756,15 +752,8 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
 
         for (let i = 0; i < totalRooms; i++) {
           const folioId = `BLK-${Date.now().toString(36).toUpperCase()}-${i}`
-          const isCityLedger = paymentMethod === 'city_ledger'
-          const notes = appendBulkGroupNote(
-            isCityLedger && selectedLedger
-              ? `City Ledger: ${selectedLedger.name || selectedLedger.account_name}`
-              : `payment_method: ${paymentMethod}`,
-            bulkGroupId
-          )
+          const notes = appendBulkGroupNote(`payment_method: ${paymentMethod}`, bulkGroupId)
           const totalAmt = nightly * nights
-          if (paymentMethod === 'city_ledger' && selectedLedger?.id) ledgerAmountToAdd += totalAmt
 
           await supabase.from('bookings').insert([{
             organization_id: orgId,
@@ -777,7 +766,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
             rate_per_night: nightly,
             total_amount: totalAmt,
             deposit: 0,
-            balance: isOrganizationLedger ? 0 : totalAmt,
+            balance: totalAmt,
             payment_status: 'pending',
             status: 'reserved',
             created_by: currentUserId,
@@ -831,25 +820,19 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
             }
 
             const total = ratePn * nights
-            if (paymentMethod === 'city_ledger' && selectedLedger?.id) ledgerAmountToAdd += total
 
-            const depositAmt = paymentMethod === 'city_ledger'
-              ? 0
-              : paymentStatus === 'paid'
-                ? (payAboveBulkRoomTotal ? Math.max(total, Number(partialAmount) || total) : total)
+            const depositAmt =
+              paymentStatus === 'paid'
+                ? payAboveBulkRoomTotal
+                  ? Math.max(total, Number(partialAmount) || total)
+                  : total
                 : paymentStatus === 'partial'
-                  ? (Number(partialAmount) || 0)
+                  ? Number(partialAmount) || 0
                   : 0
             const balanceAmt = Math.max(0, total - depositAmt)
-            const isCityLedger = paymentMethod === 'city_ledger'
             const folioId = `BLK-${Date.now().toString(36).toUpperCase()}`
-            const bookingBalance = isOrganizationLedger ? 0 : balanceAmt
-            const notes = appendBulkGroupNote(
-              isCityLedger && selectedLedger
-                ? `City Ledger: ${selectedLedger.name || selectedLedger.account_name}`
-                : `payment_method: ${paymentMethod}`,
-              bulkGroupId
-            )
+            const bookingBalance = balanceAmt
+            const notes = appendBulkGroupNote(`payment_method: ${paymentMethod}`, bulkGroupId)
 
             const { data: booking, error: be } = await supabase.from('bookings').insert([{
               organization_id: orgId, guest_id: finalGuestId, room_id: room.id, folio_id: folioId,
@@ -871,15 +854,15 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
               } room charge - ${nights} night${nights !== 1 ? 's' : ''}`,
               amount: total,
               charge_type: 'room_charge',
-              payment_method: isCityLedger ? 'city_ledger' : paymentMethod,
-              ledger_account_id: isCityLedger && selectedLedger ? selectedLedger.id : null,
-              ledger_account_type: isCityLedger ? ledgerType : null,
-              payment_status: isOrganizationLedger ? 'posted_to_ledger' : balanceAmt > 0 ? 'unpaid' : 'paid',
+              payment_method: paymentMethod,
+              ledger_account_id: null,
+              ledger_account_type: null,
+              payment_status: balanceAmt > 0 ? 'unpaid' : 'paid',
               created_by: currentUserId,
             }])
             if (fcErr) throw fcErr
             const prepayExcess = Math.max(0, depositAmt - total)
-            if (!isCityLedger && prepayExcess > 0 && finalGuestId) {
+            if (prepayExcess > 0 && finalGuestId) {
               const gn = formatPersonName(entry.guestName) || ''
               const { data: gRow } = await supabase.from('guests').select('name').eq('id', finalGuestId).maybeSingle()
               const ledgerGuestName = (gRow?.name || gn || selectedGroupGuest?.name || '').trim()
@@ -896,7 +879,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
               organization_id: orgId, booking_id: booking.id,
               transaction_id: `TXN-${Date.now().toString(36).toUpperCase()}`,
               guest_name: entryGuestName || selectedOrg?.name || selectedGroupGuest?.name || 'Bulk Guest', room: room.room_number, amount: total,
-              payment_method: isCityLedger ? 'city_ledger' : paymentMethod,
+              payment_method: paymentMethod,
               status: paymentStatus === 'paid' ? 'paid' : paymentStatus === 'partial' ? 'partial' : 'pending',
               description: `${
                 wording === 'booking' ? 'Bulk booking' : 'Bulk reservation'
@@ -904,34 +887,6 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
               received_by: currentUserId,
             }])
             createdCount++
-          }
-        }
-      }
-
-      if (paymentMethod === 'city_ledger' && selectedLedger?.id && ledgerAmountToAdd > 0) {
-        const { data: account } = await supabase
-          .from('city_ledger_accounts')
-          .select('balance')
-          .eq('id', selectedLedger.id)
-          .maybeSingle()
-        if (account) {
-          await supabase
-            .from('city_ledger_accounts')
-            .update({ balance: Number(account.balance || 0) + ledgerAmountToAdd })
-            .eq('id', selectedLedger.id)
-        }
-        if (ledgerType === 'organization') {
-          const ledgerName = selectedLedger.name || selectedLedger.account_name
-          const { data: orgRow } = await supabase
-            .from('organizations')
-            .select('id, current_balance')
-            .eq('name', ledgerName)
-            .maybeSingle()
-          if (orgRow?.id) {
-            await supabase
-              .from('organizations')
-              .update({ current_balance: Number(orgRow.current_balance || 0) + ledgerAmountToAdd })
-              .eq('id', orgRow.id)
           }
         }
       }
@@ -1272,88 +1227,22 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
               </div>
               <div className="space-y-2">
                 <Label>Payment Method</Label>
-                <Select value={paymentMethod} onValueChange={(v: any) => {
-                  setPaymentMethod(v)
-                  if (v !== 'city_ledger') {
-                    setSelectedLedger(null); setShowNewLedgerOrgForm(false)
-                  } else {
-                    setPayAboveBulkRoomTotal(false)
-                  }
-                }}>
+                <Select
+                  value={paymentMethod}
+                  onValueChange={(v: 'cash' | 'pos' | 'card' | 'transfer') => setPaymentMethod(v)}
+                >
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="pos">POS</SelectItem>
                     <SelectItem value="cash">Cash</SelectItem>
                     <SelectItem value="transfer">Transfer</SelectItem>
                     <SelectItem value="card">Card</SelectItem>
-                    <SelectItem value="city_ledger">City Ledger (bill to account)</SelectItem>
                   </SelectContent>
                 </Select>
+                <p className="text-xs text-muted-foreground">
+                  Payment validates the reservation. Unpaid holds the block until the guest pays.
+                </p>
               </div>
-
-              {paymentMethod === 'city_ledger' && (
-                <div className="space-y-3 p-3 border rounded-lg bg-muted/20">
-                  <div className="flex items-center justify-between">
-                    <Label className="text-sm font-medium">City Ledger Account</Label>
-                  </div>
-                  <div className="flex gap-2">
-                    <Button type="button" size="sm" variant={ledgerType === 'individual' ? 'default' : 'outline'} onClick={() => { setLedgerType('individual'); setLedgerSearch(''); setLedgerResults([]); setSelectedLedger(null); setShowNewLedgerOrgForm(false) }}>Individual</Button>
-                    <Button type="button" size="sm" variant={ledgerType === 'organization' ? 'default' : 'outline'} onClick={() => { setLedgerType('organization'); setLedgerSearch(''); setLedgerResults([]); setSelectedLedger(null); setShowNewLedgerOrgForm(false) }}>Organization</Button>
-                  </div>
-
-                  <div className="flex gap-2">
-                    <div className="relative flex-1">
-                      <Input
-                        placeholder={`Search ${ledgerType === 'individual' ? 'guest from database' : 'organization from database'}...`}
-                        value={ledgerSearch}
-                        onChange={(e) => searchLedger(e.target.value)}
-                        onBlur={() => setTimeout(() => setLedgerSearchOpen(false), 150)}
-                      />
-                      {ledgerSearchOpen && ledgerResults.length > 0 && (
-                        <div className="absolute top-full left-0 right-0 mt-1 bg-background border rounded-md shadow-lg z-50 max-h-48 overflow-y-auto">
-                          {ledgerResults.map((r: any) => (
-                            <button key={`${r.source || 'account'}-${r.id}`} className="w-full text-left px-4 py-2 hover:bg-accent border-b last:border-b-0 text-sm"
-                              onMouseDown={(e) => { e.preventDefault(); selectLedgerAccount(r) }}>
-                              <div className="font-medium">{r.name || r.account_name}</div>
-                              <div className="text-xs text-muted-foreground">{r.phone || r.contact_phone}</div>
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                    {ledgerType === 'organization' && (
-                      <Button type="button" size="sm" variant="outline" className="whitespace-nowrap" onClick={() => setShowNewLedgerOrgForm(v => !v)}>
-                        + New Account
-                      </Button>
-                    )}
-                  </div>
-                  {ledgerType === 'organization' && (
-                    <p className="text-xs text-muted-foreground">
-                      Search organizations created from the Organizations menu or city ledger organization accounts. Use New Account to create one here.
-                    </p>
-                  )}
-
-                  {showNewLedgerOrgForm && ledgerType === 'organization' && (
-                    <div className="border rounded-md p-3 space-y-2 bg-background">
-                      <p className="text-xs font-medium text-muted-foreground">Create new organization for city ledger</p>
-                      <Input placeholder="Organization name *" value={newLedgerOrgName} onChange={(e) => setNewLedgerOrgName(e.target.value)} />
-                      <Input type="email" placeholder="Email" value={newLedgerOrgEmail} onChange={(e) => setNewLedgerOrgEmail(e.target.value)} />
-                      <Input placeholder="Phone" value={newLedgerOrgPhone} onChange={(e) => setNewLedgerOrgPhone(e.target.value)} />
-                      <Button size="sm" className="w-full" onClick={createNewLedgerOrg} disabled={creatingLedgerOrg}>
-                        {creatingLedgerOrg ? 'Creating...' : 'Create & Select'}
-                      </Button>
-                    </div>
-                  )}
-
-                  {selectedLedger && (
-                    <div className="flex items-center justify-between p-2 rounded border bg-background text-sm">
-                      <span className="font-medium">{selectedLedger.name || selectedLedger.account_name}</span>
-                      <Button variant="ghost" size="sm" className="text-destructive h-6 text-xs" onClick={() => { setSelectedLedger(null); setLedgerSearch('') }}>Remove</Button>
-                    </div>
-                  )}
-                  <p className="text-xs text-orange-600">City Ledger bills this reservation to the account — balance remains outstanding until paid.</p>
-                </div>
-              )}
 
               <div className="space-y-2">
                 <Label>Payment Status</Label>
@@ -1370,7 +1259,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
                 </Select>
               </div>
 
-              {paymentStatus === 'paid' && paymentMethod !== 'city_ledger' && (
+              {paymentStatus === 'paid' && (
                 <div className="flex items-start gap-2 rounded-md border border-input p-3">
                   <Checkbox
                     id="bulk-pay-above"
@@ -1383,7 +1272,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
                 </div>
               )}
 
-              {paymentStatus === 'paid' && payAboveBulkRoomTotal && paymentMethod !== 'city_ledger' && (
+              {paymentStatus === 'paid' && payAboveBulkRoomTotal && (
                 <div className="space-y-2">
                   <Label>Cash received per room (at least each room&apos;s calculated total)</Label>
                   <Input
