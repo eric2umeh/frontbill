@@ -37,6 +37,8 @@ import { toast } from 'sonner'
 import { Loader2, Pencil, Plus, Sparkles, Trash2 } from 'lucide-react'
 import { formatNaira } from '@/lib/utils/currency'
 import { outletApiHeaders } from '@/lib/outlets/outlet-api-headers'
+import { OutletItemMetaFields } from '@/components/outlets/outlet-item-meta-fields'
+import { isLegacyDefaultDescription } from '@/lib/outlets/item-display'
 
 type Props = {
   department: OutletDepartmentKey
@@ -51,6 +53,7 @@ const emptyItemForm = {
   category_id: '',
   unit_price: '',
   description: '',
+  tags: [] as string[],
 }
 
 export function OutletMenuManager({ department, categories, items, canManage, onRefresh }: Props) {
@@ -79,7 +82,8 @@ export function OutletMenuManager({ department, categories, items, canManage, on
       name: it.name,
       category_id: it.category_id || '',
       unit_price: String(it.unit_price),
-      description: it.description || '',
+      description: isLegacyDefaultDescription(it.description) ? '' : it.description || '',
+      tags: [...(it.tags || [])],
     })
     setEditItemActive(it.is_active)
   }
@@ -189,8 +193,8 @@ export function OutletMenuManager({ department, categories, items, canManage, on
           name: form.name.trim(),
           category_id: form.category_id || null,
           unit_price: Number(form.unit_price),
-          description: form.description,
-          tags: ['available', 'ready_to_serve'],
+          description: form.description.trim(),
+          tags: form.tags,
         }),
       })
       const json = await res.json().catch(() => ({}))
@@ -222,7 +226,8 @@ export function OutletMenuManager({ department, categories, items, canManage, on
           name: editItemForm.name.trim(),
           category_id: editItemForm.category_id || null,
           unit_price: Number(editItemForm.unit_price),
-          description: editItemForm.description,
+          description: editItemForm.description.trim(),
+          tags: editItemForm.tags,
           is_active: editItemActive,
         }),
       })
@@ -396,14 +401,11 @@ export function OutletMenuManager({ department, categories, items, canManage, on
                   onChange={(e) => setForm((f) => ({ ...f, unit_price: e.target.value }))}
                 />
               </div>
-              <div className="space-y-1">
-                <Label>Description (optional)</Label>
-                <Textarea
-                  rows={2}
-                  value={form.description}
-                  onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
-                />
-              </div>
+              <OutletItemMetaFields
+                value={{ description: form.description, tags: form.tags }}
+                onChange={(meta) => setForm((f) => ({ ...f, ...meta }))}
+                descriptionId="outlet-add-item-description"
+              />
               <Button type="button" className="w-full" onClick={() => void addItem()} disabled={saving}>
                 Add item
               </Button>
@@ -548,14 +550,11 @@ export function OutletMenuManager({ department, categories, items, canManage, on
                 onChange={(e) => setEditItemForm((f) => ({ ...f, unit_price: e.target.value }))}
               />
             </div>
-            <div className="space-y-1">
-              <Label>Description</Label>
-              <Textarea
-                rows={2}
-                value={editItemForm.description}
-                onChange={(e) => setEditItemForm((f) => ({ ...f, description: e.target.value }))}
-              />
-            </div>
+            <OutletItemMetaFields
+              value={{ description: editItemForm.description, tags: editItemForm.tags }}
+              onChange={(meta) => setEditItemForm((f) => ({ ...f, ...meta }))}
+              descriptionId="outlet-edit-item-description"
+            />
             <div className="flex items-center gap-2">
               <Switch checked={editItemActive} onCheckedChange={setEditItemActive} />
               <Label>Active on POS</Label>
