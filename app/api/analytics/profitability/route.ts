@@ -9,13 +9,40 @@ import {
 import type { ProfitabilityAssumptions } from '@/lib/analytics/profitability-types'
 import { format, subDays, startOfMonth, endOfMonth } from 'date-fns'
 
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+
+function parseYmd(value: string | null): string | null {
+  const v = String(value || '').trim().slice(0, 10)
+  return DATE_RE.test(v) ? v : null
+}
+
 function resolvePeriod(params: URLSearchParams) {
   const period = params.get('period') || '30d'
   const now = new Date()
+  const today = format(now, 'yyyy-MM-dd')
+
+  if (period === 'today') {
+    return { start: today, end: today }
+  }
+
+  if (period === 'day') {
+    const d = parseYmd(params.get('date')) || parseYmd(params.get('start_date'))
+    if (d) return { start: d, end: d }
+    return { start: today, end: today }
+  }
+
+  if (period === 'range') {
+    const start = parseYmd(params.get('start_date'))
+    const end = parseYmd(params.get('end_date')) || start
+    if (start && end) {
+      return start <= end ? { start, end } : { start: end, end: start }
+    }
+  }
+
   if (period === '7d') {
     return {
       start: format(subDays(now, 6), 'yyyy-MM-dd'),
-      end: format(now, 'yyyy-MM-dd'),
+      end: today,
     }
   }
   if (period === 'this_month') {
@@ -24,14 +51,10 @@ function resolvePeriod(params: URLSearchParams) {
       end: format(endOfMonth(now), 'yyyy-MM-dd'),
     }
   }
-  const customStart = params.get('start_date')
-  const customEnd = params.get('end_date')
-  if (customStart && customEnd && /^\d{4}-\d{2}-\d{2}$/.test(customStart)) {
-    return { start: customStart, end: customEnd }
-  }
+
   return {
     start: format(subDays(now, 29), 'yyyy-MM-dd'),
-    end: format(now, 'yyyy-MM-dd'),
+    end: today,
   }
 }
 
