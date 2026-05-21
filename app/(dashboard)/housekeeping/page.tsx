@@ -20,6 +20,7 @@ import {
   Sparkles, Search, Filter, CheckCircle2, Clock, AlertCircle,
   User, Bed, CalendarDays, ClipboardList, RefreshCw, ChevronDown,
 } from 'lucide-react'
+import { RoomInventoryStatsStrip } from '@/components/shared/room-inventory-stats-strip'
 
 type TaskStatus = 'pending' | 'in_progress' | 'done' | 'skipped'
 type TaskPriority = 'low' | 'normal' | 'high' | 'urgent'
@@ -389,22 +390,23 @@ export default function HousekeepingPage() {
   return (
     <div className="space-y-6 p-6">
       {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2">
-            <Sparkles className="h-7 w-7 text-teal-500" />
+      <div className="space-y-1">
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+          <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2 min-w-0">
+            <Sparkles className="h-7 w-7 shrink-0 text-teal-500" />
             Housekeeping
           </h1>
-          <p className="text-muted-foreground text-sm mt-1">Manage cleaning tasks, room status and daily reports</p>
+          <div className="flex flex-wrap items-center justify-end gap-2 shrink-0">
+            <RoomInventoryStatsStrip />
+            {canReport && (
+              <Button variant="outline" onClick={() => setReportOpen(true)}>
+                <ClipboardList className="mr-2 h-4 w-4" />
+                Daily Report
+              </Button>
+            )}
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          {canReport && (
-            <Button variant="outline" onClick={() => setReportOpen(true)}>
-              <ClipboardList className="mr-2 h-4 w-4" />
-              Daily Report
-            </Button>
-          )}
-        </div>
+        <p className="text-muted-foreground text-sm">Manage cleaning tasks, room status and daily reports</p>
       </div>
 
       {/* Stats */}

@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/lib/auth-context'
 import { hasPermission } from '@/lib/permissions'
+import { canManageOutletMenu } from '@/lib/outlets/access'
 import { getOutletDepartment, type OutletDepartmentKey } from '@/lib/outlets/departments'
 import type { OutletMenuCategoryRow, OutletMenuItemRow, OutletOrderRow } from '@/lib/outlets/types'
 import { LoadingSpinner } from '@/components/loading-screen'
@@ -13,10 +14,12 @@ import { Button } from '@/components/ui/button'
 import { OutletPos } from '@/components/outlets/outlet-pos'
 import { OutletMenuManager } from '@/components/outlets/outlet-menu-manager'
 import { OutletOrdersPanel } from '@/components/outlets/outlet-orders-panel'
+import { OutletDailyReportPanel } from '@/components/outlets/outlet-daily-report-panel'
 import { OutletOrderReceiptDialog } from '@/components/outlets/outlet-order-receipt-dialog'
 import { ChevronLeft, ShoppingCart, UtensilsCrossed, ClipboardList, BarChart3 } from 'lucide-react'
 import { toast } from 'sonner'
 import { outletApiHeaders } from '@/lib/outlets/outlet-api-headers'
+import { RoomInventoryStatsStrip } from '@/components/shared/room-inventory-stats-strip'
 
 export function OutletWorkspace({ department }: { department: OutletDepartmentKey }) {
   const { organizationId, role, name: staffName } = useAuth()
@@ -74,7 +77,8 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
   if (!def) return null
   if (loading) return <LoadingSpinner />
 
-  const canMenu = hasPermission(role, 'outlet:menu')
+  const canViewMenu = hasPermission(role, 'outlet:view')
+  const canManageMenu = canManageOutletMenu(role)
   const canReports = hasPermission(role, 'outlet:reports')
   const canReceipt = hasPermission(role, 'outlet:receipt')
 
@@ -86,15 +90,18 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-3">
-        <Button variant="ghost" size="sm" asChild>
+      <div className="flex flex-wrap items-start gap-3">
+        <Button variant="ghost" size="sm" asChild className="shrink-0 mt-0.5">
           <Link href="/outlets">
             <ChevronLeft className="h-4 w-4 mr-1" />
             Outlets
           </Link>
         </Button>
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">{def.label}</h1>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+            <h1 className="text-2xl font-bold tracking-tight">{def.label}</h1>
+            <RoomInventoryStatsStrip className="shrink-0" />
+          </div>
           <p className="text-sm text-muted-foreground">POS · menu · orders · daily sales</p>
         </div>
       </div>
@@ -105,7 +112,7 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
             <ShoppingCart className="h-4 w-4" />
             Take order
           </TabsTrigger>
-          {canMenu && (
+          {canViewMenu && (
             <TabsTrigger value="menu" className="gap-1">
               <UtensilsCrossed className="h-4 w-4" />
               Menu
@@ -136,9 +143,15 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
           />
         </TabsContent>
 
-        {canMenu && (
+        {canViewMenu && (
           <TabsContent value="menu" className="mt-4">
-            <OutletMenuManager department={department} categories={categories} items={items} onRefresh={() => void load()} />
+            <OutletMenuManager
+              department={department}
+              categories={categories}
+              items={items}
+              canManage={canManageMenu}
+              onRefresh={() => void load()}
+            />
           </TabsContent>
         )}
 
@@ -151,9 +164,13 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
         </TabsContent>
 
         {canReports && (
-          <TabsContent value="reports" className="mt-4">
-            <OutletOrdersPanel orders={orders} />
-            <p className="text-xs text-muted-foreground mt-4">
+          <TabsContent value="reports" className="mt-4 space-y-6">
+            <OutletDailyReportPanel department={department} departmentLabel={def.label} />
+            <div>
+              <h3 className="text-sm font-semibold mb-3">Recent orders</h3>
+              <OutletOrdersPanel orders={orders} />
+            </div>
+            <p className="text-xs text-muted-foreground">
               Charge to room posts to city ledger with the outlet name (e.g. Restaurant) on folio, transactions, and accounts — same as booking add charge.
             </p>
           </TabsContent>

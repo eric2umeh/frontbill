@@ -4,8 +4,7 @@ import { canonicalRoleKey } from '@/lib/permissions'
 export function getPostLoginPath(role: string | null | undefined): string {
   const rk = canonicalRoleKey(role)
   if (rk === 'store') return '/store'
-  if (rk === 'restaurant') return '/outlets/restaurant'
-  if (rk === 'bar') return '/outlets/main_bar'
+  if (rk === 'food_beverage') return '/outlets'
   if (rk === 'laundry') return '/outlets/laundry'
   if (rk === 'gym') return '/outlets/gym'
   if (rk === 'housekeeping') return '/housekeeping'

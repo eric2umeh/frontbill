@@ -6,7 +6,11 @@ import { cn } from '@/lib/utils'
 import { createClient } from '@/lib/supabase/client'
 import type { OutletMenuCategoryRow, OutletMenuItemRow, OutletOrderRow, CartLine } from '@/lib/outlets/types'
 import type { OutletDepartmentKey } from '@/lib/outlets/departments'
-import { OUTLET_ITEM_TAGS } from '@/lib/outlets/types'
+import {
+  formatOutletItemTagLabel,
+  getItemDisplayDescription,
+  getItemDisplayTags,
+} from '@/lib/outlets/item-display'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -271,8 +275,6 @@ export function OutletPos({
       setSubmitting(false)
     }
   }
-
-  const tagLabel = (key: string) => OUTLET_ITEM_TAGS.find((t) => t.key === key)?.label ?? key
 
   return (
     <div className="grid gap-4 lg:grid-cols-[minmax(280px,340px)_1fr]">
@@ -554,6 +556,8 @@ export function OutletPos({
               <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                 {groupItems.map((it) => {
                   const inCart = cart.find((l) => l.item.id === it.id)
+                  const displayDesc = getItemDisplayDescription(it.description)
+                  const displayTags = getItemDisplayTags(it.tags)
                   return (
                     <button
                       key={it.id}
@@ -573,14 +577,18 @@ export function OutletPos({
                           )}
                         />
                       </div>
-                      <p className="text-xs text-muted-foreground mt-2 line-clamp-2">{it.description}</p>
-                      <div className="flex flex-wrap gap-1 mt-2">
-                        {(it.tags || []).slice(0, 3).map((t) => (
-                          <Badge key={t} variant="secondary" className="text-[10px] font-normal">
-                            {tagLabel(t)}
-                          </Badge>
-                        ))}
-                      </div>
+                      {displayDesc && (
+                        <p className="text-xs text-muted-foreground mt-2 line-clamp-2">{displayDesc}</p>
+                      )}
+                      {displayTags.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-2">
+                          {displayTags.map((t) => (
+                            <Badge key={t} variant="secondary" className="text-[10px] font-normal">
+                              {formatOutletItemTagLabel(t)}
+                            </Badge>
+                          ))}
+                        </div>
+                      )}
                       <p className="mt-3 text-xl font-bold">{formatNaira(it.unit_price)}</p>
                       {cat && <p className="text-[10px] text-muted-foreground mt-1 text-right">{cat.name}</p>}
                     </button>
@@ -590,7 +598,7 @@ export function OutletPos({
             </section>
           ))}
           {filteredItems.length === 0 && (
-            <p className="text-center text-muted-foreground py-12">No items — add menu items or seed default categories.</p>
+            <p className="text-center text-muted-foreground py-12">No items — add menu items in the Menu tab.</p>
           )}
         </ScrollArea>
       </div>

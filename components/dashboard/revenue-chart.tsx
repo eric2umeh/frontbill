@@ -6,6 +6,7 @@ import { TrendingUp, Loader2 } from 'lucide-react'
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { formatNaira } from '@/lib/utils/currency'
 import { createClient } from '@/lib/supabase/client'
+import { useAuth } from '@/lib/auth-context'
 import { subDays, format } from 'date-fns'
 
 interface ChartData {
@@ -15,39 +16,27 @@ interface ChartData {
 }
 
 export function RevenueChart() {
+  const { organizationId } = useAuth()
   const [data, setData] = useState<ChartData[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    fetchChartData()
-  }, [])
+    if (!organizationId) return
+    void fetchChartData()
+  }, [organizationId])
 
   const fetchChartData = async () => {
+    if (!organizationId) return
     try {
       setLoading(true)
       const supabase = createClient()
-      
+
       if (!supabase) {
         setData([])
         setLoading(false)
         return
       }
 
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
-
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('organization_id')
-        .eq('id', user.id)
-        .single()
-
-      if (!profile) {
-        setData([])
-        return
-      }
-
-      // Fetch last 7 days of data
       const chartData: ChartData[] = []
       for (let i = 6; i >= 0; i--) {
         const date = subDays(new Date(), i)
@@ -57,7 +46,7 @@ export function RevenueChart() {
         const { data: payments } = await supabase
           .from('payments')
           .select('*')
-          .eq('organization_id', profile.organization_id)
+          .eq('organization_id', organizationId)
           .gte('payment_date', `${dateStr}T00:00:00`)
           .lte('payment_date', `${dateStr}T23:59:59`)
 

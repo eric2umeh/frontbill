@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { hasPermission, canonicalRoleKey, type Permission } from '@/lib/permissions'
-import { canAccessOutletDepartment } from '@/lib/outlets/access'
+import { canAccessOutletDepartment, canManageOutletMenu } from '@/lib/outlets/access'
 import { isOutletDepartmentKey } from '@/lib/outlets/departments'
 
 export type OutletAuthedContext = {
@@ -66,6 +66,25 @@ export async function resolveOutletAuthed(
       role,
     },
   }
+}
+
+/** Auth for POST/PATCH/DELETE on outlet menu — superadmin, admin, manager only. */
+export async function resolveOutletMenuManage(
+  request: Request,
+  opts?: { department?: string },
+): Promise<{ ctx: OutletAuthedContext } | { error: string; status: number }> {
+  const auth = await resolveOutletAuthed(request, {
+    permission: 'outlet:view',
+    department: opts?.department,
+  })
+  if ('error' in auth) return auth
+  if (!canManageOutletMenu(auth.ctx.role)) {
+    return {
+      error: 'Only Superadmin, Administrator, or Manager can change the outlet menu',
+      status: 403,
+    }
+  }
+  return auth
 }
 
 export function nextOrderNumber(department: string): string {

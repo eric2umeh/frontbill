@@ -120,10 +120,18 @@ export default function DashboardLayout({
           return
         }
 
-        // Get authenticated user (single call instead of multiple)
-        const { data: { user: authUser }, error: authError } = await supabase.auth.getUser()
-        
-        if (authError || !authUser) {
+        // Prefer session from storage (no extra network round-trip); middleware already validates on navigation
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+        const authUser = session?.user
+
+        if (sessionError?.message?.includes('Failed to fetch')) {
+          console.error(
+            'Cannot reach Supabase Auth. Check NEXT_PUBLIC_SUPABASE_URL / ANON_KEY and your network.',
+            sessionError,
+          )
+        }
+
+        if (!authUser) {
           if (isMounted) {
             setRedirected(true)
             router.push('/auth/login')
@@ -220,12 +228,8 @@ export default function DashboardLayout({
         router.replace('/maintenance')
         return
       }
-      if (rk === 'restaurant') {
-        router.replace('/outlets/restaurant')
-        return
-      }
-      if (rk === 'bar') {
-        router.replace('/outlets/main_bar')
+      if (rk === 'food_beverage') {
+        router.replace('/outlets')
         return
       }
       if (rk === 'laundry') {

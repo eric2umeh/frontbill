@@ -11,6 +11,7 @@ export type Permission =
   | 'room_change:request' | 'room_change:approve'
   | 'reschedule_stay:request' | 'reschedule_stay:approve'
   | 'reservations:view' | 'reservations:create' | 'reservations:edit' | 'reservations:delete'
+  | 'events:view' | 'events:create' | 'events:edit' | 'events:delete'
   | 'rooms:view' | 'rooms:create' | 'rooms:edit' | 'rooms:delete' | 'rooms:update_status'
   | 'guests:view' | 'guests:create' | 'guests:edit' | 'guests:delete'
   | 'transactions:view' | 'transactions:create' | 'transactions:edit' | 'transactions:delete' | 'transactions:export'
@@ -52,8 +53,7 @@ export type RoleKey =
   | 'housekeeping'
   | 'maintenance'
   | 'store'
-  | 'restaurant'
-  | 'bar'
+  | 'food_beverage'
   | 'laundry'
   | 'gym'
 
@@ -83,6 +83,11 @@ export const ALL_PERMISSIONS: { key: Permission; label: string; group: string }[
   { key: 'reservations:create', label: 'Create Reservations & Bulk Reservation', group: 'Reservations' },
   { key: 'reservations:edit', label: 'Edit Reservations', group: 'Reservations' },
   { key: 'reservations:delete', label: 'Cancel/Delete Reservations', group: 'Reservations' },
+
+  { key: 'events:view', label: 'View Events', group: 'Reservations' },
+  { key: 'events:create', label: 'Create Events', group: 'Reservations' },
+  { key: 'events:edit', label: 'Edit Events', group: 'Reservations' },
+  { key: 'events:delete', label: 'Delete Events', group: 'Reservations' },
 
   { key: 'guests:view', label: 'View Guests', group: 'Guests' },
   { key: 'guests:create', label: 'Create Guest Profiles', group: 'Guests' },
@@ -143,7 +148,7 @@ export const ALL_PERMISSIONS: { key: Permission; label: string; group: string }[
   { key: 'outlet:menu', label: 'Manage Outlet Menu (categories & items)', group: 'Outlets' },
   { key: 'outlet:sell', label: 'Take Orders & Sell (POS)', group: 'Outlets' },
   { key: 'outlet:void', label: 'Void Outlet Orders', group: 'Outlets' },
-  { key: 'outlet:reports', label: 'Outlet Sales Reports', group: 'Outlets' },
+  { key: 'outlet:reports', label: 'Outlet Sales Reports & Night Audit', group: 'Outlets' },
   { key: 'outlet:receipt', label: 'Print / View Outlet Receipts', group: 'Outlets' },
 
   { key: 'analytics:view', label: 'View Analytics', group: 'Analytics' },
@@ -265,6 +270,7 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
       'audit_trails:view',
       'bookings:view',
       'reservations:view',
+      'events:view',
       'guests:view',
       'organizations:view',
       'rooms:view',
@@ -273,8 +279,6 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
       'store:reports',
       'store:audit',
       'outlet:view',
-      'outlet:menu',
-      'outlet:sell',
       'outlet:reports',
       'outlet:receipt',
       'settings:view',
@@ -289,6 +293,7 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
       'dashboard:view',
       'bookings:view', 'bookings:create', 'bookings:checkin', 'bookings:checkout',
       'reservations:view', 'reservations:create',
+      'events:view', 'events:create', 'events:edit', 'events:delete',
       'rooms:view',
       'guests:view', 'guests:create',
       'transactions:view', 'transactions:create',
@@ -312,6 +317,7 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
       'dashboard:view',
       'bookings:view', 'bookings:checkin', 'bookings:checkout',
       'reservations:view',
+      'events:view',
       'rooms:view',
       'guests:view', 'guests:create',
       'payments:view',
@@ -359,29 +365,13 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
     ],
   },
   {
-    key: 'restaurant',
-    label: 'Restaurant',
+    key: 'food_beverage',
+    label: 'Food & Beverage',
     description:
-      'Restaurant POS only: sell, receipts, daily outlet reports, and menu maintenance for the restaurant. No front desk, store, or other outlets.',
+      'Food & Beverage department: Restaurant, Main Bar, Pool Bar, and Banquets & Events POS — take orders, print receipts, and daily outlet reports. Menu changes are done by Superadmin, Administrator, or Manager. No front desk, store, laundry, or gym.',
     color: 'bg-rose-100 text-rose-900 dark:bg-rose-950/40 dark:text-rose-100',
     permissions: [
       'outlet:view',
-      'outlet:menu',
-      'outlet:sell',
-      'outlet:reports',
-      'outlet:receipt',
-      'settings:view',
-    ],
-  },
-  {
-    key: 'bar',
-    label: 'Bar',
-    description:
-      'Main Bar and Pool Bar POS: take orders, print receipts, outlet sales reports, and manage bar menus. No restaurant, laundry, or front-office access.',
-    color: 'bg-violet-100 text-violet-900 dark:bg-violet-950/40 dark:text-violet-100',
-    permissions: [
-      'outlet:view',
-      'outlet:menu',
       'outlet:sell',
       'outlet:reports',
       'outlet:receipt',
@@ -392,11 +382,10 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
     key: 'laundry',
     label: 'Laundry',
     description:
-      'Laundry POS: guest laundry tickets, receipts, daily reports, and laundry price list (categories & items). No bar, restaurant, or front desk.',
+      'Laundry POS: guest laundry tickets, receipts, and daily reports. Menu changes are done by Superadmin, Administrator, or Manager.',
     color: 'bg-sky-100 text-sky-900 dark:bg-sky-950/40 dark:text-sky-100',
     permissions: [
       'outlet:view',
-      'outlet:menu',
       'outlet:sell',
       'outlet:reports',
       'outlet:receipt',
@@ -437,11 +426,18 @@ const PROFILE_ROLE_ALIASES: Record<string, RoleKey> = {
   housekeeping_staff: 'housekeeping',
   maint: 'maintenance',
   maintenance_staff: 'maintenance',
-  waiter: 'restaurant',
-  restaurant_staff: 'restaurant',
-  bartender: 'bar',
-  bar_staff: 'bar',
-  pool_bar: 'bar',
+  restaurant: 'food_beverage',
+  bar: 'food_beverage',
+  waiter: 'food_beverage',
+  restaurant_staff: 'food_beverage',
+  bartender: 'food_beverage',
+  bar_staff: 'food_beverage',
+  pool_bar: 'food_beverage',
+  food_and_beverage: 'food_beverage',
+  'food_&_beverage': 'food_beverage',
+  fnb: 'food_beverage',
+  banquets_staff: 'food_beverage',
+  events_staff: 'food_beverage',
   laundry_staff: 'laundry',
   gym_staff: 'gym',
 }
@@ -506,6 +502,14 @@ export function hasPermission(userRole: string | null | undefined, permission: P
   }
   if (permission === 'outlet:void') {
     return roleKey === 'superadmin' || roleKey === 'admin'
+  }
+  if (['events:create', 'events:edit', 'events:delete'].includes(permission)) {
+    return (
+      roleKey === 'superadmin' ||
+      roleKey === 'admin' ||
+      roleKey === 'manager' ||
+      roleKey === 'front_desk'
+    )
   }
   const role = getRoleDefinition(roleKey)
   if (!role) return false

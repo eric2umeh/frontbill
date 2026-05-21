@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { resolveOutletAuthed } from '@/lib/outlets/api-auth'
+import { resolveOutletAuthed, resolveOutletMenuManage } from '@/lib/outlets/api-auth'
 import { canAccessOutletDepartment } from '@/lib/outlets/access'
 import { isOutletDepartmentKey } from '@/lib/outlets/departments'
+import { normalizeOutletItemTags } from '@/lib/outlets/item-display'
 
 export async function GET(request: Request) {
   const params = new URL(request.url).searchParams
@@ -32,7 +33,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const auth = await resolveOutletAuthed(request, { permission: 'outlet:menu' })
+  const auth = await resolveOutletMenuManage(request)
   if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status })
 
   const body = await request.json().catch(() => ({}))
@@ -58,10 +59,10 @@ export async function POST(request: Request) {
       department,
       category_id: body?.category_id || null,
       name,
-      description: String(body?.description || '').trim() || 'Carefully selected for your comfort and enjoyment.',
+      description: String(body?.description ?? '').trim(),
       unit_price: unitPrice,
       sku: body?.sku || null,
-      tags: Array.isArray(body?.tags) ? body.tags : ['available', 'ready_to_serve'],
+      tags: normalizeOutletItemTags(body?.tags),
       is_active: body?.is_active !== false,
       sort_order: Number(body?.sort_order) || 0,
       service_code: body?.service_code || null,
@@ -76,7 +77,7 @@ export async function POST(request: Request) {
 }
 
 export async function PATCH(request: Request) {
-  const auth = await resolveOutletAuthed(request, { permission: 'outlet:menu' })
+  const auth = await resolveOutletMenuManage(request)
   if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status })
 
   const body = await request.json().catch(() => ({}))
@@ -98,10 +99,10 @@ export async function PATCH(request: Request) {
 
   const patch: Record<string, unknown> = { updated_by: auth.ctx.userId, updated_at: new Date().toISOString() }
   if (body.name != null) patch.name = String(body.name).trim()
-  if (body.description != null) patch.description = String(body.description)
+  if (body.description != null) patch.description = String(body.description).trim()
   if (body.unit_price != null) patch.unit_price = Number(body.unit_price)
   if (body.category_id !== undefined) patch.category_id = body.category_id || null
-  if (body.tags != null) patch.tags = body.tags
+  if (body.tags != null) patch.tags = normalizeOutletItemTags(body.tags)
   if (body.is_active != null) patch.is_active = Boolean(body.is_active)
   if (body.sort_order != null) patch.sort_order = Number(body.sort_order)
 
@@ -114,4 +115,29 @@ export async function PATCH(request: Request) {
 
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
   return NextResponse.json({ item: data })
+}
+
+export async function DELETE(request: Request) {
+  const auth = await resolveOutletMenuManage(request)
+  if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status })
+
+  const id = new URL(request.url).searchParams.get('id')?.trim()
+  if (!id) return NextResponse.json({ error: 'id query required' }, { status: 400 })
+
+  const admin = createAdminClient()
+  const { data: existing, error: fe } = await admin
+    .from('outlet_menu_items')
+    .select('department')
+    .eq('id', id)
+    .eq('organization_id', auth.ctx.organizationId)
+    .single()
+
+  if (fe || !existing) return NextResponse.json({ error: 'Item not found' }, { status: 404 })
+  if (!canAccessOutletDepartment(auth.ctx.role, existing.department)) {
+    return NextResponse.json({ error: 'No access' }, { status: 403 })
+  }
+
+  const { error } = await admin.from('outlet_menu_items').delete().eq('id', id)
+  if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+  return NextResponse.json({ ok: true })
 }

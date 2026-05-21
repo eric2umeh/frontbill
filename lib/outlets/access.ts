@@ -10,14 +10,27 @@ import {
   isOutletDepartmentKey,
 } from '@/lib/outlets/departments'
 
+/** FnB outlets for the single Food & Beverage staff role (hotel department). */
+export const FOOD_BEVERAGE_OUTLET_DEPARTMENTS: OutletDepartmentKey[] = [
+  'restaurant',
+  'main_bar',
+  'pool_bar',
+  'banquets',
+]
+
 const OUTLET_ROLE_DEPARTMENTS: Partial<Record<RoleKey, OutletDepartmentKey[]>> = {
-  restaurant: ['restaurant'],
-  bar: ['main_bar', 'pool_bar'],
+  food_beverage: FOOD_BEVERAGE_OUTLET_DEPARTMENTS,
   laundry: ['laundry'],
   gym: ['gym'],
 }
 
 const MANAGEMENT_ROLES: RoleKey[] = ['superadmin', 'admin', 'manager']
+
+/** Create, edit, and delete outlet menu categories & items (not outlet POS staff). */
+export function canManageOutletMenu(role: string | null | undefined): boolean {
+  const rk = canonicalRoleKey(role)
+  return rk != null && MANAGEMENT_ROLES.includes(rk)
+}
 
 export function departmentsForRole(role: string | null | undefined): OutletDepartmentKey[] {
   const rk = canonicalRoleKey(role)

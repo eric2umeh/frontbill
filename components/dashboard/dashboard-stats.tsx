@@ -5,8 +5,10 @@ import { StatCard } from '@/components/shared/stat-card'
 import { DollarSign, Users, Bed, TrendingUp } from 'lucide-react'
 import { formatNaira } from '@/lib/utils/currency'
 import { createClient } from '@/lib/supabase/client'
+import { useAuth } from '@/lib/auth-context'
 
 export function DashboardStats() {
+  const { organizationId } = useAuth()
   const [stats, setStats] = useState([
     { title: "Today's Revenue", value: formatNaira(0), icon: DollarSign, description: '—' },
     { title: 'Occupied rooms', value: '0', icon: Users, description: '—' },
@@ -15,32 +17,22 @@ export function DashboardStats() {
   ])
 
   useEffect(() => {
-    fetchStats()
-  }, [])
+    if (!organizationId) return
+    void fetchStats()
+  }, [organizationId])
 
   const fetchStats = async () => {
+    if (!organizationId) return
     try {
       const supabase = createClient()
       if (!supabase) return
 
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
-
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('organization_id')
-        .eq('id', user.id)
-        .single()
-
-      if (!profile) return
-
       const today = new Date().toISOString().split('T')[0]
 
-      // Fetch today's revenue
       const { data: payments } = await supabase
         .from('payments')
         .select('*')
-        .eq('organization_id', profile.organization_id)
+        .eq('organization_id', organizationId)
         .gte('payment_date', `${today}T00:00:00`)
         .lte('payment_date', `${today}T23:59:59`)
 
@@ -48,12 +40,12 @@ export function DashboardStats() {
       const { data: rooms } = await supabase
         .from('rooms')
         .select('*')
-        .eq('organization_id', profile.organization_id)
+        .eq('organization_id', organizationId)
 
       const { data: bookings } = await supabase
         .from('bookings')
         .select('id')
-        .eq('organization_id', profile.organization_id)
+        .eq('organization_id', organizationId)
         .eq('status', 'checked_in')
 
       const totalRevenue =

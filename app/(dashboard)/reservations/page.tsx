@@ -20,6 +20,7 @@ import { getUserDisplayName } from '@/lib/utils/user-display'
 import { fetchUserDisplayNameMap } from '@/lib/utils/fetch-user-display-names'
 import { getBulkGroupId } from '@/lib/utils/bulk-booking'
 import { toast } from 'sonner'
+import { useReservationsEventsHeader } from '@/components/reservations/reservations-events-header'
 
 interface Reservation {
   id: string
@@ -61,9 +62,35 @@ export default function ReservationsPage() {
   const [cancelReserveLoadingId, setCancelReserveLoadingId] = useState<string | null>(null)
   const { initialLoading, startFetch, endFetch } = usePageData()
   const { organizationId, role, userId } = useAuth()
+  const { setHeaderActions } = useReservationsEventsHeader()
+
   useEffect(() => {
     fetchReservations()
   }, [organizationId])
+
+  useEffect(() => {
+    if (!hasPermission(role, 'reservations:create')) {
+      setHeaderActions(null)
+      return
+    }
+    setHeaderActions(
+      <>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setBulkModalOpen(true)}
+        >
+          <Users className="mr-2 h-4 w-4" />
+          Bulk Reservation
+        </Button>
+        <Button size="sm" onClick={() => setNewReservationOpen(true)}>
+          <Plus className="mr-2 h-4 w-4" />
+          New Reservation
+        </Button>
+      </>,
+    )
+    return () => setHeaderActions(null)
+  }, [role, setHeaderActions])
 
   const fetchReservations = async () => {
     if (!organizationId) {
@@ -288,25 +315,6 @@ export default function ReservationsPage() {
         userId={userId || ''}
       />
       
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Reservations</h1>
-          <p className="text-muted-foreground">Manage future bookings and reservations</p>
-        </div>
-        {hasPermission(role, 'reservations:create') && (
-          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
-            <Button variant="outline" size="sm" className="w-full text-xs sm:w-auto sm:text-sm" onClick={() => setBulkModalOpen(true)}>
-              <Users className="mr-2 h-3.5 w-3.5 sm:h-4 sm:w-4" />
-              Bulk Reservation
-            </Button>
-            <Button size="sm" className="w-full text-xs sm:w-auto sm:text-sm" onClick={() => setNewReservationOpen(true)}>
-              <Plus className="mr-2 h-3.5 w-3.5 sm:h-4 sm:w-4" />
-              New Reservation
-            </Button>
-          </div>
-        )}
-      </div>
-
       <EnhancedDataTable
         compactTable
         data={reservations}
