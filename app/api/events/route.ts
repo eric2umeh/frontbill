@@ -5,6 +5,8 @@ import {
   parseEventPaymentFromBody,
   recordEventPaymentSideEffects,
 } from '@/lib/events/record-event-payment'
+import { resolveEventClientRecord } from '@/lib/events/resolve-event-client'
+import type { EventClientType } from '@/lib/events/resolve-event-client'
 import type { HotelEventStatus } from '@/lib/events/types'
 
 const STATUSES: HotelEventStatus[] = ['planned', 'confirmed', 'cancelled', 'completed']
@@ -91,18 +93,42 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Enter the amount paid for partial payment' }, { status: 400 })
   }
 
-  const guestId =
-    raw.guest_id != null && String(raw.guest_id).trim()
-      ? String(raw.guest_id).trim()
-      : null
+  const clientType = (
+    raw.client_type === 'organization' ? 'organization' : 'guest'
+  ) as EventClientType
 
   const admin = createAdminClient()
+
+  const clientResolved = await resolveEventClientRecord(admin, {
+    hotelOrganizationId: auth.ctx.organizationId,
+    userId: auth.ctx.userId,
+    clientType,
+    clientName: String(raw.client_name || parsed.client_name || ''),
+    clientPhone: raw.client_phone != null ? String(raw.client_phone) : parsed.client_phone,
+    clientEmail: raw.client_email != null ? String(raw.client_email) : parsed.client_email,
+    clientAddress: raw.client_address != null ? String(raw.client_address) : null,
+    guestId: raw.guest_id != null ? String(raw.guest_id) : null,
+    clientOrganizationId:
+      raw.client_organization_id != null ? String(raw.client_organization_id) : null,
+    orgType: raw.org_type != null ? String(raw.org_type) : null,
+    contactPerson: raw.contact_person != null ? String(raw.contact_person) : null,
+  })
+  if ('error' in clientResolved) {
+    return NextResponse.json({ error: clientResolved.error }, { status: 400 })
+  }
+
   const now = new Date().toISOString()
   const { data, error } = await admin
     .from('hotel_events')
     .insert({
       organization_id: auth.ctx.organizationId,
       ...parsed,
+      client_type: clientResolved.data.client_type,
+      client_name: clientResolved.data.client_name,
+      client_phone: clientResolved.data.client_phone,
+      client_email: clientResolved.data.client_email,
+      guest_id: clientResolved.data.guest_id,
+      client_organization_id: clientResolved.data.client_organization_id,
       payment_method: payment.payment_method,
       payment_status: payment.payment_status,
       amount_paid: payment.amount_paid,
@@ -124,7 +150,7 @@ export async function POST(request: Request) {
     title: data.title,
     clientName: data.client_name,
     venue: data.venue,
-    guestId,
+    guestId: clientResolved.data.guest_id,
     estimatedValue: data.estimated_value,
     paymentMethod: payment.payment_method,
     storedPaymentStatus: payment.payment_status,
