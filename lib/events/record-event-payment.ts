@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { computeEventPayment, type EventPaymentStatus } from '@/lib/events/compute-event-payment'
+import { isEventPendingHold } from '@/lib/events/event-payment-methods'
 import { applyPaymentToGuestCityLedger } from '@/lib/utils/guest-city-ledger'
 
 export function parseEventPaymentFromBody(
@@ -7,14 +8,20 @@ export function parseEventPaymentFromBody(
   estimatedValue: number | null,
 ) {
   const total = Math.max(0, Number(estimatedValue) || 0)
-  const uiStatus = String(body.payment_status || 'paid').toLowerCase() as EventPaymentStatus
+  const rawMethod = String(body.payment_method || 'pos').trim().toLowerCase() || 'pos'
+  const methodIsPendingHold = isEventPendingHold(rawMethod)
+
+  let uiStatus = String(body.payment_status || 'paid').toLowerCase() as EventPaymentStatus
+  if (methodIsPendingHold) uiStatus = 'unpaid'
+
   const paymentStatus: EventPaymentStatus =
     uiStatus === 'partial' || uiStatus === 'unpaid' ? uiStatus : 'paid'
-  const partialAmount =
-    body.partial_amount != null && body.partial_amount !== ''
+  const partialAmount = methodIsPendingHold
+    ? 0
+    : body.partial_amount != null && body.partial_amount !== ''
       ? Math.max(0, Number(body.partial_amount) || 0)
       : 0
-  const payAboveTotal = Boolean(body.pay_above_total)
+  const payAboveTotal = methodIsPendingHold ? false : Boolean(body.pay_above_total)
 
   const { depositAmount, balanceAmount, storedPaymentStatus } = computeEventPayment({
     totalAmount: total,
@@ -23,7 +30,7 @@ export function parseEventPaymentFromBody(
     payAboveTotal,
   })
 
-  const payment_method = String(body.payment_method || 'cash').trim() || 'cash'
+  const payment_method = methodIsPendingHold ? 'pending' : rawMethod
   const remarks =
     body.remarks != null ? String(body.remarks).trim() || null : null
 
@@ -58,6 +65,10 @@ export async function recordEventPaymentSideEffects(
   const total = Math.max(0, Number(input.estimatedValue) || 0)
   const { depositAmount, balanceAmount, paymentMethod, storedPaymentStatus } = input
   const clientName = (input.clientName || 'Event client').trim()
+
+  if (isEventPendingHold(paymentMethod) || storedPaymentStatus === 'pending') {
+    return { error: null }
+  }
 
   if (depositAmount > 0) {
     const { error: payErr } = await admin.from('payments').insert({
