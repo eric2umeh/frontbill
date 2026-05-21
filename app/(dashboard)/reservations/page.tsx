@@ -290,8 +290,8 @@ export default function ReservationsPage() {
       
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Reservations</h1>
-          <p className="text-muted-foreground">Manage future bookings and reservations</p>
+          <h2 className="text-lg font-semibold tracking-tight">Room reservations</h2>
+          <p className="text-sm text-muted-foreground">Future stays — check-in, cancel, and bulk booking</p>
         </div>
         {hasPermission(role, 'reservations:create') && (
           <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
