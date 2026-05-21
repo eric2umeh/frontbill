@@ -37,9 +37,10 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
   ],
   cashier: [
     'View daily transactions, payments, and sales',
+    'Take orders (POS) at all outlets and print receipts',
     'Record cash collections and operating expenses',
     'Process refunds',
-    'Read-only access to bookings, reservations, events, and outlets',
+    'Read-only access to bookings, reservations, and events',
   ],
   housekeeping: [
     'View room status',
