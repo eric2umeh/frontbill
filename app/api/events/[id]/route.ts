@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { resolveEventsAuthed } from '@/lib/events/api-auth'
+import { parseEventPaymentFromBody } from '@/lib/events/record-event-payment'
 
 export async function PATCH(
   request: Request,
@@ -17,7 +18,7 @@ export async function PATCH(
 
   const { data: existing, error: fe } = await admin
     .from('hotel_events')
-    .select('organization_id, start_date, end_date')
+    .select('organization_id, start_date, end_date, estimated_value')
     .eq('id', id)
     .single()
 
@@ -52,7 +53,30 @@ export async function PATCH(
         ? null
         : Math.max(0, Number(body.estimated_value) || 0)
   }
-  if (body.notes !== undefined) patch.notes = String(body.notes || '').trim() || null
+  const estimatedForPayment =
+    body.estimated_value !== undefined
+      ? body.estimated_value === '' || body.estimated_value == null
+        ? null
+        : Math.max(0, Number(body.estimated_value) || 0)
+      : existing.estimated_value
+
+  if (
+    body.payment_status != null ||
+    body.payment_method != null ||
+    body.partial_amount !== undefined ||
+    body.pay_above_total !== undefined ||
+    body.estimated_value !== undefined
+  ) {
+    const payment = parseEventPaymentFromBody(body as Record<string, unknown>, estimatedForPayment)
+    if (payment.uiPaymentStatus === 'partial' && payment.depositAmount <= 0) {
+      return NextResponse.json({ error: 'Enter the amount paid for partial payment' }, { status: 400 })
+    }
+    patch.payment_method = payment.payment_method
+    patch.payment_status = payment.payment_status
+    patch.amount_paid = payment.amount_paid
+    patch.balance = payment.balance
+  }
+  if (body.remarks !== undefined) patch.remarks = String(body.remarks || '').trim() || null
 
   const start = String(patch.start_date ?? existing.start_date)
   const end = String(patch.end_date ?? existing.end_date)
