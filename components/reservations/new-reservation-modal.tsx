@@ -91,7 +91,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
   const [pricePerNight, setPricePerNight] = useState(0)
   const [customPrice, setCustomPrice] = useState<number | ''>('')
   // Payment
-  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'pos' | 'card' | 'transfer' | 'city_ledger'>('pos')
+  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'pos' | 'card' | 'transfer'>('pos')
   const [paymentStatus, setPaymentStatus] = useState<'paid' | 'partial' | 'unpaid'>('paid')
   const [partialAmount, setPartialAmount] = useState<number | ''>('')
   const [payAboveRoomTotal, setPayAboveRoomTotal] = useState(false)
@@ -366,25 +366,19 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
     if (!(guestId || fullName.trim())) return false
     if (!(checkInDate && checkOutDate && nights > 0)) return false
     if (!selectedRoom) return false
-    if (paymentMethod === 'city_ledger' && !selectedLedger) return false
     return true
   }
 
   const effectiveRate = (customPrice !== '' ? Number(customPrice) : pricePerNight) || 0
   const totalAmount = effectiveRate * nights
-  // For cash/POS/card/transfer: full payment received (deposit = total, balance = 0)
-  // For city_ledger: deferred payment (deposit = 0, balance = total)
-  const isCityLedgerPayment = paymentMethod === 'city_ledger'
   const rawPaid = Number(partialAmount) || 0
   let depositCalc = 0
-  if (!isCityLedgerPayment) {
-    if (paymentStatus === 'paid') {
-      depositCalc = payAboveRoomTotal ? Math.max(totalAmount, rawPaid || totalAmount) : totalAmount
-    } else if (paymentStatus === 'partial') {
-      depositCalc = payAboveRoomTotal ? Math.max(0, rawPaid) : Math.min(rawPaid, totalAmount)
-    }
+  if (paymentStatus === 'paid') {
+    depositCalc = payAboveRoomTotal ? Math.max(totalAmount, rawPaid || totalAmount) : totalAmount
+  } else if (paymentStatus === 'partial') {
+    depositCalc = payAboveRoomTotal ? Math.max(0, rawPaid) : Math.min(rawPaid, totalAmount)
   }
-  const depositAmount = isCityLedgerPayment ? 0 : depositCalc
+  const depositAmount = depositCalc
   const balanceAmount = Math.max(0, totalAmount - depositAmount)
   const canApproveBackdates = hasPermission(currentUserRole, 'backdate:approve')
   const isBackdated = checkInDate ? isStayCheckInConsideredBackdated(toLocalDateStr(checkInDate)) : false
@@ -479,10 +473,6 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
       toast.error('Selected room is under maintenance — pick another')
       return
     }
-    if (paymentMethod === 'city_ledger' && !selectedLedger) {
-      toast.error('Please select a city ledger account')
-      return
-    }
     if (paymentStatus === 'partial' && depositAmount <= 0) {
       toast.error('Please enter the amount paid')
       return
@@ -522,9 +512,9 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
         }])
       }
 
-      const isCityLedger = paymentMethod === 'city_ledger'
       const folioId = `RES-${Date.now().toString(36).toUpperCase()}`
-      const bookingPaymentStatus = isCityLedger ? 'pending' : balanceAmount <= 0 ? 'paid' : depositAmount > 0 ? 'partial' : 'pending'
+      const bookingPaymentStatus =
+        balanceAmount <= 0 ? 'paid' : depositAmount > 0 ? 'partial' : 'pending'
 
       const { data: booking, error: be } = await supabase
         .from('bookings')
@@ -543,41 +533,12 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
           payment_status: bookingPaymentStatus,
           status: 'reserved',
           created_by: currentUserId,
-          notes: isCityLedger
-            ? `City Ledger: ${selectedLedger?.account_name || selectedLedger?.name}`
-            : `payment_method: ${paymentMethod}`,
+          notes: `payment_method: ${paymentMethod}`,
         }])
         .select().single()
       if (be) throw be
 
       await supabase.from('rooms').update({ status: 'reserved', updated_by: currentUserId, updated_at: new Date().toISOString() }).eq('id', selectedRoom.id)
-
-      // If city ledger: update account + guest/org profile balance
-      if (isCityLedger && selectedLedger?.id) {
-        const { data: acc } = await supabase
-          .from('city_ledger_accounts').select('balance, account_type').eq('id', selectedLedger.id).single()
-        await supabase
-          .from('city_ledger_accounts')
-          .update({ balance: (acc?.balance || 0) + balanceAmount })
-          .eq('id', selectedLedger.id)
-
-        const acctType = acc?.account_type || ledgerType
-        if (acctType === 'individual' || acctType === 'guest') {
-          if (finalGuestId) {
-            const { data: guestRow } = await supabase.from('guests').select('balance').eq('id', finalGuestId).single()
-            await supabase.from('guests')
-              .update({ balance: ((guestRow?.balance as number) || 0) + balanceAmount })
-              .eq('id', finalGuestId)
-          }
-        } else {
-          const { data: orgRow } = await supabase.from('organizations').select('current_balance').eq('id', selectedLedger.id).single()
-          if (orgRow) {
-            await supabase.from('organizations')
-              .update({ current_balance: ((orgRow.current_balance as number) || 0) + balanceAmount })
-              .eq('id', selectedLedger.id)
-          }
-        }
-      }
 
       // Insert folio charge (this is what the Transactions page reads from)
       const { error: fcErr } = await insertFolioCharges(supabase, [{
@@ -586,9 +547,9 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
         description: `Reservation charge - ${nights} night${nights !== 1 ? 's' : ''}`,
         amount: totalAmount,
         charge_type: 'reservation',
-        payment_method: isCityLedger ? 'city_ledger' : paymentMethod,
-        ledger_account_id: isCityLedger && selectedLedger ? selectedLedger.id : null,
-        ledger_account_type: isCityLedger ? ledgerType : null,
+        payment_method: paymentMethod,
+        ledger_account_id: null,
+        ledger_account_type: null,
         payment_status: bookingPaymentStatus === 'paid' ? 'paid' : 'unpaid',
         created_by: currentUserId,
       }])
@@ -616,7 +577,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
         guest_name: formattedGuestName,
         room: selectedRoom.room_number,
         amount: totalAmount,
-        payment_method: isCityLedger ? 'city_ledger' : paymentMethod,
+        payment_method: paymentMethod,
         status: bookingPaymentStatus,
         description: `Reservation — ${folioId}`,
         received_by: currentUserId,
@@ -625,13 +586,13 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
       // Always insert into payments table so Transactions page shows ALL transactions
       // This includes both paid and unpaid/pending reservations
       const paidAmount = depositAmount
-      if (paidAmount > 0 || isCityLedger) {
+      if (paidAmount > 0) {
         await supabase.from('payments').insert([{
           organization_id: orgId,
           booking_id: booking.id,
           guest_id: finalGuestId,
-          amount: paidAmount || totalAmount,
-          payment_method: isCityLedger ? 'city_ledger' : paymentMethod,
+          amount: paidAmount,
+          payment_method: paymentMethod,
           payment_date: new Date().toISOString(),
           notes: `Reservation payment — Folio ${folioId}`,
           received_by: currentUserId || null,
@@ -639,7 +600,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
       }
 
       const prepayExcess = Math.max(0, depositAmount - totalAmount)
-      if (!isCityLedger && prepayExcess > 0 && finalGuestId) {
+      if (prepayExcess > 0 && finalGuestId) {
         const { data: gRow } = await supabase.from('guests').select('name').eq('id', finalGuestId).maybeSingle()
         const ledgerName = (gRow?.name || formattedGuestName).trim()
         if (ledgerName) {
@@ -827,8 +788,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
           {/* Payment */}
           <div className="rounded-lg border p-4 space-y-4">
             <p className="text-sm font-semibold">Payment</p>
-            {paymentMethod !== 'city_ledger' && (
-              <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-2">
                   <Label>Payment Status</Label>
                   <Select value={paymentStatus} onValueChange={(v: 'paid' | 'partial' | 'unpaid') => setPaymentStatus(v)}>
@@ -853,9 +813,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
                   />
                 </div>
               </div>
-            )}
-            {paymentMethod !== 'city_ledger' && (
-              <div className="flex items-start gap-2 rounded-md border border-input p-3">
+            <div className="flex items-start gap-2 rounded-md border border-input p-3">
                 <Checkbox
                   id="res-pay-above-total"
                   checked={payAboveRoomTotal}
@@ -874,74 +832,21 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
                   Guest is paying more than the room total — save the excess as city ledger credit for future stays or incidentals.
                 </Label>
               </div>
-            )}
+            <p className="text-xs text-muted-foreground">
+              Payment validates the reservation. Use partial or unpaid only when the guest will pay later.
+            </p>
             <div className="space-y-2">
               <Label>Payment Method</Label>
-              <Select value={paymentMethod} onValueChange={(v: any) => {
-                setPaymentMethod(v)
-                if (v !== 'city_ledger') setSelectedLedger(null)
-                else setPayAboveRoomTotal(false)
-              }}>
+              <Select value={paymentMethod} onValueChange={(v: 'cash' | 'pos' | 'card' | 'transfer') => setPaymentMethod(v)}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="pos">POS</SelectItem>
                   <SelectItem value="cash">Cash</SelectItem>
                   <SelectItem value="transfer">Transfer</SelectItem>
                   <SelectItem value="card">Card</SelectItem>
-                  <SelectItem value="city_ledger">City Ledger (bill to account)</SelectItem>
                 </SelectContent>
               </Select>
             </div>
-
-            {paymentMethod === 'city_ledger' && (
-              <div className="space-y-3 p-3 border rounded-lg bg-muted/30">
-                <Label className="text-sm font-medium">City Ledger Account</Label>
-                <div className="flex gap-2">
-                  <Button type="button" size="sm" variant={ledgerType === 'individual' ? 'default' : 'outline'} onClick={() => { setLedgerType('individual'); setLedgerSearch(''); setLedgerResults([]); setSelectedLedger(null); setShowNewLedgerOrgForm(false) }}>Individual</Button>
-                  <Button type="button" size="sm" variant={ledgerType === 'organization' ? 'default' : 'outline'} onClick={() => { setLedgerType('organization'); setLedgerSearch(''); setLedgerResults([]); setSelectedLedger(null); setShowNewLedgerOrgForm(false) }}>Organization</Button>
-                </div>
-                <div className="flex gap-2">
-                  <div className="relative flex-1">
-                    <Input placeholder={ledgerType === 'individual' ? 'Search guest...' : 'Search organization...'} value={ledgerSearch} onChange={(e) => searchLedger(e.target.value)} onBlur={() => setTimeout(() => setLedgerSearchOpen(false), 150)} />
-                    {ledgerSearchOpen && ledgerResults.length > 0 && (
-                      <div className="absolute top-full left-0 right-0 mt-1 bg-background border rounded-md shadow-lg z-50 max-h-48 overflow-y-auto">
-                        {ledgerResults.map((r: any) => (
-                          <button key={`${r.source || 'account'}-${r.id}`} className="w-full text-left px-4 py-2 hover:bg-accent border-b last:border-b-0 text-sm" onMouseDown={(e) => { e.preventDefault(); selectLedgerAccount(r) }}>
-                            <div className="font-medium">{r.name || r.account_name}</div>
-                            <div className="text-xs text-muted-foreground">{r.phone || r.contact_phone}</div>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                  <Button type="button" size="sm" variant="outline" className="gap-1 whitespace-nowrap" onClick={() => setShowNewLedgerOrgForm(v => !v)}>
-                      <Plus className="h-3 w-3" /> New
-                  </Button>
-                </div>
-                {ledgerType === 'organization' && (
-                  <p className="text-xs text-muted-foreground">
-                    Search organizations created from the Organizations menu or city ledger organization accounts. Use New to create one here.
-                  </p>
-                )}
-                {showNewLedgerOrgForm && (
-                  <div className="border rounded-md p-3 space-y-2 bg-background">
-                    <p className="text-xs font-medium text-muted-foreground">Create new {ledgerType} account</p>
-                    <Input placeholder={ledgerType === 'individual' ? 'Individual name' : 'Organization name'} value={newLedgerOrgName} onChange={(e) => setNewLedgerOrgName(e.target.value)} />
-                    <Input placeholder="Phone (optional)" value={newLedgerOrgPhone} onChange={(e) => setNewLedgerOrgPhone(e.target.value)} />
-                    <div className="flex gap-2">
-                      <Button size="sm" onClick={createNewLedgerOrg} disabled={creatingLedgerOrg || !newLedgerOrgName.trim()}>{creatingLedgerOrg ? 'Creating...' : 'Create'}</Button>
-                      <Button size="sm" variant="outline" onClick={() => setShowNewLedgerOrgForm(false)}>Cancel</Button>
-                    </div>
-                  </div>
-                )}
-                {selectedLedger && (
-                  <div className="flex items-center justify-between p-2 rounded border bg-background text-sm">
-                    <span className="font-medium">{selectedLedger.name || selectedLedger.account_name}</span>
-                    <Button variant="ghost" size="sm" className="text-destructive h-6 text-xs" onClick={() => { setSelectedLedger(null); setLedgerSearch('') }}>Remove</Button>
-                  </div>
-                )}
-              </div>
-            )}
 
             {selectedRoom && nights > 0 && (
               <div className="p-3 rounded-lg bg-muted space-y-1 text-sm border">
