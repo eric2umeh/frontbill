@@ -66,7 +66,7 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
   const [selectedRoom, setSelectedRoom] = useState<any>(null)
 
   // Payment
-  const [paymentMethod, setPaymentMethod] = useState('cash')
+  const [paymentMethod, setPaymentMethod] = useState('pos')
   const [customPrice, setCustomPrice] = useState<number | ''>('')
   const [ledgerSearch, setLedgerSearch] = useState('')
   const [ledgerResults, setLedgerResults] = useState<any[]>([])
@@ -429,7 +429,7 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
     setFilteredGuests([]); setGuestSearchOpen(false)
     const d = new Date(); d.setHours(0,0,0,0)
     setCheckInDate(d); setCheckOutDate(addDays(d, 1)); setNights(1)
-    setSelectedRoom(null); setPaymentMethod('cash'); setCustomPrice('')
+    setSelectedRoom(null); setPaymentMethod('pos'); setCustomPrice('')
     setLedgerSearch(''); setLedgerResults([]); setSelectedLedger(null); setLedgerSearchOpen(false)
     setShowNewLedgerOrgForm(false); setNewLedgerOrgName(''); setNewLedgerOrgPhone('')
     setDriverCode(''); setDriverVerified(false); setDriverName('')
@@ -579,8 +579,8 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
               <Select value={paymentMethod} onValueChange={setPaymentMethod}>
                 <SelectTrigger><SelectValue placeholder="Select payment mode" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="cash">Cash</SelectItem>
                   <SelectItem value="pos">POS</SelectItem>
+                  <SelectItem value="cash">Cash</SelectItem>
                   <SelectItem value="transfer">Transfer</SelectItem>
                   <SelectItem value="card">Card</SelectItem>
                   <SelectItem value="city_ledger">City Ledger</SelectItem>
