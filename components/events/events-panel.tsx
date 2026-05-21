@@ -15,6 +15,7 @@ import {
 import { computeEventPayment } from '@/lib/events/compute-event-payment'
 import { effectiveEventEndDate } from '@/lib/events/event-date-overlap'
 import { EventDateAvailability } from '@/components/events/event-date-availability'
+import { EventTimeField } from '@/components/events/event-time-field'
 import { canManageEvents } from '@/lib/events/access'
 import { eventsApiHeaders } from '@/lib/events/events-api-headers'
 import type { HotelEventRow } from '@/lib/events/types'
@@ -361,9 +362,13 @@ export function EventsPanel() {
       const end = format(parseISO(String(ev.end_date).slice(0, 10)), 'd MMM yyyy')
       const range = ev.start_date === ev.end_date ? start : `${start} – ${end}`
       const times =
-        ev.start_time || ev.end_time
-          ? ` · ${ev.start_time || '—'}${ev.end_time ? ` – ${ev.end_time}` : ''}`
-          : ''
+        ev.start_time && ev.end_time
+          ? ` · ${ev.start_time} – ${ev.end_time}`
+          : ev.start_time
+            ? ` · ${ev.start_time}`
+            : ev.end_time
+              ? ` · until ${ev.end_time}`
+              : ''
       return range + times
     } catch {
       return `${ev.start_date} – ${ev.end_date}`
@@ -523,22 +528,19 @@ export function EventsPanel() {
               />
             )}
             <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <Label>Start time</Label>
-                <Input
-                  placeholder="e.g. 14:00"
-                  value={form.start_time}
-                  onChange={(e) => setForm((f) => ({ ...f, start_time: e.target.value }))}
-                />
-              </div>
-              <div className="space-y-1">
-                <Label>End time</Label>
-                <Input
-                  placeholder="e.g. 22:00"
-                  value={form.end_time}
-                  onChange={(e) => setForm((f) => ({ ...f, end_time: e.target.value }))}
-                />
-              </div>
+              <EventTimeField
+                label="Start time"
+                value={form.start_time}
+                onChange={(start_time) => setForm((f) => ({ ...f, start_time }))}
+                disabled={saving}
+              />
+              <EventTimeField
+                label="End time"
+                value={form.end_time}
+                onChange={(end_time) => setForm((f) => ({ ...f, end_time }))}
+                optional
+                disabled={saving}
+              />
             </div>
             <div className="space-y-1">
               <Label>Venue / hall</Label>
