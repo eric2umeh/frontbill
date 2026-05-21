@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import { useReservationsEventsHeader } from '@/components/reservations/reservations-events-header'
 import { format, parseISO } from 'date-fns'
 import { useAuth } from '@/lib/auth-context'
 import { EventClientSearchField } from '@/components/events/event-client-search-field'
@@ -61,6 +62,7 @@ const emptyForm = {
 export function EventsPanel() {
   const { role, organizationId } = useAuth()
   const canManage = canManageEvents(role)
+  const { setHeaderActions } = useReservationsEventsHeader()
   const [events, setEvents] = useState<HotelEventRow[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -101,6 +103,28 @@ export function EventsPanel() {
   useEffect(() => {
     void load()
   }, [load])
+
+  useEffect(() => {
+    if (!canManage) {
+      setHeaderActions(null)
+      return
+    }
+    setHeaderActions(
+      <Button
+        size="sm"
+        onClick={() => {
+          setEditing(null)
+          const today = format(new Date(), 'yyyy-MM-dd')
+          setForm({ ...emptyForm, start_date: today, end_date: today })
+          setDialogOpen(true)
+        }}
+      >
+        <Plus className="h-4 w-4 mr-1" />
+        New event
+      </Button>,
+    )
+    return () => setHeaderActions(null)
+  }, [canManage, setHeaderActions])
 
   const openCreate = () => {
     setEditing(null)
@@ -222,18 +246,11 @@ export function EventsPanel() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      {!canManage && (
         <p className="text-sm text-muted-foreground">
-          Schedule banquets, conferences, and hall hire for specific date ranges.
-          {!canManage && ' View only — contact Front Desk or Manager to make changes.'}
+          View only — contact Front Desk or Manager to add or change events.
         </p>
-        {canManage && (
-          <Button size="sm" onClick={openCreate}>
-            <Plus className="h-4 w-4 mr-1" />
-            New event
-          </Button>
-        )}
-      </div>
+      )}
 
       <EnhancedDataTable
         compactTable
