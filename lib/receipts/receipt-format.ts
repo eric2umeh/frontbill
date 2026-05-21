@@ -32,6 +32,7 @@ export function formatReceiptPaymentMethod(
     card: "Card",
     transfer: "Transfer",
     bank_transfer: "Transfer",
+    pending: "Pending (hold)",
     city_ledger: "City Ledger",
     deferred: "Deferred",
     pending: "Pending",
