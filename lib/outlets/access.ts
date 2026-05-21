@@ -10,9 +10,16 @@ import {
   isOutletDepartmentKey,
 } from '@/lib/outlets/departments'
 
+/** FnB outlets for the single Food & Beverage staff role (hotel department). */
+export const FOOD_BEVERAGE_OUTLET_DEPARTMENTS: OutletDepartmentKey[] = [
+  'restaurant',
+  'main_bar',
+  'pool_bar',
+  'banquets',
+]
+
 const OUTLET_ROLE_DEPARTMENTS: Partial<Record<RoleKey, OutletDepartmentKey[]>> = {
-  restaurant: ['restaurant'],
-  bar: ['main_bar', 'pool_bar'],
+  food_beverage: FOOD_BEVERAGE_OUTLET_DEPARTMENTS,
   laundry: ['laundry'],
   gym: ['gym'],
 }
