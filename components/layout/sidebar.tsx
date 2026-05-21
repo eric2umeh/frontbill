@@ -31,6 +31,7 @@ import {
   Wrench,
   ShoppingBag,
   UtensilsCrossed,
+  Wallet,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useBackdatePendingCount } from '@/hooks/use-backdate-pending-count'
@@ -64,7 +65,7 @@ const routes: Array<{
     label: 'Guests',
     icon: Users,
     href: '/accounts',
-    permission: 'guests:view', // Guests & city ledger accounts
+    permission: 'guests:view',
   },
   {
     label: 'Organizations',
@@ -73,28 +74,10 @@ const routes: Array<{
     permission: 'organizations:view',
   },
   {
-    label: 'Transactions',
-    icon: Receipt,
-    href: '/transactions',
-    permission: 'transactions:view',
-  },
-  {
-    label: 'Reports',
-    icon: FileBarChart,
-    href: '/reports',
-    permission: 'reports:view',
-  },
-  {
-    label: 'Expenses',
-    icon: Receipt,
-    href: '/expenses',
-    permission: 'expenses:view',
-  },
-  {
-    label: 'Night Audit',
-    icon: Moon,
-    href: '/night-audit',
-    permission: 'night_audit:view',
+    label: 'Outlets',
+    icon: UtensilsCrossed,
+    href: '/outlets',
+    permission: 'outlet:view',
   },
   {
     label: 'Housekeeping',
@@ -115,10 +98,28 @@ const routes: Array<{
     permissionAny: ['store:view', 'store:requisition'],
   },
   {
-    label: 'Outlets',
-    icon: UtensilsCrossed,
-    href: '/outlets',
-    permission: 'outlet:view',
+    label: 'Expenses',
+    icon: Wallet,
+    href: '/expenses',
+    permission: 'expenses:view',
+  },
+  {
+    label: 'Reports',
+    icon: FileBarChart,
+    href: '/reports',
+    permission: 'reports:view',
+  },
+  {
+    label: 'Night Audit',
+    icon: Moon,
+    href: '/night-audit',
+    permission: 'night_audit:view',
+  },
+  {
+    label: 'Transactions',
+    icon: Receipt,
+    href: '/transactions',
+    permission: 'transactions:view',
   },
   {
     label: 'Analytics',
