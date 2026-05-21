@@ -11,6 +11,7 @@ export type Permission =
   | 'room_change:request' | 'room_change:approve'
   | 'reschedule_stay:request' | 'reschedule_stay:approve'
   | 'reservations:view' | 'reservations:create' | 'reservations:edit' | 'reservations:delete'
+  | 'events:view' | 'events:create' | 'events:edit' | 'events:delete'
   | 'rooms:view' | 'rooms:create' | 'rooms:edit' | 'rooms:delete' | 'rooms:update_status'
   | 'guests:view' | 'guests:create' | 'guests:edit' | 'guests:delete'
   | 'transactions:view' | 'transactions:create' | 'transactions:edit' | 'transactions:delete' | 'transactions:export'
@@ -82,6 +83,11 @@ export const ALL_PERMISSIONS: { key: Permission; label: string; group: string }[
   { key: 'reservations:create', label: 'Create Reservations & Bulk Reservation', group: 'Reservations' },
   { key: 'reservations:edit', label: 'Edit Reservations', group: 'Reservations' },
   { key: 'reservations:delete', label: 'Cancel/Delete Reservations', group: 'Reservations' },
+
+  { key: 'events:view', label: 'View Events', group: 'Reservations' },
+  { key: 'events:create', label: 'Create Events', group: 'Reservations' },
+  { key: 'events:edit', label: 'Edit Events', group: 'Reservations' },
+  { key: 'events:delete', label: 'Delete Events', group: 'Reservations' },
 
   { key: 'guests:view', label: 'View Guests', group: 'Guests' },
   { key: 'guests:create', label: 'Create Guest Profiles', group: 'Guests' },
@@ -264,6 +270,7 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
       'audit_trails:view',
       'bookings:view',
       'reservations:view',
+      'events:view',
       'guests:view',
       'organizations:view',
       'rooms:view',
@@ -286,6 +293,7 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
       'dashboard:view',
       'bookings:view', 'bookings:create', 'bookings:checkin', 'bookings:checkout',
       'reservations:view', 'reservations:create',
+      'events:view', 'events:create', 'events:edit', 'events:delete',
       'rooms:view',
       'guests:view', 'guests:create',
       'transactions:view', 'transactions:create',
@@ -309,6 +317,7 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
       'dashboard:view',
       'bookings:view', 'bookings:checkin', 'bookings:checkout',
       'reservations:view',
+      'events:view',
       'rooms:view',
       'guests:view', 'guests:create',
       'payments:view',
@@ -493,6 +502,14 @@ export function hasPermission(userRole: string | null | undefined, permission: P
   }
   if (permission === 'outlet:void') {
     return roleKey === 'superadmin' || roleKey === 'admin'
+  }
+  if (['events:create', 'events:edit', 'events:delete'].includes(permission)) {
+    return (
+      roleKey === 'superadmin' ||
+      roleKey === 'admin' ||
+      roleKey === 'manager' ||
+      roleKey === 'front_desk'
+    )
   }
   const role = getRoleDefinition(roleKey)
   if (!role) return false
