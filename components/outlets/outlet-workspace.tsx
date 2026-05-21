@@ -18,6 +18,7 @@ import { OutletOrderReceiptDialog } from '@/components/outlets/outlet-order-rece
 import { ChevronLeft, ShoppingCart, UtensilsCrossed, ClipboardList, BarChart3 } from 'lucide-react'
 import { toast } from 'sonner'
 import { outletApiHeaders } from '@/lib/outlets/outlet-api-headers'
+import { RoomInventoryStatsStrip } from '@/components/shared/room-inventory-stats-strip'
 
 export function OutletWorkspace({ department }: { department: OutletDepartmentKey }) {
   const { organizationId, role, name: staffName } = useAuth()
@@ -88,15 +89,18 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-3">
-        <Button variant="ghost" size="sm" asChild>
+      <div className="flex flex-wrap items-start gap-3">
+        <Button variant="ghost" size="sm" asChild className="shrink-0 mt-0.5">
           <Link href="/outlets">
             <ChevronLeft className="h-4 w-4 mr-1" />
             Outlets
           </Link>
         </Button>
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">{def.label}</h1>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+            <h1 className="text-2xl font-bold tracking-tight">{def.label}</h1>
+            <RoomInventoryStatsStrip className="shrink-0" />
+          </div>
           <p className="text-sm text-muted-foreground">POS · menu · orders · daily sales</p>
         </div>
       </div>
