@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { resolveEventsAuthed } from '@/lib/events/api-auth'
 import { parseEventPaymentFromBody } from '@/lib/events/record-event-payment'
+import { resolveEventClientRecord, type EventClientType } from '@/lib/events/resolve-event-client'
 
 export async function PATCH(
   request: Request,
@@ -18,7 +19,9 @@ export async function PATCH(
 
   const { data: existing, error: fe } = await admin
     .from('hotel_events')
-    .select('organization_id, start_date, end_date, estimated_value')
+    .select(
+      'organization_id, start_date, end_date, estimated_value, client_type, client_name, client_phone, client_email, guest_id, client_organization_id',
+    )
     .eq('id', id)
     .single()
 
@@ -43,9 +46,57 @@ export async function PATCH(
   }
   if (body.start_time !== undefined) patch.start_time = String(body.start_time || '').trim() || null
   if (body.end_time !== undefined) patch.end_time = String(body.end_time || '').trim() || null
-  if (body.client_name !== undefined) patch.client_name = String(body.client_name || '').trim() || null
-  if (body.client_phone !== undefined) patch.client_phone = String(body.client_phone || '').trim() || null
-  if (body.client_email !== undefined) patch.client_email = String(body.client_email || '').trim() || null
+  const clientFieldsTouched =
+    body.client_type != null ||
+    body.client_name !== undefined ||
+    body.client_phone !== undefined ||
+    body.client_email !== undefined ||
+    body.guest_id !== undefined ||
+    body.client_organization_id !== undefined
+
+  if (clientFieldsTouched) {
+    const clientType = (
+      body.client_type === 'organization'
+        ? 'organization'
+        : body.client_type === 'guest'
+          ? 'guest'
+          : existing.client_type === 'organization'
+            ? 'organization'
+            : 'guest'
+    ) as EventClientType
+
+    const clientResolved = await resolveEventClientRecord(admin, {
+      hotelOrganizationId: auth.ctx.organizationId,
+      userId: auth.ctx.userId,
+      clientType,
+      clientName: String(
+        body.client_name !== undefined ? body.client_name : existing.client_name || '',
+      ),
+      clientPhone:
+        body.client_phone !== undefined ? String(body.client_phone || '') : existing.client_phone,
+      clientEmail:
+        body.client_email !== undefined ? String(body.client_email || '') : existing.client_email,
+      clientAddress: body.client_address != null ? String(body.client_address) : null,
+      guestId:
+        body.guest_id !== undefined
+          ? body.guest_id
+            ? String(body.guest_id)
+            : null
+          : existing.guest_id,
+      clientOrganizationId:
+        body.client_organization_id !== undefined
+          ? body.client_organization_id
+            ? String(body.client_organization_id)
+            : null
+          : existing.client_organization_id,
+      orgType: body.org_type != null ? String(body.org_type) : null,
+      contactPerson: body.contact_person != null ? String(body.contact_person) : null,
+    })
+    if ('error' in clientResolved) {
+      return NextResponse.json({ error: clientResolved.error }, { status: 400 })
+    }
+    Object.assign(patch, clientResolved.data)
+  }
   if (body.expected_attendees !== undefined) {
     patch.expected_attendees =
       body.expected_attendees === '' || body.expected_attendees == null
