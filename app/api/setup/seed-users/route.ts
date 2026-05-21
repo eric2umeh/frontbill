@@ -48,6 +48,26 @@ export async function POST(request: Request) {
       console.log('Front desk user created:', deskData.user?.email)
     }
 
+    const { data: cashierData, error: cashierError } = await supabase.auth.admin.createUser({
+      email: 'cashier@frontbill.com',
+      password: 'Cash@123456',
+      email_confirm: true,
+      user_metadata: {
+        first_name: 'Hotel',
+        last_name: 'Cashier',
+        role: 'cashier',
+      },
+    })
+
+    if (cashierError) {
+      console.error('Error creating cashier:', cashierError)
+      if (!cashierError.message.includes('already exists')) {
+        throw cashierError
+      }
+    } else {
+      console.log('Cashier user created:', cashierData.user?.email)
+    }
+
     const { error: storeError } = await supabase.auth.admin.createUser({
       email: 'store@frontbill.com',
       password: 'Store@123456',
@@ -73,6 +93,7 @@ export async function POST(request: Request) {
         { email: 'admin@frontbill.com', password: 'Admin@123456', role: 'Admin' },
         { email: 'frontdesk@frontbill.com', password: 'Desk@123456', role: 'Front Desk' },
         { email: 'store@frontbill.com', password: 'Store@123456', role: 'Store' },
+        { email: 'cashier@frontbill.com', password: 'Cash@123456', role: 'Cashier' },
       ],
     })
   } catch (error: any) {
