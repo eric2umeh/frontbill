@@ -598,7 +598,7 @@ export function OutletPos({
             </section>
           ))}
           {filteredItems.length === 0 && (
-            <p className="text-center text-muted-foreground py-12">No items — add menu items or seed default categories.</p>
+            <p className="text-center text-muted-foreground py-12">No items — add menu items in the Menu tab.</p>
           )}
         </ScrollArea>
       </div>
