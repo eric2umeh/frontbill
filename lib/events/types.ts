@@ -1,0 +1,39 @@
+export type HotelEventStatus = 'planned' | 'confirmed' | 'cancelled' | 'completed'
+
+export interface HotelEventRow {
+  id: string
+  organization_id: string
+  title: string
+  description: string | null
+  venue: string | null
+  start_date: string
+  end_date: string
+  start_time: string | null
+  end_time: string | null
+  status: HotelEventStatus
+  client_name: string | null
+  client_phone: string | null
+  client_email: string | null
+  expected_attendees: number | null
+  estimated_value: number | null
+  notes: string | null
+  created_by: string | null
+  updated_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+export const HOTEL_EVENT_STATUSES: { value: HotelEventStatus; label: string }[] = [
+  { value: 'planned', label: 'Planned' },
+  { value: 'confirmed', label: 'Confirmed' },
+  { value: 'completed', label: 'Completed' },
+  { value: 'cancelled', label: 'Cancelled' },
+]
+
+export const EVENT_VENUE_PRESETS = [
+  'Rebecca Hall',
+  'Floxy Hall',
+  'Board Room',
+  'Pool Deck',
+  'Other',
+] as const
