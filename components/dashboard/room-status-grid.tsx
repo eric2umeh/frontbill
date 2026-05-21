@@ -7,6 +7,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Bed, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { createClient } from '@/lib/supabase/client'
+import { useAuth } from '@/lib/auth-context'
 
 interface Room {
   id: string
@@ -35,38 +36,28 @@ const statusPriority: Record<string, number> = {
 }
 
 export function RoomStatusGrid() {
+  const { organizationId } = useAuth()
   const [rooms, setRooms] = useState<Room[]>([])
   const [loading, setLoading] = useState(true)
-  const fetchTimeoutRef = useEffect === null ? { current: null } : { current: null as any }
 
   useEffect(() => {
+    if (!organizationId) return
     let isMounted = true
-    
+
     const fetchRooms = async () => {
       try {
         setLoading(true)
         const supabase = createClient()
-        
+
         if (!supabase) {
           if (isMounted) setRooms([])
           return
         }
 
-        const { data: { user } } = await supabase.auth.getUser()
-        if (!user || !isMounted) return
-
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('organization_id')
-          .eq('id', user.id)
-          .single()
-
-        if (!profile || !isMounted) return
-
         const { data, error } = await supabase
           .from('rooms')
           .select('id, room_number, room_type, status, organization_id')
-          .eq('organization_id', profile.organization_id)
+          .eq('organization_id', organizationId)
           .order('room_number', { ascending: true })
 
         if (error) throw error
@@ -84,12 +75,12 @@ export function RoomStatusGrid() {
       }
     }
 
-    fetchRooms()
+    void fetchRooms()
 
     return () => {
       isMounted = false
     }
-  }, [])
+  }, [organizationId])
 
   return (
     <Card>

@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge'
 import { CreditCard, Loader2 } from 'lucide-react'
 import { formatNaira } from '@/lib/utils/currency'
 import { createClient } from '@/lib/supabase/client'
+import { useAuth } from '@/lib/auth-context'
 
 interface Payment {
   id: string
@@ -23,41 +24,31 @@ const methodColors = {
 }
 
 export function RecentPayments() {
+  const { organizationId } = useAuth()
   const [payments, setPayments] = useState<Payment[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    fetchPayments()
-  }, [])
+    if (!organizationId) return
+    void fetchPayments()
+  }, [organizationId])
 
   const fetchPayments = async () => {
+    if (!organizationId) return
     try {
       setLoading(true)
       const supabase = createClient()
-      
+
       if (!supabase) {
         setPayments([])
         setLoading(false)
         return
       }
 
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
-
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('organization_id')
-        .eq('id', user.id)
-        .single()
-
-      if (!profile) {
-        setPayments([])
-        return
-      }
-
       const { data, error } = await supabase
         .from('folio_charges')
         .select('id, description, amount, payment_status, created_at')
+        .eq('organization_id', organizationId)
         .eq('payment_status', 'paid')
         .order('created_at', { ascending: false })
         .limit(5)
