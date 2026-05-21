@@ -23,6 +23,8 @@ import { FolioAttachmentsPanel } from '@/components/folio/folio-attachments-pane
 import { BookingPaymentReceiptPanel } from '@/components/receipts/booking-payment-receipt-panel'
 import { hasPermission } from '@/lib/permissions'
 import { cancelBookingReservation } from '@/lib/reservations/cancel-reservation'
+import { formatReservationPaymentMethodLabel } from '@/lib/reservations/reservation-payment-methods'
+import { PAYMENT_METHOD_SELECT_OPTIONS } from '@/lib/payments/payment-methods'
 
 export default function ReservationDetailPage({
   params,
@@ -85,7 +87,13 @@ export default function ReservationDetailPage({
         setError('Reservation not found')
         return
       }
-      setReservation(data)
+      let payment_method = 'cash'
+      if (data.notes) {
+        if (data.notes.startsWith('payment_method:')) {
+          payment_method = data.notes.replace(/^payment_method:\s*/, '').split('|')[0].trim()
+        }
+      }
+      setReservation({ ...data, payment_method })
 
       if (userId) {
         try {
@@ -377,10 +385,11 @@ export default function ReservationDetailPage({
                   <SelectValue placeholder="Select method" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="cash">Cash</SelectItem>
-                  <SelectItem value="pos">POS</SelectItem>
-                  <SelectItem value="transfer">Transfer</SelectItem>
-                  <SelectItem value="card">Card</SelectItem>
+                  {PAYMENT_METHOD_SELECT_OPTIONS.map((o) => (
+                    <SelectItem key={o.value} value={o.value}>
+                      {o.label}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
@@ -572,9 +581,9 @@ export default function ReservationDetailPage({
                 <div className="text-sm text-muted-foreground">
                   {'Payment Method'}
                 </div>
-                <div className="font-semibold capitalize">
+                <div className="font-semibold">
                   {reservation.payment_method
-                    ? String(reservation.payment_method).replace('_', ' ')
+                    ? formatReservationPaymentMethodLabel(reservation.payment_method)
                     : '-'}
                 </div>
               </div>
