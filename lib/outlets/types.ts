@@ -5,11 +5,15 @@ export type OutletOrderType = 'dine_in' | 'takeaway' | 'room_service'
 export type OutletPaymentMethod = 'cash' | 'pos' | 'transfer' | 'card' | 'city_ledger' | 'room_charge'
 
 export const OUTLET_ITEM_TAGS = [
-  { key: 'ready_to_serve', label: 'Ready to serve' },
-  { key: 'alcohol', label: 'Alcohol' },
   { key: 'available', label: 'Available' },
+  { key: 'ready_to_serve', label: 'Ready to serve' },
   { key: 'food', label: 'Food' },
   { key: 'beverage', label: 'Beverage' },
+  { key: 'alcohol', label: 'Alcohol' },
+  { key: 'vegetarian', label: 'Vegetarian' },
+  { key: 'spicy', label: 'Spicy' },
+  { key: 'hot', label: 'Hot' },
+  { key: 'cold', label: 'Cold' },
 ] as const
 
 export type OutletItemTag = (typeof OUTLET_ITEM_TAGS)[number]['key']
