@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { resolveOutletAuthed } from '@/lib/outlets/api-auth'
+import { resolveOutletAuthed, resolveOutletMenuManage } from '@/lib/outlets/api-auth'
 import { canAccessOutletDepartment } from '@/lib/outlets/access'
 import { isOutletDepartmentKey } from '@/lib/outlets/departments'
 
@@ -32,7 +32,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const auth = await resolveOutletAuthed(request, { permission: 'outlet:menu' })
+  const auth = await resolveOutletMenuManage(request)
   if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status })
 
   const body = await request.json().catch(() => ({}))
@@ -76,7 +76,7 @@ export async function POST(request: Request) {
 }
 
 export async function PATCH(request: Request) {
-  const auth = await resolveOutletAuthed(request, { permission: 'outlet:menu' })
+  const auth = await resolveOutletMenuManage(request)
   if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status })
 
   const body = await request.json().catch(() => ({}))
@@ -114,4 +114,29 @@ export async function PATCH(request: Request) {
 
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
   return NextResponse.json({ item: data })
+}
+
+export async function DELETE(request: Request) {
+  const auth = await resolveOutletMenuManage(request)
+  if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status })
+
+  const id = new URL(request.url).searchParams.get('id')?.trim()
+  if (!id) return NextResponse.json({ error: 'id query required' }, { status: 400 })
+
+  const admin = createAdminClient()
+  const { data: existing, error: fe } = await admin
+    .from('outlet_menu_items')
+    .select('department')
+    .eq('id', id)
+    .eq('organization_id', auth.ctx.organizationId)
+    .single()
+
+  if (fe || !existing) return NextResponse.json({ error: 'Item not found' }, { status: 404 })
+  if (!canAccessOutletDepartment(auth.ctx.role, existing.department)) {
+    return NextResponse.json({ error: 'No access' }, { status: 403 })
+  }
+
+  const { error } = await admin.from('outlet_menu_items').delete().eq('id', id)
+  if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+  return NextResponse.json({ ok: true })
 }
