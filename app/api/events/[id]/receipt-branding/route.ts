@@ -1,5 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/admin'
-import { canonicalRoleKey, canPrintPaymentReceipt } from '@/lib/receipts/can-print-payment-receipt'
+import { canonicalRoleKey } from '@/lib/permissions'
+import { canPrintPaymentReceipt } from '@/lib/receipts/can-print-payment-receipt'
 import { NextResponse } from 'next/server'
 
 export async function GET(request: Request, ctx: { params: Promise<{ id: string }> }) {
