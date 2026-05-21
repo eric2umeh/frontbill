@@ -1,5 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { canonicalRoleKey } from '@/lib/permissions'
+import { canPrintPaymentReceipt } from '@/lib/receipts/can-print-payment-receipt'
 import { NextResponse } from 'next/server'
 
 /** Receipt header uses org legal/property branding; anon client reads are often blocked by RLS/embed quirks. */
@@ -41,6 +42,10 @@ export async function GET(request: Request, ctx: { params: Promise<{ id: string 
     const sameTenant = !!callerOrgId && callerOrgId === bookingOrgId
 
     if (!isSuperAdmin && !sameTenant) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+
+    if (!canPrintPaymentReceipt(caller.role)) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
