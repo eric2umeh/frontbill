@@ -4,7 +4,10 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useReservationsEventsHeader } from '@/components/reservations/reservations-events-header'
 import { format, parseISO } from 'date-fns'
 import { useAuth } from '@/lib/auth-context'
-import { EventClientSearchField } from '@/components/events/event-client-search-field'
+import {
+  EventClientSearchField,
+  type EventClientValue,
+} from '@/components/events/event-client-search-field'
 import {
   EventPaymentSection,
   type EventPaymentFormValue,
@@ -66,10 +69,15 @@ const emptyForm = {
   end_date: '',
   start_time: '',
   end_time: '',
+  client_type: 'guest' as EventClientValue['client_type'],
   client_name: '',
   client_phone: '',
   client_email: '',
+  client_address: '',
   guest_id: null as string | null,
+  client_organization_id: null as string | null,
+  org_type: 'other',
+  contact_person: '',
   expected_attendees: '',
   estimated_value: '',
   payment: defaultPayment(),
@@ -149,18 +157,18 @@ export function EventsPanel() {
     setDialogOpen(true)
   }
 
-  const setClientFields = (client: {
-    client_name: string
-    client_phone: string
-    client_email: string
-    guest_id?: string | null
-  }) => {
+  const setClientFields = (client: EventClientValue) => {
     setForm((f) => ({
       ...f,
+      client_type: client.client_type,
       client_name: client.client_name,
       client_phone: client.client_phone,
       client_email: client.client_email,
-      guest_id: client.guest_id ?? null,
+      client_address: client.client_address,
+      guest_id: client.guest_id,
+      client_organization_id: client.client_organization_id,
+      org_type: client.org_type,
+      contact_person: client.contact_person,
     }))
   }
 
@@ -177,12 +185,20 @@ export function EventsPanel() {
       end_date: ev.end_date,
       start_time: ev.start_time || '',
       end_time: ev.end_time || '',
+      client_type:
+        ev.client_type === 'organization'
+          ? 'organization'
+          : 'guest',
       client_name: ev.client_name || '',
       client_phone: ev.client_phone || '',
       client_email: ev.client_email || '',
+      client_address: '',
+      guest_id: ev.guest_id || null,
+      client_organization_id: ev.client_organization_id || null,
+      org_type: 'other',
+      contact_person: '',
       expected_attendees: ev.expected_attendees != null ? String(ev.expected_attendees) : '',
       estimated_value: ev.estimated_value != null ? String(ev.estimated_value) : '',
-      guest_id: null,
       payment: {
         payment_method: ev.payment_method || 'cash',
         payment_status:
@@ -235,6 +251,14 @@ export function EventsPanel() {
       toast.error('Please enter the amount paid')
       return
     }
+    if (!form.client_name.trim()) {
+      toast.error(
+        form.client_type === 'organization'
+          ? 'Organization name is required'
+          : 'Guest name is required',
+      )
+      return
+    }
 
     setSaving(true)
     try {
@@ -246,10 +270,15 @@ export function EventsPanel() {
         end_date: resolvedEnd,
         start_time: form.start_time,
         end_time: form.end_time,
+        client_type: form.client_type,
         client_name: form.client_name,
         client_phone: form.client_phone,
         client_email: form.client_email,
+        client_address: form.client_address,
         guest_id: form.guest_id,
+        client_organization_id: form.client_organization_id,
+        org_type: form.org_type,
+        contact_person: form.contact_person,
         expected_attendees: form.expected_attendees,
         estimated_value: form.estimated_value,
         payment_method: form.payment.payment_method,
@@ -534,12 +563,18 @@ export function EventsPanel() {
                 key={editing?.id ?? 'create'}
                 organizationId={organizationId}
                 value={{
+                  client_type: form.client_type,
                   client_name: form.client_name,
                   client_phone: form.client_phone,
                   client_email: form.client_email,
+                  client_address: form.client_address,
                   guest_id: form.guest_id,
+                  client_organization_id: form.client_organization_id,
+                  org_type: form.org_type,
+                  contact_person: form.contact_person,
                 }}
                 onChange={setClientFields}
+                disabled={saving}
               />
             ) : (
               <div className="space-y-1">
