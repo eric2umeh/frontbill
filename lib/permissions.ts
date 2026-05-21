@@ -257,7 +257,7 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
     key: 'cashier',
     label: 'Cashier',
     description:
-      'Cash control and daily treasury: view dashboard, today’s transactions, payments, and reports; record cash received from front desk and outlets; post operating expenses and refunds; read-only on bookings, reservations/events, guests, organizations, and outlet sales (orders, receipts, daily reports — no POS selling or menu edits). Cannot create, edit, or delete bookings, reservations, events, guests, or organizations. No night audit run, user administration, analytics, or ledger settlement.',
+      'Cash control and daily treasury: view dashboard, today’s transactions, payments, and reports; record cash received from front desk and outlets; post operating expenses and refunds; read-only on bookings, reservations/events, guests, organizations, and outlet sales (print receipts for settled orders, daily reports — no POS selling or menu edits). Cannot create, edit, or delete bookings, reservations, events, guests, or organizations. No Night Audit menu, user administration, analytics, or ledger settlement.',
     color: 'bg-lime-100 text-lime-950 dark:bg-lime-950/35 dark:text-lime-100',
     permissions: [
       'dashboard:view',
@@ -279,7 +279,6 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
       'expenses:edit',
       'reconciliation:view',
       'ledger:view',
-      'night_audit:view',
       'outlet:view',
       'outlet:reports',
       'outlet:receipt',
