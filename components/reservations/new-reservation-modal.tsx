@@ -32,6 +32,13 @@ import { BOOKING_MODAL_ROOMS_LIMIT, isRoomAssignable, normalizeRoomsForBookingPi
 import { Checkbox } from '@/components/ui/checkbox'
 import { applyPaymentToGuestCityLedger } from '@/lib/utils/guest-city-ledger'
 import { insertFolioCharges } from '@/lib/utils/insert-folio-charges'
+import {
+  formatReservationPaymentMethodLabel,
+  isReservationPendingHold,
+  RESERVATION_PAYMENT_METHOD_OPTIONS,
+  RESERVATION_PAYMENT_METHOD_PENDING,
+  type ReservationPaymentMethod,
+} from '@/lib/reservations/reservation-payment-methods'
 import { buildBackdateDedupeKey } from '@/lib/backdate/dedupe-key'
 import { isStayCheckInConsideredBackdated } from '@/lib/hotel-date'
 import { hasPermission } from '@/lib/permissions'
@@ -91,7 +98,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
   const [pricePerNight, setPricePerNight] = useState(0)
   const [customPrice, setCustomPrice] = useState<number | ''>('')
   // Payment
-  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'pos' | 'card' | 'transfer'>('pos')
+  const [paymentMethod, setPaymentMethod] = useState<ReservationPaymentMethod>('pos')
   const [paymentStatus, setPaymentStatus] = useState<'paid' | 'partial' | 'unpaid'>('paid')
   const [partialAmount, setPartialAmount] = useState<number | ''>('')
   const [payAboveRoomTotal, setPayAboveRoomTotal] = useState(false)
@@ -371,11 +378,13 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
 
   const effectiveRate = (customPrice !== '' ? Number(customPrice) : pricePerNight) || 0
   const totalAmount = effectiveRate * nights
+  const pendingHold = isReservationPendingHold(paymentMethod)
+  const effectivePaymentStatus = pendingHold ? 'unpaid' : paymentStatus
   const rawPaid = Number(partialAmount) || 0
   let depositCalc = 0
-  if (paymentStatus === 'paid') {
+  if (!pendingHold && effectivePaymentStatus === 'paid') {
     depositCalc = payAboveRoomTotal ? Math.max(totalAmount, rawPaid || totalAmount) : totalAmount
-  } else if (paymentStatus === 'partial') {
+  } else if (!pendingHold && effectivePaymentStatus === 'partial') {
     depositCalc = payAboveRoomTotal ? Math.max(0, rawPaid) : Math.min(rawPaid, totalAmount)
   }
   const depositAmount = depositCalc
@@ -473,7 +482,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
       toast.error('Selected room is under maintenance — pick another')
       return
     }
-    if (paymentStatus === 'partial' && depositAmount <= 0) {
+    if (!pendingHold && paymentStatus === 'partial' && depositAmount <= 0) {
       toast.error('Please enter the amount paid')
       return
     }
@@ -555,7 +564,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
       }])
       if (fcErr) throw fcErr
 
-      if (depositAmount > 0 && balanceAmount > 0) {
+      if (!pendingHold && depositAmount > 0 && balanceAmount > 0) {
         const { error: payFcErr } = await insertFolioCharges(supabase, [{
           booking_id: booking.id,
           organization_id: orgId,
@@ -569,23 +578,22 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
         if (payFcErr) throw payFcErr
       }
 
-      // Record in transactions table
-      await supabase.from('transactions').insert([{
-        organization_id: orgId,
-        booking_id: booking.id,
-        transaction_id: `TXN-${Date.now().toString(36).toUpperCase()}`,
-        guest_name: formattedGuestName,
-        room: selectedRoom.room_number,
-        amount: totalAmount,
-        payment_method: paymentMethod,
-        status: bookingPaymentStatus,
-        description: `Reservation — ${folioId}`,
-        received_by: currentUserId,
-      }])
+      if (!pendingHold) {
+        await supabase.from('transactions').insert([{
+          organization_id: orgId,
+          booking_id: booking.id,
+          transaction_id: `TXN-${Date.now().toString(36).toUpperCase()}`,
+          guest_name: formattedGuestName,
+          room: selectedRoom.room_number,
+          amount: totalAmount,
+          payment_method: paymentMethod,
+          status: bookingPaymentStatus,
+          description: `Reservation — ${folioId}`,
+          received_by: currentUserId,
+        }])
+      }
 
-      // Always insert into payments table so Transactions page shows ALL transactions
-      // This includes both paid and unpaid/pending reservations
-      const paidAmount = depositAmount
+      const paidAmount = pendingHold ? 0 : depositAmount
       if (paidAmount > 0) {
         await supabase.from('payments').insert([{
           organization_id: orgId,
@@ -599,7 +607,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
         }])
       }
 
-      const prepayExcess = Math.max(0, depositAmount - totalAmount)
+      const prepayExcess = pendingHold ? 0 : Math.max(0, depositAmount - totalAmount)
       if (prepayExcess > 0 && finalGuestId) {
         const { data: gRow } = await supabase.from('guests').select('name').eq('id', finalGuestId).maybeSingle()
         const ledgerName = (gRow?.name || formattedGuestName).trim()
@@ -791,7 +799,23 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
             <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-2">
                   <Label>Payment Status</Label>
-                  <Select value={paymentStatus} onValueChange={(v: 'paid' | 'partial' | 'unpaid') => setPaymentStatus(v)}>
+                  <Select
+                    value={effectivePaymentStatus}
+                    onValueChange={(v: 'paid' | 'partial' | 'unpaid') => {
+                      if (v === 'unpaid') {
+                        setPaymentStatus(v)
+                        setPaymentMethod(RESERVATION_PAYMENT_METHOD_PENDING)
+                        setPartialAmount('')
+                        setPayAboveRoomTotal(false)
+                      } else {
+                        setPaymentStatus(v)
+                        if (paymentMethod === RESERVATION_PAYMENT_METHOD_PENDING) {
+                          setPaymentMethod('pos')
+                        }
+                      }
+                    }}
+                    disabled={pendingHold}
+                  >
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="paid">Full Payment</SelectItem>
@@ -805,14 +829,19 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
                   <Input
                     type="number"
                     min="0"
-                    max={paymentStatus === 'partial' && !payAboveRoomTotal ? totalAmount : undefined}
-                    value={paymentStatus === 'paid' && !payAboveRoomTotal ? totalAmount || '' : partialAmount}
+                    max={effectivePaymentStatus === 'partial' && !payAboveRoomTotal ? totalAmount : undefined}
+                    value={effectivePaymentStatus === 'paid' && !payAboveRoomTotal ? totalAmount || '' : partialAmount}
                     onChange={(e) => setPartialAmount(e.target.value === '' ? '' : Number(e.target.value))}
-                    disabled={paymentStatus === 'unpaid' || (paymentStatus === 'paid' && !payAboveRoomTotal)}
+                    disabled={
+                      pendingHold ||
+                      effectivePaymentStatus === 'unpaid' ||
+                      (effectivePaymentStatus === 'paid' && !payAboveRoomTotal)
+                    }
                     placeholder="Enter paid amount"
                   />
                 </div>
               </div>
+            {!pendingHold && effectivePaymentStatus !== 'unpaid' && (
             <div className="flex items-start gap-2 rounded-md border border-input p-3">
                 <Checkbox
                   id="res-pay-above-total"
@@ -832,18 +861,34 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
                   Guest is paying more than the room total — save the excess as city ledger credit for future stays or incidentals.
                 </Label>
               </div>
+            )}
             <p className="text-xs text-muted-foreground">
-              Payment validates the reservation. Use partial or unpaid only when the guest will pay later.
+              {pendingHold
+                ? 'Room dates are held without payment. Collect payment later or cancel if the guest does not attend.'
+                : 'Payment validates the reservation. Use partial or unpaid when the guest will pay later, or Pending (hold date, no payment) if they may not attend.'}
             </p>
             <div className="space-y-2">
               <Label>Payment Method</Label>
-              <Select value={paymentMethod} onValueChange={(v: 'cash' | 'pos' | 'card' | 'transfer') => setPaymentMethod(v)}>
+              <Select
+                value={paymentMethod}
+                onValueChange={(v: ReservationPaymentMethod) => {
+                  if (v === RESERVATION_PAYMENT_METHOD_PENDING) {
+                    setPaymentMethod(v)
+                    setPaymentStatus('unpaid')
+                    setPartialAmount('')
+                    setPayAboveRoomTotal(false)
+                  } else {
+                    setPaymentMethod(v)
+                  }
+                }}
+              >
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="pos">POS</SelectItem>
-                  <SelectItem value="cash">Cash</SelectItem>
-                  <SelectItem value="transfer">Transfer</SelectItem>
-                  <SelectItem value="card">Card</SelectItem>
+                  {RESERVATION_PAYMENT_METHOD_OPTIONS.map((o) => (
+                    <SelectItem key={o.value} value={o.value}>
+                      {o.label}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
@@ -854,7 +899,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
                 {balanceAmount > 0 && <div className="flex justify-between text-orange-700 font-medium"><span>Balance Due</span><span>{formatNaira(balanceAmount)}</span></div>}
                 <div className="flex justify-between items-center pt-1">
                   <span className="text-muted-foreground">Method</span>
-                  <Badge variant="outline">{paymentMethod.replace('_', ' ')}</Badge>
+                  <Badge variant="outline">{formatReservationPaymentMethodLabel(paymentMethod)}</Badge>
                 </div>
               </div>
             )}
