@@ -31,8 +31,14 @@ function parseEventBody(body: Record<string, unknown>) {
     venue: body.venue != null ? String(body.venue).trim() || null : null,
     start_date,
     end_date,
-    start_time: body.start_time != null ? String(body.start_time).trim() || null : null,
-    end_time: body.end_time != null ? String(body.end_time).trim() || null : null,
+    start_time:
+      body.start_time != null && String(body.start_time).trim()
+        ? String(body.start_time).trim()
+        : null,
+    end_time:
+      body.end_time != null && String(body.end_time).trim()
+        ? String(body.end_time).trim()
+        : null,
     status: 'planned' as HotelEventStatus,
     client_name: body.client_name != null ? String(body.client_name).trim() || null : null,
     client_phone: body.client_phone != null ? String(body.client_phone).trim() || null : null,
