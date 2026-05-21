@@ -142,7 +142,7 @@ export const ALL_PERMISSIONS: { key: Permission; label: string; group: string }[
   { key: 'outlet:menu', label: 'Manage Outlet Menu (categories & items)', group: 'Outlets' },
   { key: 'outlet:sell', label: 'Take Orders & Sell (POS)', group: 'Outlets' },
   { key: 'outlet:void', label: 'Void Outlet Orders', group: 'Outlets' },
-  { key: 'outlet:reports', label: 'Outlet Sales Reports', group: 'Outlets' },
+  { key: 'outlet:reports', label: 'Outlet Sales Reports & Night Audit', group: 'Outlets' },
   { key: 'outlet:receipt', label: 'Print / View Outlet Receipts', group: 'Outlets' },
 
   { key: 'analytics:view', label: 'View Analytics', group: 'Analytics' },
