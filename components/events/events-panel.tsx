@@ -53,6 +53,7 @@ import {
 import { PageLoadingState } from '@/components/loading-screen'
 import { toast } from 'sonner'
 import { Plus, Pencil, Trash2, Loader2 } from 'lucide-react'
+import { EventPaymentReceiptButton } from '@/components/receipts/event-payment-receipt-button'
 
 const defaultPayment = (): EventPaymentFormValue => ({
   payment_method: 'cash',
@@ -85,7 +86,7 @@ const emptyForm = {
 }
 
 export function EventsPanel() {
-  const { role, organizationId } = useAuth()
+  const { role, organizationId, userId, name: userName } = useAuth()
   const canManage = canManageEvents(role)
   const { setHeaderActions } = useReservationsEventsHeader()
   const [events, setEvents] = useState<HotelEventRow[]>([])
@@ -439,6 +440,20 @@ export function EventsPanel() {
               <span className="text-right block">
                 {ev.estimated_value != null ? formatNaira(Number(ev.estimated_value)) : '—'}
               </span>
+            ),
+          },
+          {
+            key: 'receipt',
+            label: '',
+            render: (ev) => (
+              <div className="flex justify-end">
+                <EventPaymentReceiptButton
+                  event={ev}
+                  role={role}
+                  userId={userId}
+                  userName={userName}
+                />
+              </div>
             ),
           },
           ...(canManage
