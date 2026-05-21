@@ -34,7 +34,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { toast } from 'sonner'
-import { Loader2, Pencil, Plus, Sparkles, Trash2 } from 'lucide-react'
+import { Loader2, Pencil, Plus, Trash2 } from 'lucide-react'
 import { formatNaira } from '@/lib/utils/currency'
 import { outletApiHeaders } from '@/lib/outlets/outlet-api-headers'
 import { OutletItemMetaFields } from '@/components/outlets/outlet-item-meta-fields'
@@ -57,7 +57,6 @@ const emptyItemForm = {
 }
 
 export function OutletMenuManager({ department, categories, items, canManage, onRefresh }: Props) {
-  const [seeding, setSeeding] = useState(false)
   const [saving, setSaving] = useState(false)
   const [newCatName, setNewCatName] = useState('')
   const [form, setForm] = useState(emptyItemForm)
@@ -86,27 +85,6 @@ export function OutletMenuManager({ department, categories, items, canManage, on
       tags: [...(it.tags || [])],
     })
     setEditItemActive(it.is_active)
-  }
-
-  const seedDefaults = async () => {
-    setSeeding(true)
-    try {
-      const res = await fetch('/api/outlets/seed-menu', {
-        method: 'POST',
-        headers: await outletApiHeaders({ 'Content-Type': 'application/json' }),
-        credentials: 'include',
-        body: JSON.stringify({ department }),
-      })
-      const json = await res.json().catch(() => ({}))
-      if (!res.ok) {
-        toast.error(json.error || 'Seed failed — run scripts/050_outlet_menu.sql in Supabase first')
-        return
-      }
-      toast.success(`Added ${json.inserted ?? 0} categories`)
-      onRefresh()
-    } finally {
-      setSeeding(false)
-    }
   }
 
   const addCategory = async () => {
@@ -298,18 +276,7 @@ export function OutletMenuManager({ department, categories, items, canManage, on
           </CardHeader>
           <CardContent className="space-y-4">
             {canManage && (
-              <>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  className="w-full gap-2"
-                  onClick={() => void seedDefaults()}
-                  disabled={seeding}
-                >
-                  {seeding ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-                  Load default category list
-                </Button>
-                <div className="flex gap-2">
+              <div className="flex gap-2">
                   <Input
                     placeholder="New category name"
                     value={newCatName}
@@ -320,7 +287,6 @@ export function OutletMenuManager({ department, categories, items, canManage, on
                     <Plus className="h-4 w-4" />
                   </Button>
                 </div>
-              </>
             )}
             <ul className="text-sm space-y-1 max-h-48 overflow-y-auto border rounded-md p-2">
               {categories.length === 0 ? (
