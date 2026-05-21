@@ -34,7 +34,7 @@ type Props = {
 }
 
 export function EventPaymentSection({ totalAmount, value, onChange, disabled }: Props) {
-  const paymentMethod = value.payment_method || 'cash'
+  const paymentMethod = value.payment_method || 'pos'
   const paymentStatus = value.payment_status || 'paid'
   const partialAmount = value.partial_amount
   const payAboveTotal = value.pay_above_total
@@ -143,10 +143,10 @@ export function EventPaymentSection({ totalAmount, value, onChange, disabled }: 
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="cash">Cash</SelectItem>
               <SelectItem value="pos">POS</SelectItem>
-              <SelectItem value="card">Card</SelectItem>
+              <SelectItem value="cash">Cash</SelectItem>
               <SelectItem value="transfer">Transfer</SelectItem>
+              <SelectItem value="card">Card</SelectItem>
             </SelectContent>
           </Select>
         </div>
