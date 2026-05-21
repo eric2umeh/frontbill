@@ -28,7 +28,8 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
   const [categories, setCategories] = useState<OutletMenuCategoryRow[]>([])
   const [items, setItems] = useState<OutletMenuItemRow[]>([])
   const [orders, setOrders] = useState<OutletOrderRow[]>([])
-  const [tab, setTab] = useState('sell')
+  const canSell = hasPermission(role, 'outlet:sell')
+  const [tab, setTab] = useState(canSell ? 'sell' : 'orders')
   const [receiptOrder, setReceiptOrder] = useState<OutletOrderRow | null>(null)
   const [receiptOpen, setReceiptOpen] = useState(false)
   const [receiptAutoPrint, setReceiptAutoPrint] = useState(false)
@@ -108,10 +109,12 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
 
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
-          <TabsTrigger value="sell" className="gap-1">
-            <ShoppingCart className="h-4 w-4" />
-            Take order
-          </TabsTrigger>
+          {canSell && (
+            <TabsTrigger value="sell" className="gap-1">
+              <ShoppingCart className="h-4 w-4" />
+              Take order
+            </TabsTrigger>
+          )}
           {canViewMenu && (
             <TabsTrigger value="menu" className="gap-1">
               <UtensilsCrossed className="h-4 w-4" />
@@ -130,18 +133,20 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
           )}
         </TabsList>
 
-        <TabsContent value="sell" className="mt-4">
-          <OutletPos
-            department={department}
-            departmentLabel={def.label}
-            organizationId={organizationId ?? ''}
-            categories={categories}
-            items={items}
-            canPrintReceipt={canReceipt}
-            onSettled={() => void load()}
-            onOrderSettled={(order) => openReceipt(order, true)}
-          />
-        </TabsContent>
+        {canSell && (
+          <TabsContent value="sell" className="mt-4">
+            <OutletPos
+              department={department}
+              departmentLabel={def.label}
+              organizationId={organizationId ?? ''}
+              categories={categories}
+              items={items}
+              canPrintReceipt={canReceipt}
+              onSettled={() => void load()}
+              onOrderSettled={(order) => openReceipt(order, true)}
+            />
+          </TabsContent>
+        )}
 
         {canViewMenu && (
           <TabsContent value="menu" className="mt-4">
