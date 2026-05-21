@@ -1,6 +1,10 @@
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { resolveEventsAuthed } from '@/lib/events/api-auth'
+import {
+  parseEventPaymentFromBody,
+  recordEventPaymentSideEffects,
+} from '@/lib/events/record-event-payment'
 import type { HotelEventStatus } from '@/lib/events/types'
 
 const STATUSES: HotelEventStatus[] = ['planned', 'confirmed', 'cancelled', 'completed']
@@ -35,7 +39,6 @@ function parseEventBody(body: Record<string, unknown>) {
       body.estimated_value != null && body.estimated_value !== ''
         ? Math.max(0, Number(body.estimated_value) || 0)
         : null,
-    notes: body.notes != null ? String(body.notes).trim() || null : null,
   }
 }
 
@@ -75,8 +78,19 @@ export async function POST(request: Request) {
   if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status })
 
   const body = await request.json().catch(() => ({}))
-  const parsed = parseEventBody(body as Record<string, unknown>)
+  const raw = body as Record<string, unknown>
+  const parsed = parseEventBody(raw)
   if ('error' in parsed) return NextResponse.json({ error: parsed.error }, { status: 400 })
+
+  const payment = parseEventPaymentFromBody(raw, parsed.estimated_value)
+  if (payment.uiPaymentStatus === 'partial' && payment.depositAmount <= 0) {
+    return NextResponse.json({ error: 'Enter the amount paid for partial payment' }, { status: 400 })
+  }
+
+  const guestId =
+    raw.guest_id != null && String(raw.guest_id).trim()
+      ? String(raw.guest_id).trim()
+      : null
 
   const admin = createAdminClient()
   const now = new Date().toISOString()
@@ -85,6 +99,11 @@ export async function POST(request: Request) {
     .insert({
       organization_id: auth.ctx.organizationId,
       ...parsed,
+      payment_method: payment.payment_method,
+      payment_status: payment.payment_status,
+      amount_paid: payment.amount_paid,
+      balance: payment.balance,
+      remarks: payment.remarks,
       created_by: auth.ctx.userId,
       updated_by: auth.ctx.userId,
       updated_at: now,
@@ -93,5 +112,27 @@ export async function POST(request: Request) {
     .single()
 
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+
+  const side = await recordEventPaymentSideEffects(admin, {
+    organizationId: auth.ctx.organizationId,
+    userId: auth.ctx.userId,
+    eventId: data.id,
+    title: data.title,
+    clientName: data.client_name,
+    venue: data.venue,
+    guestId,
+    estimatedValue: data.estimated_value,
+    paymentMethod: payment.payment_method,
+    storedPaymentStatus: payment.payment_status,
+    depositAmount: payment.depositAmount,
+    balanceAmount: payment.balance,
+  })
+  if (side.error) {
+    return NextResponse.json(
+      { event: data, warning: `Event saved but payment ledger failed: ${side.error}` },
+      { status: 201 },
+    )
+  }
+
   return NextResponse.json({ event: data })
 }
