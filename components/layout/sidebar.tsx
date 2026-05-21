@@ -55,7 +55,7 @@ const routes: Array<{
     permission: 'bookings:view',
   },
   {
-    label: 'Reservations',
+    label: 'Reservations/Events',
     icon: CalendarClock,
     href: '/reservations',
     permission: 'reservations:view',
