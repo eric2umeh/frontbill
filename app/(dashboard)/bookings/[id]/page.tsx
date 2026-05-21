@@ -54,6 +54,14 @@ import {
   type PaymentReceiptChargeRow,
 } from "@/components/receipts/payment-receipt-dialog";
 import type { PaymentReceiptBranding } from "@/lib/receipts/receipt-format";
+import { canPrintPaymentReceipt } from "@/lib/receipts/can-print-payment-receipt";
+import {
+  buildFolioContextLinesForReceipt,
+  filterPaymentLedgerTransactions,
+  folioRowEligibleForPaymentReceipt,
+  transactionToReceiptChargeRow,
+  type PaymentLedgerReceiptRow,
+} from "@/lib/receipts/booking-receipt-utils";
 import { canAdministerBookingRecord } from "@/lib/booking/can-administer-booking-record";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/lib/auth-context";
@@ -95,81 +103,6 @@ import {
   recordGuestLedgerCashMovement,
 } from "@/lib/utils/guest-city-ledger";
 
-/** Row can generate a payment receipt (paid money in — negative folio amount or explicit payment type). */
-function folioRowEligibleForPaymentReceipt(charge: {
-  type?: string;
-  amount?: number;
-  paymentStatus?: string;
-}): boolean {
-  if (charge.type === "payment") return true;
-  if (Number(charge.amount) < 0) return true;
-  const t = String(charge.type || "").toLowerCase();
-  const paid = String(charge.paymentStatus || "").toLowerCase() === "paid";
-  if (paid && (t === "extended_stay" || t === "charge")) return true;
-  return false;
-}
-
-type PaymentLedgerReceiptRow = {
-  id: string;
-  created_at: string;
-  amount: number;
-  payment_method: string | null;
-  description: string | null;
-  transaction_id: string | null;
-  receivedByLabel: string;
-};
-
-function transactionToReceiptChargeRow(
-  tx: PaymentLedgerReceiptRow,
-): PaymentReceiptChargeRow {
-  const amt = Math.abs(Number(tx.amount) || 0);
-  return {
-    id: tx.id,
-    timestamp: tx.created_at,
-    description: tx.description || undefined,
-    amount: -amt,
-    type: "payment",
-    createdBy: tx.receivedByLabel,
-    paymentMethod: tx.payment_method,
-  };
-}
-
-/** Lines printed on payment receipts so room, add-on and extension charges are visible to the guest. */
-function buildFolioContextLinesForReceipt(
-  charges: Array<{
-    id?: string;
-    type?: string;
-    description?: string;
-    amount?: number;
-    paymentStatus?: string;
-  }>,
-): string[] {
-  const types = new Set([
-    "room_charge",
-    "additional_charge",
-    "extended_stay",
-    "reservation",
-    "late_checkout",
-    "charge",
-  ]);
-  const lines: string[] = [];
-  for (const c of charges) {
-    const t = String(c.type || "").toLowerCase();
-    if (t === "payment" || t === "folio_note") continue;
-    if (!types.has(t)) continue;
-    const desc = String(c.description || "").trim() || t.replace(/_/g, " ");
-    const amt = Math.abs(Number(c.amount) || 0);
-    const ps = String(c.paymentStatus || "").toLowerCase();
-    let tag = "";
-    if (ps === "paid") tag = " · Paid on spot";
-    else if (ps === "city_ledger") tag = " · City ledger";
-    else if (["pending", "unpaid", "partial"].includes(ps))
-      tag = " · On folio / unpaid";
-    lines.push(`${desc}: +${formatNaira(amt)}${tag}`);
-  }
-  return lines.slice(-24);
-}
-
 export default function BookingDetailPage({
   params: _params,
 }: {
@@ -181,6 +114,7 @@ export default function BookingDetailPage({
   const roleKey = canonicalRoleKey(role);
   const canManageFolio =
     roleKey === "superadmin" || roleKey === "admin" || roleKey === "front_desk";
+  const canPrintReceipt = canPrintPaymentReceipt(role);
   const canRequestRoomChange =
     hasPermission(role, "room_change:request") ||
     roleKey === "front_desk" ||
@@ -441,25 +375,7 @@ export default function BookingDetailPage({
         .eq("booking_id", id)
         .order("created_at", { ascending: false });
 
-      const payLedgerRaw = (txRows || []).filter(
-        (t: {
-          transaction_id?: string | null;
-          description?: string | null;
-          status?: string | null;
-        }) => {
-          const st = String(t.status || "").toLowerCase();
-          if (st === "void" || st === "cancelled") return false;
-          const tid = String(t.transaction_id || "");
-          const desc = String(t.description || "").toLowerCase();
-          if (tid.startsWith("PAY-")) return true;
-          if (desc.includes("payment received")) return true;
-          if (desc.includes("booking created")) return true;
-          if (desc.includes("city ledger top-up")) return true;
-          if (desc.includes("add credit") || desc.includes("via add credit"))
-            return true;
-          return false;
-        },
-      );
+      const payLedgerRaw = filterPaymentLedgerTransactions(txRows || []);
 
       const receiverIds = [
         ...new Set(
@@ -2305,7 +2221,7 @@ export default function BookingDetailPage({
                         {formatNaira(Math.abs(charge.amount))}
                       </div>
                       {folioRowEligibleForPaymentReceipt(charge) &&
-                        canManageFolio && (
+                        canPrintReceipt && (
                           <Button
                             size="sm"
                             variant="secondary"
@@ -2426,7 +2342,7 @@ export default function BookingDetailPage({
                   {formatNaira(totalBillBalance)}
                 </span>
               </div>
-              {canManageFolio && paymentLedgerRows.length > 0 && (
+              {canPrintReceipt && paymentLedgerRows.length > 0 && (
                 <div className="space-y-2 pt-1">
                   <div className="text-sm font-medium">
                     Print payment receipts
