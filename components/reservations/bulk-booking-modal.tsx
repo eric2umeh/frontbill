@@ -33,6 +33,13 @@ import { appendBulkGroupNote, createBulkGroupId } from '@/lib/utils/bulk-booking
 import { StayDateRangeFields } from '@/components/shared/stay-date-range-fields'
 import { BOOKING_MODAL_ROOMS_LIMIT, normalizeRoomsForBookingPickers } from '@/lib/utils/room-bookability'
 import { insertFolioCharges } from '@/lib/utils/insert-folio-charges'
+import {
+  formatReservationPaymentMethodLabel,
+  isReservationPendingHold,
+  RESERVATION_PAYMENT_METHOD_OPTIONS,
+  RESERVATION_PAYMENT_METHOD_PENDING,
+  type ReservationPaymentMethod,
+} from '@/lib/reservations/reservation-payment-methods'
 import { applyPaymentToGuestCityLedger } from '@/lib/utils/guest-city-ledger'
 import { buildBackdateDedupeKey } from '@/lib/backdate/dedupe-key'
 import { hasPermission } from '@/lib/permissions'
@@ -123,7 +130,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
 
   // Step 3: Payment
   const [customRate, setCustomRate] = useState<number | ''>('')
-  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'pos' | 'card' | 'transfer'>('pos')
+  const [paymentMethod, setPaymentMethod] = useState<ReservationPaymentMethod>('pos')
   const [paymentStatus, setPaymentStatus] = useState<'paid' | 'partial' | 'unpaid'>('unpaid')
   const [partialAmount, setPartialAmount] = useState<number | ''>('')
   const [payAboveBulkRoomTotal, setPayAboveBulkRoomTotal] = useState(false)
@@ -147,6 +154,8 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
   const [totalRoomsCount, setTotalRoomsCount] = useState<number | ''>('')
 
   const nights = checkIn && checkOut ? differenceInDays(checkOut, checkIn) : 0
+  const pendingHold = isReservationPendingHold(paymentMethod)
+  const effectiveBulkPaymentStatus = pendingHold ? 'unpaid' : paymentStatus
 
   useEffect(() => { if (open) fetchBootstrap(); else handleClose() }, [open])
 
@@ -461,6 +470,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
     return true
   }
   const canSubmit = () => {
+    if (pendingHold) return true
     if (paymentStatus === 'partial' && (!partialAmount || Number(partialAmount) <= 0)) return false
     if (paymentStatus === 'paid' && payAboveBulkRoomTotal && (!partialAmount || Number(partialAmount) <= 0)) return false
     return true
@@ -821,8 +831,9 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
 
             const total = ratePn * nights
 
-            const depositAmt =
-              paymentStatus === 'paid'
+            const depositAmt = pendingHold
+              ? 0
+              : paymentStatus === 'paid'
                 ? payAboveBulkRoomTotal
                   ? Math.max(total, Number(partialAmount) || total)
                   : total
@@ -875,17 +886,19 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
                 })
               }
             }
-            await supabase.from('transactions').insert([{
-              organization_id: orgId, booking_id: booking.id,
-              transaction_id: `TXN-${Date.now().toString(36).toUpperCase()}`,
-              guest_name: entryGuestName || selectedOrg?.name || selectedGroupGuest?.name || 'Bulk Guest', room: room.room_number, amount: total,
-              payment_method: paymentMethod,
-              status: paymentStatus === 'paid' ? 'paid' : paymentStatus === 'partial' ? 'partial' : 'pending',
-              description: `${
-                wording === 'booking' ? 'Bulk booking' : 'Bulk reservation'
-              } — ${bookingType === 'organization' ? selectedOrg?.name : selectedGroupGuest?.name} — ${folioId}`,
-              received_by: currentUserId,
-            }])
+            if (!pendingHold) {
+              await supabase.from('transactions').insert([{
+                organization_id: orgId, booking_id: booking.id,
+                transaction_id: `TXN-${Date.now().toString(36).toUpperCase()}`,
+                guest_name: entryGuestName || selectedOrg?.name || selectedGroupGuest?.name || 'Bulk Guest', room: room.room_number, amount: total,
+                payment_method: paymentMethod,
+                status: paymentStatus === 'paid' ? 'paid' : paymentStatus === 'partial' ? 'partial' : 'pending',
+                description: `${
+                  wording === 'booking' ? 'Bulk booking' : 'Bulk reservation'
+                } — ${bookingType === 'organization' ? selectedOrg?.name : selectedGroupGuest?.name} — ${folioId}`,
+                received_by: currentUserId,
+              }])
+            }
             createdCount++
           }
         }
@@ -1229,27 +1242,53 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
                 <Label>Payment Method</Label>
                 <Select
                   value={paymentMethod}
-                  onValueChange={(v: 'cash' | 'pos' | 'card' | 'transfer') => setPaymentMethod(v)}
+                  onValueChange={(v: ReservationPaymentMethod) => {
+                    if (v === RESERVATION_PAYMENT_METHOD_PENDING) {
+                      setPaymentMethod(v)
+                      setPaymentStatus('unpaid')
+                      setPartialAmount('')
+                      setPayAboveBulkRoomTotal(false)
+                    } else {
+                      setPaymentMethod(v)
+                    }
+                  }}
                 >
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="pos">POS</SelectItem>
-                    <SelectItem value="cash">Cash</SelectItem>
-                    <SelectItem value="transfer">Transfer</SelectItem>
-                    <SelectItem value="card">Card</SelectItem>
+                    {RESERVATION_PAYMENT_METHOD_OPTIONS.map((o) => (
+                      <SelectItem key={o.value} value={o.value}>
+                        {o.label}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-muted-foreground">
-                  Payment validates the reservation. Unpaid holds the block until the guest pays.
+                  {pendingHold
+                    ? 'Dates are held without payment. Collect later or cancel if the group does not attend.'
+                    : 'Payment validates the block. Use unpaid or partial when they will pay later; Pending holds dates with no payment.'}
                 </p>
               </div>
 
               <div className="space-y-2">
                 <Label>Payment Status</Label>
-                <Select value={paymentStatus} onValueChange={(v: any) => {
-                  setPaymentStatus(v)
-                  if (v !== 'paid') setPayAboveBulkRoomTotal(false)
-                }}>
+                <Select
+                  value={effectiveBulkPaymentStatus}
+                  onValueChange={(v: 'paid' | 'partial' | 'unpaid') => {
+                    if (v === 'unpaid') {
+                      setPaymentStatus(v)
+                      setPaymentMethod(RESERVATION_PAYMENT_METHOD_PENDING)
+                      setPartialAmount('')
+                      setPayAboveBulkRoomTotal(false)
+                    } else {
+                      setPaymentStatus(v)
+                      if (paymentMethod === RESERVATION_PAYMENT_METHOD_PENDING) {
+                        setPaymentMethod('pos')
+                      }
+                      if (v !== 'paid') setPayAboveBulkRoomTotal(false)
+                    }
+                  }}
+                  disabled={pendingHold}
+                >
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="unpaid">Unpaid — pay at check-in</SelectItem>
@@ -1259,7 +1298,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
                 </Select>
               </div>
 
-              {paymentStatus === 'paid' && (
+              {!pendingHold && paymentStatus === 'paid' && (
                 <div className="flex items-start gap-2 rounded-md border border-input p-3">
                   <Checkbox
                     id="bulk-pay-above"
@@ -1285,7 +1324,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
                 </div>
               )}
 
-              {paymentStatus === 'partial' && (
+              {!pendingHold && paymentStatus === 'partial' && (
                 <div className="space-y-2">
                   <Label>Part Payment Amount (per room)</Label>
                   <Input type="number" min={1} placeholder="Amount paid now per room" value={partialAmount} onChange={(e) => setPartialAmount(e.target.value === '' ? '' : Number(e.target.value))} />
