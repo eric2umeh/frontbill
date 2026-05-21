@@ -9,9 +9,11 @@ import {
 } from '@/components/receipts/payment-receipt-dialog'
 import type { PaymentReceiptBranding } from '@/lib/receipts/receipt-format'
 import { canPrintPaymentReceipt } from '@/lib/receipts/can-print-payment-receipt'
+import { isEventPendingHold } from '@/lib/events/event-payment-methods'
 import type { HotelEventRow } from '@/lib/events/types'
 
 export function eventEligibleForPaymentReceipt(ev: HotelEventRow): boolean {
+  if (isEventPendingHold(ev.payment_method)) return false
   const paid = Number(ev.amount_paid) || 0
   if (paid > 0) return true
   const st = String(ev.payment_status || '').toLowerCase()
