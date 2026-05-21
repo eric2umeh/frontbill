@@ -52,8 +52,7 @@ export type RoleKey =
   | 'housekeeping'
   | 'maintenance'
   | 'store'
-  | 'restaurant'
-  | 'bar'
+  | 'food_beverage'
   | 'laundry'
   | 'gym'
 
@@ -357,25 +356,11 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
     ],
   },
   {
-    key: 'restaurant',
-    label: 'Restaurant',
+    key: 'food_beverage',
+    label: 'Food & Beverage',
     description:
-      'Restaurant POS only: sell, receipts, and daily outlet reports. Menu changes are done by Superadmin, Administrator, or Manager. No front desk, store, or other outlets.',
+      'Food & Beverage department: Restaurant, Main Bar, Pool Bar, and Banquets & Events POS — take orders, print receipts, and daily outlet reports. Menu changes are done by Superadmin, Administrator, or Manager. No front desk, store, laundry, or gym.',
     color: 'bg-rose-100 text-rose-900 dark:bg-rose-950/40 dark:text-rose-100',
-    permissions: [
-      'outlet:view',
-      'outlet:sell',
-      'outlet:reports',
-      'outlet:receipt',
-      'settings:view',
-    ],
-  },
-  {
-    key: 'bar',
-    label: 'Bar',
-    description:
-      'Main Bar and Pool Bar POS: take orders, print receipts, and outlet sales reports. Menu changes are done by Superadmin, Administrator, or Manager.',
-    color: 'bg-violet-100 text-violet-900 dark:bg-violet-950/40 dark:text-violet-100',
     permissions: [
       'outlet:view',
       'outlet:sell',
@@ -432,11 +417,18 @@ const PROFILE_ROLE_ALIASES: Record<string, RoleKey> = {
   housekeeping_staff: 'housekeeping',
   maint: 'maintenance',
   maintenance_staff: 'maintenance',
-  waiter: 'restaurant',
-  restaurant_staff: 'restaurant',
-  bartender: 'bar',
-  bar_staff: 'bar',
-  pool_bar: 'bar',
+  restaurant: 'food_beverage',
+  bar: 'food_beverage',
+  waiter: 'food_beverage',
+  restaurant_staff: 'food_beverage',
+  bartender: 'food_beverage',
+  bar_staff: 'food_beverage',
+  pool_bar: 'food_beverage',
+  food_and_beverage: 'food_beverage',
+  'food_&_beverage': 'food_beverage',
+  fnb: 'food_beverage',
+  banquets_staff: 'food_beverage',
+  events_staff: 'food_beverage',
   laundry_staff: 'laundry',
   gym_staff: 'gym',
 }
