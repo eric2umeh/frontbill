@@ -220,12 +220,8 @@ export default function DashboardLayout({
         router.replace('/maintenance')
         return
       }
-      if (rk === 'restaurant') {
-        router.replace('/outlets/restaurant')
-        return
-      }
-      if (rk === 'bar') {
-        router.replace('/outlets/main_bar')
+      if (rk === 'food_beverage') {
+        router.replace('/outlets')
         return
       }
       if (rk === 'laundry') {
