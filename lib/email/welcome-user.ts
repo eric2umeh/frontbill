@@ -5,6 +5,7 @@ const ROLE_LABELS: Record<string, string> = {
   manager: 'Manager',
   receptionist: 'Receptionist',
   accountant: 'Accountant',
+  cashier: 'Cashier',
   housekeeping: 'Housekeeping',
   staff: 'Staff',
 }
@@ -33,6 +34,12 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
     'Manage city ledger accounts',
     'Process settlements',
     'Export transaction history',
+  ],
+  cashier: [
+    'View daily transactions, payments, and sales',
+    'Record cash collections and operating expenses',
+    'Process refunds',
+    'Read-only access to bookings, reservations, events, and outlets',
   ],
   housekeeping: [
     'View room status',

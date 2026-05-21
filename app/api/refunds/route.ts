@@ -1,10 +1,9 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
-import { canonicalRoleKey } from '@/lib/permissions'
+import { hasPermission } from '@/lib/permissions'
 
 function canProcessRefunds(role: string | null | undefined): boolean {
-  const k = canonicalRoleKey(role)
-  return k === 'superadmin' || k === 'admin' || k === 'manager' || k === 'accountant'
+  return hasPermission(role, 'payments:refund')
 }
 
 export async function GET(request: Request) {

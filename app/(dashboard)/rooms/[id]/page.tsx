@@ -17,7 +17,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Separator } from '@/components/ui/separator'
 import { format, parseISO } from 'date-fns'
 import { useAuth } from '@/lib/auth-context'
-import { hasPermission } from '@/lib/permissions'
+import { canonicalRoleKey, hasPermission } from '@/lib/permissions'
 import { PageLoadingState, LoadingSpinner } from '@/components/loading-screen'
 
 const ROOM_TYPES = [
@@ -62,7 +62,10 @@ export default function RoomDetailPage() {
   const { role, organizationId } = useAuth()
   const canMutateRooms = hasPermission(role, 'rooms:edit')
   const canDeleteRooms = hasPermission(role, 'rooms:delete')
-  const canViewRoomFolio = ['superadmin', 'admin', 'manager', 'front_desk', 'accountant'].includes(role)
+  const roleKey = canonicalRoleKey(role)
+  const canViewRoomFolio =
+    roleKey != null &&
+    ['superadmin', 'admin', 'manager', 'front_desk', 'accountant', 'cashier'].includes(roleKey)
 
   const [room, setRoom] = useState<Room | null>(null)
   const [loading, setLoading] = useState(true)

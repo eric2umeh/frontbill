@@ -53,6 +53,7 @@ export type RoleKey =
   | 'housekeeping'
   | 'maintenance'
   | 'store'
+  | 'cashier'
   | 'food_beverage'
   | 'laundry'
   | 'gym'
@@ -253,6 +254,39 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
     ],
   },
   {
+    key: 'cashier',
+    label: 'Cashier',
+    description:
+      'Cash control and daily treasury: view dashboard, today’s transactions, payments, and reports; record cash received from front desk and outlets; post operating expenses and refunds; read-only on bookings, reservations/events, guests, organizations, and outlet sales (orders, receipts, daily reports — no POS selling or menu edits). Cannot create, edit, or delete bookings, reservations, events, guests, or organizations. No night audit run, user administration, analytics, or ledger settlement.',
+    color: 'bg-lime-100 text-lime-950 dark:bg-lime-950/35 dark:text-lime-100',
+    permissions: [
+      'dashboard:view',
+      'bookings:view',
+      'reservations:view',
+      'events:view',
+      'guests:view',
+      'organizations:view',
+      'transactions:view',
+      'transactions:create',
+      'transactions:export',
+      'payments:view',
+      'payments:create',
+      'payments:refund',
+      'reports:view',
+      'reports:export',
+      'expenses:view',
+      'expenses:create',
+      'expenses:edit',
+      'reconciliation:view',
+      'ledger:view',
+      'night_audit:view',
+      'outlet:view',
+      'outlet:reports',
+      'outlet:receipt',
+      'settings:view',
+    ],
+  },
+  {
     key: 'accountant',
     label: 'Accountant',
     description: 'Finance: transactions view and export (no transaction entry from this role configuration), reconciliation, refunds, ledger management and settlement tools, analytics, recording payments/receipts against folios opened by front office, bookings and reservations read-only, guests and organizations read-only. Opens Night Audit for review but cannot run audits or approve backdates.',
@@ -440,6 +474,10 @@ const PROFILE_ROLE_ALIASES: Record<string, RoleKey> = {
   events_staff: 'food_beverage',
   laundry_staff: 'laundry',
   gym_staff: 'gym',
+  cash: 'cashier',
+  cashiers: 'cashier',
+  cashier_staff: 'cashier',
+  treasury: 'cashier',
 }
 
 /** Every role that may use the signed-in hotel app shell (same set as `ROLE_DEFINITIONS`). */
@@ -472,6 +510,7 @@ export const EXPENSE_MENU_ROLE_KEYS: readonly RoleKey[] = [
   'admin',
   'manager',
   'accountant',
+  'cashier',
 ]
 
 export function canAccessExpenseMenu(userRole: string | null | undefined): boolean {

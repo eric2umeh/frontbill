@@ -35,6 +35,7 @@ function allowedReportsRole(role: string | null | undefined): boolean {
     k === "admin" ||
     k === "manager" ||
     k === "accountant" ||
+    k === "cashier" ||
     k === "front_desk" ||
     k === "auditor"
   );
