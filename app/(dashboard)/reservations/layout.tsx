@@ -6,16 +6,23 @@ import { cn } from '@/lib/utils'
 import { useAuth } from '@/lib/auth-context'
 import { hasPermission } from '@/lib/permissions'
 import { CalendarClock, PartyPopper } from 'lucide-react'
+import {
+  ReservationsEventsHeaderProvider,
+  useReservationsEventsHeader,
+} from '@/components/reservations/reservations-events-header'
 
-export default function ReservationsEventsLayout({ children }: { children: React.ReactNode }) {
+function ReservationsEventsLayoutInner({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const { role } = useAuth()
+  const { headerActions } = useReservationsEventsHeader()
   const showEvents = hasPermission(role, 'events:view')
 
   const reservationsActive =
     pathname === '/reservations' ||
     (pathname.startsWith('/reservations/') && !pathname.startsWith('/reservations/events'))
   const eventsActive = pathname.startsWith('/reservations/events')
+
+  const pageTitle = eventsActive ? 'Events' : 'Reservations'
 
   const tabClass = (active: boolean) =>
     cn(
@@ -26,12 +33,12 @@ export default function ReservationsEventsLayout({ children }: { children: React
     )
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Reservations/Events</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Room reservations and hotel events (banquets, conferences, hall hire).
-        </p>
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">{pageTitle}</h1>
+        {headerActions ? (
+          <div className="flex flex-wrap items-center justify-end gap-2 shrink-0">{headerActions}</div>
+        ) : null}
       </div>
       <nav className="flex flex-wrap gap-0 border-b">
         <Link href="/reservations" className={tabClass(reservationsActive)}>
@@ -47,5 +54,13 @@ export default function ReservationsEventsLayout({ children }: { children: React
       </nav>
       {children}
     </div>
+  )
+}
+
+export default function ReservationsEventsLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <ReservationsEventsHeaderProvider>
+      <ReservationsEventsLayoutInner>{children}</ReservationsEventsLayoutInner>
+    </ReservationsEventsHeaderProvider>
   )
 }
