@@ -273,8 +273,6 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
       'store:reports',
       'store:audit',
       'outlet:view',
-      'outlet:menu',
-      'outlet:sell',
       'outlet:reports',
       'outlet:receipt',
       'settings:view',
@@ -362,11 +360,10 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
     key: 'restaurant',
     label: 'Restaurant',
     description:
-      'Restaurant POS only: sell, receipts, daily outlet reports, and menu maintenance for the restaurant. No front desk, store, or other outlets.',
+      'Restaurant POS only: sell, receipts, and daily outlet reports. Menu changes are done by Superadmin, Administrator, or Manager. No front desk, store, or other outlets.',
     color: 'bg-rose-100 text-rose-900 dark:bg-rose-950/40 dark:text-rose-100',
     permissions: [
       'outlet:view',
-      'outlet:menu',
       'outlet:sell',
       'outlet:reports',
       'outlet:receipt',
@@ -377,11 +374,10 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
     key: 'bar',
     label: 'Bar',
     description:
-      'Main Bar and Pool Bar POS: take orders, print receipts, outlet sales reports, and manage bar menus. No restaurant, laundry, or front-office access.',
+      'Main Bar and Pool Bar POS: take orders, print receipts, and outlet sales reports. Menu changes are done by Superadmin, Administrator, or Manager.',
     color: 'bg-violet-100 text-violet-900 dark:bg-violet-950/40 dark:text-violet-100',
     permissions: [
       'outlet:view',
-      'outlet:menu',
       'outlet:sell',
       'outlet:reports',
       'outlet:receipt',
@@ -392,11 +388,10 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
     key: 'laundry',
     label: 'Laundry',
     description:
-      'Laundry POS: guest laundry tickets, receipts, daily reports, and laundry price list (categories & items). No bar, restaurant, or front desk.',
+      'Laundry POS: guest laundry tickets, receipts, and daily reports. Menu changes are done by Superadmin, Administrator, or Manager.',
     color: 'bg-sky-100 text-sky-900 dark:bg-sky-950/40 dark:text-sky-100',
     permissions: [
       'outlet:view',
-      'outlet:menu',
       'outlet:sell',
       'outlet:reports',
       'outlet:receipt',
