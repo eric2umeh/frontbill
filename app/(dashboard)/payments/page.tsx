@@ -33,7 +33,7 @@ export default function PaymentsPage() {
   const [recording, setRecording] = useState(false)
   const [selectedBookingId, setSelectedBookingId] = useState('')
   const [amount, setAmount] = useState('')
-  const [paymentMethod, setPaymentMethod] = useState('cash')
+  const [paymentMethod, setPaymentMethod] = useState('pos')
   const { initialLoading, startFetch, endFetch } = usePageData()
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -181,7 +181,7 @@ export default function PaymentsPage() {
       setRecordOpen(false)
       setSelectedBookingId('')
       setAmount('')
-      setPaymentMethod('cash')
+      setPaymentMethod('pos')
       fetchPayments()
     } catch (error: any) {
       toast.error(error.message || 'Failed to record payment')
@@ -283,10 +283,10 @@ export default function PaymentsPage() {
               <Select value={paymentMethod} onValueChange={setPaymentMethod}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="cash">Cash</SelectItem>
                   <SelectItem value="pos">POS</SelectItem>
-                  <SelectItem value="card">Card</SelectItem>
+                  <SelectItem value="cash">Cash</SelectItem>
                   <SelectItem value="transfer">Transfer</SelectItem>
+                  <SelectItem value="card">Card</SelectItem>
                 </SelectContent>
               </Select>
             </div>

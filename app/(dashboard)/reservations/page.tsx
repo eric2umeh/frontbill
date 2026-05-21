@@ -18,7 +18,9 @@ import { NewReservationModal } from '@/components/reservations/new-reservation-m
 import { ReserveCheckInModal, type ReserveCheckInBooking } from '@/components/reservations/reserve-checkin-modal'
 import { getUserDisplayName } from '@/lib/utils/user-display'
 import { fetchUserDisplayNameMap } from '@/lib/utils/fetch-user-display-names'
-import { getBulkGroupId } from '@/lib/utils/bulk-booking'
+import { getBulkGroupId, isLegacyBulkGroupId } from '@/lib/utils/bulk-booking'
+import { cancelBookingReservation } from '@/lib/reservations/cancel-reservation'
+import { formatReservationPaymentMethodLabel } from '@/lib/reservations/reservation-payment-methods'
 import { toast } from 'sonner'
 import { useReservationsEventsHeader } from '@/components/reservations/reservations-events-header'
 
@@ -252,14 +254,19 @@ export default function ReservationsPage() {
   }
 
   const handleCancelReservation = (res: Reservation) => {
+    const label = res.is_bulk ? 'Cancel this bulk reservation?' : 'Cancel this reservation?'
+    const detail = res.is_bulk
+      ? 'All rooms in this group will be cancelled and released.'
+      : 'Held rooms are freed; the folio becomes cancelled.'
+
     toast.custom(
       (tid: string | number) => (
         <div className="flex flex-col gap-3">
           <div className="flex gap-2 items-start">
             <div className="text-red-600 mt-0.5 text-lg">!</div>
             <div>
-              <p className="font-semibold">Cancel this reservation?</p>
-              <p className="text-sm text-muted-foreground">Held rooms are freed; the folio becomes cancelled.</p>
+              <p className="font-semibold">{label}</p>
+              <p className="text-sm text-muted-foreground">{detail}</p>
             </div>
           </div>
           <div className="flex gap-2 justify-end">
@@ -273,15 +280,46 @@ export default function ReservationsPage() {
                 setCancelReserveLoadingId(res.id)
                 try {
                   const supabase = createClient()
-                  const { error } = await supabase
-                    .from('bookings')
-                    .update({ status: 'cancelled', updated_by: userId || null, updated_at: new Date().toISOString() })
-                    .eq('id', res.id)
-                  if (error) throw error
-                  if (res.room_id) {
-                    await supabase.from('rooms').update({ status: 'available', updated_at: new Date().toISOString() }).eq('id', res.room_id)
+                  if (!supabase) throw new Error('Unable to connect')
+
+                  if (res.is_bulk && res.bulk_group_id) {
+                    const { data: rows, error: fetchErr } = isLegacyBulkGroupId(res.bulk_group_id)
+                      ? await supabase
+                          .from('bookings')
+                          .select('id, room_id, folio_id, notes')
+                          .eq('organization_id', organizationId)
+                          .ilike('folio_id', 'BLK-%')
+                      : await supabase
+                          .from('bookings')
+                          .select('id, room_id, folio_id, notes')
+                          .eq('organization_id', organizationId)
+                          .ilike('notes', `%bulk_group:${res.bulk_group_id}%`)
+
+                    if (fetchErr) throw fetchErr
+                    const groupRows = (rows || []).filter((row: any) => {
+                      if (!isLegacyBulkGroupId(res.bulk_group_id!)) return true
+                      return getBulkGroupId(row) === res.bulk_group_id
+                    })
+                    for (const row of groupRows) {
+                      const { error } = await cancelBookingReservation(supabase, {
+                        bookingId: row.id,
+                        roomId: row.room_id,
+                        userId,
+                      })
+                      if (error) throw new Error(error)
+                    }
+                    toast.success(
+                      `Cancelled ${groupRows.length} reservation${groupRows.length === 1 ? '' : 's'} in group`,
+                    )
+                  } else {
+                    const { error } = await cancelBookingReservation(supabase, {
+                      bookingId: res.id,
+                      roomId: res.room_id,
+                      userId,
+                    })
+                    if (error) throw new Error(error)
+                    toast.success('Reservation cancelled')
                   }
-                  toast.success('Reservation cancelled')
                   fetchReservations()
                 } catch (e: any) {
                   toast.error(e?.message || 'Failed to cancel')
@@ -378,9 +416,11 @@ export default function ReservationsPage() {
             label: 'Payment',
             responsive: 'md+',
             render: (res) => {
-              const effectiveStatus = res.payment_method === 'city_ledger' && res.payment_status === 'paid'
-                ? 'pending'
-                : res.payment_status
+              const effectiveStatus =
+                res.payment_method === 'pending' ||
+                (res.payment_method === 'city_ledger' && res.payment_status === 'paid')
+                  ? 'pending'
+                  : res.payment_status
               return (
                 <div className="space-y-1">
                   <Badge variant="outline" className={`${(paymentColors as Record<string, string>)[effectiveStatus]} max-md:text-[10px]`}>
@@ -401,8 +441,8 @@ export default function ReservationsPage() {
             responsive: 'md+',
             render: (res) => (
               <div className="space-y-1">
-                <Badge variant="outline" className="text-[10px] capitalize">
-                  {(res.payment_method || 'cash').replace(/_/g, ' ')}
+                <Badge variant="outline" className="text-[10px]">
+                  {formatReservationPaymentMethodLabel(res.payment_method || 'cash')}
                 </Badge>
                 {res.payment_method === 'city_ledger' && res.ledger_account_name && (
                   <div className="text-[10px] text-muted-foreground truncate max-w-[100px]">
@@ -429,7 +469,7 @@ export default function ReservationsPage() {
                     Check in
                   </Button>
                 )}
-                {!res.is_bulk && canCancelReservation && (
+                {canCancelReservation && res.status !== 'cancelled' && (
                   <Button
                     size="sm"
                     variant="outline"

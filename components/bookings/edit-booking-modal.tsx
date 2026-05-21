@@ -88,7 +88,7 @@ export function EditBookingModal({ open, onClose, booking, userId, onSaved }: Ed
   const [deposit, setDeposit] = useState('')
   const [balance, setBalance] = useState('')
   const [paymentStatus, setPaymentStatus] = useState('pending')
-  const [paymentMethod, setPaymentMethod] = useState('cash')
+  const [paymentMethod, setPaymentMethod] = useState('pos')
   const [ledgerAccountName, setLedgerAccountName] = useState('')
   const [status, setStatus] = useState('active')
   const [notes, setNotes] = useState('')

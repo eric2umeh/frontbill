@@ -20,7 +20,11 @@ import { createClient } from '@/lib/supabase/client'
 import { format, isBefore, startOfDay } from 'date-fns'
 import { useAuth } from '@/lib/auth-context'
 import { FolioAttachmentsPanel } from '@/components/folio/folio-attachments-panel'
+import { BookingPaymentReceiptPanel } from '@/components/receipts/booking-payment-receipt-panel'
 import { hasPermission } from '@/lib/permissions'
+import { cancelBookingReservation } from '@/lib/reservations/cancel-reservation'
+import { formatReservationPaymentMethodLabel } from '@/lib/reservations/reservation-payment-methods'
+import { PAYMENT_METHOD_SELECT_OPTIONS } from '@/lib/payments/payment-methods'
 
 export default function ReservationDetailPage({
   params,
@@ -28,7 +32,7 @@ export default function ReservationDetailPage({
   params: Promise<{ id: string }> | { id: string }
 }) {
   const router = useRouter()
-  const { role, userId, organizationId } = useAuth()
+  const { role, userId, organizationId, name: userName } = useAuth()
   const canCancelReservation = hasPermission(role, 'reservations:delete')
   const [rescheduleOpen, setRescheduleOpen] = useState(false)
   const [reschedulePending, setReschedulePending] = useState(false)
@@ -83,7 +87,13 @@ export default function ReservationDetailPage({
         setError('Reservation not found')
         return
       }
-      setReservation(data)
+      let payment_method = 'cash'
+      if (data.notes) {
+        if (data.notes.startsWith('payment_method:')) {
+          payment_method = data.notes.replace(/^payment_method:\s*/, '').split('|')[0].trim()
+        }
+      }
+      setReservation({ ...data, payment_method })
 
       if (userId) {
         try {
@@ -277,16 +287,14 @@ export default function ReservationDetailPage({
                 setActionLoading(true)
                 try {
                   const supabase = createClient()
-                  await supabase
-                    .from('bookings')
-                    .update({ status: 'cancelled' })
-                    .eq('id', rid)
-                  if (reservation?.rooms?.id) {
-                    await supabase
-                      .from('rooms')
-                      .update({ status: 'available', updated_at: new Date().toISOString() })
-                      .eq('id', reservation.rooms.id)
-                  }
+                  if (!supabase) throw new Error('Unable to connect')
+                  const roomId = reservation?.rooms?.id ?? reservation?.room_id
+                  const { error } = await cancelBookingReservation(supabase, {
+                    bookingId: rid,
+                    roomId,
+                    userId,
+                  })
+                  if (error) throw new Error(error)
                   toast.success('Reservation cancelled')
                   router.push('/reservations')
                 } catch (err: any) {
@@ -377,11 +385,11 @@ export default function ReservationDetailPage({
                   <SelectValue placeholder="Select method" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="cash">Cash</SelectItem>
-                  <SelectItem value="pos">POS</SelectItem>
-                  <SelectItem value="transfer">Transfer</SelectItem>
-                  <SelectItem value="card">Card</SelectItem>
-                  <SelectItem value="city_ledger">City Ledger</SelectItem>
+                  {PAYMENT_METHOD_SELECT_OPTIONS.map((o) => (
+                    <SelectItem key={o.value} value={o.value}>
+                      {o.label}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
@@ -573,9 +581,9 @@ export default function ReservationDetailPage({
                 <div className="text-sm text-muted-foreground">
                   {'Payment Method'}
                 </div>
-                <div className="font-semibold capitalize">
+                <div className="font-semibold">
                   {reservation.payment_method
-                    ? String(reservation.payment_method).replace('_', ' ')
+                    ? formatReservationPaymentMethodLabel(reservation.payment_method)
                     : '-'}
                 </div>
               </div>
@@ -619,7 +627,7 @@ export default function ReservationDetailPage({
                   {formatNaira(balance)}
                 </span>
               </div>
-              {balance > 0 && (
+              {balance > 0 && hasPermission(role, 'payments:create') && (
                 <Button
                   className="w-full"
                   onClick={() => setPaymentModalOpen(true)}
@@ -627,6 +635,19 @@ export default function ReservationDetailPage({
                   <CreditCard className="mr-2 h-4 w-4" />
                   {'Update Payment'}
                 </Button>
+              )}
+              {reservation?.id && (
+                <BookingPaymentReceiptPanel
+                  bookingId={reservation.id}
+                  folioId={reservation.folio_id}
+                  guestName={guest?.name}
+                  roomNumber={room?.room_number}
+                  role={role}
+                  userId={userId}
+                  userName={userName}
+                  organizationId={organizationId}
+                  variant="compact"
+                />
               )}
             </CardContent>
           </Card>

@@ -58,7 +58,7 @@ export function OutletPos({
   const [roomNumber, setRoomNumber] = useState('')
   const [tableLabel, setTableLabel] = useState('')
   const [orderType, setOrderType] = useState<'dine_in' | 'takeaway' | 'room_service'>('takeaway')
-  const [paymentMethod, setPaymentMethod] = useState('cash')
+  const [paymentMethod, setPaymentMethod] = useState('pos')
   const [bookingId, setBookingId] = useState('')
   const [roomGuestLabel, setRoomGuestLabel] = useState<string | null>(null)
   const [lookingUpRoom, setLookingUpRoom] = useState(false)
@@ -404,8 +404,8 @@ export function OutletPos({
             <Select value={paymentMethod} onValueChange={setPaymentMethod}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="cash">Cash</SelectItem>
                 <SelectItem value="pos">POS</SelectItem>
+                <SelectItem value="cash">Cash</SelectItem>
                 <SelectItem value="transfer">Transfer</SelectItem>
                 <SelectItem value="card">Card</SelectItem>
                 <SelectItem value="city_ledger">Charge to room (city ledger)</SelectItem>

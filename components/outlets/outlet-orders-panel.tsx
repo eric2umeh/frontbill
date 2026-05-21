@@ -3,6 +3,7 @@
 import { useMemo } from 'react'
 import { format, parseISO } from 'date-fns'
 import { formatNaira } from '@/lib/utils/currency'
+import { formatPaymentMethodLabel } from '@/lib/payments/payment-methods'
 import type { OutletOrderRow } from '@/lib/outlets/types'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -58,9 +59,7 @@ export function OutletOrdersPanel({ orders, canPrintReceipt, onPrintReceipt }: P
                 <td className="p-2">{o.guest_name || o.room_number || '—'}</td>
                 <td className="p-2 text-right font-medium">{formatNaira(o.subtotal)}</td>
                 <td className="p-2 text-xs">
-                  {o.payment_method === 'city_ledger' || o.payment_method === 'room_charge'
-                    ? 'City ledger'
-                    : o.payment_method?.replace('_', ' ') ?? '—'}
+                  {formatPaymentMethodLabel(o.payment_method)}
                 </td>
                 <td className="p-2">
                   <Badge variant={o.status === 'settled' ? 'default' : 'secondary'}>{o.status}</Badge>

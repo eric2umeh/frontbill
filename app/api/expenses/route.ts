@@ -3,8 +3,9 @@ import { NextResponse } from 'next/server'
 import { canAccessExpenseMenu, hasPermission } from '@/lib/permissions'
 import { ensureExpenseCategories } from '@/lib/expenses/seed-categories'
 import { resolveProfileNames } from '@/lib/expenses/resolve-profile-names'
+import { EXPENSE_PAYMENT_METHODS } from '@/lib/payments/payment-methods'
 
-const PAYMENT_METHODS = ['cash', 'transfer', 'pos', 'cheque', 'other'] as const
+const PAYMENT_METHODS = EXPENSE_PAYMENT_METHODS
 
 async function logExpenseAudit(
   admin: ReturnType<typeof createAdminClient>,

@@ -110,7 +110,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
   const [selectedRoom, setSelectedRoom] = useState<Room | null>(null)
   const [pricePerNight, setPricePerNight] = useState(0)
   const [customPrice, setCustomPrice] = useState(0)
-  const [paymentMethod, setPaymentMethod] = useState('cash')
+  const [paymentMethod, setPaymentMethod] = useState('pos')
   const [paymentStatus, setPaymentStatus] = useState<'paid' | 'partial'>('paid')
   const [amountPaid, setAmountPaid] = useState<number | ''>('')
   const [payAboveRoomTotal, setPayAboveRoomTotal] = useState(false)
@@ -927,7 +927,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
     const d = new Date(); d.setHours(0, 0, 0, 0)
     setCheckInDate(d); setCheckOutDate(new Date(d.getTime() + 86400000)); setNights(1)
     setSelectedRoomType(''); setSelectedRoom(null); setPricePerNight(0); setCustomPrice(0)
-    setPaymentMethod('cash'); setPaymentStatus('paid'); setAmountPaid(''); setPayAboveRoomTotal(false)
+    setPaymentMethod('pos'); setPaymentStatus('paid'); setAmountPaid(''); setPayAboveRoomTotal(false)
     setLedgerSearch(''); setLedgerAccount(''); setLedgerAccountName('')
     setLedgerTab('individual')
     setNewAccountName(''); setNewAccountPhone(''); setNewAccountEmail('')
@@ -1156,9 +1156,9 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
                 <Select value={paymentMethod} onValueChange={(v) => { setPaymentMethod(v); setLedgerAccount(''); setLedgerSearch(''); setLedgerAccountName(''); setPayAboveRoomTotal(false) }}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
+                    <SelectItem value="pos">POS</SelectItem>
                     <SelectItem value="cash">Cash</SelectItem>
                     <SelectItem value="transfer">Transfer</SelectItem>
-                    <SelectItem value="pos">POS</SelectItem>
                     <SelectItem value="city_ledger">City Ledger</SelectItem>
                   </SelectContent>
                 </Select>

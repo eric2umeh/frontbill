@@ -34,6 +34,14 @@ export async function PATCH(
     updated_at: new Date().toISOString(),
   }
 
+  if (body.status != null) {
+    const nextStatus = String(body.status).trim().toLowerCase()
+    if (!['planned', 'confirmed', 'cancelled', 'completed'].includes(nextStatus)) {
+      return NextResponse.json({ error: 'Invalid status' }, { status: 400 })
+    }
+    patch.status = nextStatus
+  }
+
   if (body.title != null) patch.title = String(body.title).trim()
   if (body.description !== undefined) patch.description = String(body.description || '').trim() || null
   if (body.venue !== undefined) patch.venue = String(body.venue || '').trim() || null

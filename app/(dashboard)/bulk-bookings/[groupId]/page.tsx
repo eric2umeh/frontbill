@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { ArrowLeft, Loader2, LogOut } from 'lucide-react'
+import { ArrowLeft, Loader2, LogOut, Ban } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/lib/auth-context'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -15,6 +15,8 @@ import { manualCheckoutEligible, resolvedCheckoutDateForClosing, DEFAULT_ORG_CHE
 import { CheckoutConfirmDialog } from '@/components/bookings/checkout-confirm-dialog'
 import { toast } from 'sonner'
 import { PageLoadingState } from '@/components/loading-screen'
+import { hasPermission } from '@/lib/permissions'
+import { cancelBookingReservation } from '@/lib/reservations/cancel-reservation'
 
 type BulkPageCheckoutDraft = { kind: 'row'; row: any } | { kind: 'all'; targets: any[] }
 
@@ -22,6 +24,8 @@ export default function BulkBookingDetailPage({ params }: { params: Promise<{ gr
   const router = useRouter()
   const { organizationId, userId, role } = useAuth()
   const canManageFolio = role === 'superadmin' || role === 'admin' || role === 'front_desk'
+  const canCancelReservation = hasPermission(role, 'reservations:delete')
+  const [cancelGroupLoading, setCancelGroupLoading] = useState(false)
   const [groupId, setGroupId] = useState('')
   const [rows, setRows] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -175,6 +179,36 @@ export default function BulkBookingDetailPage({ params }: { params: Promise<{ gr
   const totalBalance = rows.reduce((sum, row) => sum + Number(row.balance || 0), 0)
   const ledgerName = first?.notes?.match(/City Ledger:\s*([^|]+)/i)?.[1]?.trim()
 
+  const handleCancelGroup = async () => {
+    if (!rows.length) return
+    const active = rows.filter((r) => r.status !== 'cancelled')
+    if (!active.length) {
+      toast.message('All reservations in this group are already cancelled.')
+      return
+    }
+    if (!confirm(`Cancel ${active.length} reservation(s) in this group? Rooms will be released.`)) return
+
+    setCancelGroupLoading(true)
+    try {
+      const supabase = createClient()
+      if (!supabase) throw new Error('Unable to connect')
+      for (const row of active) {
+        const { error } = await cancelBookingReservation(supabase, {
+          bookingId: row.id,
+          roomId: row.room_id,
+          userId,
+        })
+        if (error) throw new Error(error)
+      }
+      toast.success(`Cancelled ${active.length} reservation(s)`)
+      await fetchBulkRows(groupId)
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Failed to cancel group')
+    } finally {
+      setCancelGroupLoading(false)
+    }
+  }
+
   if (loading) {
     return <PageLoadingState />
   }
@@ -227,21 +261,38 @@ export default function BulkBookingDetailPage({ params }: { params: Promise<{ gr
           <ArrowLeft className="mr-2 h-4 w-4" />
           Back
         </Button>
-        {canManageFolio && rows.some((r) => checkoutRowEligible(r)) && (
-          <Button
-            variant="outline"
-            className="shrink-0 text-amber-700 border-amber-200 hover:bg-amber-50"
-            disabled={checkoutAllLoading || checkoutDialogBusy}
-            onClick={handleCheckoutAllEligible}
-          >
-            {checkoutAllLoading ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <LogOut className="mr-2 h-4 w-4" />
-            )}
-            Check out eligible rooms
-          </Button>
-        )}
+        <div className="flex flex-wrap gap-2 shrink-0">
+          {canCancelReservation && rows.some((r) => r.status !== 'cancelled') && (
+            <Button
+              variant="outline"
+              className="text-destructive border-destructive/40 hover:bg-destructive/10"
+              disabled={cancelGroupLoading || checkoutDialogBusy}
+              onClick={() => void handleCancelGroup()}
+            >
+              {cancelGroupLoading ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Ban className="mr-2 h-4 w-4" />
+              )}
+              Cancel group
+            </Button>
+          )}
+          {canManageFolio && rows.some((r) => checkoutRowEligible(r)) && (
+            <Button
+              variant="outline"
+              className="text-amber-700 border-amber-200 hover:bg-amber-50"
+              disabled={checkoutAllLoading || checkoutDialogBusy || cancelGroupLoading}
+              onClick={handleCheckoutAllEligible}
+            >
+              {checkoutAllLoading ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <LogOut className="mr-2 h-4 w-4" />
+              )}
+              Check out eligible rooms
+            </Button>
+          )}
+        </div>
       </div>
 
       <div>

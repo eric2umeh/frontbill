@@ -17,6 +17,12 @@ import {
   type FolioRemarksAttachmentsValue,
 } from '@/components/folio/folio-remarks-attachments-field'
 import { computeEventPayment, type EventPaymentStatus } from '@/lib/events/compute-event-payment'
+import {
+  EVENT_PAYMENT_METHOD_OPTIONS,
+  EVENT_PAYMENT_METHOD_PENDING,
+  formatEventPaymentMethodLabel,
+  isEventPendingHold,
+} from '@/lib/events/event-payment-methods'
 
 export type EventPaymentFormValue = {
   payment_method: string
@@ -34,16 +40,23 @@ type Props = {
 }
 
 export function EventPaymentSection({ totalAmount, value, onChange, disabled }: Props) {
-  const paymentMethod = value.payment_method || 'cash'
-  const paymentStatus = value.payment_status || 'paid'
+  const paymentMethod = value.payment_method || 'pos'
+  const paymentStatus = isEventPendingHold(paymentMethod)
+    ? 'unpaid'
+    : value.payment_status || 'paid'
   const partialAmount = value.partial_amount
   const payAboveTotal = value.pay_above_total
+  const pendingHold = isEventPendingHold(paymentMethod)
 
   const { depositAmount, balanceAmount } = computeEventPayment({
     totalAmount,
     paymentStatus,
-    partialAmount: typeof partialAmount === 'number' ? partialAmount : Number(partialAmount) || 0,
-    payAboveTotal,
+    partialAmount: pendingHold
+      ? 0
+      : typeof partialAmount === 'number'
+        ? partialAmount
+        : Number(partialAmount) || 0,
+    payAboveTotal: pendingHold ? false : payAboveTotal,
   })
 
   const patch = (partial: Partial<EventPaymentFormValue>) => onChange({ ...value, ...partial })
@@ -66,8 +79,23 @@ export function EventPaymentSection({ totalAmount, value, onChange, disabled }: 
             <Label>Payment Status</Label>
             <Select
               value={paymentStatus}
-              onValueChange={(v: EventPaymentStatus) => patch({ payment_status: v })}
-              disabled={disabled}
+              onValueChange={(v: EventPaymentStatus) => {
+                if (v === 'unpaid') {
+                  patch({
+                    payment_status: v,
+                    payment_method: EVENT_PAYMENT_METHOD_PENDING,
+                    partial_amount: '',
+                    pay_above_total: false,
+                  })
+                } else {
+                  patch({
+                    payment_status: v,
+                    payment_method:
+                      paymentMethod === EVENT_PAYMENT_METHOD_PENDING ? 'pos' : paymentMethod,
+                  })
+                }
+              }}
+              disabled={disabled || pendingHold}
             >
               <SelectTrigger>
                 <SelectValue />
@@ -97,6 +125,7 @@ export function EventPaymentSection({ totalAmount, value, onChange, disabled }: 
               }
               disabled={
                 disabled ||
+                pendingHold ||
                 paymentStatus === 'unpaid' ||
                 (paymentStatus === 'paid' && !payAboveTotal)
               }
@@ -105,6 +134,7 @@ export function EventPaymentSection({ totalAmount, value, onChange, disabled }: 
           </div>
         </div>
 
+        {!pendingHold && paymentStatus !== 'unpaid' && (
         <div className="flex items-start gap-2 rounded-md border border-input p-3">
           <Checkbox
             id="event-pay-above-total"
@@ -131,24 +161,43 @@ export function EventPaymentSection({ totalAmount, value, onChange, disabled }: 
             future stays or incidentals.
           </Label>
         </div>
+        )}
 
         <div className="space-y-2">
           <Label>Payment Method</Label>
           <Select
             value={paymentMethod}
-            onValueChange={(v) => patch({ payment_method: v })}
+            onValueChange={(v) => {
+              if (v === EVENT_PAYMENT_METHOD_PENDING) {
+                patch({
+                  payment_method: v,
+                  payment_status: 'unpaid',
+                  partial_amount: '',
+                  pay_above_total: false,
+                })
+              } else {
+                patch({ payment_method: v })
+              }
+            }}
             disabled={disabled}
           >
             <SelectTrigger>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="cash">Cash</SelectItem>
-              <SelectItem value="pos">POS</SelectItem>
-              <SelectItem value="card">Card</SelectItem>
-              <SelectItem value="transfer">Transfer</SelectItem>
+              {EVENT_PAYMENT_METHOD_OPTIONS.map((o) => (
+                <SelectItem key={o.value} value={o.value}>
+                  {o.label}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
+          {pendingHold && (
+            <p className="text-xs text-muted-foreground">
+              Date is held without payment. Collect payment later or cancel if the guest does not
+              attend — no city ledger charge.
+            </p>
+          )}
         </div>
 
         {totalAmount > 0 && (
@@ -167,7 +216,7 @@ export function EventPaymentSection({ totalAmount, value, onChange, disabled }: 
             )}
             <div className="flex items-center justify-between pt-1">
               <span className="text-muted-foreground">Method</span>
-              <Badge variant="outline">{paymentMethod.replace('_', ' ')}</Badge>
+              <Badge variant="outline">{formatEventPaymentMethodLabel(paymentMethod)}</Badge>
             </div>
           </div>
         )}
