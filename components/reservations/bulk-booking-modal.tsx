@@ -123,7 +123,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
 
   // Step 3: Payment
   const [customRate, setCustomRate] = useState<number | ''>('')
-  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'pos' | 'card' | 'transfer' | 'city_ledger'>('cash')
+  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'pos' | 'card' | 'transfer' | 'city_ledger'>('pos')
   const [paymentStatus, setPaymentStatus] = useState<'paid' | 'partial' | 'unpaid'>('unpaid')
   const [partialAmount, setPartialAmount] = useState<number | ''>('')
   const [payAboveBulkRoomTotal, setPayAboveBulkRoomTotal] = useState(false)
@@ -954,7 +954,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
     setNewOrgName(''); setNewOrgType(''); setNewOrgContact(''); setNewOrgPhone(''); setNewOrgEmail(''); setNewOrgAddress('')
     setGroupGuestSearch(''); setGroupGuestResults([]); setSelectedGroupGuest(null); setGroupGuestSearchOpen(false)
     setCheckIn(undefined); setCheckOut(undefined); setBackdateReason(''); setRoomAvailabilityChecked(false); setAvailableRooms([])
-    setCustomRate(''); setPaymentMethod('cash'); setPaymentStatus('unpaid'); setPartialAmount('')
+    setCustomRate(''); setPaymentMethod('pos'); setPaymentStatus('unpaid'); setPartialAmount('')
     setPayAboveBulkRoomTotal(false)
     setLedgerSearch(''); setLedgerResults([]); setSelectedLedger(null); setLedgerSearchOpen(false)
     setShowNewLedgerOrgForm(false); setNewLedgerOrgName(''); setNewLedgerOrgEmail(''); setNewLedgerOrgPhone('')
@@ -1282,10 +1282,10 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
                 }}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="cash">Cash</SelectItem>
                     <SelectItem value="pos">POS</SelectItem>
-                    <SelectItem value="card">Card</SelectItem>
+                    <SelectItem value="cash">Cash</SelectItem>
                     <SelectItem value="transfer">Transfer</SelectItem>
+                    <SelectItem value="card">Card</SelectItem>
                     <SelectItem value="city_ledger">City Ledger (bill to account)</SelectItem>
                   </SelectContent>
                 </Select>
