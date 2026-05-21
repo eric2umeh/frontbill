@@ -23,6 +23,7 @@ import { EVENT_VENUE_PRESETS } from '@/lib/events/types'
 import { formatNaira } from '@/lib/utils/currency'
 import { EnhancedDataTable } from '@/components/shared/enhanced-data-table'
 import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
@@ -52,7 +53,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { PageLoadingState } from '@/components/loading-screen'
 import { toast } from 'sonner'
-import { Plus, Pencil, Trash2, Loader2 } from 'lucide-react'
+import { Plus, Pencil, Ban, Loader2 } from 'lucide-react'
 import { EventPaymentReceiptButton } from '@/components/receipts/event-payment-receipt-button'
 
 const defaultPayment = (): EventPaymentFormValue => ({
@@ -94,7 +95,7 @@ export function EventsPanel() {
   const [saving, setSaving] = useState(false)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<HotelEventRow | null>(null)
-  const [deleteTarget, setDeleteTarget] = useState<HotelEventRow | null>(null)
+  const [cancelTarget, setCancelTarget] = useState<HotelEventRow | null>(null)
   const [form, setForm] = useState(emptyForm)
 
   const load = useCallback(async () => {
@@ -335,22 +336,23 @@ export function EventsPanel() {
     }
   }
 
-  const confirmDelete = async () => {
-    if (!deleteTarget) return
+  const confirmCancelEvent = async () => {
+    if (!cancelTarget) return
     setSaving(true)
     try {
-      const res = await fetch(`/api/events/${deleteTarget.id}`, {
-        method: 'DELETE',
-        headers: await eventsApiHeaders(),
+      const res = await fetch(`/api/events/${cancelTarget.id}`, {
+        method: 'PATCH',
+        headers: await eventsApiHeaders({ 'Content-Type': 'application/json' }),
         credentials: 'include',
+        body: JSON.stringify({ status: 'cancelled' }),
       })
       const json = await res.json().catch(() => ({}))
       if (!res.ok) {
-        toast.error(json.error || 'Delete failed')
+        toast.error(json.error || 'Cancel failed')
         return
       }
-      toast.success('Event deleted')
-      setDeleteTarget(null)
+      toast.success('Event cancelled')
+      setCancelTarget(null)
       void load()
     } catch {
       toast.error('Network error')
@@ -415,7 +417,14 @@ export function EventsPanel() {
             key: 'period',
             label: 'Period',
             render: (ev) => (
-              <span className="text-sm whitespace-nowrap">{ev ? formatPeriod(ev) : '—'}</span>
+              <div className="space-y-1">
+                <span className="text-sm whitespace-nowrap block">{ev ? formatPeriod(ev) : '—'}</span>
+                {ev.status === 'cancelled' && (
+                  <Badge variant="outline" className="text-[10px] text-destructive border-destructive/40">
+                    Cancelled
+                  </Badge>
+                )}
+              </div>
             ),
           },
           {
@@ -473,18 +482,22 @@ export function EventsPanel() {
                         size="icon"
                         className="h-8 w-8"
                         onClick={() => openEdit(ev)}
+                        title="Edit event"
                       >
                         <Pencil className="h-4 w-4" />
                       </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 text-destructive"
-                        onClick={() => setDeleteTarget(ev)}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
+                      {ev.status !== 'cancelled' && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-destructive"
+                          title="Cancel event"
+                          onClick={() => setCancelTarget(ev)}
+                        >
+                          <Ban className="h-4 w-4" />
+                        </Button>
+                      )}
                     </div>
                   ),
                 },
@@ -658,24 +671,24 @@ export function EventsPanel() {
         </DialogContent>
       </Dialog>
 
-      <AlertDialog open={Boolean(deleteTarget)} onOpenChange={(o) => !o && setDeleteTarget(null)}>
+      <AlertDialog open={Boolean(cancelTarget)} onOpenChange={(o) => !o && setCancelTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete this event?</AlertDialogTitle>
+            <AlertDialogTitle>Cancel this event?</AlertDialogTitle>
             <AlertDialogDescription>
-              {deleteTarget
-                ? `${deleteTarget.title} (${formatPeriod(deleteTarget)}) will be removed permanently.`
-                : 'This event will be removed permanently.'}
+              {cancelTarget
+                ? `${cancelTarget.title} (${formatPeriod(cancelTarget)}) will be marked cancelled. The guest or organization is not continuing with this booking.`
+                : 'This event will be marked cancelled.'}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>Keep event</AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={() => void confirmDelete()}
+              onClick={() => void confirmCancelEvent()}
               disabled={saving}
             >
-              Delete
+              Cancel event
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
