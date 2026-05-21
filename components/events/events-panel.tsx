@@ -5,6 +5,11 @@ import { useReservationsEventsHeader } from '@/components/reservations/reservati
 import { format, parseISO } from 'date-fns'
 import { useAuth } from '@/lib/auth-context'
 import { EventClientSearchField } from '@/components/events/event-client-search-field'
+import {
+  EventPaymentSection,
+  type EventPaymentFormValue,
+} from '@/components/events/event-payment-section'
+import { computeEventPayment } from '@/lib/events/compute-event-payment'
 import { canManageEvents } from '@/lib/events/access'
 import { eventsApiHeaders } from '@/lib/events/events-api-headers'
 import type { HotelEventRow } from '@/lib/events/types'
@@ -43,6 +48,14 @@ import { PageLoadingState } from '@/components/loading-screen'
 import { toast } from 'sonner'
 import { Plus, Pencil, Trash2, Loader2 } from 'lucide-react'
 
+const defaultPayment = (): EventPaymentFormValue => ({
+  payment_method: 'cash',
+  payment_status: 'paid',
+  partial_amount: '',
+  pay_above_total: false,
+  folio_extras: { remarks: '', files: [] },
+})
+
 const emptyForm = {
   title: '',
   description: '',
@@ -54,9 +67,10 @@ const emptyForm = {
   client_name: '',
   client_phone: '',
   client_email: '',
+  guest_id: null as string | null,
   expected_attendees: '',
   estimated_value: '',
-  notes: '',
+  payment: defaultPayment(),
 }
 
 export function EventsPanel() {
@@ -115,7 +129,7 @@ export function EventsPanel() {
         onClick={() => {
           setEditing(null)
           const today = format(new Date(), 'yyyy-MM-dd')
-          setForm({ ...emptyForm, start_date: today, end_date: today })
+          setForm({ ...emptyForm, start_date: today, end_date: today, payment: defaultPayment() })
           setDialogOpen(true)
         }}
       >
@@ -129,7 +143,7 @@ export function EventsPanel() {
   const openCreate = () => {
     setEditing(null)
     const today = format(new Date(), 'yyyy-MM-dd')
-    setForm({ ...emptyForm, start_date: today, end_date: today })
+    setForm({ ...emptyForm, start_date: today, end_date: today, payment: defaultPayment() })
     setDialogOpen(true)
   }
 
@@ -137,8 +151,15 @@ export function EventsPanel() {
     client_name: string
     client_phone: string
     client_email: string
+    guest_id?: string | null
   }) => {
-    setForm((f) => ({ ...f, ...client }))
+    setForm((f) => ({
+      ...f,
+      client_name: client.client_name,
+      client_phone: client.client_phone,
+      client_email: client.client_email,
+      guest_id: client.guest_id ?? null,
+    }))
   }
 
   const openEdit = (ev: HotelEventRow) => {
@@ -159,7 +180,27 @@ export function EventsPanel() {
       client_email: ev.client_email || '',
       expected_attendees: ev.expected_attendees != null ? String(ev.expected_attendees) : '',
       estimated_value: ev.estimated_value != null ? String(ev.estimated_value) : '',
-      notes: ev.notes || '',
+      guest_id: null,
+      payment: {
+        payment_method: ev.payment_method || 'cash',
+        payment_status:
+          ev.payment_status === 'pending'
+            ? 'unpaid'
+            : ev.payment_status === 'partial'
+              ? 'partial'
+              : 'paid',
+        partial_amount:
+          ev.amount_paid != null
+            ? String(ev.amount_paid)
+            : ev.estimated_value != null
+              ? String(ev.estimated_value)
+              : '',
+        pay_above_total:
+          ev.amount_paid != null &&
+          ev.estimated_value != null &&
+          Number(ev.amount_paid) > Number(ev.estimated_value),
+        folio_extras: { remarks: ev.remarks || '', files: [] },
+      },
     })
     setDialogOpen(true)
   }
@@ -177,9 +218,43 @@ export function EventsPanel() {
       toast.error('End date must be on or after start date')
       return
     }
+    const totalAmount = Math.max(0, Number(form.estimated_value) || 0)
+    const { depositAmount } = computeEventPayment({
+      totalAmount,
+      paymentStatus: form.payment.payment_status,
+      partialAmount:
+        typeof form.payment.partial_amount === 'number'
+          ? form.payment.partial_amount
+          : Number(form.payment.partial_amount) || 0,
+      payAboveTotal: form.payment.pay_above_total,
+    })
+    if (form.payment.payment_status === 'partial' && depositAmount <= 0) {
+      toast.error('Please enter the amount paid')
+      return
+    }
+
     setSaving(true)
     try {
-      const body = { ...form, venue: form.venue.trim() || null }
+      const body = {
+        title: form.title,
+        description: form.description,
+        venue: form.venue.trim() || null,
+        start_date: form.start_date,
+        end_date: form.end_date,
+        start_time: form.start_time,
+        end_time: form.end_time,
+        client_name: form.client_name,
+        client_phone: form.client_phone,
+        client_email: form.client_email,
+        guest_id: form.guest_id,
+        expected_attendees: form.expected_attendees,
+        estimated_value: form.estimated_value,
+        payment_method: form.payment.payment_method,
+        payment_status: form.payment.payment_status,
+        partial_amount: form.payment.partial_amount,
+        pay_above_total: form.payment.pay_above_total,
+        remarks: form.payment.folio_extras.remarks,
+      }
       const url = editing ? `/api/events/${editing.id}` : '/api/events'
       const res = await fetch(url, {
         method: editing ? 'PATCH' : 'POST',
@@ -192,6 +267,27 @@ export function EventsPanel() {
         toast.error(json.error || 'Save failed')
         return
       }
+      if (json.warning) toast.warning(json.warning)
+
+      const eventId = (json.event?.id as string) || editing?.id
+      const files = form.payment.folio_extras.files?.filter(Boolean) || []
+      if (eventId && files.length > 0) {
+        const fd = new FormData()
+        for (const file of files) fd.append('files', file)
+        const attachRes = await fetch(`/api/events/${eventId}/attachments`, {
+          method: 'POST',
+          headers: await eventsApiHeaders(),
+          credentials: 'include',
+          body: fd,
+        })
+        const attachJson = await attachRes.json().catch(() => ({}))
+        if (!attachRes.ok) {
+          toast.warning(
+            attachJson.error || 'Event saved but file upload failed',
+          )
+        }
+      }
+
       toast.success(editing ? 'Event updated' : 'Event created')
       setDialogOpen(false)
       void load()
@@ -255,7 +351,7 @@ export function EventsPanel() {
       <EnhancedDataTable
         compactTable
         data={events}
-        searchKeys={['title', 'venue', 'client_name', 'client_phone', 'notes'] as (keyof HotelEventRow)[]}
+        searchKeys={['title', 'venue', 'client_name', 'client_phone', 'remarks'] as (keyof HotelEventRow)[]}
         dateField="start_date"
         columns={[
           {
@@ -337,7 +433,7 @@ export function EventsPanel() {
       />
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editing ? 'Edit event' : 'New event'}</DialogTitle>
           </DialogHeader>
@@ -413,6 +509,7 @@ export function EventsPanel() {
                   client_name: form.client_name,
                   client_phone: form.client_phone,
                   client_email: form.client_email,
+                  guest_id: form.guest_id,
                 }}
                 onChange={setClientFields}
               />
@@ -453,14 +550,12 @@ export function EventsPanel() {
                 onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
               />
             </div>
-            <div className="space-y-1">
-              <Label>Internal notes</Label>
-              <Textarea
-                rows={2}
-                value={form.notes}
-                onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
-              />
-            </div>
+            <EventPaymentSection
+              totalAmount={Math.max(0, Number(form.estimated_value) || 0)}
+              value={form.payment}
+              onChange={(payment) => setForm((f) => ({ ...f, payment }))}
+              disabled={saving}
+            />
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>
