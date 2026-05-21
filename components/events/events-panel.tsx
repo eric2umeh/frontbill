@@ -202,9 +202,12 @@ export function EventsPanel() {
       expected_attendees: ev.expected_attendees != null ? String(ev.expected_attendees) : '',
       estimated_value: ev.estimated_value != null ? String(ev.estimated_value) : '',
       payment: {
-        payment_method: ev.payment_method || 'cash',
+        payment_method:
+          ev.payment_method === 'pending' || ev.payment_status === 'pending'
+            ? 'pending'
+            : ev.payment_method || 'pos',
         payment_status:
-          ev.payment_status === 'pending'
+          ev.payment_method === 'pending' || ev.payment_status === 'pending'
             ? 'unpaid'
             : ev.payment_status === 'partial'
               ? 'partial'
@@ -396,6 +399,7 @@ export function EventsPanel() {
         data={events}
         searchKeys={['title', 'venue', 'client_name', 'client_phone', 'remarks'] as (keyof HotelEventRow)[]}
         dateField="start_date"
+        onRowClick={canManage ? (ev) => openEdit(ev) : undefined}
         columns={[
           {
             key: 'title',
@@ -511,11 +515,17 @@ export function EventsPanel() {
                   value={form.start_date}
                   onChange={(e) => {
                     const start = e.target.value
-                    setForm((f) => ({
-                      ...f,
-                      start_date: start,
-                      end_date: start,
-                    }))
+                    setForm((f) => {
+                      const hadRange =
+                        Boolean(f.end_date) &&
+                        f.end_date !== f.start_date &&
+                        f.end_date >= f.start_date
+                      return {
+                        ...f,
+                        start_date: start,
+                        end_date: hadRange && f.end_date >= start ? f.end_date : start,
+                      }
+                    })
                   }}
                 />
               </div>
