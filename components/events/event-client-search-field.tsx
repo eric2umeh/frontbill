@@ -14,16 +14,17 @@ export type EventClientPick = {
   email: string
 }
 
-type Value = {
+export type EventClientValue = {
   client_name: string
   client_phone: string
   client_email: string
+  guest_id?: string | null
 }
 
 type Props = {
   organizationId: string
-  value: Value
-  onChange: (next: Value) => void
+  value: EventClientValue
+  onChange: (next: EventClientValue) => void
   disabled?: boolean
 }
 
@@ -119,7 +120,7 @@ export function EventClientSearchField({
 
   const handleNameChange = (name: string) => {
     setLinked(null)
-    onChange({ ...value, client_name: name })
+    onChange({ ...value, client_name: name, guest_id: null })
     void runSearch(name)
   }
 
@@ -129,6 +130,7 @@ export function EventClientSearchField({
       client_name: pick.name,
       client_phone: pick.phone,
       client_email: pick.email,
+      guest_id: pick.kind === 'guest' ? pick.id : null,
     })
     setOpen(false)
     setSuggestions([])
@@ -196,7 +198,7 @@ export function EventClientSearchField({
             value={value.client_phone}
             onChange={(e) => {
               setLinked(null)
-              onChange({ ...value, client_phone: e.target.value })
+              onChange({ ...value, client_phone: e.target.value, guest_id: null })
             }}
             disabled={disabled || Boolean(linked)}
           />
@@ -208,7 +210,7 @@ export function EventClientSearchField({
             value={value.client_email}
             onChange={(e) => {
               setLinked(null)
-              onChange({ ...value, client_email: e.target.value })
+              onChange({ ...value, client_email: e.target.value, guest_id: null })
             }}
             disabled={disabled || Boolean(linked)}
           />
