@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/lib/auth-context'
 import { hasPermission } from '@/lib/permissions'
+import { canManageOutletMenu } from '@/lib/outlets/access'
 import { getOutletDepartment, type OutletDepartmentKey } from '@/lib/outlets/departments'
 import type { OutletMenuCategoryRow, OutletMenuItemRow, OutletOrderRow } from '@/lib/outlets/types'
 import { LoadingSpinner } from '@/components/loading-screen'
@@ -74,7 +75,8 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
   if (!def) return null
   if (loading) return <LoadingSpinner />
 
-  const canMenu = hasPermission(role, 'outlet:menu')
+  const canViewMenu = hasPermission(role, 'outlet:view')
+  const canManageMenu = canManageOutletMenu(role)
   const canReports = hasPermission(role, 'outlet:reports')
   const canReceipt = hasPermission(role, 'outlet:receipt')
 
@@ -105,7 +107,7 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
             <ShoppingCart className="h-4 w-4" />
             Take order
           </TabsTrigger>
-          {canMenu && (
+          {canViewMenu && (
             <TabsTrigger value="menu" className="gap-1">
               <UtensilsCrossed className="h-4 w-4" />
               Menu
@@ -136,9 +138,15 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
           />
         </TabsContent>
 
-        {canMenu && (
+        {canViewMenu && (
           <TabsContent value="menu" className="mt-4">
-            <OutletMenuManager department={department} categories={categories} items={items} onRefresh={() => void load()} />
+            <OutletMenuManager
+              department={department}
+              categories={categories}
+              items={items}
+              canManage={canManageMenu}
+              onRefresh={() => void load()}
+            />
           </TabsContent>
         )}
 
