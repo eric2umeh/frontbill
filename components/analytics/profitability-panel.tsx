@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import { format } from 'date-fns'
 import { useAuth } from '@/lib/auth-context'
 import { formatNaira } from '@/lib/utils/currency'
 import type { ProfitabilityAnalysisResult, ProfitabilityAssumptions } from '@/lib/analytics/profitability-types'
@@ -35,11 +36,18 @@ import {
   Calculator,
 } from 'lucide-react'
 
-type PeriodKey = '7d' | '30d' | 'this_month'
+type PeriodKey = 'today' | 'day' | 'range' | '7d' | '30d' | 'this_month'
+
+function toYmd(d: Date) {
+  return format(d, 'yyyy-MM-dd')
+}
 
 export function ProfitabilityPanel() {
   const { userId, role } = useAuth()
-  const [period, setPeriod] = useState<PeriodKey>('30d')
+  const [period, setPeriod] = useState<PeriodKey>('day')
+  const [selectedDay, setSelectedDay] = useState(() => toYmd(new Date()))
+  const [rangeStart, setRangeStart] = useState(() => toYmd(new Date()))
+  const [rangeEnd, setRangeEnd] = useState(() => toYmd(new Date()))
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [analysis, setAnalysis] = useState<ProfitabilityAnalysisResult | null>(null)
@@ -51,6 +59,12 @@ export function ProfitabilityPanel() {
     setLoading(true)
     try {
       const qs = new URLSearchParams({ caller_id: userId, period })
+      if (period === 'day') {
+        qs.set('date', selectedDay)
+      } else if (period === 'range') {
+        qs.set('start_date', rangeStart)
+        qs.set('end_date', rangeEnd || rangeStart)
+      }
       const res = await fetch(`/api/analytics/profitability?${qs}`, { credentials: 'include' })
       const json = await res.json()
       if (!res.ok) {
@@ -66,7 +80,7 @@ export function ProfitabilityPanel() {
     } finally {
       setLoading(false)
     }
-  }, [userId, period])
+  }, [userId, period, selectedDay, rangeStart, rangeEnd])
 
   useEffect(() => {
     void load()
@@ -129,17 +143,71 @@ export function ProfitabilityPanel() {
             laundry, cleaning).
           </p>
         </div>
-        <div className="flex gap-2">
-          <Select value={period} onValueChange={(v) => setPeriod(v as PeriodKey)}>
-            <SelectTrigger className="w-36">
+        <div className="flex flex-wrap items-end gap-2">
+          <Select
+            value={period}
+            onValueChange={(v) => {
+              const next = v as PeriodKey
+              setPeriod(next)
+              if (next === 'day') {
+                setSelectedDay(toYmd(new Date()))
+              }
+              if (next === 'range') {
+                const today = toYmd(new Date())
+                setRangeStart(today)
+                setRangeEnd(today)
+              }
+            }}
+          >
+            <SelectTrigger className="w-44">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
+              <SelectItem value="today">Today</SelectItem>
+              <SelectItem value="day">Specific day</SelectItem>
+              <SelectItem value="range">Date range</SelectItem>
               <SelectItem value="7d">Last 7 days</SelectItem>
               <SelectItem value="30d">Last 30 days</SelectItem>
               <SelectItem value="this_month">This month</SelectItem>
             </SelectContent>
           </Select>
+          {period === 'day' && (
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground">Date</Label>
+              <Input
+                type="date"
+                className="w-40"
+                value={selectedDay}
+                max={toYmd(new Date())}
+                onChange={(e) => setSelectedDay(e.target.value)}
+              />
+            </div>
+          )}
+          {period === 'range' && (
+            <>
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">From</Label>
+                <Input
+                  type="date"
+                  className="w-40"
+                  value={rangeStart}
+                  max={rangeEnd || undefined}
+                  onChange={(e) => setRangeStart(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">To</Label>
+                <Input
+                  type="date"
+                  className="w-40"
+                  value={rangeEnd}
+                  min={rangeStart || undefined}
+                  max={toYmd(new Date())}
+                  onChange={(e) => setRangeEnd(e.target.value)}
+                />
+              </div>
+            </>
+          )}
           <Button variant="outline" size="icon" onClick={() => void load()} disabled={loading}>
             <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
           </Button>
@@ -162,7 +230,14 @@ export function ProfitabilityPanel() {
               </p>
               <p className="text-sm opacity-90">
                 GOP {formatNaira(analysis.summary.gross_operating_profit)} ({analysis.summary.net_margin_pct}%
-                margin) · Period {analysis.period.start} – {analysis.period.end}
+                margin) ·{' '}
+                {analysis.period.start === analysis.period.end ? (
+                  <>Day {analysis.period.start}</>
+                ) : (
+                  <>
+                    {analysis.period.start} – {analysis.period.end} ({analysis.period.days} days)
+                  </>
+                )}
               </p>
             </div>
             <div className="text-right text-sm">
