@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { resolveOutletAuthed } from '@/lib/outlets/api-auth'
+import { resolveOutletMenuManage } from '@/lib/outlets/api-auth'
 import { canAccessOutletDepartment } from '@/lib/outlets/access'
 import { isOutletDepartmentKey } from '@/lib/outlets/departments'
 import { flattenSeedCategories } from '@/lib/outlets/default-menu-seed'
@@ -8,7 +8,7 @@ import type { OutletDepartmentKey } from '@/lib/outlets/departments'
 
 /** POST — seed default categories for an outlet (idempotent on slug). */
 export async function POST(request: Request) {
-  const auth = await resolveOutletAuthed(request, { permission: 'outlet:menu' })
+  const auth = await resolveOutletMenuManage(request)
   if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status })
 
   const body = await request.json().catch(() => ({}))
