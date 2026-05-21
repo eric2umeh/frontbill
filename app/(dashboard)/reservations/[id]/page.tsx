@@ -20,6 +20,7 @@ import { createClient } from '@/lib/supabase/client'
 import { format, isBefore, startOfDay } from 'date-fns'
 import { useAuth } from '@/lib/auth-context'
 import { FolioAttachmentsPanel } from '@/components/folio/folio-attachments-panel'
+import { BookingPaymentReceiptPanel } from '@/components/receipts/booking-payment-receipt-panel'
 import { hasPermission } from '@/lib/permissions'
 
 export default function ReservationDetailPage({
@@ -28,7 +29,7 @@ export default function ReservationDetailPage({
   params: Promise<{ id: string }> | { id: string }
 }) {
   const router = useRouter()
-  const { role, userId, organizationId } = useAuth()
+  const { role, userId, organizationId, name: userName } = useAuth()
   const canCancelReservation = hasPermission(role, 'reservations:delete')
   const [rescheduleOpen, setRescheduleOpen] = useState(false)
   const [reschedulePending, setReschedulePending] = useState(false)
@@ -619,7 +620,7 @@ export default function ReservationDetailPage({
                   {formatNaira(balance)}
                 </span>
               </div>
-              {balance > 0 && (
+              {balance > 0 && hasPermission(role, 'payments:create') && (
                 <Button
                   className="w-full"
                   onClick={() => setPaymentModalOpen(true)}
@@ -627,6 +628,19 @@ export default function ReservationDetailPage({
                   <CreditCard className="mr-2 h-4 w-4" />
                   {'Update Payment'}
                 </Button>
+              )}
+              {reservation?.id && (
+                <BookingPaymentReceiptPanel
+                  bookingId={reservation.id}
+                  folioId={reservation.folio_id}
+                  guestName={guest?.name}
+                  roomNumber={room?.room_number}
+                  role={role}
+                  userId={userId}
+                  userName={userName}
+                  organizationId={organizationId}
+                  variant="compact"
+                />
               )}
             </CardContent>
           </Card>
