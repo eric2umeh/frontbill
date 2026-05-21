@@ -26,6 +26,10 @@ import {
 } from '@/components/ui/select'
 import { Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
+import {
+  DEFAULT_PAYMENT_METHOD,
+  PAYMENT_METHOD_SELECT_OPTIONS,
+} from '@/lib/payments/payment-methods'
 
 export type ExpenseCategoryOption = {
   id: string
@@ -54,21 +58,13 @@ export type ExpenseEntryRecord = ExpenseEntryFormValues & {
   expense_categories?: { name: string } | { name: string }[] | null
 }
 
-const PAYMENT_OPTIONS = [
-  { value: 'cash', label: 'Cash' },
-  { value: 'transfer', label: 'Bank transfer' },
-  { value: 'pos', label: 'POS' },
-  { value: 'cheque', label: 'Cheque' },
-  { value: 'other', label: 'Other' },
-]
-
 function emptyForm(): ExpenseEntryFormValues {
   return {
     expense_date: format(new Date(), 'yyyy-MM-dd'),
     category_id: '',
     amount: '',
     description: '',
-    payment_method: 'cash',
+    payment_method: DEFAULT_PAYMENT_METHOD,
     reference: '',
   }
 }
@@ -231,7 +227,7 @@ export function ExpenseEntryFormDialog({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {PAYMENT_OPTIONS.map((o) => (
+                {PAYMENT_METHOD_SELECT_OPTIONS.map((o) => (
                   <SelectItem key={o.value} value={o.value}>
                     {o.label}
                   </SelectItem>
