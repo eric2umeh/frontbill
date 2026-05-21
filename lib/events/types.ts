@@ -17,6 +17,11 @@ export interface HotelEventRow {
   expected_attendees: number | null
   estimated_value: number | null
   notes: string | null
+  payment_method: string | null
+  payment_status: 'paid' | 'partial' | 'pending' | null
+  amount_paid: number | null
+  balance: number | null
+  remarks: string | null
   created_by: string | null
   updated_by: string | null
   created_at: string
