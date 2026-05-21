@@ -91,7 +91,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
   const [pricePerNight, setPricePerNight] = useState(0)
   const [customPrice, setCustomPrice] = useState<number | ''>('')
   // Payment
-  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'pos' | 'card' | 'transfer' | 'city_ledger'>('cash')
+  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'pos' | 'card' | 'transfer' | 'city_ledger'>('pos')
   const [paymentStatus, setPaymentStatus] = useState<'paid' | 'partial' | 'unpaid'>('paid')
   const [partialAmount, setPartialAmount] = useState<number | ''>('')
   const [payAboveRoomTotal, setPayAboveRoomTotal] = useState(false)
@@ -680,7 +680,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
     const d = new Date(); d.setHours(0, 0, 0, 0)
     setCheckInDate(d); setCheckOutDate(addDays(d, 1)); setNights(1); setBackdateReason('')
     setSelectedRoomType(''); setSelectedRoom(null); setPricePerNight(0); setCustomPrice('')
-    setPaymentMethod('cash'); setPaymentStatus('paid'); setPartialAmount(''); setPayAboveRoomTotal(false)
+    setPaymentMethod('pos'); setPaymentStatus('paid'); setPartialAmount(''); setPayAboveRoomTotal(false)
     setLedgerType('individual'); setLedgerSearch(''); setLedgerResults([])
     setSelectedLedger(null); setLedgerSearchOpen(false)
     setShowNewLedgerOrgForm(false); setNewLedgerOrgName(''); setNewLedgerOrgEmail(''); setNewLedgerOrgPhone(''); setNewLedgerOrgAddress('')
@@ -884,10 +884,10 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
               }}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="cash">Cash</SelectItem>
                   <SelectItem value="pos">POS</SelectItem>
-                  <SelectItem value="card">Card</SelectItem>
+                  <SelectItem value="cash">Cash</SelectItem>
                   <SelectItem value="transfer">Transfer</SelectItem>
+                  <SelectItem value="card">Card</SelectItem>
                   <SelectItem value="city_ledger">City Ledger (bill to account)</SelectItem>
                 </SelectContent>
               </Select>
