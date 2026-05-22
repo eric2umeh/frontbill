@@ -72,6 +72,7 @@ export interface OutletOrderRow {
   subtotal: number
   room_service_fee?: number | null
   takeaway_fee?: number | null
+  is_complimentary?: boolean | null
   payment_method: string | null
   folio_charge_id: string | null
   notes: string | null
