@@ -71,6 +71,7 @@ export interface OutletOrderRow {
   booking_id: string | null
   subtotal: number
   room_service_fee?: number | null
+  takeaway_fee?: number | null
   payment_method: string | null
   folio_charge_id: string | null
   notes: string | null
@@ -84,4 +85,14 @@ export interface OutletOrderRow {
 export interface CartLine {
   item: OutletMenuItemRow
   qty: number
+}
+
+export type OutletClientOptionKind = 'guest' | 'organization' | 'ledger'
+
+export interface OutletClientOption {
+  kind: OutletClientOptionKind
+  id: string
+  name: string
+  subtitle: string | null
+  balance?: number
 }
