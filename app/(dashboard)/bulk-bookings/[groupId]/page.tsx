@@ -12,6 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { formatNaira } from '@/lib/utils/currency'
 import { getBulkGroupId, isLegacyBulkGroupId } from '@/lib/utils/bulk-booking'
 import { manualCheckoutEligible, resolvedCheckoutDateForClosing, DEFAULT_ORG_CHECKOUT_TIME } from '@/lib/utils/booking-checkout-ui'
+import { fetchOrgCheckoutTime } from '@/lib/utils/org-checkout-policy'
 import { CheckoutConfirmDialog } from '@/components/bookings/checkout-confirm-dialog'
 import { toast } from 'sonner'
 import { PageLoadingState } from '@/components/loading-screen'
@@ -40,12 +41,8 @@ export default function BulkBookingDetailPage({ params }: { params: Promise<{ gr
     ;(async () => {
       const supabase = createClient()
       if (!supabase) return
-      const { data } = await supabase
-        .from('organizations')
-        .select('checkout_time')
-        .eq('id', organizationId)
-        .maybeSingle()
-      if (!cancelled) setOrgCheckoutTime(data?.checkout_time ?? DEFAULT_ORG_CHECKOUT_TIME)
+      const checkoutTime = await fetchOrgCheckoutTime(supabase, organizationId)
+      if (!cancelled) setOrgCheckoutTime(checkoutTime)
     })()
     return () => {
       cancelled = true
