@@ -26,6 +26,8 @@ import {
 import { Search, Minus, Plus, Loader2, Receipt } from 'lucide-react'
 import { toast } from 'sonner'
 import { outletApiHeaders } from '@/lib/outlets/outlet-api-headers'
+import { OutletOrderCustomerFields } from '@/components/outlets/outlet-order-customer-fields'
+import type { OutletClientOption } from '@/lib/outlets/types'
 
 type LedgerOption = { id: string; name: string; balance: number }
 
@@ -61,11 +63,11 @@ export function OutletPos({
   const [paymentMethod, setPaymentMethod] = useState('pos')
   const [bookingId, setBookingId] = useState('')
   const [roomGuestLabel, setRoomGuestLabel] = useState<string | null>(null)
-  const [lookingUpRoom, setLookingUpRoom] = useState(false)
   const [ledgerSearch, setLedgerSearch] = useState('')
   const [ledgerResults, setLedgerResults] = useState<LedgerOption[]>([])
   const [selectedLedger, setSelectedLedger] = useState<LedgerOption | null>(null)
   const [roomServiceFee, setRoomServiceFee] = useState('')
+  const [takeawayFee, setTakeawayFee] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
   const rootCategories = useMemo(
@@ -128,7 +130,11 @@ export function OutletPos({
     orderType === 'room_service' && roomServiceFee.trim() !== ''
       ? Math.max(0, Math.round(parseFloat(roomServiceFee) * 100) / 100) || 0
       : 0
-  const orderTotal = Math.round((cartItemsTotal + parsedRoomServiceFee) * 100) / 100
+  const parsedTakeawayFee =
+    orderType === 'takeaway' && takeawayFee.trim() !== ''
+      ? Math.max(0, Math.round(parseFloat(takeawayFee) * 100) / 100) || 0
+      : 0
+  const orderTotal = Math.round((cartItemsTotal + parsedRoomServiceFee + parsedTakeawayFee) * 100) / 100
 
   const addToCart = (item: OutletMenuItemRow) => {
     setCart((prev) => {
@@ -150,43 +156,18 @@ export function OutletPos({
     )
   }
 
-  const lookupRoom = useCallback(async () => {
-    const room = roomNumber.trim()
-    if (!room) {
-      toast.error('Enter a room number')
-      return
-    }
-    setLookingUpRoom(true)
-    setRoomGuestLabel(null)
-    setBookingId('')
-    try {
-      const res = await fetch(`/api/outlets/active-booking?room=${encodeURIComponent(room)}`, {
-        headers: await outletApiHeaders(),
-        credentials: 'include',
+  const handleClientSelect = useCallback((client: OutletClientOption | null) => {
+    if (!client) return
+    if (client.kind === 'ledger') {
+      setSelectedLedger({
+        id: client.id,
+        name: client.name,
+        balance: client.balance ?? 0,
       })
-      const json = await res.json().catch(() => ({}))
-      if (!res.ok) {
-        toast.error(json.error || 'Room lookup failed')
-        return
-      }
-      if (!json.booking) {
-        toast.message('No checked-in guest in that room — use guest name or ledger account')
-        return
-      }
-      setBookingId(json.booking.id)
-      if (json.booking.guest_name) {
-        setGuestName(json.booking.guest_name)
-        setRoomGuestLabel(`${json.booking.guest_name} · Room ${json.booking.room_number ?? room}`)
-      } else {
-        setRoomGuestLabel(`Room ${json.booking.room_number ?? room} (checked in)`)
-      }
-      toast.success('Guest linked to room')
-    } catch {
-      toast.error('Network error')
-    } finally {
-      setLookingUpRoom(false)
+      setLedgerSearch('')
+      setLedgerResults([])
     }
-  }, [roomNumber])
+  }, [])
 
   const searchLedgers = useCallback(async () => {
     const term = ledgerSearch.trim()
@@ -220,7 +201,7 @@ export function OutletPos({
       const hasLedger = !!selectedLedger?.id
       const hasBooking = !!bookingId.trim()
       if (!hasBooking && !hasGuest && !hasLedger) {
-        toast.error('Find room guest, enter guest name, or select a city ledger account')
+        toast.error('Select a checked-in room, enter a guest name, or pick a city ledger account')
         return
       }
     }
@@ -244,6 +225,10 @@ export function OutletPos({
             orderType === 'room_service' && roomServiceFee.trim() !== ''
               ? parsedRoomServiceFee
               : null,
+          takeaway_fee:
+            orderType === 'takeaway' && takeawayFee.trim() !== ''
+              ? parsedTakeawayFee
+              : null,
         }),
       })
       const json = await res.json().catch(() => ({}))
@@ -265,6 +250,7 @@ export function OutletPos({
       setLedgerSearch('')
       setLedgerResults([])
       setRoomServiceFee('')
+      setTakeawayFee('')
       onSettled()
       if (canPrintReceipt && onOrderSettled && json.order) {
         onOrderSettled(json.order as OutletOrderRow)
@@ -323,6 +309,12 @@ export function OutletPos({
                 <span>{formatNaira(parsedRoomServiceFee)}</span>
               </div>
             )}
+            {orderType === 'takeaway' && parsedTakeawayFee > 0 && (
+              <div className="flex justify-between text-muted-foreground">
+                <span>Take-away fee</span>
+                <span>{formatNaira(parsedTakeawayFee)}</span>
+              </div>
+            )}
             <div className="flex justify-between text-lg font-bold pt-1 border-t">
               <span>Total</span>
               <span>{formatNaira(orderTotal)}</span>
@@ -336,6 +328,7 @@ export function OutletPos({
                 const next = v as typeof orderType
                 setOrderType(next)
                 if (next !== 'room_service') setRoomServiceFee('')
+                if (next !== 'takeaway') setTakeawayFee('')
               }}
             >
               <SelectTrigger><SelectValue /></SelectTrigger>
@@ -364,39 +357,46 @@ export function OutletPos({
               </p>
             </div>
           )}
-          <div className="grid gap-2 sm:grid-cols-2">
-            <div className="space-y-1">
-              <Label>Guest name</Label>
-              <Input value={guestName} onChange={(e) => setGuestName(e.target.value)} placeholder="Walk-in or ledger name" />
+          {orderType === 'takeaway' && (
+            <div className="space-y-1 rounded-lg border border-amber-200/80 bg-amber-50/50 dark:bg-amber-950/20 p-3">
+              <Label htmlFor="takeaway-fee">Take-away fee (optional)</Label>
+              <Input
+                id="takeaway-fee"
+                type="number"
+                min={0}
+                step="0.01"
+                inputMode="decimal"
+                placeholder="e.g. 300"
+                value={takeawayFee}
+                onChange={(e) => setTakeawayFee(e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">
+                Optional packaging or handling charge for take-away orders.
+              </p>
             </div>
-            <div className="space-y-1">
-              <Label>Room #</Label>
-              <div className="flex gap-1">
-                <Input
-                  value={roomNumber}
-                  onChange={(e) => {
-                    setRoomNumber(e.target.value)
-                    setRoomGuestLabel(null)
-                    setBookingId('')
-                  }}
-                  placeholder="e.g. 101"
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') void lookupRoom()
-                  }}
-                />
-                <Button type="button" variant="secondary" size="sm" className="shrink-0" disabled={lookingUpRoom} onClick={() => void lookupRoom()}>
-                  {lookingUpRoom ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Find'}
-                </Button>
-              </div>
-            </div>
-          </div>
+          )}
+          <OutletOrderCustomerFields
+            organizationId={organizationId}
+            guestName={guestName}
+            onGuestNameChange={setGuestName}
+            onClientSelect={handleClientSelect}
+            roomNumber={roomNumber}
+            onRoomNumberChange={setRoomNumber}
+            onRoomBookingLink={({ bookingId: bid, guestName: gn, label }) => {
+              setBookingId(bid ?? '')
+              setRoomGuestLabel(label)
+              if (gn) setGuestName(gn)
+            }}
+            selectedLedger={selectedLedger}
+            onLedgerSelect={setSelectedLedger}
+          />
           {roomGuestLabel && (
             <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md px-2 py-1.5">
               {roomGuestLabel} — charge will post to folio &amp; city ledger as &quot;{departmentLabel}&quot;
             </p>
           )}
           <div className="space-y-1">
-            <Label>Table / reference</Label>
+            <Label>Table / reference (optional)</Label>
             <Input value={tableLabel} onChange={(e) => setTableLabel(e.target.value)} placeholder="Table 4, etc." />
           </div>
           <div className="space-y-1">
@@ -407,7 +407,6 @@ export function OutletPos({
                 <SelectItem value="pos">POS</SelectItem>
                 <SelectItem value="cash">Cash</SelectItem>
                 <SelectItem value="transfer">Transfer</SelectItem>
-                <SelectItem value="card">Card</SelectItem>
                 <SelectItem value="city_ledger">Charge to room (city ledger)</SelectItem>
               </SelectContent>
             </Select>
