@@ -1,3 +1,4 @@
+import { LOGIN_SUCCESS_COOKIE } from '@/lib/auth/constants'
 import { createRouteHandlerClient } from '@/lib/supabase/route-handler'
 import { NextRequest, NextResponse } from 'next/server'
 
@@ -23,6 +24,12 @@ export async function POST(request: NextRequest) {
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 401 })
     }
+
+    response.cookies.set(LOGIN_SUCCESS_COOKIE, '1', {
+      path: '/',
+      maxAge: 120,
+      sameSite: 'lax',
+    })
 
     return response
   } catch (err: unknown) {

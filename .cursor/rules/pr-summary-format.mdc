@@ -1,0 +1,29 @@
+---
+description: GitHub PR summary format when the user asks for a PR
+alwaysApply: true
+---
+
+# Pull request summaries
+
+When the user asks for a PR summary, title, or copy-paste PR body:
+
+1. Put the **PR title** in its own fenced `text` block (one line).
+2. Put the **full description** in a single fenced `markdown` block so they can copy everything inside it.
+3. Inside the markdown block:
+   - First line: `# Title` (matches PR title).
+   - Sections: `## Summary`, `## …`, `## Test plan` (use `##` only, not HTML).
+   - List items: hyphen bullets (`- item`) only — do not use numbered lists (`1.`).
+4. Do not include file paths in the PR body unless the user explicitly asks for them.
+5. Keep prose clear; no engagement bait at the end.
+
+Example structure:
+
+```markdown
+# Feature name
+
+## Summary
+- …
+
+## Test plan
+- …
+```
