@@ -5,6 +5,10 @@ import { canAccessOutletDepartment } from '@/lib/outlets/access'
 import { isOutletDepartmentKey, getOutletDepartment } from '@/lib/outlets/departments'
 import { findActiveBookingByRoom } from '@/lib/outlets/find-active-booking'
 import { postOutletCityLedgerCharge } from '@/lib/outlets/post-outlet-city-ledger'
+import {
+  OUTLET_FEE_LINE_NAMES,
+  parseOutletOrderExtraFees,
+} from '@/lib/outlets/order-extra-fees'
 
 type OrderLineInput = { item_id: string; qty: number }
 
@@ -106,18 +110,17 @@ export async function POST(request: Request) {
 
   itemsSubtotal = Math.round(itemsSubtotal * 100) / 100
   const orderType = String(body?.order_type || 'takeaway').trim()
-  let roomServiceFee = 0
-  if (orderType === 'room_service' && body?.room_service_fee != null && body.room_service_fee !== '') {
-    roomServiceFee = Math.round(Number(body.room_service_fee) * 100) / 100
-    if (!Number.isFinite(roomServiceFee) || roomServiceFee < 0) {
-      return NextResponse.json({ error: 'Invalid room service fee' }, { status: 400 })
-    }
+  const feeResult = parseOutletOrderExtraFees(orderType, body)
+  if (feeResult.error) {
+    return NextResponse.json({ error: feeResult.error }, { status: 400 })
   }
-  const subtotal = Math.round((itemsSubtotal + roomServiceFee) * 100) / 100 // grand total charged
+  const { roomServiceFee, takeawayFee, extraFeesTotal } = feeResult.fees
+  const subtotal = Math.round((itemsSubtotal + extraFeesTotal) * 100) / 100 // grand total charged
   const deptDef = getOutletDepartment(department)
   const orderNumber = nextOrderNumber(department)
   const lineParts = orderLines.map((l) => `${l.item_name} ×${l.qty}`)
   if (roomServiceFee > 0) lineParts.push(`Room service fee ${roomServiceFee}`)
+  if (takeawayFee > 0) lineParts.push(`Take-away fee ${takeawayFee}`)
   const lineDetail = lineParts.join(', ')
 
   if (paymentMethod === 'city_ledger') {
@@ -147,6 +150,7 @@ export async function POST(request: Request) {
       booking_id: bookingId || null,
       subtotal,
       room_service_fee: roomServiceFee,
+      takeaway_fee: takeawayFee,
       payment_method: paymentMethod,
       notes: body?.notes || null,
       created_by: auth.ctx.userId,
@@ -162,10 +166,19 @@ export async function POST(request: Request) {
   if (roomServiceFee > 0) {
     linesToInsert.push({
       item_id: '',
-      item_name: 'Room service delivery fee',
+      item_name: OUTLET_FEE_LINE_NAMES.roomService,
       qty: 1,
       unit_price: roomServiceFee,
       line_total: roomServiceFee,
+    })
+  }
+  if (takeawayFee > 0) {
+    linesToInsert.push({
+      item_id: '',
+      item_name: OUTLET_FEE_LINE_NAMES.takeaway,
+      qty: 1,
+      unit_price: takeawayFee,
+      line_total: takeawayFee,
     })
   }
   const { error: le } = await admin.from('outlet_order_lines').insert(
@@ -235,6 +248,7 @@ export async function POST(request: Request) {
       ...order,
       ...orderPatch,
       room_service_fee: roomServiceFee,
+      takeaway_fee: takeawayFee,
       outlet_order_lines: linesToInsert,
     },
   })
