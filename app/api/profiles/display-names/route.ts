@@ -47,20 +47,12 @@ export async function POST(request: Request) {
       }
     })
 
-    await Promise.all(
-      missingNameIds.map(async (id) => {
-        const { data } = await admin.auth.admin.getUserById(id)
-        const user = data?.user
-        const metadataName = String(user?.user_metadata?.full_name || '').trim()
-        const emailName = user?.email?.split('@')[0]?.replace(/[._-]+/g, ' ').trim()
-        const displayName = metadataName || emailName || ''
-
-        if (displayName) {
-          names[id] = displayName
-          await admin.from('profiles').update({ full_name: displayName }).eq('id', id)
-        }
-      })
-    )
+    // Skip slow Auth Admin lookups on list pages — fall back to profile id labels in the UI.
+    for (const id of missingNameIds) {
+      if (!names[id]) {
+        names[id] = id.slice(0, 8)
+      }
+    }
 
     return NextResponse.json({ names })
   } catch (err: any) {

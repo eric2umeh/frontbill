@@ -1,4 +1,5 @@
 import { getUserDisplayName } from './user-display'
+import { fetchJsonWithTimeout } from './fetch-with-timeout'
 
 export async function fetchUserDisplayNameMap(userIds: string[], callerId: string) {
   const uniqueIds = Array.from(new Set(userIds.filter(Boolean)))
@@ -9,18 +10,17 @@ export async function fetchUserDisplayNameMap(userIds: string[], callerId: strin
 
   if (!callerId || uniqueIds.length === 0) return fallbackMap
 
-  try {
-    const response = await fetch('/api/profiles/display-names', {
+  const { ok, data, timedOut } = await fetchJsonWithTimeout<{ names?: Record<string, string> }>(
+    '/api/profiles/display-names',
+    {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ caller_id: callerId, user_ids: uniqueIds }),
-    })
+      credentials: 'include',
+    },
+    8_000,
+  )
 
-    if (!response.ok) return fallbackMap
-
-    const payload = await response.json()
-    return { ...fallbackMap, ...(payload.names || {}) }
-  } catch {
-    return fallbackMap
-  }
+  if (timedOut || !ok || !data?.names) return fallbackMap
+  return { ...fallbackMap, ...data.names }
 }
