@@ -15,6 +15,7 @@ import {
 import { BackdatePendingProvider } from '@/components/providers/backdate-pending-provider'
 import { BrandingFavicon } from '@/components/branding/branding-favicon'
 import { BRAND_LOGO_SESSION_KEY } from '@/lib/branding/constants'
+import { getPostLoginPath } from '@/lib/utils/post-login-path'
 
 const ROUTE_PERMISSIONS: Array<{ path: string; permission: Permission }> = [
   { path: '/dashboard', permission: 'dashboard:view' },
@@ -117,6 +118,14 @@ export function DashboardShell({
       }
       if (rk === 'staff') {
         router.replace('/bookings')
+        return
+      }
+      if (rk === 'cashier') {
+        router.replace('/outlets')
+        return
+      }
+      if (!hasPermission(user.role, 'dashboard:view')) {
+        router.replace(getPostLoginPath(user.role))
         return
       }
     }
