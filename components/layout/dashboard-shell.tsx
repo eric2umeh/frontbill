@@ -15,7 +15,9 @@ import {
 import { BackdatePendingProvider } from '@/components/providers/backdate-pending-provider'
 import { BrandingFavicon } from '@/components/branding/branding-favicon'
 import { BRAND_LOGO_SESSION_KEY } from '@/lib/branding/constants'
+import { LOGIN_SUCCESS_TOAST_KEY } from '@/lib/auth/constants'
 import { getPostLoginPath } from '@/lib/utils/post-login-path'
+import { toast } from 'sonner'
 
 const ROUTE_PERMISSIONS: Array<{ path: string; permission: Permission }> = [
   { path: '/dashboard', permission: 'dashboard:view' },
@@ -86,6 +88,17 @@ export function DashboardShell({
   const setOrganizationLogoUrl = (url: string) => {
     setUser((prev) => ({ ...prev, organizationLogoUrl: url }))
   }
+
+  useEffect(() => {
+    try {
+      if (sessionStorage.getItem(LOGIN_SUCCESS_TOAST_KEY) === '1') {
+        sessionStorage.removeItem(LOGIN_SUCCESS_TOAST_KEY)
+        toast.success('Login successful!')
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [])
 
   useEffect(() => {
     const rk = canonicalRoleKey(user.role) || ''

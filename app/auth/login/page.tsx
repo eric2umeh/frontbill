@@ -22,6 +22,7 @@ import { Label } from '@/components/ui/label'
 import { Hotel, Loader2, AlertCircle, Eye, EyeOff } from 'lucide-react'
 import Link from 'next/link'
 import { toast } from 'sonner'
+import { LOGIN_SUCCESS_TOAST_KEY } from '@/lib/auth/constants'
 import { BRAND_LOGO_SESSION_KEY } from '@/lib/branding/constants'
 
 export default function Page() {
@@ -123,6 +124,12 @@ export default function Page() {
       const cookieJson = await cookieRes.json().catch(() => ({}))
       if (!cookieRes.ok) {
         throw new Error(cookieJson.error || 'Could not establish server session')
+      }
+
+      try {
+        sessionStorage.setItem(LOGIN_SUCCESS_TOAST_KEY, '1')
+      } catch {
+        /* ignore */
       }
 
       // Redirect immediately — do not wait on profiles (often 504/timeouts). Role routing runs in the dashboard shell.
