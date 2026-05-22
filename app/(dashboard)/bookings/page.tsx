@@ -26,6 +26,7 @@ import { manualCheckoutEligible, resolvedCheckoutDateForClosing, hideChargeExten
 import { folioPositiveOutstandingSum, shouldReconcileBookingPaymentPaid } from '@/lib/utils/booking-bill-balance'
 import { bookingYmdHotel, isInHouseOnCalendarDay, todayYmdHotel } from '@/lib/utils/booking-in-house-dates'
 import { resolveHotelTimeZone } from '@/lib/hotel-date'
+import { cancelBookingReservation } from '@/lib/reservations/cancel-reservation'
 
 interface Booking {
   id: string
@@ -491,15 +492,12 @@ export default function BookingsPage() {
                 setCancelReserveLoadingId(booking.id)
                 try {
                   const supabase = createClient()
-                  const { error } = await supabase
-                    .from('bookings')
-                    .update({ status: 'cancelled', updated_by: userId, updated_at: new Date().toISOString() })
-                    .eq('id', booking.id)
+                  const { error } = await cancelBookingReservation(supabase, {
+                    bookingId: booking.id,
+                    roomId: booking.room_id,
+                    userId,
+                  })
                   if (error) throw error
-                  const rid = booking.room_id
-                  if (rid) {
-                    await supabase.from('rooms').update({ status: 'available', updated_at: new Date().toISOString() }).eq('id', rid)
-                  }
                   toast.success('Reservation cancelled')
                   fetchBookings()
                 } catch (err: any) {

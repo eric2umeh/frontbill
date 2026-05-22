@@ -16,7 +16,7 @@ import { CheckoutConfirmDialog } from '@/components/bookings/checkout-confirm-di
 import { toast } from 'sonner'
 import { PageLoadingState } from '@/components/loading-screen'
 import { hasPermission } from '@/lib/permissions'
-import { cancelBookingReservation } from '@/lib/reservations/cancel-reservation'
+import { cancelBookingReservation, isCancellableReservationStatus } from '@/lib/reservations/cancel-reservation'
 
 type BulkPageCheckoutDraft = { kind: 'row'; row: any } | { kind: 'all'; targets: any[] }
 
@@ -181,9 +181,9 @@ export default function BulkBookingDetailPage({ params }: { params: Promise<{ gr
 
   const handleCancelGroup = async () => {
     if (!rows.length) return
-    const active = rows.filter((r) => r.status !== 'cancelled')
+    const active = rows.filter((r) => isCancellableReservationStatus(r.status))
     if (!active.length) {
-      toast.message('All reservations in this group are already cancelled.')
+      toast.message('All reservations in this group are already cancelled or checked in.')
       return
     }
     if (!confirm(`Cancel ${active.length} reservation(s) in this group? Rooms will be released.`)) return
