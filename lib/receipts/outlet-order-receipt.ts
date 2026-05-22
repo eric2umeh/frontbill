@@ -52,6 +52,7 @@ export function outletReceiptPaymentLabel(method: string | null | undefined): st
     transfer: 'TRANSFER',
     city_ledger: 'Folio Transfer',
     room_charge: 'Folio Transfer',
+    complimentary: 'COMPLIMENTARY',
   }
   return map[m] ?? (m ? m.toUpperCase() : '—')
 }
