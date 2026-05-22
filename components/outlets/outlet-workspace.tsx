@@ -15,7 +15,8 @@ import { OutletPos } from '@/components/outlets/outlet-pos'
 import { OutletMenuManager } from '@/components/outlets/outlet-menu-manager'
 import { OutletOrdersPanel } from '@/components/outlets/outlet-orders-panel'
 import { OutletDailyReportPanel } from '@/components/outlets/outlet-daily-report-panel'
-import { OutletOrderReceiptDialog } from '@/components/outlets/outlet-order-receipt-dialog'
+import { OutletOrderReceiptDialog, type OutletBillPrintKind } from '@/components/outlets/outlet-order-receipt-dialog'
+import { PageHeader } from '@/components/layout/page-header'
 import { ChevronLeft, ShoppingCart, UtensilsCrossed, ClipboardList, BarChart3 } from 'lucide-react'
 import { toast } from 'sonner'
 import { outletApiHeaders } from '@/lib/outlets/outlet-api-headers'
@@ -36,6 +37,7 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
   const [receiptOrder, setReceiptOrder] = useState<OutletOrderRow | null>(null)
   const [receiptOpen, setReceiptOpen] = useState(false)
   const [receiptAutoPrint, setReceiptAutoPrint] = useState(false)
+  const [receiptBillKind, setReceiptBillKind] = useState<OutletBillPrintKind>('auto')
 
   const load = useCallback(async () => {
     if (!organizationId) return
@@ -84,58 +86,61 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
   const canViewMenu = hasPermission(role, 'outlet:view')
   const canManageMenu = canManageOutletMenu(role)
   const canReports = hasPermission(role, 'outlet:reports')
-  const openReceipt = (order: OutletOrderRow, autoPrint: boolean) => {
+  const openReceipt = (
+    order: OutletOrderRow,
+    autoPrint: boolean,
+    billKind: OutletBillPrintKind = 'auto',
+  ) => {
     setReceiptOrder(order)
     setReceiptAutoPrint(autoPrint)
+    setReceiptBillKind(billKind)
     setReceiptOpen(true)
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-start gap-3">
-        <Button variant="ghost" size="sm" asChild className="shrink-0 mt-0.5">
-          <Link href="/outlets">
-            <ChevronLeft className="h-4 w-4 mr-1" />
-            Outlets
-          </Link>
-        </Button>
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-            <h1 className="text-2xl font-bold tracking-tight">{def.label}</h1>
-            <RoomInventoryStatsStrip className="shrink-0" />
-          </div>
-          <p className="text-sm text-muted-foreground">POS · menu · orders · daily sales</p>
-        </div>
-      </div>
+    <div className="space-y-2">
+      <PageHeader
+        title={def.label}
+        description="POS · menu · orders · daily sales"
+        backLink={
+          <Button variant="ghost" size="sm" asChild className="h-7 px-2 shrink-0">
+            <Link href="/outlets">
+              <ChevronLeft className="h-3.5 w-3.5 mr-0.5" />
+              Outlets
+            </Link>
+          </Button>
+        }
+        trailing={<RoomInventoryStatsStrip className="shrink-0 scale-90 origin-right" />}
+      />
 
-      <Tabs value={tab} onValueChange={setTab}>
-        <TabsList>
+      <Tabs value={tab} onValueChange={setTab} className="gap-2">
+        <TabsList className="h-8">
           {canSell && (
-            <TabsTrigger value="sell" className="gap-1">
-              <ShoppingCart className="h-4 w-4" />
+            <TabsTrigger value="sell" className="gap-1 text-xs h-7 px-2.5">
+              <ShoppingCart className="h-3.5 w-3.5" />
               Take order
             </TabsTrigger>
           )}
           {canViewMenu && (
-            <TabsTrigger value="menu" className="gap-1">
-              <UtensilsCrossed className="h-4 w-4" />
+            <TabsTrigger value="menu" className="gap-1 text-xs h-7 px-2.5">
+              <UtensilsCrossed className="h-3.5 w-3.5" />
               Menu
             </TabsTrigger>
           )}
-          <TabsTrigger value="orders" className="gap-1">
-            <ClipboardList className="h-4 w-4" />
+          <TabsTrigger value="orders" className="gap-1 text-xs h-7 px-2.5">
+            <ClipboardList className="h-3.5 w-3.5" />
             Orders
           </TabsTrigger>
           {canReports && (
-            <TabsTrigger value="reports" className="gap-1">
-              <BarChart3 className="h-4 w-4" />
+            <TabsTrigger value="reports" className="gap-1 text-xs h-7 px-2.5">
+              <BarChart3 className="h-3.5 w-3.5" />
               Reports
             </TabsTrigger>
           )}
         </TabsList>
 
         {canSell && (
-          <TabsContent value="sell" className="mt-4">
+          <TabsContent value="sell" className="mt-2">
             <OutletPos
               department={department}
               departmentLabel={def.label}
@@ -144,13 +149,14 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
               items={items}
               canPrintReceipt={canReceipt}
               onSettled={() => void load()}
-              onOrderSettled={(order) => openReceipt(order, true)}
+              onOrderBill={(order) => openReceipt(order, true, 'unsettled')}
+              onOrderSettled={(order) => openReceipt(order, true, 'settled')}
             />
           </TabsContent>
         )}
 
         {canViewMenu && (
-          <TabsContent value="menu" className="mt-4">
+          <TabsContent value="menu" className="mt-2">
             <OutletMenuManager
               department={department}
               categories={categories}
@@ -161,23 +167,29 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
           </TabsContent>
         )}
 
-        <TabsContent value="orders" className="mt-4">
+        <TabsContent value="orders" className="mt-2">
           <OutletOrdersPanel
             orders={orders}
             canPrintReceipt={canReceipt}
-            onPrintReceipt={(order) => openReceipt(order, false)}
+            canSell={canSell}
+            onPrintUnsettled={(order) => openReceipt(order, false, 'unsettled')}
+            onPrintSettled={(order) => openReceipt(order, false, 'settled')}
+            onSettled={() => void load()}
           />
         </TabsContent>
 
         {canReports && (
-          <TabsContent value="reports" className="mt-4 space-y-6">
+          <TabsContent value="reports" className="mt-2 space-y-4">
             <OutletDailyReportPanel department={department} departmentLabel={def.label} />
             <div>
               <h3 className="text-sm font-semibold mb-3">Recent orders</h3>
               <OutletOrdersPanel
                 orders={orders}
                 canPrintReceipt={canReceipt}
-                onPrintReceipt={(order) => openReceipt(order, false)}
+                canSell={canSell}
+                onPrintUnsettled={(order) => openReceipt(order, false, 'unsettled')}
+                onPrintSettled={(order) => openReceipt(order, false, 'settled')}
+                onSettled={() => void load()}
               />
             </div>
             <p className="text-xs text-muted-foreground">
@@ -197,6 +209,7 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
           organizationId={organizationId ?? ''}
           staffName={staffName}
           autoPrint={receiptAutoPrint}
+          billKind={receiptBillKind}
         />
       )}
     </div>
