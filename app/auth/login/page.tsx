@@ -21,9 +21,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Hotel, Loader2, AlertCircle, Eye, EyeOff } from 'lucide-react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { getPostLoginPath } from '@/lib/utils/post-login-path'
 import { BRAND_LOGO_SESSION_KEY } from '@/lib/branding/constants'
 
 export default function Page() {
@@ -36,8 +34,6 @@ export default function Page() {
   const [resetEmail, setResetEmail] = useState('')
   const [resetLoading, setResetLoading] = useState(false)
   const [sessionBrandLogo, setSessionBrandLogo] = useState<string | null>(null)
-  const router = useRouter()
-
   useEffect(() => {
     try {
       const u = sessionStorage.getItem(BRAND_LOGO_SESSION_KEY)
@@ -88,6 +84,12 @@ export default function Page() {
     setIsLoading(true)
 
     try {
+      try {
+        localStorage.removeItem('supabase-auth-token')
+      } catch {
+        /* legacy storage key — remove so it does not overwrite SSR cookies */
+      }
+
       const supabase = createClient()
       if (!supabase) {
         toast.error('Supabase not configured. Please add environment variables.')
@@ -105,16 +107,30 @@ export default function Page() {
         throw error
       }
 
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('role')
-        .eq('id', data.user.id)
-        .maybeSingle()
+      if (!data.session) {
+        throw new Error('Login succeeded but no session was returned. Try again.')
+      }
 
-      toast.success('Login successful!')
-      router.push(getPostLoginPath(profile?.role))
+      const cookieRes = await fetch('/api/auth/establish-session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          access_token: data.session.access_token,
+          refresh_token: data.session.refresh_token,
+        }),
+      })
+      const cookieJson = await cookieRes.json().catch(() => ({}))
+      if (!cookieRes.ok) {
+        throw new Error(cookieJson.error || 'Could not establish server session')
+      }
+
+      // Redirect immediately — do not wait on profiles (often 504/timeouts). Role routing runs in the dashboard shell.
+      window.location.replace('/dashboard')
+      return
     } catch (error: any) {
       toast.error(error.message || 'Failed to login')
+    } finally {
       setIsLoading(false)
     }
   }
