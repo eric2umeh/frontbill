@@ -132,7 +132,9 @@ export function Header({ user, onMenuClick }: HeaderProps) {
       ] = await Promise.all([
         supabase
         .from('transactions')
-        .select('id, description, amount, created_at, booking_id, guest_id, folio_id')
+        .select(
+          'id, description, amount, created_at, booking_id, guest_name, transaction_id, bookings(guest_id, folio_id)',
+        )
         .eq('organization_id', organizationId)
         .order('created_at', { ascending: false })
         .limit(8),
@@ -182,19 +184,29 @@ export function Header({ user, onMenuClick }: HeaderProps) {
       const getGuestName = (booking: any) => Array.isArray(booking.guests) ? booking.guests[0]?.name : booking.guests?.name
       const getGuestId = (booking: any) => Array.isArray(booking.guests) ? booking.guests[0]?.id : booking.guests?.id
       const getRoomNumber = (booking: any) => Array.isArray(booking.rooms) ? booking.rooms[0]?.room_number : booking.rooms?.room_number
+      const getLinkedBooking = (row: { bookings?: unknown }) => {
+        const b = row.bookings
+        return Array.isArray(b) ? b[0] : b
+      }
 
-      const transactionNotifications: Notification[] = (transactionsRes.data || []).map((t: any) => ({
+      const transactionNotifications: Notification[] = (transactionsRes.data || []).map((t: any) => {
+        const linked = getLinkedBooking(t) as { guest_id?: string; folio_id?: string } | null | undefined
+        return {
         id: `transaction-${t.id}`,
-        description: t.description || 'Transaction recorded',
+        description: t.description || t.guest_name || 'Transaction recorded',
         amount: Number(t.amount || 0),
         created_at: t.created_at,
         booking_id: t.booking_id ?? null,
-        guest_id: t.guest_id ?? null,
-        folio_id: t.folio_id ?? null,
+        guest_id: linked?.guest_id ?? null,
+        folio_id: linked?.folio_id ?? t.transaction_id ?? null,
         read: readIds.has(`transaction-${t.id}`),
         type: 'transaction',
         actionLabel: t.booking_id ? 'View booking' : 'View transactions',
-      }))
+      }})
+
+      if (transactionsRes.error) {
+        console.warn('[notifications] transactions:', transactionsRes.error.message)
+      }
 
       const checkinNotifications: Notification[] = now >= checkinReminderTime
         ? (checkinsRes.data || []).map((b: any) => ({
@@ -518,22 +530,22 @@ export function Header({ user, onMenuClick }: HeaderProps) {
     .toUpperCase() || 'U'
 
   return (
-    <header className="flex h-16 items-center justify-between border-b bg-card px-4 md:px-6">
-      <div className="flex items-center gap-4">
-        <Button variant="ghost" size="icon" className="md:hidden" onClick={onMenuClick}>
-          <Menu className="h-5 w-5" />
+    <header className="flex h-11 items-center justify-between border-b bg-card px-3 md:px-4 shrink-0">
+      <div className="flex items-center gap-2 min-w-0">
+        <Button variant="ghost" size="icon" className="md:hidden h-8 w-8" onClick={onMenuClick}>
+          <Menu className="h-4 w-4" />
         </Button>
-        <div>
-          <h2 className="text-sm font-medium text-muted-foreground">Welcome back,</h2>
-          <p className="text-lg font-semibold">{user.name}</p>
+        <div className="min-w-0 leading-tight">
+          <p className="text-[10px] text-muted-foreground truncate">Welcome back</p>
+          <p className="text-sm font-semibold truncate">{user.name}</p>
         </div>
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1 shrink-0">
         <Popover open={notifOpen} onOpenChange={setNotifOpen}>
           <PopoverTrigger asChild>
-            <Button variant="ghost" size="icon" className="relative">
-              <Bell className="h-5 w-5" />
+            <Button variant="ghost" size="icon" className="relative h-8 w-8">
+              <Bell className="h-4 w-4" />
               {unreadCount > 0 && (
                 <span className="absolute right-1.5 top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-destructive text-[10px] font-medium text-destructive-foreground">
                   {unreadCount > 9 ? '9+' : unreadCount}
@@ -586,8 +598,8 @@ export function Header({ user, onMenuClick }: HeaderProps) {
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" className="relative h-10 w-10 rounded-full">
-              <Avatar className="h-10 w-10">
+            <Button variant="ghost" className="relative h-8 w-8 rounded-full">
+              <Avatar className="h-8 w-8">
                 <AvatarFallback className="bg-primary text-primary-foreground">
                   {initials}
                 </AvatarFallback>

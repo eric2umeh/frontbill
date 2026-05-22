@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { Geist, Geist_Mono } from 'next/font/google'
 import { Toaster } from 'sonner'
+import { LoginSuccessToast } from '@/components/auth/login-success-toast'
 
 import './globals.css'
 
@@ -22,6 +23,7 @@ export default function RootLayout({
       <body className="font-sans antialiased" suppressHydrationWarning>
         {children}
         <Toaster richColors position="top-right" />
+        <LoginSuccessToast />
       </body>
     </html>
   )

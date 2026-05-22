@@ -25,6 +25,7 @@ export function formatPaymentMethodLabel(method: string | null | undefined): str
   const found = PAYMENT_METHOD_SELECT_OPTIONS.find((o) => o.value === m)
   if (found) return found.label
   if (m === 'pending') return 'Pending (hold date, no payment)'
+  if (m === 'complimentary') return 'Complimentary'
   if (m === 'city_ledger' || m === 'room_charge') return 'City ledger'
   if (!m) return '—'
   return m

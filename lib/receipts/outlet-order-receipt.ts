@@ -1,6 +1,7 @@
 import { escapeHtml } from '@/lib/utils/html-escape'
 import { formatReceiptDateTime, formatAmountReceipt } from '@/lib/receipts/receipt-format'
 import type { OutletDepartmentKey } from '@/lib/outlets/departments'
+import { OUTLET_FEE_LINE_NAMES } from '@/lib/outlets/order-extra-fees'
 import type { OutletOrderLineRow, OutletOrderType } from '@/lib/outlets/types'
 
 export type OutletOrderReceiptLine = {
@@ -26,6 +27,7 @@ export type OutletOrderReceiptPayload = {
   lines: OutletOrderReceiptLine[]
   itemsSubtotal: number
   roomServiceFee: number
+  takeawayFee: number
   grandTotal: number
   salesCategoryLabel: string
 }
@@ -50,6 +52,7 @@ export function outletReceiptPaymentLabel(method: string | null | undefined): st
     transfer: 'TRANSFER',
     city_ledger: 'Folio Transfer',
     room_charge: 'Folio Transfer',
+    complimentary: 'COMPLIMENTARY',
   }
   return map[m] ?? (m ? m.toUpperCase() : '—')
 }
@@ -134,6 +137,10 @@ export function buildOutletOrderReceiptHtml(p: OutletOrderReceiptPayload): strin
     p.roomServiceFee > 0
       ? `<tr><td class="indent">Room service fee</td><td class="amt">${amtCell(p.roomServiceFee)}</td></tr>`
       : ''
+  const takeawayFeeRow =
+    p.takeawayFee > 0
+      ? `<tr><td class="indent">Take-away fee</td><td class="amt">${amtCell(p.takeawayFee)}</td></tr>`
+      : ''
 
   return `<!DOCTYPE html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width"/><title>Receipt ${receiptNo}</title><style>${receiptStyles()}</style></head><body>
   <div class="wrap">
@@ -153,6 +160,7 @@ export function buildOutletOrderReceiptHtml(p: OutletOrderReceiptPayload): strin
       <tbody>
         ${itemRows}
         ${roomFeeRow}
+        ${takeawayFeeRow}
       </tbody>
     </table>
     <hr class="hr-dashed"/>
@@ -174,6 +182,7 @@ export function buildOutletOrderReceiptHtml(p: OutletOrderReceiptPayload): strin
         <tr><td colspan="2" style="font-weight:700;padding-top:4px;">Sales</td></tr>
         <tr><td class="indent">${salesCat}</td><td class="amt">${amtCell(p.itemsSubtotal)}</td></tr>
         ${p.roomServiceFee > 0 ? `<tr><td class="indent">Room service fee</td><td class="amt">${amtCell(p.roomServiceFee)}</td></tr>` : ''}
+        ${p.takeawayFee > 0 ? `<tr><td class="indent">Take-away fee</td><td class="amt">${amtCell(p.takeawayFee)}</td></tr>` : ''}
         <tr class="sub"><td>Sub Total</td><td class="amt">${amtCell(p.grandTotal)}</td></tr>
         <tr class="total"><td>Grand Total</td><td class="amt">${amtCell(p.grandTotal)}</td></tr>
       </tbody>
@@ -200,9 +209,16 @@ export function buildOutletOrderReceiptPayload(input: {
   lines: OutletOrderLineRow[] | OutletOrderReceiptLine[]
   subtotal: number
   roomServiceFee?: number | null
+  takeawayFee?: number | null
 }): OutletOrderReceiptPayload {
   const roomServiceFee = Number(input.roomServiceFee) || 0
+  const takeawayFee = Number(input.takeawayFee) || 0
+  const extraFeesTotal = Math.round((roomServiceFee + takeawayFee) * 100) / 100
   const grandTotal = Math.round(Number(input.subtotal) * 100) / 100
+  const feeNames = [
+    OUTLET_FEE_LINE_NAMES.roomService.toLowerCase(),
+    OUTLET_FEE_LINE_NAMES.takeaway.toLowerCase(),
+  ]
   const lines: OutletOrderReceiptLine[] = input.lines.map((l) => ({
     name: 'item_name' in l ? l.item_name : l.name,
     qty: Number(l.qty),
@@ -210,12 +226,12 @@ export function buildOutletOrderReceiptPayload(input: {
     lineTotal: Number(l.line_total ?? l.lineTotal),
   }))
   const itemsFromLines = lines
-    .filter((l) => !l.name.toLowerCase().includes('room service delivery fee'))
+    .filter((l) => !feeNames.some((f) => l.name.toLowerCase().includes(f)))
     .reduce((s, l) => s + l.lineTotal, 0)
   const itemsSubtotal =
-    roomServiceFee > 0 && Math.abs(itemsFromLines + roomServiceFee - grandTotal) < 0.02
+    extraFeesTotal > 0 && Math.abs(itemsFromLines + extraFeesTotal - grandTotal) < 0.02
       ? Math.round(itemsFromLines * 100) / 100
-      : Math.round((grandTotal - roomServiceFee) * 100) / 100
+      : Math.round((grandTotal - extraFeesTotal) * 100) / 100
 
   return {
     hotelName: input.hotelName,
@@ -233,6 +249,7 @@ export function buildOutletOrderReceiptPayload(input: {
     lines,
     itemsSubtotal,
     roomServiceFee,
+    takeawayFee,
     grandTotal,
     salesCategoryLabel: outletSalesCategoryLabel(input.department),
   }

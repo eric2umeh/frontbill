@@ -13,9 +13,10 @@ import { Printer, FileDown, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { createClient } from '@/lib/supabase/client'
 import {
-  buildOutletOrderReceiptHtml,
-  buildOutletOrderReceiptPayload,
-} from '@/lib/receipts/outlet-order-receipt'
+  buildOutletThermalBillHtml,
+  buildOutletThermalBillPayload,
+  orderLinesToThermalLines,
+} from '@/lib/receipts/outlet-thermal-bill'
 import { exportElementToPdf, printHtmlDocument } from '@/lib/receipts/receipt-pdf-print'
 import type { OutletDepartmentKey } from '@/lib/outlets/departments'
 import type { OutletOrderRow } from '@/lib/outlets/types'
@@ -26,6 +27,8 @@ type OrgBranding = {
   phone?: string | null
 }
 
+export type OutletBillPrintKind = 'unsettled' | 'settled' | 'auto'
+
 type Props = {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -34,19 +37,21 @@ type Props = {
   departmentLabel: string
   organizationId: string
   staffName: string
-  /** Auto-open print dialog when receipt opens (after settle). */
+  /** Auto-open print dialog when receipt opens. */
   autoPrint?: boolean
+  /** Force unsettled vs settled layout; auto uses order.status. */
+  billKind?: OutletBillPrintKind
 }
 
 export function OutletOrderReceiptDialog({
   open,
   onOpenChange,
   order,
-  department,
   departmentLabel,
   organizationId,
   staffName,
   autoPrint = false,
+  billKind = 'auto',
 }: Props) {
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const [pdfLoading, setPdfLoading] = useState(false)
@@ -83,29 +88,37 @@ export function OutletOrderReceiptDialog({
     }
   }, [open])
 
+  const resolvedKind = useMemo((): 'unsettled' | 'settled' => {
+    if (billKind === 'unsettled' || billKind === 'settled') return billKind
+    return order?.status === 'settled' ? 'settled' : 'unsettled'
+  }, [billKind, order?.status])
+
   const payload = useMemo(() => {
     if (!order) return null
-    return buildOutletOrderReceiptPayload({
+    const lines = orderLinesToThermalLines(order.outlet_order_lines ?? [])
+    return buildOutletThermalBillPayload({
       hotelName: org?.hotelName ?? 'Hotel',
-      address: org?.address,
-      phone: org?.phone,
       outletLabel: departmentLabel,
-      department,
       orderNumber: order.order_number,
-      printedBy: staffName,
       printedAtIso: order.settled_at ?? order.created_at,
-      guestName: order.guest_name,
-      roomNumber: order.room_number,
       tableLabel: order.table_label,
-      orderType: order.order_type,
-      paymentMethod: order.payment_method,
-      lines: order.outlet_order_lines ?? [],
-      subtotal: Number(order.subtotal),
-      roomServiceFee: order.room_service_fee,
+      waiterName: staffName,
+      roomNumber: order.room_number,
+      guestName: order.guest_name,
+      lines,
+      grandTotal: Number(order.subtotal),
+      status: resolvedKind,
+      isComplimentary: !!order.is_complimentary,
+      preparedBy: staffName,
+      paymentMethod: resolvedKind === 'settled' ? order.payment_method : null,
+      paymentReference: resolvedKind === 'settled' ? order.order_number : null,
     })
-  }, [order, org, department, departmentLabel, staffName])
+  }, [order, org, departmentLabel, staffName, resolvedKind])
 
-  const html = useMemo(() => (payload ? buildOutletOrderReceiptHtml(payload) : ''), [payload])
+  const html = useMemo(() => (payload ? buildOutletThermalBillHtml(payload) : ''), [payload])
+
+  const title =
+    resolvedKind === 'settled' ? 'Settled receipt' : 'Unsettled bill'
 
   const handlePrint = useCallback(() => {
     if (!html) return
@@ -133,30 +146,31 @@ export function OutletOrderReceiptDialog({
     const iframe = iframeRef.current
     const body = iframe?.contentDocument?.body
     if (!body || !payload || !order) {
-      toast.error('Receipt preview is not ready')
+      toast.error('Bill preview is not ready')
       return
     }
     setPdfLoading(true)
     try {
       const safeNo = String(order.order_number).replace(/[^\w-]+/g, '_')
-      await exportElementToPdf(body, `outlet-receipt-${safeNo}.pdf`)
+      const suffix = resolvedKind === 'settled' ? 'settled' : 'unsettled'
+      await exportElementToPdf(body, `outlet-${suffix}-${safeNo}.pdf`)
       toast.success('PDF saved')
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : 'Failed to export PDF')
     } finally {
       setPdfLoading(false)
     }
-  }, [payload, order])
+  }, [payload, order, resolvedKind])
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md max-h-[min(90vh,720px)] flex flex-col">
         <DialogHeader>
-          <DialogTitle>Outlet receipt</DialogTitle>
+          <DialogTitle>{title}</DialogTitle>
           <DialogDescription>
             {order?.order_number
-              ? `Receipt ${order.order_number} — ${departmentLabel}`
-              : 'Print or save a copy for the guest and outlet.'}
+              ? `${order.order_number} — ${departmentLabel}. Give unsettled bills to the guest before payment; print settled receipts after payment or room charge.`
+              : 'Thermal bill for guest and outlet copy.'}
           </DialogDescription>
         </DialogHeader>
         {html ? (
@@ -178,14 +192,14 @@ export function OutletOrderReceiptDialog({
             <div className="flex-1 min-h-[360px] rounded-md border bg-white overflow-hidden">
               <iframe
                 ref={iframeRef}
-                title="Outlet receipt preview"
+                title="Outlet bill preview"
                 srcDoc={html}
                 className="w-full h-[min(480px,55vh)] border-0 bg-white"
               />
             </div>
           </>
         ) : (
-          <p className="text-sm text-muted-foreground">No receipt data.</p>
+          <p className="text-sm text-muted-foreground">No bill data.</p>
         )}
       </DialogContent>
     </Dialog>

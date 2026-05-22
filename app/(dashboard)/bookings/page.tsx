@@ -23,6 +23,7 @@ import { getUserDisplayName } from '@/lib/utils/user-display'
 import { fetchUserDisplayNameMap } from '@/lib/utils/fetch-user-display-names'
 import { getBulkGroupId } from '@/lib/utils/bulk-booking'
 import { manualCheckoutEligible, resolvedCheckoutDateForClosing, hideChargeExtendInBookingsTable, DEFAULT_ORG_CHECKOUT_TIME, isPastCheckoutCutoff } from '@/lib/utils/booking-checkout-ui'
+import { fetchOrgCheckoutTime } from '@/lib/utils/org-checkout-policy'
 import { folioPositiveOutstandingSum, shouldReconcileBookingPaymentPaid } from '@/lib/utils/booking-bill-balance'
 import { bookingYmdHotel, isInHouseOnCalendarDay, todayYmdHotel } from '@/lib/utils/booking-in-house-dates'
 import { resolveHotelTimeZone } from '@/lib/hotel-date'
@@ -107,13 +108,9 @@ export default function BookingsPage() {
     ;(async () => {
       const supabase = createClient()
       if (!supabase) return
-      const { data } = await supabase
-        .from('organizations')
-        .select('checkout_time')
-        .eq('id', organizationId)
-        .maybeSingle()
+      const checkoutTime = await fetchOrgCheckoutTime(supabase, organizationId)
       if (!cancelled) {
-        setOrgCheckoutTime(data?.checkout_time ?? DEFAULT_ORG_CHECKOUT_TIME)
+        setOrgCheckoutTime(checkoutTime)
       }
     })()
     return () => {
@@ -176,14 +173,16 @@ export default function BookingsPage() {
   }, [organizationId])
 
   const fetchBookings = useCallback(async () => {
+    startFetch()
     try {
-      startFetch()
       const supabase = createClient()
 
-      if (!supabase) {
+      if (!supabase || !organizationId) {
         setBookings([])
         return
       }
+
+      const loadWork = async () => {
 
       const statusKey = tableFilters.status
       const tz = resolveHotelTimeZone()
@@ -310,14 +309,14 @@ export default function BookingsPage() {
             .map((b: any) => b.id as string)
 
           if (healIds.length > 0) {
-            await Promise.all(
+            bookingsWithUsers.forEach((b: any) => {
+              if (healIds.includes(b.id)) b.payment_status = 'paid'
+            })
+            void Promise.all(
               healIds.map((id: string) =>
                 supabase.from('bookings').update({ payment_status: 'paid' }).eq('id', id),
               ),
             )
-            bookingsWithUsers.forEach((b: any) => {
-              if (healIds.includes(b.id)) b.payment_status = 'paid'
-            })
           }
         }
       }
@@ -327,18 +326,35 @@ export default function BookingsPage() {
       })
 
       setBookings(groupBulkRows(bookingsWithUsers))
+      }
+
+      await Promise.race([
+        loadWork(),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Bookings request timed out')), 25_000),
+        ),
+      ])
     } catch (error: any) {
       console.error('Error fetching bookings:', error)
-      toast.error('Failed to load bookings')
+      const msg = error?.message === 'Bookings request timed out'
+        ? 'Bookings took too long — showing empty list. Try Refresh or a narrower status filter.'
+        : 'Failed to load bookings'
+      toast.error(msg)
+      setBookings([])
     } finally {
       void refreshRoomStats()
       endFetch()
     }
-  }, [organizationId, userId, tableFilters.status, refreshRoomStats])
+  }, [organizationId, userId, tableFilters.status, refreshRoomStats, startFetch, endFetch])
 
   useEffect(() => {
-    if (organizationId) fetchBookings()
-  }, [organizationId, userId, fetchBookings])
+    if (!organizationId) {
+      setBookings([])
+      endFetch()
+      return
+    }
+    fetchBookings()
+  }, [organizationId, userId, fetchBookings, endFetch])
 
   useEffect(() => {
     if (!organizationId) {

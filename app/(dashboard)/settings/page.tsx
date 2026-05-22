@@ -12,14 +12,7 @@ import { Loader2, Building2, Shield, Eye, EyeOff, Clock, ImageIcon, Trash2 } fro
 import { useAuth } from '@/lib/auth-context'
 import { createClient } from '@/lib/supabase/client'
 import { canonicalRoleKey, hasPermission } from '@/lib/permissions'
-
-/** PostgREST/Postgres when `organizations` has no checkout policy columns yet */
-function isOrgCheckoutPolicyColumnError(err: { message?: string } | null | undefined): boolean {
-  const m = (err?.message || '').toLowerCase()
-  if (!m) return false
-  const namesCheckout = m.includes('checkout_time') || m.includes('late_checkout_fee')
-  return namesCheckout && (m.includes('does not exist') || m.includes('undefined column'))
-}
+import { isOrgCheckoutPolicyColumnError } from '@/lib/utils/org-checkout-policy'
 
 export default function SettingsPage() {
   const { userId, email, name, role, organizationId, organizationLogoUrl, setOrganizationLogoUrl } = useAuth()

@@ -96,6 +96,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import { PageLoadingState } from "@/components/loading-screen";
+import { fetchOrgCheckoutTime } from "@/lib/utils/org-checkout-policy";
 import {
   fetchGuestCityLedgerAccount,
   applyBookingPaymentToGuestLedger,
@@ -252,20 +253,10 @@ export default function BookingDetailPage({
         if (!error) {
           orgRow = data ?? null;
         }
-        const co = await supabase
-          .from("organizations")
-          .select("checkout_time")
-          .eq("id", bookingData.organization_id)
-          .maybeSingle();
-        if (
-          !co.error &&
-          co.data != null &&
-          (co.data as { checkout_time?: string | null }).checkout_time != null
-        ) {
-          checkoutTime = String(
-            (co.data as { checkout_time: string }).checkout_time,
-          );
-        }
+        checkoutTime = await fetchOrgCheckoutTime(
+          supabase,
+          bookingData.organization_id,
+        );
       }
       setOrgCheckoutTime(checkoutTime);
 
