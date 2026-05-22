@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { formatNaira } from '@/lib/utils/currency'
 import { cn } from '@/lib/utils'
 import { createClient } from '@/lib/supabase/client'
@@ -14,6 +14,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import {
@@ -23,7 +24,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Search, Minus, Plus, Loader2, Receipt } from 'lucide-react'
+import { Search, Minus, Plus, Loader2, Receipt, FileText } from 'lucide-react'
 import { toast } from 'sonner'
 import { outletApiHeaders } from '@/lib/outlets/outlet-api-headers'
 import { OutletOrderCustomerFields } from '@/components/outlets/outlet-order-customer-fields'
@@ -39,6 +40,9 @@ type Props = {
   items: OutletMenuItemRow[]
   onSettled: () => void
   canPrintReceipt?: boolean
+  /** Open order saved — print unsettled bill. */
+  onOrderBill?: (order: OutletOrderRow) => void
+  /** Payment recorded — print settled receipt. */
   onOrderSettled?: (order: OutletOrderRow) => void
 }
 
@@ -50,6 +54,7 @@ export function OutletPos({
   items,
   onSettled,
   canPrintReceipt = false,
+  onOrderBill,
   onOrderSettled,
 }: Props) {
   const [search, setSearch] = useState('')
@@ -68,6 +73,7 @@ export function OutletPos({
   const [selectedLedger, setSelectedLedger] = useState<LedgerOption | null>(null)
   const [roomServiceFee, setRoomServiceFee] = useState('')
   const [takeawayFee, setTakeawayFee] = useState('')
+  const [isComplimentary, setIsComplimentary] = useState(false)
   const [submitting, setSubmitting] = useState(false)
 
   const rootCategories = useMemo(
@@ -134,7 +140,15 @@ export function OutletPos({
     orderType === 'takeaway' && takeawayFee.trim() !== ''
       ? Math.max(0, Math.round(parseFloat(takeawayFee) * 100) / 100) || 0
       : 0
-  const orderTotal = Math.round((cartItemsTotal + parsedRoomServiceFee + parsedTakeawayFee) * 100) / 100
+  const listTotal = Math.round((cartItemsTotal + parsedRoomServiceFee + parsedTakeawayFee) * 100) / 100
+  const orderTotal = isComplimentary ? 0 : listTotal
+
+  useEffect(() => {
+    if (!isComplimentary) return
+    setSelectedLedger(null)
+    setLedgerSearch('')
+    setLedgerResults([])
+  }, [isComplimentary])
 
   const addToCart = (item: OutletMenuItemRow) => {
     setCart((prev) => {
@@ -190,12 +204,49 @@ export function OutletPos({
     )
   }, [ledgerSearch, organizationId])
 
-  const settle = async () => {
+  const buildOrderBody = (settleNow: boolean) => ({
+    department,
+    lines: cart.map((l) => ({ item_id: l.item.id, qty: l.qty })),
+    payment_method: isComplimentary ? 'complimentary' : paymentMethod,
+    is_complimentary: isComplimentary,
+    order_type: orderType,
+    guest_name: guestName.trim() || null,
+    room_number: roomNumber.trim() || null,
+    table_label: tableLabel.trim() || null,
+    booking_id: bookingId.trim() || null,
+    city_ledger_account_id: selectedLedger?.id || null,
+    room_service_fee:
+      orderType === 'room_service' && roomServiceFee.trim() !== ''
+        ? parsedRoomServiceFee
+        : null,
+    takeaway_fee:
+      orderType === 'takeaway' && takeawayFee.trim() !== ''
+        ? parsedTakeawayFee
+        : null,
+    settle_now: settleNow,
+    bill_only: !settleNow,
+  })
+
+  const resetOrderForm = () => {
+    setCart([])
+    setGuestName('')
+    setRoomNumber('')
+    setBookingId('')
+    setRoomGuestLabel(null)
+    setSelectedLedger(null)
+    setLedgerSearch('')
+    setLedgerResults([])
+    setRoomServiceFee('')
+    setTakeawayFee('')
+    setIsComplimentary(false)
+  }
+
+  const submitOrder = async (settleNow: boolean) => {
     if (cart.length === 0) {
       toast.error('Add items to the order first')
       return
     }
-    if (paymentMethod === 'city_ledger') {
+    if (!isComplimentary && settleNow && paymentMethod === 'city_ledger') {
       const hasRoom = roomNumber.trim().length > 0
       const hasGuest = guestName.trim().length > 0
       const hasLedger = !!selectedLedger?.id
@@ -211,49 +262,34 @@ export function OutletPos({
         method: 'POST',
         headers: await outletApiHeaders({ 'Content-Type': 'application/json' }),
         credentials: 'include',
-        body: JSON.stringify({
-          department,
-          lines: cart.map((l) => ({ item_id: l.item.id, qty: l.qty })),
-          payment_method: paymentMethod,
-          order_type: orderType,
-          guest_name: guestName.trim() || null,
-          room_number: roomNumber.trim() || null,
-          table_label: tableLabel.trim() || null,
-          booking_id: bookingId.trim() || null,
-          city_ledger_account_id: selectedLedger?.id || null,
-          room_service_fee:
-            orderType === 'room_service' && roomServiceFee.trim() !== ''
-              ? parsedRoomServiceFee
-              : null,
-          takeaway_fee:
-            orderType === 'takeaway' && takeawayFee.trim() !== ''
-              ? parsedTakeawayFee
-              : null,
-        }),
+        body: JSON.stringify(buildOrderBody(settleNow)),
       })
       const json = await res.json().catch(() => ({}))
       if (!res.ok) {
-        toast.error(json.error || 'Could not complete sale')
+        toast.error(json.error || 'Could not save order')
         return
       }
-      toast.success(
-        paymentMethod === 'city_ledger'
-          ? `${departmentLabel} charge posted to city ledger — ${json.order?.order_number ?? 'OK'}`
-          : `Sale recorded — ${json.order?.order_number ?? 'OK'}`,
-      )
-      setCart([])
-      setGuestName('')
-      setRoomNumber('')
-      setBookingId('')
-      setRoomGuestLabel(null)
-      setSelectedLedger(null)
-      setLedgerSearch('')
-      setLedgerResults([])
-      setRoomServiceFee('')
-      setTakeawayFee('')
-      onSettled()
-      if (canPrintReceipt && onOrderSettled && json.order) {
-        onOrderSettled(json.order as OutletOrderRow)
+      const order = json.order as OutletOrderRow
+      if (settleNow) {
+        toast.success(
+          isComplimentary
+            ? `Complimentary order settled — ${order?.order_number ?? 'OK'}`
+            : paymentMethod === 'city_ledger'
+              ? `Charged to room — ${order?.order_number ?? 'OK'}`
+              : `Settled — ${order?.order_number ?? 'OK'}`,
+        )
+        resetOrderForm()
+        onSettled()
+        if (canPrintReceipt && onOrderSettled && order) {
+          onOrderSettled(order)
+        }
+      } else {
+        toast.success(`Bill saved — ${order?.order_number ?? 'OK'}. Print unsettled bill for the guest.`)
+        resetOrderForm()
+        onSettled()
+        if (canPrintReceipt && onOrderBill && order) {
+          onOrderBill(order)
+        }
       }
     } catch {
       toast.error('Network error')
@@ -315,9 +351,15 @@ export function OutletPos({
                 <span>{formatNaira(parsedTakeawayFee)}</span>
               </div>
             )}
+            {isComplimentary && listTotal > 0 && (
+              <div className="flex justify-between text-xs text-muted-foreground line-through">
+                <span>List value</span>
+                <span>{formatNaira(listTotal)}</span>
+              </div>
+            )}
             <div className="flex justify-between text-lg font-bold pt-1 border-t">
-              <span>Total</span>
-              <span>{formatNaira(orderTotal)}</span>
+              <span>{isComplimentary ? 'Total (complimentary)' : 'Total'}</span>
+              <span>{isComplimentary ? formatNaira(0) : formatNaira(orderTotal)}</span>
             </div>
           </div>
           <div className="grid gap-2">
@@ -399,6 +441,22 @@ export function OutletPos({
             <Label>Table / reference (optional)</Label>
             <Input value={tableLabel} onChange={(e) => setTableLabel(e.target.value)} placeholder="Table 4, etc." />
           </div>
+          <div className="flex items-start gap-2 rounded-lg border border-violet-200/80 bg-violet-50/40 dark:bg-violet-950/20 p-3">
+            <Checkbox
+              id="complimentary-order"
+              checked={isComplimentary}
+              onCheckedChange={(v) => setIsComplimentary(v === true)}
+            />
+            <div className="space-y-0.5">
+              <Label htmlFor="complimentary-order" className="text-sm font-medium cursor-pointer">
+                Complimentary order
+              </Label>
+              <p className="text-xs text-muted-foreground leading-snug">
+                No charge to the guest or client. Items still print on the bill; total is zero and no payment posts.
+              </p>
+            </div>
+          </div>
+          {!isComplimentary && (
           <div className="space-y-1">
             <Label>Payment</Label>
             <Select value={paymentMethod} onValueChange={setPaymentMethod}>
@@ -411,7 +469,8 @@ export function OutletPos({
               </SelectContent>
             </Select>
           </div>
-          {paymentMethod === 'city_ledger' && (
+          )}
+          {!isComplimentary && paymentMethod === 'city_ledger' && (
             <div className="space-y-2 rounded-lg border bg-muted/30 p-3">
               <p className="text-xs text-muted-foreground">
                 Posts to city ledger with category <strong>{departmentLabel}</strong> (same as folio add charge). Visible on accounts, transactions, and guest balance.
@@ -461,10 +520,27 @@ export function OutletPos({
               </div>
             </div>
           )}
-          <Button className="w-full bg-amber-600 hover:bg-amber-700" onClick={() => void settle()} disabled={submitting || cart.length === 0}>
-            {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Receipt className="h-4 w-4 mr-2" />}
-            Settle &amp; print receipt
-          </Button>
+          <div className="grid gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full"
+              onClick={() => void submitOrder(false)}
+              disabled={submitting || cart.length === 0}
+            >
+              {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4 mr-2" />}
+              Save &amp; print unsettled bill
+            </Button>
+            <Button
+              type="button"
+              className="w-full bg-amber-600 hover:bg-amber-700"
+              onClick={() => void submitOrder(true)}
+              disabled={submitting || cart.length === 0}
+            >
+              {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Receipt className="h-4 w-4 mr-2" />}
+              Settle &amp; print receipt
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -481,6 +557,7 @@ export function OutletPos({
             <Button
               type="button"
               size="sm"
+              className="h-7 text-xs"
               variant={!parentCategoryId ? 'default' : 'outline'}
               onClick={() => {
                 setParentCategoryId(null)
@@ -494,6 +571,7 @@ export function OutletPos({
                 key={c.id}
                 type="button"
                 size="sm"
+                className="h-7 text-xs"
                 variant={parentCategoryId === c.id ? 'default' : 'outline'}
                 onClick={() => {
                   setParentCategoryId(c.id)
@@ -508,7 +586,7 @@ export function OutletPos({
 
         {subCategories.length > 0 && (
           <div className="flex flex-wrap gap-2">
-            <Button type="button" size="sm" variant={categoryId === 'all' ? 'secondary' : 'ghost'} onClick={() => setCategoryId('all')}>
+            <Button type="button" size="sm" className="h-6 text-xs" variant={categoryId === 'all' ? 'secondary' : 'ghost'} onClick={() => setCategoryId('all')}>
               All in section
             </Button>
             {subCategories.map((c) => (
@@ -516,6 +594,7 @@ export function OutletPos({
                 key={c.id}
                 type="button"
                 size="sm"
+                className="h-6 text-xs"
                 variant={categoryId === c.id ? 'secondary' : 'ghost'}
                 onClick={() => setCategoryId(c.id)}
               >
@@ -527,32 +606,29 @@ export function OutletPos({
 
         {!parentCategoryId && subCategories.length === 0 && rootCategories.length > 0 && (
           <div className="flex flex-wrap gap-2">
-            <Button type="button" size="sm" variant={categoryId === 'all' ? 'secondary' : 'ghost'} onClick={() => setCategoryId('all')}>
+            <Button type="button" size="sm" className="h-6 text-xs" variant={categoryId === 'all' ? 'secondary' : 'ghost'} onClick={() => setCategoryId('all')}>
               All
             </Button>
             {rootCategories.map((c) => (
-              <Button key={c.id} type="button" size="sm" variant={categoryId === c.id ? 'secondary' : 'ghost'} onClick={() => setCategoryId(c.id)}>
+              <Button key={c.id} type="button" size="sm" className="h-6 text-xs" variant={categoryId === c.id ? 'secondary' : 'ghost'} onClick={() => setCategoryId(c.id)}>
                 {c.name}
               </Button>
             ))}
           </div>
         )}
 
-        <ScrollArea className="h-[min(520px,65vh)] pr-2">
+        <ScrollArea className="h-[min(560px,72vh)] pr-1">
           {groupedByCategory.map(({ cat, items: groupItems }) => (
-            <section key={cat?.id ?? 'all'} className="mb-6">
+            <section key={cat?.id ?? 'all'} className="mb-3">
               {cat && (
-                <div className="flex items-center justify-between mb-3 sticky top-0 bg-background/95 py-1 z-10">
-                  <div>
-                    <h4 className="text-lg font-semibold font-serif">{cat.name}</h4>
-                    <p className="text-xs text-muted-foreground">{groupItems.length} items</p>
-                  </div>
+                <div className="flex items-center justify-between mb-1.5 sticky top-0 bg-background/95 py-0.5 z-10">
+                  <h4 className="text-sm font-semibold">{cat.name}</h4>
                   {cat.tag_label && (
-                    <Badge className="bg-amber-100 text-amber-900 border-amber-200">{cat.tag_label}</Badge>
+                    <Badge variant="secondary" className="text-[9px] h-4 px-1">{cat.tag_label}</Badge>
                   )}
                 </div>
               )}
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              <div className="grid gap-2 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-4">
                 {groupItems.map((it) => {
                   const inCart = cart.find((l) => l.item.id === it.id)
                   const displayDesc = getItemDisplayDescription(it.description)
@@ -563,33 +639,40 @@ export function OutletPos({
                       type="button"
                       onClick={() => addToCart(it)}
                       className={cn(
-                        'text-left rounded-xl border bg-card p-4 shadow-sm transition hover:border-amber-300 hover:shadow-md',
-                        inCart && 'ring-2 ring-amber-500/60 border-amber-400',
+                        'text-left rounded-lg border bg-card px-2.5 py-2 shadow-sm transition hover:border-amber-400 min-h-[88px] flex flex-col',
+                        inCart && 'ring-1 ring-amber-500 border-amber-400 bg-amber-50/50',
                       )}
                     >
-                      <div className="flex justify-between gap-2">
-                        <p className="font-semibold leading-tight">{it.name}</p>
+                      <div className="flex justify-between gap-1.5 items-start">
+                        <p className="text-xs font-semibold leading-snug line-clamp-2 flex-1">{it.name}</p>
                         <span
                           className={cn(
-                            'h-5 w-5 rounded-full border-2 shrink-0',
-                            inCart ? 'bg-amber-700 border-amber-700' : 'border-muted-foreground/30',
+                            'h-3.5 w-3.5 rounded-full border shrink-0 mt-0.5',
+                            inCart ? 'bg-amber-700 border-amber-700' : 'border-muted-foreground/40',
                           )}
                         />
                       </div>
-                      {displayDesc && (
-                        <p className="text-xs text-muted-foreground mt-2 line-clamp-2">{displayDesc}</p>
+                      {displayDesc ? (
+                        <p className="text-[10px] text-muted-foreground mt-1 line-clamp-2 leading-snug flex-1">
+                          {displayDesc}
+                        </p>
+                      ) : (
+                        <span className="flex-1 min-h-[1.25rem]" />
                       )}
                       {displayTags.length > 0 && (
-                        <div className="flex flex-wrap gap-1 mt-2">
-                          {displayTags.map((t) => (
-                            <Badge key={t} variant="secondary" className="text-[10px] font-normal">
+                        <div className="flex flex-wrap gap-0.5 mt-1">
+                          {displayTags.slice(0, 3).map((t) => (
+                            <Badge
+                              key={t}
+                              variant="secondary"
+                              className="text-[9px] font-normal px-1 py-0 h-4 leading-none"
+                            >
                               {formatOutletItemTagLabel(t)}
                             </Badge>
                           ))}
                         </div>
                       )}
-                      <p className="mt-3 text-xl font-bold">{formatNaira(it.unit_price)}</p>
-                      {cat && <p className="text-[10px] text-muted-foreground mt-1 text-right">{cat.name}</p>}
+                      <p className="text-sm font-bold tabular-nums mt-auto pt-1">{formatNaira(it.unit_price)}</p>
                     </button>
                   )
                 })}
