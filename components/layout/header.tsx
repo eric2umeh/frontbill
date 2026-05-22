@@ -132,7 +132,9 @@ export function Header({ user, onMenuClick }: HeaderProps) {
       ] = await Promise.all([
         supabase
         .from('transactions')
-        .select('id, description, amount, created_at, booking_id, guest_id, folio_id')
+        .select(
+          'id, description, amount, created_at, booking_id, guest_name, transaction_id, bookings(guest_id, folio_id)',
+        )
         .eq('organization_id', organizationId)
         .order('created_at', { ascending: false })
         .limit(8),
@@ -182,19 +184,29 @@ export function Header({ user, onMenuClick }: HeaderProps) {
       const getGuestName = (booking: any) => Array.isArray(booking.guests) ? booking.guests[0]?.name : booking.guests?.name
       const getGuestId = (booking: any) => Array.isArray(booking.guests) ? booking.guests[0]?.id : booking.guests?.id
       const getRoomNumber = (booking: any) => Array.isArray(booking.rooms) ? booking.rooms[0]?.room_number : booking.rooms?.room_number
+      const getLinkedBooking = (row: { bookings?: unknown }) => {
+        const b = row.bookings
+        return Array.isArray(b) ? b[0] : b
+      }
 
-      const transactionNotifications: Notification[] = (transactionsRes.data || []).map((t: any) => ({
+      const transactionNotifications: Notification[] = (transactionsRes.data || []).map((t: any) => {
+        const linked = getLinkedBooking(t) as { guest_id?: string; folio_id?: string } | null | undefined
+        return {
         id: `transaction-${t.id}`,
-        description: t.description || 'Transaction recorded',
+        description: t.description || t.guest_name || 'Transaction recorded',
         amount: Number(t.amount || 0),
         created_at: t.created_at,
         booking_id: t.booking_id ?? null,
-        guest_id: t.guest_id ?? null,
-        folio_id: t.folio_id ?? null,
+        guest_id: linked?.guest_id ?? null,
+        folio_id: linked?.folio_id ?? t.transaction_id ?? null,
         read: readIds.has(`transaction-${t.id}`),
         type: 'transaction',
         actionLabel: t.booking_id ? 'View booking' : 'View transactions',
-      }))
+      }})
+
+      if (transactionsRes.error) {
+        console.warn('[notifications] transactions:', transactionsRes.error.message)
+      }
 
       const checkinNotifications: Notification[] = now >= checkinReminderTime
         ? (checkinsRes.data || []).map((b: any) => ({
