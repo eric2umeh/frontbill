@@ -159,8 +159,13 @@ export function Sidebar({ mobileOpen, onMobileClose }: SidebarProps = {}) {
   const pendingBackdateCount = useBackdatePendingCount()
 
   // Filter sidebar routes based on the logged-in user's role
+  const roleKey = canonicalRoleKey(role)
+
   const visibleRoutes = routes.filter((route) => {
-    if (route.href === '/store' && canonicalRoleKey(role) === 'front_desk') {
+    if (route.href === '/dashboard' && roleKey === 'cashier') {
+      return false
+    }
+    if (route.href === '/store' && roleKey === 'front_desk') {
       return false
     }
     if (route.permissionAny?.length) {
