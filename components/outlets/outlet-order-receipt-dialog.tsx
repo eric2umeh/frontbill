@@ -102,6 +102,7 @@ export function OutletOrderReceiptDialog({
       lines: order.outlet_order_lines ?? [],
       subtotal: Number(order.subtotal),
       roomServiceFee: order.room_service_fee,
+      takeawayFee: order.takeaway_fee,
     })
   }, [order, org, department, departmentLabel, staffName])
 
