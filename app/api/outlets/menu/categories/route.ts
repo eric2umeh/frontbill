@@ -19,7 +19,6 @@ export async function GET(request: Request) {
     .select('*')
     .eq('organization_id', auth.ctx.organizationId)
     .eq('department', department)
-    .order('sort_order')
     .order('name')
 
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
