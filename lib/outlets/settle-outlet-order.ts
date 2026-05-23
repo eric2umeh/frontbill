@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { getOutletDepartment } from '@/lib/outlets/departments'
 import { findActiveBookingByRoom } from '@/lib/outlets/find-active-booking'
+import { recordOutletImmediatePayment } from '@/lib/outlets/outlet-financial-integration'
 import { postOutletCityLedgerCharge } from '@/lib/outlets/post-outlet-city-ledger'
 import {
   OUTLET_FEE_LINE_NAMES,
@@ -102,18 +103,19 @@ export async function settleOutletOrderRecord(
     folioChargeId = result.folioChargeId
     ledgerAccountId = result.ledgerAccountId
   } else if (!complimentary && paymentMethod !== 'city_ledger') {
-    const { data: booking } = bookingId
-      ? await admin.from('bookings').select('guest_id').eq('id', bookingId).maybeSingle()
-      : { data: null }
-    await admin.from('payments').insert({
-      organization_id: input.organizationId,
-      booking_id: bookingId || null,
-      guest_id: booking?.guest_id ?? null,
+    await recordOutletImmediatePayment(admin, {
+      organizationId: input.organizationId,
+      userId: input.userId,
+      orderId: order.id,
+      orderNumber,
+      department,
+      departmentLabel: deptDef?.label ?? department,
       amount: subtotal,
-      payment_method: paymentMethod,
-      payment_date: new Date().toISOString(),
-      notes: `${deptDef?.label ?? department} ${orderNumber} — ${lineDetail}`.slice(0, 500),
-      received_by: input.userId,
+      paymentMethod,
+      lineDetail,
+      bookingId,
+      guestName,
+      roomNumber,
     })
   }
 
