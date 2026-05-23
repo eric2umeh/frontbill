@@ -3,6 +3,11 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { resolveEventsAuthed } from '@/lib/events/api-auth'
 import { parseEventPaymentFromBody } from '@/lib/events/record-event-payment'
 import { resolveEventClientRecord, type EventClientType } from '@/lib/events/resolve-event-client'
+import {
+  computeEventEstimatedTotal,
+  parseEventOtherServices,
+  sumEventOtherServices,
+} from '@/lib/events/event-other-services'
 
 export async function PATCH(
   request: Request,
@@ -20,7 +25,7 @@ export async function PATCH(
   const { data: existing, error: fe } = await admin
     .from('hotel_events')
     .select(
-      'organization_id, start_date, end_date, estimated_value, client_type, client_name, client_phone, client_email, guest_id, client_organization_id',
+      'organization_id, start_date, end_date, estimated_value, venue, other_services, client_type, client_name, client_phone, client_email, guest_id, client_organization_id',
     )
     .eq('id', id)
     .single()
@@ -45,6 +50,10 @@ export async function PATCH(
   if (body.title != null) patch.title = String(body.title).trim()
   if (body.description !== undefined) patch.description = String(body.description || '').trim() || null
   if (body.venue !== undefined) patch.venue = String(body.venue || '').trim() || null
+  if (body.other_services !== undefined) {
+    const parsed = parseEventOtherServices(body.other_services)
+    patch.other_services = parsed.length > 0 ? parsed : null
+  }
   if (body.start_date != null) patch.start_date = String(body.start_date).trim()
   if (body.end_date !== undefined) {
     const startForEnd = String(patch.start_date ?? existing.start_date).trim()
@@ -111,25 +120,50 @@ export async function PATCH(
         ? null
         : Math.max(0, parseInt(String(body.expected_attendees), 10) || 0)
   }
-  if (body.estimated_value !== undefined) {
-    patch.estimated_value =
-      body.estimated_value === '' || body.estimated_value == null
-        ? null
-        : Math.max(0, Number(body.estimated_value) || 0)
+  if (
+    body.estimated_value !== undefined ||
+    body.estimated_base_value !== undefined ||
+    body.other_services !== undefined ||
+    body.estimated_base_value !== undefined ||
+    body.other_services !== undefined
+  ) {
+    const otherLines =
+      patch.other_services !== undefined
+        ? (patch.other_services as ReturnType<typeof parseEventOtherServices>)
+        : body.other_services !== undefined
+          ? parseEventOtherServices(body.other_services)
+          : parseEventOtherServices(existing.other_services)
+    const baseEstimated =
+      body.estimated_base_value !== undefined
+        ? body.estimated_base_value === '' || body.estimated_base_value == null
+          ? 0
+          : Math.max(0, Number(body.estimated_base_value) || 0)
+        : body.estimated_value !== undefined
+          ? Math.max(0, Number(body.estimated_value) || 0) - sumEventOtherServices(otherLines)
+          : Math.max(
+              0,
+              (Number(existing.estimated_value) || 0) - sumEventOtherServices(otherLines),
+            )
+    patch.estimated_value = computeEventEstimatedTotal(baseEstimated, otherLines)
   }
+
   const estimatedForPayment =
-    body.estimated_value !== undefined
-      ? body.estimated_value === '' || body.estimated_value == null
-        ? null
-        : Math.max(0, Number(body.estimated_value) || 0)
-      : existing.estimated_value
+    patch.estimated_value !== undefined
+      ? (patch.estimated_value as number)
+      : body.estimated_value !== undefined
+        ? body.estimated_value === '' || body.estimated_value == null
+          ? null
+          : Math.max(0, Number(body.estimated_value) || 0)
+        : existing.estimated_value
 
   if (
     body.payment_status != null ||
     body.payment_method != null ||
     body.partial_amount !== undefined ||
     body.pay_above_total !== undefined ||
-    body.estimated_value !== undefined
+    body.estimated_value !== undefined ||
+    body.estimated_base_value !== undefined ||
+    body.other_services !== undefined
   ) {
     const payment = parseEventPaymentFromBody(body as Record<string, unknown>, estimatedForPayment)
     if (payment.uiPaymentStatus === 'partial' && payment.depositAmount <= 0) {
