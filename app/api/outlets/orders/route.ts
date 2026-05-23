@@ -22,13 +22,15 @@ export async function GET(request: Request) {
   const dateFrom = params.get('from')
   const dateTo = params.get('to')
 
+  const hasRange = Boolean(dateFrom && dateTo)
+
   let q = admin
     .from('outlet_orders')
     .select('*, outlet_order_lines(*)')
     .eq('organization_id', auth.ctx.organizationId)
     .eq('department', department)
     .order('created_at', { ascending: false })
-    .limit(200)
+    .limit(hasRange ? 1000 : 200)
 
   if (dateFrom) q = q.gte('created_at', dateFrom)
   if (dateTo) q = q.lte('created_at', dateTo)
