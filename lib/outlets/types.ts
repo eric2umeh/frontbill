@@ -27,6 +27,8 @@ export interface OutletMenuCategoryRow {
   slug: string
   sort_order: number
   tag_label: string | null
+  /** When true, cashiers may change unit price on POS for this order only. */
+  price_editable?: boolean | null
   created_at: string
   updated_at: string
 }
