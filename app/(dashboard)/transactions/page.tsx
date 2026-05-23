@@ -20,6 +20,7 @@ import {
   Banknote, Smartphone, ArrowRightLeft, Building2, Clock
 } from 'lucide-react'
 import { format, startOfDay, endOfDay, startOfMonth, endOfMonth, startOfWeek, endOfWeek, subDays } from 'date-fns'
+import { isOutletTransactionId } from '@/lib/outlets/outlet-financial-integration'
 
 interface Payment {
   id: string
@@ -88,11 +89,23 @@ export default function TransactionsPage() {
         .order('created_at', { ascending: false })
         .limit(5000)
 
+      let payQuery = supabase
+        .from('payments')
+        .select('*')
+        .gte('payment_date', fromIso)
+        .lte('payment_date', toIso)
+        .order('payment_date', { ascending: false })
+        .limit(5000)
+
       if (role !== 'superadmin' && orgId) {
         txQuery = txQuery.eq('organization_id', orgId)
+        payQuery = payQuery.eq('organization_id', orgId)
       }
 
-      const { data: txData, error: txError } = await txQuery
+      const [{ data: txData, error: txError }, { data: payData, error: payError }] = await Promise.all([
+        txQuery,
+        payQuery,
+      ])
 
       if (txError) {
         console.error('Transactions query error:', txError)
@@ -102,9 +115,35 @@ export default function TransactionsPage() {
         return
       }
 
-      const visibleTxData = txData || []
+      if (payError) {
+        console.error('Payments query error:', payError)
+      }
 
-      const bookingIds = Array.from(new Set(visibleTxData.map((t: any) => t.booking_id).filter(Boolean)))
+      const visibleTxData = txData || []
+      const outletTxOrderNumbers = new Set(
+        visibleTxData
+          .filter((t: { transaction_id?: string | null; status?: string | null }) =>
+            isOutletTransactionId(t.transaction_id) &&
+            ['paid', 'completed'].includes(String(t.status || '').toLowerCase()),
+          )
+          .map((t: { transaction_id?: string | null }) =>
+            String(t.transaction_id || '').replace(/^OUT-/i, ''),
+          ),
+      )
+
+      const payRows = (payData || []).filter((p: { notes?: string | null }) => {
+        const notes = String(p.notes || '')
+        const orderMatch = notes.match(/\s([A-Z]{2,}-\d+)\s—/)
+        if (orderMatch && outletTxOrderNumbers.has(orderMatch[1])) return false
+        return true
+      })
+
+      const bookingIds = Array.from(
+        new Set([
+          ...visibleTxData.map((t: { booking_id?: string | null }) => t.booking_id),
+          ...payRows.map((p: { booking_id?: string | null }) => p.booking_id),
+        ].filter(Boolean)),
+      )
       const bookingCreatorMap: Record<string, string> = {}
       if (bookingIds.length > 0) {
         const { data: bookingRows } = await supabase
@@ -118,41 +157,105 @@ export default function TransactionsPage() {
 
       const isUuid = (value: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
       const receivedByIds = Array.from(new Set(
-        visibleTxData
-          .map((t: any) => {
+        [
+          ...visibleTxData.map((t: { received_by?: string | null; booking_id?: string | null }) => {
             const receivedBy = String(t.received_by || '').trim()
             if (receivedBy && isUuid(receivedBy)) return receivedBy
             return t.booking_id ? bookingCreatorMap[t.booking_id] : null
-          })
-          .filter(Boolean)
+          }),
+          ...payRows.map((p: { received_by?: string | null; booking_id?: string | null }) => {
+            const receivedBy = String(p.received_by || '').trim()
+            if (receivedBy && isUuid(receivedBy)) return receivedBy
+            return p.booking_id ? bookingCreatorMap[p.booking_id] : null
+          }),
+        ].filter(Boolean),
       ))
       const receivedByNameMap = await fetchUserDisplayNameMap(receivedByIds as string[], userId)
 
-      const all: Payment[] = visibleTxData
-        .map((t: any) => ({
-          id: t.id,
-          booking_id: t.booking_id,
-          guest_id: null,
-          guest_name: t.guest_name || 'Unknown Guest',
-          room: t.room || '',
-          amount: t.amount,
-          payment_method: t.payment_method,
-          payment_date: t.created_at,
-          reference_number: t.transaction_id || null,
-          notes: t.description || null,
-          received_by: t.received_by || bookingCreatorMap[t.booking_id] || null,
-          guest_phone: '',
-          folio_id: t.transaction_id || '—',
-          received_by_name: (() => {
-            const receivedBy = String(t.received_by || '').trim()
-            if (receivedBy && !isUuid(receivedBy)) return receivedBy
-            const actorId = receivedBy || (t.booking_id ? bookingCreatorMap[t.booking_id] : null)
-            return actorId ? receivedByNameMap[actorId] || 'System' : 'System'
-          })(),
-          status: t.status,
-          description: t.description,
-          source: 'transaction' as const,
-        }))
+      const guestIds = Array.from(new Set(payRows.map((p: { guest_id?: string | null }) => p.guest_id).filter(Boolean)))
+      const guestNameMap: Record<string, string> = {}
+      if (guestIds.length > 0) {
+        const { data: guests } = await supabase.from('guests').select('id, name').in('id', guestIds)
+        ;(guests || []).forEach((g: { id: string; name: string }) => {
+          guestNameMap[g.id] = g.name
+        })
+      }
+
+      const fromTx: Payment[] = visibleTxData.map((t: {
+        id: string
+        booking_id: string | null
+        guest_name?: string | null
+        room?: string | null
+        amount: number
+        payment_method: string
+        created_at: string
+        transaction_id?: string | null
+        description?: string | null
+        received_by?: string | null
+        status?: string | null
+      }) => ({
+        id: t.id,
+        booking_id: t.booking_id,
+        guest_id: null,
+        guest_name: t.guest_name || 'Unknown Guest',
+        room: t.room || '',
+        amount: t.amount,
+        payment_method: t.payment_method,
+        payment_date: t.created_at,
+        reference_number: t.transaction_id || null,
+        notes: t.description || null,
+        received_by: t.received_by || bookingCreatorMap[t.booking_id || ''] || null,
+        guest_phone: '',
+        folio_id: t.transaction_id || '—',
+        received_by_name: (() => {
+          const receivedBy = String(t.received_by || '').trim()
+          if (receivedBy && !isUuid(receivedBy)) return receivedBy
+          const actorId = receivedBy || (t.booking_id ? bookingCreatorMap[t.booking_id] : null)
+          return actorId ? receivedByNameMap[actorId] || 'System' : 'System'
+        })(),
+        status: t.status,
+        description: t.description,
+        source: 'transaction' as const,
+      }))
+
+      const fromPayments: Payment[] = payRows.map((p: {
+        id: string
+        booking_id: string | null
+        guest_id: string | null
+        amount: number
+        payment_method: string
+        payment_date: string
+        reference_number?: string | null
+        notes?: string | null
+        received_by?: string | null
+      }) => ({
+        id: `pay-${p.id}`,
+        booking_id: p.booking_id,
+        guest_id: p.guest_id,
+        guest_name: p.guest_id ? guestNameMap[p.guest_id] || 'Guest' : 'Walk-in / Outlet',
+        room: '',
+        amount: p.amount,
+        payment_method: p.payment_method,
+        payment_date: p.payment_date,
+        reference_number: p.reference_number || p.id.slice(0, 8),
+        notes: p.notes || null,
+        received_by: p.received_by || bookingCreatorMap[p.booking_id || ''] || null,
+        guest_phone: '',
+        folio_id: '—',
+        received_by_name: (() => {
+          const receivedBy = String(p.received_by || '').trim()
+          if (receivedBy && !isUuid(receivedBy)) return receivedBy
+          const actorId = receivedBy || (p.booking_id ? bookingCreatorMap[p.booking_id] : null)
+          return actorId ? receivedByNameMap[actorId] || 'System' : 'System'
+        })(),
+        status: 'paid',
+        description: p.notes || null,
+        source: 'payment' as const,
+      }))
+
+      const all = [...fromTx, ...fromPayments].sort(
+        (a, b) => new Date(b.payment_date).getTime() - new Date(a.payment_date).getTime(),
+      )
 
       setPayments(all)
     } catch (err: any) {

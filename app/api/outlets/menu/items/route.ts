@@ -20,7 +20,6 @@ export async function GET(request: Request) {
     .select('*')
     .eq('organization_id', auth.ctx.organizationId)
     .eq('department', department)
-    .order('sort_order')
     .order('name')
 
   const categoryId = params.get('category_id')

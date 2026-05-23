@@ -11,6 +11,11 @@ import {
   getItemDisplayDescription,
   getItemDisplayTags,
 } from '@/lib/outlets/item-display'
+import {
+  compareOutletMenuByName,
+  sortOutletRootCategories,
+  sortOutletSubCategories,
+} from '@/lib/outlets/sort-outlet-menu'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -76,16 +81,11 @@ export function OutletPos({
   const [isComplimentary, setIsComplimentary] = useState(false)
   const [submitting, setSubmitting] = useState(false)
 
-  const rootCategories = useMemo(
-    () => categories.filter((c) => !c.parent_id).sort((a, b) => a.sort_order - b.sort_order),
-    [categories],
-  )
+  const rootCategories = useMemo(() => sortOutletRootCategories(categories), [categories])
 
   const subCategories = useMemo(() => {
     if (!parentCategoryId) return []
-    return categories
-      .filter((c) => c.parent_id === parentCategoryId)
-      .sort((a, b) => a.sort_order - b.sort_order)
+    return sortOutletSubCategories(categories, parentCategoryId)
   }, [categories, parentCategoryId])
 
   const activeCategoryFilter = parentCategoryId
@@ -112,7 +112,7 @@ export function OutletPos({
         if (!q) return true
         return it.name.toLowerCase().includes(q) || (it.sku || '').toLowerCase().includes(q)
       })
-      .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name))
+      .sort(compareOutletMenuByName)
   }, [items, search, activeCategoryFilter, parentCategoryId, categoryId, subCategories])
 
   const groupedByCategory = useMemo(() => {
@@ -125,10 +125,17 @@ export function OutletPos({
       if (!map.has(key)) map.set(key, [])
       map.get(key)!.push(it)
     }
-    return [...map.entries()].map(([key, list]) => ({
-      cat: categories.find((c) => c.id === key) ?? null,
-      items: list,
-    }))
+    return [...map.entries()]
+      .map(([key, list]) => ({
+        cat: categories.find((c) => c.id === key) ?? null,
+        items: list,
+      }))
+      .sort((a, b) =>
+        compareOutletMenuByName(
+          { name: a.cat?.name ?? 'Uncategorized' },
+          { name: b.cat?.name ?? 'Uncategorized' },
+        ),
+      )
   }, [filteredItems, categories, activeCategoryFilter, parentCategoryId])
 
   const cartItemsTotal = cart.reduce((s, l) => s + l.item.unit_price * l.qty, 0)
@@ -251,8 +258,10 @@ export function OutletPos({
       const hasGuest = guestName.trim().length > 0
       const hasLedger = !!selectedLedger?.id
       const hasBooking = !!bookingId.trim()
-      if (!hasBooking && !hasGuest && !hasLedger) {
-        toast.error('Select a checked-in room, enter a guest name, or pick a city ledger account')
+      if (!hasBooking && !hasGuest && !hasLedger && !hasRoom) {
+        toast.error(
+          'For charge to room: pick an in-house room, enter a guest name, or select a city ledger account',
+        )
         return
       }
     }

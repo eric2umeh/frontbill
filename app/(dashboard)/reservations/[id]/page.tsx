@@ -22,7 +22,7 @@ import { useAuth } from '@/lib/auth-context'
 import { FolioAttachmentsPanel } from '@/components/folio/folio-attachments-panel'
 import { BookingPaymentReceiptPanel } from '@/components/receipts/booking-payment-receipt-panel'
 import { hasPermission } from '@/lib/permissions'
-import { cancelBookingReservation } from '@/lib/reservations/cancel-reservation'
+import { cancelBookingReservation, isCancellableReservationStatus } from '@/lib/reservations/cancel-reservation'
 import { formatReservationPaymentMethodLabel } from '@/lib/reservations/reservation-payment-methods'
 import { PAYMENT_METHOD_SELECT_OPTIONS } from '@/lib/payments/payment-methods'
 
@@ -262,6 +262,10 @@ export default function ReservationDetailPage({
   }
 
   function handleDelete() {
+    if (!isCancellableReservationStatus(reservation?.status)) {
+      toast.error('Only held reservations can be cancelled')
+      return
+    }
     toast.custom(
       (t: string | number) => (
         <div className="flex flex-col gap-3">
@@ -351,6 +355,8 @@ export default function ReservationDetailPage({
       ? reservation.balance
       : (reservation.total_amount || 0) - (reservation.deposit || 0)
   const amountPaid = reservation.deposit || 0
+  const canCancelCurrentReservation =
+    canCancelReservation && isCancellableReservationStatus(reservation.status)
 
   const statusColors: Record<string, string> = {
     reserved: 'bg-blue-500/10 text-blue-700',
@@ -473,7 +479,7 @@ export default function ReservationDetailPage({
               ? `Check-in on ${format(new Date(reservation!.check_in), 'dd MMM')}`
               : 'Check-in Guest'}
           </Button>
-          {canCancelReservation && (
+          {canCancelCurrentReservation && (
             <Button
               variant="destructive"
               size="sm"
@@ -671,7 +677,7 @@ export default function ReservationDetailPage({
                   ? `Check-in on ${format(new Date(reservation!.check_in), 'dd MMM')}`
                   : 'Check-in Guest'}
               </Button>
-              {canCancelReservation && (
+              {canCancelCurrentReservation && (
                 <Button
                   className="w-full"
                   variant="destructive"

@@ -92,6 +92,7 @@ export function filterPaymentLedgerTransactions(
     if (desc.includes('add credit') || desc.includes('via add credit')) return true
     if (desc.includes('reservation payment')) return true
     if (desc.includes('event payment')) return true
+    if (tid.startsWith('OUT-')) return true
     return false
   })
 }

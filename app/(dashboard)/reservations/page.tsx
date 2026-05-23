@@ -19,7 +19,7 @@ import { ReserveCheckInModal, type ReserveCheckInBooking } from '@/components/re
 import { getUserDisplayName } from '@/lib/utils/user-display'
 import { fetchUserDisplayNameMap } from '@/lib/utils/fetch-user-display-names'
 import { getBulkGroupId, isLegacyBulkGroupId } from '@/lib/utils/bulk-booking'
-import { cancelBookingReservation } from '@/lib/reservations/cancel-reservation'
+import { cancelBookingReservation, isCancellableReservationStatus } from '@/lib/reservations/cancel-reservation'
 import { formatReservationPaymentMethodLabel } from '@/lib/reservations/reservation-payment-methods'
 import { toast } from 'sonner'
 import { useReservationsEventsHeader } from '@/components/reservations/reservations-events-header'
@@ -286,12 +286,12 @@ export default function ReservationsPage() {
                     const { data: rows, error: fetchErr } = isLegacyBulkGroupId(res.bulk_group_id)
                       ? await supabase
                           .from('bookings')
-                          .select('id, room_id, folio_id, notes')
+                          .select('id, room_id, folio_id, notes, status')
                           .eq('organization_id', organizationId)
                           .ilike('folio_id', 'BLK-%')
                       : await supabase
                           .from('bookings')
-                          .select('id, room_id, folio_id, notes')
+                          .select('id, room_id, folio_id, notes, status')
                           .eq('organization_id', organizationId)
                           .ilike('notes', `%bulk_group:${res.bulk_group_id}%`)
 
@@ -299,7 +299,11 @@ export default function ReservationsPage() {
                     const groupRows = (rows || []).filter((row: any) => {
                       if (!isLegacyBulkGroupId(res.bulk_group_id!)) return true
                       return getBulkGroupId(row) === res.bulk_group_id
-                    })
+                    }).filter((row: any) => isCancellableReservationStatus(row.status))
+                    if (!groupRows.length) {
+                      toast.message('All reservations in this group are already cancelled or checked in.')
+                      return
+                    }
                     for (const row of groupRows) {
                       const { error } = await cancelBookingReservation(supabase, {
                         bookingId: row.id,

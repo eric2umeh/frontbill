@@ -138,7 +138,7 @@ export function OutletOrderCustomerFields({
     onRoomNumberChange(room.room_number)
     setRoomSearchOpen(false)
     if (room.booking) {
-      const guest = room.booking.guest_name
+      const guest = room.booking.guest_name?.trim() || null
       onRoomBookingLink?.({
         bookingId: room.booking.id,
         guestName: guest,
@@ -154,6 +154,15 @@ export function OutletOrderCustomerFields({
         label: null,
       })
     }
+  }
+
+  const tryApplyRoomByExactNumber = () => {
+    const term = roomNumber.trim().toLowerCase()
+    if (!term) return
+    const exact = roomOptions.find(
+      (r) => String(r.room_number).trim().toLowerCase() === term,
+    )
+    if (exact) applyRoomSelection(exact)
   }
 
   useEffect(() => {
@@ -177,7 +186,7 @@ export function OutletOrderCustomerFields({
   return (
     <div className="grid gap-2 sm:grid-cols-2">
       <div className="space-y-1 sm:col-span-2">
-        <Label>Guest / client name</Label>
+        <Label>Guest / client name (optional)</Label>
         <div className="relative">
           <Input
             value={guestName}
@@ -189,7 +198,7 @@ export function OutletOrderCustomerFields({
             }}
             onFocus={() => setClientSearchOpen(true)}
             onBlur={() => setTimeout(() => setClientSearchOpen(false), 150)}
-            placeholder="Search guest or organization — or type a walk-in name"
+            placeholder="Walk-in optional — search guest or organization"
             autoComplete="off"
           />
           {clientSearching && (
@@ -219,8 +228,8 @@ export function OutletOrderCustomerFields({
           )}
         </div>
         <p className="text-xs text-muted-foreground">
-          Walk-in patrons (restaurant, bar, gym, etc.) can use any name — no hotel guest record required.
-          Charge-to-room needs an in-house guest (pick room) or a ledger account under Payment.
+          Leave blank for anonymous walk-ins. Enter a room # to auto-fill the in-house guest name when the room is
+          occupied. Charge-to-room needs an in-house room, a guest name, or a city ledger account under Payment.
         </p>
       </div>
       <div className="space-y-1">
@@ -229,6 +238,7 @@ export function OutletOrderCustomerFields({
           <Input
             value={roomNumber}
             onChange={(e) => {
+              lastAutoRoomRef.current = null
               onRoomNumberChange(e.target.value)
               onRoomBookingLink?.({ bookingId: null, guestName: null, label: null })
               setRoomSearchOpen(true)
@@ -237,7 +247,12 @@ export function OutletOrderCustomerFields({
               setRoomSearchOpen(true)
               void searchRooms(roomNumber)
             }}
-            onBlur={() => setTimeout(() => setRoomSearchOpen(false), 150)}
+            onBlur={() => {
+              setTimeout(() => {
+                setRoomSearchOpen(false)
+                tryApplyRoomByExactNumber()
+              }, 150)
+            }}
             placeholder="In-house guests only"
             autoComplete="off"
           />

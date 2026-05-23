@@ -90,12 +90,15 @@ export function inferRevenueCategory(
   )
     return "restaurant";
   if (
+    /\bmain bar\b/.test(d) ||
+    /\bpool bar\b/.test(d) ||
     /\bbar\b/.test(d) ||
     /\bdrinks?\b/.test(d) ||
     /\bbeverage\b/.test(d) ||
     /\bminibar\b/.test(d)
   )
     return "bar";
+  if (/\bbanquet/.test(d)) return "events";
   if (/\blaundry\b/.test(d)) return "laundry";
   if (/\bswim\b/.test(d) || /\bpool\b/.test(d)) return "swimming";
   if (/\bgym\b/.test(d) || /\bfitness\b/.test(d)) return "gym";

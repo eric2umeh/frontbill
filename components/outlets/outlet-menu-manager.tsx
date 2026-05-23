@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import type { OutletMenuCategoryRow, OutletMenuItemRow } from '@/lib/outlets/types'
 import type { OutletDepartmentKey } from '@/lib/outlets/departments'
 import { Button } from '@/components/ui/button'
@@ -39,6 +39,7 @@ import { formatNaira } from '@/lib/utils/currency'
 import { outletApiHeaders } from '@/lib/outlets/outlet-api-headers'
 import { OutletItemMetaFields } from '@/components/outlets/outlet-item-meta-fields'
 import { isLegacyDefaultDescription } from '@/lib/outlets/item-display'
+import { sortOutletMenuByName } from '@/lib/outlets/sort-outlet-menu'
 
 type Props = {
   department: OutletDepartmentKey
@@ -57,6 +58,8 @@ const emptyItemForm = {
 }
 
 export function OutletMenuManager({ department, categories, items, canManage, onRefresh }: Props) {
+  const sortedCategories = useMemo(() => sortOutletMenuByName(categories), [categories])
+  const sortedItems = useMemo(() => sortOutletMenuByName(items), [items])
   const [saving, setSaving] = useState(false)
   const [newCatName, setNewCatName] = useState('')
   const [form, setForm] = useState(emptyItemForm)
@@ -289,10 +292,10 @@ export function OutletMenuManager({ department, categories, items, canManage, on
                 </div>
             )}
             <ul className="text-sm space-y-1 max-h-48 overflow-y-auto border rounded-md p-2">
-              {categories.length === 0 ? (
+              {sortedCategories.length === 0 ? (
                 <li className="text-muted-foreground">No categories yet</li>
               ) : (
-                categories.map((c) => (
+                sortedCategories.map((c) => (
                   <li key={c.id} className="flex items-center justify-between gap-2 py-0.5">
                     <span>
                       {c.parent_id ? '↳ ' : ''}
@@ -350,7 +353,7 @@ export function OutletMenuManager({ department, categories, items, canManage, on
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="__none__">Uncategorized</SelectItem>
-                    {categories.map((c) => (
+                    {sortedCategories.map((c) => (
                       <SelectItem key={c.id} value={c.id}>
                         {c.parent_id ? `↳ ${c.name}` : c.name}
                       </SelectItem>
@@ -389,7 +392,7 @@ export function OutletMenuManager({ department, categories, items, canManage, on
 
       <Card>
         <CardHeader>
-          <CardTitle>Items ({items.length})</CardTitle>
+          <CardTitle>Items ({sortedItems.length})</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="border rounded-md overflow-x-auto max-h-[400px] overflow-y-auto">
@@ -404,8 +407,8 @@ export function OutletMenuManager({ department, categories, items, canManage, on
                 </tr>
               </thead>
               <tbody>
-                {items.map((it) => {
-                  const cat = categories.find((c) => c.id === it.category_id)
+                {sortedItems.map((it) => {
+                  const cat = sortedCategories.find((c) => c.id === it.category_id)
                   return (
                     <tr key={it.id} className="border-t">
                       <td className="p-2 font-medium">{it.name}</td>
@@ -499,7 +502,7 @@ export function OutletMenuManager({ department, categories, items, canManage, on
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="__none__">Uncategorized</SelectItem>
-                  {categories.map((c) => (
+                  {sortedCategories.map((c) => (
                     <SelectItem key={c.id} value={c.id}>
                       {c.parent_id ? `↳ ${c.name}` : c.name}
                     </SelectItem>

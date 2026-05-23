@@ -189,11 +189,15 @@ export async function GET(request: Request) {
       const { data } = await query
       ;(data || []).forEach((row: any) => {
         if (isUuid(row.received_by)) actorIds.add(row.received_by)
+        const tid = String(row.transaction_id || '')
+        const isOutlet = tid.startsWith('OUT-')
         items.push({
           id: row.id,
           source: 'transaction',
-          category: 'Transaction',
-          action: `Recorded ${row.payment_method || 'payment'} transaction`,
+          category: isOutlet ? 'Outlet sale' : 'Transaction',
+          action: isOutlet
+            ? `Outlet ${row.payment_method || 'payment'} settlement`
+            : `Recorded ${row.payment_method || 'payment'} transaction`,
           status: row.status || 'recorded',
           actor_id: isUuid(row.received_by) ? row.received_by : null,
           actor_name: row.received_by || 'System',
@@ -217,11 +221,15 @@ export async function GET(request: Request) {
       const { data } = await query
       ;(data || []).forEach((row: any) => {
         if (row.received_by) actorIds.add(row.received_by)
+        const notes = String(row.notes || '')
+        const isOutletPay = /\s[A-Z]{2,}-\d+\s—/.test(notes)
         items.push({
           id: row.id,
           source: 'payment',
-          category: 'Payment',
-          action: `Received ${row.payment_method || 'payment'}`,
+          category: isOutletPay ? 'Outlet sale' : 'Payment',
+          action: isOutletPay
+            ? `Outlet ${row.payment_method || 'payment'} collected`
+            : `Received ${row.payment_method || 'payment'}`,
           status: 'paid',
           actor_id: row.received_by || null,
           actor_name: 'Loading...',
