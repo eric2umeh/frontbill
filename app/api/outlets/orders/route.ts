@@ -6,6 +6,7 @@ import { isOutletDepartmentKey, getOutletDepartment } from '@/lib/outlets/depart
 import { parseOutletOrderExtraFees } from '@/lib/outlets/order-extra-fees'
 import { hasOutletCityLedgerChargeTarget, resolveOutletCustomerContext } from '@/lib/outlets/resolve-outlet-customer'
 import { isOutletOrderType } from '@/lib/outlets/order-types'
+import { itemAllowsPosPriceEdit } from '@/lib/outlets/category-price-editable'
 import { createOutletOrderRecord } from '@/lib/outlets/settle-outlet-order'
 
 type OrderLineInput = { item_id: string; qty: number; unit_price?: number }
@@ -90,6 +91,12 @@ export async function POST(request: Request) {
   if (ie) return NextResponse.json({ error: ie.message }, { status: 400 })
   const byId = new Map((items ?? []).map((i) => [i.id, i]))
 
+  const { data: menuCategories } = await admin
+    .from('outlet_menu_categories')
+    .select('id, parent_id, price_editable')
+    .eq('organization_id', auth.ctx.organizationId)
+    .eq('department', department)
+
   const orderLines: {
     item_id: string
     item_name: string
@@ -116,6 +123,14 @@ export async function POST(request: Request) {
         )
       }
       unitPrice = Math.round(custom * 100) / 100
+      if (unitPrice !== menuUnitPrice && !itemAllowsPosPriceEdit(item, menuCategories ?? [])) {
+        return NextResponse.json(
+          {
+            error: `Custom price is not allowed for "${item.name}". Enable "Flexible price on POS" on its menu category.`,
+          },
+          { status: 400 },
+        )
+      }
     }
     const lineTotal = Math.round(unitPrice * qty * 100) / 100
     itemsSubtotal += lineTotal
