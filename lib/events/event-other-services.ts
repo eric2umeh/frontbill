@@ -1,5 +1,3 @@
-export const EVENT_OTHER_VENUE = 'Other' as const
-
 export const EVENT_OTHER_SERVICE_OPTIONS = [
   { value: 'corkage', label: 'Corkage' },
   { value: 'tea_break', label: 'Tea break' },
@@ -8,6 +6,9 @@ export const EVENT_OTHER_SERVICE_OPTIONS = [
 ] as const
 
 export type EventOtherServiceKey = (typeof EVENT_OTHER_SERVICE_OPTIONS)[number]['value']
+
+/** none = skip; multiple = show all price fields; otherwise one service. */
+export type EventOtherServiceChoice = 'none' | 'multiple' | EventOtherServiceKey
 
 export type EventOtherServiceLine = {
   type: EventOtherServiceKey
@@ -21,6 +22,13 @@ export function eventOtherServiceLabel(type: string): string {
 
 export function sumEventOtherServices(lines: EventOtherServiceLine[]): number {
   return Math.round(lines.reduce((s, l) => s + Math.max(0, Number(l.amount) || 0), 0) * 100) / 100
+}
+
+export function computeEventEstimatedTotal(
+  baseEstimated: number,
+  otherServices: EventOtherServiceLine[],
+): number {
+  return Math.round((Math.max(0, baseEstimated) + sumEventOtherServices(otherServices)) * 100) / 100
 }
 
 export function parseEventOtherServices(raw: unknown): EventOtherServiceLine[] {
@@ -38,8 +46,13 @@ export function parseEventOtherServices(raw: unknown): EventOtherServiceLine[] {
   return out
 }
 
+export function inferOtherServiceChoice(lines: EventOtherServiceLine[]): EventOtherServiceChoice {
+  if (lines.length === 0) return 'none'
+  if (lines.length > 1) return 'multiple'
+  return lines[0].type
+}
+
 export function formatEventOtherServicesSummary(lines: EventOtherServiceLine[]): string {
-  if (lines.length === 0) return EVENT_OTHER_VENUE
-  const parts = lines.map((l) => `${eventOtherServiceLabel(l.type)} ${l.amount.toLocaleString()}`)
-  return `${EVENT_OTHER_VENUE} — ${parts.join(', ')}`
+  if (lines.length === 0) return ''
+  return lines.map((l) => `${eventOtherServiceLabel(l.type)} ${l.amount.toLocaleString()}`).join(', ')
 }
