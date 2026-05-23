@@ -102,7 +102,7 @@ export function OutletOrderReceiptDialog({
       orderNumber: order.order_number,
       printedAtIso: order.settled_at ?? order.created_at,
       tableLabel: order.table_label,
-      waiterName: staffName,
+      waiterName: order.waiter_name?.trim() || null,
       roomNumber: order.room_number,
       guestName: order.guest_name,
       lines,
