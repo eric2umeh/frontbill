@@ -170,6 +170,7 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
             organizationId={organizationId ?? ''}
             active={tab === 'orders'}
             refreshToken={ordersRefresh}
+            staffName={staffName ?? 'Staff'}
             canPrintReceipt={canReceipt}
             canSell={canSell}
             onPrintUnsettled={(order) => openReceipt(order, false, 'unsettled')}
