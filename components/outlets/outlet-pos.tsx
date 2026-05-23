@@ -4,8 +4,16 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { formatNaira } from '@/lib/utils/currency'
 import { cn } from '@/lib/utils'
 import { createClient } from '@/lib/supabase/client'
-import type { OutletMenuCategoryRow, OutletMenuItemRow, OutletOrderRow, CartLine } from '@/lib/outlets/types'
+import type {
+  OutletMenuCategoryRow,
+  OutletMenuItemRow,
+  OutletOrderRow,
+  CartLine,
+  OutletOrderType,
+} from '@/lib/outlets/types'
 import type { OutletDepartmentKey } from '@/lib/outlets/departments'
+import { OUTLET_ORDER_TYPE_OPTIONS } from '@/lib/outlets/order-types'
+import { OutletWaiterField } from '@/components/outlets/outlet-waiter-field'
 import {
   formatOutletItemTagLabel,
   getItemDisplayDescription,
@@ -69,7 +77,9 @@ export function OutletPos({
   const [guestName, setGuestName] = useState('')
   const [roomNumber, setRoomNumber] = useState('')
   const [tableLabel, setTableLabel] = useState('')
-  const [orderType, setOrderType] = useState<'dine_in' | 'takeaway' | 'room_service'>('takeaway')
+  const [orderType, setOrderType] = useState<OutletOrderType>('takeaway')
+  const [waiterName, setWaiterName] = useState('')
+  const [waiterId, setWaiterId] = useState<string | null>(null)
   const [paymentMethod, setPaymentMethod] = useState('pos')
   const [bookingId, setBookingId] = useState('')
   const [roomGuestLabel, setRoomGuestLabel] = useState<string | null>(null)
@@ -222,6 +232,8 @@ export function OutletPos({
     guest_name: guestName.trim() || null,
     room_number: roomNumber.trim() || null,
     table_label: tableLabel.trim() || null,
+    waiter_name: waiterName.trim() || null,
+    waiter_id: waiterId,
     booking_id: bookingId.trim() || null,
     city_ledger_account_id: selectedLedger?.id || null,
     room_service_fee:
@@ -248,6 +260,8 @@ export function OutletPos({
     setRoomServiceFee('')
     setTakeawayFee('')
     setIsComplimentary(false)
+    setWaiterName('')
+    setWaiterId(null)
   }
 
   const submitOrder = async (settleNow: boolean) => {
@@ -382,7 +396,7 @@ export function OutletPos({
             <Select
               value={orderType}
               onValueChange={(v) => {
-                const next = v as typeof orderType
+                const next = v as OutletOrderType
                 setOrderType(next)
                 if (next !== 'room_service') setRoomServiceFee('')
                 if (next !== 'takeaway') setTakeawayFee('')
@@ -390,12 +404,23 @@ export function OutletPos({
             >
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="takeaway">Take-away</SelectItem>
-                <SelectItem value="dine_in">Dine in</SelectItem>
-                <SelectItem value="room_service">Room service</SelectItem>
+                {OUTLET_ORDER_TYPE_OPTIONS.map((opt) => (
+                  <SelectItem key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
+          <OutletWaiterField
+            organizationId={organizationId}
+            waiterName={waiterName}
+            waiterId={waiterId}
+            onWaiterChange={(name, id) => {
+              setWaiterName(name)
+              setWaiterId(id)
+            }}
+          />
           {orderType === 'room_service' && (
             <div className="space-y-1 rounded-lg border border-amber-200/80 bg-amber-50/50 dark:bg-amber-950/20 p-3">
               <Label htmlFor="room-service-fee">Room service fee (optional)</Label>
