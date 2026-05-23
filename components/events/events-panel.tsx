@@ -20,6 +20,19 @@ import { canManageEvents } from '@/lib/events/access'
 import { eventsApiHeaders } from '@/lib/events/events-api-headers'
 import type { HotelEventRow } from '@/lib/events/types'
 import { EVENT_VENUE_PRESETS } from '@/lib/events/types'
+import {
+  EventOtherServicesSection,
+  priceMapFromLines,
+} from '@/components/events/event-other-services-section'
+import {
+  computeEventEstimatedTotal,
+  eventOtherServiceLabel,
+  inferOtherServiceChoice,
+  parseEventOtherServices,
+  sumEventOtherServices,
+  type EventOtherServiceChoice,
+  type EventOtherServiceLine,
+} from '@/lib/events/event-other-services'
 import { formatNaira } from '@/lib/utils/currency'
 import { EnhancedDataTable } from '@/components/shared/enhanced-data-table'
 import { Button } from '@/components/ui/button'
@@ -82,7 +95,10 @@ const emptyForm = {
   org_type: 'other',
   contact_person: '',
   expected_attendees: '',
-  estimated_value: '',
+  estimated_base_value: '',
+  other_services: [] as EventOtherServiceLine[],
+  other_service_prices: {} as Partial<Record<string, string>>,
+  other_service_choice: 'none' as EventOtherServiceChoice,
   payment: defaultPayment(),
 }
 
@@ -183,7 +199,7 @@ export function EventsPanel() {
       venue:
         ev.venue && EVENT_VENUE_PRESETS.includes(ev.venue as (typeof EVENT_VENUE_PRESETS)[number])
           ? ev.venue
-          : '',
+          : ev.venue || '',
       start_date: ev.start_date,
       end_date: ev.end_date,
       start_time: ev.start_time || '',
@@ -201,7 +217,15 @@ export function EventsPanel() {
       org_type: 'other',
       contact_person: '',
       expected_attendees: ev.expected_attendees != null ? String(ev.expected_attendees) : '',
-      estimated_value: ev.estimated_value != null ? String(ev.estimated_value) : '',
+      estimated_base_value: (() => {
+        const other = parseEventOtherServices(ev.other_services)
+        const otherTotal = sumEventOtherServices(other)
+        const total = Number(ev.estimated_value) || 0
+        return String(Math.max(0, Math.round((total - otherTotal) * 100) / 100))
+      })(),
+      other_services: parseEventOtherServices(ev.other_services),
+      other_service_prices: priceMapFromLines(parseEventOtherServices(ev.other_services)),
+      other_service_choice: inferOtherServiceChoice(parseEventOtherServices(ev.other_services)),
       payment: {
         payment_method:
           ev.payment_method === 'pending' || ev.payment_status === 'pending'
@@ -243,7 +267,12 @@ export function EventsPanel() {
       toast.error('End date must be on or after start date')
       return
     }
-    const totalAmount = Math.max(0, Number(form.estimated_value) || 0)
+    if (form.other_service_choice !== 'none' && form.other_services.length === 0) {
+      toast.error('Enter a price for the selected other service')
+      return
+    }
+
+    const totalAmount = eventTotalAmount
     const { depositAmount } = computeEventPayment({
       totalAmount,
       paymentStatus: form.payment.payment_status,
@@ -272,6 +301,7 @@ export function EventsPanel() {
         title: form.title,
         description: form.description,
         venue: form.venue.trim() || null,
+        other_services: form.other_services,
         start_date: form.start_date,
         end_date: resolvedEnd,
         start_time: form.start_time,
@@ -286,7 +316,8 @@ export function EventsPanel() {
         org_type: form.org_type,
         contact_person: form.contact_person,
         expected_attendees: form.expected_attendees,
-        estimated_value: form.estimated_value,
+        estimated_base_value: form.estimated_base_value,
+        estimated_value: totalAmount,
         payment_method: form.payment.payment_method,
         payment_status: form.payment.payment_status,
         partial_amount: form.payment.partial_amount,
@@ -386,6 +417,15 @@ export function EventsPanel() {
     [form.start_date, form.end_date],
   )
 
+  const eventTotalAmount = useMemo(
+    () =>
+      computeEventEstimatedTotal(
+        Math.max(0, Number(form.estimated_base_value) || 0),
+        form.other_services,
+      ),
+    [form.estimated_base_value, form.other_services],
+  )
+
   if (loading) return <PageLoadingState />
 
   return (
@@ -410,6 +450,11 @@ export function EventsPanel() {
               <div>
                 <div className="font-medium">{ev.title}</div>
                 {ev.venue && <div className="text-xs text-muted-foreground">{ev.venue}</div>}
+                {ev.other_services && ev.other_services.length > 0 && (
+                  <div className="text-xs text-muted-foreground">
+                    + {ev.other_services.map((s) => eventOtherServiceLabel(s.type)).join(', ')}
+                  </div>
+                )}
               </div>
             ),
           },
@@ -598,6 +643,21 @@ export function EventsPanel() {
                 </SelectContent>
               </Select>
             </div>
+            {form.venue && (
+              <EventOtherServicesSection
+                choice={form.other_service_choice}
+                onChoiceChange={(other_service_choice) =>
+                  setForm((f) => ({ ...f, other_service_choice }))
+                }
+                lines={form.other_services}
+                onChange={(other_services) => setForm((f) => ({ ...f, other_services }))}
+                priceByType={form.other_service_prices}
+                onPriceByTypeChange={(other_service_prices) =>
+                  setForm((f) => ({ ...f, other_service_prices }))
+                }
+                disabled={saving}
+              />
+            )}
             {organizationId ? (
               <EventClientSearchField
                 key={editing?.id ?? 'create'}
@@ -636,15 +696,22 @@ export function EventsPanel() {
                 />
               </div>
               <div className="space-y-1">
-                <Label>Estimated value (₦)</Label>
+                <Label>Hall / package value (₦)</Label>
                 <Input
                   type="number"
                   min={0}
-                  value={form.estimated_value}
-                  onChange={(e) => setForm((f) => ({ ...f, estimated_value: e.target.value }))}
+                  value={form.estimated_base_value}
+                  onChange={(e) => setForm((f) => ({ ...f, estimated_base_value: e.target.value }))}
                 />
               </div>
             </div>
+            {form.other_services.length > 0 && (
+              <p className="text-sm">
+                Event total:{' '}
+                <span className="font-semibold tabular-nums">{formatNaira(eventTotalAmount)}</span>
+                <span className="text-muted-foreground text-xs ml-1">(hall + other services)</span>
+              </p>
+            )}
             <div className="space-y-1">
               <Label>Description</Label>
               <Textarea
@@ -654,7 +721,7 @@ export function EventsPanel() {
               />
             </div>
             <EventPaymentSection
-              totalAmount={Math.max(0, Number(form.estimated_value) || 0)}
+              totalAmount={eventTotalAmount}
               value={form.payment}
               onChange={(payment) => setForm((f) => ({ ...f, payment }))}
               disabled={saving}

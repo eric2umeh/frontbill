@@ -1,3 +1,5 @@
+import type { EventOtherServiceLine } from '@/lib/events/event-other-services'
+
 export type HotelEventStatus = 'planned' | 'confirmed' | 'cancelled' | 'completed'
 
 export interface HotelEventRow {
@@ -6,6 +8,7 @@ export interface HotelEventRow {
   title: string
   description: string | null
   venue: string | null
+  other_services?: EventOtherServiceLine[] | null
   start_date: string
   end_date: string
   start_time: string | null
@@ -43,5 +46,4 @@ export const EVENT_VENUE_PRESETS = [
   'Floxy Hall',
   'Board Room',
   'Pool Deck',
-  'Other',
 ] as const

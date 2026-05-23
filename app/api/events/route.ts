@@ -7,6 +7,10 @@ import {
 } from '@/lib/events/record-event-payment'
 import { resolveEventClientRecord } from '@/lib/events/resolve-event-client'
 import type { EventClientType } from '@/lib/events/resolve-event-client'
+import {
+  computeEventEstimatedTotal,
+  parseEventOtherServices,
+} from '@/lib/events/event-other-services'
 import type { HotelEventStatus } from '@/lib/events/types'
 
 const STATUSES: HotelEventStatus[] = ['planned', 'confirmed', 'cancelled', 'completed']
@@ -25,10 +29,27 @@ function parseEventBody(body: Record<string, unknown>) {
   if (end_date < start_date) {
     return { error: 'end_date must be on or after start_date' }
   }
+
+  const venue = body.venue != null ? String(body.venue).trim() || null : null
+  const otherServices = parseEventOtherServices(body.other_services)
+  const baseEstimated =
+    body.estimated_base_value != null && body.estimated_base_value !== ''
+      ? Math.max(0, Number(body.estimated_base_value) || 0)
+      : body.estimated_value != null && body.estimated_value !== ''
+        ? Math.max(0, Number(body.estimated_value) || 0)
+        : 0
+  const estimated_value =
+    otherServices.length > 0 || body.estimated_base_value != null
+      ? computeEventEstimatedTotal(baseEstimated, otherServices)
+      : body.estimated_value != null && body.estimated_value !== ''
+        ? Math.max(0, Number(body.estimated_value) || 0)
+        : null
+
   return {
     title,
     description: body.description != null ? String(body.description).trim() || null : null,
-    venue: body.venue != null ? String(body.venue).trim() || null : null,
+    venue,
+    other_services: otherServices.length > 0 ? otherServices : null,
     start_date,
     end_date,
     start_time:
@@ -47,10 +68,7 @@ function parseEventBody(body: Record<string, unknown>) {
       body.expected_attendees != null && body.expected_attendees !== ''
         ? Math.max(0, parseInt(String(body.expected_attendees), 10) || 0)
         : null,
-    estimated_value:
-      body.estimated_value != null && body.estimated_value !== ''
-        ? Math.max(0, Number(body.estimated_value) || 0)
-        : null,
+    estimated_value,
   }
 }
 
@@ -129,6 +147,7 @@ export async function POST(request: Request) {
     .insert({
       organization_id: auth.ctx.organizationId,
       ...parsed,
+      other_services: parsed.other_services,
       client_type: clientResolved.data.client_type,
       client_name: clientResolved.data.client_name,
       client_phone: clientResolved.data.client_phone,
