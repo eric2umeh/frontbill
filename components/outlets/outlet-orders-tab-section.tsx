@@ -6,7 +6,9 @@ import { format, parseISO, subDays } from 'date-fns'
 import type { OutletDepartmentKey } from '@/lib/outlets/departments'
 import type { OutletOrderRow } from '@/lib/outlets/types'
 import { buildOutletSalesReport } from '@/lib/outlets/outlet-sales-report'
+import { buildOutletSalesSummaryReport } from '@/lib/outlets/outlet-sales-summary-report'
 import { printOutletSalesReport } from '@/lib/receipts/outlet-sales-report-print'
+import { printOutletSalesSummaryReport } from '@/lib/receipts/outlet-sales-summary-print'
 import { OutletOrdersPanel } from '@/components/outlets/outlet-orders-panel'
 import { fetchOutletOrdersInRange } from '@/lib/outlets/fetch-outlet-orders'
 import { formatNaira } from '@/lib/utils/currency'
@@ -14,6 +16,13 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent } from '@/components/ui/card'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { toast } from 'sonner'
 import { Loader2, Printer, RefreshCw } from 'lucide-react'
 import { hotelCalendarTodayYmd } from '@/lib/hotel-date'
@@ -26,6 +35,7 @@ type Props = {
   active: boolean
   /** Bump to reload after a new sale or settlement from POS. */
   refreshToken?: number
+  staffName?: string
   canPrintReceipt?: boolean
   canSell?: boolean
   onPrintUnsettled?: (order: OutletOrderRow) => void
@@ -39,6 +49,7 @@ export function OutletOrdersTabSection({
   organizationId,
   active,
   refreshToken = 0,
+  staffName = 'Staff',
   canPrintReceipt,
   canSell,
   onPrintUnsettled,
@@ -51,6 +62,7 @@ export function OutletOrdersTabSection({
   const [orders, setOrders] = useState<OutletOrderRow[]>([])
   const [loading, setLoading] = useState(false)
   const [printing, setPrinting] = useState(false)
+  const [reportPrintKind, setReportPrintKind] = useState<'summary' | 'full'>('summary')
   const [hotelName, setHotelName] = useState('Hotel')
   const initialLoadDone = useRef(false)
 
@@ -128,16 +140,29 @@ export function OutletOrdersTabSection({
     }
     setPrinting(true)
     try {
-      const report = buildOutletSalesReport(orders, dateFrom, dateTo)
-      if (report.settledOrderCount === 0 && report.openOrders.length === 0) {
-        toast.error('No orders in this date range')
-        return
+      if (reportPrintKind === 'summary') {
+        const summary = buildOutletSalesSummaryReport(orders, dateFrom, dateTo, department)
+        if (summary.settledOrderCount === 0 && summary.openBillCount === 0) {
+          toast.error('No orders in this date range')
+          return
+        }
+        printOutletSalesSummaryReport({
+          hotelName,
+          printedBy: staffName.trim() || 'Staff',
+          report: summary,
+        })
+      } else {
+        const report = buildOutletSalesReport(orders, dateFrom, dateTo)
+        if (report.settledOrderCount === 0 && report.openOrders.length === 0) {
+          toast.error('No orders in this date range')
+          return
+        }
+        printOutletSalesReport({
+          hotelName,
+          departmentLabel,
+          report,
+        })
       }
-      printOutletSalesReport({
-        hotelName,
-        departmentLabel,
-        report,
-      })
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not print report')
     } finally {
@@ -170,7 +195,8 @@ export function OutletOrdersTabSection({
     <div className="space-y-3">
       <p className="text-xs text-muted-foreground">
         Shows today&apos;s orders by default. Change dates and click Apply to load another day or range.
-        Print sales report groups settled orders by cash, POS, transfer, and charge to room.
+        Print summary shows payment-method totals (like night audit). Print full lists every settled
+        receipt with payment method, guest, and line items.
       </p>
 
       <div className="flex flex-wrap items-end gap-3">
@@ -209,6 +235,15 @@ export function OutletOrdersTabSection({
           {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-1" />}
           Apply
         </Button>
+        <Select value={reportPrintKind} onValueChange={(v) => setReportPrintKind(v as 'summary' | 'full')}>
+          <SelectTrigger className="h-9 w-[200px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="summary">Print summary sales report</SelectItem>
+            <SelectItem value="full">Print full sales report</SelectItem>
+          </SelectContent>
+        </Select>
         <Button
           type="button"
           size="sm"
@@ -217,7 +252,7 @@ export function OutletOrdersTabSection({
           disabled={printing || loading || orders.length === 0}
         >
           {printing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
-          Print sales report
+          Print
         </Button>
         <div className="flex gap-2">
           <Button type="button" variant="ghost" size="sm" className="h-9 text-xs" onClick={applyToday}>
@@ -254,6 +289,8 @@ export function OutletOrdersTabSection({
       ) : (
         <OutletOrdersPanel
           orders={orders}
+          organizationId={organizationId}
+          departmentLabel={departmentLabel}
           canPrintReceipt={canPrintReceipt}
           canSell={canSell}
           showTodaySummary={false}
