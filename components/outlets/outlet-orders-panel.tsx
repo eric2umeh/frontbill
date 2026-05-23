@@ -8,22 +8,15 @@ import type { OutletOrderRow } from '@/lib/outlets/types'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { FileText, Printer, Loader2 } from 'lucide-react'
-import { toast } from 'sonner'
-import { outletApiHeaders } from '@/lib/outlets/outlet-api-headers'
+import { OutletSettleOrderDialog } from '@/components/outlets/outlet-settle-order-dialog'
 
 type Props = {
   orders: OutletOrderRow[]
+  organizationId: string
+  departmentLabel: string
   canPrintReceipt?: boolean
   canSell?: boolean
-  /** Hide the “today only” summary card (e.g. reports tab uses a date range). */
   showTodaySummary?: boolean
   onPrintUnsettled?: (order: OutletOrderRow) => void
   onPrintSettled?: (order: OutletOrderRow) => void
@@ -32,6 +25,8 @@ type Props = {
 
 export function OutletOrdersPanel({
   orders,
+  organizationId,
+  departmentLabel,
   canPrintReceipt,
   canSell,
   showTodaySummary = true,
@@ -39,8 +34,7 @@ export function OutletOrdersPanel({
   onPrintSettled,
   onSettled,
 }: Props) {
-  const [settlingId, setSettlingId] = useState<string | null>(null)
-  const [settlePayMethod, setSettlePayMethod] = useState('pos')
+  const [settleTarget, setSettleTarget] = useState<OutletOrderRow | null>(null)
 
   const todayTotal = useMemo(() => {
     const today = format(new Date(), 'yyyy-MM-dd')
@@ -49,35 +43,10 @@ export function OutletOrdersPanel({
       .reduce((s, o) => s + Number(o.subtotal), 0)
   }, [orders])
 
-  const settleOpenOrder = async (order: OutletOrderRow) => {
-    setSettlingId(order.id)
-    try {
-      const res = await fetch(`/api/outlets/orders/${order.id}/settle`, {
-        method: 'POST',
-        headers: await outletApiHeaders({ 'Content-Type': 'application/json' }),
-        credentials: 'include',
-        body: JSON.stringify({
-          payment_method: order.is_complimentary ? 'complimentary' : settlePayMethod,
-          is_complimentary: !!order.is_complimentary,
-          booking_id: order.booking_id,
-          guest_name: order.guest_name,
-          room_number: order.room_number,
-        }),
-      })
-      const json = await res.json().catch(() => ({}))
-      if (!res.ok) {
-        toast.error(json.error || 'Could not settle order')
-        return
-      }
-      toast.success(`Settled — ${order.order_number}`)
-      onSettled?.()
-      if (canPrintReceipt && onPrintSettled && json.order) {
-        onPrintSettled(json.order as OutletOrderRow)
-      }
-    } catch {
-      toast.error('Network error')
-    } finally {
-      setSettlingId(null)
+  const handleSettled = (order: OutletOrderRow) => {
+    onSettled?.()
+    if (canPrintReceipt && onPrintSettled) {
+      onPrintSettled(order)
     }
   }
 
@@ -96,23 +65,6 @@ export function OutletOrdersPanel({
             </p>
           </CardContent>
         </Card>
-      )}
-
-      {canSell && orders.some((o) => o.status === 'open') && (
-        <div className="flex flex-wrap items-center gap-2 text-xs">
-          <span className="text-muted-foreground">Settle open bill with:</span>
-          <Select value={settlePayMethod} onValueChange={setSettlePayMethod}>
-            <SelectTrigger className="h-8 w-[140px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="pos">POS</SelectItem>
-              <SelectItem value="cash">Cash</SelectItem>
-              <SelectItem value="transfer">Transfer</SelectItem>
-              <SelectItem value="city_ledger">Charge to room</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
       )}
 
       <div className="border rounded-lg overflow-x-auto">
@@ -189,14 +141,9 @@ export function OutletOrdersPanel({
                           variant="secondary"
                           size="sm"
                           className="h-7 text-[10px] px-2"
-                          disabled={settlingId === o.id}
-                          onClick={() => void settleOpenOrder(o)}
+                          onClick={() => setSettleTarget(o)}
                         >
-                          {settlingId === o.id ? (
-                            <Loader2 className="h-3 w-3 animate-spin" />
-                          ) : (
-                            'Settle'
-                          )}
+                          Settle
                         </Button>
                       )}
                     </div>
@@ -210,6 +157,15 @@ export function OutletOrdersPanel({
           <p className="p-6 text-center text-muted-foreground text-sm">No orders yet</p>
         )}
       </div>
+
+      <OutletSettleOrderDialog
+        order={settleTarget}
+        open={!!settleTarget}
+        onOpenChange={(open) => !open && setSettleTarget(null)}
+        organizationId={organizationId}
+        departmentLabel={departmentLabel}
+        onSettled={handleSettled}
+      />
     </div>
   )
 }
