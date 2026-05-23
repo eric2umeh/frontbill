@@ -193,6 +193,7 @@ export async function postOutletCityLedgerCharge(
       room: roomNumber?.trim() || null,
       amount,
       payment_method: 'city_ledger',
+      category: 'city_ledger',
       status: 'pending',
       description: txDescription,
       received_by: userId,
