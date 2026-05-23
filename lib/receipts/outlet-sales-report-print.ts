@@ -1,6 +1,7 @@
 import { escapeHtml } from '@/lib/utils/html-escape'
 import { formatNaira } from '@/lib/utils/currency'
 import type { OutletSalesReportBundle } from '@/lib/outlets/outlet-sales-report'
+import { printHtmlDocument } from '@/lib/receipts/receipt-pdf-print'
 
 function reportStyles(): string {
   return `
@@ -86,7 +87,6 @@ export function buildOutletSalesReportHtml(input: {
       </div>
       <p class="meta">Voided in period: ${report.voidCount}. Open bills are not included in the settled total.</p>
     </div>
-    <script>window.onload = function(){ window.print(); }</script>
     </body></html>`
 }
 
@@ -100,11 +100,5 @@ export function printOutletSalesReport(input: {
     timeStyle: 'short',
   })
   const html = buildOutletSalesReportHtml({ ...input, printedAt })
-  const w = window.open('', '_blank', 'noopener,noreferrer,width=960,height=720')
-  if (!w) {
-    throw new Error('Pop-up blocked — allow pop-ups to print the sales report')
-  }
-  w.document.open()
-  w.document.write(html)
-  w.document.close()
+  printHtmlDocument(html)
 }

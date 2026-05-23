@@ -14,6 +14,8 @@ export type PostOutletCityLedgerParams = {
   ledgerAccountId?: string | null
   guestName?: string | null
   roomNumber?: string | null
+  /** When an open bill already created a pending folio line, skip inserting another. */
+  skipFolioInsert?: boolean
 }
 
 export type PostOutletCityLedgerResult = {
@@ -57,6 +59,7 @@ export async function postOutletCityLedgerCharge(
     ledgerAccountId: presetLedgerId,
     guestName,
     roomNumber,
+    skipFolioInsert = false,
   } = params
 
   if (amount <= 0) throw new Error('Amount must be positive')
@@ -120,7 +123,7 @@ export async function postOutletCityLedgerCharge(
     throw new Error('Guest name, room number with active check-in, or city ledger account is required')
   }
 
-  if (bookingId && bookingRow) {
+  if (bookingId && bookingRow && !skipFolioInsert) {
     const { error: fcErr } = await insertFolioCharges(supabase, [
       {
         booking_id: bookingId,
@@ -128,7 +131,7 @@ export async function postOutletCityLedgerCharge(
         description: fullDescription,
         amount,
         charge_type: 'additional_charge',
-        payment_method: null,
+        payment_method: 'city_ledger',
         payment_status: 'pending',
         revenue_category: revenueCategory,
         created_by: userId,
@@ -136,14 +139,15 @@ export async function postOutletCityLedgerCharge(
     ])
     if (fcErr) throw new Error(fcErr.message)
 
-    const { data: fc } = await supabase
+    const { data: fcRows, error: fcIdErr } = await supabase
       .from('folio_charges')
       .select('id')
       .eq('booking_id', bookingId)
+      .eq('description', fullDescription)
       .order('created_at', { ascending: false })
       .limit(1)
-      .maybeSingle()
-    folioChargeId = fc?.id ?? null
+    if (fcIdErr) throw new Error(fcIdErr.message)
+    folioChargeId = fcRows?.[0]?.id ?? null
 
     const newBalance = (Number(bookingRow.balance) || 0) + amount
     await supabase
