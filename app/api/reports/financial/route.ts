@@ -17,6 +17,12 @@ import {
   buildDailyExpenditurePayload,
   buildProfitAndLossPayload,
 } from "@/lib/expenses/reports";
+import {
+  addOutletOrdersToRevenueBuckets,
+  fetchSettledOutletOrdersInRange,
+  mergeOutletOrdersIntoDailyRevenue,
+  skipOutletTxnInSalesCollection,
+} from "@/lib/outlets/outlet-financial-integration";
 
 const VAT_RATE = 0.075;
 
@@ -181,15 +187,29 @@ export async function GET(request: Request) {
         filteredCharges.push(...(part || []));
       }
 
-      return NextResponse.json(
-        buildDailyRevenuePayload(
-          filteredCharges,
-          bookings || [],
-          startD,
-          endD,
-          department,
-        ),
+      let dailyPayload = buildDailyRevenuePayload(
+        filteredCharges,
+        bookings || [],
+        startD,
+        endD,
+        department,
       );
+      try {
+        const outletOrders = await fetchSettledOutletOrdersInRange(
+          admin,
+          orgId,
+          startD.toISOString(),
+          endD.toISOString(),
+        );
+        dailyPayload = mergeOutletOrdersIntoDailyRevenue(
+          dailyPayload,
+          outletOrders,
+          department,
+        );
+      } catch {
+        /* outlet_orders may be missing */
+      }
+      return NextResponse.json(dailyPayload);
     }
 
     if (report === "sales_collection") {
@@ -240,6 +260,7 @@ export async function GET(request: Request) {
       for (const t of txrows || []) {
         const st = String((t as any).status || "").toLowerCase();
         if (st === "void" || st === "cancelled") continue;
+        if (skipOutletTxnInSalesCollection(t as any)) continue;
         const amt = Number((t as any).amount) || 0;
         if (amt <= 0) continue;
         const cat = classifyTx((t as any).description);
@@ -337,6 +358,24 @@ export async function GET(request: Request) {
         const amt = Number(c.amount) || 0;
         if (amt <= 0) continue;
         buckets[targetCat] += amt;
+      }
+
+      try {
+        const outletOrders = await fetchSettledOutletOrdersInRange(
+          admin,
+          orgId,
+          startD.toISOString(),
+          endD.toISOString(),
+        );
+        addOutletOrdersToRevenueBuckets(
+          outletOrders,
+          buckets,
+          department,
+          start,
+          end,
+        );
+      } catch {
+        /* outlet_orders table may be missing on older DBs */
       }
 
       return NextResponse.json({
@@ -531,6 +570,7 @@ export async function GET(request: Request) {
       for (const t of txrows || []) {
         const st = String((t as any).status || "").toLowerCase();
         if (st === "void" || st === "cancelled") continue;
+        if (skipOutletTxnInSalesCollection(t as any)) continue;
         const amt = Number((t as any).amount) || 0;
         if (amt > 0) txSum += amt;
       }
