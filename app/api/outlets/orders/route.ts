@@ -5,6 +5,7 @@ import { canAccessOutletDepartment } from '@/lib/outlets/access'
 import { isOutletDepartmentKey, getOutletDepartment } from '@/lib/outlets/departments'
 import { parseOutletOrderExtraFees } from '@/lib/outlets/order-extra-fees'
 import { hasOutletCityLedgerChargeTarget, resolveOutletCustomerContext } from '@/lib/outlets/resolve-outlet-customer'
+import { isOutletOrderType } from '@/lib/outlets/order-types'
 import { createOutletOrderRecord } from '@/lib/outlets/settle-outlet-order'
 
 type OrderLineInput = { item_id: string; qty: number }
@@ -117,7 +118,10 @@ export async function POST(request: Request) {
   }
 
   itemsSubtotal = Math.round(itemsSubtotal * 100) / 100
-  const orderType = String(body?.order_type || 'takeaway').trim()
+  const orderTypeRaw = String(body?.order_type || 'takeaway').trim()
+  const orderType = isOutletOrderType(orderTypeRaw) ? orderTypeRaw : 'takeaway'
+  const waiterName = (body?.waiter_name as string | undefined)?.trim() || null
+  const waiterId = (body?.waiter_id as string | undefined)?.trim() || null
   const feeResult = parseOutletOrderExtraFees(orderType, body)
   if (feeResult.error) {
     return NextResponse.json({ error: feeResult.error }, { status: 400 })
@@ -156,6 +160,8 @@ export async function POST(request: Request) {
       guestName,
       roomNumber: resolvedCustomer.roomNumber,
       tableLabel: body?.table_label || null,
+      waiterName,
+      waiterId,
       bookingId,
       subtotal,
       roomServiceFee,
