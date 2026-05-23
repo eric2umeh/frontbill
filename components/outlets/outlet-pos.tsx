@@ -14,7 +14,7 @@ import type {
 import type { OutletDepartmentKey } from '@/lib/outlets/departments'
 import { OUTLET_ORDER_TYPE_OPTIONS } from '@/lib/outlets/order-types'
 import { OutletWaiterField } from '@/components/outlets/outlet-waiter-field'
-import { OutletAddToCartDialog } from '@/components/outlets/outlet-add-to-cart-dialog'
+import { itemAllowsPosPriceEdit } from '@/lib/outlets/category-price-editable'
 import {
   cartLineUsesCustomPrice,
   menuDefaultUnitPrice,
@@ -97,8 +97,6 @@ export function OutletPos({
   const [takeawayFee, setTakeawayFee] = useState('')
   const [isComplimentary, setIsComplimentary] = useState(false)
   const [submitting, setSubmitting] = useState(false)
-  const [addItem, setAddItem] = useState<OutletMenuItemRow | null>(null)
-  const [addDialogOpen, setAddDialogOpen] = useState(false)
 
   const rootCategories = useMemo(() => sortOutletRootCategories(categories), [categories])
 
@@ -176,29 +174,34 @@ export function OutletPos({
     setLedgerResults([])
   }, [isComplimentary])
 
-  const openAddDialog = (item: OutletMenuItemRow) => {
-    setAddItem(item)
-    setAddDialogOpen(true)
-  }
-
-  const confirmAddToCart = (item: OutletMenuItemRow, qty: number, unitPrice: number) => {
-    const price = roundOutletMoney(unitPrice)
+  const addToCart = (item: OutletMenuItemRow) => {
+    const unitPrice = menuDefaultUnitPrice(item.unit_price)
+    const priceEditable = itemAllowsPosPriceEdit(item, categories)
     setCart((prev) => {
-      const match = prev.find(
-        (l) => l.item.id === item.id && roundOutletMoney(l.unitPrice) === price,
-      )
-      if (match) {
-        return prev.map((l) =>
-          l.id === match.id ? { ...l, qty: l.qty + qty } : l,
+      if (!priceEditable) {
+        const i = prev.findIndex((l) => l.item.id === item.id)
+        if (i >= 0) {
+          const next = [...prev]
+          next[i] = { ...next[i], qty: next[i].qty + 1 }
+          return next
+        }
+      } else {
+        const match = prev.find(
+          (l) => l.item.id === item.id && roundOutletMoney(l.unitPrice) === unitPrice,
         )
+        if (match) {
+          return prev.map((l) =>
+            l.id === match.id ? { ...l, qty: l.qty + 1 } : l,
+          )
+        }
       }
       return [
         ...prev,
         {
           id: crypto.randomUUID(),
           item,
-          qty,
-          unitPrice: price,
+          qty: 1,
+          unitPrice,
         },
       ]
     })
@@ -378,17 +381,29 @@ export function OutletPos({
             <ul className="space-y-2">
               {cart.map((l) => {
                 const menuPrice = menuDefaultUnitPrice(l.item.unit_price)
-                const custom = cartLineUsesCustomPrice(l.unitPrice, menuPrice)
+                const priceEditable = itemAllowsPosPriceEdit(l.item, categories)
+                const custom =
+                  priceEditable && cartLineUsesCustomPrice(l.unitPrice, menuPrice)
                 return (
                   <li key={l.id} className="text-sm border rounded-lg p-2 space-y-1.5">
                     <div className="flex gap-2 items-start">
                       <div className="flex-1 min-w-0">
                         <p className="font-medium truncate">{l.item.name}</p>
-                        {custom ? (
-                          <p className="text-[10px] text-muted-foreground">
-                            Menu default {formatNaira(menuPrice)}
+                        {priceEditable ? (
+                          custom ? (
+                            <p className="text-[10px] text-muted-foreground">
+                              Menu default {formatNaira(menuPrice)}
+                            </p>
+                          ) : (
+                            <p className="text-[10px] text-muted-foreground">
+                              {formatNaira(l.unitPrice)} each · tap Unit to change
+                            </p>
+                          )
+                        ) : (
+                          <p className="text-muted-foreground text-xs">
+                            {formatNaira(l.unitPrice)} each
                           </p>
-                        ) : null}
+                        )}
                       </div>
                       <div className="flex items-center gap-1 shrink-0">
                         <Button
@@ -415,30 +430,34 @@ export function OutletPos({
                         {formatNaira(l.unitPrice * l.qty)}
                       </p>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <Label className="text-[10px] text-muted-foreground shrink-0">Unit ₦</Label>
-                      <Input
-                        type="number"
-                        min={0}
-                        step="0.01"
-                        inputMode="decimal"
-                        className="h-7 text-xs flex-1"
-                        defaultValue={l.unitPrice}
-                        key={`${l.id}-${l.unitPrice}`}
-                        onBlur={(e) => updateLineUnitPrice(l.id, e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            updateLineUnitPrice(l.id, e.currentTarget.value)
-                            e.currentTarget.blur()
-                          }
-                        }}
-                      />
-                      {custom && (
-                        <Badge variant="outline" className="text-[9px] h-5 shrink-0">
-                          Custom
-                        </Badge>
-                      )}
-                    </div>
+                    {priceEditable && (
+                      <div className="flex items-center gap-2">
+                        <Label className="text-[10px] text-muted-foreground shrink-0">
+                          Unit ₦
+                        </Label>
+                        <Input
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          inputMode="decimal"
+                          className="h-7 text-xs flex-1"
+                          defaultValue={l.unitPrice}
+                          key={`${l.id}-${l.unitPrice}`}
+                          onBlur={(e) => updateLineUnitPrice(l.id, e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              updateLineUnitPrice(l.id, e.currentTarget.value)
+                              e.currentTarget.blur()
+                            }
+                          }}
+                        />
+                        {custom && (
+                          <Badge variant="outline" className="text-[9px] h-5 shrink-0">
+                            Custom
+                          </Badge>
+                        )}
+                      </div>
+                    )}
                   </li>
                 )
               })}
@@ -771,7 +790,7 @@ export function OutletPos({
                     <button
                       key={it.id}
                       type="button"
-                      onClick={() => openAddDialog(it)}
+                      onClick={() => addToCart(it)}
                       className={cn(
                         'text-left rounded-lg border bg-card px-2.5 py-2 shadow-sm transition hover:border-amber-400 min-h-[88px] flex flex-col',
                         inCart && 'ring-1 ring-amber-500 border-amber-400 bg-amber-50/50',
@@ -826,12 +845,6 @@ export function OutletPos({
         </ScrollArea>
       </div>
 
-      <OutletAddToCartDialog
-        item={addItem}
-        open={addDialogOpen}
-        onOpenChange={setAddDialogOpen}
-        onConfirm={confirmAddToCart}
-      />
     </div>
   )
 }
