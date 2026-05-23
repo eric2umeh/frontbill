@@ -23,6 +23,8 @@ type Props = {
   orders: OutletOrderRow[]
   canPrintReceipt?: boolean
   canSell?: boolean
+  /** Hide the “today only” summary card (e.g. reports tab uses a date range). */
+  showTodaySummary?: boolean
   onPrintUnsettled?: (order: OutletOrderRow) => void
   onPrintSettled?: (order: OutletOrderRow) => void
   onSettled?: () => void
@@ -32,6 +34,7 @@ export function OutletOrdersPanel({
   orders,
   canPrintReceipt,
   canSell,
+  showTodaySummary = true,
   onPrintUnsettled,
   onPrintSettled,
   onSettled,
@@ -80,18 +83,20 @@ export function OutletOrdersPanel({
 
   return (
     <div className="space-y-3">
-      <Card>
-        <CardHeader className="py-2 px-3">
-          <CardTitle className="text-sm">Today&apos;s settled sales</CardTitle>
-        </CardHeader>
-        <CardContent className="px-3 pb-3 pt-0">
-          <p className="text-xl font-bold">{formatNaira(todayTotal)}</p>
-          <p className="text-[10px] text-muted-foreground">
-            {orders.filter((o) => o.status === 'settled').length} settled ·{' '}
-            {orders.filter((o) => o.status === 'open').length} open bills
-          </p>
-        </CardContent>
-      </Card>
+      {showTodaySummary && (
+        <Card>
+          <CardHeader className="py-2 px-3">
+            <CardTitle className="text-sm">Today&apos;s settled sales</CardTitle>
+          </CardHeader>
+          <CardContent className="px-3 pb-3 pt-0">
+            <p className="text-xl font-bold">{formatNaira(todayTotal)}</p>
+            <p className="text-[10px] text-muted-foreground">
+              {orders.filter((o) => o.status === 'settled').length} settled ·{' '}
+              {orders.filter((o) => o.status === 'open').length} open bills
+            </p>
+          </CardContent>
+        </Card>
+      )}
 
       {canSell && orders.some((o) => o.status === 'open') && (
         <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -117,6 +122,7 @@ export function OutletOrdersPanel({
               <th className="text-left p-2">Receipt #</th>
               <th className="text-left p-2">Time</th>
               <th className="text-left p-2">Guest</th>
+              <th className="text-right p-2">Items</th>
               <th className="text-right p-2">Total</th>
               <th className="p-2">Pay</th>
               <th className="p-2">Status</th>
@@ -131,6 +137,9 @@ export function OutletOrdersPanel({
                   {format(parseISO(o.created_at), 'dd MMM · HH:mm')}
                 </td>
                 <td className="p-2">{o.guest_name || o.room_number || '—'}</td>
+                <td className="p-2 text-right text-muted-foreground">
+                  {(o.outlet_order_lines ?? []).reduce((s, l) => s + (Number(l.qty) || 0), 0)}
+                </td>
                 <td className="p-2 text-right font-medium">{formatNaira(o.subtotal)}</td>
                 <td className="p-2">
                   {o.is_complimentary
