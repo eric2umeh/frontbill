@@ -123,15 +123,27 @@ export function BookingPaymentReceiptPanel({
         )
       }
 
-      const { data: txRows } = await supabase
-        .from('transactions')
-        .select(
-          'id, created_at, amount, payment_method, description, received_by, transaction_id, status',
-        )
-        .eq('booking_id', bookingId)
-        .order('created_at', { ascending: false })
+      const [{ data: txRows }, { data: payRows }] = await Promise.all([
+        supabase
+          .from('transactions')
+          .select(
+            'id, created_at, amount, payment_method, description, received_by, transaction_id, status',
+          )
+          .eq('booking_id', bookingId)
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('payments')
+          .select('id, payment_date, amount, payment_method, notes, received_by')
+          .eq('booking_id', bookingId)
+          .order('payment_date', { ascending: false }),
+      ])
 
       const payLedgerRaw = filterPaymentLedgerTransactions(txRows || [])
+      const outletTxIds = new Set(
+        payLedgerRaw
+          .filter((t) => String(t.transaction_id || '').startsWith('OUT-'))
+          .map((t) => String(t.transaction_id || '').replace(/^OUT-/i, '')),
+      )
       const receiverIds = [
         ...new Set(
           payLedgerRaw
@@ -142,18 +154,41 @@ export function BookingPaymentReceiptPanel({
       const receiverMap =
         receiverIds.length > 0 ? await fetchUserDisplayNameMap(receiverIds, userId) : {}
 
-      setPaymentLedgerRows(
-        payLedgerRaw.map((t: Record<string, unknown>) => ({
-          id: String(t.id),
-          created_at: String(t.created_at),
-          amount: Number(t.amount) || 0,
-          payment_method: t.payment_method ? String(t.payment_method) : null,
-          description: t.description ? String(t.description) : null,
-          transaction_id: t.transaction_id ? String(t.transaction_id) : null,
-          receivedByLabel: t.received_by
-            ? receiverMap[String(t.received_by)] || getUserDisplayName(null, String(t.received_by))
+      const fromTx = payLedgerRaw.map((t: Record<string, unknown>) => ({
+        id: String(t.id),
+        created_at: String(t.created_at),
+        amount: Number(t.amount) || 0,
+        payment_method: t.payment_method ? String(t.payment_method) : null,
+        description: t.description ? String(t.description) : null,
+        transaction_id: t.transaction_id ? String(t.transaction_id) : null,
+        receivedByLabel: t.received_by
+          ? receiverMap[String(t.received_by)] || getUserDisplayName(null, String(t.received_by))
+          : 'Staff',
+      }))
+
+      const fromPayments = (payRows || [])
+        .filter((p: { notes?: string | null }) => {
+          const notes = String(p.notes || '')
+          const m = notes.match(/\s([A-Z]{2,}-\d+)\s—/)
+          if (m && outletTxIds.has(m[1])) return false
+          return true
+        })
+        .map((p: Record<string, unknown>) => ({
+          id: `pay-${String(p.id)}`,
+          created_at: String(p.payment_date),
+          amount: Number(p.amount) || 0,
+          payment_method: p.payment_method ? String(p.payment_method) : null,
+          description: p.notes ? String(p.notes) : null,
+          transaction_id: null,
+          receivedByLabel: p.received_by
+            ? receiverMap[String(p.received_by)] || getUserDisplayName(null, String(p.received_by))
             : 'Staff',
-        })),
+        }))
+
+      setPaymentLedgerRows(
+        [...fromTx, ...fromPayments].sort(
+          (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+        ),
       )
     } finally {
       setLoading(false)
