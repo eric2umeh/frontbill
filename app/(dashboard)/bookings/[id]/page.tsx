@@ -103,6 +103,20 @@ import {
   applyPaymentToGuestCityLedger,
   recordGuestLedgerCashMovement,
 } from "@/lib/utils/guest-city-ledger";
+import { isOutletFolioDescription } from "@/lib/outlets/booking-folio";
+
+function isFolioAdditionalChargeRow(c: {
+  type?: string;
+  charge_type?: string;
+}): boolean {
+  const ctype = String(c.type ?? c.charge_type ?? "").toLowerCase();
+  return (
+    ctype !== "payment" &&
+    ctype !== "room_charge" &&
+    ctype !== "reservation" &&
+    ctype !== "folio_note"
+  );
+}
 
 export default function BookingDetailPage({
   params: _params,
@@ -318,6 +332,22 @@ export default function BookingDetailPage({
           id: bookingData.updated_by,
           full_name: bookingUserMap[bookingData.updated_by],
         });
+      }
+
+      if (uid && uid !== "placeholder") {
+        try {
+          await fetch(
+            `/api/bookings/${encodeURIComponent(id)}/sync-outlet-folio`,
+            {
+              method: "POST",
+              credentials: "include",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ caller_id: uid }),
+            },
+          );
+        } catch {
+          /* non-fatal — folio may still load */
+        }
       }
 
       // Fetch folio charges from database
@@ -1225,9 +1255,11 @@ export default function BookingDetailPage({
   const paidAdditionalCharges = folioCharges
     .filter(
       (c: any) =>
-        c.paymentStatus === "paid" && c.amount > 0 && c.type === "charge",
+        isFolioAdditionalChargeRow(c) &&
+        c.paymentStatus === "paid" &&
+        Number(c.amount) > 0,
     )
-    .reduce((sum: number, c: any) => sum + c.amount, 0);
+    .reduce((sum: number, c: any) => sum + Number(c.amount), 0);
 
   const folioBookingCreditAmount = folioGuestCreditAmount(folioCharges);
 
@@ -2127,6 +2159,14 @@ export default function BookingDetailPage({
                         <span className="font-medium">
                           {charge.description}
                         </span>
+                        {isOutletFolioDescription(charge.description) && (
+                          <Badge
+                            variant="outline"
+                            className="text-xs bg-purple-50 text-purple-800 border-purple-200"
+                          >
+                            Outlet
+                          </Badge>
+                        )}
                         {charge.type === "payment" && (
                           <Badge
                             variant="outline"

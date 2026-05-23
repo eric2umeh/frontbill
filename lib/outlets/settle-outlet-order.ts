@@ -8,6 +8,11 @@ import {
   outletTransactionId,
   recordOutletImmediatePayment,
 } from '@/lib/outlets/outlet-financial-integration'
+import {
+  postOpenOutletBillToBookingFolio,
+  postPaidOutletSaleToBookingFolio,
+  updateOutletFolioOnSettlement,
+} from '@/lib/outlets/booking-folio'
 import { postOutletCityLedgerCharge } from '@/lib/outlets/post-outlet-city-ledger'
 import {
   OUTLET_FEE_LINE_NAMES,
@@ -114,7 +119,7 @@ export async function settleOutletOrderRecord(
     ? await outletSettlementTransactionExists(admin, input.organizationId, orderNumber)
     : false
 
-  if (paymentMethod === 'city_ledger' && !folioChargeId && !existingSettlementTransaction) {
+  if (paymentMethod === 'city_ledger' && !existingSettlementTransaction) {
     const result = await postOutletCityLedgerCharge(admin, {
       organizationId: input.organizationId,
       userId: input.userId,
@@ -127,8 +132,9 @@ export async function settleOutletOrderRecord(
       ledgerAccountId: cityLedgerAccountId,
       guestName,
       roomNumber,
+      skipFolioInsert: !!folioChargeId,
     })
-    folioChargeId = result.folioChargeId
+    if (!folioChargeId) folioChargeId = result.folioChargeId
     ledgerAccountId = result.ledgerAccountId
   } else if (paymentMethod === 'city_ledger' && existingSettlementTransaction) {
     ledgerAccountId = ledgerAccountId ?? cityLedgerAccountId
@@ -146,6 +152,28 @@ export async function settleOutletOrderRecord(
       bookingId,
       guestName,
       roomNumber,
+    })
+    if (bookingId && subtotal > 0 && !folioChargeId) {
+      folioChargeId = await postPaidOutletSaleToBookingFolio(admin, {
+        bookingId,
+        organizationId: input.organizationId,
+        userId: input.userId,
+        department,
+        orderNumber,
+        amount: subtotal,
+        lineDetail,
+        paymentMethod,
+      })
+    }
+  }
+
+  if (folioChargeId && bookingId && !complimentary) {
+    await updateOutletFolioOnSettlement(admin, {
+      folioChargeId,
+      bookingId,
+      paymentMethod,
+      amount: subtotal,
+      complimentary,
     })
   }
 
@@ -265,6 +293,28 @@ export async function createOutletOrderRecord(
     })),
   )
   if (le) throw new Error(le.message)
+
+  let folioChargeId: string | null = null
+  if (
+    !input.settleNow &&
+    input.bookingId &&
+    chargeSubtotal > 0 &&
+    !isComplimentary
+  ) {
+    const lineDetail = input.orderLines.map((l) => `${l.item_name} ×${l.qty}`).join(', ')
+    folioChargeId = await postOpenOutletBillToBookingFolio(admin, {
+      bookingId: input.bookingId,
+      organizationId: input.organizationId,
+      userId: input.userId,
+      department: input.department,
+      orderNumber: input.orderNumber,
+      amount: chargeSubtotal,
+      lineDetail,
+    })
+    if (folioChargeId) {
+      await admin.from('outlet_orders').update({ folio_charge_id: folioChargeId }).eq('id', order.id)
+    }
+  }
 
   if (input.settleNow) {
     return settleOutletOrderRecord(admin, {
