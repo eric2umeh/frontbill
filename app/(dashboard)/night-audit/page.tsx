@@ -135,7 +135,8 @@ export default function NightAuditPage() {
           .from('payments')
           .select('*')
           .eq('organization_id', organizationId)
-          .eq('payment_date', closingDate),
+          .gte('payment_date', `${closingDate}T00:00:00.000Z`)
+          .lte('payment_date', `${closingDate}T23:59:59.999Z`),
         supabase
           .from('rooms')
           .select('id, room_number, status')
