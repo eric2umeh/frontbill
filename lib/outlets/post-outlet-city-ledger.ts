@@ -23,6 +23,20 @@ export type PostOutletCityLedgerResult = {
   fullDescription: string
 }
 
+type MaybeRelated<T> = T | T[] | null | undefined
+
+type BookingLookupRow = {
+  guest_id?: string | null
+  balance?: number | string | null
+  guests?: MaybeRelated<{ name?: string | null }>
+  rooms?: MaybeRelated<{ room_number?: string | null }>
+}
+
+function firstRelated<T>(value: MaybeRelated<T>): T | null {
+  if (Array.isArray(value)) return value[0] ?? null
+  return value ?? null
+}
+
 /**
  * Post outlet sale to city ledger (same pattern as folio "City Ledger" charges).
  * Description is prefixed with outlet name (e.g. "Restaurant — …") for reporting across the app.
@@ -53,12 +67,7 @@ export async function postOutletCityLedgerCharge(
   let folioChargeId: string | null = null
   let guestId: string | null = null
   let resolvedGuestName = guestName?.trim() || ''
-  let bookingRow: {
-    guest_id?: string | null
-    balance?: number | string | null
-    guests?: { name?: string | null } | null
-    rooms?: { room_number?: string | null } | null
-  } | null = null
+  let bookingRow: BookingLookupRow | null = null
   let presetLedger: {
     id: string
     account_name: string
@@ -81,9 +90,10 @@ export async function postOutletCityLedgerCharge(
 
     if (be || !bk) throw new Error('Booking not found')
 
-    bookingRow = bk
-    guestId = bookingRow.guest_id ?? null
-    const g = bookingRow.guests as { name?: string } | null
+    const row = bk as BookingLookupRow
+    bookingRow = row
+    guestId = row.guest_id ?? null
+    const g = firstRelated(row.guests)
     if (g?.name) resolvedGuestName = g.name
   }
 
