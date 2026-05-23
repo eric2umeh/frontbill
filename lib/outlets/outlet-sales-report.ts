@@ -54,6 +54,7 @@ export function normOutletPaymentKey(method: string | null | undefined): OutletS
     .trim()
     .toLowerCase()
     .replace(/-/g, '_')
+  if (!m) return 'other'
   if (m === 'room_charge') return 'city_ledger'
   if (m === 'cash') return 'cash'
   if (m === 'pos') return 'pos'
