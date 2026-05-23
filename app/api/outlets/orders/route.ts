@@ -50,10 +50,21 @@ export async function POST(request: Request) {
   const body = await request.json().catch(() => ({}))
   const department = body?.department as string
   const lines = body?.lines as OrderLineInput[] | undefined
-  const rawPaymentMethod = String(body?.payment_method || 'cash').trim()
   const isComplimentary = body?.is_complimentary === true
   const billOnly = body?.bill_only === true
   const settleNow = billOnly ? false : body?.settle_now !== false
+  const rawPaymentMethod = settleNow
+    ? isComplimentary
+      ? 'complimentary'
+      : String(body?.payment_method || '').trim()
+    : null
+
+  if (settleNow && !isComplimentary && !rawPaymentMethod) {
+    return NextResponse.json(
+      { error: 'Payment method is required when settling an order' },
+      { status: 400 },
+    )
+  }
   const cityLedgerAccountId = (body?.city_ledger_account_id as string | undefined)?.trim() || null
   const roomNumber = (body?.room_number as string | undefined)?.trim() || null
   const guestNameInput = (body?.guest_name as string | undefined)?.trim() || null
@@ -149,7 +160,7 @@ export async function POST(request: Request) {
       subtotal,
       roomServiceFee,
       takeawayFee,
-      paymentMethod: rawPaymentMethod,
+      paymentMethod: rawPaymentMethod ?? (settleNow ? 'cash' : ''),
       notes: body?.notes || null,
       orderLines,
       settleNow,
