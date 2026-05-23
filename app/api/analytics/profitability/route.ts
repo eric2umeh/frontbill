@@ -7,6 +7,10 @@ import {
   mergeAssumptions,
 } from '@/lib/analytics/profitability-model'
 import type { ProfitabilityAssumptions } from '@/lib/analytics/profitability-types'
+import {
+  isOutletPaymentNotes,
+  outletOrderAmount,
+} from '@/lib/outlets/outlet-financial-integration'
 import { format, subDays, startOfMonth, endOfMonth } from 'date-fns'
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
@@ -116,7 +120,7 @@ export async function GET(request: Request) {
 
     const { data: payments } = await ctx.admin
       .from('payments')
-      .select('amount')
+      .select('amount, notes')
       .eq('organization_id', ctx.orgId)
       .gte('payment_date', startIso)
       .lte('payment_date', endIso)
@@ -149,15 +153,18 @@ export async function GET(request: Request) {
       const instant = settled || created
       const day = String(instant).slice(0, 10)
       if (day < start || day > end) continue
-      outletRevenue +=
-        Number((o as { subtotal: number }).subtotal) +
-        Number((o as { room_service_fee?: number }).room_service_fee || 0)
+      outletRevenue += outletOrderAmount(
+        o as {
+          subtotal: number
+          is_complimentary?: boolean | null
+        },
+      )
     }
 
-    const paymentsTotal = (payments || []).reduce(
-      (s, p) => s + Math.max(0, Number((p as { amount: number }).amount) || 0),
-      0,
-    )
+    const paymentsTotal = (payments || []).reduce((s, p) => {
+      if (isOutletPaymentNotes((p as { notes?: string | null }).notes)) return s
+      return s + Math.max(0, Number((p as { amount: number }).amount) || 0)
+    }, 0)
 
     const analysis = buildProfitabilityAnalysis({
       periodStart: start,
