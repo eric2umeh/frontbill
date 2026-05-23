@@ -32,6 +32,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
+import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { toast } from 'sonner'
 import { Loader2, Pencil, Plus, Trash2 } from 'lucide-react'
@@ -62,10 +63,12 @@ export function OutletMenuManager({ department, categories, items, canManage, on
   const sortedItems = useMemo(() => sortOutletMenuByName(items), [items])
   const [saving, setSaving] = useState(false)
   const [newCatName, setNewCatName] = useState('')
+  const [newCatPriceEditable, setNewCatPriceEditable] = useState(false)
   const [form, setForm] = useState(emptyItemForm)
 
   const [editCategory, setEditCategory] = useState<OutletMenuCategoryRow | null>(null)
   const [editCatName, setEditCatName] = useState('')
+  const [editCatPriceEditable, setEditCatPriceEditable] = useState(false)
   const [deleteCategory, setDeleteCategory] = useState<OutletMenuCategoryRow | null>(null)
 
   const [editItem, setEditItem] = useState<OutletMenuItemRow | null>(null)
@@ -76,6 +79,7 @@ export function OutletMenuManager({ department, categories, items, canManage, on
   const openEditCategory = (c: OutletMenuCategoryRow) => {
     setEditCategory(c)
     setEditCatName(c.name)
+    setEditCatPriceEditable(!!c.price_editable)
   }
 
   const openEditItem = (it: OutletMenuItemRow) => {
@@ -98,7 +102,11 @@ export function OutletMenuManager({ department, categories, items, canManage, on
         method: 'POST',
         headers: await outletApiHeaders({ 'Content-Type': 'application/json' }),
         credentials: 'include',
-        body: JSON.stringify({ department, name: newCatName.trim() }),
+        body: JSON.stringify({
+          department,
+          name: newCatName.trim(),
+          price_editable: newCatPriceEditable,
+        }),
       })
       const json = await res.json().catch(() => ({}))
       if (!res.ok) {
@@ -107,6 +115,7 @@ export function OutletMenuManager({ department, categories, items, canManage, on
       }
       toast.success('Category added')
       setNewCatName('')
+      setNewCatPriceEditable(false)
       onRefresh()
     } finally {
       setSaving(false)
@@ -121,7 +130,11 @@ export function OutletMenuManager({ department, categories, items, canManage, on
         method: 'PATCH',
         headers: await outletApiHeaders({ 'Content-Type': 'application/json' }),
         credentials: 'include',
-        body: JSON.stringify({ id: editCategory.id, name: editCatName.trim() }),
+        body: JSON.stringify({
+          id: editCategory.id,
+          name: editCatName.trim(),
+          price_editable: editCatPriceEditable,
+        }),
       })
       const json = await res.json().catch(() => ({}))
       if (!res.ok) {
@@ -275,11 +288,15 @@ export function OutletMenuManager({ department, categories, items, canManage, on
         <Card>
           <CardHeader>
             <CardTitle>Categories</CardTitle>
-            <CardDescription>Group items (e.g. Red Wine, Main dishes).</CardDescription>
+            <CardDescription>
+              Group items (e.g. Buffet, Banquets). Enable flexible POS price for categories where
+              the cashier may change the amount per order only.
+            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             {canManage && (
-              <div className="flex gap-2">
+              <div className="space-y-2">
+                <div className="flex gap-2">
                   <Input
                     placeholder="New category name"
                     value={newCatName}
@@ -290,6 +307,17 @@ export function OutletMenuManager({ department, categories, items, canManage, on
                     <Plus className="h-4 w-4" />
                   </Button>
                 </div>
+                <div className="flex items-center gap-2 rounded-md border bg-muted/30 px-2 py-1.5">
+                  <Switch
+                    id="new-cat-price-editable"
+                    checked={newCatPriceEditable}
+                    onCheckedChange={setNewCatPriceEditable}
+                  />
+                  <Label htmlFor="new-cat-price-editable" className="text-xs font-normal cursor-pointer">
+                    Flexible price on POS (per order only)
+                  </Label>
+                </div>
+              </div>
             )}
             <ul className="text-sm space-y-1 max-h-48 overflow-y-auto border rounded-md p-2">
               {sortedCategories.length === 0 ? (
@@ -297,9 +325,14 @@ export function OutletMenuManager({ department, categories, items, canManage, on
               ) : (
                 sortedCategories.map((c) => (
                   <li key={c.id} className="flex items-center justify-between gap-2 py-0.5">
-                    <span>
+                    <span className="min-w-0">
                       {c.parent_id ? '↳ ' : ''}
                       {c.name}
+                      {c.price_editable ? (
+                        <Badge variant="secondary" className="ml-1.5 text-[9px] h-4 px-1">
+                          Flex price
+                        </Badge>
+                      ) : null}
                     </span>
                     {canManage && (
                       <span className="flex shrink-0 gap-0.5">
@@ -461,9 +494,22 @@ export function OutletMenuManager({ department, categories, items, canManage, on
           <DialogHeader>
             <DialogTitle>Edit category</DialogTitle>
           </DialogHeader>
-          <div className="space-y-2">
-            <Label>Name</Label>
-            <Input value={editCatName} onChange={(e) => setEditCatName(e.target.value)} />
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <Label>Name</Label>
+              <Input value={editCatName} onChange={(e) => setEditCatName(e.target.value)} />
+            </div>
+            <div className="flex items-center gap-2 rounded-md border bg-muted/30 px-2 py-2">
+              <Switch
+                id="edit-cat-price-editable"
+                checked={editCatPriceEditable}
+                onCheckedChange={setEditCatPriceEditable}
+              />
+              <Label htmlFor="edit-cat-price-editable" className="text-sm font-normal cursor-pointer leading-snug">
+                Flexible price on POS — cashiers can change unit price in the cart for this order
+                only; menu price stays the same.
+              </Label>
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditCategory(null)}>

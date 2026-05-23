@@ -1,5 +1,6 @@
 import { format, parseISO } from 'date-fns'
 import { formatYMDInTimeZone, resolveHotelTimeZone } from '@/lib/hotel-date'
+import { outletOrderTypeLabel } from '@/lib/outlets/order-types'
 import type { OutletOrderRow } from '@/lib/outlets/types'
 
 export type OutletSalesPaymentKey =
@@ -91,7 +92,7 @@ function buildRow(order: OutletOrderRow): OutletSalesReportRow {
     guest: order.guest_name?.trim() || '—',
     room: order.room_number?.trim() || null,
     table: order.table_label?.trim() || null,
-    orderType: String(order.order_type || 'takeaway').replace(/_/g, ' '),
+    orderType: outletOrderTypeLabel(String(order.order_type || 'takeaway')),
     itemCount,
     itemsSummary: itemsSummary || '—',
     total: Number(order.subtotal) || 0,

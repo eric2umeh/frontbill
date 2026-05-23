@@ -210,6 +210,8 @@ export type CreateOutletOrderInput = {
   guestName: string | null
   roomNumber: string | null
   tableLabel: string | null
+  waiterName?: string | null
+  waiterId?: string | null
   bookingId: string | null
   subtotal: number
   roomServiceFee: number
@@ -248,6 +250,8 @@ export async function createOutletOrderRecord(
       guest_name: input.guestName,
       room_number: input.roomNumber,
       table_label: input.tableLabel,
+      waiter_name: input.waiterName?.trim() || null,
+      waiter_id: input.waiterId?.trim() || null,
       booking_id: input.bookingId,
       subtotal: chargeSubtotal,
       room_service_fee: roomServiceFee,

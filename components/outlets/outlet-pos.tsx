@@ -4,8 +4,23 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { formatNaira } from '@/lib/utils/currency'
 import { cn } from '@/lib/utils'
 import { createClient } from '@/lib/supabase/client'
-import type { OutletMenuCategoryRow, OutletMenuItemRow, OutletOrderRow, CartLine } from '@/lib/outlets/types'
+import type {
+  OutletMenuCategoryRow,
+  OutletMenuItemRow,
+  OutletOrderRow,
+  CartLine,
+  OutletOrderType,
+} from '@/lib/outlets/types'
 import type { OutletDepartmentKey } from '@/lib/outlets/departments'
+import { OUTLET_ORDER_TYPE_OPTIONS } from '@/lib/outlets/order-types'
+import { OutletWaiterField } from '@/components/outlets/outlet-waiter-field'
+import { itemAllowsPosPriceEdit } from '@/lib/outlets/category-price-editable'
+import {
+  cartLineUsesCustomPrice,
+  menuDefaultUnitPrice,
+  parseOutletUnitPriceInput,
+  roundOutletMoney,
+} from '@/lib/outlets/cart-line-price'
 import {
   formatOutletItemTagLabel,
   getItemDisplayDescription,
@@ -69,7 +84,9 @@ export function OutletPos({
   const [guestName, setGuestName] = useState('')
   const [roomNumber, setRoomNumber] = useState('')
   const [tableLabel, setTableLabel] = useState('')
-  const [orderType, setOrderType] = useState<'dine_in' | 'takeaway' | 'room_service'>('takeaway')
+  const [orderType, setOrderType] = useState<OutletOrderType>('takeaway')
+  const [waiterName, setWaiterName] = useState('')
+  const [waiterId, setWaiterId] = useState<string | null>(null)
   const [paymentMethod, setPaymentMethod] = useState('pos')
   const [bookingId, setBookingId] = useState('')
   const [roomGuestLabel, setRoomGuestLabel] = useState<string | null>(null)
@@ -138,7 +155,7 @@ export function OutletPos({
       )
   }, [filteredItems, categories, activeCategoryFilter, parentCategoryId])
 
-  const cartItemsTotal = cart.reduce((s, l) => s + l.item.unit_price * l.qty, 0)
+  const cartItemsTotal = cart.reduce((s, l) => s + l.unitPrice * l.qty, 0)
   const parsedRoomServiceFee =
     orderType === 'room_service' && roomServiceFee.trim() !== ''
       ? Math.max(0, Math.round(parseFloat(roomServiceFee) * 100) / 100) || 0
@@ -158,22 +175,51 @@ export function OutletPos({
   }, [isComplimentary])
 
   const addToCart = (item: OutletMenuItemRow) => {
+    const unitPrice = menuDefaultUnitPrice(item.unit_price)
+    const priceEditable = itemAllowsPosPriceEdit(item, categories)
     setCart((prev) => {
-      const i = prev.findIndex((l) => l.item.id === item.id)
-      if (i >= 0) {
-        const next = [...prev]
-        next[i] = { ...next[i], qty: next[i].qty + 1 }
-        return next
+      if (!priceEditable) {
+        const i = prev.findIndex((l) => l.item.id === item.id)
+        if (i >= 0) {
+          const next = [...prev]
+          next[i] = { ...next[i], qty: next[i].qty + 1 }
+          return next
+        }
+      } else {
+        const match = prev.find(
+          (l) => l.item.id === item.id && roundOutletMoney(l.unitPrice) === unitPrice,
+        )
+        if (match) {
+          return prev.map((l) =>
+            l.id === match.id ? { ...l, qty: l.qty + 1 } : l,
+          )
+        }
       }
-      return [...prev, { item, qty: 1 }]
+      return [
+        ...prev,
+        {
+          id: crypto.randomUUID(),
+          item,
+          qty: 1,
+          unitPrice,
+        },
+      ]
     })
   }
 
-  const updateQty = (itemId: string, delta: number) => {
+  const updateLineQty = (lineId: string, delta: number) => {
     setCart((prev) =>
       prev
-        .map((l) => (l.item.id === itemId ? { ...l, qty: l.qty + delta } : l))
+        .map((l) => (l.id === lineId ? { ...l, qty: l.qty + delta } : l))
         .filter((l) => l.qty > 0),
+    )
+  }
+
+  const updateLineUnitPrice = (lineId: string, raw: string) => {
+    const parsed = parseOutletUnitPriceInput(raw)
+    if (parsed == null) return
+    setCart((prev) =>
+      prev.map((l) => (l.id === lineId ? { ...l, unitPrice: parsed } : l)),
     )
   }
 
@@ -213,7 +259,11 @@ export function OutletPos({
 
   const buildOrderBody = (settleNow: boolean) => ({
     department,
-    lines: cart.map((l) => ({ item_id: l.item.id, qty: l.qty })),
+    lines: cart.map((l) => ({
+      item_id: l.item.id,
+      qty: l.qty,
+      unit_price: l.unitPrice,
+    })),
     ...(settleNow
       ? { payment_method: isComplimentary ? 'complimentary' : paymentMethod }
       : {}),
@@ -222,6 +272,8 @@ export function OutletPos({
     guest_name: guestName.trim() || null,
     room_number: roomNumber.trim() || null,
     table_label: tableLabel.trim() || null,
+    waiter_name: waiterName.trim() || null,
+    waiter_id: waiterId,
     booking_id: bookingId.trim() || null,
     city_ledger_account_id: selectedLedger?.id || null,
     room_service_fee:
@@ -248,6 +300,8 @@ export function OutletPos({
     setRoomServiceFee('')
     setTakeawayFee('')
     setIsComplimentary(false)
+    setWaiterName('')
+    setWaiterId(null)
   }
 
   const submitOrder = async (settleNow: boolean) => {
@@ -325,26 +379,88 @@ export function OutletPos({
             <p className="text-sm text-muted-foreground py-8 text-center">Tap items to add</p>
           ) : (
             <ul className="space-y-2">
-              {cart.map((l) => (
-                <li key={l.item.id} className="flex gap-2 text-sm border rounded-lg p-2">
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium truncate">{l.item.name}</p>
-                    <p className="text-muted-foreground">{formatNaira(l.item.unit_price)} each</p>
-                  </div>
-                  <div className="flex items-center gap-1 shrink-0">
-                    <Button type="button" size="icon" variant="outline" className="h-7 w-7" onClick={() => updateQty(l.item.id, -1)}>
-                      <Minus className="h-3 w-3" />
-                    </Button>
-                    <span className="w-6 text-center font-mono">{l.qty}</span>
-                    <Button type="button" size="icon" variant="outline" className="h-7 w-7" onClick={() => updateQty(l.item.id, 1)}>
-                      <Plus className="h-3 w-3" />
-                    </Button>
-                  </div>
-                  <p className="font-semibold tabular-nums shrink-0 w-20 text-right">
-                    {formatNaira(l.item.unit_price * l.qty)}
-                  </p>
-                </li>
-              ))}
+              {cart.map((l) => {
+                const menuPrice = menuDefaultUnitPrice(l.item.unit_price)
+                const priceEditable = itemAllowsPosPriceEdit(l.item, categories)
+                const custom =
+                  priceEditable && cartLineUsesCustomPrice(l.unitPrice, menuPrice)
+                return (
+                  <li key={l.id} className="text-sm border rounded-lg p-2 space-y-1.5">
+                    <div className="flex gap-2 items-start">
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium truncate">{l.item.name}</p>
+                        {priceEditable ? (
+                          custom ? (
+                            <p className="text-[10px] text-muted-foreground">
+                              Menu default {formatNaira(menuPrice)}
+                            </p>
+                          ) : (
+                            <p className="text-[10px] text-muted-foreground">
+                              {formatNaira(l.unitPrice)} each · tap Unit to change
+                            </p>
+                          )
+                        ) : (
+                          <p className="text-muted-foreground text-xs">
+                            {formatNaira(l.unitPrice)} each
+                          </p>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="outline"
+                          className="h-7 w-7"
+                          onClick={() => updateLineQty(l.id, -1)}
+                        >
+                          <Minus className="h-3 w-3" />
+                        </Button>
+                        <span className="w-6 text-center font-mono">{l.qty}</span>
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="outline"
+                          className="h-7 w-7"
+                          onClick={() => updateLineQty(l.id, 1)}
+                        >
+                          <Plus className="h-3 w-3" />
+                        </Button>
+                      </div>
+                      <p className="font-semibold tabular-nums shrink-0 w-20 text-right">
+                        {formatNaira(l.unitPrice * l.qty)}
+                      </p>
+                    </div>
+                    {priceEditable && (
+                      <div className="flex items-center gap-2">
+                        <Label className="text-[10px] text-muted-foreground shrink-0">
+                          Unit ₦
+                        </Label>
+                        <Input
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          inputMode="decimal"
+                          className="h-7 text-xs flex-1"
+                          defaultValue={l.unitPrice}
+                          key={`${l.id}-${l.unitPrice}`}
+                          onBlur={(e) => updateLineUnitPrice(l.id, e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              updateLineUnitPrice(l.id, e.currentTarget.value)
+                              e.currentTarget.blur()
+                            }
+                          }}
+                        />
+                        {custom && (
+                          <Badge variant="outline" className="text-[9px] h-5 shrink-0">
+                            Custom
+                          </Badge>
+                        )}
+                      </div>
+                    )}
+                  </li>
+                )
+              })}
             </ul>
           )}
         </ScrollArea>
@@ -382,7 +498,7 @@ export function OutletPos({
             <Select
               value={orderType}
               onValueChange={(v) => {
-                const next = v as typeof orderType
+                const next = v as OutletOrderType
                 setOrderType(next)
                 if (next !== 'room_service') setRoomServiceFee('')
                 if (next !== 'takeaway') setTakeawayFee('')
@@ -390,12 +506,23 @@ export function OutletPos({
             >
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="takeaway">Take-away</SelectItem>
-                <SelectItem value="dine_in">Dine in</SelectItem>
-                <SelectItem value="room_service">Room service</SelectItem>
+                {OUTLET_ORDER_TYPE_OPTIONS.map((opt) => (
+                  <SelectItem key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
+          <OutletWaiterField
+            organizationId={organizationId}
+            waiterName={waiterName}
+            waiterId={waiterId}
+            onWaiterChange={(name, id) => {
+              setWaiterName(name)
+              setWaiterId(id)
+            }}
+          />
           {orderType === 'room_service' && (
             <div className="space-y-1 rounded-lg border border-amber-200/80 bg-amber-50/50 dark:bg-amber-950/20 p-3">
               <Label htmlFor="room-service-fee">Room service fee (optional)</Label>
@@ -653,7 +780,10 @@ export function OutletPos({
               )}
               <div className="grid gap-2 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-4">
                 {groupItems.map((it) => {
-                  const inCart = cart.find((l) => l.item.id === it.id)
+                  const inCart = cart.some((l) => l.item.id === it.id)
+                  const cartQty = cart
+                    .filter((l) => l.item.id === it.id)
+                    .reduce((s, l) => s + l.qty, 0)
                   const displayDesc = getItemDisplayDescription(it.description)
                   const displayTags = getItemDisplayTags(it.tags)
                   return (
@@ -695,7 +825,14 @@ export function OutletPos({
                           ))}
                         </div>
                       )}
-                      <p className="text-sm font-bold tabular-nums mt-auto pt-1">{formatNaira(it.unit_price)}</p>
+                      <p className="text-sm font-bold tabular-nums mt-auto pt-1">
+                        {formatNaira(it.unit_price)}
+                        {inCart && cartQty > 0 ? (
+                          <span className="block text-[10px] font-normal text-amber-800">
+                            {cartQty} in order
+                          </span>
+                        ) : null}
+                      </p>
                     </button>
                   )
                 })}
@@ -707,6 +844,7 @@ export function OutletPos({
           )}
         </ScrollArea>
       </div>
+
     </div>
   )
 }

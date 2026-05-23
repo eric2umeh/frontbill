@@ -5,9 +5,11 @@ import { canAccessOutletDepartment } from '@/lib/outlets/access'
 import { isOutletDepartmentKey, getOutletDepartment } from '@/lib/outlets/departments'
 import { parseOutletOrderExtraFees } from '@/lib/outlets/order-extra-fees'
 import { hasOutletCityLedgerChargeTarget, resolveOutletCustomerContext } from '@/lib/outlets/resolve-outlet-customer'
+import { isOutletOrderType } from '@/lib/outlets/order-types'
+import { itemAllowsPosPriceEdit } from '@/lib/outlets/category-price-editable'
 import { createOutletOrderRecord } from '@/lib/outlets/settle-outlet-order'
 
-type OrderLineInput = { item_id: string; qty: number }
+type OrderLineInput = { item_id: string; qty: number; unit_price?: number }
 
 export async function GET(request: Request) {
   const params = new URL(request.url).searchParams
@@ -89,6 +91,12 @@ export async function POST(request: Request) {
   if (ie) return NextResponse.json({ error: ie.message }, { status: 400 })
   const byId = new Map((items ?? []).map((i) => [i.id, i]))
 
+  const { data: menuCategories } = await admin
+    .from('outlet_menu_categories')
+    .select('id, parent_id, price_editable')
+    .eq('organization_id', auth.ctx.organizationId)
+    .eq('department', department)
+
   const orderLines: {
     item_id: string
     item_name: string
@@ -104,7 +112,26 @@ export async function POST(request: Request) {
     if (!item || !Number.isFinite(qty) || qty <= 0) {
       return NextResponse.json({ error: `Invalid line for item ${l.item_id}` }, { status: 400 })
     }
-    const unitPrice = Number(item.unit_price)
+    const menuUnitPrice = Math.round(Number(item.unit_price) * 100) / 100
+    let unitPrice = menuUnitPrice
+    if (l.unit_price != null && Number.isFinite(Number(l.unit_price))) {
+      const custom = Number(l.unit_price)
+      if (!Number.isFinite(custom) || custom < 0) {
+        return NextResponse.json(
+          { error: `Invalid unit price for ${item.name}` },
+          { status: 400 },
+        )
+      }
+      unitPrice = Math.round(custom * 100) / 100
+      if (unitPrice !== menuUnitPrice && !itemAllowsPosPriceEdit(item, menuCategories ?? [])) {
+        return NextResponse.json(
+          {
+            error: `Custom price is not allowed for "${item.name}". Enable "Flexible price on POS" on its menu category.`,
+          },
+          { status: 400 },
+        )
+      }
+    }
     const lineTotal = Math.round(unitPrice * qty * 100) / 100
     itemsSubtotal += lineTotal
     orderLines.push({
@@ -117,7 +144,10 @@ export async function POST(request: Request) {
   }
 
   itemsSubtotal = Math.round(itemsSubtotal * 100) / 100
-  const orderType = String(body?.order_type || 'takeaway').trim()
+  const orderTypeRaw = String(body?.order_type || 'takeaway').trim()
+  const orderType = isOutletOrderType(orderTypeRaw) ? orderTypeRaw : 'takeaway'
+  const waiterName = (body?.waiter_name as string | undefined)?.trim() || null
+  const waiterId = (body?.waiter_id as string | undefined)?.trim() || null
   const feeResult = parseOutletOrderExtraFees(orderType, body)
   if (feeResult.error) {
     return NextResponse.json({ error: feeResult.error }, { status: 400 })
@@ -156,6 +186,8 @@ export async function POST(request: Request) {
       guestName,
       roomNumber: resolvedCustomer.roomNumber,
       tableLabel: body?.table_label || null,
+      waiterName,
+      waiterId,
       bookingId,
       subtotal,
       roomServiceFee,

@@ -2,7 +2,8 @@ import { escapeHtml } from '@/lib/utils/html-escape'
 import { formatReceiptDateTime, formatAmountReceipt } from '@/lib/receipts/receipt-format'
 import type { OutletDepartmentKey } from '@/lib/outlets/departments'
 import { OUTLET_FEE_LINE_NAMES } from '@/lib/outlets/order-extra-fees'
-import type { OutletOrderLineRow, OutletOrderType } from '@/lib/outlets/types'
+import { outletOrderTypeLabel } from '@/lib/outlets/order-types'
+import type { OutletOrderLineRow } from '@/lib/outlets/types'
 
 export type OutletOrderReceiptLine = {
   name: string
@@ -30,16 +31,6 @@ export type OutletOrderReceiptPayload = {
   takeawayFee: number
   grandTotal: number
   salesCategoryLabel: string
-}
-
-const ORDER_TYPE_LABELS: Record<OutletOrderType, string> = {
-  dine_in: 'Dine in',
-  takeaway: 'Take-away',
-  room_service: 'Room service',
-}
-
-export function outletOrderTypeLabel(type: string): string {
-  return ORDER_TYPE_LABELS[type as OutletOrderType] ?? type.replace(/_/g, ' ')
 }
 
 /** Legacy-style payment label (e.g. Folio Transfer for city ledger). */
