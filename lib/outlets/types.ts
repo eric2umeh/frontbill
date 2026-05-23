@@ -1,7 +1,7 @@
 import type { OutletDepartmentKey } from '@/lib/outlets/departments'
 
 export type OutletOrderStatus = 'open' | 'settled' | 'void'
-export type OutletOrderType = 'dine_in' | 'takeaway' | 'room_service'
+export type OutletOrderType = 'dine_in' | 'takeaway' | 'room_service' | 'walk_in'
 export type OutletPaymentMethod = 'cash' | 'pos' | 'transfer' | 'card' | 'city_ledger' | 'room_charge'
 
 export const OUTLET_ITEM_TAGS = [
@@ -68,6 +68,8 @@ export interface OutletOrderRow {
   guest_name: string | null
   room_number: string | null
   table_label: string | null
+  waiter_name?: string | null
+  waiter_id?: string | null
   booking_id: string | null
   subtotal: number
   room_service_fee?: number | null
