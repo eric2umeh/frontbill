@@ -4,6 +4,14 @@ import { resolveOutletAuthed, nextOrderNumber } from '@/lib/outlets/api-auth'
 import { canAccessOutletDepartment } from '@/lib/outlets/access'
 import { isOutletDepartmentKey, getOutletDepartment } from '@/lib/outlets/departments'
 import { parseOutletOrderExtraFees } from '@/lib/outlets/order-extra-fees'
+import {
+  hasOutletCityLedgerChargeTarget,
+  resolveOutletCustomerContext,
+} from '@/lib/outlets/resolve-outlet-customer'
+import {
+  hasOutletCityLedgerChargeTarget,
+  resolveOutletCustomerContext,
+} from '@/lib/outlets/resolve-outlet-customer'
 import { createOutletOrderRecord } from '@/lib/outlets/settle-outlet-order'
 
 type OrderLineInput = { item_id: string; qty: number }
@@ -51,10 +59,10 @@ export async function POST(request: Request) {
   const isComplimentary = body?.is_complimentary === true
   const billOnly = body?.bill_only === true
   const settleNow = billOnly ? false : body?.settle_now !== false
-  let bookingId = (body?.booking_id as string | undefined)?.trim() || null
   const cityLedgerAccountId = (body?.city_ledger_account_id as string | undefined)?.trim() || null
   const roomNumber = (body?.room_number as string | undefined)?.trim() || null
-  const guestName = (body?.guest_name as string | undefined)?.trim() || null
+  const guestNameInput = (body?.guest_name as string | undefined)?.trim() || null
+  let bookingId = (body?.booking_id as string | undefined)?.trim() || null
 
   if (!isOutletDepartmentKey(department) || !Array.isArray(lines) || lines.length === 0) {
     return NextResponse.json({ error: 'department and lines[] required' }, { status: 400 })
@@ -112,10 +120,21 @@ export async function POST(request: Request) {
   const subtotal = Math.round((itemsSubtotal + extraFeesTotal) * 100) / 100
   const orderNumber = nextOrderNumber(department)
 
+  const resolvedCustomer = await resolveOutletCustomerContext(admin, auth.ctx.organizationId, {
+    bookingId,
+    guestName: guestNameInput,
+    roomNumber,
+  })
+  bookingId = resolvedCustomer.bookingId
+  const guestName = resolvedCustomer.guestName
+
   if (!isComplimentary && settleNow && rawPaymentMethod === 'city_ledger') {
-    if (!bookingId && !cityLedgerAccountId && !guestName && !roomNumber) {
+    if (!hasOutletCityLedgerChargeTarget(resolvedCustomer, cityLedgerAccountId)) {
       return NextResponse.json(
-        { error: 'Room, guest name, or city ledger account required to charge to room' },
+        {
+          error:
+            'In-house room with active stay, guest name, or city ledger account required to charge to room',
+        },
         { status: 400 },
       )
     }
@@ -128,8 +147,8 @@ export async function POST(request: Request) {
       department,
       orderNumber,
       orderType,
-      guestName: guestName || null,
-      roomNumber: roomNumber || null,
+      guestName,
+      roomNumber: resolvedCustomer.roomNumber,
       tableLabel: body?.table_label || null,
       bookingId,
       subtotal,

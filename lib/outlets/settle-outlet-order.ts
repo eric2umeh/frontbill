@@ -1,6 +1,9 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { getOutletDepartment } from '@/lib/outlets/departments'
-import { findActiveBookingByRoom } from '@/lib/outlets/find-active-booking'
+import {
+  hasOutletCityLedgerChargeTarget,
+  resolveOutletCustomerContext,
+} from '@/lib/outlets/resolve-outlet-customer'
 import { recordOutletImmediatePayment } from '@/lib/outlets/outlet-financial-integration'
 import { postOutletCityLedgerCharge } from '@/lib/outlets/post-outlet-city-ledger'
 import {
@@ -58,9 +61,14 @@ export async function settleOutletOrderRecord(
       ? 'city_ledger'
       : input.paymentMethod
 
-  let bookingId = input.bookingId?.trim() || order.booking_id || null
   const roomNumber = input.roomNumber?.trim() || order.room_number || null
-  const guestName = input.guestName?.trim() || order.guest_name || null
+  const resolvedCustomer = await resolveOutletCustomerContext(admin, input.organizationId, {
+    bookingId: input.bookingId?.trim() || order.booking_id || null,
+    guestName: input.guestName?.trim() || order.guest_name || null,
+    roomNumber,
+  })
+  let bookingId = resolvedCustomer.bookingId
+  const guestName = resolvedCustomer.guestName
   const cityLedgerAccountId = input.cityLedgerAccountId?.trim() || null
   const department = String(order.department)
   const deptDef = getOutletDepartment(department)
@@ -74,12 +82,10 @@ export async function settleOutletOrderRecord(
   const lineDetail = lines.map((l) => `${l.item_name} ×${l.qty}`).join(', ')
 
   if (!complimentary && paymentMethod === 'city_ledger') {
-    if (!bookingId && roomNumber) {
-      const found = await findActiveBookingByRoom(admin, input.organizationId, roomNumber)
-      if (found) bookingId = found.id
-    }
-    if (!bookingId && !cityLedgerAccountId && !guestName) {
-      throw new Error('Room with in-house guest, guest name, or city ledger account required')
+    if (!hasOutletCityLedgerChargeTarget(resolvedCustomer, cityLedgerAccountId)) {
+      throw new Error(
+        'In-house room with active stay, guest name, or city ledger account required to charge to room',
+      )
     }
   }
 

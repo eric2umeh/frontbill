@@ -258,8 +258,10 @@ export function OutletPos({
       const hasGuest = guestName.trim().length > 0
       const hasLedger = !!selectedLedger?.id
       const hasBooking = !!bookingId.trim()
-      if (!hasBooking && !hasGuest && !hasLedger) {
-        toast.error('Select a checked-in room, enter a guest name, or pick a city ledger account')
+      if (!hasBooking && !hasGuest && !hasLedger && !hasRoom) {
+        toast.error(
+          'For charge to room: pick an in-house room, enter a guest name, or select a city ledger account',
+        )
         return
       }
     }
