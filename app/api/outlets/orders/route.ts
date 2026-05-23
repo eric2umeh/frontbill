@@ -4,10 +4,7 @@ import { resolveOutletAuthed, nextOrderNumber } from '@/lib/outlets/api-auth'
 import { canAccessOutletDepartment } from '@/lib/outlets/access'
 import { isOutletDepartmentKey, getOutletDepartment } from '@/lib/outlets/departments'
 import { parseOutletOrderExtraFees } from '@/lib/outlets/order-extra-fees'
-import {
-  hasOutletCityLedgerChargeTarget,
-  resolveOutletCustomerContext,
-} from '@/lib/outlets/resolve-outlet-customer'
+import { hasOutletCityLedgerChargeTarget, resolveOutletCustomerContext } from '@/lib/outlets/resolve-outlet-customer'
 import { createOutletOrderRecord } from '@/lib/outlets/settle-outlet-order'
 
 type OrderLineInput = { item_id: string; qty: number }
