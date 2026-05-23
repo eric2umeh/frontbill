@@ -214,7 +214,9 @@ export function OutletPos({
   const buildOrderBody = (settleNow: boolean) => ({
     department,
     lines: cart.map((l) => ({ item_id: l.item.id, qty: l.qty })),
-    payment_method: isComplimentary ? 'complimentary' : paymentMethod,
+    ...(settleNow
+      ? { payment_method: isComplimentary ? 'complimentary' : paymentMethod }
+      : {}),
     is_complimentary: isComplimentary,
     order_type: orderType,
     guest_name: guestName.trim() || null,
@@ -251,6 +253,10 @@ export function OutletPos({
   const submitOrder = async (settleNow: boolean) => {
     if (cart.length === 0) {
       toast.error('Add items to the order first')
+      return
+    }
+    if (settleNow && !isComplimentary && !paymentMethod) {
+      toast.error('Choose a payment method to settle')
       return
     }
     if (!isComplimentary && settleNow && paymentMethod === 'city_ledger') {
@@ -465,70 +471,6 @@ export function OutletPos({
               </p>
             </div>
           </div>
-          {!isComplimentary && (
-          <div className="space-y-1">
-            <Label>Payment</Label>
-            <Select value={paymentMethod} onValueChange={setPaymentMethod}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="pos">POS</SelectItem>
-                <SelectItem value="cash">Cash</SelectItem>
-                <SelectItem value="transfer">Transfer</SelectItem>
-                <SelectItem value="city_ledger">Charge to room (city ledger)</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          )}
-          {!isComplimentary && paymentMethod === 'city_ledger' && (
-            <div className="space-y-2 rounded-lg border bg-muted/30 p-3">
-              <p className="text-xs text-muted-foreground">
-                Posts to city ledger with category <strong>{departmentLabel}</strong> (same as folio add charge). Visible on accounts, transactions, and guest balance.
-              </p>
-              <div className="space-y-1">
-                <Label className="text-xs">Or bill to ledger account</Label>
-                <div className="flex gap-1">
-                  <Input
-                    value={ledgerSearch}
-                    onChange={(e) => setLedgerSearch(e.target.value)}
-                    placeholder="Search account name…"
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') void searchLedgers()
-                    }}
-                  />
-                  <Button type="button" variant="outline" size="sm" onClick={() => void searchLedgers()}>
-                    Search
-                  </Button>
-                </div>
-                {selectedLedger && (
-                  <p className="text-xs font-medium text-amber-800">
-                    Ledger: {selectedLedger.name} ({formatNaira(selectedLedger.balance)})
-                    <Button type="button" variant="link" className="h-auto p-0 ml-2 text-xs" onClick={() => setSelectedLedger(null)}>
-                      Clear
-                    </Button>
-                  </p>
-                )}
-                {ledgerResults.length > 0 && !selectedLedger && (
-                  <ul className="border rounded-md bg-background max-h-28 overflow-y-auto text-xs">
-                    {ledgerResults.map((a) => (
-                      <li key={a.id}>
-                        <button
-                          type="button"
-                          className="w-full text-left px-2 py-1.5 hover:bg-muted"
-                          onClick={() => {
-                            setSelectedLedger(a)
-                            setGuestName(a.name)
-                            setLedgerResults([])
-                          }}
-                        >
-                          {a.name} · {formatNaira(a.balance)}
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            </div>
-          )}
           <div className="grid gap-2">
             <Button
               type="button"
@@ -540,6 +482,78 @@ export function OutletPos({
               {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4 mr-2" />}
               Save &amp; print unsettled bill
             </Button>
+            <p className="text-[11px] text-muted-foreground px-0.5">
+              Unsettled bills have no payment type yet — choose how the guest pays when you settle below.
+            </p>
+          </div>
+          <div className="rounded-lg border border-amber-200/80 bg-amber-50/30 dark:bg-amber-950/20 p-3 space-y-3">
+            <p className="text-xs font-medium text-amber-900 dark:text-amber-100">
+              Settle &amp; collect payment
+            </p>
+            {!isComplimentary && (
+              <div className="space-y-1">
+                <Label>Payment method</Label>
+                <Select value={paymentMethod} onValueChange={setPaymentMethod}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="pos">POS</SelectItem>
+                    <SelectItem value="cash">Cash</SelectItem>
+                    <SelectItem value="transfer">Transfer</SelectItem>
+                    <SelectItem value="city_ledger">Charge to room (city ledger)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            {!isComplimentary && paymentMethod === 'city_ledger' && (
+              <div className="space-y-2 rounded-lg border bg-muted/30 p-3">
+                <p className="text-xs text-muted-foreground">
+                  Posts to city ledger with category <strong>{departmentLabel}</strong> (same as folio add charge). Visible on accounts, transactions, and guest balance.
+                </p>
+                <div className="space-y-1">
+                  <Label className="text-xs">Or bill to ledger account</Label>
+                  <div className="flex gap-1">
+                    <Input
+                      value={ledgerSearch}
+                      onChange={(e) => setLedgerSearch(e.target.value)}
+                      placeholder="Search account name…"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') void searchLedgers()
+                      }}
+                    />
+                    <Button type="button" variant="outline" size="sm" onClick={() => void searchLedgers()}>
+                      Search
+                    </Button>
+                  </div>
+                  {selectedLedger && (
+                    <p className="text-xs font-medium text-amber-800">
+                      Ledger: {selectedLedger.name} ({formatNaira(selectedLedger.balance)})
+                      <Button type="button" variant="link" className="h-auto p-0 ml-2 text-xs" onClick={() => setSelectedLedger(null)}>
+                        Clear
+                      </Button>
+                    </p>
+                  )}
+                  {ledgerResults.length > 0 && !selectedLedger && (
+                    <ul className="border rounded-md bg-background max-h-28 overflow-y-auto text-xs">
+                      {ledgerResults.map((a) => (
+                        <li key={a.id}>
+                          <button
+                            type="button"
+                            className="w-full text-left px-2 py-1.5 hover:bg-muted"
+                            onClick={() => {
+                              setSelectedLedger(a)
+                              setGuestName(a.name)
+                              setLedgerResults([])
+                            }}
+                          >
+                            {a.name} · {formatNaira(a.balance)}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </div>
+            )}
             <Button
               type="button"
               className="w-full bg-amber-600 hover:bg-amber-700"
