@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/button'
 import { OutletPos } from '@/components/outlets/outlet-pos'
 import { OutletMenuManager } from '@/components/outlets/outlet-menu-manager'
 import { OutletOrdersPanel } from '@/components/outlets/outlet-orders-panel'
+import { OutletReportsOrdersSection } from '@/components/outlets/outlet-reports-orders-section'
 import { sortOutletMenuByName } from '@/lib/outlets/sort-outlet-menu'
 import { OutletDailyReportPanel } from '@/components/outlets/outlet-daily-report-panel'
 import { OutletOrderReceiptDialog, type OutletBillPrintKind } from '@/components/outlets/outlet-order-receipt-dialog'
@@ -183,9 +184,14 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
           <TabsContent value="reports" className="mt-2 space-y-4">
             <OutletDailyReportPanel department={department} departmentLabel={def.label} />
             <div>
-              <h3 className="text-sm font-semibold mb-3">Recent orders</h3>
-              <OutletOrdersPanel
-                orders={orders}
+              <h3 className="text-sm font-semibold mb-2">Recent orders</h3>
+              <p className="text-xs text-muted-foreground mb-3">
+                Filter by date or range, then print a sales report by payment type (cash, POS, transfer, charge to room).
+              </p>
+              <OutletReportsOrdersSection
+                department={department}
+                departmentLabel={def.label}
+                organizationId={organizationId ?? ''}
                 canPrintReceipt={canReceipt}
                 canSell={canSell}
                 onPrintUnsettled={(order) => openReceipt(order, false, 'unsettled')}
