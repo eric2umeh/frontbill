@@ -13,6 +13,7 @@ import {
 import {
   EVENT_OTHER_SERVICE_OPTIONS,
   sumEventOtherServices,
+  type EventOtherServiceChoice,
   type EventOtherServiceKey,
   type EventOtherServiceLine,
 } from '@/lib/events/event-other-services'
@@ -21,11 +22,10 @@ import { formatNaira } from '@/lib/utils/currency'
 type PriceMap = Partial<Record<EventOtherServiceKey, string>>
 
 type Props = {
+  choice: EventOtherServiceChoice
+  onChoiceChange: (choice: EventOtherServiceChoice) => void
   lines: EventOtherServiceLine[]
   onChange: (lines: EventOtherServiceLine[]) => void
-  /** Which service row is focused in the secondary dropdown (optional filter). */
-  activeType: EventOtherServiceKey | ''
-  onActiveTypeChange: (type: EventOtherServiceKey | '') => void
   priceByType: PriceMap
   onPriceByTypeChange: (next: PriceMap) => void
   disabled?: boolean
@@ -49,10 +49,10 @@ export function priceMapFromLines(lines: EventOtherServiceLine[]): PriceMap {
 }
 
 export function EventOtherServicesSection({
+  choice,
+  onChoiceChange,
   lines,
   onChange,
-  activeType,
-  onActiveTypeChange,
   priceByType,
   onPriceByTypeChange,
   disabled,
@@ -65,62 +65,69 @@ export function EventOtherServicesSection({
     onChange(linesFromPriceMap(next))
   }
 
-  const visibleOptions = activeType
-    ? EVENT_OTHER_SERVICE_OPTIONS.filter((o) => o.value === activeType)
-    : EVENT_OTHER_SERVICE_OPTIONS
+  const handleChoiceChange = (value: string) => {
+    const next = value as EventOtherServiceChoice
+    onChoiceChange(next)
+    if (next === 'none') {
+      onPriceByTypeChange({})
+      onChange([])
+    }
+  }
+
+  const visibleOptions =
+    choice === 'multiple'
+      ? EVENT_OTHER_SERVICE_OPTIONS
+      : choice !== 'none'
+        ? EVENT_OTHER_SERVICE_OPTIONS.filter((o) => o.value === choice)
+        : []
 
   return (
     <div className="space-y-3 rounded-lg border bg-muted/30 p-3">
-      <div>
-        <Label className="text-sm font-medium">Other services</Label>
-        <p className="text-xs text-muted-foreground mt-0.5">
-          Choose a service type, then enter the price for each item you need.
+      <div className="space-y-1">
+        <Label className="text-sm font-medium">Other services (optional)</Label>
+        <p className="text-xs text-muted-foreground">
+          Add corkage, tea break, buffet lunch, or dinner if needed for this event.
         </p>
       </div>
 
-      <div className="space-y-1">
-        <Label className="text-xs">Service type</Label>
-        <Select
-          value={activeType || 'all'}
-          onValueChange={(v) =>
-            onActiveTypeChange(v === 'all' ? '' : (v as EventOtherServiceKey))
-          }
-          disabled={disabled}
-        >
-          <SelectTrigger>
-            <SelectValue placeholder="All services" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All services</SelectItem>
-            {EVENT_OTHER_SERVICE_OPTIONS.map((o) => (
-              <SelectItem key={o.value} value={o.value}>
-                {o.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
+      <Select value={choice} onValueChange={handleChoiceChange} disabled={disabled}>
+        <SelectTrigger>
+          <SelectValue placeholder="None" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="none">None</SelectItem>
+          {EVENT_OTHER_SERVICE_OPTIONS.map((o) => (
+            <SelectItem key={o.value} value={o.value}>
+              {o.label}
+            </SelectItem>
+          ))}
+          <SelectItem value="multiple">Multiple services</SelectItem>
+        </SelectContent>
+      </Select>
 
-      <div className="grid gap-2 sm:grid-cols-2">
-        {visibleOptions.map((opt) => (
-          <div key={opt.value} className="space-y-1">
-            <Label className="text-xs">{opt.label} (₦)</Label>
-            <Input
-              type="number"
-              min={0}
-              step="0.01"
-              value={priceByType[opt.value] ?? ''}
-              onChange={(e) => setPrice(opt.value, e.target.value)}
-              placeholder="0"
-              disabled={disabled}
-            />
-          </div>
-        ))}
-      </div>
+      {choice !== 'none' && visibleOptions.length > 0 && (
+        <div className="grid gap-2 sm:grid-cols-2">
+          {visibleOptions.map((opt) => (
+            <div key={opt.value} className="space-y-1">
+              <Label className="text-xs">{opt.label} (₦)</Label>
+              <Input
+                type="number"
+                min={0}
+                step="0.01"
+                value={priceByType[opt.value] ?? ''}
+                onChange={(e) => setPrice(opt.value, e.target.value)}
+                placeholder="0"
+                disabled={disabled}
+              />
+            </div>
+          ))}
+        </div>
+      )}
 
       {lines.length > 0 && (
-        <p className="text-sm font-medium">
-          Other services total: <span className="tabular-nums">{formatNaira(total)}</span>
+        <p className="text-sm text-muted-foreground">
+          Other services add-on:{' '}
+          <span className="font-medium text-foreground">{formatNaira(total)}</span>
         </p>
       )}
     </div>
