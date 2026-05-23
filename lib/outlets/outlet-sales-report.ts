@@ -1,5 +1,6 @@
 import { format, parseISO } from 'date-fns'
 import { formatYMDInTimeZone, resolveHotelTimeZone } from '@/lib/hotel-date'
+import { formatPaymentMethodLabel } from '@/lib/payments/payment-methods'
 import { outletOrderTypeLabel } from '@/lib/outlets/order-types'
 import type { OutletOrderRow } from '@/lib/outlets/types'
 
@@ -29,6 +30,7 @@ export type OutletSalesReportRow = {
   orderType: string
   itemCount: number
   itemsSummary: string
+  paymentMethod: string
   total: number
   status: string
 }
@@ -95,6 +97,9 @@ function buildRow(order: OutletOrderRow): OutletSalesReportRow {
     orderType: outletOrderTypeLabel(String(order.order_type || 'takeaway')),
     itemCount,
     itemsSummary: itemsSummary || '—',
+    paymentMethod: order.is_complimentary
+      ? 'Complimentary'
+      : formatPaymentMethodLabel(order.payment_method),
     total: Number(order.subtotal) || 0,
     status: order.status,
   }
