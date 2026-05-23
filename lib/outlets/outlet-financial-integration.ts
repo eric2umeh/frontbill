@@ -132,6 +132,33 @@ export type RecordOutletImmediatePaymentInput = {
   roomNumber?: string | null
 }
 
+function isUniqueViolation(err: { code?: string; message?: string } | null): boolean {
+  if (!err) return false
+  return err.code === '23505' || /duplicate key|already exists/i.test(err.message || '')
+}
+
+async function findExistingOutletPayment(
+  admin: SupabaseClient,
+  input: RecordOutletImmediatePaymentInput,
+  notes: string,
+): Promise<string | null> {
+  let query = admin
+    .from('payments')
+    .select('id')
+    .eq('organization_id', input.organizationId)
+    .eq('amount', input.amount)
+    .eq('payment_method', input.paymentMethod)
+    .eq('notes', notes)
+    .order('created_at', { ascending: false })
+    .limit(1)
+
+  query = input.bookingId ? query.eq('booking_id', input.bookingId) : query.is('booking_id', null)
+
+  const { data, error } = await query.maybeSingle()
+  if (error) throw new Error(error.message)
+  return data?.id ?? null
+}
+
 export async function recordOutletImmediatePayment(
   admin: SupabaseClient,
   input: RecordOutletImmediatePaymentInput,
@@ -167,45 +194,64 @@ export async function recordOutletImmediatePayment(
     500,
   )
   const now = new Date().toISOString()
+  const transactionId = outletTransactionId(input.orderNumber)
 
-  const { data: payment, error: payErr } = await admin
-    .from('payments')
-    .insert({
+  const { data: existingTx, error: existingTxErr } = await admin
+    .from('transactions')
+    .select('id')
+    .eq('organization_id', input.organizationId)
+    .eq('transaction_id', transactionId)
+    .maybeSingle()
+
+  if (existingTxErr) throw new Error(existingTxErr.message)
+
+  let paymentId = await findExistingOutletPayment(admin, input, notes)
+
+  if (!paymentId && !existingTx) {
+    const { data: payment, error: payErr } = await admin
+      .from('payments')
+      .insert({
+        organization_id: input.organizationId,
+        booking_id: input.bookingId || null,
+        guest_id: guestId,
+        amount: input.amount,
+        payment_method: input.paymentMethod,
+        payment_date: now,
+        notes,
+        received_by: input.userId,
+      })
+      .select('id')
+      .single()
+
+    if (payErr) throw new Error(payErr.message)
+    paymentId = payment?.id ?? null
+  }
+
+  if (!existingTx) {
+    const { error: txErr } = await admin.from('transactions').insert({
       organization_id: input.organizationId,
       booking_id: input.bookingId || null,
-      guest_id: guestId,
+      transaction_id: transactionId,
+      guest_name: guestName || 'Walk-in',
+      room,
       amount: input.amount,
       payment_method: input.paymentMethod,
-      payment_date: now,
-      notes,
+      status: 'paid',
+      description: txDescription,
       received_by: input.userId,
     })
-    .select('id')
-    .single()
 
-  if (payErr) throw new Error(payErr.message)
+    if (txErr && !isUniqueViolation(txErr)) throw new Error(txErr.message)
+  }
 
-  const { error: txErr } = await admin.from('transactions').insert({
-    organization_id: input.organizationId,
-    booking_id: input.bookingId || null,
-    transaction_id: outletTransactionId(input.orderNumber),
-    guest_name: guestName || 'Walk-in',
-    room,
-    amount: input.amount,
-    payment_method: input.paymentMethod,
-    status: 'paid',
-    description: txDescription,
-    received_by: input.userId,
-  })
+  if (paymentId) {
+    await admin
+      .from('outlet_orders')
+      .update({ payment_id: paymentId })
+      .eq('id', input.orderId)
+  }
 
-  if (txErr) throw new Error(txErr.message)
-
-  await admin
-    .from('outlet_orders')
-    .update({ payment_id: payment?.id ?? null })
-    .eq('id', input.orderId)
-
-  return { paymentId: payment?.id ?? null }
+  return { paymentId }
 }
 
 type DailyRevenueDayRow = {
