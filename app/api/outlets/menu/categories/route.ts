@@ -51,6 +51,7 @@ export async function POST(request: Request) {
       slug,
       sort_order: Number(body?.sort_order) || 0,
       tag_label: body?.tag_label || null,
+      price_editable: body?.price_editable === true,
       created_by: auth.ctx.userId,
       updated_by: auth.ctx.userId,
     })
@@ -96,6 +97,7 @@ export async function PATCH(request: Request) {
   if (body.parent_id !== undefined) patch.parent_id = body.parent_id || null
   if (body.sort_order != null) patch.sort_order = Number(body.sort_order)
   if (body.tag_label !== undefined) patch.tag_label = body.tag_label || null
+  if (body.price_editable !== undefined) patch.price_editable = body.price_editable === true
 
   const { data, error } = await admin
     .from('outlet_menu_categories')
