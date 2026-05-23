@@ -85,7 +85,8 @@ export async function POST(request: Request) {
         .from('payments')
         .select('*')
         .eq('organization_id', orgId)
-        .eq('payment_date', closingDate),
+        .gte('payment_date', `${closingDate}T00:00:00.000Z`)
+        .lte('payment_date', `${closingDate}T23:59:59.999Z`),
       admin
         .from('rooms')
         .select('id, room_number, status')
