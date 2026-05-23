@@ -12,6 +12,44 @@ export function isOutletTransactionId(transactionId: string | null | undefined):
   return String(transactionId || '').startsWith(OUTLET_TRANSACTION_ID_PREFIX)
 }
 
+/** Matches outlet order numbers such as RES-20260523-2GIB */
+export const OUTLET_ORDER_NUMBER_RE = /\b([A-Z]{2,}-\d{8}-[A-Z0-9]{4})\b/i
+
+export function extractOutletOrderNumberFromNotes(notes: string | null | undefined): string | null {
+  const m = String(notes || '').match(OUTLET_ORDER_NUMBER_RE)
+  return m ? m[1].toUpperCase() : null
+}
+
+export function outletOrderNumberFromTransactionId(
+  transactionId: string | null | undefined,
+): string | null {
+  const id = String(transactionId || '')
+  if (!isOutletTransactionId(id)) return null
+  return id.slice(OUTLET_TRANSACTION_ID_PREFIX.length)
+}
+
+/** OUT-* rows in transactions paired with payments — hide the payment duplicate in lists. */
+export function collectOutletPaidTransactionOrderNumbers(
+  transactions: Array<{ transaction_id?: string | null; status?: string | null }>,
+): Set<string> {
+  const set = new Set<string>()
+  for (const t of transactions) {
+    const orderNo = outletOrderNumberFromTransactionId(t.transaction_id)
+    if (!orderNo) continue
+    const st = String(t.status || '').toLowerCase()
+    if (['paid', 'completed'].includes(st)) set.add(orderNo)
+  }
+  return set
+}
+
+export function shouldHideOutletPaymentDuplicate(
+  paymentNotes: string | null | undefined,
+  outletTransactionOrderNumbers: Set<string>,
+): boolean {
+  const orderNo = extractOutletOrderNumberFromNotes(paymentNotes)
+  return !!orderNo && outletTransactionOrderNumbers.has(orderNo)
+}
+
 export function buildOutletSettlementNotes(
   departmentLabel: string,
   orderNumber: string,
@@ -112,9 +150,7 @@ export function skipOutletTxnInSalesCollection(row: {
 }
 
 export function isOutletPaymentNotes(notes: string | null | undefined): boolean {
-  const n = String(notes || '')
-  if (!n.trim()) return false
-  return /\s[A-Z]{2,}-\d{4,}\s—/i.test(n) || /\sOUT-\d/i.test(n)
+  return extractOutletOrderNumberFromNotes(notes) !== null
 }
 
 export type RecordOutletImmediatePaymentInput = {

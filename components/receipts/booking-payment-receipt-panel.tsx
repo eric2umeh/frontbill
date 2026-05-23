@@ -20,6 +20,10 @@ import {
 } from '@/lib/receipts/booking-receipt-utils'
 import { fetchUserDisplayNameMap } from '@/lib/utils/fetch-user-display-names'
 import { getUserDisplayName } from '@/lib/utils/user-display'
+import {
+  collectOutletPaidTransactionOrderNumbers,
+  shouldHideOutletPaymentDuplicate,
+} from '@/lib/outlets/outlet-financial-integration'
 
 type FolioChargeRow = {
   id: string
@@ -139,11 +143,7 @@ export function BookingPaymentReceiptPanel({
       ])
 
       const payLedgerRaw = filterPaymentLedgerTransactions(txRows || [])
-      const outletTxIds = new Set(
-        payLedgerRaw
-          .filter((t) => String(t.transaction_id || '').startsWith('OUT-'))
-          .map((t) => String(t.transaction_id || '').replace(/^OUT-/i, '')),
-      )
+      const outletTxIds = collectOutletPaidTransactionOrderNumbers(payLedgerRaw)
       const receiverIds = [
         ...new Set(
           payLedgerRaw
@@ -167,12 +167,9 @@ export function BookingPaymentReceiptPanel({
       }))
 
       const fromPayments = (payRows || [])
-        .filter((p: { notes?: string | null }) => {
-          const notes = String(p.notes || '')
-          const m = notes.match(/\s([A-Z]{2,}-\d+)\s—/)
-          if (m && outletTxIds.has(m[1])) return false
-          return true
-        })
+        .filter((p: { notes?: string | null }) =>
+          !shouldHideOutletPaymentDuplicate(p.notes, outletTxIds),
+        )
         .map((p: Record<string, unknown>) => ({
           id: `pay-${String(p.id)}`,
           created_at: String(p.payment_date),

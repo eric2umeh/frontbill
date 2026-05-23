@@ -20,7 +20,10 @@ import {
   Banknote, Smartphone, ArrowRightLeft, Building2, Clock
 } from 'lucide-react'
 import { format, startOfDay, endOfDay, startOfMonth, endOfMonth, startOfWeek, endOfWeek, subDays } from 'date-fns'
-import { isOutletTransactionId } from '@/lib/outlets/outlet-financial-integration'
+import {
+  collectOutletPaidTransactionOrderNumbers,
+  shouldHideOutletPaymentDuplicate,
+} from '@/lib/outlets/outlet-financial-integration'
 
 interface Payment {
   id: string
@@ -120,23 +123,11 @@ export default function TransactionsPage() {
       }
 
       const visibleTxData = txData || []
-      const outletTxOrderNumbers = new Set(
-        visibleTxData
-          .filter((t: { transaction_id?: string | null; status?: string | null }) =>
-            isOutletTransactionId(t.transaction_id) &&
-            ['paid', 'completed'].includes(String(t.status || '').toLowerCase()),
-          )
-          .map((t: { transaction_id?: string | null }) =>
-            String(t.transaction_id || '').replace(/^OUT-/i, ''),
-          ),
-      )
+      const outletTxOrderNumbers = collectOutletPaidTransactionOrderNumbers(visibleTxData)
 
-      const payRows = (payData || []).filter((p: { notes?: string | null }) => {
-        const notes = String(p.notes || '')
-        const orderMatch = notes.match(/\s([A-Z]{2,}-\d+)\s—/)
-        if (orderMatch && outletTxOrderNumbers.has(orderMatch[1])) return false
-        return true
-      })
+      const payRows = (payData || []).filter((p: { notes?: string | null }) =>
+        !shouldHideOutletPaymentDuplicate(p.notes, outletTxOrderNumbers),
+      )
 
       const bookingIds = Array.from(
         new Set([
