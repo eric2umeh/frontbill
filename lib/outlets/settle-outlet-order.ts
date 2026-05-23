@@ -4,7 +4,10 @@ import {
   hasOutletCityLedgerChargeTarget,
   resolveOutletCustomerContext,
 } from '@/lib/outlets/resolve-outlet-customer'
-import { recordOutletImmediatePayment } from '@/lib/outlets/outlet-financial-integration'
+import {
+  outletTransactionId,
+  recordOutletImmediatePayment,
+} from '@/lib/outlets/outlet-financial-integration'
 import { postOutletCityLedgerCharge } from '@/lib/outlets/post-outlet-city-ledger'
 import {
   OUTLET_FEE_LINE_NAMES,
@@ -17,6 +20,22 @@ function isCityLedgerPayment(method: string) {
 
 function isComplimentaryOrder(order: { is_complimentary?: boolean | null }, method: string) {
   return !!order.is_complimentary || method === 'complimentary'
+}
+
+async function outletSettlementTransactionExists(
+  admin: SupabaseClient,
+  organizationId: string,
+  orderNumber: string,
+): Promise<boolean> {
+  const { data, error } = await admin
+    .from('transactions')
+    .select('id')
+    .eq('organization_id', organizationId)
+    .eq('transaction_id', outletTransactionId(orderNumber))
+    .maybeSingle()
+
+  if (error) throw new Error(error.message)
+  return !!data
 }
 
 export type SettleOutletOrderResult = {
@@ -91,8 +110,11 @@ export async function settleOutletOrderRecord(
 
   let folioChargeId: string | null = order.folio_charge_id ?? null
   let ledgerAccountId: string | null = order.city_ledger_account_id ?? null
+  const existingSettlementTransaction = !complimentary
+    ? await outletSettlementTransactionExists(admin, input.organizationId, orderNumber)
+    : false
 
-  if (paymentMethod === 'city_ledger' && !folioChargeId) {
+  if (paymentMethod === 'city_ledger' && !folioChargeId && !existingSettlementTransaction) {
     const result = await postOutletCityLedgerCharge(admin, {
       organizationId: input.organizationId,
       userId: input.userId,
@@ -108,6 +130,8 @@ export async function settleOutletOrderRecord(
     })
     folioChargeId = result.folioChargeId
     ledgerAccountId = result.ledgerAccountId
+  } else if (paymentMethod === 'city_ledger' && existingSettlementTransaction) {
+    ledgerAccountId = ledgerAccountId ?? cityLedgerAccountId
   } else if (!complimentary && paymentMethod !== 'city_ledger') {
     await recordOutletImmediatePayment(admin, {
       organizationId: input.organizationId,

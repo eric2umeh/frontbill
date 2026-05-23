@@ -8,10 +8,6 @@ import {
   hasOutletCityLedgerChargeTarget,
   resolveOutletCustomerContext,
 } from '@/lib/outlets/resolve-outlet-customer'
-import {
-  hasOutletCityLedgerChargeTarget,
-  resolveOutletCustomerContext,
-} from '@/lib/outlets/resolve-outlet-customer'
 import { createOutletOrderRecord } from '@/lib/outlets/settle-outlet-order'
 
 type OrderLineInput = { item_id: string; qty: number }
