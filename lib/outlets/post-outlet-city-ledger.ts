@@ -23,6 +23,20 @@ export type PostOutletCityLedgerResult = {
   fullDescription: string
 }
 
+type MaybeRelated<T> = T | T[] | null | undefined
+
+type BookingLookupRow = {
+  guest_id?: string | null
+  balance?: number | string | null
+  guests?: MaybeRelated<{ name?: string | null }>
+  rooms?: MaybeRelated<{ room_number?: string | null }>
+}
+
+function firstRelated<T>(value: MaybeRelated<T>): T | null {
+  if (Array.isArray(value)) return value[0] ?? null
+  return value ?? null
+}
+
 /**
  * Post outlet sale to city ledger (same pattern as folio "City Ledger" charges).
  * Description is prefixed with outlet name (e.g. "Restaurant — …") for reporting across the app.
@@ -53,6 +67,18 @@ export async function postOutletCityLedgerCharge(
   let folioChargeId: string | null = null
   let guestId: string | null = null
   let resolvedGuestName = guestName?.trim() || ''
+  let bookingRow: BookingLookupRow | null = null
+  let presetLedger: {
+    id: string
+    account_name: string
+    balance?: number | string | null
+    account_type?: string | null
+  } | null = null
+  let existingGuestLedger: {
+    id: string
+    account_name: string
+    balance?: number | string | null
+  } | null = null
 
   if (bookingId) {
     const { data: bk, error: be } = await supabase
@@ -64,11 +90,37 @@ export async function postOutletCityLedgerCharge(
 
     if (be || !bk) throw new Error('Booking not found')
 
-    guestId = bk.guest_id ?? null
-    const g = bk.guests as { name?: string } | null
+    const row = bk as BookingLookupRow
+    bookingRow = row
+    guestId = row.guest_id ?? null
+    const g = firstRelated(row.guests)
     if (g?.name) resolvedGuestName = g.name
-    const rm = bk.rooms as { room_number?: string } | null
+  }
 
+  if (presetLedgerId) {
+    const { data: acct, error: acctErr } = await supabase
+      .from('city_ledger_accounts')
+      .select('id, account_name, balance, account_type')
+      .eq('id', presetLedgerId)
+      .eq('organization_id', organizationId)
+      .single()
+    if (acctErr || !acct) throw new Error('City ledger account not found')
+    presetLedger = acct
+  } else if (resolvedGuestName) {
+    const { data: existing } = await supabase
+      .from('city_ledger_accounts')
+      .select('id, account_name, balance')
+      .eq('organization_id', organizationId)
+      .ilike('account_name', resolvedGuestName)
+      .in('account_type', ['individual', 'guest'])
+      .maybeSingle()
+
+    existingGuestLedger = existing ?? null
+  } else {
+    throw new Error('Guest name, room number with active check-in, or city ledger account is required')
+  }
+
+  if (bookingId && bookingRow) {
     const { error: fcErr } = await insertFolioCharges(supabase, [
       {
         booking_id: bookingId,
@@ -93,62 +145,47 @@ export async function postOutletCityLedgerCharge(
       .maybeSingle()
     folioChargeId = fc?.id ?? null
 
-    const newBalance = (Number(bk.balance) || 0) + amount
+    const newBalance = (Number(bookingRow.balance) || 0) + amount
     await supabase
       .from('bookings')
       .update({ balance: newBalance, payment_status: 'pending' })
       .eq('id', bookingId)
   }
 
-  let ledgerAccountId = presetLedgerId ?? null
+  let ledgerAccountId = presetLedger?.id ?? null
   let ledgerAccountName = ''
 
-  if (ledgerAccountId) {
-    const { data: acct } = await supabase
-      .from('city_ledger_accounts')
-      .select('id, account_name, balance, account_type')
-      .eq('id', ledgerAccountId)
-      .eq('organization_id', organizationId)
-      .single()
-    if (!acct) throw new Error('City ledger account not found')
-    ledgerAccountName = acct.account_name
-    const newBal = (Number(acct.balance) || 0) + amount
+  if (presetLedger) {
+    ledgerAccountName = presetLedger.account_name
+    const newBal = (Number(presetLedger.balance) || 0) + amount
     await supabase
       .from('city_ledger_accounts')
       .update({ balance: newBal, updated_at: new Date().toISOString() })
-      .eq('id', ledgerAccountId)
-    if (acct.account_type === 'organization') {
+      .eq('id', presetLedger.id)
+    if (presetLedger.account_type === 'organization') {
       const { data: orgRow } = await supabase
         .from('organizations')
         .select('current_balance')
-        .eq('id', ledgerAccountId)
+        .eq('id', presetLedger.id)
         .maybeSingle()
       if (orgRow) {
         await supabase
           .from('organizations')
           .update({ current_balance: (Number(orgRow.current_balance) || 0) + amount })
-          .eq('id', ledgerAccountId)
+          .eq('id', presetLedger.id)
       }
     }
   } else if (resolvedGuestName) {
-    const { data: existing } = await supabase
-      .from('city_ledger_accounts')
-      .select('id, account_name, balance')
-      .eq('organization_id', organizationId)
-      .ilike('account_name', resolvedGuestName)
-      .in('account_type', ['individual', 'guest'])
-      .maybeSingle()
-
-    if (existing) {
-      ledgerAccountId = existing.id
-      ledgerAccountName = existing.account_name
+    if (existingGuestLedger) {
+      ledgerAccountId = existingGuestLedger.id
+      ledgerAccountName = existingGuestLedger.account_name
       await supabase
         .from('city_ledger_accounts')
         .update({
-          balance: (Number(existing.balance) || 0) + amount,
+          balance: (Number(existingGuestLedger.balance) || 0) + amount,
           updated_at: new Date().toISOString(),
         })
-        .eq('id', existing.id)
+        .eq('id', existingGuestLedger.id)
     } else {
       const { data: created, error: ce } = await supabase
         .from('city_ledger_accounts')
@@ -166,8 +203,6 @@ export async function postOutletCityLedgerCharge(
       ledgerAccountId = created!.id
       ledgerAccountName = created!.account_name
     }
-  } else {
-    throw new Error('Guest name, room number with active check-in, or city ledger account is required')
   }
 
   if (guestId) {
