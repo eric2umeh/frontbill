@@ -8,7 +8,7 @@ import { hasOutletCityLedgerChargeTarget, resolveOutletCustomerContext } from '@
 import { isOutletOrderType } from '@/lib/outlets/order-types'
 import { createOutletOrderRecord } from '@/lib/outlets/settle-outlet-order'
 
-type OrderLineInput = { item_id: string; qty: number }
+type OrderLineInput = { item_id: string; qty: number; unit_price?: number }
 
 export async function GET(request: Request) {
   const params = new URL(request.url).searchParams
@@ -105,7 +105,18 @@ export async function POST(request: Request) {
     if (!item || !Number.isFinite(qty) || qty <= 0) {
       return NextResponse.json({ error: `Invalid line for item ${l.item_id}` }, { status: 400 })
     }
-    const unitPrice = Number(item.unit_price)
+    const menuUnitPrice = Math.round(Number(item.unit_price) * 100) / 100
+    let unitPrice = menuUnitPrice
+    if (l.unit_price != null && Number.isFinite(Number(l.unit_price))) {
+      const custom = Number(l.unit_price)
+      if (!Number.isFinite(custom) || custom < 0) {
+        return NextResponse.json(
+          { error: `Invalid unit price for ${item.name}` },
+          { status: 400 },
+        )
+      }
+      unitPrice = Math.round(custom * 100) / 100
+    }
     const lineTotal = Math.round(unitPrice * qty * 100) / 100
     itemsSubtotal += lineTotal
     orderLines.push({
