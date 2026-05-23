@@ -40,6 +40,7 @@ function rowsTable(rows: OutletSalesReportBundle['sections'][0]['rows']): string
         <td class="r">${r.itemCount}</td>
         <td class="items">${escapeHtml(r.itemsSummary)}</td>
         <td>${escapeHtml(r.orderType)}</td>
+        <td>${escapeHtml(r.paymentMethod)}</td>
         <td class="r">${escapeHtml(formatNaira(r.total))}</td>
       </tr>`,
     )
@@ -47,7 +48,7 @@ function rowsTable(rows: OutletSalesReportBundle['sections'][0]['rows']): string
   return `<table>
     <thead><tr>
       <th>Receipt #</th><th>Time</th><th>Guest</th><th>Room</th><th>Table</th>
-      <th class="r">Items</th><th>Line items</th><th>Type</th><th class="r">Total</th>
+      <th class="r">Items</th><th>Line items</th><th>Type</th><th>Payment</th><th class="r">Total</th>
     </tr></thead>
     <tbody>${body}</tbody>
   </table>`
@@ -76,7 +77,7 @@ export function buildOutletSalesReportHtml(input: {
     <style>${reportStyles()}</style></head><body>
     <div class="wrap">
       <h1>${escapeHtml(hotelName)}</h1>
-      <p class="sub"><strong>${escapeHtml(departmentLabel)}</strong> — Sales report<br/>
+      <p class="sub"><strong>${escapeHtml(departmentLabel)}</strong> — Full sales report (detail by payment method)<br/>
       Period: ${escapeHtml(report.periodLabel)}<br/>
       Printed: ${escapeHtml(printedAt)}</p>
       ${sectionsHtml}
