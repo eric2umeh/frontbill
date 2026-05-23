@@ -1,0 +1,24 @@
+---
+description: Per-file git commit message summaries when the user will commit changes
+alwaysApply: true
+---
+
+# Per-file commit summaries
+
+When you finish a task that changed multiple files, and the user may commit (or asks for commit summaries):
+
+1. Run `git status --short` and list **every** modified and new file.
+2. For each file, give one line: **filename** — suggested commit subject (imperative, ≤72 chars) plus one short sentence of why.
+3. Order files logically: new libs first, then APIs, then UI that depends on them.
+4. Do not run `git commit` unless the user explicitly asks to commit.
+5. If the user says "commit each file" or similar, commit one file per commit using those messages (HEREDOC format).
+
+Example format:
+
+```
+lib/foo/bar.ts — Add bar helpers for outlet reports.
+Centralizes payment grouping used by print and API.
+
+app/api/.../route.ts — Raise order query limit when date range is set.
+Supports reports tab loading up to 1000 orders in a range.
+```
