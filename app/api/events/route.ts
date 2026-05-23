@@ -7,7 +7,10 @@ import {
 } from '@/lib/events/record-event-payment'
 import { resolveEventClientRecord } from '@/lib/events/resolve-event-client'
 import type { EventClientType } from '@/lib/events/resolve-event-client'
-import { EVENT_OTHER_VENUE, parseEventOtherServices } from '@/lib/events/event-other-services'
+import {
+  computeEventEstimatedTotal,
+  parseEventOtherServices,
+} from '@/lib/events/event-other-services'
 import type { HotelEventStatus } from '@/lib/events/types'
 
 const STATUSES: HotelEventStatus[] = ['planned', 'confirmed', 'cancelled', 'completed']
@@ -26,23 +29,27 @@ function parseEventBody(body: Record<string, unknown>) {
   if (end_date < start_date) {
     return { error: 'end_date must be on or after start_date' }
   }
+
   const venue = body.venue != null ? String(body.venue).trim() || null : null
-  const otherServices =
-    venue === EVENT_OTHER_VENUE ? parseEventOtherServices(body.other_services) : []
-  const otherTotal = otherServices.reduce((s, l) => s + l.amount, 0)
-  let estimated_value =
-    body.estimated_value != null && body.estimated_value !== ''
-      ? Math.max(0, Number(body.estimated_value) || 0)
-      : null
-  if (venue === EVENT_OTHER_VENUE && otherTotal > 0) {
-    estimated_value = Math.round(otherTotal * 100) / 100
-  }
+  const otherServices = parseEventOtherServices(body.other_services)
+  const baseEstimated =
+    body.estimated_base_value != null && body.estimated_base_value !== ''
+      ? Math.max(0, Number(body.estimated_base_value) || 0)
+      : body.estimated_value != null && body.estimated_value !== ''
+        ? Math.max(0, Number(body.estimated_value) || 0)
+        : 0
+  const estimated_value =
+    otherServices.length > 0 || body.estimated_base_value != null
+      ? computeEventEstimatedTotal(baseEstimated, otherServices)
+      : body.estimated_value != null && body.estimated_value !== ''
+        ? Math.max(0, Number(body.estimated_value) || 0)
+        : null
 
   return {
     title,
     description: body.description != null ? String(body.description).trim() || null : null,
     venue,
-    other_services: venue === EVENT_OTHER_VENUE ? otherServices : null,
+    other_services: otherServices.length > 0 ? otherServices : null,
     start_date,
     end_date,
     start_time:
