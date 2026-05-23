@@ -1,14 +1,14 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { format, parseISO, startOfDay, endOfDay, subDays } from 'date-fns'
+import { format, parseISO, subDays } from 'date-fns'
 import type { OutletDepartmentKey } from '@/lib/outlets/departments'
 import type { OutletOrderRow } from '@/lib/outlets/types'
 import { buildOutletSalesReport } from '@/lib/outlets/outlet-sales-report'
 import { printOutletSalesReport } from '@/lib/receipts/outlet-sales-report-print'
 import { OutletOrdersPanel } from '@/components/outlets/outlet-orders-panel'
-import { outletApiHeaders } from '@/lib/outlets/outlet-api-headers'
+import { fetchOutletOrdersInRange } from '@/lib/outlets/fetch-outlet-orders'
 import { formatNaira } from '@/lib/utils/currency'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -16,12 +16,16 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent } from '@/components/ui/card'
 import { toast } from 'sonner'
 import { Loader2, Printer, RefreshCw } from 'lucide-react'
-import { nightAuditClosingDateYmd } from '@/lib/hotel-date'
+import { hotelCalendarTodayYmd } from '@/lib/hotel-date'
 
 type Props = {
   department: OutletDepartmentKey
   departmentLabel: string
   organizationId: string
+  /** Load orders only when this tab is visible (avoids API cost on other tabs). */
+  active: boolean
+  /** Bump to reload after a new sale or settlement from POS. */
+  refreshToken?: number
   canPrintReceipt?: boolean
   canSell?: boolean
   onPrintUnsettled?: (order: OutletOrderRow) => void
@@ -29,23 +33,26 @@ type Props = {
   onSettled?: () => void
 }
 
-export function OutletReportsOrdersSection({
+export function OutletOrdersTabSection({
   department,
   departmentLabel,
   organizationId,
+  active,
+  refreshToken = 0,
   canPrintReceipt,
   canSell,
   onPrintUnsettled,
   onPrintSettled,
   onSettled,
 }: Props) {
-  const todayYmd = nightAuditClosingDateYmd()
+  const todayYmd = hotelCalendarTodayYmd()
   const [dateFrom, setDateFrom] = useState(todayYmd)
   const [dateTo, setDateTo] = useState(todayYmd)
   const [orders, setOrders] = useState<OutletOrderRow[]>([])
   const [loading, setLoading] = useState(false)
   const [printing, setPrinting] = useState(false)
   const [hotelName, setHotelName] = useState('Hotel')
+  const initialLoadDone = useRef(false)
 
   useEffect(() => {
     if (!organizationId) return
@@ -61,43 +68,47 @@ export function OutletReportsOrdersSection({
       })
   }, [organizationId])
 
-  const loadOrders = useCallback(async () => {
-    if (!dateFrom || !dateTo) return
-    if (dateFrom > dateTo) {
-      toast.error('Start date must be on or before end date')
-      return
-    }
-    setLoading(true)
-    try {
-      const fromIso = startOfDay(parseISO(dateFrom)).toISOString()
-      const toIso = endOfDay(parseISO(dateTo)).toISOString()
-      const qs = new URLSearchParams({
-        department,
-        from: fromIso,
-        to: toIso,
-      })
-      const res = await fetch(`/api/outlets/orders?${qs}`, {
-        headers: await outletApiHeaders(),
-        credentials: 'include',
-      })
-      const json = await res.json().catch(() => ({}))
-      if (!res.ok) {
-        toast.error(json.error || 'Could not load orders')
-        setOrders([])
+  const loadOrdersForRange = useCallback(
+    async (from: string, to: string) => {
+      if (!from || !to) return
+      if (from > to) {
+        toast.error('Start date must be on or before end date')
         return
       }
-      setOrders((json.orders as OutletOrderRow[]) ?? [])
-    } catch {
-      toast.error('Network error')
-      setOrders([])
-    } finally {
-      setLoading(false)
-    }
-  }, [department, dateFrom, dateTo])
+      setLoading(true)
+      try {
+        const { orders: rows, error } = await fetchOutletOrdersInRange(department, from, to)
+        if (error) {
+          toast.error(error)
+          setOrders([])
+          return
+        }
+        setOrders(rows)
+      } catch {
+        toast.error('Network error')
+        setOrders([])
+      } finally {
+        setLoading(false)
+      }
+    },
+    [department],
+  )
+
+  const loadOrders = useCallback(() => {
+    return loadOrdersForRange(dateFrom, dateTo)
+  }, [dateFrom, dateTo, loadOrdersForRange])
 
   useEffect(() => {
-    void loadOrders()
-  }, [loadOrders])
+    if (!active) return
+    if (!initialLoadDone.current) {
+      initialLoadDone.current = true
+      void loadOrdersForRange(todayYmd, todayYmd)
+      return
+    }
+    if (refreshToken > 0) {
+      void loadOrders()
+    }
+  }, [active, refreshToken, todayYmd, loadOrders, loadOrdersForRange])
 
   const rangeSummary = useMemo(() => {
     const settled = orders.filter((o) => o.status === 'settled')
@@ -134,15 +145,41 @@ export function OutletReportsOrdersSection({
     }
   }
 
+  const applyToday = () => {
+    setDateFrom(todayYmd)
+    setDateTo(todayYmd)
+    void loadOrdersForRange(todayYmd, todayYmd)
+  }
+
+  const applyLast7Days = () => {
+    const from = format(subDays(parseISO(todayYmd), 6), 'yyyy-MM-dd')
+    setDateFrom(from)
+    setDateTo(todayYmd)
+    void loadOrdersForRange(from, todayYmd)
+  }
+
+  if (!active) {
+    return (
+      <p className="text-sm text-muted-foreground py-6 text-center">
+        Open this tab to load orders.
+      </p>
+    )
+  }
+
   return (
     <div className="space-y-3">
+      <p className="text-xs text-muted-foreground">
+        Shows today&apos;s orders by default. Change dates and click Apply to load another day or range.
+        Print sales report groups settled orders by cash, POS, transfer, and charge to room.
+      </p>
+
       <div className="flex flex-wrap items-end gap-3">
         <div className="space-y-1">
-          <Label htmlFor="outlet-report-from" className="text-xs">
+          <Label htmlFor="outlet-orders-from" className="text-xs">
             From
           </Label>
           <Input
-            id="outlet-report-from"
+            id="outlet-orders-from"
             type="date"
             className="h-9 w-[150px]"
             value={dateFrom}
@@ -150,18 +187,25 @@ export function OutletReportsOrdersSection({
           />
         </div>
         <div className="space-y-1">
-          <Label htmlFor="outlet-report-to" className="text-xs">
+          <Label htmlFor="outlet-orders-to" className="text-xs">
             To
           </Label>
           <Input
-            id="outlet-report-to"
+            id="outlet-orders-to"
             type="date"
             className="h-9 w-[150px]"
             value={dateTo}
             onChange={(e) => setDateTo(e.target.value)}
           />
         </div>
-        <Button type="button" variant="outline" size="sm" className="h-9" onClick={() => void loadOrders()} disabled={loading}>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-9"
+          onClick={() => void loadOrders()}
+          disabled={loading}
+        >
           {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-1" />}
           Apply
         </Button>
@@ -176,30 +220,10 @@ export function OutletReportsOrdersSection({
           Print sales report
         </Button>
         <div className="flex gap-2">
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="h-9 text-xs"
-            onClick={() => {
-              const d = todayYmd
-              setDateFrom(d)
-              setDateTo(d)
-            }}
-          >
+          <Button type="button" variant="ghost" size="sm" className="h-9 text-xs" onClick={applyToday}>
             Today
           </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="h-9 text-xs"
-            onClick={() => {
-              const d = format(subDays(parseISO(todayYmd), 6), 'yyyy-MM-dd')
-              setDateFrom(d)
-              setDateTo(todayYmd)
-            }}
-          >
+          <Button type="button" variant="ghost" size="sm" className="h-9 text-xs" onClick={applyLast7Days}>
             Last 7 days
           </Button>
         </div>

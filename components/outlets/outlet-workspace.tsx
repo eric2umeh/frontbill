@@ -13,15 +13,13 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
 import { OutletPos } from '@/components/outlets/outlet-pos'
 import { OutletMenuManager } from '@/components/outlets/outlet-menu-manager'
-import { OutletOrdersPanel } from '@/components/outlets/outlet-orders-panel'
-import { OutletReportsOrdersSection } from '@/components/outlets/outlet-reports-orders-section'
+import { OutletOrdersTabSection } from '@/components/outlets/outlet-orders-tab-section'
 import { sortOutletMenuByName } from '@/lib/outlets/sort-outlet-menu'
 import { OutletDailyReportPanel } from '@/components/outlets/outlet-daily-report-panel'
 import { OutletOrderReceiptDialog, type OutletBillPrintKind } from '@/components/outlets/outlet-order-receipt-dialog'
 import { PageHeader } from '@/components/layout/page-header'
 import { ChevronLeft, ShoppingCart, UtensilsCrossed, ClipboardList, BarChart3 } from 'lucide-react'
 import { toast } from 'sonner'
-import { outletApiHeaders } from '@/lib/outlets/outlet-api-headers'
 import { RoomInventoryStatsStrip } from '@/components/shared/room-inventory-stats-strip'
 
 export function OutletWorkspace({ department }: { department: OutletDepartmentKey }) {
@@ -30,7 +28,7 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
   const [loading, setLoading] = useState(true)
   const [categories, setCategories] = useState<OutletMenuCategoryRow[]>([])
   const [items, setItems] = useState<OutletMenuItemRow[]>([])
-  const [orders, setOrders] = useState<OutletOrderRow[]>([])
+  const [ordersRefresh, setOrdersRefresh] = useState(0)
   const canSell = hasPermission(role, 'outlet:sell')
   const canReceipt = hasPermission(role, 'outlet:receipt')
   const [tab, setTab] = useState(
@@ -41,13 +39,13 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
   const [receiptAutoPrint, setReceiptAutoPrint] = useState(false)
   const [receiptBillKind, setReceiptBillKind] = useState<OutletBillPrintKind>('auto')
 
-  const load = useCallback(async () => {
+  const loadMenu = useCallback(async () => {
     if (!organizationId) return
     setLoading(true)
     try {
       const supabase = createClient()
       if (!supabase) return
-      const [{ data: c }, { data: i }, resOrders] = await Promise.all([
+      const [{ data: c }, { data: i }] = await Promise.all([
         supabase
           .from('outlet_menu_categories')
           .select('*')
@@ -60,27 +58,23 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
           .eq('organization_id', organizationId)
           .eq('department', department)
           .order('name'),
-        fetch(`/api/outlets/orders?department=${department}`, {
-          headers: await outletApiHeaders(),
-          credentials: 'include',
-        }),
       ])
       setCategories(sortOutletMenuByName((c as OutletMenuCategoryRow[]) ?? []))
       setItems(sortOutletMenuByName((i as OutletMenuItemRow[]) ?? []))
-      if (resOrders.ok) {
-        const json = await resOrders.json()
-        setOrders(json.orders ?? [])
-      }
     } catch {
-      toast.error('Failed to load outlet data')
+      toast.error('Failed to load outlet menu')
     } finally {
       setLoading(false)
     }
   }, [organizationId, department])
 
+  const notifyOrdersChanged = useCallback(() => {
+    setOrdersRefresh((n) => n + 1)
+  }, [])
+
   useEffect(() => {
-    void load()
-  }, [load])
+    void loadMenu()
+  }, [loadMenu])
 
   if (!def) return null
   if (loading) return <LoadingSpinner />
@@ -103,7 +97,7 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
     <div className="space-y-2">
       <PageHeader
         title={def.label}
-        description="POS · menu · orders · daily sales"
+        description="POS · menu · orders · reports"
         backLink={
           <Button variant="ghost" size="sm" asChild className="h-7 px-2 shrink-0">
             <Link href="/outlets">
@@ -116,7 +110,7 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
       />
 
       <Tabs value={tab} onValueChange={setTab} className="gap-2">
-        <TabsList className="h-8">
+        <TabsList className="h-8 flex-wrap">
           {canSell && (
             <TabsTrigger value="sell" className="gap-1 text-xs h-7 px-2.5">
               <ShoppingCart className="h-3.5 w-3.5" />
@@ -150,7 +144,7 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
               categories={categories}
               items={items}
               canPrintReceipt={canReceipt}
-              onSettled={() => void load()}
+              onSettled={notifyOrdersChanged}
               onOrderBill={(order) => openReceipt(order, true, 'unsettled')}
               onOrderSettled={(order) => openReceipt(order, true, 'settled')}
             />
@@ -164,43 +158,31 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
               categories={categories}
               items={items}
               canManage={canManageMenu}
-              onRefresh={() => void load()}
+              onRefresh={() => void loadMenu()}
             />
           </TabsContent>
         )}
 
         <TabsContent value="orders" className="mt-2">
-          <OutletOrdersPanel
-            orders={orders}
+          <OutletOrdersTabSection
+            department={department}
+            departmentLabel={def.label}
+            organizationId={organizationId ?? ''}
+            active={tab === 'orders'}
+            refreshToken={ordersRefresh}
             canPrintReceipt={canReceipt}
             canSell={canSell}
             onPrintUnsettled={(order) => openReceipt(order, false, 'unsettled')}
             onPrintSettled={(order) => openReceipt(order, false, 'settled')}
-            onSettled={() => void load()}
+            onSettled={notifyOrdersChanged}
           />
         </TabsContent>
 
         {canReports && (
           <TabsContent value="reports" className="mt-2 space-y-4">
             <OutletDailyReportPanel department={department} departmentLabel={def.label} />
-            <div>
-              <h3 className="text-sm font-semibold mb-2">Recent orders</h3>
-              <p className="text-xs text-muted-foreground mb-3">
-                Filter by date or range, then print a sales report by payment type (cash, POS, transfer, charge to room).
-              </p>
-              <OutletReportsOrdersSection
-                department={department}
-                departmentLabel={def.label}
-                organizationId={organizationId ?? ''}
-                canPrintReceipt={canReceipt}
-                canSell={canSell}
-                onPrintUnsettled={(order) => openReceipt(order, false, 'unsettled')}
-                onPrintSettled={(order) => openReceipt(order, false, 'settled')}
-                onSettled={() => void load()}
-              />
-            </div>
             <p className="text-xs text-muted-foreground">
-              Charge to room posts to city ledger with the outlet name (e.g. Restaurant) on folio, transactions, and accounts — same as booking add charge.
+              Charge to room posts to city ledger with the outlet name (e.g. Restaurant) on folio, transactions, and accounts — same as booking add charge. Use the Orders tab for order history and printable sales reports by date.
             </p>
           </TabsContent>
         )}

@@ -149,6 +149,17 @@ export function nightAuditClosesTodayAfterHour(): number {
 }
 
 /**
+ * Calendar today in the hotel timezone (YYYY-MM-DD).
+ * Use for date pickers, order history, and other “today” UI — not night-audit closing day.
+ */
+export function hotelCalendarTodayYmd(
+  now: Date = new Date(),
+  timeZone: string = resolveHotelTimeZone(),
+): string {
+  return formatYMDInTimeZone(now, resolveHotelTimeZone(timeZone))
+}
+
+/**
  * Business day being *closed* when night audit runs (hotel timezone).
  * Example: 7am on 16 May → closes 15 May; 11pm on 15 May → closes 15 May.
  */
