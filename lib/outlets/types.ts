@@ -86,8 +86,12 @@ export interface OutletOrderRow {
 }
 
 export interface CartLine {
+  /** Unique row id — same menu item can appear twice at different prices. */
+  id: string
   item: OutletMenuItemRow
   qty: number
+  /** Effective unit price for this order line only (may differ from menu default). */
+  unitPrice: number
 }
 
 export type OutletClientOptionKind = 'guest' | 'organization' | 'ledger'
