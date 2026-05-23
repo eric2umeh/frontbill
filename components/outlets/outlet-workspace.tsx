@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/button'
 import { OutletPos } from '@/components/outlets/outlet-pos'
 import { OutletMenuManager } from '@/components/outlets/outlet-menu-manager'
 import { OutletOrdersPanel } from '@/components/outlets/outlet-orders-panel'
+import { sortOutletMenuByName } from '@/lib/outlets/sort-outlet-menu'
 import { OutletDailyReportPanel } from '@/components/outlets/outlet-daily-report-panel'
 import { OutletOrderReceiptDialog, type OutletBillPrintKind } from '@/components/outlets/outlet-order-receipt-dialog'
 import { PageHeader } from '@/components/layout/page-header'
@@ -51,20 +52,20 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
           .select('*')
           .eq('organization_id', organizationId)
           .eq('department', department)
-          .order('sort_order'),
+          .order('name'),
         supabase
           .from('outlet_menu_items')
           .select('*')
           .eq('organization_id', organizationId)
           .eq('department', department)
-          .order('sort_order'),
+          .order('name'),
         fetch(`/api/outlets/orders?department=${department}`, {
           headers: await outletApiHeaders(),
           credentials: 'include',
         }),
       ])
-      setCategories((c as OutletMenuCategoryRow[]) ?? [])
-      setItems((i as OutletMenuItemRow[]) ?? [])
+      setCategories(sortOutletMenuByName((c as OutletMenuCategoryRow[]) ?? []))
+      setItems(sortOutletMenuByName((i as OutletMenuItemRow[]) ?? []))
       if (resOrders.ok) {
         const json = await resOrders.json()
         setOrders(json.orders ?? [])
