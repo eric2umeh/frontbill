@@ -71,6 +71,14 @@ export function EventOtherServicesSection({
     if (next === 'none') {
       onPriceByTypeChange({})
       onChange([])
+      return
+    }
+    if (next !== 'multiple') {
+      const nextPriceByType: PriceMap = {}
+      const current = priceByType[next]
+      if (current !== undefined) nextPriceByType[next] = current
+      onPriceByTypeChange(nextPriceByType)
+      onChange(linesFromPriceMap(nextPriceByType))
     }
   }
 

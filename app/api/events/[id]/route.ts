@@ -9,6 +9,19 @@ import {
   sumEventOtherServices,
 } from '@/lib/events/event-other-services'
 
+type EventPaymentUiStatus = 'paid' | 'partial' | 'unpaid'
+
+function roundMoney(value: unknown): number {
+  return Math.round(Math.max(0, Number(value) || 0) * 100) / 100
+}
+
+function normalizePaymentStatus(value: unknown): EventPaymentUiStatus {
+  const status = String(value || '').trim().toLowerCase()
+  if (status === 'partial') return 'partial'
+  if (status === 'unpaid' || status === 'pending') return 'unpaid'
+  return 'paid'
+}
+
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
@@ -25,7 +38,7 @@ export async function PATCH(
   const { data: existing, error: fe } = await admin
     .from('hotel_events')
     .select(
-      'organization_id, start_date, end_date, estimated_value, venue, other_services, client_type, client_name, client_phone, client_email, guest_id, client_organization_id',
+      'organization_id, start_date, end_date, estimated_value, venue, other_services, payment_method, payment_status, amount_paid, client_type, client_name, client_phone, client_email, guest_id, client_organization_id',
     )
     .eq('id', id)
     .single()
@@ -120,13 +133,12 @@ export async function PATCH(
         ? null
         : Math.max(0, parseInt(String(body.expected_attendees), 10) || 0)
   }
-  if (
+  const estimateFieldsTouched =
     body.estimated_value !== undefined ||
     body.estimated_base_value !== undefined ||
-    body.other_services !== undefined ||
-    body.estimated_base_value !== undefined ||
     body.other_services !== undefined
-  ) {
+
+  if (estimateFieldsTouched) {
     const otherLines =
       patch.other_services !== undefined
         ? (patch.other_services as ReturnType<typeof parseEventOtherServices>)
@@ -156,16 +168,67 @@ export async function PATCH(
           : Math.max(0, Number(body.estimated_value) || 0)
         : existing.estimated_value
 
-  if (
+  const paymentFieldsTouched =
     body.payment_status != null ||
     body.payment_method != null ||
     body.partial_amount !== undefined ||
-    body.pay_above_total !== undefined ||
-    body.estimated_value !== undefined ||
-    body.estimated_base_value !== undefined ||
-    body.other_services !== undefined
-  ) {
-    const payment = parseEventPaymentFromBody(body as Record<string, unknown>, estimatedForPayment)
+    body.pay_above_total !== undefined
+
+  if (paymentFieldsTouched || estimateFieldsTouched) {
+    const existingTotal = roundMoney(existing.estimated_value)
+    const nextTotal = roundMoney(estimatedForPayment)
+    const existingAmountPaid = roundMoney(existing.amount_paid)
+    const existingPaymentMethod =
+      String(existing.payment_method || 'pos').trim().toLowerCase() || 'pos'
+    const existingPaymentStatus =
+      existingPaymentMethod === 'pending'
+        ? 'unpaid'
+        : normalizePaymentStatus(existing.payment_status)
+    const existingPayAboveTotal = existingAmountPaid > existingTotal
+    const requestedPaymentMethod =
+      body.payment_method != null
+        ? String(body.payment_method || 'pos').trim().toLowerCase() || 'pos'
+        : existingPaymentMethod
+    const requestedPaymentStatus =
+      body.payment_status != null
+        ? normalizePaymentStatus(body.payment_status)
+        : existingPaymentStatus
+    const requestedAmountPaid =
+      body.partial_amount !== undefined ? roundMoney(body.partial_amount) : existingAmountPaid
+    const requestedPayAboveTotal =
+      body.pay_above_total !== undefined ? Boolean(body.pay_above_total) : existingPayAboveTotal
+    const materialPaymentChange =
+      requestedPaymentMethod !== existingPaymentMethod ||
+      requestedPaymentStatus !== existingPaymentStatus ||
+      requestedAmountPaid !== existingAmountPaid ||
+      requestedPayAboveTotal !== existingPayAboveTotal
+
+    const paymentBody: Record<string, unknown> = {
+      ...(body as Record<string, unknown>),
+      payment_method: requestedPaymentMethod,
+      payment_status: requestedPaymentStatus,
+      partial_amount: requestedAmountPaid > 0 ? requestedAmountPaid : '',
+      pay_above_total: requestedPayAboveTotal,
+    }
+
+    if (
+      estimateFieldsTouched &&
+      !materialPaymentChange &&
+      existingPaymentStatus === 'paid' &&
+      existingAmountPaid > 0 &&
+      existingAmountPaid !== nextTotal
+    ) {
+      paymentBody.partial_amount = existingAmountPaid
+      if (existingAmountPaid < nextTotal) {
+        paymentBody.payment_status = 'partial'
+        paymentBody.pay_above_total = false
+      } else {
+        paymentBody.payment_status = 'paid'
+        paymentBody.pay_above_total = true
+      }
+    }
+
+    const payment = parseEventPaymentFromBody(paymentBody, estimatedForPayment)
     if (payment.uiPaymentStatus === 'partial' && payment.depositAmount <= 0) {
       return NextResponse.json({ error: 'Enter the amount paid for partial payment' }, { status: 400 })
     }
