@@ -168,6 +168,10 @@ export function RescheduleStayModal({
         }
       }
       toast.success('Move-dates request sent for manager approval')
+      const { dispatchNightAuditPendingChanged } = await import(
+        '@/lib/utils/dispatch-night-audit-pending-changed'
+      )
+      dispatchNightAuditPendingChanged()
       await onSuccess()
       onClose()
     } catch (e: unknown) {
