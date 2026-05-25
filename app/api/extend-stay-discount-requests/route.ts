@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 import { canonicalRoleKey, hasPermission } from '@/lib/permissions'
 import { canRequestExtendStayDiscount } from '@/lib/utils/booking-checkout-ui'
 import { insertFolioCharges } from '@/lib/utils/insert-folio-charges'
+import { notifyNightAuditRequestCreated } from '@/lib/night-audit/notify-request-created'
 
 const DECISION = ['approved', 'rejected'] as const
 
@@ -149,6 +150,19 @@ export async function POST(request: Request) {
       }
       return NextResponse.json({ error: insE.message }, { status: 500 })
     }
+
+    void notifyNightAuditRequestCreated(admin, {
+      organizationId: prof.organization_id,
+      callerId: caller_id,
+      kind: 'extend_discount',
+      requestId: inserted.id,
+      reason: String(reason).trim(),
+      detailLines: [
+        { label: 'New checkout', value: newCo },
+        { label: 'Nights', value: String(nights) },
+        { label: 'Discounted total', value: String(disc) },
+      ],
+    })
 
     return NextResponse.json({ request: inserted })
   } catch (err: any) {
