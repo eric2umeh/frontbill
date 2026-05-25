@@ -86,22 +86,22 @@ export function EventOtherServicesSection({
       <div className="space-y-1">
         <Label className="text-sm font-medium">Other services (optional)</Label>
         <p className="text-xs text-muted-foreground">
-          Add corkage, tea break, buffet lunch, or dinner if needed for this event.
+          All service prices are shown below — enter amounts only for what applies, or choose None.
         </p>
       </div>
 
       <Select value={choice} onValueChange={handleChoiceChange} disabled={disabled}>
         <SelectTrigger>
-          <SelectValue placeholder="None" />
+          <SelectValue placeholder="Multiple services" />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="none">None</SelectItem>
+          <SelectItem value="multiple">Multiple services</SelectItem>
           {EVENT_OTHER_SERVICE_OPTIONS.map((o) => (
             <SelectItem key={o.value} value={o.value}>
               {o.label}
             </SelectItem>
           ))}
-          <SelectItem value="multiple">Multiple services</SelectItem>
+          <SelectItem value="none">None</SelectItem>
         </SelectContent>
       </Select>
 
