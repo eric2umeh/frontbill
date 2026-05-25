@@ -36,5 +36,6 @@ This creates:
 - The `middleware.ts` convention is deprecated in Next.js 16 (warning about migrating to `proxy`); this is cosmetic and does not block development.
 - `pnpm install` warns about ignored build scripts for `core-js` and `sharp`; these are non-critical.
 - The `OPENAI_API_KEY` env var is optional; only needed for the three `/api/ai/*` routes.
+- **Email alerts (off-app):** Night Audit approvals (backdate, room change, move dates, extend discounts) email Superadmin/Admin/Manager when `RESEND_API_KEY` is set. Optional: `RESEND_FROM_EMAIL`, `NEXT_PUBLIC_APP_URL`, `NIGHT_AUDIT_NOTIFY_EXTRA_EMAILS` (or `BACKDATE_NOTIFY_EXTRA_EMAILS`). Browser push notifications are not implemented yet.
 - SQL migration scripts in `/scripts/` (001–011) are for the Supabase SQL Editor; they are not run locally.
 - The `/api/cron/auto-checkout` job does nothing unless `ENABLE_AUTO_CHECKOUT=true` is set (staff checkout is manual by default).
