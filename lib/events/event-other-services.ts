@@ -47,7 +47,7 @@ export function parseEventOtherServices(raw: unknown): EventOtherServiceLine[] {
 }
 
 export function inferOtherServiceChoice(lines: EventOtherServiceLine[]): EventOtherServiceChoice {
-  if (lines.length === 0) return 'none'
+  if (lines.length === 0) return 'multiple'
   if (lines.length > 1) return 'multiple'
   return lines[0].type
 }
