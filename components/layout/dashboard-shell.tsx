@@ -12,7 +12,7 @@ import {
   type Permission,
   canonicalRoleKey,
 } from '@/lib/permissions'
-import { BackdatePendingProvider } from '@/components/providers/backdate-pending-provider'
+import { NightAuditPendingProvider } from '@/components/providers/night-audit-pending-provider'
 import { BrandingFavicon } from '@/components/branding/branding-favicon'
 import { BRAND_LOGO_SESSION_KEY } from '@/lib/branding/constants'
 import { getPostLoginPath } from '@/lib/utils/post-login-path'
@@ -165,7 +165,7 @@ export function DashboardShell({
       }}
     >
       <BrandingFavicon href={user.organizationLogoUrl} />
-      <BackdatePendingProvider>
+      <NightAuditPendingProvider>
         <div className="flex h-screen overflow-hidden bg-background">
           <Sidebar mobileOpen={mobileMenuOpen} onMobileClose={() => setMobileMenuOpen(false)} />
           <div className="flex flex-1 flex-col overflow-hidden">
@@ -173,7 +173,7 @@ export function DashboardShell({
             <main className="flex-1 overflow-y-auto p-3 md:p-4 lg:p-5">{children}</main>
           </div>
         </div>
-      </BackdatePendingProvider>
+      </NightAuditPendingProvider>
     </AuthProvider>
   )
 }
