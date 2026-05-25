@@ -6,6 +6,7 @@ import {
   parseOutletOrderExtraFees,
 } from '@/lib/outlets/order-extra-fees'
 import { isOutletOrderType } from '@/lib/outlets/order-types'
+import { reverseOutletOrderSettlement } from '@/lib/outlets/reverse-outlet-order-settlement'
 
 const FEE_NAMES = new Set<string>([
   OUTLET_FEE_LINE_NAMES.roomService,
@@ -317,7 +318,9 @@ export async function deleteOrVoidOutletOrder(
 ): Promise<{ deleted: boolean }> {
   const { data: order, error: loadErr } = await admin
     .from('outlet_orders')
-    .select('id, status, folio_charge_id, booking_id')
+    .select(
+      '*, outlet_order_lines(item_name, qty)',
+    )
     .eq('id', input.orderId)
     .eq('organization_id', input.organizationId)
     .maybeSingle()
@@ -340,6 +343,24 @@ export async function deleteOrVoidOutletOrder(
 
   const reason = input.reason?.trim()
   if (!reason) throw new Error('A reason is required to void a settled order')
+
+  await reverseOutletOrderSettlement(admin, {
+    organizationId: input.organizationId,
+    order: order as {
+      id: string
+      order_number: string
+      department: string
+      subtotal: number | string
+      payment_method: string | null
+      booking_id: string | null
+      folio_charge_id: string | null
+      city_ledger_account_id?: string | null
+      payment_id?: string | null
+      is_complimentary?: boolean | null
+      outlet_order_lines?: Array<{ item_name: string; qty: number }> | null
+    },
+    voidReason: reason,
+  })
 
   const { error: ve } = await admin
     .from('outlet_orders')
