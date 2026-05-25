@@ -40,6 +40,8 @@ interface EnhancedDataTableProps<T> {
   listWhenSearchEmpty?: T[]
   onSearchQueryChange?: (query: string) => void
   searchPlaceholder?: string
+  /** Filter keys skipped while search is non-empty (e.g. keep Status on "in house" but search all folios). */
+  filterKeysIgnoredWhileSearching?: string[]
   /**
    * Controlled filter values (e.g. parent refetches when `status` changes).
    * When set, `onControlledActiveFiltersChange` must be provided to update them.
@@ -69,6 +71,7 @@ export function EnhancedDataTable<T extends Record<string, any>>({
   listWhenSearchEmpty,
   onSearchQueryChange,
   searchPlaceholder = 'Search…',
+  filterKeysIgnoredWhileSearching = [],
   controlledActiveFilters,
   onControlledActiveFiltersChange,
   renderCard,
@@ -102,7 +105,9 @@ export function EnhancedDataTable<T extends Record<string, any>>({
   const [selectedDate, setSelectedDate] = useState<Date | undefined>()
 
   const qTrim = searchQuery.trim()
-  const searchingFullCatalog = Boolean(qTrim && listWhenSearchEmpty)
+  const searchingFullCatalog = Boolean(
+    qTrim && (listWhenSearchEmpty || filterKeysIgnoredWhileSearching.length > 0),
+  )
   const baseList =
     listWhenSearchEmpty && !qTrim ? listWhenSearchEmpty : data
 
@@ -123,6 +128,7 @@ export function EnhancedDataTable<T extends Record<string, any>>({
     // Active filters
     const matchesFilters = Object.entries(activeFilters).every(([key, value]) => {
       if (!value || value === 'all') return true
+      if (qTrim && filterKeysIgnoredWhileSearching.includes(key)) return true
       const custom = resolveFilterMatch?.(item, key, value)
       if (custom !== undefined) return custom
       return String(item[key] || '').toLowerCase() === value.toLowerCase()
