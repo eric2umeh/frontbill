@@ -15,7 +15,6 @@ import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { formatNaira } from '@/lib/utils/currency'
 import { createClient } from '@/lib/supabase/client'
-import { recordGuestLedgerCashMovement } from '@/lib/utils/guest-city-ledger'
 import { toast } from 'sonner'
 import { TrendingDown, TrendingUp, Loader2 } from 'lucide-react'
 
@@ -83,19 +82,35 @@ export default function CityLedgerPaymentModal({
       const transactionType = isTopUp ? 'City Ledger Top-Up' : 'City Ledger Settlement'
 
       if (accountType === 'guest') {
-        await recordGuestLedgerCashMovement(supabase, {
-          organizationId,
-          accountName,
-          guestId: guestId ?? null,
-          amount: amountNum,
-          paymentMethod,
-          notes,
-          transactionType,
-          userId: user.id,
-          ledgerAccountId,
-          currentLedgerBalance: currentBalance,
-          syncGuestProfile: true,
+        if (!guestId) {
+          toast.error('Guest profile is missing')
+          return
+        }
+        const res = await fetch(`/api/guests/${guestId}/ledger-payment`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            caller_id: user.id,
+            amount: amountNum,
+            payment_method: paymentMethod,
+            notes,
+            transaction_type: transactionType,
+            ledger_account_id: ledgerAccountId,
+            current_ledger_balance: currentBalance,
+          }),
         })
+        const payload = await res.json().catch(() => ({}))
+        if (!res.ok) {
+          throw new Error(payload?.error || 'Failed to process payment')
+        }
+        if (
+          typeof payload?.folio_after === 'number' &&
+          payload.folio_after > 0.005
+        ) {
+          throw new Error(
+            `₦${payload.folio_after.toLocaleString()} is still outstanding after payment. Refresh and try settling from the booking folio.`,
+          )
+        }
       } else {
         // Organization (or non-guest): city ledger row is required for update path
         if (ledgerAccountId) {
