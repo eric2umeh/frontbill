@@ -732,10 +732,10 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
         }
 
         const { data: newGuest, error } = await supabase
-          .from('guests')
+            .from('guests')
           .insert([{ organization_id: orgId, name: formattedName, phone: phone || null }])
-          .select('id')
-          .single()
+            .select('id')
+            .single()
         if (error) throw error
         guestCache.set(guestKey, newGuest.id)
         return newGuest.id
@@ -887,17 +887,17 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
               }
             }
             if (!pendingHold) {
-              await supabase.from('transactions').insert([{
-                organization_id: orgId, booking_id: booking.id,
-                transaction_id: `TXN-${Date.now().toString(36).toUpperCase()}`,
+            await supabase.from('transactions').insert([{
+              organization_id: orgId, booking_id: booking.id,
+              transaction_id: `TXN-${Date.now().toString(36).toUpperCase()}`,
                 guest_name: entryGuestName || selectedOrg?.name || selectedGroupGuest?.name || 'Bulk Guest', room: room.room_number, amount: total,
                 payment_method: paymentMethod,
-                status: paymentStatus === 'paid' ? 'paid' : paymentStatus === 'partial' ? 'partial' : 'pending',
+              status: paymentStatus === 'paid' ? 'paid' : paymentStatus === 'partial' ? 'partial' : 'pending',
                 description: `${
                   wording === 'booking' ? 'Bulk booking' : 'Bulk reservation'
                 } — ${bookingType === 'organization' ? selectedOrg?.name : selectedGroupGuest?.name} — ${folioId}`,
-                received_by: currentUserId,
-              }])
+              received_by: currentUserId,
+            }])
             }
             createdCount++
           }
@@ -1202,7 +1202,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
                                   )}
                                 </label>
                               ))}
-                            </div>
+                  </div>
                           )
                         })
                       )}
