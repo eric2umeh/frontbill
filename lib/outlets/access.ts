@@ -32,6 +32,11 @@ export function canManageOutletMenu(role: string | null | undefined): boolean {
   return rk != null && MANAGEMENT_ROLES.includes(rk)
 }
 
+/** Edit or delete/void outlet orders (superadmin, admin, manager). */
+export function canManageOutletOrders(role: string | null | undefined): boolean {
+  return hasPermission(role, 'outlet:edit')
+}
+
 export function departmentsForRole(role: string | null | undefined): OutletDepartmentKey[] {
   const rk = canonicalRoleKey(role)
   if (!rk) return []
