@@ -34,7 +34,8 @@ import {
   Wallet,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
-import { useBackdatePendingCount } from '@/hooks/use-backdate-pending-count'
+import { useNightAuditPendingCounts } from '@/hooks/use-night-audit-pending-counts'
+import { nightAuditHrefForPendingCounts } from '@/lib/night-audit/pending-approval-counts'
 
 const routes: Array<{
   label: string
@@ -156,7 +157,12 @@ export function Sidebar({ mobileOpen, onMobileClose }: SidebarProps = {}) {
   const pathname = usePathname()
   const [collapsed, setCollapsed] = useState(false)
   const { role, userId, organizationLogoUrl } = useAuth()
-  const pendingBackdateCount = useBackdatePendingCount()
+  const nightAuditPending = useNightAuditPendingCounts()
+  const pendingNightAuditTotal = nightAuditPending.total
+  const nightAuditHref =
+    pendingNightAuditTotal > 0
+      ? nightAuditHrefForPendingCounts(nightAuditPending)
+      : '/night-audit'
 
   // Filter sidebar routes based on the logged-in user's role
   const roleKey = canonicalRoleKey(role)
@@ -227,7 +233,7 @@ export function Sidebar({ mobileOpen, onMobileClose }: SidebarProps = {}) {
             return (
               <Link
                 key={route.href}
-                href={route.href === '/night-audit' && pendingBackdateCount > 0 ? '/night-audit?tab=backdate-requests' : route.href}
+                href={route.href === '/night-audit' ? nightAuditHref : route.href}
                 onClick={() => isMobile && onMobileClose?.()}
                 className={cn(
                   'flex items-center rounded-lg px-3 py-2.5 text-sm font-medium transition-colors',
@@ -238,8 +244,8 @@ export function Sidebar({ mobileOpen, onMobileClose }: SidebarProps = {}) {
                 )}
                 title={
                   collapsed && !isMobile
-                    ? (route.href === '/night-audit' && pendingBackdateCount > 0
-                      ? `${route.label} (${pendingBackdateCount} pending backdate)`
+                    ? (route.href === '/night-audit' && pendingNightAuditTotal > 0
+                      ? `${route.label} (${pendingNightAuditTotal} pending approval${pendingNightAuditTotal === 1 ? '' : 's'})`
                       : route.label)
                     : undefined
                 }
@@ -248,7 +254,7 @@ export function Sidebar({ mobileOpen, onMobileClose }: SidebarProps = {}) {
                 {(!collapsed || isMobile) && (
                   <>
                     <span className="flex-1 text-left">{route.label}</span>
-                    {route.href === '/night-audit' && pendingBackdateCount > 0 && (
+                    {route.href === '/night-audit' && pendingNightAuditTotal > 0 && (
                       <Badge
                         variant="destructive"
                         className={cn(
@@ -256,7 +262,7 @@ export function Sidebar({ mobileOpen, onMobileClose }: SidebarProps = {}) {
                           isActive && 'bg-primary-foreground/20 text-primary-foreground border-transparent',
                         )}
                       >
-                        {pendingBackdateCount > 99 ? '99+' : pendingBackdateCount}
+                        {pendingNightAuditTotal > 99 ? '99+' : pendingNightAuditTotal}
                       </Badge>
                     )}
                   </>

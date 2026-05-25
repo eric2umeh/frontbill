@@ -27,7 +27,7 @@ import { BackdateRequestsTab } from '@/components/night-audit/backdate-requests-
 import { RoomChangeRequestsTab } from '@/components/night-audit/room-change-requests-tab'
 import { RescheduleStayRequestsTab } from '@/components/night-audit/reschedule-stay-requests-tab'
 import { ExtendStayDiscountTab } from '@/components/night-audit/extend-stay-discount-tab'
-import { useBackdatePendingCount } from '@/hooks/use-backdate-pending-count'
+import { useNightAuditPendingCounts } from '@/hooks/use-night-audit-pending-counts'
 import { LoadingSpinner } from '@/components/loading-screen'
 import {
   formatHotelDateDisplayGB,
@@ -78,7 +78,7 @@ export default function NightAuditPage() {
   const canApproveRoomChanges = hasPermission(role, 'room_change:approve')
   const canApproveRescheduleStay = hasPermission(role, 'reschedule_stay:approve')
   const canApproveExtendDiscount = canApproveRoomChanges
-  const pendingBackdateBadge = useBackdatePendingCount()
+  const pendingApprovals = useNightAuditPendingCounts()
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -314,8 +314,8 @@ export default function NightAuditPage() {
               AI Summary
             </Button>
           )}
-          <Button
-            size="lg"
+          <Button 
+            size="lg" 
             onClick={() => void handleRunAudit()}
             disabled={auditRunning || auditComplete || !canRunNightAudit}
             className="gap-2"
@@ -473,9 +473,9 @@ export default function NightAuditPage() {
             <TabsTrigger value="backdate-requests" className="gap-1.5">
               <CalendarClock className="h-3.5 w-3.5" />
               Backdate Requests
-              {pendingBackdateBadge > 0 && (
+              {pendingApprovals.backdate > 0 && (
                 <Badge variant="destructive" className="h-5 min-w-5 rounded-full px-1.5 text-[11px] tabular-nums">
-                  {pendingBackdateBadge > 99 ? '99+' : pendingBackdateBadge}
+                  {pendingApprovals.backdate > 99 ? '99+' : pendingApprovals.backdate}
                 </Badge>
               )}
             </TabsTrigger>
@@ -484,18 +484,33 @@ export default function NightAuditPage() {
             <TabsTrigger value="room-change-requests" className="gap-1.5">
               <DoorOpen className="h-3.5 w-3.5" />
               Room Changes
+              {pendingApprovals.room_change > 0 && (
+                <Badge variant="destructive" className="h-5 min-w-5 rounded-full px-1.5 text-[11px] tabular-nums">
+                  {pendingApprovals.room_change > 99 ? '99+' : pendingApprovals.room_change}
+                </Badge>
+              )}
             </TabsTrigger>
           )}
           {canApproveExtendDiscount && !!userId && (
             <TabsTrigger value="extend-discount" className="gap-1.5">
               <Percent className="h-3.5 w-3.5" />
               Extend discounts
+              {pendingApprovals.extend_discount > 0 && (
+                <Badge variant="destructive" className="h-5 min-w-5 rounded-full px-1.5 text-[11px] tabular-nums">
+                  {pendingApprovals.extend_discount > 99 ? '99+' : pendingApprovals.extend_discount}
+                </Badge>
+              )}
             </TabsTrigger>
           )}
           {canApproveRescheduleStay && !!userId && (
             <TabsTrigger value="reschedule-stay-requests" className="gap-1.5">
               <CalendarRange className="h-3.5 w-3.5" />
               Move dates
+              {pendingApprovals.reschedule_stay > 0 && (
+                <Badge variant="destructive" className="h-5 min-w-5 rounded-full px-1.5 text-[11px] tabular-nums">
+                  {pendingApprovals.reschedule_stay > 99 ? '99+' : pendingApprovals.reschedule_stay}
+                </Badge>
+              )}
             </TabsTrigger>
           )}
         </TabsList>
@@ -542,58 +557,58 @@ export default function NightAuditPage() {
         </TabsContent>
 
         <TabsContent value="pending-checkouts">
-          <Card>
-            <CardHeader>
-              <CardTitle>Pending Checkouts</CardTitle>
-              <CardDescription>Guests expected to depart today</CardDescription>
-            </CardHeader>
-            <CardContent>
+        <Card>
+          <CardHeader>
+            <CardTitle>Pending Checkouts</CardTitle>
+            <CardDescription>Guests expected to depart today</CardDescription>
+          </CardHeader>
+          <CardContent>
               {auditData?.pendingCheckouts?.length ? (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Folio ID</TableHead>
-                      <TableHead>Guest Name</TableHead>
-                      <TableHead>Room</TableHead>
-                      <TableHead>Check-out Date</TableHead>
-                      <TableHead className="text-right">Balance</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {auditData.pendingCheckouts.map((b: any) => (
-                      <TableRow
-                        key={b.id}
-                        className="cursor-pointer"
-                        onClick={() => router.push(`/bookings/${b.id}`)}
-                      >
-                        <TableCell className="font-mono text-xs">
-                          {b.folio_id || b.booking_number || b.id.slice(0, 8)}
-                        </TableCell>
-                        <TableCell>{b.guests?.name || '—'}</TableCell>
-                        <TableCell>{b.rooms?.room_number || '—'}</TableCell>
-                        <TableCell>{b.check_out}</TableCell>
-                        <TableCell className="text-right">{formatNaira(b.balance || 0)}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Folio ID</TableHead>
+                  <TableHead>Guest Name</TableHead>
+                  <TableHead>Room</TableHead>
+                  <TableHead>Check-out Date</TableHead>
+                  <TableHead className="text-right">Balance</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {auditData.pendingCheckouts.map((b: any) => (
+                  <TableRow
+                    key={b.id}
+                    className="cursor-pointer"
+                    onClick={() => router.push(`/bookings/${b.id}`)}
+                  >
+                    <TableCell className="font-mono text-xs">
+                      {b.folio_id || b.booking_number || b.id.slice(0, 8)}
+                    </TableCell>
+                    <TableCell>{b.guests?.name || '—'}</TableCell>
+                    <TableCell>{b.rooms?.room_number || '—'}</TableCell>
+                    <TableCell>{b.check_out}</TableCell>
+                    <TableCell className="text-right">{formatNaira(b.balance || 0)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
               ) : (
                 <div className="py-8 text-center text-sm text-muted-foreground">No pending checkouts for today.</div>
               )}
-            </CardContent>
-          </Card>
+          </CardContent>
+        </Card>
         </TabsContent>
 
         {canViewAuditTrails ? (
           <TabsContent value="audit-trails">
-            <Card>
-              <CardHeader>
+        <Card>
+          <CardHeader>
                 <div className="flex items-center gap-2">
                   <ClipboardList className="h-5 w-5 text-muted-foreground" />
                   <CardTitle>Audit Trails</CardTitle>
                 </div>
                 <CardDescription>Filtered logs for requests, bookings, transactions, payments and night audits.</CardDescription>
-              </CardHeader>
+          </CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid gap-3 md:grid-cols-6">
                   <div className="space-y-1">
@@ -662,9 +677,9 @@ export default function NightAuditPage() {
                   </div>
                 </div>
 
-                <Table>
-                  <TableHeader>
-                    <TableRow>
+            <Table>
+              <TableHeader>
+                <TableRow>
                       <TableHead>Time</TableHead>
                       <TableHead>Type</TableHead>
                       <TableHead>Activity</TableHead>
@@ -672,9 +687,9 @@ export default function NightAuditPage() {
                       <TableHead>Reference</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead className="text-right">Amount</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                     {logsLoading ? (
                       <TableRow>
                         <TableCell colSpan={7} className="py-10">
@@ -690,7 +705,7 @@ export default function NightAuditPage() {
                         </TableCell>
                       </TableRow>
                     ) : auditLogs.map((log) => (
-                      <TableRow
+                  <TableRow
                         key={`${log.source}-${log.id}`}
                         className={log.href ? 'cursor-pointer' : ''}
                         onClick={() => log.href && router.push(log.href)}
@@ -714,13 +729,13 @@ export default function NightAuditPage() {
                         </TableCell>
                         <TableCell className="text-right">
                           {log.amount ? formatNaira(log.amount) : '—'}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </CardContent>
-            </Card>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
           </TabsContent>
         ) : null}
 

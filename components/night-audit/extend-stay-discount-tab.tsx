@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Loader2, Percent } from 'lucide-react'
 import { toast } from 'sonner'
+import { dispatchNightAuditPendingChanged } from '@/lib/utils/dispatch-night-audit-pending-changed'
 import { formatNaira } from '@/lib/utils/currency'
 import { FolioAttachmentLinks } from '@/components/folio/folio-attachment-links'
 
@@ -75,6 +76,7 @@ export function ExtendStayDiscountTab({ userId }: { userId: string }) {
       }
       toast.success(status === 'approved' ? 'Discounted extension applied' : 'Rejected')
       await load()
+      dispatchNightAuditPendingChanged()
     } catch {
       toast.error('Failed')
     } finally {

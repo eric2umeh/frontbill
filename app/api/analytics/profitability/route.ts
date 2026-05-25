@@ -8,7 +8,9 @@ import {
 } from '@/lib/analytics/profitability-model'
 import type { ProfitabilityAssumptions } from '@/lib/analytics/profitability-types'
 import {
+  fetchVoidedOutletOrderNumbers,
   isOutletPaymentNotes,
+  isPaymentForVoidedOutletOrder,
   outletOrderAmount,
 } from '@/lib/outlets/outlet-financial-integration'
 import { format, subDays, startOfMonth, endOfMonth } from 'date-fns'
@@ -125,6 +127,13 @@ export async function GET(request: Request) {
       .gte('payment_date', startIso)
       .lte('payment_date', endIso)
 
+    let voidedOutletOrders = new Set<string>()
+    try {
+      voidedOutletOrders = await fetchVoidedOutletOrderNumbers(ctx.admin, ctx.orgId)
+    } catch {
+      /* outlet_orders may be missing */
+    }
+
     const { data: outletOrders } = await ctx.admin
       .from('outlet_orders')
       .select('subtotal, room_service_fee, status, settled_at, created_at')
@@ -162,7 +171,9 @@ export async function GET(request: Request) {
     }
 
     const paymentsTotal = (payments || []).reduce((s, p) => {
-      if (isOutletPaymentNotes((p as { notes?: string | null }).notes)) return s
+      const notes = (p as { notes?: string | null }).notes
+      if (isOutletPaymentNotes(notes)) return s
+      if (isPaymentForVoidedOutletOrder(notes, voidedOutletOrders)) return s
       return s + Math.max(0, Number((p as { amount: number }).amount) || 0)
     }, 0)
 

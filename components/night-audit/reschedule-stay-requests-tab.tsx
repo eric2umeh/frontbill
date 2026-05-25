@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Loader2, CalendarRange } from 'lucide-react'
 import { toast } from 'sonner'
+import { dispatchNightAuditPendingChanged } from '@/lib/utils/dispatch-night-audit-pending-changed'
 import { format } from 'date-fns'
 import { FolioAttachmentLinks } from '@/components/folio/folio-attachment-links'
 
@@ -87,6 +88,7 @@ export function RescheduleStayRequestsTab({ userId }: Props) {
       }
       toast.success(status === 'approved' ? 'Stay dates updated on folio' : 'Request rejected')
       await load()
+      dispatchNightAuditPendingChanged()
     } catch {
       toast.error('Failed to update request')
     } finally {

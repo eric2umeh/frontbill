@@ -122,7 +122,10 @@ export default function TransactionsPage() {
         console.error('Payments query error:', payError)
       }
 
-      const visibleTxData = txData || []
+      const visibleTxData = (txData || []).filter((t: { status?: string | null }) => {
+        const st = String(t.status || '').toLowerCase()
+        return st !== 'void' && st !== 'cancelled'
+      })
       const outletTxOrderNumbers = collectOutletPaidTransactionOrderNumbers(visibleTxData)
 
       const payRows = (payData || []).filter((p: { notes?: string | null }) =>

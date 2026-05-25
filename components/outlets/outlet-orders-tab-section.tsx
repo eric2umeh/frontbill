@@ -17,7 +17,6 @@ import {
 import { formatNaira } from '@/lib/utils/currency'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { Card, CardContent } from '@/components/ui/card'
 import {
   Select,
@@ -41,6 +40,7 @@ type Props = {
   staffName?: string
   canPrintReceipt?: boolean
   canSell?: boolean
+  canManageOrders?: boolean
   onPrintUnsettled?: (order: OutletOrderRow) => void
   onPrintSettled?: (order: OutletOrderRow) => void
   onSettled?: () => void
@@ -55,6 +55,7 @@ export function OutletOrdersTabSection({
   staffName = 'Staff',
   canPrintReceipt,
   canSell,
+  canManageOrders,
   onPrintUnsettled,
   onPrintSettled,
   onSettled,
@@ -237,6 +238,16 @@ export function OutletOrdersTabSection({
     setDateTo(todayYmd)
   }
 
+  const reloadOrders = useCallback(() => {
+    void loadOrdersForRange(dateFrom, dateTo)
+    const q = orderSearch.trim()
+    if (q) {
+      void fetchOutletOrdersSearch(department, q).then(({ orders: rows, error }) => {
+        if (!error) setSearchCatalogOrders(rows)
+      })
+    }
+  }, [dateFrom, dateTo, department, loadOrdersForRange, orderSearch])
+
   if (!active) {
     return (
       <p className="text-sm text-muted-foreground py-6 text-center">
@@ -246,39 +257,22 @@ export function OutletOrdersTabSection({
   }
 
   return (
-    <div className="space-y-3">
-      <p className="text-xs text-muted-foreground">
-        Shows orders for the selected dates by default. Search finds any matching guest, room, or
-        receipt across all dates. Print reports use the date range only.
-      </p>
-
-      <div className="flex flex-wrap items-end gap-3">
-        <div className="relative flex-1 min-w-[200px] max-w-md space-y-1">
-          <Label htmlFor="outlet-orders-search" className="text-xs">
-            Search guest / client
-          </Label>
-          <div className="relative">
-            <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+    <div className="space-y-2">
+      <div className="overflow-x-auto -mx-1 px-1">
+        <div className="flex flex-nowrap items-center gap-1 min-w-max pb-0.5">
+          <div className="relative shrink-0 w-[168px]">
+            <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground pointer-events-none" />
             <Input
               id="outlet-orders-search"
-              className="h-9 pl-8"
-              placeholder="Search all dates — name, room, receipt #…"
+              className="h-8 pl-7 text-xs"
+              title="Search all dates — guest, room, receipt #"
+              placeholder="Search…"
               value={orderSearch}
               onChange={(e) => setOrderSearch(e.target.value)}
             />
           </div>
-          {(searchLoading || searching) && (
-            <p className="text-[10px] text-muted-foreground pt-0.5">
-              {searchLoading
-                ? 'Searching all orders…'
-                : 'Searching all dates · filters still apply'}
-            </p>
-          )}
-        </div>
-        <div className="space-y-1">
-          <Label className="text-xs">Status</Label>
           <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="h-9 w-[130px]">
+            <SelectTrigger className="h-8 w-[92px] text-xs shrink-0" title="Status">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -288,15 +282,12 @@ export function OutletOrdersTabSection({
               <SelectItem value="void">Void</SelectItem>
             </SelectContent>
           </Select>
-        </div>
-        <div className="space-y-1">
-          <Label className="text-xs">Payment</Label>
           <Select value={paymentFilter} onValueChange={setPaymentFilter}>
-            <SelectTrigger className="h-9 w-[130px]">
+            <SelectTrigger className="h-8 w-[92px] text-xs shrink-0" title="Payment">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All payments</SelectItem>
+              <SelectItem value="all">All pay</SelectItem>
               <SelectItem value="cash">Cash</SelectItem>
               <SelectItem value="pos">POS</SelectItem>
               <SelectItem value="transfer">Transfer</SelectItem>
@@ -306,11 +297,8 @@ export function OutletOrdersTabSection({
               <SelectItem value="complimentary">Complimentary</SelectItem>
             </SelectContent>
           </Select>
-        </div>
-        <div className="space-y-1">
-          <Label className="text-xs">Order type</Label>
           <Select value={orderTypeFilter} onValueChange={setOrderTypeFilter}>
-            <SelectTrigger className="h-9 w-[140px]">
+            <SelectTrigger className="h-8 w-[96px] text-xs shrink-0" title="Order type">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -321,65 +309,75 @@ export function OutletOrdersTabSection({
               <SelectItem value="walk_in">Walk in</SelectItem>
             </SelectContent>
           </Select>
-        </div>
-        <div className="space-y-1">
-          <Label htmlFor="outlet-orders-from" className="text-xs">
-            From
-          </Label>
           <Input
             id="outlet-orders-from"
             type="date"
-            className="h-9 w-[150px]"
+            className="h-8 w-[118px] text-xs shrink-0"
+            title="From date"
             value={dateFrom}
             onChange={(e) => setDateFrom(e.target.value)}
           />
-        </div>
-        <div className="space-y-1">
-          <Label htmlFor="outlet-orders-to" className="text-xs">
-            To
-          </Label>
+          <span className="text-muted-foreground text-xs shrink-0">–</span>
           <Input
             id="outlet-orders-to"
             type="date"
-            className="h-9 w-[150px]"
+            className="h-8 w-[118px] text-xs shrink-0"
+            title="To date"
             value={dateTo}
             onChange={(e) => setDateTo(e.target.value)}
           />
-        </div>
-        {(loading || searchLoading) && (
-          <div className="flex h-9 items-center gap-1.5 text-xs text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            {searchLoading ? 'Searching…' : 'Loading…'}
-          </div>
-        )}
-        <Select value={reportPrintKind} onValueChange={(v) => setReportPrintKind(v as 'summary' | 'full')}>
-          <SelectTrigger className="h-9 w-[200px]">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="summary">Print summary sales report</SelectItem>
-            <SelectItem value="full">Print full sales report</SelectItem>
-          </SelectContent>
-        </Select>
-        <Button
-          type="button"
-          size="sm"
-          className="h-9 gap-1.5"
-          onClick={printSalesReport}
-          disabled={printing || loading || rangeFilteredForPrint.length === 0}
-        >
-          {printing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
-          Print
-        </Button>
-        <div className="flex gap-2">
-          <Button type="button" variant="ghost" size="sm" className="h-9 text-xs" onClick={applyToday}>
+          {(loading || searchLoading) && (
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground shrink-0" />
+          )}
+          <Select
+            value={reportPrintKind}
+            onValueChange={(v) => setReportPrintKind(v as 'summary' | 'full')}
+          >
+            <SelectTrigger className="h-8 w-[108px] text-xs shrink-0" title="Report type">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="summary">Summary</SelectItem>
+              <SelectItem value="full">Full report</SelectItem>
+            </SelectContent>
+          </Select>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-8 px-2 text-xs gap-1 shrink-0"
+            title="Print sales report for date range"
+            onClick={printSalesReport}
+            disabled={printing || loading || rangeFilteredForPrint.length === 0}
+          >
+            {printing ? <Loader2 className="h-3 w-3 animate-spin" /> : <Printer className="h-3 w-3" />}
+            Print
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-8 px-2 text-xs shrink-0"
+            onClick={applyToday}
+          >
             Today
           </Button>
-          <Button type="button" variant="ghost" size="sm" className="h-9 text-xs" onClick={applyLast7Days}>
-            Last 7 days
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-8 px-2 text-xs shrink-0"
+            onClick={applyLast7Days}
+          >
+            7 days
           </Button>
         </div>
       </div>
+      {(searching || searchLoading) && (
+        <p className="text-[10px] text-muted-foreground -mt-1">
+          {searchLoading ? 'Searching all orders…' : 'Search spans all dates · print uses range above'}
+        </p>
+      )}
 
       <Card>
         <CardContent className="px-3 py-2 flex flex-wrap gap-4 text-sm">
@@ -421,17 +419,16 @@ export function OutletOrdersTabSection({
           departmentLabel={departmentLabel}
           canPrintReceipt={canPrintReceipt}
           canSell={canSell}
+          canManageOrders={canManageOrders}
           showTodaySummary={false}
           onPrintUnsettled={onPrintUnsettled}
           onPrintSettled={onPrintSettled}
           onSettled={() => {
-            void loadOrdersForRange(dateFrom, dateTo)
-            const q = orderSearch.trim()
-            if (q) {
-              void fetchOutletOrdersSearch(department, q).then(({ orders: rows, error }) => {
-                if (!error) setSearchCatalogOrders(rows)
-              })
-            }
+            reloadOrders()
+            onSettled?.()
+          }}
+          onOrdersChanged={() => {
+            reloadOrders()
             onSettled?.()
           }}
         />

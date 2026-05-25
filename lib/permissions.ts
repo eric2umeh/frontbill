@@ -38,6 +38,8 @@ export type Permission =
   | 'outlet:menu'
   | 'outlet:sell'
   | 'outlet:void'
+  | 'outlet:edit'
+  | 'outlet:delete'
   | 'outlet:reports'
   | 'outlet:receipt'
 
@@ -149,6 +151,8 @@ export const ALL_PERMISSIONS: { key: Permission; label: string; group: string }[
   { key: 'outlet:menu', label: 'Manage Outlet Menu (categories & items)', group: 'Outlets' },
   { key: 'outlet:sell', label: 'Take Orders & Sell (POS)', group: 'Outlets' },
   { key: 'outlet:void', label: 'Void Outlet Orders', group: 'Outlets' },
+  { key: 'outlet:edit', label: 'Edit Outlet Orders', group: 'Outlets' },
+  { key: 'outlet:delete', label: 'Delete / Void Outlet Orders', group: 'Outlets' },
   { key: 'outlet:reports', label: 'Outlet Sales Reports & Night Audit', group: 'Outlets' },
   { key: 'outlet:receipt', label: 'Print / View Outlet Receipts', group: 'Outlets' },
 
@@ -540,6 +544,9 @@ export function hasPermission(userRole: string | null | undefined, permission: P
   }
   if (permission === 'outlet:void') {
     return roleKey === 'superadmin' || roleKey === 'admin'
+  }
+  if (permission === 'outlet:edit' || permission === 'outlet:delete') {
+    return roleKey === 'superadmin' || roleKey === 'admin' || roleKey === 'manager'
   }
   if (['events:create', 'events:edit', 'events:delete'].includes(permission)) {
     return (

@@ -8,8 +8,23 @@ import type { OutletOrderRow } from '@/lib/outlets/types'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { FileText, Printer, Loader2 } from 'lucide-react'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { FileText, Pencil, Printer, Loader2, Trash2 } from 'lucide-react'
 import { OutletSettleOrderDialog } from '@/components/outlets/outlet-settle-order-dialog'
+import { OutletEditOrderDialog } from '@/components/outlets/outlet-edit-order-dialog'
+import { outletApiHeaders } from '@/lib/outlets/outlet-api-headers'
+import { toast } from 'sonner'
 
 type Props = {
   orders: OutletOrderRow[]
@@ -17,10 +32,12 @@ type Props = {
   departmentLabel: string
   canPrintReceipt?: boolean
   canSell?: boolean
+  canManageOrders?: boolean
   showTodaySummary?: boolean
   onPrintUnsettled?: (order: OutletOrderRow) => void
   onPrintSettled?: (order: OutletOrderRow) => void
   onSettled?: () => void
+  onOrdersChanged?: () => void
 }
 
 export function OutletOrdersPanel({
@@ -29,12 +46,18 @@ export function OutletOrdersPanel({
   departmentLabel,
   canPrintReceipt,
   canSell,
+  canManageOrders,
   showTodaySummary = true,
   onPrintUnsettled,
   onPrintSettled,
   onSettled,
+  onOrdersChanged,
 }: Props) {
   const [settleTarget, setSettleTarget] = useState<OutletOrderRow | null>(null)
+  const [editTarget, setEditTarget] = useState<OutletOrderRow | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<OutletOrderRow | null>(null)
+  const [voidReason, setVoidReason] = useState('')
+  const [deleting, setDeleting] = useState(false)
 
   const todayTotal = useMemo(() => {
     const today = format(new Date(), 'yyyy-MM-dd')
@@ -49,6 +72,41 @@ export function OutletOrdersPanel({
       onPrintSettled(order)
     }
   }
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return
+    const needsReason = deleteTarget.status === 'settled'
+    if (needsReason && !voidReason.trim()) {
+      toast.error('Enter a reason to void this settled order')
+      return
+    }
+    setDeleting(true)
+    try {
+      const res = await fetch(`/api/outlets/orders/${deleteTarget.id}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json', ...(await outletApiHeaders()) },
+        credentials: 'include',
+        body: JSON.stringify({ reason: voidReason.trim() || undefined }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        toast.error(json.error || 'Could not remove order')
+        return
+      }
+      toast.success(
+        json.deleted ? 'Open bill deleted' : 'Order voided',
+      )
+      setDeleteTarget(null)
+      setVoidReason('')
+      onOrdersChanged?.()
+    } catch {
+      toast.error('Network error')
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  const showActionsCol = canManageOrders || canSell || canPrintReceipt
 
   return (
     <div className="space-y-3">
@@ -78,7 +136,7 @@ export function OutletOrdersPanel({
               <th className="text-right p-2">Total</th>
               <th className="p-2">Pay</th>
               <th className="p-2">Status</th>
-              {canPrintReceipt && <th className="p-2 text-right">Print</th>}
+              {showActionsCol && <th className="p-2 text-right">Actions</th>}
             </tr>
           </thead>
           <tbody>
@@ -108,10 +166,37 @@ export function OutletOrdersPanel({
                     {o.status === 'open' ? 'unsettled' : o.status}
                   </Badge>
                 </td>
-                {canPrintReceipt && (
+                {showActionsCol && (
                   <td className="p-2">
                     <div className="flex justify-end gap-0.5 flex-wrap">
-                      {(o.status === 'open' || o.status === 'settled') && (
+                      {canManageOrders && (o.status === 'open' || o.status === 'settled') && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7"
+                          title="Edit order"
+                          onClick={() => setEditTarget(o)}
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
+                      {canManageOrders && (o.status === 'open' || o.status === 'settled') && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 text-destructive hover:text-destructive"
+                          title={o.status === 'open' ? 'Delete open bill' : 'Void settled order'}
+                          onClick={() => {
+                            setVoidReason('')
+                            setDeleteTarget(o)
+                          }}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
+                      {canPrintReceipt && (o.status === 'open' || o.status === 'settled') && (
                         <Button
                           type="button"
                           variant="ghost"
@@ -123,7 +208,7 @@ export function OutletOrdersPanel({
                           <FileText className="h-3.5 w-3.5" />
                         </Button>
                       )}
-                      {o.status === 'settled' && (
+                      {canPrintReceipt && o.status === 'settled' && (
                         <Button
                           type="button"
                           variant="ghost"
@@ -166,6 +251,64 @@ export function OutletOrdersPanel({
         departmentLabel={departmentLabel}
         onSettled={handleSettled}
       />
+
+      <OutletEditOrderDialog
+        order={editTarget}
+        open={!!editTarget}
+        onOpenChange={(open) => !open && setEditTarget(null)}
+        onSaved={() => {
+          onOrdersChanged?.()
+        }}
+      />
+
+      <AlertDialog
+        open={!!deleteTarget}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDeleteTarget(null)
+            setVoidReason('')
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {deleteTarget?.status === 'open' ? 'Delete open bill?' : 'Void settled order?'}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteTarget?.status === 'open'
+                ? `Permanently remove receipt ${deleteTarget?.order_number}. Any open folio charge on the booking will be removed.`
+                : `Void receipt ${deleteTarget?.order_number} and reverse its payment, transaction, folio, and city ledger entries across reports and analytics.`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {deleteTarget?.status === 'settled' && (
+            <div className="space-y-1 py-1">
+              <Label htmlFor="void-reason" className="text-xs">
+                Reason (required)
+              </Label>
+              <Input
+                id="void-reason"
+                value={voidReason}
+                onChange={(e) => setVoidReason(e.target.value)}
+                placeholder="e.g. entered in error"
+              />
+            </div>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={deleting}
+              onClick={(e) => {
+                e.preventDefault()
+                void confirmDelete()
+              }}
+            >
+              {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : deleteTarget?.status === 'open' ? 'Delete' : 'Void'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

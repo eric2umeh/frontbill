@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/lib/auth-context'
 import { hasPermission } from '@/lib/permissions'
-import { canManageOutletMenu } from '@/lib/outlets/access'
+import { canManageOutletMenu, canManageOutletOrders } from '@/lib/outlets/access'
 import { getOutletDepartment, type OutletDepartmentKey } from '@/lib/outlets/departments'
 import type { OutletMenuCategoryRow, OutletMenuItemRow, OutletOrderRow } from '@/lib/outlets/types'
 import { LoadingSpinner } from '@/components/loading-screen'
@@ -82,6 +82,7 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
   const canViewMenu = hasPermission(role, 'outlet:view')
   const canManageMenu = canManageOutletMenu(role)
   const canReports = hasPermission(role, 'outlet:reports')
+  const canManageOrders = canManageOutletOrders(role)
   const openReceipt = (
     order: OutletOrderRow,
     autoPrint: boolean,
@@ -173,6 +174,7 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
             staffName={staffName ?? 'Staff'}
             canPrintReceipt={canReceipt}
             canSell={canSell}
+            canManageOrders={canManageOrders}
             onPrintUnsettled={(order) => openReceipt(order, false, 'unsettled')}
             onPrintSettled={(order) => openReceipt(order, false, 'settled')}
             onSettled={notifyOrdersChanged}

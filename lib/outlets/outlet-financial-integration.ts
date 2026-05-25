@@ -153,6 +153,31 @@ export function isOutletPaymentNotes(notes: string | null | undefined): boolean 
   return extractOutletOrderNumberFromNotes(notes) !== null
 }
 
+/** Order numbers voided in the org — used to exclude stale payments from sales collection. */
+export async function fetchVoidedOutletOrderNumbers(
+  admin: SupabaseClient,
+  organizationId: string,
+): Promise<Set<string>> {
+  const { data, error } = await admin
+    .from('outlet_orders')
+    .select('order_number')
+    .eq('organization_id', organizationId)
+    .eq('status', 'void')
+
+  if (error) throw new Error(error.message)
+  return new Set(
+    (data || []).map((r) => String((r as { order_number: string }).order_number).toUpperCase()),
+  )
+}
+
+export function isPaymentForVoidedOutletOrder(
+  notes: string | null | undefined,
+  voidedOrderNumbers: Set<string>,
+): boolean {
+  const orderNo = extractOutletOrderNumberFromNotes(notes)
+  return !!orderNo && voidedOrderNumbers.has(orderNo)
+}
+
 export type RecordOutletImmediatePaymentInput = {
   organizationId: string
   userId: string

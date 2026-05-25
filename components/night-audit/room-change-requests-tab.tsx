@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Loader2, DoorOpen } from 'lucide-react'
 import { toast } from 'sonner'
+import { dispatchNightAuditPendingChanged } from '@/lib/utils/dispatch-night-audit-pending-changed'
 
 export interface RoomChangeRequestRow {
   id: string
@@ -71,6 +72,7 @@ export function RoomChangeRequestsTab({ userId }: Props) {
       }
       toast.success(status === 'approved' ? 'Room change applied' : 'Request rejected')
       await load()
+      dispatchNightAuditPendingChanged()
       if (status === 'approved' && json.booking_id) {
         /* optional: open booking */
       }

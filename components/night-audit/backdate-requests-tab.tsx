@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Loader2, CalendarClock } from 'lucide-react'
 import { toast } from 'sonner'
+import { dispatchNightAuditPendingChanged } from '@/lib/utils/dispatch-night-audit-pending-changed'
 import { formatNaira } from '@/lib/utils/currency'
 import type { BackdateRequestSummary } from '@/lib/backdate/request-summary'
 
@@ -177,7 +178,7 @@ export function BackdateRequestsTab({ userId }: Props) {
       }
       setRequests((prev) => prev.map((item) => (item.id === requestId ? { ...item, ...json.request } : item)))
       void load()
-      if (typeof window !== 'undefined') window.dispatchEvent(new Event('frontbill-backdate-pending-changed'))
+      dispatchNightAuditPendingChanged()
     } catch {
       toast.error('Failed to update request')
     } finally {
