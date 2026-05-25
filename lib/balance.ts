@@ -1,6 +1,6 @@
 import { createClient } from '@/lib/supabase/client'
 import {
-  bookingDisplayBillBalance,
+  folioPositiveOutstandingSum,
   type FolioLineForBalance,
 } from '@/lib/utils/booking-bill-balance'
 
@@ -65,13 +65,7 @@ export async function calculateGuestBalance(
 
   let balance = 0
   for (const b of bookings) {
-    balance += Math.max(
-      0,
-      bookingDisplayBillBalance(
-        { balance: b.balance, deposit: b.deposit, total_amount: b.total_amount },
-        byBooking[b.id] ?? [],
-      ),
-    )
+    balance += Math.max(0, folioPositiveOutstandingSum(byBooking[b.id] ?? []))
   }
 
   return Math.max(0, balance)
@@ -147,14 +141,7 @@ export async function calculateGuestBalancesBatch(
   bookings.forEach((b) => {
     const gId = b.guest_id
     if (postedToOrganizationLedger.has(b.id)) return
-    const outstanding = bookingDisplayBillBalance(
-      {
-        balance: b.balance,
-        deposit: b.deposit,
-        total_amount: b.total_amount,
-      },
-      chargesByBooking[b.id] ?? [],
-    )
+    const outstanding = folioPositiveOutstandingSum(chargesByBooking[b.id] ?? [])
     balanceMap[gId] = (balanceMap[gId] || 0) + Math.max(0, outstanding)
   })
 
