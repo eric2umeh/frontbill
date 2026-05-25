@@ -146,6 +146,10 @@ export function RoomChangeRequestModal({
         return;
       }
       toast.success("Room change request sent for approval");
+      const { dispatchNightAuditPendingChanged } = await import(
+        "@/lib/utils/dispatch-night-audit-pending-changed"
+      );
+      dispatchNightAuditPendingChanged();
       onSuccess();
       onClose();
     } catch {
