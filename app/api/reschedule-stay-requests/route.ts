@@ -2,6 +2,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { applyRescheduleStay } from '@/lib/booking/apply-reschedule-stay'
 import { canRescheduleStay, canRescheduleStayBooking } from '@/lib/booking/can-reschedule-stay'
 import { isStayCheckInConsideredBackdated } from '@/lib/hotel-date'
+import { notifyNightAuditRequestCreated } from '@/lib/night-audit/notify-request-created'
 import { isBookingCheckedOut } from '@/lib/utils/booking-checkout-ui'
 import { canonicalRoleKey, hasPermission } from '@/lib/permissions'
 import { NextResponse } from 'next/server'
@@ -217,6 +218,19 @@ export async function POST(request: Request) {
       }
       return NextResponse.json({ error: insErr.message }, { status: 500 })
     }
+
+    void notifyNightAuditRequestCreated(admin, {
+      organizationId: orgId,
+      callerId: caller_id,
+      kind: 'reschedule_stay',
+      requestId: inserted.id,
+      reason: String(reason).trim(),
+      detailLines: [
+        { label: 'From', value: `${prevCi} → ${prevCo}` },
+        { label: 'To', value: `${check_in} → ${check_out}` },
+        { label: 'Guest', value: guest_label || '—' },
+      ],
+    })
 
     return NextResponse.json({ request: inserted })
   } catch (err: unknown) {
