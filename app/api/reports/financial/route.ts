@@ -20,6 +20,8 @@ import {
 import {
   addOutletOrdersToRevenueBuckets,
   fetchSettledOutletOrdersInRange,
+  fetchVoidedOutletOrderNumbers,
+  isPaymentForVoidedOutletOrder,
   mergeOutletOrdersIntoDailyRevenue,
   skipOutletTxnInSalesCollection,
 } from "@/lib/outlets/outlet-financial-integration";
@@ -222,6 +224,13 @@ export async function GET(request: Request) {
       if (payE)
         return NextResponse.json({ error: payE.message }, { status: 500 });
 
+      let voidedOutletOrders = new Set<string>();
+      try {
+        voidedOutletOrders = await fetchVoidedOutletOrderNumbers(admin, orgId);
+      } catch {
+        /* outlet_orders may be missing */
+      }
+
       let refunds: any[] = [];
       const { data: rf, error: rfE } = await admin
         .from("refunds")
@@ -252,6 +261,8 @@ export async function GET(request: Request) {
       for (const p of payments || []) {
         const amt = Number((p as any).amount) || 0;
         if (amt <= 0) continue;
+        if (isPaymentForVoidedOutletOrder((p as any).notes, voidedOutletOrders))
+          continue;
         const cat = classifyPay(p);
         if (department === "all" || department === cat) paySum += amt;
       }
@@ -540,7 +551,7 @@ export async function GET(request: Request) {
 
       const { data: payments } = await admin
         .from("payments")
-        .select("amount")
+        .select("amount, notes")
         .eq("organization_id", orgId)
         .gte("payment_date", startD.toISOString())
         .lte("payment_date", endD.toISOString());
@@ -551,6 +562,13 @@ export async function GET(request: Request) {
         .eq("organization_id", orgId)
         .gte("created_at", startD.toISOString())
         .lte("created_at", endD.toISOString());
+
+      let voidedOutletOrders = new Set<string>();
+      try {
+        voidedOutletOrders = await fetchVoidedOutletOrderNumbers(admin, orgId);
+      } catch {
+        /* outlet_orders may be missing */
+      }
 
       let refunds: any[] = [];
       const { data: rf } = await admin
@@ -564,7 +582,10 @@ export async function GET(request: Request) {
       let paySum = 0;
       for (const p of payments || []) {
         const amt = Number((p as any).amount) || 0;
-        if (amt > 0) paySum += amt;
+        if (amt <= 0) continue;
+        if (isPaymentForVoidedOutletOrder((p as any).notes, voidedOutletOrders))
+          continue;
+        paySum += amt;
       }
       let txSum = 0;
       for (const t of txrows || []) {
