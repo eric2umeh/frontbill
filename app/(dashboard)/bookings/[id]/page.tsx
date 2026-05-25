@@ -118,6 +118,40 @@ function isFolioAdditionalChargeRow(c: {
   );
 }
 
+function isGuestSettleableFolioCharge(c: {
+  payment_status?: string | null;
+  ledger_account_type?: string | null;
+}): boolean {
+  const status = String(c.payment_status ?? "").toLowerCase();
+  const ledgerType = String(c.ledger_account_type ?? "").toLowerCase();
+  return status !== "posted_to_ledger" && ledgerType !== "organization";
+}
+
+async function markGuestSettleableFolioChargesPaid(
+  supabase: any,
+  bookingId: string,
+): Promise<void> {
+  const { data: rows, error: fetchError } = await supabase
+    .from("folio_charges")
+    .select("id, payment_status, ledger_account_type")
+    .eq("booking_id", bookingId)
+    .gt("amount", 0)
+    .not("charge_type", "eq", "payment");
+  if (fetchError) throw fetchError;
+
+  const ids = (rows || [])
+    .filter(isGuestSettleableFolioCharge)
+    .map((row: { id?: string }) => row.id)
+    .filter(Boolean);
+  if (ids.length === 0) return;
+
+  const { error } = await supabase
+    .from("folio_charges")
+    .update({ payment_status: "paid" })
+    .in("id", ids);
+  if (error) throw error;
+}
+
 export default function BookingDetailPage({
   params: _params,
 }: {
@@ -855,12 +889,7 @@ export default function BookingDetailPage({
 
       // When booking balance clears, settle every outstanding positive folio line (not only payment_status=pending).
       if (newBalance === 0) {
-        await supabase
-          .from("folio_charges")
-          .update({ payment_status: "paid" })
-          .eq("booking_id", bookingId)
-          .gt("amount", 0)
-          .not("charge_type", "eq", "payment");
+        await markGuestSettleableFolioChargesPaid(supabase, bookingId);
       }
 
       const guestId = booking.guest_id || booking.guests?.id;
@@ -1035,12 +1064,7 @@ export default function BookingDetailPage({
           })
           .eq("id", bookingId);
         if (newBalance === 0) {
-          await supabase
-            .from("folio_charges")
-            .update({ payment_status: "paid" })
-            .eq("booking_id", bookingId)
-            .gt("amount", 0)
-            .not("charge_type", "eq", "payment");
+          await markGuestSettleableFolioChargesPaid(supabase, bookingId);
         }
       }
 

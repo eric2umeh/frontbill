@@ -100,6 +100,50 @@ function mapFolioRows(
   }))
 }
 
+function isGuestSettleableCharge(row: {
+  payment_status?: string | null
+  ledger_account_type?: string | null
+}): boolean {
+  const status = String(row.payment_status ?? '').toLowerCase()
+  const ledgerType = String(row.ledger_account_type ?? '').toLowerCase()
+  return status !== 'posted_to_ledger' && ledgerType !== 'organization'
+}
+
+function roundCurrency(amount: number): number {
+  return Math.round(amount * 100) / 100
+}
+
+async function resolveGuestLedgerBalanceBeforeCash(
+  supabase: SupabaseClient,
+  args: {
+    organizationId: string
+    accountName: string
+    ledgerAccountId: string | null
+    fallbackBalance: number
+  },
+): Promise<number> {
+  const { organizationId, accountName, ledgerAccountId, fallbackBalance } = args
+
+  if (ledgerAccountId) {
+    const { data } = await supabase
+      .from('city_ledger_accounts')
+      .select('balance')
+      .eq('id', ledgerAccountId)
+      .eq('organization_id', organizationId)
+      .maybeSingle()
+    if (data) return Number(data.balance ?? 0)
+  }
+
+  const account = await fetchGuestCityLedgerAccount(
+    supabase,
+    organizationId,
+    accountName,
+  )
+  if (account?.id) return Number(account.balance ?? 0)
+
+  return Number.isFinite(fallbackBalance) ? fallbackBalance : 0
+}
+
 async function fetchBookingsForGuestSettlement(
   supabase: SupabaseClient,
   guestId: string,
@@ -163,12 +207,24 @@ async function markBookingFolioSettled(
   supabase: SupabaseClient,
   bookingId: string,
 ): Promise<void> {
-  const { error } = await supabase
+  const { data: rows, error: fetchError } = await supabase
     .from('folio_charges')
-    .update({ payment_status: 'paid' })
+    .select('id, payment_status, ledger_account_type')
     .eq('booking_id', bookingId)
     .gt('amount', 0)
     .not('charge_type', 'eq', 'payment')
+  if (fetchError) throw new Error(`Folio settle lookup failed: ${fetchError.message}`)
+
+  const ids = (rows || [])
+    .filter(isGuestSettleableCharge)
+    .map((row) => row.id)
+    .filter(Boolean)
+  if (ids.length === 0) return
+
+  const { error } = await supabase
+    .from('folio_charges')
+    .update({ payment_status: 'paid' })
+    .in('id', ids)
   if (error) throw new Error(`Folio settle failed: ${error.message}`)
 }
 
@@ -466,14 +522,23 @@ export async function recordGuestLedgerCashMovement(
 
   const isSettlement = isLedgerSettlementType(transactionType)
 
+  const serverLedgerBalanceBeforeCash = await resolveGuestLedgerBalanceBeforeCash(
+    supabase,
+    {
+      organizationId,
+      accountName,
+      ledgerAccountId,
+      fallbackBalance: currentLedgerBalance,
+    },
+  )
+
   const folioBefore =
     isSettlement && syncGuestProfile && guestId
       ? await guestFolioOutstandingTotal(supabase, guestId, organizationId)
       : 0
 
-  let appliedToFolio = 0
   if (isSettlement && syncGuestProfile && guestId) {
-    appliedToFolio = await applyGuestSettlementToFolios(supabase, {
+    await applyGuestSettlementToFolios(supabase, {
       organizationId,
       guestId,
       amount,
@@ -525,7 +590,11 @@ export async function recordGuestLedgerCashMovement(
     )
   }
 
-  const ledgerAfterCash = Math.max(0, currentLedgerBalance - amount)
+  const ledgerBalanceBeforeCash =
+    isSettlement && folioBefore > 0.005
+      ? Math.max(serverLedgerBalanceBeforeCash, folioBefore)
+      : serverLedgerBalanceBeforeCash
+  const ledgerAfterCash = roundCurrency(ledgerBalanceBeforeCash - amount)
 
   // Ledger-only stale debit (folio already clear but city_ledger_accounts still shows debt).
   if (
@@ -536,21 +605,19 @@ export async function recordGuestLedgerCashMovement(
     folioRemaining = 0
   }
 
-  const finalLedgerBalance =
-    folioRemaining != null
-      ? Math.max(0, folioRemaining)
-      : ledgerAfterCash
+  const finalLedgerBalance = ledgerAfterCash
 
   if (
     isSettlement &&
     syncGuestProfile &&
     guestId &&
     folioBefore > 0.005 &&
-    finalLedgerBalance > 0.005 &&
+    folioRemaining != null &&
+    folioRemaining > 0.005 &&
     amount + 0.005 >= folioBefore
   ) {
     throw new Error(
-      `₦${finalLedgerBalance.toLocaleString()} is still outstanding after payment. Open the booking folio and record payment there, or contact support.`,
+      `₦${folioRemaining.toLocaleString()} is still outstanding after payment. Open the booking folio and record payment there, or contact support.`,
     )
   }
 
@@ -579,8 +646,11 @@ export async function recordGuestLedgerCashMovement(
   }
 
   if (syncGuestProfile && guestId) {
-    const guestBalance =
-      folioRemaining != null ? folioRemaining : Math.max(0, finalLedgerBalance)
+    const guestBalance = Math.max(
+      0,
+      folioRemaining ?? 0,
+      finalLedgerBalance,
+    )
     const { error: gErr } = await supabase
       .from('guests')
       .update({ balance: guestBalance })

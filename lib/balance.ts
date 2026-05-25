@@ -36,7 +36,7 @@ export async function calculateGuestBalance(
   // Get all folio charges for these bookings
   const { data: charges } = await supabase
     .from('folio_charges')
-    .select('amount, charge_type, payment_status, payment_method')
+    .select('booking_id, amount, charge_type, payment_status, payment_method')
     .in('booking_id', bookingIds)
 
   if (!charges || charges.length === 0) {
@@ -123,10 +123,8 @@ export async function calculateGuestBalancesBatch(
   }
 
   const chargesByBooking: Record<string, FolioLineForBalance[]> = {}
-  const postedToOrganizationLedger = new Set<string>()
   charges.forEach((c) => {
     if (c.payment_status === 'posted_to_ledger') {
-      postedToOrganizationLedger.add(c.booking_id)
       return
     }
     if (!chargesByBooking[c.booking_id]) chargesByBooking[c.booking_id] = []
@@ -140,7 +138,6 @@ export async function calculateGuestBalancesBatch(
 
   bookings.forEach((b) => {
     const gId = b.guest_id
-    if (postedToOrganizationLedger.has(b.id)) return
     const outstanding = folioPositiveOutstandingSum(chargesByBooking[b.id] ?? [])
     balanceMap[gId] = (balanceMap[gId] || 0) + Math.max(0, outstanding)
   })
