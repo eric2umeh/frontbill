@@ -26,3 +26,25 @@ export async function fetchOutletOrdersInRange(
   }
   return { orders: ((json as { orders?: OutletOrderRow[] }).orders ?? []) as OutletOrderRow[] }
 }
+
+/** Search all outlet orders for this department (no date limit; server matches name/room/receipt). */
+export async function fetchOutletOrdersSearch(
+  department: OutletDepartmentKey,
+  search: string,
+): Promise<{ orders: OutletOrderRow[]; error?: string }> {
+  const q = search.trim()
+  if (!q) return { orders: [] }
+  const qs = new URLSearchParams({
+    department,
+    search: q,
+  })
+  const res = await fetch(`/api/outlets/orders?${qs}`, {
+    headers: await outletApiHeaders(),
+    credentials: 'include',
+  })
+  const json = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    return { orders: [], error: (json as { error?: string }).error || 'Could not search orders' }
+  }
+  return { orders: ((json as { orders?: OutletOrderRow[] }).orders ?? []) as OutletOrderRow[] }
+}
