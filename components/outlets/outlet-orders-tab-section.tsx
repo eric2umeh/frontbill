@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { format, parseISO, subDays } from 'date-fns'
 import type { OutletDepartmentKey } from '@/lib/outlets/departments'
@@ -24,7 +24,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { toast } from 'sonner'
-import { Loader2, Printer, RefreshCw } from 'lucide-react'
+import { Loader2, Printer } from 'lucide-react'
 import { hotelCalendarTodayYmd } from '@/lib/hotel-date'
 
 type Props = {
@@ -64,7 +64,6 @@ export function OutletOrdersTabSection({
   const [printing, setPrinting] = useState(false)
   const [reportPrintKind, setReportPrintKind] = useState<'summary' | 'full'>('summary')
   const [hotelName, setHotelName] = useState('Hotel')
-  const initialLoadDone = useRef(false)
 
   useEffect(() => {
     if (!organizationId) return
@@ -106,21 +105,13 @@ export function OutletOrdersTabSection({
     [department],
   )
 
-  const loadOrders = useCallback(() => {
-    return loadOrdersForRange(dateFrom, dateTo)
-  }, [dateFrom, dateTo, loadOrdersForRange])
-
   useEffect(() => {
-    if (!active) return
-    if (!initialLoadDone.current) {
-      initialLoadDone.current = true
-      void loadOrdersForRange(todayYmd, todayYmd)
-      return
-    }
-    if (refreshToken > 0) {
-      void loadOrders()
-    }
-  }, [active, refreshToken, todayYmd, loadOrders, loadOrdersForRange])
+    if (!active || !dateFrom || !dateTo) return
+    const timer = setTimeout(() => {
+      void loadOrdersForRange(dateFrom, dateTo)
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [active, dateFrom, dateTo, refreshToken, loadOrdersForRange])
 
   const rangeSummary = useMemo(() => {
     const settled = orders.filter((o) => o.status === 'settled')
@@ -173,14 +164,12 @@ export function OutletOrdersTabSection({
   const applyToday = () => {
     setDateFrom(todayYmd)
     setDateTo(todayYmd)
-    void loadOrdersForRange(todayYmd, todayYmd)
   }
 
   const applyLast7Days = () => {
     const from = format(subDays(parseISO(todayYmd), 6), 'yyyy-MM-dd')
     setDateFrom(from)
     setDateTo(todayYmd)
-    void loadOrdersForRange(from, todayYmd)
   }
 
   if (!active) {
@@ -194,7 +183,7 @@ export function OutletOrdersTabSection({
   return (
     <div className="space-y-3">
       <p className="text-xs text-muted-foreground">
-        Shows today&apos;s orders by default. Change dates and click Apply to load another day or range.
+        Shows today&apos;s orders by default. Changing the date range reloads the list automatically.
         Print summary shows payment-method totals (like night audit). Print full lists every settled
         receipt with payment method, guest, and line items.
       </p>
@@ -224,17 +213,12 @@ export function OutletOrdersTabSection({
             onChange={(e) => setDateTo(e.target.value)}
           />
         </div>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="h-9"
-          onClick={() => void loadOrders()}
-          disabled={loading}
-        >
-          {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-1" />}
-          Apply
-        </Button>
+        {loading && (
+          <div className="flex h-9 items-center gap-1.5 text-xs text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Loading…
+          </div>
+        )}
         <Select value={reportPrintKind} onValueChange={(v) => setReportPrintKind(v as 'summary' | 'full')}>
           <SelectTrigger className="h-9 w-[200px]">
             <SelectValue />
@@ -297,7 +281,7 @@ export function OutletOrdersTabSection({
           onPrintUnsettled={onPrintUnsettled}
           onPrintSettled={onPrintSettled}
           onSettled={() => {
-            void loadOrders()
+            void loadOrdersForRange(dateFrom, dateTo)
             onSettled?.()
           }}
         />
