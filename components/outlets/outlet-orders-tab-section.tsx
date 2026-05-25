@@ -10,7 +10,10 @@ import { buildOutletSalesSummaryReport } from '@/lib/outlets/outlet-sales-summar
 import { printOutletSalesReport } from '@/lib/receipts/outlet-sales-report-print'
 import { printOutletSalesSummaryReport } from '@/lib/receipts/outlet-sales-summary-print'
 import { OutletOrdersPanel } from '@/components/outlets/outlet-orders-panel'
-import { fetchOutletOrdersInRange } from '@/lib/outlets/fetch-outlet-orders'
+import {
+  fetchOutletOrdersInRange,
+  fetchOutletOrdersSearch,
+} from '@/lib/outlets/fetch-outlet-orders'
 import { formatNaira } from '@/lib/utils/currency'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -59,8 +62,10 @@ export function OutletOrdersTabSection({
   const todayYmd = hotelCalendarTodayYmd()
   const [dateFrom, setDateFrom] = useState(todayYmd)
   const [dateTo, setDateTo] = useState(todayYmd)
-  const [orders, setOrders] = useState<OutletOrderRow[]>([])
+  const [rangeOrders, setRangeOrders] = useState<OutletOrderRow[]>([])
+  const [searchCatalogOrders, setSearchCatalogOrders] = useState<OutletOrderRow[]>([])
   const [loading, setLoading] = useState(false)
+  const [searchLoading, setSearchLoading] = useState(false)
   const [printing, setPrinting] = useState(false)
   const [reportPrintKind, setReportPrintKind] = useState<'summary' | 'full'>('summary')
   const [hotelName, setHotelName] = useState('Hotel')
@@ -95,13 +100,13 @@ export function OutletOrdersTabSection({
         const { orders: rows, error } = await fetchOutletOrdersInRange(department, from, to)
         if (error) {
           toast.error(error)
-          setOrders([])
+          setRangeOrders([])
           return
         }
-        setOrders(rows)
+        setRangeOrders(rows)
       } catch {
         toast.error('Network error')
-        setOrders([])
+        setRangeOrders([])
       } finally {
         setLoading(false)
       }
@@ -117,29 +122,54 @@ export function OutletOrdersTabSection({
     return () => clearTimeout(timer)
   }, [active, dateFrom, dateTo, refreshToken, loadOrdersForRange])
 
-  const filteredOrders = useMemo(() => {
-    const q = orderSearch.trim().toLowerCase()
-    return orders.filter((o) => {
-      if (statusFilter !== 'all' && o.status !== statusFilter) return false
-      if (paymentFilter !== 'all') {
-        const pay = o.is_complimentary ? 'complimentary' : String(o.payment_method || '')
-        if (pay !== paymentFilter) return false
-      }
-      if (orderTypeFilter !== 'all' && o.order_type !== orderTypeFilter) return false
-      if (!q) return true
-      const hay = [
-        o.guest_name,
-        o.room_number,
-        o.order_number,
-        o.table_label,
-        o.waiter_name,
-      ]
-        .filter(Boolean)
-        .join(' ')
-        .toLowerCase()
-      return hay.includes(q)
-    })
-  }, [orders, orderSearch, statusFilter, paymentFilter, orderTypeFilter])
+  useEffect(() => {
+    const q = orderSearch.trim()
+    if (!active || !q) {
+      setSearchCatalogOrders([])
+      setSearchLoading(false)
+      return
+    }
+    setSearchLoading(true)
+    const timer = setTimeout(() => {
+      void fetchOutletOrdersSearch(department, q).then(({ orders: rows, error }) => {
+        if (error) {
+          toast.error(error)
+          setSearchCatalogOrders([])
+        } else {
+          setSearchCatalogOrders(rows)
+        }
+        setSearchLoading(false)
+      })
+    }, 280)
+    return () => clearTimeout(timer)
+  }, [active, department, orderSearch])
+
+  const applyOrderFilters = useCallback(
+    (list: OutletOrderRow[]) =>
+      list.filter((o) => {
+        if (statusFilter !== 'all' && o.status !== statusFilter) return false
+        if (paymentFilter !== 'all') {
+          const pay = o.is_complimentary ? 'complimentary' : String(o.payment_method || '')
+          if (pay !== paymentFilter) return false
+        }
+        if (orderTypeFilter !== 'all' && o.order_type !== orderTypeFilter) return false
+        return true
+      }),
+    [statusFilter, paymentFilter, orderTypeFilter],
+  )
+
+  const searching = Boolean(orderSearch.trim())
+  const baseOrders = searching ? searchCatalogOrders : rangeOrders
+
+  const filteredOrders = useMemo(
+    () => applyOrderFilters(baseOrders),
+    [baseOrders, applyOrderFilters],
+  )
+
+  const rangeFilteredForPrint = useMemo(
+    () => applyOrderFilters(rangeOrders),
+    [rangeOrders, applyOrderFilters],
+  )
 
   const rangeSummary = useMemo(() => {
     const settled = filteredOrders.filter((o) => o.status === 'settled')
@@ -149,9 +179,10 @@ export function OutletOrdersTabSection({
       settledCount: settled.length,
       openCount: filteredOrders.filter((o) => o.status === 'open').length,
       allCount: filteredOrders.length,
-      loadedCount: orders.length,
+      loadedCount: rangeOrders.length,
+      searching,
     }
-  }, [filteredOrders, orders.length])
+  }, [filteredOrders, rangeOrders.length, searching])
 
   const printSalesReport = () => {
     if (dateFrom > dateTo) {
@@ -161,7 +192,12 @@ export function OutletOrdersTabSection({
     setPrinting(true)
     try {
       if (reportPrintKind === 'summary') {
-        const summary = buildOutletSalesSummaryReport(filteredOrders, dateFrom, dateTo, department)
+        const summary = buildOutletSalesSummaryReport(
+          rangeFilteredForPrint,
+          dateFrom,
+          dateTo,
+          department,
+        )
         if (summary.settledOrderCount === 0 && summary.openBillCount === 0) {
           toast.error('No orders in this date range')
           return
@@ -172,7 +208,7 @@ export function OutletOrdersTabSection({
           report: summary,
         })
       } else {
-        const report = buildOutletSalesReport(filteredOrders, dateFrom, dateTo)
+        const report = buildOutletSalesReport(rangeFilteredForPrint, dateFrom, dateTo)
         if (report.settledOrderCount === 0 && report.openOrders.length === 0) {
           toast.error('No orders in this date range')
           return
@@ -212,9 +248,8 @@ export function OutletOrdersTabSection({
   return (
     <div className="space-y-3">
       <p className="text-xs text-muted-foreground">
-        Shows today&apos;s orders by default. Changing the date range reloads the list automatically.
-        Print summary shows payment-method totals (like night audit). Print full lists every settled
-        receipt with payment method, guest, and line items.
+        Shows orders for the selected dates by default. Search finds any matching guest, room, or
+        receipt across all dates. Print reports use the date range only.
       </p>
 
       <div className="flex flex-wrap items-end gap-3">
@@ -227,11 +262,18 @@ export function OutletOrdersTabSection({
             <Input
               id="outlet-orders-search"
               className="h-9 pl-8"
-              placeholder="Name, room, receipt #…"
+              placeholder="Search all dates — name, room, receipt #…"
               value={orderSearch}
               onChange={(e) => setOrderSearch(e.target.value)}
             />
           </div>
+          {(searchLoading || searching) && (
+            <p className="text-[10px] text-muted-foreground pt-0.5">
+              {searchLoading
+                ? 'Searching all orders…'
+                : 'Searching all dates · filters still apply'}
+            </p>
+          )}
         </div>
         <div className="space-y-1">
           <Label className="text-xs">Status</Label>
@@ -304,10 +346,10 @@ export function OutletOrdersTabSection({
             onChange={(e) => setDateTo(e.target.value)}
           />
         </div>
-        {loading && (
+        {(loading || searchLoading) && (
           <div className="flex h-9 items-center gap-1.5 text-xs text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" />
-            Loading…
+            {searchLoading ? 'Searching…' : 'Loading…'}
           </div>
         )}
         <Select value={reportPrintKind} onValueChange={(v) => setReportPrintKind(v as 'summary' | 'full')}>
@@ -324,7 +366,7 @@ export function OutletOrdersTabSection({
           size="sm"
           className="h-9 gap-1.5"
           onClick={printSalesReport}
-          disabled={printing || loading || filteredOrders.length === 0}
+          disabled={printing || loading || rangeFilteredForPrint.length === 0}
         >
           {printing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
           Print
@@ -344,7 +386,9 @@ export function OutletOrdersTabSection({
           <span>
             <span className="text-muted-foreground">Showing:</span>{' '}
             <strong>{rangeSummary.allCount}</strong>
-            {rangeSummary.allCount !== rangeSummary.loadedCount ? (
+            {rangeSummary.searching ? (
+              <span className="text-muted-foreground"> · all dates</span>
+            ) : rangeSummary.allCount !== rangeSummary.loadedCount ? (
               <span className="text-muted-foreground"> of {rangeSummary.loadedCount}</span>
             ) : null}{' '}
             orders
@@ -360,10 +404,15 @@ export function OutletOrdersTabSection({
         </CardContent>
       </Card>
 
-      {loading ? (
+      {loading && !searching ? (
         <p className="text-sm text-muted-foreground flex items-center gap-2 py-8 justify-center">
           <Loader2 className="h-4 w-4 animate-spin" />
           Loading orders…
+        </p>
+      ) : searchLoading && searching ? (
+        <p className="text-sm text-muted-foreground flex items-center gap-2 py-8 justify-center">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Searching all orders…
         </p>
       ) : (
         <OutletOrdersPanel
@@ -377,6 +426,12 @@ export function OutletOrdersTabSection({
           onPrintSettled={onPrintSettled}
           onSettled={() => {
             void loadOrdersForRange(dateFrom, dateTo)
+            const q = orderSearch.trim()
+            if (q) {
+              void fetchOutletOrdersSearch(department, q).then(({ orders: rows, error }) => {
+                if (!error) setSearchCatalogOrders(rows)
+              })
+            }
             onSettled?.()
           }}
         />
