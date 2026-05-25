@@ -278,7 +278,7 @@ export function OutletOrdersPanel({
             <AlertDialogDescription>
               {deleteTarget?.status === 'open'
                 ? `Permanently remove receipt ${deleteTarget?.order_number}. Any open folio charge on the booking will be removed.`
-                : `Mark receipt ${deleteTarget?.order_number} as void. Payment and transaction records are not automatically reversed.`}
+                : `Void receipt ${deleteTarget?.order_number} and reverse its payment, transaction, folio, and city ledger entries across reports and analytics.`}
             </AlertDialogDescription>
           </AlertDialogHeader>
           {deleteTarget?.status === 'settled' && (
