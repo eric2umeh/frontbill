@@ -24,7 +24,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { toast } from 'sonner'
-import { Loader2, Printer } from 'lucide-react'
+import { Loader2, Printer, Search } from 'lucide-react'
 import { hotelCalendarTodayYmd } from '@/lib/hotel-date'
 
 type Props = {
@@ -64,6 +64,10 @@ export function OutletOrdersTabSection({
   const [printing, setPrinting] = useState(false)
   const [reportPrintKind, setReportPrintKind] = useState<'summary' | 'full'>('summary')
   const [hotelName, setHotelName] = useState('Hotel')
+  const [orderSearch, setOrderSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState<string>('all')
+  const [paymentFilter, setPaymentFilter] = useState<string>('all')
+  const [orderTypeFilter, setOrderTypeFilter] = useState<string>('all')
 
   useEffect(() => {
     if (!organizationId) return
@@ -113,16 +117,41 @@ export function OutletOrdersTabSection({
     return () => clearTimeout(timer)
   }, [active, dateFrom, dateTo, refreshToken, loadOrdersForRange])
 
+  const filteredOrders = useMemo(() => {
+    const q = orderSearch.trim().toLowerCase()
+    return orders.filter((o) => {
+      if (statusFilter !== 'all' && o.status !== statusFilter) return false
+      if (paymentFilter !== 'all') {
+        const pay = o.is_complimentary ? 'complimentary' : String(o.payment_method || '')
+        if (pay !== paymentFilter) return false
+      }
+      if (orderTypeFilter !== 'all' && o.order_type !== orderTypeFilter) return false
+      if (!q) return true
+      const hay = [
+        o.guest_name,
+        o.room_number,
+        o.order_number,
+        o.table_label,
+        o.waiter_name,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase()
+      return hay.includes(q)
+    })
+  }, [orders, orderSearch, statusFilter, paymentFilter, orderTypeFilter])
+
   const rangeSummary = useMemo(() => {
-    const settled = orders.filter((o) => o.status === 'settled')
+    const settled = filteredOrders.filter((o) => o.status === 'settled')
     const total = settled.reduce((s, o) => s + (Number(o.subtotal) || 0), 0)
     return {
       total: Math.round(total * 100) / 100,
       settledCount: settled.length,
-      openCount: orders.filter((o) => o.status === 'open').length,
-      allCount: orders.length,
+      openCount: filteredOrders.filter((o) => o.status === 'open').length,
+      allCount: filteredOrders.length,
+      loadedCount: orders.length,
     }
-  }, [orders])
+  }, [filteredOrders, orders.length])
 
   const printSalesReport = () => {
     if (dateFrom > dateTo) {
@@ -132,7 +161,7 @@ export function OutletOrdersTabSection({
     setPrinting(true)
     try {
       if (reportPrintKind === 'summary') {
-        const summary = buildOutletSalesSummaryReport(orders, dateFrom, dateTo, department)
+        const summary = buildOutletSalesSummaryReport(filteredOrders, dateFrom, dateTo, department)
         if (summary.settledOrderCount === 0 && summary.openBillCount === 0) {
           toast.error('No orders in this date range')
           return
@@ -143,7 +172,7 @@ export function OutletOrdersTabSection({
           report: summary,
         })
       } else {
-        const report = buildOutletSalesReport(orders, dateFrom, dateTo)
+        const report = buildOutletSalesReport(filteredOrders, dateFrom, dateTo)
         if (report.settledOrderCount === 0 && report.openOrders.length === 0) {
           toast.error('No orders in this date range')
           return
@@ -189,6 +218,68 @@ export function OutletOrdersTabSection({
       </p>
 
       <div className="flex flex-wrap items-end gap-3">
+        <div className="relative flex-1 min-w-[200px] max-w-md space-y-1">
+          <Label htmlFor="outlet-orders-search" className="text-xs">
+            Search guest / client
+          </Label>
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              id="outlet-orders-search"
+              className="h-9 pl-8"
+              placeholder="Name, room, receipt #…"
+              value={orderSearch}
+              onChange={(e) => setOrderSearch(e.target.value)}
+            />
+          </div>
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">Status</Label>
+          <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <SelectTrigger className="h-9 w-[130px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All status</SelectItem>
+              <SelectItem value="open">Unsettled</SelectItem>
+              <SelectItem value="settled">Settled</SelectItem>
+              <SelectItem value="void">Void</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">Payment</Label>
+          <Select value={paymentFilter} onValueChange={setPaymentFilter}>
+            <SelectTrigger className="h-9 w-[130px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All payments</SelectItem>
+              <SelectItem value="cash">Cash</SelectItem>
+              <SelectItem value="pos">POS</SelectItem>
+              <SelectItem value="transfer">Transfer</SelectItem>
+              <SelectItem value="card">Card</SelectItem>
+              <SelectItem value="city_ledger">City ledger</SelectItem>
+              <SelectItem value="room_charge">Room charge</SelectItem>
+              <SelectItem value="complimentary">Complimentary</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">Order type</Label>
+          <Select value={orderTypeFilter} onValueChange={setOrderTypeFilter}>
+            <SelectTrigger className="h-9 w-[140px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All types</SelectItem>
+              <SelectItem value="dine_in">Dine in</SelectItem>
+              <SelectItem value="takeaway">Takeaway</SelectItem>
+              <SelectItem value="room_service">Room service</SelectItem>
+              <SelectItem value="walk_in">Walk in</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
         <div className="space-y-1">
           <Label htmlFor="outlet-orders-from" className="text-xs">
             From
@@ -233,7 +324,7 @@ export function OutletOrdersTabSection({
           size="sm"
           className="h-9 gap-1.5"
           onClick={printSalesReport}
-          disabled={printing || loading || orders.length === 0}
+          disabled={printing || loading || filteredOrders.length === 0}
         >
           {printing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
           Print
@@ -251,8 +342,12 @@ export function OutletOrdersTabSection({
       <Card>
         <CardContent className="px-3 py-2 flex flex-wrap gap-4 text-sm">
           <span>
-            <span className="text-muted-foreground">In range:</span>{' '}
-            <strong>{rangeSummary.allCount}</strong> orders
+            <span className="text-muted-foreground">Showing:</span>{' '}
+            <strong>{rangeSummary.allCount}</strong>
+            {rangeSummary.allCount !== rangeSummary.loadedCount ? (
+              <span className="text-muted-foreground"> of {rangeSummary.loadedCount}</span>
+            ) : null}{' '}
+            orders
           </span>
           <span>
             <span className="text-muted-foreground">Settled:</span>{' '}
@@ -272,7 +367,7 @@ export function OutletOrdersTabSection({
         </p>
       ) : (
         <OutletOrdersPanel
-          orders={orders}
+          orders={filteredOrders}
           organizationId={organizationId}
           departmentLabel={departmentLabel}
           canPrintReceipt={canPrintReceipt}
