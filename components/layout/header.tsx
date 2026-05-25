@@ -59,7 +59,9 @@ interface Notification {
     | 'room'
     | 'backdate_pending'
     | 'backdate_decided'
+    | 'night_audit_pending'
   actionLabel?: string
+  href?: string
 }
 
 export function Header({ user, onMenuClick }: HeaderProps) {
@@ -67,10 +69,10 @@ export function Header({ user, onMenuClick }: HeaderProps) {
   const [notifications, setNotifications] = useState<Notification[]>([])
   const [readIds, setReadIds] = useState<Set<string>>(new Set())
   const [notifOpen, setNotifOpen] = useState(false)
-  const prevBackdatePendingRef = useRef<Set<string>>(new Set())
+  const prevNightAuditPendingRef = useRef<Set<string>>(new Set())
   const nonBackdateNotificationsRef = useRef<Notification[]>([])
   const backdateDecidedNotificationsRef = useRef<Notification[]>([])
-  const backdatePendingNotificationsRef = useRef<Notification[]>([])
+  const nightAuditPendingNotificationsRef = useRef<Notification[]>([])
   const router = useRouter()
   const { organizationId } = useAuth()
   const notificationStorageKey = `frontbill-read-notifications-${organizationId || user.id}`
@@ -95,8 +97,8 @@ export function Header({ user, onMenuClick }: HeaderProps) {
   const mergeNotificationSlices = useCallback(() => {
     setNotifications(
       [
+        ...nightAuditPendingNotificationsRef.current,
         ...backdateDecidedNotificationsRef.current,
-        ...backdatePendingNotificationsRef.current,
         ...nonBackdateNotificationsRef.current,
       ].slice(0, 20),
     )
@@ -327,15 +329,33 @@ export function Header({ user, onMenuClick }: HeaderProps) {
     if (!organizationId) return
     const now = new Date()
     try {
-      const backdateJson =
+      const [backdateJson, pendingJson] = await Promise.all([
         user.id && user.id !== 'placeholder'
-          ? await fetch(`/api/backdate-requests?caller_id=${user.id}`, { credentials: 'include' })
+          ? fetch(`/api/backdate-requests?caller_id=${user.id}`, { credentials: 'include' })
               .then((r) => r.json())
               .catch(() => ({ requests: [] as unknown[] }))
-          : { requests: [] as unknown[] }
+          : Promise.resolve({ requests: [] as unknown[] }),
+        user.id && user.id !== 'placeholder'
+          ? fetch(`/api/night-audit/pending-notifications?caller_id=${user.id}`, {
+              credentials: 'include',
+            })
+              .then((r) => r.json())
+              .catch(() => ({ notifications: [] as unknown[] }))
+          : Promise.resolve({ notifications: [] as unknown[] }),
+      ])
 
       const backdateRequests: any[] = Array.isArray((backdateJson as { requests?: unknown }).requests)
         ? ((backdateJson as { requests: any[] }).requests)
+        : []
+
+      const pendingItems: Array<{
+        id: string
+        description: string
+        created_at: string
+        booking_id: string | null
+        href: string
+      }> = Array.isArray((pendingJson as { notifications?: unknown }).notifications)
+        ? ((pendingJson as { notifications: typeof pendingItems }).notifications)
         : []
 
       if (user.id && user.id !== 'placeholder' && typeof sessionStorage !== 'undefined') {
@@ -373,28 +393,27 @@ export function Header({ user, onMenuClick }: HeaderProps) {
         }
       }
 
-      const isDecisionRole = user.role === 'superadmin' || user.role === 'admin'
-      const pendingBackdates = isDecisionRole ? backdateRequests.filter((r: any) => r.status === 'pending') : []
-      const pendingIds = new Set(pendingBackdates.map((r: any) => r.id))
+      const pendingIds = new Set(pendingItems.map((p) => p.id))
       for (const id of pendingIds) {
-        if (!prevBackdatePendingRef.current.has(id)) {
+        if (!prevNightAuditPendingRef.current.has(id)) {
           playNotificationBeep()
           break
         }
       }
-      prevBackdatePendingRef.current = pendingIds
+      prevNightAuditPendingRef.current = pendingIds
 
-      backdatePendingNotificationsRef.current = pendingBackdates.map((r: any) => ({
-        id: `backdate-pending-${r.id}`,
-        description: `${String(r.request_type).replace(/_/g, ' ')} backdate from ${r.requested_by_name} · ${r.requested_check_in}`,
+      nightAuditPendingNotificationsRef.current = pendingItems.map((p) => ({
+        id: p.id,
+        description: p.description,
         amount: 0,
-        created_at: r.created_at || now.toISOString(),
-        booking_id: null,
+        created_at: p.created_at || now.toISOString(),
+        booking_id: p.booking_id,
         guest_id: null,
         folio_id: null,
-        read: readIds.has(`backdate-pending-${r.id}`),
-        type: 'backdate_pending' as const,
+        read: readIds.has(p.id),
+        type: 'night_audit_pending' as const,
         actionLabel: 'Night Audit',
+        href: p.href,
       }))
 
       backdateDecidedNotificationsRef.current =
@@ -445,7 +464,14 @@ export function Header({ user, onMenuClick }: HeaderProps) {
   useEffect(() => {
     void fetchBackdateNotifications()
     const interval = window.setInterval(() => void fetchBackdateNotifications(), NOTIFICATION_BACKDATE_POLL_MS)
-    return () => window.clearInterval(interval)
+    const onPending = () => void fetchBackdateNotifications()
+    window.addEventListener('frontbill-night-audit-pending-changed', onPending)
+    window.addEventListener('frontbill-backdate-pending-changed', onPending)
+    return () => {
+      window.clearInterval(interval)
+      window.removeEventListener('frontbill-night-audit-pending-changed', onPending)
+      window.removeEventListener('frontbill-backdate-pending-changed', onPending)
+    }
   }, [fetchBackdateNotifications])
 
   useEffect(() => {
@@ -472,8 +498,8 @@ export function Header({ user, onMenuClick }: HeaderProps) {
     })
     setNotifications((prev) => prev.map((x) => x.id === n.id ? { ...x, read: true } : x))
     setNotifOpen(false)
-    if (n.type === 'backdate_pending') {
-      router.push('/night-audit')
+    if (n.type === 'night_audit_pending' || n.type === 'backdate_pending') {
+      router.push(n.href || '/night-audit')
       return
     }
     if (n.type === 'backdate_decided' && n.booking_id) {
