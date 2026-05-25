@@ -1,6 +1,7 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
 import { canonicalRoleKey, hasPermission } from '@/lib/permissions'
+import { notifyNightAuditRequestCreated } from '@/lib/night-audit/notify-request-created'
 
 const DECISION = ['approved', 'rejected'] as const
 
@@ -233,6 +234,19 @@ export async function POST(request: Request) {
       }
       return NextResponse.json({ error: insErr.message }, { status: 500 })
     }
+
+    void notifyNightAuditRequestCreated(admin, {
+      organizationId: orgId,
+      callerId: caller_id,
+      kind: 'room_change',
+      requestId: inserted.id,
+      reason: String(reason).trim(),
+      detailLines: [
+        { label: 'From room', value: String(fromRoom.room_number || fromRoomId) },
+        { label: 'To room', value: String(toRoom.room_number || to_room_id) },
+        { label: 'Folio', value: String(booking.folio_id || booking_id).slice(0, 32) },
+      ],
+    })
 
     return NextResponse.json({ request: inserted })
   } catch (err: any) {
