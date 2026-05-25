@@ -91,6 +91,9 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
   const canEditGuest = hasPermission(resolvedRole ?? role, 'guests:edit')
   const canDeleteGuest = hasPermission(resolvedRole ?? role, 'guests:delete')
   const canViewGuests = hasPermission(resolvedRole ?? role, 'guests:view')
+  const canRepairBalance =
+    hasPermission(resolvedRole ?? role, 'ledger:manage') ||
+    hasPermission(resolvedRole ?? role, 'guests:edit')
   const [guest, setGuest] = useState<Guest | null>(null)
   const [bookings, setBookings] = useState<Booking[]>([])
   const [ledgerAccount, setLedgerAccount] = useState<LedgerAccount | null>(null)
@@ -98,6 +101,8 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
   const [orgId, setOrgId] = useState<string>('')
   const [loading, setLoading] = useState(true)
   const [paymentModalOpen, setPaymentModalOpen] = useState(false)
+  const [repairDialogOpen, setRepairDialogOpen] = useState(false)
+  const [repairingBalance, setRepairingBalance] = useState(false)
   const [guestPendingBalance, setGuestPendingBalance] = useState(0)
   const [guestFolioCreditTotal, setGuestFolioCreditTotal] = useState(0)
   const [selectedFolioId, setSelectedFolioId] = useState<string>('')
@@ -214,14 +219,20 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
         setSelectedFolioId(enrichedBookings[0].folio_id)
       }
 
-      // City ledger account — fetch if exists for display
-      const { data: ledgerData } = await supabase
+      // City ledger — prefer the row with the highest debit (duplicate name rows can exist)
+      const { data: ledgerRows } = await supabase
         .from('city_ledger_accounts')
         .select('id, balance, account_name, account_type')
         .eq('organization_id', profile.organization_id)
         .ilike('account_name', guestData.name)
         .in('account_type', ['individual', 'guest'])
-        .maybeSingle()
+
+      const ledgerData =
+        ledgerRows && ledgerRows.length > 0
+          ? ledgerRows.reduce((best, row) =>
+              Number(row.balance ?? 0) > Number(best.balance ?? 0) ? row : best,
+            )
+          : null
 
       if (ledgerData) {
         setLedgerAccount({
@@ -431,6 +442,33 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
   }
 
   const ls = ledgerStatusBadge()
+
+  const handleRepairStaleBalance = async () => {
+    if (!guest || !currentUserId) return
+    try {
+      setRepairingBalance(true)
+      const res = await fetch(`/api/guests/${guest.id}/repair-balance`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ caller_id: currentUserId }),
+      })
+      const payload = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        throw new Error(payload?.error || 'Repair failed')
+      }
+      toast.success(
+        payload.folio_after > 0.005
+          ? `Repair applied; ₦${Number(payload.folio_after).toLocaleString()} still shows on folio — settle from the booking folio.`
+          : 'Stale balance cleared for this guest',
+      )
+      setRepairDialogOpen(false)
+      await loadGuest()
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Repair failed')
+    } finally {
+      setRepairingBalance(false)
+    }
+  }
 
   const txIcon = (desc: string) => {
     if (desc?.toLowerCase().includes('top-up') || desc?.toLowerCase().includes('credit')) {
@@ -662,9 +700,21 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
               )}
             </div>
             {ledgerAccount && (
-              <Button size="sm" onClick={() => setPaymentModalOpen(true)}>
-                Settle / Top Up
-              </Button>
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" onClick={() => setPaymentModalOpen(true)}>
+                  Settle / Top Up
+                </Button>
+                {canRepairBalance &&
+                  (hasOutstandingDebit || ledgerDisplayBalance > 0.005) && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setRepairDialogOpen(true)}
+                    >
+                      Repair stale balance
+                    </Button>
+                  )}
+              </div>
             )}
           </div>
         </CardHeader>
@@ -955,6 +1005,37 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
             </Button>
             <Button type="button" variant="destructive" onClick={handleDeleteGuest} disabled={deletingGuest}>
               {deletingGuest ? 'Deleting…' : 'Delete guest'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={repairDialogOpen} onOpenChange={setRepairDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Repair stale balance?</DialogTitle>
+            <DialogDescription>
+              Use this when <strong>{guest.name}</strong> still shows debt after Settle / Pay Debt
+              (often an old checkout folio or a duplicate city ledger name). This marks open folio
+              lines paid, syncs all matching city ledger accounts, and zeros the guest balance. It does
+              not remove transaction history.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setRepairDialogOpen(false)}
+              disabled={repairingBalance}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={handleRepairStaleBalance}
+              disabled={repairingBalance}
+            >
+              {repairingBalance ? 'Repairing…' : 'Clear stale balance'}
             </Button>
           </DialogFooter>
         </DialogContent>

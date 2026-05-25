@@ -1,57 +1,32 @@
 import { escapeHtml } from '@/lib/utils/html-escape'
 import { formatNaira } from '@/lib/utils/currency'
-import type { OutletSalesReportBundle } from '@/lib/outlets/outlet-sales-report'
+import type { OutletSalesReportBundle, OutletSalesReportRow } from '@/lib/outlets/outlet-sales-report'
+import { outletReportThermalStyles } from '@/lib/receipts/outlet-report-thermal-styles'
 import { printHtmlDocument } from '@/lib/receipts/receipt-pdf-print'
 
-function reportStyles(): string {
-  return `
-    * { box-sizing: border-box; }
-    body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, sans-serif; font-size: 12px; color: #111; background: #fff; }
-    .wrap { max-width: 900px; margin: 0 auto; padding: 24px; }
-    h1 { font-size: 20px; margin: 0 0 4px; }
-    .sub { color: #555; margin-bottom: 20px; font-size: 13px; }
-    h2 { font-size: 15px; margin: 24px 0 8px; padding-bottom: 4px; border-bottom: 2px solid #111; }
-    h2 .amt { float: right; font-weight: 700; }
-    table { width: 100%; border-collapse: collapse; margin-bottom: 8px; font-size: 11px; }
-    th, td { border: 1px solid #ccc; padding: 6px 8px; text-align: left; vertical-align: top; }
-    th { background: #f4f4f5; font-weight: 600; }
-    td.r, th.r { text-align: right; white-space: nowrap; }
-    .items { max-width: 220px; color: #333; }
-    .grand { margin-top: 24px; padding: 12px; background: #f4f4f5; border-radius: 8px; font-size: 14px; font-weight: 700; display: flex; justify-content: space-between; }
-    .meta { font-size: 11px; color: #666; margin-top: 16px; }
-    @media print {
-      .wrap { max-width: 100%; padding: 12px; }
-      h2 { page-break-after: avoid; }
-      tr { page-break-inside: avoid; }
-    }
-  `
+function orderBlock(r: OutletSalesReportRow): string {
+  const guestLine = r.guest ? `<div class="row"><span>Guest</span><span>${escapeHtml(r.guest)}</span></div>` : ''
+  const roomLine = r.room
+    ? `<div class="row"><span>Room</span><span>${escapeHtml(r.room)}</span></div>`
+    : ''
+  const tableLine = r.table
+    ? `<div class="row"><span>Table</span><span>${escapeHtml(r.table)}</span></div>`
+    : ''
+  return `<div class="order">
+    <div class="row"><span><strong>${escapeHtml(r.orderNumber)}</strong></span><span>${escapeHtml(r.timeLabel)}</span></div>
+    ${guestLine}
+    ${roomLine}
+    ${tableLine}
+    <div class="row"><span>Type</span><span>${escapeHtml(r.orderType)}</span></div>
+    <div class="row"><span>Pay</span><span>${escapeHtml(r.paymentMethod)}</span></div>
+    <div class="items">${r.itemCount} item(s): ${escapeHtml(r.itemsSummary)}</div>
+    <div class="row"><span>Total</span><span><strong>${escapeHtml(formatNaira(r.total))}</strong></span></div>
+  </div>`
 }
 
-function rowsTable(rows: OutletSalesReportBundle['sections'][0]['rows']): string {
-  if (!rows.length) return '<p>No orders</p>'
-  const body = rows
-    .map(
-      (r) => `<tr>
-        <td class="mono">${escapeHtml(r.orderNumber)}</td>
-        <td>${escapeHtml(r.timeLabel)}</td>
-        <td>${escapeHtml(r.guest)}</td>
-        <td>${escapeHtml(r.room || '—')}</td>
-        <td>${escapeHtml(r.table || '—')}</td>
-        <td class="r">${r.itemCount}</td>
-        <td class="items">${escapeHtml(r.itemsSummary)}</td>
-        <td>${escapeHtml(r.orderType)}</td>
-        <td>${escapeHtml(r.paymentMethod)}</td>
-        <td class="r">${escapeHtml(formatNaira(r.total))}</td>
-      </tr>`,
-    )
-    .join('')
-  return `<table>
-    <thead><tr>
-      <th>Receipt #</th><th>Time</th><th>Guest</th><th>Room</th><th>Table</th>
-      <th class="r">Items</th><th>Line items</th><th>Type</th><th>Payment</th><th class="r">Total</th>
-    </tr></thead>
-    <tbody>${body}</tbody>
-  </table>`
+function sectionBlocks(rows: OutletSalesReportRow[]): string {
+  if (!rows.length) return '<p class="sub">No orders</p>'
+  return rows.map(orderBlock).join('')
 }
 
 export function buildOutletSalesReportHtml(input: {
@@ -63,30 +38,36 @@ export function buildOutletSalesReportHtml(input: {
   const { hotelName, departmentLabel, printedAt, report } = input
   const sectionsHtml = report.sections
     .map(
-      (s) => `<h2>${escapeHtml(s.label)} <span class="amt">${escapeHtml(formatNaira(s.subtotal))} · ${s.rows.length} order(s)</span></h2>
-      ${rowsTable(s.rows)}`,
+      (s) => `<h2 class="sec">${escapeHtml(s.label)}
+        <span class="amt">${escapeHtml(formatNaira(s.subtotal))} · ${s.rows.length} order(s)</span></h2>
+      ${sectionBlocks(s.rows)}`,
     )
     .join('')
 
   const openHtml =
     report.openOrders.length > 0
-      ? `<h2>Open / unsettled bills <span class="amt">${report.openOrders.length} order(s)</span></h2>${rowsTable(report.openOrders)}`
+      ? `<h2 class="sec">Open / unsettled
+        <span class="amt">${report.openOrders.length} order(s)</span></h2>${sectionBlocks(report.openOrders)}`
       : ''
 
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>${escapeHtml(departmentLabel)} sales report</title>
-    <style>${reportStyles()}</style></head><body>
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width"/><title>${escapeHtml(departmentLabel)} sales</title>
+    <style>${outletReportThermalStyles()}</style></head><body>
     <div class="wrap">
-      <h1>${escapeHtml(hotelName)}</h1>
-      <p class="sub"><strong>${escapeHtml(departmentLabel)}</strong> — Full sales report (detail by payment method)<br/>
-      Period: ${escapeHtml(report.periodLabel)}<br/>
-      Printed: ${escapeHtml(printedAt)}</p>
+      <p class="hotel">${escapeHtml(hotelName)}</p>
+      <p class="title">Full Sales Report</p>
+      <div class="sub">
+        <div><span>Outlet:</span><span>${escapeHtml(departmentLabel)}</span></div>
+        <div><span>Period:</span><span>${escapeHtml(report.periodLabel)}</span></div>
+        <div><span>Printed:</span><span>${escapeHtml(printedAt)}</span></div>
+      </div>
+      <hr class="hr"/>
       ${sectionsHtml}
       ${openHtml}
       <div class="grand">
-        <span>Settled sales total (${report.settledOrderCount} orders)</span>
+        <span>Settled (${report.settledOrderCount})</span>
         <span>${escapeHtml(formatNaira(report.settledGrandTotal))}</span>
       </div>
-      <p class="meta">Voided in period: ${report.voidCount}. Open bills are not included in the settled total.</p>
+      <p class="footnote">Voided: ${report.voidCount}. Open bills excluded from settled total.</p>
     </div>
     </body></html>`
 }

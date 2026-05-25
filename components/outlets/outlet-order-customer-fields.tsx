@@ -186,53 +186,6 @@ export function OutletOrderCustomerFields({
   return (
     <div className="grid gap-2 sm:grid-cols-2">
       <div className="space-y-1 sm:col-span-2">
-        <Label>Guest / client name (optional)</Label>
-        <div className="relative">
-          <Input
-            value={guestName}
-            onChange={(e) => {
-              onGuestNameChange(e.target.value)
-              onClientSelect?.(null)
-              if (onLedgerSelect && selectedLedger) onLedgerSelect(null)
-              setClientSearchOpen(true)
-            }}
-            onFocus={() => setClientSearchOpen(true)}
-            onBlur={() => setTimeout(() => setClientSearchOpen(false), 150)}
-            placeholder="Walk-in optional — search guest or organization"
-            autoComplete="off"
-          />
-          {clientSearching && (
-            <Loader2 className="absolute right-2 top-2.5 h-4 w-4 animate-spin text-muted-foreground" />
-          )}
-          {clientSearchOpen && clientOptions.length > 0 && (
-            <ul className="absolute z-50 top-full left-0 right-0 mt-1 border rounded-md bg-background shadow-lg max-h-48 overflow-y-auto text-sm">
-              {clientOptions.map((c) => (
-                <li key={`${c.kind}-${c.id}`}>
-                  <button
-                    type="button"
-                    className="w-full text-left px-3 py-2 hover:bg-muted border-b last:border-b-0"
-                    onMouseDown={(e) => {
-                      e.preventDefault()
-                      selectClient(c)
-                    }}
-                  >
-                    <span className="font-medium">{c.name}</span>
-                    <span className="text-xs text-muted-foreground ml-2">
-                      {kindLabel[c.kind]}
-                      {c.subtitle ? ` · ${c.subtitle}` : ''}
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-        <p className="text-xs text-muted-foreground">
-          Leave blank for anonymous walk-ins. Enter a room # to auto-fill the in-house guest name when the room is
-          occupied. Charge-to-room needs an in-house room, a guest name, or a city ledger account under Payment.
-        </p>
-      </div>
-      <div className="space-y-1">
         <Label>Room # (optional)</Label>
         <div className="relative">
           <Input
@@ -283,6 +236,56 @@ export function OutletOrderCustomerFields({
             </ul>
           )}
         </div>
+        <p className="text-xs text-muted-foreground">
+          Enter the room number first — guest name fills in automatically when the room is occupied.
+        </p>
+      </div>
+      <div className="space-y-1 sm:col-span-2">
+        <Label>Guest / client name (optional)</Label>
+        <div className="relative">
+          <Input
+            value={guestName}
+            onChange={(e) => {
+              onGuestNameChange(e.target.value)
+              onClientSelect?.(null)
+              if (onLedgerSelect && selectedLedger) onLedgerSelect(null)
+              setClientSearchOpen(true)
+            }}
+            onFocus={() => setClientSearchOpen(true)}
+            onBlur={() => setTimeout(() => setClientSearchOpen(false), 150)}
+            placeholder="Walk-in optional — search guest or organization"
+            autoComplete="off"
+          />
+          {clientSearching && (
+            <Loader2 className="absolute right-2 top-2.5 h-4 w-4 animate-spin text-muted-foreground" />
+          )}
+          {clientSearchOpen && clientOptions.length > 0 && (
+            <ul className="absolute z-50 top-full left-0 right-0 mt-1 border rounded-md bg-background shadow-lg max-h-48 overflow-y-auto text-sm">
+              {clientOptions.map((c) => (
+                <li key={`${c.kind}-${c.id}`}>
+                  <button
+                    type="button"
+                    className="w-full text-left px-3 py-2 hover:bg-muted border-b last:border-b-0"
+                    onMouseDown={(e) => {
+                      e.preventDefault()
+                      selectClient(c)
+                    }}
+                  >
+                    <span className="font-medium">{c.name}</span>
+                    <span className="text-xs text-muted-foreground ml-2">
+                      {kindLabel[c.kind]}
+                      {c.subtitle ? ` · ${c.subtitle}` : ''}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Leave blank for walk-ins. Charge-to-room needs an in-house room, a guest name, or a city ledger account under
+          Payment.
+        </p>
       </div>
     </div>
   )

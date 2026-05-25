@@ -14,17 +14,23 @@ export type FolioLineForBalance = {
   payment_method?: string | null
 }
 
+function isFolioPaymentLine(ctype: string, amt: number): boolean {
+  if (ctype.toLowerCase() === 'payment') return true
+  return amt < 0
+}
+
 export function folioPositiveOutstandingSum(charges: FolioLineForBalance[]): number {
   return charges.reduce((sum, raw) => {
-    const ctype = String(raw.type ?? raw.charge_type ?? '')
+    const ctype = String(raw.type ?? raw.charge_type ?? '').trim()
     const amt = Number(raw.amount ?? 0)
     const status = String(raw.paymentStatus ?? raw.payment_status ?? '').toLowerCase()
     const method = String(raw.paymentMethod ?? raw.payment_method ?? '').toLowerCase()
 
-    // Payments (stored as negative amounts) reduce net outstanding bill balance.
-    if (ctype === 'payment') {
+    // Payments (usually negative amounts) reduce net outstanding bill balance.
+    if (isFolioPaymentLine(ctype, amt)) {
       if (status !== 'paid' && status !== 'posted_to_ledger') return sum
-      return sum + amt
+      const credit = amt < 0 ? amt : -Math.abs(amt)
+      return sum + credit
     }
 
     if (amt <= 0) return sum
@@ -32,7 +38,8 @@ export function folioPositiveOutstandingSum(charges: FolioLineForBalance[]): num
 
     const isUnpaid =
       ['pending', 'unpaid', 'city_ledger', 'partial'].includes(status) ||
-      (method === 'city_ledger' && status !== 'paid')
+      (method === 'city_ledger' && status !== 'paid') ||
+      (status === '' && amt > 0)
 
     return isUnpaid ? sum + amt : sum
   }, 0)

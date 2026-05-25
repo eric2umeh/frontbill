@@ -27,12 +27,21 @@ interface Filter {
 }
 
 interface EnhancedDataTableProps<T> {
+  /** Full catalog used when the user searches (and when `listWhenSearchEmpty` is not set). */
   data: T[]
   columns: Column<T>[]
   filters?: Filter[]
   searchKeys?: (keyof T)[]
   /** When set, used for search (overrides searchKeys substring logic when query non-empty). */
   searchMatch?: (item: T, query: string) => boolean
+  /**
+   * Default list when search is empty (e.g. in-house today). Non-empty search uses full `data`.
+   */
+  listWhenSearchEmpty?: T[]
+  onSearchQueryChange?: (query: string) => void
+  searchPlaceholder?: string
+  /** Filter keys skipped while search is non-empty (e.g. keep Status on "in house" but search all folios). */
+  filterKeysIgnoredWhileSearching?: string[]
   /**
    * Controlled filter values (e.g. parent refetches when `status` changes).
    * When set, `onControlledActiveFiltersChange` must be provided to update them.
@@ -59,6 +68,10 @@ export function EnhancedDataTable<T extends Record<string, any>>({
   filters = [],
   searchKeys = [],
   searchMatch,
+  listWhenSearchEmpty,
+  onSearchQueryChange,
+  searchPlaceholder = 'Search…',
+  filterKeysIgnoredWhileSearching = [],
   controlledActiveFilters,
   onControlledActiveFiltersChange,
   renderCard,
@@ -91,9 +104,16 @@ export function EnhancedDataTable<T extends Record<string, any>>({
   const [currentPage, setCurrentPage] = useState(1)
   const [selectedDate, setSelectedDate] = useState<Date | undefined>()
 
+  const qTrim = searchQuery.trim()
+  const searchingFullCatalog = Boolean(
+    qTrim && (listWhenSearchEmpty || filterKeysIgnoredWhileSearching.length > 0),
+  )
+  const baseList =
+    listWhenSearchEmpty && !qTrim ? listWhenSearchEmpty : data
+
   // Filter and search logic
-  const filteredData = data.filter((item) => {
-    const q = searchQuery.trim().toLowerCase()
+  const filteredData = baseList.filter((item) => {
+    const q = qTrim.toLowerCase()
     const matchesSearch =
       !q ||
       (searchMatch
@@ -108,6 +128,7 @@ export function EnhancedDataTable<T extends Record<string, any>>({
     // Active filters
     const matchesFilters = Object.entries(activeFilters).every(([key, value]) => {
       if (!value || value === 'all') return true
+      if (qTrim && filterKeysIgnoredWhileSearching.includes(key)) return true
       const custom = resolveFilterMatch?.(item, key, value)
       if (custom !== undefined) return custom
       return String(item[key] || '').toLowerCase() === value.toLowerCase()
@@ -156,11 +177,13 @@ export function EnhancedDataTable<T extends Record<string, any>>({
         <div className="relative flex-1 max-w-md">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
-            placeholder="Search..."
+            placeholder={searchPlaceholder}
             value={searchQuery}
             onChange={(e) => {
-              setSearchQuery(e.target.value)
+              const next = e.target.value
+              setSearchQuery(next)
               setCurrentPage(1)
+              onSearchQueryChange?.(next)
             }}
             className="pl-9"
           />
@@ -248,6 +271,9 @@ export function EnhancedDataTable<T extends Record<string, any>>({
           <span>
             Showing {startIndex + 1}-{Math.min(startIndex + itemsPerPage, filteredData.length)} of{' '}
             {filteredData.length} results
+            {searchingFullCatalog ? (
+              <span className="text-muted-foreground/80"> · searching full list</span>
+            ) : null}
           </span>
         )}
       </div>

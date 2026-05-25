@@ -70,7 +70,10 @@ type BookingsCheckoutDraft =
   | { kind: 'bulk'; bulkRow: Booking; targets: Booking[] }
 
 export default function BookingsPage() {
-  const [bookings, setBookings] = useState<Booking[]>([])
+  /** Default table view: in-house stays (fast). */
+  const [inHouseBookings, setInHouseBookings] = useState<Booking[]>([])
+  /** Full folio catalog for search (last 90 days). */
+  const [allBookingsCatalog, setAllBookingsCatalog] = useState<Booking[]>([])
   const [modalOpen, setModalOpen] = useState(false)
   const [bulkModalOpen, setBulkModalOpen] = useState(false)
   const [extendModalOpen, setExtendModalOpen] = useState(false)
@@ -95,6 +98,7 @@ export default function BookingsPage() {
     status: 'checked_in',
     payment_status: 'all',
   })
+  const [tableSearchQuery, setTableSearchQuery] = useState('')
   const [roomStats, setRoomStats] = useState<{
     total: number
     occupied: number
@@ -179,13 +183,12 @@ export default function BookingsPage() {
       const supabase = createClient()
 
       if (!supabase || !organizationId) {
-        setBookings([])
+        setInHouseBookings([])
+        setAllBookingsCatalog([])
         return
       }
 
-      const loadWork = async () => {
-
-      const statusKey = tableFilters.status
+      const loadScope = async (statusKey: string) => {
       const tz = resolveHotelTimeZone()
       const today = todayYmdHotel(tz)
       const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
@@ -326,11 +329,20 @@ export default function BookingsPage() {
         delete b._db_balance
       })
 
-      setBookings(groupBulkRows(bookingsWithUsers))
+      return groupBulkRows(bookingsWithUsers)
+      }
+
+      const loadBoth = async () => {
+        const [inHouse, catalog] = await Promise.all([
+          loadScope('checked_in'),
+          loadScope('all'),
+        ])
+        setInHouseBookings(inHouse)
+        setAllBookingsCatalog(catalog)
       }
 
       await Promise.race([
-        loadWork(),
+        loadBoth(),
         new Promise<never>((_, reject) =>
           setTimeout(() => reject(new Error('Bookings request timed out')), 25_000),
         ),
@@ -341,16 +353,18 @@ export default function BookingsPage() {
         ? 'Bookings took too long — showing empty list. Try Refresh or a narrower status filter.'
         : 'Failed to load bookings'
       toast.error(msg)
-      setBookings([])
+      setInHouseBookings([])
+      setAllBookingsCatalog([])
     } finally {
       void refreshRoomStats()
       endFetch()
     }
-  }, [organizationId, userId, tableFilters.status, refreshRoomStats, startFetch, endFetch])
+  }, [organizationId, userId, refreshRoomStats, startFetch, endFetch])
 
   useEffect(() => {
     if (!organizationId) {
-      setBookings([])
+      setInHouseBookings([])
+      setAllBookingsCatalog([])
       endFetch()
       return
     }
@@ -724,7 +738,8 @@ export default function BookingsPage() {
         <div className="min-w-0 space-y-1">
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Bookings</h1>
           <p className="text-muted-foreground text-xs sm:text-sm leading-snug max-w-3xl">
-            Default: <strong>in-house</strong> stays only (fast). Change Status for history. Checkout frees the room.
+            Default: <strong>in-house</strong> stays only (fast). Search finds any booking in the last 90 days.
+            Change Status for history. Checkout frees the room.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-1.5 shrink-0">
@@ -783,18 +798,26 @@ export default function BookingsPage() {
       </div>
 
       <EnhancedDataTable
-        data={bookings}
+        data={allBookingsCatalog}
+        listWhenSearchEmpty={
+          tableFilters.status === 'checked_in' ? inHouseBookings : undefined
+        }
         compactTable
         rowKey={(b) => (b.is_bulk && b.bulk_group_id ? `bulk-${b.bulk_group_id}` : String(b.id))}
         controlledActiveFilters={tableFilters}
         onControlledActiveFiltersChange={setTableFilters}
+        onSearchQueryChange={setTableSearchQuery}
+        filterKeysIgnoredWhileSearching={['status']}
+        searchPlaceholder="Search all bookings by guest, room, folio…"
         searchMatch={(b, query) => {
           const q = query.trim().toLowerCase()
           if (!q) return true
           const parts: string[] = [
             String(b.folio_id ?? ''),
             String(b.guestName ?? ''),
+            String(b.guests?.name ?? ''),
             String(b.guestPhone ?? ''),
+            String(b.guests?.phone ?? ''),
             String(b.ledger_account_name ?? ''),
             String(b.rooms?.room_number ?? ''),
             String(b.rooms?.room_type ?? ''),

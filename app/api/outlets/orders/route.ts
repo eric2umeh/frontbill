@@ -23,8 +23,10 @@ export async function GET(request: Request) {
   const admin = createAdminClient()
   const dateFrom = params.get('from')
   const dateTo = params.get('to')
+  const searchRaw = params.get('search')?.trim() ?? ''
+  const searchEsc = searchRaw.replace(/[%_,]/g, '')
 
-  const hasRange = Boolean(dateFrom && dateTo)
+  const hasRange = Boolean(dateFrom && dateTo) && !searchEsc
 
   let q = admin
     .from('outlet_orders')
@@ -32,10 +34,24 @@ export async function GET(request: Request) {
     .eq('organization_id', auth.ctx.organizationId)
     .eq('department', department)
     .order('created_at', { ascending: false })
-    .limit(hasRange ? 1000 : 200)
 
-  if (dateFrom) q = q.gte('created_at', dateFrom)
-  if (dateTo) q = q.lte('created_at', dateTo)
+  if (searchEsc) {
+    q = q
+      .or(
+        [
+          `guest_name.ilike.%${searchEsc}%`,
+          `room_number.ilike.%${searchEsc}%`,
+          `order_number.ilike.%${searchEsc}%`,
+          `table_label.ilike.%${searchEsc}%`,
+          `waiter_name.ilike.%${searchEsc}%`,
+        ].join(','),
+      )
+      .limit(500)
+  } else {
+    q = q.limit(hasRange ? 1000 : 200)
+    if (dateFrom) q = q.gte('created_at', dateFrom)
+    if (dateTo) q = q.lte('created_at', dateTo)
+  }
 
   const status = params.get('status')
   if (status) q = q.eq('status', status)

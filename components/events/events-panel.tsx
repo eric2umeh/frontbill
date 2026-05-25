@@ -98,7 +98,7 @@ const emptyForm = {
   estimated_base_value: '',
   other_services: [] as EventOtherServiceLine[],
   other_service_prices: {} as Partial<Record<string, string>>,
-  other_service_choice: 'none' as EventOtherServiceChoice,
+  other_service_choice: 'multiple' as EventOtherServiceChoice,
   payment: defaultPayment(),
 }
 
@@ -267,7 +267,11 @@ export function EventsPanel() {
       toast.error('End date must be on or after start date')
       return
     }
-    if (form.other_service_choice !== 'none' && form.other_services.length === 0) {
+    if (
+      form.other_service_choice !== 'none' &&
+      form.other_service_choice !== 'multiple' &&
+      form.other_services.length === 0
+    ) {
       toast.error('Enter a price for the selected other service')
       return
     }
@@ -629,7 +633,14 @@ export function EventsPanel() {
               <Label>Venue / hall</Label>
               <Select
                 value={form.venue || undefined}
-                onValueChange={(v) => setForm((f) => ({ ...f, venue: v }))}
+                onValueChange={(v) =>
+                  setForm((f) => ({
+                    ...f,
+                    venue: v,
+                    other_service_choice:
+                      f.other_service_choice === 'none' ? 'multiple' : f.other_service_choice,
+                  }))
+                }
               >
                 <SelectTrigger>
                   <SelectValue placeholder="Select venue" />
