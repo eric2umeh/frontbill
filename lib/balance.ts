@@ -1,4 +1,8 @@
 import { createClient } from '@/lib/supabase/client'
+import {
+  bookingDisplayBillBalance,
+  type FolioLineForBalance,
+} from '@/lib/utils/booking-bill-balance'
 
 /**
  * Computes the net outstanding balance for a guest across all their bookings.
@@ -20,10 +24,10 @@ export async function calculateGuestBalance(
   // Get all booking IDs for this guest
   const { data: bookings } = await supabase
     .from('bookings')
-    .select('id, total_amount, deposit, payment_status')
+    .select('id, total_amount, deposit, balance, payment_status')
     .eq('guest_id', guestId)
     .eq('organization_id', organizationId)
-    .not('status', 'in', '("cancelled","checked_out")')
+    .not('status', 'in', '("cancelled")')
 
   if (!bookings || bookings.length === 0) return 0
 
@@ -47,20 +51,28 @@ export async function calculateGuestBalance(
   // Net balance from folio:
   //   positive charges (room rate, add-charge, extended stay) that are unpaid/pending
   //   negative charges (payments recorded as negative amount)
-  const balance = charges.reduce((sum, c) => {
-    if (c.payment_status === 'posted_to_ledger') return sum
-    // Payments recorded as negative amounts reduce the balance
-    if (c.charge_type === 'payment') return sum + (c.amount || 0) // amount is negative
-    // City ledger charges that are pending = still owed
-    if (c.payment_method === 'city_ledger' && c.payment_status !== 'paid') {
-      return sum + (c.amount || 0)
-    }
-    // Other unpaid charges
-    if (c.payment_status === 'pending' || c.payment_status === 'unpaid') {
-      return sum + (c.amount || 0)
-    }
-    return sum
-  }, 0)
+  const byBooking: Record<string, FolioLineForBalance[]> = {}
+  for (const c of charges) {
+    if (c.payment_status === 'posted_to_ledger') continue
+    if (!byBooking[c.booking_id]) byBooking[c.booking_id] = []
+    byBooking[c.booking_id].push({
+      amount: c.amount,
+      charge_type: c.charge_type,
+      payment_status: c.payment_status,
+      payment_method: c.payment_method,
+    })
+  }
+
+  let balance = 0
+  for (const b of bookings) {
+    balance += Math.max(
+      0,
+      bookingDisplayBillBalance(
+        { balance: b.balance, deposit: b.deposit, total_amount: b.total_amount },
+        byBooking[b.id] ?? [],
+      ),
+    )
+  }
 
   return Math.max(0, balance)
 }
@@ -116,39 +128,34 @@ export async function calculateGuestBalancesBatch(
     return balanceMap
   }
 
-  const folioBalanceByBooking: Record<string, number> = {}
+  const chargesByBooking: Record<string, FolioLineForBalance[]> = {}
   const postedToOrganizationLedger = new Set<string>()
-  charges.forEach(c => {
-    const gId = bookingToGuest[c.booking_id]
-    if (!gId) return
+  charges.forEach((c) => {
     if (c.payment_status === 'posted_to_ledger') {
       postedToOrganizationLedger.add(c.booking_id)
       return
     }
-    if (c.charge_type === 'payment') {
-      // Payment amounts are negative — reduces balance
-      folioBalanceByBooking[c.booking_id] = (folioBalanceByBooking[c.booking_id] || 0) + (c.amount || 0)
-    } else if (
-      c.payment_method === 'city_ledger' ||
-      c.payment_status === 'pending' ||
-      c.payment_status === 'unpaid'
-    ) {
-      folioBalanceByBooking[c.booking_id] = (folioBalanceByBooking[c.booking_id] || 0) + (c.amount || 0)
-    }
+    if (!chargesByBooking[c.booking_id]) chargesByBooking[c.booking_id] = []
+    chargesByBooking[c.booking_id].push({
+      amount: c.amount,
+      charge_type: c.charge_type,
+      payment_status: c.payment_status,
+      payment_method: c.payment_method,
+    })
   })
 
-  bookings.forEach(b => {
+  bookings.forEach((b) => {
     const gId = b.guest_id
-    if (postedToOrganizationLedger.has(b.id)) {
-      return
-    }
-    const fallbackOwed = Math.max(0, (Number(b.total_amount) || 0) - (Number(b.deposit) || 0))
-    const outstanding = Math.max(
-      Number(folioBalanceByBooking[b.id] || 0),
-      Number(b.balance || 0),
-      fallbackOwed
+    if (postedToOrganizationLedger.has(b.id)) return
+    const outstanding = bookingDisplayBillBalance(
+      {
+        balance: b.balance,
+        deposit: b.deposit,
+        total_amount: b.total_amount,
+      },
+      chargesByBooking[b.id] ?? [],
     )
-    balanceMap[gId] = (balanceMap[gId] || 0) + outstanding
+    balanceMap[gId] = (balanceMap[gId] || 0) + Math.max(0, outstanding)
   })
 
   // Clamp negatives to 0 (credit balance shown elsewhere)
