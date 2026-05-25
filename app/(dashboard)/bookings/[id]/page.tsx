@@ -219,7 +219,7 @@ export default function BookingDetailPage({
     const uid = userIdRef.current;
     try {
       const supabase = createClient();
-
+      
       // Fetch booking with related data
       let { data: bookingData, error: bookingError } = await supabase
         .from("bookings")
@@ -372,7 +372,7 @@ export default function BookingDetailPage({
           ? chargeCreatorMap[charge.created_by] ||
             getUserDisplayName(null, charge.created_by)
           : "System";
-
+        
         return {
           id: charge.id,
           date: charge.created_at?.split("T")[0],
@@ -481,8 +481,8 @@ export default function BookingDetailPage({
       // we reconcile to `paid` above.
 
       setLoading(false);
-    } catch (error: any) {
-      // Check if it's an auth error
+  } catch (error: any) {
+    // Check if it's an auth error
       if (error?.status === 401 || error?.code === "PGRST") {
         toast.error("Session expired. Please log in again.");
         router.push("/login");
@@ -622,17 +622,17 @@ export default function BookingDetailPage({
         .from("folio_charges")
         .insert([
           {
-            booking_id: bookingId,
-            description: chargeDescription,
-            amount: Number(chargeAmount),
+          booking_id: bookingId,
+          description: chargeDescription,
+          amount: Number(chargeAmount),
             charge_type: "charge",
-            payment_method: isPaidNow ? chargePaymentMethod : null,
-            payment_status: paymentStatus,
+          payment_method: isPaidNow ? chargePaymentMethod : null,
+          payment_status: paymentStatus,
           },
         ]);
       if (chargeInsertError) throw chargeInsertError;
 
-      try {
+        try {
         await supabase.from("transactions").insert([
           {
             organization_id: booking!.organization_id || null,
@@ -651,54 +651,54 @@ export default function BookingDetailPage({
         /* non-fatal */
       }
 
-      if (!isPaidNow) {
-        const { data: freshBk } = await supabase
+        if (!isPaidNow) {
+          const { data: freshBk } = await supabase
           .from("bookings")
           .select("balance")
           .eq("id", bookingId)
           .single();
         const newBalance =
           (Number(freshBk?.balance) || 0) + Number(chargeAmount);
-        const { error: balUpdateErr } = await supabase
+          const { error: balUpdateErr } = await supabase
           .from("bookings")
-          .update({ balance: newBalance })
+            .update({ balance: newBalance })
           .eq("id", bookingId);
-        if (balUpdateErr) {
+          if (balUpdateErr) {
           toast.error("Failed to update bill balance - please refresh");
-        } else {
+          } else {
           setBooking((prev: any) =>
             prev ? { ...prev, balance: newBalance } : prev,
           );
-        }
+          }
 
         if (chargePaymentMethod === "city_ledger" && booking!.guest_id) {
           const chargeAmt = Number(chargeAmount);
-          const { data: guestRow } = await supabase
+            const { data: guestRow } = await supabase
             .from("guests")
             .select("balance, name")
             .eq("id", booking!.guest_id)
             .single();
-          if (guestRow) {
-            await supabase
+            if (guestRow) {
+              await supabase
               .from("guests")
               .update({
                 balance: ((guestRow.balance as number) || 0) + chargeAmt,
               })
               .eq("id", booking!.guest_id);
-            if (guestRow.name) {
-              const { data: existingAcct } = await supabase
+              if (guestRow.name) {
+                const { data: existingAcct } = await supabase
                 .from("city_ledger_accounts")
                 .select("id, balance")
                 .eq("organization_id", booking!.organization_id)
                 .ilike("account_name", guestRow.name)
                 .in("account_type", ["individual", "guest"])
                 .maybeSingle();
-              if (existingAcct) {
-                await supabase
+                if (existingAcct) {
+                  await supabase
                   .from("city_ledger_accounts")
-                  .update({ balance: (existingAcct.balance || 0) + chargeAmt })
+                    .update({ balance: (existingAcct.balance || 0) + chargeAmt })
                   .eq("id", existingAcct.id);
-              } else {
+                } else {
                 await supabase.from("city_ledger_accounts").insert([
                   {
                     organization_id: booking!.organization_id,
@@ -707,32 +707,32 @@ export default function BookingDetailPage({
                     balance: chargeAmt,
                   },
                 ]);
+                }
               }
             }
           }
-        }
-      } else {
-        const { data: freshBk } = await supabase
+        } else {
+          const { data: freshBk } = await supabase
           .from("bookings")
           .select("deposit")
           .eq("id", bookingId)
           .single();
         const newDeposit =
           (Number(freshBk?.deposit) || 0) + Number(chargeAmount);
-        await supabase
+          await supabase
           .from("bookings")
-          .update({ deposit: newDeposit })
+            .update({ deposit: newDeposit })
           .eq("id", bookingId);
         setBooking((prev: any) =>
           prev ? { ...prev, deposit: newDeposit } : prev,
         );
-      }
+        }
 
-      toast.success(
-        isPaidNow
+        toast.success(
+          isPaidNow
           ? `Charge of ${formatNaira(Number(chargeAmount))} recorded as paid (${chargePaymentMethod.replace(/_/g, " ")})`
           : chargePaymentMethod === "city_ledger"
-            ? `${formatNaira(Number(chargeAmount))} added to city ledger - Bill Balance updated`
+              ? `${formatNaira(Number(chargeAmount))} added to city ledger - Bill Balance updated`
             : `${formatNaira(Number(chargeAmount))} deferred - Bill Balance updated`,
       );
 
@@ -770,7 +770,7 @@ export default function BookingDetailPage({
       toast.error("Please enter a valid amount");
       return;
     }
-    if (!paymentMethod) {
+        if (!paymentMethod) {
       toast.error("Please select a payment method");
       return;
     }
@@ -826,11 +826,11 @@ export default function BookingDetailPage({
       }
 
       const paymentEntry: Record<string, unknown> = {
-        booking_id: bookingId,
+          booking_id: bookingId,
         description: `Payment Received - ${paymentMethod.replace("_", " ")}`,
         amount: -P,
         charge_type: "payment",
-        payment_method: paymentMethod,
+          payment_method: paymentMethod,
         payment_status: "paid",
       };
       if (booking.organization_id) {
@@ -844,18 +844,18 @@ export default function BookingDetailPage({
       const newBalance = Math.max(0, billBefore - P);
       const newDeposit = Number(freshBk2?.deposit || 0) + P;
 
-      await supabase
+        await supabase
         .from("bookings")
-        .update({
-          balance: newBalance,
-          deposit: newDeposit,
+          .update({
+            balance: newBalance,
+            deposit: newDeposit,
           payment_status: newBalance === 0 ? "paid" : "partial",
         })
         .eq("id", bookingId);
 
       // When booking balance clears, settle every outstanding positive folio line (not only payment_status=pending).
       if (newBalance === 0) {
-        await supabase
+          await supabase
           .from("folio_charges")
           .update({ payment_status: "paid" })
           .eq("booking_id", bookingId)
@@ -865,15 +865,15 @@ export default function BookingDetailPage({
 
       const guestId = booking.guest_id || booking.guests?.id;
       const guestName = (booking.guests?.name || "").trim();
-      if (guestId) {
-        const { data: guestRow } = await supabase
+        if (guestId) {
+          const { data: guestRow } = await supabase
           .from("guests")
           .select("balance")
           .eq("id", guestId)
           .single();
         if (guestRow && (guestRow.balance || 0) > 0) {
           const newGuestBalance = Math.max(0, (guestRow.balance || 0) - P);
-          await supabase
+            await supabase
             .from("guests")
             .update({ balance: newGuestBalance })
             .eq("id", guestId);
@@ -1093,15 +1093,15 @@ export default function BookingDetailPage({
       setAddChargeLoading(true);
       const supabase = createClient();
 
-      const { data: chargeData } = await supabase
+                  const { data: chargeData } = await supabase
         .from("folio_charges")
         .select("payment_status, amount")
         .eq("id", chargeId)
         .single();
 
-      const { error: deleteError } = await supabase
+                  const { error: deleteError } = await supabase
         .from("folio_charges")
-        .delete()
+                    .delete()
         .eq("id", chargeId);
       if (deleteError) throw deleteError;
 
@@ -1110,16 +1110,16 @@ export default function BookingDetailPage({
           0,
           (booking?.balance || 0) - Math.abs(Number(chargeData.amount)),
         );
-        await supabase
+                    await supabase
           .from("bookings")
-          .update({ balance: newBalance })
+                      .update({ balance: newBalance })
           .eq("id", bookingId);
-      }
-
+                  }
+                  
       await fetchBookingDetails(bookingId);
       toast.success("Charge deleted");
       setDeleteChargeTarget(null);
-    } catch (error: any) {
+                } catch (error: any) {
       toast.error(error.message || "Failed to delete charge");
     } finally {
       setAddChargeLoading(false);
@@ -1144,7 +1144,7 @@ export default function BookingDetailPage({
       // Preserve sign: payments are stored as negative
       const newAmount =
         editingCharge.amount < 0
-          ? -Math.abs(Number(editChargeAmount))
+        ? -Math.abs(Number(editChargeAmount))
           : Math.abs(Number(editChargeAmount));
 
       const { error } = await supabase
@@ -1212,9 +1212,9 @@ export default function BookingDetailPage({
       toast.success("Booking deleted");
       setDeleteBookingDialogOpen(false);
       router.push("/bookings");
-    } catch (err: any) {
+                } catch (err: any) {
       toast.error(err.message || "Failed to delete booking");
-    } finally {
+                } finally {
       setDeleteLoading(false);
     }
   };
@@ -1454,7 +1454,7 @@ export default function BookingDetailPage({
         }}
       />
 
-      <ExtendStayModal
+      <ExtendStayModal 
         open={extendStayModalOpen}
         onClose={() => setExtendStayModalOpen(false)}
         onSuccess={() => fetchBookingDetails(bookingId)}
@@ -1598,34 +1598,34 @@ export default function BookingDetailPage({
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label>Amount</Label>
-              <Input
-                type="number"
-                min="0"
-                placeholder="Enter amount"
-                value={chargeAmount}
-                onChange={(e) => setChargeAmount(e.target.value)}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Description</Label>
-              <Input
-                placeholder="e.g., Restaurant - Dinner, Laundry"
-                value={chargeDescription}
-                onChange={(e) => setChargeDescription(e.target.value)}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>How is this charge being settled?</Label>
+                <div className="space-y-2">
+                  <Label>Amount</Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    placeholder="Enter amount"
+                    value={chargeAmount}
+                    onChange={(e) => setChargeAmount(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Description</Label>
+                  <Input
+                    placeholder="e.g., Restaurant - Dinner, Laundry"
+                    value={chargeDescription}
+                    onChange={(e) => setChargeDescription(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>How is this charge being settled?</Label>
               <Select
                 value={chargePaymentMethod}
                 onValueChange={setChargePaymentMethod}
               >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select settlement method" />
-                </SelectTrigger>
-                <SelectContent>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select settlement method" />
+                    </SelectTrigger>
+                    <SelectContent>
                   <SelectItem value="cash">
                     Cash (paid now - not added to Bill Balance)
                   </SelectItem>
@@ -1644,22 +1644,22 @@ export default function BookingDetailPage({
                   <SelectItem value="deferred">
                     Defer / Not yet paid (adds to Bill Balance)
                   </SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+                    </SelectContent>
+                  </Select>
+                </div>
             {(chargePaymentMethod === "city_ledger" ||
               chargePaymentMethod === "deferred") && (
-              <p className="text-xs text-orange-600 bg-orange-50 border border-orange-200 rounded px-3 py-2">
-                This charge will be added to the Bill Balance (Unpaid).
-              </p>
-            )}
+                  <p className="text-xs text-orange-600 bg-orange-50 border border-orange-200 rounded px-3 py-2">
+                    This charge will be added to the Bill Balance (Unpaid).
+                  </p>
+                )}
             {chargePaymentMethod !== "" &&
               chargePaymentMethod !== "city_ledger" && (
-                <p className="text-xs text-green-600 bg-green-50 border border-green-200 rounded px-3 py-2">
+                  <p className="text-xs text-green-600 bg-green-50 border border-green-200 rounded px-3 py-2">
                   Paid on the spot - this will be recorded in the folio but will
                   NOT affect the Bill Balance.
-                </p>
-              )}
+                  </p>
+                )}
             <Button
               onClick={handleFolioCharge}
               className="w-full"
@@ -1843,15 +1843,15 @@ export default function BookingDetailPage({
                   className="w-full"
                   disabled={addChargeLoading}
                 >
-                  {addChargeLoading ? (
+              {addChargeLoading ? (
                     <>
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                       Saving...
                     </>
-                  ) : (
+              ) : (
                     "Add Credit"
-                  )}
-                </Button>
+              )}
+            </Button>
               </TabsContent>
             </Tabs>
           </div>
@@ -1971,9 +1971,9 @@ export default function BookingDetailPage({
                 onClick={() => setExtendStayModalOpen(true)}
                 disabled={addChargeLoading || folioLocked}
               >
-                <Clock className="mr-2 h-4 w-4" />
-                Extend Stay
-              </Button>
+            <Clock className="mr-2 h-4 w-4" />
+            Extend Stay
+          </Button>
               {manualCheckoutEligible(
                 {
                   status: booking?.status,
@@ -2012,18 +2012,18 @@ export default function BookingDetailPage({
                 }
                 onClick={() => setEditBookingOpen(true)}
               >
-                <Edit className="mr-2 h-4 w-4" />
-                Edit
-              </Button>
+            <Edit className="mr-2 h-4 w-4" />
+            Edit
+          </Button>
               <Button
                 variant="destructive"
                 size="sm"
                 onClick={handleDeleteBookingClick}
                 disabled={booking?.folio_status === "checked_out"}
               >
-                <Trash2 className="mr-2 h-4 w-4" />
-                Delete
-              </Button>
+            <Trash2 className="mr-2 h-4 w-4" />
+            Delete
+          </Button>
             </>
           )}
         </div>
@@ -2143,9 +2143,9 @@ export default function BookingDetailPage({
                     onClick={() => setFolioChargeModalOpen(true)}
                     disabled={folioLocked}
                   >
-                    <Plus className="mr-2 h-4 w-4" />
-                    Add Charge
-                  </Button>
+                  <Plus className="mr-2 h-4 w-4" />
+                  Add Charge
+                </Button>
                 )}
               </div>
               <div className="space-y-2">
@@ -2232,7 +2232,7 @@ export default function BookingDetailPage({
                             >
                               Pending
                             </Badge>
-                          )}
+                        )}
                       </div>
                       <div className="text-xs text-muted-foreground mt-1 space-y-0.5">
                         <div>
@@ -2288,27 +2288,27 @@ export default function BookingDetailPage({
                           </Button>
                         )}
                       {canAdminBooking && charge.type !== "folio_note" && (
-                        <div className="flex gap-1">
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => openEditCharge(charge)}
-                            title="Edit charge"
-                          >
-                            <Edit className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                      <div className="flex gap-1">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => openEditCharge(charge)}
+                          title="Edit charge"
+                        >
+                          <Edit className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="text-red-600 hover:text-red-700 hover:bg-red-50"
                             onClick={() =>
                               handleDeleteCharge(charge.id, charge.amount)
                             }
-                            title="Delete charge"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
+                          title="Delete charge"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
                       )}
                     </div>
                   </div>
