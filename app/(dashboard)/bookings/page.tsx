@@ -95,6 +95,14 @@ export default function BookingsPage() {
     status: 'checked_in',
     payment_status: 'all',
   })
+  /** Non-empty search loads the wider booking history so any folio can be found. */
+  const [tableSearchQuery, setTableSearchQuery] = useState('')
+  const [debouncedTableSearch, setDebouncedTableSearch] = useState('')
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedTableSearch(tableSearchQuery), 350)
+    return () => clearTimeout(t)
+  }, [tableSearchQuery])
   const [roomStats, setRoomStats] = useState<{
     total: number
     occupied: number
@@ -185,7 +193,7 @@ export default function BookingsPage() {
 
       const loadWork = async () => {
 
-      const statusKey = tableFilters.status
+      const statusKey = debouncedTableSearch.trim() ? 'all' : tableFilters.status
       const tz = resolveHotelTimeZone()
       const today = todayYmdHotel(tz)
       const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
@@ -346,7 +354,7 @@ export default function BookingsPage() {
       void refreshRoomStats()
       endFetch()
     }
-  }, [organizationId, userId, tableFilters.status, refreshRoomStats, startFetch, endFetch])
+  }, [organizationId, userId, tableFilters.status, debouncedTableSearch, refreshRoomStats, startFetch, endFetch])
 
   useEffect(() => {
     if (!organizationId) {
@@ -724,7 +732,8 @@ export default function BookingsPage() {
         <div className="min-w-0 space-y-1">
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Bookings</h1>
           <p className="text-muted-foreground text-xs sm:text-sm leading-snug max-w-3xl">
-            Default: <strong>in-house</strong> stays only (fast). Change Status for history. Checkout frees the room.
+            Default: <strong>in-house</strong> stays only (fast). Search finds any booking in the last 90 days.
+            Change Status for history. Checkout frees the room.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-1.5 shrink-0">
@@ -788,6 +797,8 @@ export default function BookingsPage() {
         rowKey={(b) => (b.is_bulk && b.bulk_group_id ? `bulk-${b.bulk_group_id}` : String(b.id))}
         controlledActiveFilters={tableFilters}
         onControlledActiveFiltersChange={setTableFilters}
+        onSearchQueryChange={setTableSearchQuery}
+        searchPlaceholder="Search all bookings by guest, room, folio…"
         searchMatch={(b, query) => {
           const q = query.trim().toLowerCase()
           if (!q) return true
