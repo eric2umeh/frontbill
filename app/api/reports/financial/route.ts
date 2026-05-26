@@ -242,7 +242,7 @@ export async function GET(request: Request) {
 
       const { data: txrows, error: txE } = await admin
         .from("transactions")
-        .select("id, amount, created_at, description, booking_id, status")
+        .select("id, amount, created_at, description, booking_id, status, transaction_id, payment_method")
         .eq("organization_id", orgId)
         .gte("created_at", startD.toISOString())
         .lte("created_at", endD.toISOString());
@@ -558,7 +558,7 @@ export async function GET(request: Request) {
 
       const { data: txrows } = await admin
         .from("transactions")
-        .select("amount, status")
+        .select("amount, status, transaction_id, payment_method")
         .eq("organization_id", orgId)
         .gte("created_at", startD.toISOString())
         .lte("created_at", endD.toISOString());
