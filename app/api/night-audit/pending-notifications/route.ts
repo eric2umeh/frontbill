@@ -1,5 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
+import { resolveAuthedUserId } from '@/lib/api/resolve-authed-user-id'
 import { fetchNightAuditPendingNotificationItems } from '@/lib/night-audit/pending-notification-items'
 
 export async function GET(request: Request) {
@@ -7,6 +8,11 @@ export async function GET(request: Request) {
     const callerId = new URL(request.url).searchParams.get('caller_id')
     if (!callerId) {
       return NextResponse.json({ error: 'caller_id is required' }, { status: 400 })
+    }
+
+    const authedUserId = await resolveAuthedUserId(request)
+    if (!authedUserId || authedUserId !== callerId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     const admin = createAdminClient()

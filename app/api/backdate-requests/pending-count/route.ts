@@ -1,4 +1,5 @@
 import { createAdminClient } from '@/lib/supabase/admin'
+import { resolveAuthedUserId } from '@/lib/api/resolve-authed-user-id'
 import { canonicalRoleKey } from '@/lib/permissions'
 import { NextResponse } from 'next/server'
 
@@ -15,6 +16,11 @@ export async function GET(request: Request) {
 
     if (!callerId) {
       return NextResponse.json({ error: 'caller_id is required' }, { status: 400 })
+    }
+
+    const authedUserId = await resolveAuthedUserId(request)
+    if (!authedUserId || authedUserId !== callerId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     const admin = createAdminClient()
