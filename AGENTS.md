@@ -3,7 +3,7 @@
 ## Cursor Cloud specific instructions
 
 ### Overview
-FrontBill is a Next.js 16 (App Router) hotel management SaaS using Supabase as the hosted backend (database, auth, realtime). Currency is Nigerian Naira. There is no local database; all data lives in Supabase.
+FrontBill is a Next.js 16 (App Router) hotel management SaaS using Supabase as the hosted backend (database, auth, realtime). Currency is Nigerian Naira. **Dev and production both use cloud Supabase** — copy API keys from the Supabase Dashboard into `.env.local` (see `.env.local.example`). Do not point `.env.local` at `127.0.0.1:54321` unless you intentionally run local Docker (`supabase start`).
 
 ### Running the dev server
 ```
@@ -21,9 +21,11 @@ Next.js 16 removed the built-in `next lint` subcommand, so `pnpm lint` does not 
 No test framework or test files exist in this codebase.
 
 ### Authentication & demo accounts
-Supabase secrets (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`) must be provided as environment variables (injected via Cursor Secrets).
+Supabase secrets (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`) must be provided as environment variables (injected via Cursor Secrets or `.env.local`).
 
-To seed demo users with auto-confirmed emails, call:
+If login fails with `fetch failed` to `127.0.0.1:54321`, `.env.local` still targets local Docker or the browser has stale auth cookies — use cloud URL in `.env.local`, restart `pnpm dev`, open `/auth/login` (clears local session), or visit `/api/auth/logout`.
+
+To seed demo users with auto-confirmed emails (cloud project only), call:
 ```
 curl -X POST http://localhost:3000/api/setup/seed-users
 ```
