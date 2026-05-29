@@ -64,6 +64,7 @@ import {
 } from "@/lib/receipts/booking-receipt-utils";
 import { canAdministerBookingRecord } from "@/lib/booking/can-administer-booking-record";
 import { createClient } from "@/lib/supabase/client";
+import { reconcileRoomStatusesClient } from "@/lib/rooms/reconcile-room-status-client";
 import { useAuth } from "@/lib/auth-context";
 import { canonicalRoleKey, hasPermission } from "@/lib/permissions";
 import { getUserDisplayName } from "@/lib/utils/user-display";
@@ -1399,6 +1400,7 @@ export default function BookingDetailPage({
                 .update({ status: "available" })
                 .eq("id", booking.room_id);
             }
+            await reconcileRoomStatusesClient();
 
             setBooking((prev: any) =>
               prev
