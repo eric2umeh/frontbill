@@ -49,7 +49,7 @@ export async function cancelBookingReservation(
       .from('rooms')
       .update({ status: 'available', updated_at: new Date().toISOString() })
       .eq('id', roomId)
-      .eq('status', 'reserved')
+      .in('status', ['reserved', 'occupied'])
     if (roomErr) return { error: roomErr.message }
   }
 
