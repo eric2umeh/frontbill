@@ -14,6 +14,8 @@ import { UserCheck } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
 import { createClient } from '@/lib/supabase/client'
 import { hasPermission } from '@/lib/permissions'
+import { countInHouseRoomsFromBookings } from '@/lib/rooms/room-occupancy'
+import { reconcileRoomStatusesClient } from '@/lib/rooms/reconcile-room-status-client'
 
 function StatsLoader() {
   return (
@@ -84,8 +86,16 @@ export default function DashboardPage() {
       const pendingCheckouts = pendingCheckoutsRes.data || []
       const outstandingBalance = (balancesRes.data || []).reduce((sum: number, booking: any) => sum + Number(booking.balance || 0), 0)
 
+      await reconcileRoomStatusesClient()
+
+      const { data: inHouseRows } = await supabase
+        .from('bookings')
+        .select('id, room_id, status, check_in, check_out, folio_status')
+        .eq('organization_id', organizationId)
+        .in('status', ['checked_in', 'confirmed', 'reserved'])
+
       const totalRooms = rooms.length
-      const occupiedRooms = rooms.filter((room: any) => room.status === 'occupied').length
+      const occupiedRooms = countInHouseRoomsFromBookings(inHouseRows ?? [])
       const occupancyRate = totalRooms > 0 ? Math.round((occupiedRooms / totalRooms) * 100) : 0
       const totalRevenue = payments.reduce((sum: number, p: any) => sum + p.amount, 0)
 
