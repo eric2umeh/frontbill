@@ -28,6 +28,8 @@ import { folioPositiveOutstandingSum, shouldReconcileBookingPaymentPaid } from '
 import { bookingYmdHotel, isInHouseOnCalendarDay, todayYmdHotel } from '@/lib/utils/booking-in-house-dates'
 import { resolveHotelTimeZone } from '@/lib/hotel-date'
 import { cancelBookingReservation } from '@/lib/reservations/cancel-reservation'
+import { countInHouseRoomsFromBookings } from '@/lib/rooms/room-occupancy'
+import { reconcileRoomStatusesClient } from '@/lib/rooms/reconcile-room-status-client'
 
 interface Booking {
   id: string
@@ -130,11 +132,13 @@ export default function BookingsPage() {
     const tz = resolveHotelTimeZone()
     const today = todayYmdHotel(tz)
 
+    await reconcileRoomStatusesClient()
+
     const [{ data: roomRows, error: roomErr }, { data: dueBookings, error: dueErr }] = await Promise.all([
       supabase.from('rooms').select('status').eq('organization_id', organizationId),
       supabase
         .from('bookings')
-        .select('check_in, check_out, status')
+        .select('id, room_id, check_in, check_out, status, folio_status')
         .eq('organization_id', organizationId)
         .in('status', ['checked_in', 'confirmed', 'reserved']),
     ])
@@ -149,7 +153,7 @@ export default function BookingsPage() {
 
     const norm = (s: string | null | undefined) => String(s || '').toLowerCase().replace(/-/g, '_')
     const list = roomRows || []
-    const occupied = list.filter((r: { status?: string }) => norm(r.status) === 'occupied').length
+    const occupied = countInHouseRoomsFromBookings(dueBookings ?? [])
     const outOfOrder = list.filter((r: { status?: string }) => norm(r.status) === 'out_of_order').length
     const unavailableForCheckin = list.filter((r: { status?: string }) => {
       const s = norm(r.status)
@@ -601,9 +605,11 @@ export default function BookingsPage() {
         if (booking.room_id) {
           await supabase.from('rooms').update({ status: 'available' }).eq('id', booking.room_id)
         }
+        await reconcileRoomStatusesClient()
         toast.success(`${booking.guests?.name} checked out successfully`)
         setCheckoutDraft(null)
         fetchBookings()
+        void refreshRoomStats()
       } catch (err: any) {
         toast.error(err.message || 'Failed to check out guest')
       } finally {
@@ -633,9 +639,11 @@ export default function BookingsPage() {
           await supabase.from('rooms').update({ status: 'available' }).eq('id', m.room_id)
         }
       }
+      await reconcileRoomStatusesClient()
       toast.success(`Checked out ${targets.length} room${targets.length === 1 ? '' : 's'}`)
       setCheckoutDraft(null)
       fetchBookings()
+      void refreshRoomStats()
     } catch (err: any) {
       toast.error(err.message || 'Failed to check out group')
     } finally {
@@ -747,7 +755,7 @@ export default function BookingsPage() {
             <>
               <div
                 className="inline-flex h-7 items-center gap-1 rounded-md border border-input bg-background px-1.5 text-[10px] font-medium leading-none shadow-sm"
-                title="Rooms with status Occupied (set from bookings / front desk)"
+                title="Distinct rooms with an in-house folio today (matches Checked in filter)"
               >
                 <Bed className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden />
                 <span className="text-muted-foreground">Occ</span>
