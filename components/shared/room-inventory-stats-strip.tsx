@@ -7,6 +7,7 @@ import {
   computeRoomInventoryStats,
   type RoomInventoryStats,
 } from '@/lib/rooms/compute-room-inventory-stats'
+import { reconcileRoomStatusesClient } from '@/lib/rooms/reconcile-room-status-client'
 import { Bed, DoorOpen, AlertTriangle, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -32,6 +33,8 @@ export function RoomInventoryStatsStrip({ className, refreshMs = 60_000 }: Props
       setLoading(false)
       return
     }
+    await reconcileRoomStatusesClient()
+
     const { data, error } = await supabase
       .from('rooms')
       .select('status')
@@ -86,7 +89,7 @@ export function RoomInventoryStatsStrip({ className, refreshMs = 60_000 }: Props
       </div>
       <div
         className="inline-flex h-7 items-center gap-1 rounded-md border border-blue-200/80 bg-blue-50/50 px-1.5 text-[10px] font-medium leading-none shadow-sm dark:border-blue-900/50 dark:bg-blue-950/30"
-        title="Rooms with status Occupied"
+        title="Rooms marked Occupied (synced from in-house folios)"
       >
         <Bed className="h-3 w-3 shrink-0 text-blue-700 dark:text-blue-400" aria-hidden />
         <span className="text-muted-foreground">Occ</span>
