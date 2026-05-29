@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { resolveHotelTimeZone } from '@/lib/hotel-date'
-import { isInHouseOnCalendarDay, todayYmdHotel } from '@/lib/utils/booking-in-house-dates'
+import { bookingYmdHotel, isInHouseOnCalendarDay, todayYmdHotel } from '@/lib/utils/booking-in-house-dates'
 
 export const OCCUPYING_BOOKING_STATUSES = ['checked_in', 'confirmed', 'reserved'] as const
 
@@ -17,23 +17,38 @@ function normStatus(s: string | null | undefined): string {
   return String(s || '').toLowerCase().replace(/-/g, '_')
 }
 
+function isOpenRoomBooking(b: OccupyingBookingRow): boolean {
+  const folioStatus = normStatus(b.folio_status || 'active')
+  if (folioStatus === 'checked_out' || folioStatus === 'cancelled') return false
+  if (normStatus(b.status) === 'checked_out' || normStatus(b.status) === 'cancelled') return false
+  return OCCUPYING_BOOKING_STATUSES.includes(normStatus(b.status) as (typeof OCCUPYING_BOOKING_STATUSES)[number])
+}
+
+function hasCurrentOrFutureRoomHold(
+  rows: OccupyingBookingRow[],
+  today: string,
+  timeZone: string,
+): boolean {
+  return rows.some((b) => {
+    if (!isOpenRoomBooking(b)) return false
+    if (normStatus(b.status) === 'checked_in') return true
+    const checkOut = bookingYmdHotel(b.check_out, timeZone)
+    return Boolean(checkOut && checkOut >= today)
+  })
+}
+
 /** Active in-house folio on a room (matches bookings in-house list / outlets charge-to-room). */
 export function pickOccupyingBooking<T extends OccupyingBookingRow>(rows: T[]): T | null {
   const today = todayYmdHotel()
   const tz = resolveHotelTimeZone()
 
   const open = rows.filter((b) => {
-    const fs = String(b.folio_status || 'active').toLowerCase()
-    if (fs === 'checked_out' || fs === 'cancelled') return false
-    if (b.status === 'checked_out' || b.status === 'cancelled') return false
-    if (!OCCUPYING_BOOKING_STATUSES.includes(b.status as (typeof OCCUPYING_BOOKING_STATUSES)[number])) {
-      return false
-    }
-    if (b.status === 'checked_in') return true
+    if (!isOpenRoomBooking(b)) return false
+    if (normStatus(b.status) === 'checked_in') return true
     return isInHouseOnCalendarDay(b.check_in, b.check_out, today, tz)
   })
 
-  const rank = (s: string) => (s === 'checked_in' ? 0 : s === 'confirmed' ? 1 : 2)
+  const rank = (s: string) => (normStatus(s) === 'checked_in' ? 0 : normStatus(s) === 'confirmed' ? 1 : 2)
   open.sort((a, b) => rank(a.status) - rank(b.status))
   return open[0] ?? null
 }
@@ -42,17 +57,19 @@ export function pickOccupyingBooking<T extends OccupyingBookingRow>(rows: T[]): 
 export function deriveRoomStatusFromOccupying(
   occupying: Pick<OccupyingBookingRow, 'status'> | null,
   currentStatus: string | null | undefined,
+  hasActiveRoomHold = Boolean(occupying),
 ): string | null {
   const cur = normStatus(currentStatus)
   if (cur === 'maintenance' || cur === 'out_of_order') return null
 
   if (!occupying) {
+    if (cur === 'cleaning') return null
+    if (hasActiveRoomHold) return cur === 'reserved' ? null : 'reserved'
     if (cur === 'occupied' || cur === 'reserved') return 'available'
-    if (cur === 'cleaning') return 'available'
     return null
   }
 
-  if (occupying.status === 'checked_in') return 'occupied'
+  if (normStatus(occupying.status) === 'checked_in') return 'occupied'
   return 'reserved'
 }
 
@@ -114,10 +131,17 @@ export async function reconcileRoomStatusesForOrganization(
   }
 
   const now = new Date().toISOString()
+  const today = todayYmdHotel()
+  const timeZone = resolveHotelTimeZone()
 
   for (const room of rooms ?? []) {
-    const occupying = pickOccupyingBooking(byRoom.get(room.id) ?? [])
-    const next = deriveRoomStatusFromOccupying(occupying, room.status)
+    const roomBookings = byRoom.get(room.id) ?? []
+    const occupying = pickOccupyingBooking(roomBookings)
+    const next = deriveRoomStatusFromOccupying(
+      occupying,
+      room.status,
+      hasCurrentOrFutureRoomHold(roomBookings, today, timeZone),
+    )
     if (!next || normStatus(next) === normStatus(room.status)) continue
 
     const { error } = await supabase
