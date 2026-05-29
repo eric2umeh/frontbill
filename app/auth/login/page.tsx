@@ -48,7 +48,10 @@ export default function Page() {
     const supabase = createClient()
     if (!supabase) {
       setIsConfigured(false)
+      return
     }
+    // Drop stale sessions (e.g. after switching from local Docker Supabase to cloud).
+    void supabase.auth.signOut({ scope: 'local' })
   }, [])
 
   const handleForgotPassword = async () => {
