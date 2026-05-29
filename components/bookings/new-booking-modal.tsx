@@ -823,7 +823,16 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
         }
       }
 
-      await supabase.from('rooms').update({ status: 'occupied', updated_by: user?.id, updated_at: new Date().toISOString() }).eq('id', selectedRoom.id)
+      const roomStatus =
+        booking.status === 'checked_in' ? 'occupied' : 'reserved'
+      await supabase
+        .from('rooms')
+        .update({
+          status: roomStatus,
+          updated_by: user?.id,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', selectedRoom.id)
 
       // Insert folio charge (this is what the Transactions page reads from)
       const { error: folioInsertError } = await insertFolioCharges(supabase, [{

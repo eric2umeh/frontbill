@@ -6,6 +6,8 @@ import { DollarSign, Users, Bed, TrendingUp } from 'lucide-react'
 import { formatNaira } from '@/lib/utils/currency'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/lib/auth-context'
+import { countInHouseRoomsFromBookings } from '@/lib/rooms/room-occupancy'
+import { reconcileRoomStatusesClient } from '@/lib/rooms/reconcile-room-status-client'
 
 export function DashboardStats() {
   const { organizationId } = useAuth()
@@ -36,27 +38,31 @@ export function DashboardStats() {
         .gte('payment_date', `${today}T00:00:00`)
         .lte('payment_date', `${today}T23:59:59`)
 
-      // Fetch rooms for occupancy
-      const { data: rooms } = await supabase
-        .from('rooms')
-        .select('*')
-        .eq('organization_id', organizationId)
+      await reconcileRoomStatusesClient()
 
-      const { data: bookings } = await supabase
+      const { data: inHouseBookings } = await supabase
         .from('bookings')
-        .select('id')
+        .select('id, room_id, status, check_in, check_out, folio_status')
         .eq('organization_id', organizationId)
-        .eq('status', 'checked_in')
+        .in('status', ['checked_in', 'confirmed', 'reserved'])
+
+      const { data: roomRows } = await supabase
+        .from('rooms')
+        .select('status')
+        .eq('organization_id', organizationId)
 
       const totalRevenue =
         payments?.reduce((sum: number, p: { amount?: unknown }) => sum + Number(p.amount ?? 0), 0) || 0
-      const totalRooms = rooms?.length || 0
-      const occupiedRooms =
-        rooms?.filter((r: { status?: string }) => String(r.status || '').toLowerCase() === 'occupied').length || 0
+      const totalRooms = roomRows?.length || 0
+      const inHouseRooms = countInHouseRoomsFromBookings(inHouseBookings ?? [])
+      const occupiedRooms = inHouseRooms
       const availableRooms =
-        rooms?.filter((r: { status?: string }) => String(r.status || '').toLowerCase() === 'available').length || 0
+        roomRows?.filter(
+          (r: { status?: string }) => String(r.status || '').toLowerCase() === 'available',
+        ).length || 0
       const occupancyRate = totalRooms > 0 ? Math.round((occupiedRooms / totalRooms) * 100) : 0
-      const checkedInFolios = bookings?.length || 0
+      const checkedInFolios =
+        inHouseBookings?.filter((b) => b.status === 'checked_in').length || 0
 
       setStats([
         { title: "Today's Revenue", value: formatNaira(totalRevenue), icon: DollarSign, description: 'Today' },
@@ -65,8 +71,8 @@ export function DashboardStats() {
           value: String(occupiedRooms),
           icon: Users,
           description: checkedInFolios
-            ? `${checkedInFolios} checked-in folio${checkedInFolios === 1 ? '' : 's'}`
-            : 'By room status',
+            ? `${checkedInFolios} checked-in · ${inHouseRooms} in-house`
+            : `${inHouseRooms} in-house room${inHouseRooms === 1 ? '' : 's'}`,
         },
         {
           title: 'Available Rooms',

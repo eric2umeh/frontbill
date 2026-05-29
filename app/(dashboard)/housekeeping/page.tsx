@@ -21,6 +21,7 @@ import {
   User, Bed, CalendarDays, ClipboardList, RefreshCw, ChevronDown,
 } from 'lucide-react'
 import { RoomInventoryStatsStrip } from '@/components/shared/room-inventory-stats-strip'
+import { reconcileRoomStatusesClient } from '@/lib/rooms/reconcile-room-status-client'
 
 type TaskStatus = 'pending' | 'in_progress' | 'done' | 'skipped'
 type TaskPriority = 'low' | 'normal' | 'high' | 'urgent'
@@ -148,6 +149,7 @@ export default function HousekeepingPage() {
   const fetchAll = async () => {
     if (!organizationId) return
     setLoading(true)
+    await reconcileRoomStatusesClient()
     const supabase = createClient()
 
     const [tasksRes, roomsRes, staffRes] = await Promise.all([

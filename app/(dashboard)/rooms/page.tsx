@@ -16,6 +16,7 @@ import { AddRoomModal } from '@/components/rooms/add-room-modal'
 import { toast } from 'sonner'
 import { getUserDisplayName } from '@/lib/utils/user-display'
 import { fetchUserDisplayNameMap } from '@/lib/utils/fetch-user-display-names'
+import { reconcileRoomStatusesClient } from '@/lib/rooms/reconcile-room-status-client'
 
 interface Room {
   id: string
@@ -56,6 +57,8 @@ export default function RoomsPage() {
         endFetch()
         return
       }
+
+      await reconcileRoomStatusesClient()
 
       const { data, error } = await supabase
         .from('rooms')

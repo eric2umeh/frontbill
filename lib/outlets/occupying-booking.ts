@@ -1,6 +1,8 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { resolveHotelTimeZone } from '@/lib/hotel-date'
-import { isInHouseOnCalendarDay, todayYmdHotel } from '@/lib/utils/booking-in-house-dates'
+import {
+  OCCUPYING_BOOKING_STATUSES,
+  pickOccupyingBooking,
+} from '@/lib/rooms/room-occupancy'
 
 export type OccupyingBookingForRoom = {
   id: string
@@ -10,8 +12,6 @@ export type OccupyingBookingForRoom = {
   room_number: string | null
   status: string
 }
-
-const OCCUPYING_STATUSES = ['checked_in', 'confirmed', 'reserved'] as const
 
 function normalizeRoomNumber(value: string): string {
   return value.trim().toLowerCase()
@@ -47,37 +47,6 @@ export async function findRoomsByNumber(
     .slice(0, 5)
 }
 
-function pickOccupyingBooking(
-  rows: Array<{
-    id: string
-    folio_id: string | null
-    guest_id: string | null
-    status: string
-    check_in: string
-    check_out: string
-    folio_status?: string | null
-    guests: { name?: string } | { name?: string }[] | null
-    rooms: { room_number?: string } | { room_number?: string }[] | null
-  }>,
-): (typeof rows)[0] | null {
-  const today = todayYmdHotel()
-  const tz = resolveHotelTimeZone()
-
-  const open = rows.filter((b) => {
-    const fs = String(b.folio_status || 'active').toLowerCase()
-    if (fs === 'checked_out' || fs === 'cancelled') return false
-    if (!OCCUPYING_STATUSES.includes(b.status as (typeof OCCUPYING_STATUSES)[number])) {
-      return false
-    }
-    if (b.status === 'checked_in') return true
-    return isInHouseOnCalendarDay(b.check_in, b.check_out, today, tz)
-  })
-
-  const rank = (s: string) => (s === 'checked_in' ? 0 : s === 'confirmed' ? 1 : 2)
-  open.sort((a, b) => rank(a.status) - rank(b.status))
-  return open[0] ?? null
-}
-
 function guestNameFromJoin(guests: { name?: string } | { name?: string }[] | null): string | null {
   if (!guests) return null
   if (Array.isArray(guests)) return guests[0]?.name ?? null
@@ -106,7 +75,7 @@ export async function findOccupyingBookingByRoom(
     )
     .eq('organization_id', organizationId)
     .in('room_id', rooms.map((r) => r.id))
-    .in('status', [...OCCUPYING_STATUSES])
+    .in('status', [...OCCUPYING_BOOKING_STATUSES])
     .order('check_in', { ascending: false })
     .limit(20)
 
@@ -144,7 +113,7 @@ export async function mapOccupyingBookingsByRoomId(
     )
     .eq('organization_id', organizationId)
     .in('room_id', roomIds)
-    .in('status', [...OCCUPYING_STATUSES])
+    .in('status', [...OCCUPYING_BOOKING_STATUSES])
     .order('check_in', { ascending: false })
 
   const byRoom = new Map<string, typeof bookings>()
