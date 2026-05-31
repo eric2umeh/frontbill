@@ -46,6 +46,8 @@ export interface OutletMenuItemRow {
   is_active: boolean
   sort_order: number
   service_code: string | null
+  /** Cashier may override unit price on POS for this item (e.g. rice-only extras). */
+  price_editable?: boolean | null
   created_at: string
   updated_at: string
 }

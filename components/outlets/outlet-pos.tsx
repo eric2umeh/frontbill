@@ -12,12 +12,14 @@ import type {
   OutletOrderType,
 } from '@/lib/outlets/types'
 import type { OutletDepartmentKey } from '@/lib/outlets/departments'
+import { isStoreControlledFnbOutlet } from '@/lib/outlets/departments'
 import { OUTLET_ORDER_TYPE_OPTIONS } from '@/lib/outlets/order-types'
 import { OutletWaiterField } from '@/components/outlets/outlet-waiter-field'
 import { itemAllowsPosPriceEdit } from '@/lib/outlets/category-price-editable'
 import {
   cartLineUsesCustomPrice,
   menuDefaultUnitPrice,
+  outletItemIsPriceAtSale,
   parseOutletUnitPriceInput,
   roundOutletMoney,
 } from '@/lib/outlets/cart-line-price'
@@ -38,6 +40,13 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -49,6 +58,21 @@ import { toast } from 'sonner'
 import { outletApiHeaders } from '@/lib/outlets/outlet-api-headers'
 import { OutletOrderCustomerFields } from '@/components/outlets/outlet-order-customer-fields'
 import type { OutletClientOption } from '@/lib/outlets/types'
+import { useSupplyChain } from '@/lib/supply-chain/supply-chain-context'
+import { useAuth } from '@/lib/auth-context'
+import { canonicalRoleKey } from '@/lib/permissions'
+import {
+  formatOutletStockQtyDisplay,
+  formatStockAvailabilityLabel,
+  isOutletItemOrderable,
+  maxSellableQty,
+  outletStockSource,
+} from '@/lib/outlets/outlet-supply-stock'
+import {
+  getStockLevel,
+  stockLevelNumberPillClass,
+  stockLevelTextClass,
+} from '@/lib/supply-chain/stock-level-ui'
 
 type LedgerOption = { id: string; name: string; balance: number }
 
@@ -77,6 +101,11 @@ export function OutletPos({
   onOrderBill,
   onOrderSettled,
 }: Props) {
+  const { name: staffName, role } = useAuth()
+  const supply = useSupplyChain()
+  const stockSource = outletStockSource(department)
+  const storeControlledFnb = isStoreControlledFnbOutlet(department)
+  const actor = { name: staffName ?? 'Staff', role: canonicalRoleKey(role) ?? 'staff' }
   const [search, setSearch] = useState('')
   const [categoryId, setCategoryId] = useState<string>('all')
   const [parentCategoryId, setParentCategoryId] = useState<string | null>(null)
@@ -97,6 +126,8 @@ export function OutletPos({
   const [takeawayFee, setTakeawayFee] = useState('')
   const [isComplimentary, setIsComplimentary] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [pricePromptItem, setPricePromptItem] = useState<OutletMenuItemRow | null>(null)
+  const [pricePromptValue, setPricePromptValue] = useState('')
 
   const rootCategories = useMemo(() => sortOutletRootCategories(categories), [categories])
 
@@ -174,8 +205,7 @@ export function OutletPos({
     setLedgerResults([])
   }, [isComplimentary])
 
-  const addToCart = (item: OutletMenuItemRow) => {
-    const unitPrice = menuDefaultUnitPrice(item.unit_price)
+  const addToCartWithPrice = (item: OutletMenuItemRow, unitPrice: number) => {
     const priceEditable = itemAllowsPosPriceEdit(item, categories)
     setCart((prev) => {
       if (!priceEditable) {
@@ -207,12 +237,68 @@ export function OutletPos({
     })
   }
 
+  const addToCart = (item: OutletMenuItemRow) => {
+    const link = supply.getOutletItemStock(department, item)
+    if (!isOutletItemOrderable(department, link)) {
+      toast.error(
+        `${item.name} is unavailable (${formatOutletStockQtyDisplay(link)})`,
+      )
+      return
+    }
+    if (link.tracked) {
+      const inCartQty = cart
+        .filter((l) => l.item.id === item.id)
+        .reduce((s, l) => s + l.qty, 0)
+      if (inCartQty + 1 > maxSellableQty(link)) {
+        toast.error(
+          `${item.name} — insufficient stock (${formatStockAvailabilityLabel(link) ?? formatOutletStockQtyDisplay(link)})`,
+        )
+        return
+      }
+    }
+    const unitPrice = menuDefaultUnitPrice(item.unit_price)
+    if (outletItemIsPriceAtSale(item, categories)) {
+      setPricePromptItem(item)
+      setPricePromptValue('')
+      return
+    }
+    addToCartWithPrice(item, unitPrice)
+  }
+
+  const confirmPricePrompt = () => {
+    if (!pricePromptItem) return
+    const parsed = parseOutletUnitPriceInput(pricePromptValue)
+    if (parsed == null || parsed <= 0) {
+      toast.error('Enter a valid price greater than zero')
+      return
+    }
+    addToCartWithPrice(pricePromptItem, parsed)
+    setPricePromptItem(null)
+    setPricePromptValue('')
+  }
+
   const updateLineQty = (lineId: string, delta: number) => {
-    setCart((prev) =>
-      prev
+    setCart((prev) => {
+      const line = prev.find((l) => l.id === lineId)
+      if (!line || delta <= 0) {
+        return prev
+          .map((l) => (l.id === lineId ? { ...l, qty: l.qty + delta } : l))
+          .filter((l) => l.qty > 0)
+      }
+      const link = supply.getOutletItemStock(department, line.item)
+      const inCartQty = prev
+        .filter((l) => l.item.id === line.item.id && l.id !== lineId)
+        .reduce((s, l) => s + l.qty, 0)
+      if (inCartQty + line.qty + delta > maxSellableQty(link)) {
+        toast.error(
+          `${line.item.name} — only ${formatOutletStockQtyDisplay(link)} available`,
+        )
+        return prev
+      }
+      return prev
         .map((l) => (l.id === lineId ? { ...l, qty: l.qty + delta } : l))
-        .filter((l) => l.qty > 0),
-    )
+        .filter((l) => l.qty > 0)
+    })
   }
 
   const updateLineUnitPrice = (lineId: string, raw: string) => {
@@ -309,6 +395,13 @@ export function OutletPos({
       toast.error('Add items to the order first')
       return
     }
+    const missingPrice = cart.find(
+      (l) => outletItemIsPriceAtSale(l.item, categories) && roundOutletMoney(l.unitPrice) <= 0,
+    )
+    if (missingPrice) {
+      toast.error(`Enter a sale price for ${missingPrice.item.name}`)
+      return
+    }
     if (settleNow && !isComplimentary && !paymentMethod) {
       toast.error('Choose a payment method to settle')
       return
@@ -327,6 +420,13 @@ export function OutletPos({
     }
     setSubmitting(true)
     try {
+      const cartLines = cart.map((l) => ({ item: l.item, qty: l.qty }))
+      const stockCheck = supply.validateOutletCart(department, cartLines)
+      if ('error' in stockCheck) {
+        toast.error(stockCheck.error)
+        return
+      }
+
       const res = await fetch('/api/outlets/orders', {
         method: 'POST',
         headers: await outletApiHeaders({ 'Content-Type': 'application/json' }),
@@ -339,6 +439,7 @@ export function OutletPos({
         return
       }
       const order = json.order as OutletOrderRow
+      supply.deductOutletCart(department, cartLines, actor)
       if (settleNow) {
         toast.success(
           isComplimentary
@@ -767,6 +868,21 @@ export function OutletPos({
           </div>
         )}
 
+        {storeControlledFnb && (
+          <p className="text-xs text-muted-foreground rounded-md border bg-muted/30 px-2 py-1.5 mb-2">
+            {department === 'restaurant'
+              ? 'Restaurant menu is controlled by kitchen stock (store → batches → portions). Items at 0 are unavailable.'
+              : 'Main bar menu is controlled by bar stock (central store → issue to bar). Items at 0 are unavailable.'}
+          </p>
+        )}
+        {stockSource !== 'none' && !storeControlledFnb && (
+          <p className="text-xs text-muted-foreground rounded-md border bg-muted/30 px-2 py-1.5 mb-2">
+            {stockSource === 'kitchen'
+              ? 'Food availability comes from kitchen stock (store → kitchen batches → portions).'
+              : 'Drink availability comes from bar stock (central store bar items issued to the bar).'}
+          </p>
+        )}
+
         <ScrollArea className="h-[min(560px,72vh)] pr-1">
           {groupedByCategory.map(({ cat, items: groupItems }) => (
             <section key={cat?.id ?? 'all'} className="mb-3">
@@ -784,27 +900,87 @@ export function OutletPos({
                   const cartQty = cart
                     .filter((l) => l.item.id === it.id)
                     .reduce((s, l) => s + l.qty, 0)
+                  const stockLink = supply.getOutletItemStock(department, it)
+                  const qtyDisplay = formatOutletStockQtyDisplay(stockLink)
+                  const unavailable = !isOutletItemOrderable(department, stockLink)
+                  const sellable = maxSellableQty(stockLink)
+                  let qtyLevel = null as ReturnType<typeof getStockLevel> | null
+                  if (stockLink.tracked && stockLink.stockId) {
+                    if (stockLink.source === 'kitchen') {
+                      const row = supply.kitchenStock.find((k) => k.id === stockLink.stockId)
+                      qtyLevel = getStockLevel(stockLink.available, row?.reorderLevel ?? 2)
+                    } else {
+                      const row = supply.barStock.find((b) => b.id === stockLink.stockId)
+                      qtyLevel = getStockLevel(stockLink.available, row?.reorderLevel ?? 6)
+                    }
+                  } else if (storeControlledFnb) {
+                    qtyLevel = 'out'
+                  }
                   const displayDesc = getItemDisplayDescription(it.description)
                   const displayTags = getItemDisplayTags(it.tags)
                   return (
                     <button
                       key={it.id}
                       type="button"
+                      disabled={unavailable}
                       onClick={() => addToCart(it)}
                       className={cn(
-                        'text-left rounded-lg border bg-card px-2.5 py-2 shadow-sm transition hover:border-amber-400 min-h-[88px] flex flex-col',
-                        inCart && 'ring-1 ring-amber-500 border-amber-400 bg-amber-50/50',
+                        'text-left rounded-lg border bg-card px-2.5 py-2 shadow-sm transition min-h-[96px] flex flex-col',
+                        unavailable
+                          ? 'opacity-45 cursor-not-allowed border-dashed bg-muted/40 hover:border-border'
+                          : 'hover:border-amber-400',
+                        inCart && !unavailable && 'ring-1 ring-amber-500 border-amber-400 bg-amber-50/50',
                       )}
                     >
                       <div className="flex justify-between gap-1.5 items-start">
-                        <p className="text-xs font-semibold leading-snug line-clamp-2 flex-1">{it.name}</p>
+                        <p
+                          className={cn(
+                            'text-xs font-semibold leading-snug line-clamp-2 flex-1',
+                            unavailable && 'text-muted-foreground line-through decoration-red-400/80',
+                          )}
+                        >
+                          {it.name}
+                        </p>
                         <span
                           className={cn(
                             'h-3.5 w-3.5 rounded-full border shrink-0 mt-0.5',
-                            inCart ? 'bg-amber-700 border-amber-700' : 'border-muted-foreground/40',
+                            inCart && !unavailable ? 'bg-amber-700 border-amber-700' : 'border-muted-foreground/40',
                           )}
                         />
                       </div>
+                      {storeControlledFnb && (
+                        <div className="mt-1 flex flex-wrap items-center gap-1">
+                          <span
+                            className={cn(
+                              qtyLevel && stockLevelNumberPillClass(qtyLevel),
+                              !qtyLevel && 'inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold tabular-nums bg-muted text-muted-foreground',
+                            )}
+                          >
+                            {qtyDisplay}
+                          </span>
+                          {unavailable && (
+                            <Badge variant="secondary" className="text-[9px] h-4 px-1 bg-red-100 text-red-800">
+                              Unavailable
+                            </Badge>
+                          )}
+                          {!unavailable && sellable !== Infinity && sellable <= 3 && (
+                            <Badge variant="secondary" className="text-[9px] h-4 px-1 bg-amber-100 text-amber-900">
+                              Low
+                            </Badge>
+                          )}
+                        </div>
+                      )}
+                      {!storeControlledFnb && stockLink.tracked && qtyLevel && (
+                        <p
+                          className={cn(
+                            'text-[10px] mt-0.5 font-medium',
+                            stockLevelTextClass(qtyLevel),
+                          )}
+                        >
+                          {unavailable ? qtyDisplay : formatStockAvailabilityLabel(stockLink)}
+                          {cartQty > 0 ? ` · cart ${cartQty}` : ''}
+                        </p>
+                      )}
                       {displayDesc ? (
                         <p className="text-[10px] text-muted-foreground mt-1 line-clamp-2 leading-snug flex-1">
                           {displayDesc}
@@ -826,7 +1002,13 @@ export function OutletPos({
                         </div>
                       )}
                       <p className="text-sm font-bold tabular-nums mt-auto pt-1">
-                        {formatNaira(it.unit_price)}
+                        {outletItemIsPriceAtSale(it, categories) ? (
+                          <span className="text-amber-800 dark:text-amber-200">Price at sale</span>
+                        ) : itemAllowsPosPriceEdit(it, categories) ? (
+                          <>From {formatNaira(it.unit_price)}</>
+                        ) : (
+                          formatNaira(it.unit_price)
+                        )}
                         {inCart && cartQty > 0 ? (
                           <span className="block text-[10px] font-normal text-amber-800">
                             {cartQty} in order
@@ -844,6 +1026,46 @@ export function OutletPos({
           )}
         </ScrollArea>
       </div>
+
+      <Dialog open={!!pricePromptItem} onOpenChange={(open) => !open && setPricePromptItem(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>
+              {pricePromptItem ? `Price for ${pricePromptItem.name}` : 'Enter price'}
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            This item is priced with the main plate or sides. Enter the amount to charge for this order.
+          </p>
+          <div className="space-y-2">
+            <Label htmlFor="outlet-price-prompt">Unit price (₦)</Label>
+            <Input
+              id="outlet-price-prompt"
+              type="number"
+              min={0}
+              step="0.01"
+              inputMode="decimal"
+              autoFocus
+              value={pricePromptValue}
+              onChange={(e) => setPricePromptValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  confirmPricePrompt()
+                }
+              }}
+            />
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setPricePromptItem(null)}>
+              Cancel
+            </Button>
+            <Button type="button" onClick={confirmPricePrompt}>
+              Add to order
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
     </div>
   )
