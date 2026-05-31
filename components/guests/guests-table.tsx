@@ -72,5 +72,36 @@ export function GuestsTable({ guests }: GuestsTableProps) {
     },
   ]
 
-  return <DataTable columns={columns} data={guests} pageSize={10} />
+  return (
+    <DataTable
+      columns={columns}
+      data={guests}
+      pageSize={15}
+      searchPlaceholder="Search name, phone, email…"
+      searchMatch={(guest, query) => {
+        const q = query.trim().toLowerCase()
+        return (
+          `${guest.first_name} ${guest.last_name}`.toLowerCase().includes(q) ||
+          (guest.phone ?? '').toLowerCase().includes(q) ||
+          (guest.email ?? '').toLowerCase().includes(q) ||
+          (guest.nationality ?? '').toLowerCase().includes(q)
+        )
+      }}
+      filters={[
+        {
+          key: 'is_active',
+          label: 'Status',
+          options: [
+            { value: 'true', label: 'Active' },
+            { value: 'false', label: 'Inactive' },
+          ],
+        },
+      ]}
+      filterMatch={(guest, key, value) => {
+        if (key !== 'is_active') return undefined
+        return String(guest.is_active) === value
+      }}
+      onRowClick={handleRowClick}
+    />
+  )
 }
