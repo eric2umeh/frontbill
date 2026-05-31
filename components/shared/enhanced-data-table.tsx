@@ -75,7 +75,7 @@ export function EnhancedDataTable<T extends Record<string, any>>({
   controlledActiveFilters,
   onControlledActiveFiltersChange,
   renderCard,
-  itemsPerPage = 10,
+  itemsPerPage = 15,
   dateField,
   onDateFilterChange,
   onRowClick,
