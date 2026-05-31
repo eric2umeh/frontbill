@@ -21,7 +21,13 @@ import {
   User, Bed, CalendarDays, ClipboardList, RefreshCw, ChevronDown,
 } from 'lucide-react'
 import { RoomInventoryStatsStrip } from '@/components/shared/room-inventory-stats-strip'
+import { RoomStatusRemarksPanel } from '@/components/rooms/room-status-remarks-panel'
 import { reconcileRoomStatusesClient } from '@/lib/rooms/reconcile-room-status-client'
+import {
+  fetchRoomStatusRemarksClient,
+  patchRoomStatus,
+} from '@/lib/rooms/update-room-status-client'
+import type { RoomStatusRemark } from '@/lib/rooms/room-status-remarks'
 
 type TaskStatus = 'pending' | 'in_progress' | 'done' | 'skipped'
 type TaskPriority = 'low' | 'normal' | 'high' | 'urgent'
@@ -127,6 +133,8 @@ export default function HousekeepingPage() {
   const [statusComment, setStatusComment] = useState('')
   const [pendingRoomStatus, setPendingRoomStatus] = useState<string | null>(null)
   const [roomStatusSaving, setRoomStatusSaving] = useState(false)
+  const [statusRemarks, setStatusRemarks] = useState<RoomStatusRemark[]>([])
+  const [statusRemarksLoading, setStatusRemarksLoading] = useState(false)
   const [taskStatusModal, setTaskStatusModal] = useState<{ task: HousekeepingTask; newStatus: TaskStatus } | null>(null)
   const [taskStatusRemark, setTaskStatusRemark] = useState('')
   const [taskStatusSaving, setTaskStatusSaving] = useState(false)
@@ -296,12 +304,20 @@ export default function HousekeepingPage() {
     setStatusChangeRoom(room)
     setPendingRoomStatus(room.status)
     setStatusComment('')
+    setStatusRemarks([])
+    setStatusRemarksLoading(true)
+    void fetchRoomStatusRemarksClient(room.id)
+      .then(setStatusRemarks)
+      .catch(() => setStatusRemarks([]))
+      .finally(() => setStatusRemarksLoading(false))
   }
 
   const closeRoomStatusModal = () => {
     setStatusChangeRoom(null)
     setPendingRoomStatus(null)
     setStatusComment('')
+    setStatusRemarks([])
+    setStatusRemarksLoading(false)
   }
 
   const handleConfirmRoomStatusChange = async () => {
@@ -330,28 +346,17 @@ export default function HousekeepingPage() {
 
     setRoomStatusSaving(true)
     try {
-      const supabase = createClient()
       const room = statusChangeRoom
       const remark = statusComment.trim()
-      const statusLabel =
-        housekeepingStatusPickerOptions.find((o) => o.value === newStatus)?.label ?? newStatus
-
-      const { error: roomError } = await supabase
-        .from('rooms')
-        .update({ status: newStatus, updated_by: userId, updated_at: new Date().toISOString() })
-        .eq('id', room.id)
-      if (roomError) throw roomError
-
-      const noteText = remark
-        ? `Status → ${statusLabel}: ${remark}`
-        : `Status → ${statusLabel}`
-
-      await saveHousekeepingRemark({
-        roomId: room.id,
-        roomNumber: room.room_number,
-        noteText,
-        taskType: 'Room Status Change',
+      const result = await patchRoomStatus({
+        room_id: room.id,
+        room_number: room.room_number,
+        status: newStatus,
+        source: 'housekeeping',
+        remark: remark || undefined,
+        scheduled_date: filterDate,
       })
+      if (!result.ok) throw new Error(result.message)
 
       toast.success(remark ? 'Room status and remark saved' : 'Room status updated')
       setRooms((prev) => prev.map((r) => (r.id === room.id ? { ...r, status: newStatus } : r)))
@@ -729,6 +734,7 @@ export default function HousekeepingPage() {
           </DialogHeader>
           {statusChangeRoom && (
             <div className="space-y-4">
+              <RoomStatusRemarksPanel remarks={statusRemarks} loading={statusRemarksLoading} />
               <div className="grid grid-cols-2 gap-2">
                 {housekeepingStatusPickerOptions.map((opt) => (
                   <button
