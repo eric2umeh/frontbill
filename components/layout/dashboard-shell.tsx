@@ -15,7 +15,7 @@ import {
 import { NightAuditPendingProvider } from '@/components/providers/night-audit-pending-provider'
 import { BrandingFavicon } from '@/components/branding/branding-favicon'
 import { BRAND_LOGO_SESSION_KEY } from '@/lib/branding/constants'
-import { getPostLoginPath } from '@/lib/utils/post-login-path'
+import { SupplyChainProvider } from '@/lib/supply-chain/supply-chain-context'
 
 const ROUTE_PERMISSIONS: Array<{ path: string; permission: Permission }> = [
   { path: '/dashboard', permission: 'dashboard:view' },
@@ -25,6 +25,9 @@ const ROUTE_PERMISSIONS: Array<{ path: string; permission: Permission }> = [
   { path: '/accounts', permission: 'guests:view' },
   { path: '/guest-database', permission: 'guests:view' },
   { path: '/organizations', permission: 'organizations:view' },
+  { path: '/transactions/analytics/profitability', permission: 'analytics:view' },
+  { path: '/transactions/analytics/revenue', permission: 'analytics:view' },
+  { path: '/transactions/analytics', permission: 'analytics:view' },
   { path: '/transactions', permission: 'transactions:view' },
   { path: '/payments', permission: 'payments:view' },
   { path: '/reports', permission: 'reports:view' },
@@ -35,6 +38,7 @@ const ROUTE_PERMISSIONS: Array<{ path: string; permission: Permission }> = [
   { path: '/ledger', permission: 'ledger:view' },
   { path: '/housekeeping', permission: 'housekeeping:view' },
   { path: '/maintenance', permission: 'maintenance:view' },
+  { path: '/supply', permission: 'supply:store' },
   { path: '/store/requisitions', permission: 'store:requisition' },
   { path: '/store', permission: 'store:view' },
   { path: '/outlets', permission: 'outlet:view' },
@@ -53,6 +57,45 @@ function getRequiredPermission(pathname: string) {
 function canAccessPath(pathname: string, userRole: string): boolean {
   if (pathname === '/expenses' || pathname.startsWith('/expenses/')) {
     return canAccessExpenseMenu(userRole) && hasPermission(userRole, 'expenses:view')
+  }
+  if (pathname === '/accounts' || pathname.startsWith('/accounts/')) {
+    return hasPermission(userRole, 'guests:view') || hasPermission(userRole, 'organizations:view')
+  }
+  if (pathname === '/organizations' || pathname.startsWith('/organizations/')) {
+    return hasPermission(userRole, 'organizations:view') || hasPermission(userRole, 'guests:view')
+  }
+  if (
+    pathname.startsWith('/transactions/analytics') ||
+    pathname === '/transactions/revenue' ||
+    pathname === '/transactions/profitability'
+  ) {
+    return hasPermission(userRole, 'analytics:view')
+  }
+  if (pathname === '/transactions' || pathname.startsWith('/transactions/')) {
+    if (pathname === '/transactions') {
+      return hasPermission(userRole, 'transactions:view') || hasPermission(userRole, 'analytics:view')
+    }
+    return hasPermission(userRole, 'transactions:view')
+  }
+  if (pathname === '/analytics' || pathname.startsWith('/analytics/')) {
+    return hasPermission(userRole, 'analytics:view')
+  }
+  if (pathname.startsWith('/supply/')) {
+    if (pathname.startsWith('/supply/store')) return hasPermission(userRole, 'supply:store')
+    if (pathname.startsWith('/supply/kitchen')) return hasPermission(userRole, 'supply:kitchen')
+    if (pathname.startsWith('/supply/fnb'))
+      return hasPermission(userRole, 'supply:fnb') || hasPermission(userRole, 'outlet:view')
+    if (pathname.startsWith('/supply/purchasing')) {
+      const rk = canonicalRoleKey(userRole)
+      if (rk === 'admin' || rk === 'superadmin') return true
+      return (
+        hasPermission(userRole, 'supply:purchasing') ||
+        hasPermission(userRole, 'supply:approve_accountant') ||
+        hasPermission(userRole, 'supply:approve_manager')
+      )
+    }
+    if (pathname.startsWith('/supply/activity')) return hasPermission(userRole, 'supply:activity')
+    return hasPermission(userRole, 'supply:store')
   }
   if (pathname === '/store/requisitions' || pathname.startsWith('/store/requisitions/')) {
     return hasPermission(userRole, 'store:requisition') || hasPermission(userRole, 'store:view')
@@ -165,6 +208,7 @@ export function DashboardShell({
       }}
     >
       <BrandingFavicon href={user.organizationLogoUrl} />
+      <SupplyChainProvider>
       <NightAuditPendingProvider>
         <div className="flex h-screen overflow-hidden bg-background">
           <Sidebar mobileOpen={mobileMenuOpen} onMobileClose={() => setMobileMenuOpen(false)} />
@@ -174,6 +218,7 @@ export function DashboardShell({
           </div>
         </div>
       </NightAuditPendingProvider>
+      </SupplyChainProvider>
     </AuthProvider>
   )
 }

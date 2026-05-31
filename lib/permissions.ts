@@ -42,6 +42,14 @@ export type Permission =
   | 'outlet:delete'
   | 'outlet:reports'
   | 'outlet:receipt'
+  /** Supply chain revamp */
+  | 'supply:store'
+  | 'supply:kitchen'
+  | 'supply:fnb'
+  | 'supply:purchasing'
+  | 'supply:approve_accountant'
+  | 'supply:approve_manager'
+  | 'supply:activity'
 
 export type RoleKey =
   | 'superadmin'
@@ -156,6 +164,14 @@ export const ALL_PERMISSIONS: { key: Permission; label: string; group: string }[
   { key: 'outlet:reports', label: 'Outlet Sales Reports & Night Audit', group: 'Outlets' },
   { key: 'outlet:receipt', label: 'Print / View Outlet Receipts', group: 'Outlets' },
 
+  { key: 'supply:store', label: 'Central Store (stock & PO basket)', group: 'Supply Chain' },
+  { key: 'supply:kitchen', label: 'Kitchen batches & recipes', group: 'Supply Chain' },
+  { key: 'supply:fnb', label: 'F&B sales (auto stock deduct)', group: 'Supply Chain' },
+  { key: 'supply:purchasing', label: 'Market retirement & PO', group: 'Supply Chain' },
+  { key: 'supply:approve_accountant', label: 'Approve PO (Accountant)', group: 'Supply Chain' },
+  { key: 'supply:approve_manager', label: 'Approve PO (Manager)', group: 'Supply Chain' },
+  { key: 'supply:activity', label: 'Supply chain activity log', group: 'Supply Chain' },
+
   { key: 'analytics:view', label: 'View Analytics', group: 'Analytics' },
   { key: 'analytics:export', label: 'Export Analytics', group: 'Analytics' },
 
@@ -238,6 +254,9 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
       'store:adjust',
       'store:issue',
       'store:reports',
+      'supply:store',
+      'supply:purchasing',
+      'supply:activity',
       'settings:view',
     ],
   },
@@ -252,6 +271,8 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
       'store:requisition',
       'store:reports',
       'store:audit',
+      'supply:store',
+      'supply:activity',
       'night_audit:view',
       'audit_trails:view',
       'settings:view',
@@ -315,6 +336,10 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
       'store:requisition',
       'store:reports',
       'store:audit',
+      'supply:store',
+      'supply:purchasing',
+      'supply:approve_accountant',
+      'supply:activity',
       'outlet:view',
       'outlet:reports',
       'outlet:receipt',
@@ -397,7 +422,7 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
     color: 'bg-orange-100 text-orange-800',
     permissions: [
       'maintenance:view', 'maintenance:create', 'maintenance:edit', 'maintenance:report',
-      'rooms:view',
+      'rooms:view', 'rooms:update_status',
       'settings:view',
     ],
   },
@@ -412,6 +437,10 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
       'outlet:sell',
       'outlet:reports',
       'outlet:receipt',
+      'supply:fnb',
+      'supply:kitchen',
+      'supply:store',
+      'supply:activity',
       'settings:view',
     ],
   },
@@ -519,6 +548,25 @@ export const EXPENSE_MENU_ROLE_KEYS: readonly RoleKey[] = [
 export function canAccessExpenseMenu(userRole: string | null | undefined): boolean {
   const roleKey = canonicalRoleKey(userRole)
   return roleKey != null && EXPENSE_MENU_ROLE_KEYS.includes(roleKey)
+}
+
+/** Testing override: Administrator / Superadmin may review POs without a dedicated accountant/manager login. */
+export function canAdminTestApproveSupplyPo(userRole: string | null | undefined): boolean {
+  const roleKey = canonicalRoleKey(userRole)
+  return roleKey === 'admin' || roleKey === 'superadmin'
+}
+
+export function canSupplyPoAccountantReview(userRole: string | null | undefined): boolean {
+  return hasPermission(userRole, 'supply:approve_accountant') || canAdminTestApproveSupplyPo(userRole)
+}
+
+export function canSupplyPoManagerReview(userRole: string | null | undefined): boolean {
+  return hasPermission(userRole, 'supply:approve_manager') || canAdminTestApproveSupplyPo(userRole)
+}
+
+export function canKickstartOutletStock(userRole: string | null | undefined): boolean {
+  const roleKey = canonicalRoleKey(userRole)
+  return roleKey === 'admin' || roleKey === 'superadmin' || roleKey === 'manager'
 }
 
 export function hasPermission(userRole: string | null | undefined, permission: Permission): boolean {

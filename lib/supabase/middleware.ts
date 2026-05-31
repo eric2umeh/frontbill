@@ -6,10 +6,37 @@ import {
   AUTH_USER_ID_HEADER,
 } from '@/lib/auth/request-auth-headers'
 
+/** Paths that must render immediately — no Supabase Auth server round-trip. */
+function isPublicAuthPath(pathname: string) {
+  return (
+    pathname.startsWith('/auth/') ||
+    pathname.startsWith('/api/auth/') ||
+    pathname.startsWith('/api/setup/')
+  )
+}
+
+function clearSupabaseAuthCookies(
+  request: NextRequest,
+  response: NextResponse,
+) {
+  for (const cookie of request.cookies.getAll()) {
+    if (cookie.name.startsWith('sb-') && cookie.name.includes('auth-token')) {
+      response.cookies.set(cookie.name, '', { maxAge: 0, path: '/' })
+    }
+  }
+}
+
 export async function updateSession(request: NextRequest) {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
   const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
   if (!supabaseUrl || !supabaseKey) {
+    return NextResponse.next({ request })
+  }
+
+  const pathname = request.nextUrl.pathname
+
+  // Login/sign-up must not block on getUser (stale Docker cookies caused 12s+ hangs).
+  if (isPublicAuthPath(pathname)) {
     return NextResponse.next({ request })
   }
 
@@ -40,12 +67,14 @@ export async function updateSession(request: NextRequest) {
     },
   )
 
-  const { user } = await getVerifiedServerUser(supabase)
+  const { user, timedOut } = await getVerifiedServerUser(supabase)
+
+  const effectiveUser = timedOut ? null : user
 
   const requestHeaders = new Headers(request.headers)
-  if (user?.id) {
-    requestHeaders.set(AUTH_USER_ID_HEADER, user.id)
-    requestHeaders.set(AUTH_USER_EMAIL_HEADER, user.email ?? '')
+  if (effectiveUser?.id) {
+    requestHeaders.set(AUTH_USER_ID_HEADER, effectiveUser.id)
+    requestHeaders.set(AUTH_USER_EMAIL_HEADER, effectiveUser.email ?? '')
   }
 
   const response = NextResponse.next({
@@ -55,6 +84,9 @@ export async function updateSession(request: NextRequest) {
   const copySessionCookies = (target: NextResponse) => {
     for (const cookie of supabaseResponse.cookies.getAll()) {
       target.cookies.set(cookie.name, cookie.value, cookie)
+    }
+    if (timedOut) {
+      clearSupabaseAuthCookies(request, target)
     }
     return target
   }
@@ -86,24 +118,19 @@ export async function updateSession(request: NextRequest) {
     '/users-roles',
     '/store',
     '/outlets',
+    '/supply',
   ]
   const isProtected = protectedPaths.some((path) =>
     request.nextUrl.pathname.startsWith(path),
   )
 
-  if (isProtected && !user) {
+  if (isProtected && !effectiveUser) {
     const url = request.nextUrl.clone()
     url.pathname = '/auth/login'
     return copySessionCookies(NextResponse.redirect(url))
   }
 
-  if (user && request.nextUrl.pathname.startsWith('/auth/login')) {
-    const url = request.nextUrl.clone()
-    url.pathname = '/dashboard'
-    return copySessionCookies(NextResponse.redirect(url))
-  }
-
-  if (request.nextUrl.pathname === '/' && user) {
+  if (pathname === '/' && effectiveUser) {
     const url = request.nextUrl.clone()
     url.pathname = '/dashboard'
     return copySessionCookies(NextResponse.redirect(url))
