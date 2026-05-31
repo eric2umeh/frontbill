@@ -280,7 +280,7 @@ export default function OrganizationDetailPage() {
 
       toast.success('Organization deleted successfully')
       toast.dismiss(toastId)
-      router.push('/organizations')
+      router.push('/accounts?tab=organizations')
     } catch (error: any) {
       toast.error(error.message || 'Failed to delete organization')
     } finally {
