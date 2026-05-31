@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { resolveHotelTimeZone } from '@/lib/hotel-date'
-import { isInHouseOnCalendarDay, todayYmdHotel } from '@/lib/utils/booking-in-house-dates'
+import { bookingYmdHotel, isInHouseOnCalendarDay, todayYmdHotel } from '@/lib/utils/booking-in-house-dates'
 
 export const OCCUPYING_BOOKING_STATUSES = ['checked_in', 'confirmed', 'reserved'] as const
 
@@ -38,17 +38,38 @@ export function pickOccupyingBooking<T extends OccupyingBookingRow>(rows: T[]): 
   return open[0] ?? null
 }
 
-/** PMS room status from the active folio on that room. Returns null if housekeeping block should stay. */
+/** Active or future folio that should keep a room unavailable in PMS inventory. */
+export function pickRoomStatusBooking<T extends OccupyingBookingRow>(rows: T[]): T | null {
+  const today = todayYmdHotel()
+  const tz = resolveHotelTimeZone()
+
+  const open = rows.filter((b) => {
+    const fs = String(b.folio_status || 'active').toLowerCase()
+    if (fs === 'checked_out' || fs === 'cancelled') return false
+    if (b.status === 'checked_out' || b.status === 'cancelled') return false
+    if (!OCCUPYING_BOOKING_STATUSES.includes(b.status as (typeof OCCUPYING_BOOKING_STATUSES)[number])) {
+      return false
+    }
+    if (b.status === 'checked_in') return true
+    const checkOut = bookingYmdHotel(b.check_out, tz)
+    return Boolean(checkOut && checkOut >= today)
+  })
+
+  const rank = (s: string) => (s === 'checked_in' ? 0 : s === 'confirmed' ? 1 : 2)
+  open.sort((a, b) => rank(a.status) - rank(b.status))
+  return open[0] ?? null
+}
+
+/** PMS room status from the booking held on that room. Returns null if housekeeping block should stay. */
 export function deriveRoomStatusFromOccupying(
   occupying: Pick<OccupyingBookingRow, 'status'> | null,
   currentStatus: string | null | undefined,
 ): string | null {
   const cur = normStatus(currentStatus)
-  if (cur === 'maintenance' || cur === 'out_of_order') return null
+  if (cur === 'maintenance' || cur === 'out_of_order' || cur === 'cleaning') return null
 
   if (!occupying) {
     if (cur === 'occupied' || cur === 'reserved') return 'available'
-    if (cur === 'cleaning') return 'available'
     return null
   }
 
@@ -81,7 +102,7 @@ export type ReconcileRoomStatusesResult = {
 }
 
 /**
- * Align rooms.status with active folios: free rooms after checkout, mark occupied/reserved from bookings.
+ * Align rooms.status with active folios/holds: free rooms after checkout, mark occupied/reserved from bookings.
  */
 export async function reconcileRoomStatusesForOrganization(
   supabase: SupabaseClient,
@@ -116,7 +137,7 @@ export async function reconcileRoomStatusesForOrganization(
   const now = new Date().toISOString()
 
   for (const room of rooms ?? []) {
-    const occupying = pickOccupyingBooking(byRoom.get(room.id) ?? [])
+    const occupying = pickRoomStatusBooking(byRoom.get(room.id) ?? [])
     const next = deriveRoomStatusFromOccupying(occupying, room.status)
     if (!next || normStatus(next) === normStatus(room.status)) continue
 
