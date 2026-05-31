@@ -1,6 +1,11 @@
 import { headers } from 'next/headers'
 import { createClient } from '@/lib/supabase/server'
-import { APP_LOGIN_ROLE_KEYS, canonicalRoleKey } from '@/lib/permissions'
+import { createAdminClient } from '@/lib/supabase/admin'
+import {
+  APP_LOGIN_ROLE_KEYS,
+  canonicalRoleKey,
+  type RoleKey,
+} from '@/lib/permissions'
 import {
   AUTH_USER_EMAIL_HEADER,
   AUTH_USER_ID_HEADER,
@@ -20,9 +25,27 @@ export type LoadDashboardUserResult =
   | { status: 'unauthenticated' }
   | { status: 'forbidden' }
 
+type ProfileRow = {
+  full_name: string | null
+  role: string | null
+  organization_id: string | null
+}
+
 const PROFILE_FETCH_MS = 10_000
 
-async function fetchProfile(
+function isAllowedLoginRole(roleKey: RoleKey | null): roleKey is RoleKey {
+  return roleKey != null && APP_LOGIN_ROLE_KEYS.includes(roleKey)
+}
+
+function resolveLoginRole(...candidates: Array<string | null | undefined>): RoleKey | null {
+  for (const candidate of candidates) {
+    const roleKey = canonicalRoleKey(candidate)
+    if (isAllowedLoginRole(roleKey)) return roleKey
+  }
+  return null
+}
+
+async function fetchProfileWithTimeout(
   supabase: Awaited<ReturnType<typeof createClient>>,
   userId: string,
 ) {
@@ -32,7 +55,7 @@ async function fetchProfile(
     .eq('id', userId)
     .maybeSingle()
 
-  const raced = await Promise.race([
+  return Promise.race([
     query,
     new Promise<{ data: null; error: { message: string } }>((resolve) =>
       setTimeout(
@@ -41,8 +64,59 @@ async function fetchProfile(
       ),
     ),
   ])
+}
 
-  return raced
+async function fetchProfileById(userId: string): Promise<{
+  profile: ProfileRow | null
+  profileError: { message: string } | null
+  metadataRole: string | null
+}> {
+  let metadataRole: string | null = null
+
+  try {
+    const admin = createAdminClient()
+    const [profileResult, authResult] = await Promise.all([
+      admin
+        .from('profiles')
+        .select('full_name, role, organization_id')
+        .eq('id', userId)
+        .maybeSingle(),
+      admin.auth.admin.getUserById(userId),
+    ])
+
+    const meta = authResult.data.user?.user_metadata?.role
+    metadataRole =
+      typeof meta === 'string' && meta.trim() ? meta.trim() : null
+
+    if (!profileResult.error && profileResult.data) {
+      return {
+        profile: profileResult.data,
+        profileError: null,
+        metadataRole,
+      }
+    }
+
+    if (profileResult.error) {
+      console.warn('loadDashboardUser: admin profile fetch failed', profileResult.error.message)
+    }
+  } catch (error) {
+    console.warn(
+      'loadDashboardUser: admin client unavailable, falling back to session client',
+      error instanceof Error ? error.message : error,
+    )
+  }
+
+  const supabase = await createClient()
+  const { data: profile, error: profileError } = await fetchProfileWithTimeout(
+    supabase,
+    userId,
+  )
+
+  return {
+    profile: profile ?? null,
+    profileError: profileError ?? null,
+    metadataRole,
+  }
 }
 
 export async function loadDashboardUser(): Promise<LoadDashboardUserResult> {
@@ -61,16 +135,22 @@ export async function loadDashboardUser(): Promise<LoadDashboardUserResult> {
       return { status: 'unauthenticated' }
     }
 
-    const supabase = await createClient()
-    const { data: profile, error: profileError } = await fetchProfile(supabase, userId)
+    const { profile, profileError, metadataRole } = await fetchProfileById(userId)
 
     if (profileError) {
       console.warn('loadDashboardUser: profile fetch failed', profileError.message)
     }
 
-    if (!profileError && profile) {
-      const rk = canonicalRoleKey(profile.role)
-      if (!rk || !APP_LOGIN_ROLE_KEYS.includes(rk)) {
+    const roleKey = resolveLoginRole(profile?.role, metadataRole)
+
+    if (profile) {
+      if (!roleKey) {
+        console.warn('loadDashboardUser: forbidden — unrecognized role', {
+          userId,
+          email,
+          profileRole: profile.role,
+          metadataRole,
+        })
         return { status: 'forbidden' }
       }
 
@@ -80,8 +160,22 @@ export async function loadDashboardUser(): Promise<LoadDashboardUserResult> {
           id: userId,
           email,
           name: profile.full_name || email.split('@')[0] || 'User',
-          role: rk,
+          role: roleKey,
           organizationId: profile.organization_id || '',
+          organizationLogoUrl: '',
+        },
+      }
+    }
+
+    if (roleKey) {
+      return {
+        status: 'ok',
+        user: {
+          id: userId,
+          email,
+          name: email.split('@')[0] || 'User',
+          role: roleKey,
+          organizationId: '',
           organizationLogoUrl: '',
         },
       }

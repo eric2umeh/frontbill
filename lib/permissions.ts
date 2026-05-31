@@ -510,6 +510,10 @@ const PROFILE_ROLE_ALIASES: Record<string, RoleKey> = {
   cashiers: 'cashier',
   cashier_staff: 'cashier',
   treasury: 'cashier',
+  super_administrator: 'superadmin',
+  superadministrator: 'superadmin',
+  platform_admin: 'superadmin',
+  owner: 'superadmin',
 }
 
 /** Every role that may use the signed-in hotel app shell (same set as `ROLE_DEFINITIONS`). */
