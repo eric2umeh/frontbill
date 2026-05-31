@@ -65,6 +65,7 @@ export async function POST(request: Request) {
       is_active: body?.is_active !== false,
       sort_order: Number(body?.sort_order) || 0,
       service_code: body?.service_code || null,
+      price_editable: body?.price_editable === true,
       created_by: auth.ctx.userId,
       updated_by: auth.ctx.userId,
     })
@@ -104,6 +105,8 @@ export async function PATCH(request: Request) {
   if (body.tags != null) patch.tags = normalizeOutletItemTags(body.tags)
   if (body.is_active != null) patch.is_active = Boolean(body.is_active)
   if (body.sort_order != null) patch.sort_order = Number(body.sort_order)
+  if (body.service_code !== undefined) patch.service_code = body.service_code ? String(body.service_code).trim() : null
+  if (body.price_editable !== undefined) patch.price_editable = body.price_editable === true
 
   const { data, error } = await admin
     .from('outlet_menu_items')
