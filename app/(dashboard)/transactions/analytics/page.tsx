@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation'
 
-export default function AnalyticsRevenueRedirectPage() {
+export default function TransactionsAnalyticsIndexPage() {
   redirect('/transactions/analytics/revenue')
 }
