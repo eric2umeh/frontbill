@@ -13,7 +13,6 @@ const NAV: Array<{ href: string; label: string; permissions: import('@/lib/permi
   { href: '/supply/kitchen', label: 'Kitchen', permissions: ['supply:kitchen'] },
   { href: '/supply/purchasing', label: 'Purchasing', permissions: ['supply:purchasing', 'supply:approve_accountant', 'supply:approve_manager'] },
   { href: '/supply/activity', label: 'Activity Log', permissions: ['supply:activity'] },
-  { href: '/outlets', label: 'Outlets (POS)', permissions: ['outlet:view', 'supply:fnb'] },
 ]
 
 function SupplyNav() {
@@ -27,10 +26,7 @@ function SupplyNav() {
   return (
     <nav className="flex flex-wrap gap-1 border-b pb-3 mb-2">
       {visible.map((n) => {
-        const isActive =
-          n.href === '/outlets'
-            ? pathname === '/outlets' || pathname.startsWith('/outlets/')
-            : pathname.startsWith(n.href)
+        const isActive = pathname.startsWith(n.href)
         return (
           <Link
             key={n.href}
