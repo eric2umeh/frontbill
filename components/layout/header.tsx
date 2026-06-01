@@ -65,6 +65,7 @@ interface Notification {
 }
 
 export function Header({ user, onMenuClick }: HeaderProps) {
+  const [radixReady, setRadixReady] = useState(false)
   const [loggingOut, setLoggingOut] = useState(false)
   const [notifications, setNotifications] = useState<Notification[]>([])
   const [readIds, setReadIds] = useState<Set<string>>(new Set())
@@ -76,6 +77,10 @@ export function Header({ user, onMenuClick }: HeaderProps) {
   const router = useRouter()
   const { organizationId } = useAuth()
   const notificationStorageKey = `frontbill-read-notifications-${organizationId || user.id}`
+
+  useEffect(() => {
+    setRadixReady(true)
+  }, [])
 
   useEffect(() => {
     try {
@@ -568,97 +573,125 @@ export function Header({ user, onMenuClick }: HeaderProps) {
       </div>
 
       <div className="flex items-center gap-1 shrink-0">
-        <Popover open={notifOpen} onOpenChange={setNotifOpen}>
-          <PopoverTrigger asChild>
-            <Button variant="ghost" size="icon" className="relative h-8 w-8">
+        {!radixReady ? (
+          <>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="relative h-8 w-8"
+              aria-label="Notifications"
+              type="button"
+            >
               <Bell className="h-4 w-4" />
-              {unreadCount > 0 && (
-                <span className="absolute right-1.5 top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-destructive text-[10px] font-medium text-destructive-foreground">
-                  {unreadCount > 9 ? '9+' : unreadCount}
-                </span>
-              )}
             </Button>
-          </PopoverTrigger>
-          <PopoverContent className="w-80 p-0" align="end">
-            <div className="flex items-center justify-between border-b px-4 py-3">
-              <h4 className="text-sm font-semibold">Notifications</h4>
-              {unreadCount > 0 && (
-                <Button variant="ghost" size="sm" className="h-auto px-2 py-1 text-xs text-muted-foreground" onClick={markAllRead}>
-                  Mark all read
-                </Button>
-              )}
-            </div>
-            <ScrollArea className="h-[300px]">
-              {notifications.length === 0 ? (
-                <div className="flex h-[200px] items-center justify-center text-sm text-muted-foreground">
-                  No new notifications
-                </div>
-              ) : (
-                <div className="divide-y">
-                  {notifications.map((n) => (
-                    <button
-                      key={n.id}
-                      onClick={() => handleNotificationClick(n)}
-                      className="w-full flex items-start gap-3 px-4 py-3 hover:bg-muted/50 transition-colors text-left"
-                    >
-                      <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${n.read ? 'bg-gray-300' : 'bg-blue-500'}`} />
-                      <div className="flex-1 space-y-1">
-                        <p className="text-sm leading-snug">{n.description || 'Transaction recorded'}</p>
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-medium text-primary">{n.amount ? formatNaira(n.amount) : n.type?.replace('_', ' ') || 'Notice'}</span>
-                          <span className="text-xs text-muted-foreground">
-                            {formatDistanceToNow(new Date(n.created_at), { addSuffix: true })}
-                          </span>
-                        </div>
-                        <p className="text-xs text-muted-foreground">
-                          {n.actionLabel || (n.booking_id ? 'View booking' : n.guest_id ? 'View guest' : 'View transactions')}
-                        </p>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </ScrollArea>
-          </PopoverContent>
-        </Popover>
-
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" className="relative h-8 w-8 rounded-full">
+            <Button
+              variant="ghost"
+              className="relative h-8 w-8 rounded-full"
+              aria-label="Account menu"
+              type="button"
+            >
               <Avatar className="h-8 w-8">
                 <AvatarFallback className="bg-primary text-primary-foreground">
                   {initials}
                 </AvatarFallback>
               </Avatar>
             </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent className="w-56" align="end" forceMount>
-            <DropdownMenuLabel className="font-normal">
-              <div className="flex flex-col space-y-1">
-                <p className="text-sm font-medium leading-none">{user.name}</p>
-                <p className="text-xs leading-none text-muted-foreground">
-                  {user.role.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}
-                </p>
-              </div>
-            </DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem asChild>
-              <Link href="/settings">
-                <UserIcon className="mr-2 h-4 w-4" />
-                <span>Profile & Settings</span>
-              </Link>
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={handleLogout} className="text-destructive" disabled={loggingOut}>
-              {loggingOut ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <LogOut className="mr-2 h-4 w-4" />
-              )}
-              <span>{loggingOut ? 'Logging out...' : 'Log out'}</span>
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+          </>
+        ) : (
+          <>
+            <Popover open={notifOpen} onOpenChange={setNotifOpen}>
+              <PopoverTrigger asChild>
+                <Button variant="ghost" size="icon" className="relative h-8 w-8">
+                  <Bell className="h-4 w-4" />
+                  {unreadCount > 0 && (
+                    <span className="absolute right-1.5 top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-destructive text-[10px] font-medium text-destructive-foreground">
+                      {unreadCount > 9 ? '9+' : unreadCount}
+                    </span>
+                  )}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-80 p-0" align="end">
+                <div className="flex items-center justify-between border-b px-4 py-3">
+                  <h4 className="text-sm font-semibold">Notifications</h4>
+                  {unreadCount > 0 && (
+                    <Button variant="ghost" size="sm" className="h-auto px-2 py-1 text-xs text-muted-foreground" onClick={markAllRead}>
+                      Mark all read
+                    </Button>
+                  )}
+                </div>
+                <ScrollArea className="h-[300px]">
+                  {notifications.length === 0 ? (
+                    <div className="flex h-[200px] items-center justify-center text-sm text-muted-foreground">
+                      No new notifications
+                    </div>
+                  ) : (
+                    <div className="divide-y">
+                      {notifications.map((n) => (
+                        <button
+                          key={n.id}
+                          onClick={() => handleNotificationClick(n)}
+                          className="w-full flex items-start gap-3 px-4 py-3 hover:bg-muted/50 transition-colors text-left"
+                        >
+                          <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${n.read ? 'bg-gray-300' : 'bg-blue-500'}`} />
+                          <div className="flex-1 space-y-1">
+                            <p className="text-sm leading-snug">{n.description || 'Transaction recorded'}</p>
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-medium text-primary">{n.amount ? formatNaira(n.amount) : n.type?.replace('_', ' ') || 'Notice'}</span>
+                              <span className="text-xs text-muted-foreground">
+                                {formatDistanceToNow(new Date(n.created_at), { addSuffix: true })}
+                              </span>
+                            </div>
+                            <p className="text-xs text-muted-foreground">
+                              {n.actionLabel || (n.booking_id ? 'View booking' : n.guest_id ? 'View guest' : 'View transactions')}
+                            </p>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </ScrollArea>
+              </PopoverContent>
+            </Popover>
+
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" className="relative h-8 w-8 rounded-full">
+                  <Avatar className="h-8 w-8">
+                    <AvatarFallback className="bg-primary text-primary-foreground">
+                      {initials}
+                    </AvatarFallback>
+                  </Avatar>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent className="w-56" align="end">
+                <DropdownMenuLabel className="font-normal">
+                  <div className="flex flex-col space-y-1">
+                    <p className="text-sm font-medium leading-none">{user.name}</p>
+                    <p className="text-xs leading-none text-muted-foreground">
+                      {user.role.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                    </p>
+                  </div>
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem asChild>
+                  <Link href="/settings">
+                    <UserIcon className="mr-2 h-4 w-4" />
+                    <span>Profile & Settings</span>
+                  </Link>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={handleLogout} className="text-destructive" disabled={loggingOut}>
+                  {loggingOut ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <LogOut className="mr-2 h-4 w-4" />
+                  )}
+                  <span>{loggingOut ? 'Logging out...' : 'Log out'}</span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </>
+        )}
       </div>
     </header>
   )
