@@ -82,20 +82,20 @@ const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
-    title: 'Property',
-    routes: [
-      { label: 'Housekeeping', icon: Sparkles, href: '/housekeeping', permission: 'housekeeping:view' },
-      { label: 'Maintenance', icon: Wrench, href: '/maintenance', permission: 'maintenance:view' },
-      { label: 'Rooms', icon: Bed, href: '/rooms', permission: 'rooms:view' },
-    ],
-  },
-  {
-    title: 'Finance',
+    title: 'Accounting',
     routes: [
       { label: 'Expenses', icon: Wallet, href: '/expenses', permission: 'expenses:view' },
       { label: 'Reports', icon: FileBarChart, href: '/reports', permission: 'reports:view' },
       { label: 'Night Audit', icon: Moon, href: '/night-audit', permission: 'night_audit:view' },
       { label: 'Transactions / Analytics', icon: Receipt, href: '/transactions', permissionAny: ['transactions:view', 'analytics:view'] },
+    ],
+  },
+  {
+    title: 'Property',
+    routes: [
+      { label: 'Housekeeping', icon: Sparkles, href: '/housekeeping', permission: 'housekeeping:view' },
+      { label: 'Maintenance', icon: Wrench, href: '/maintenance', permission: 'maintenance:view' },
+      { label: 'Rooms', icon: Bed, href: '/rooms', permission: 'rooms:view' },
     ],
   },
   {
