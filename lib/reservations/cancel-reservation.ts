@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { reconcileRoomStatusForRoom } from '@/lib/rooms/room-occupancy'
 
 const CANCELLABLE_RESERVATION_STATUSES = ['reserved']
 
@@ -45,12 +46,11 @@ export async function cancelBookingReservation(
 
   const roomId = input.roomId ?? booking.room_id
   if (roomId) {
-    const { error: roomErr } = await supabase
-      .from('rooms')
-      .update({ status: 'available', updated_at: new Date().toISOString() })
-      .eq('id', roomId)
-      .in('status', ['reserved', 'occupied'])
-    if (roomErr) return { error: roomErr.message }
+    try {
+      await reconcileRoomStatusForRoom(supabase, roomId)
+    } catch (error) {
+      return { error: error instanceof Error ? error.message : 'Could not update room status' }
+    }
   }
 
   return { error: null }

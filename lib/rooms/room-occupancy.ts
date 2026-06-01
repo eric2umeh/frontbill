@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { resolveHotelTimeZone } from '@/lib/hotel-date'
-import { isInHouseOnCalendarDay, todayYmdHotel } from '@/lib/utils/booking-in-house-dates'
+import { bookingYmdHotel, isInHouseOnCalendarDay, todayYmdHotel } from '@/lib/utils/booking-in-house-dates'
 
 export const OCCUPYING_BOOKING_STATUSES = ['checked_in', 'confirmed', 'reserved'] as const
 
@@ -17,24 +17,75 @@ function normStatus(s: string | null | undefined): string {
   return String(s || '').toLowerCase().replace(/-/g, '_')
 }
 
+function isOpenOccupancyStatus(status: string | null | undefined): boolean {
+  const s = normStatus(status)
+  return OCCUPYING_BOOKING_STATUSES.includes(s as (typeof OCCUPYING_BOOKING_STATUSES)[number])
+}
+
+function isClosedBooking(row: Pick<OccupyingBookingRow, 'status' | 'folio_status'>): boolean {
+  const fs = normStatus(row.folio_status)
+  const st = normStatus(row.status)
+  return fs === 'checked_out' || fs === 'cancelled' || st === 'checked_out' || st === 'cancelled'
+}
+
+function isCurrentOrFutureRoomHold(
+  row: Pick<OccupyingBookingRow, 'check_out'>,
+  today: string,
+  timeZone: string,
+): boolean {
+  const checkout = bookingYmdHotel(row.check_out, timeZone)
+  return Boolean(checkout) && checkout >= today
+}
+
 /** Active in-house folio on a room (matches bookings in-house list / outlets charge-to-room). */
 export function pickOccupyingBooking<T extends OccupyingBookingRow>(rows: T[]): T | null {
   const today = todayYmdHotel()
   const tz = resolveHotelTimeZone()
 
   const open = rows.filter((b) => {
-    const fs = String(b.folio_status || 'active').toLowerCase()
-    if (fs === 'checked_out' || fs === 'cancelled') return false
-    if (b.status === 'checked_out' || b.status === 'cancelled') return false
-    if (!OCCUPYING_BOOKING_STATUSES.includes(b.status as (typeof OCCUPYING_BOOKING_STATUSES)[number])) {
-      return false
-    }
-    if (b.status === 'checked_in') return true
+    const status = normStatus(b.status)
+    if (isClosedBooking(b)) return false
+    if (!isOpenOccupancyStatus(status)) return false
+    if (status === 'checked_in') return true
     return isInHouseOnCalendarDay(b.check_in, b.check_out, today, tz)
   })
 
-  const rank = (s: string) => (s === 'checked_in' ? 0 : s === 'confirmed' ? 1 : 2)
+  const rank = (s: string) => {
+    const status = normStatus(s)
+    return status === 'checked_in' ? 0 : status === 'confirmed' ? 1 : 2
+  }
   open.sort((a, b) => rank(a.status) - rank(b.status))
+  return open[0] ?? null
+}
+
+/**
+ * Booking that should drive rooms.status: checked-in guests occupy the room;
+ * current/future confirmed or reserved bookings keep the room held.
+ */
+export function pickRoomStatusBooking<T extends OccupyingBookingRow>(rows: T[]): T | null {
+  const today = todayYmdHotel()
+  const tz = resolveHotelTimeZone()
+
+  const open = rows.filter((b) => {
+    const status = normStatus(b.status)
+    if (isClosedBooking(b)) return false
+    if (!isOpenOccupancyStatus(status)) return false
+    if (status === 'checked_in') return true
+    return isCurrentOrFutureRoomHold(b, today, tz)
+  })
+
+  const rank = (b: OccupyingBookingRow) => {
+    const status = normStatus(b.status)
+    if (status === 'checked_in') return 0
+    if (isInHouseOnCalendarDay(b.check_in, b.check_out, today, tz)) return status === 'confirmed' ? 1 : 2
+    return status === 'confirmed' ? 3 : 4
+  }
+
+  open.sort((a, b) => {
+    const rankDiff = rank(a) - rank(b)
+    if (rankDiff !== 0) return rankDiff
+    return bookingYmdHotel(a.check_in, tz).localeCompare(bookingYmdHotel(b.check_in, tz))
+  })
   return open[0] ?? null
 }
 
@@ -44,15 +95,14 @@ export function deriveRoomStatusFromOccupying(
   currentStatus: string | null | undefined,
 ): string | null {
   const cur = normStatus(currentStatus)
-  if (cur === 'maintenance' || cur === 'out_of_order') return null
+  if (cur === 'maintenance' || cur === 'out_of_order' || cur === 'cleaning') return null
 
   if (!occupying) {
     if (cur === 'occupied' || cur === 'reserved') return 'available'
-    if (cur === 'cleaning') return 'available'
     return null
   }
 
-  if (occupying.status === 'checked_in') return 'occupied'
+  if (normStatus(occupying.status) === 'checked_in') return 'occupied'
   return 'reserved'
 }
 
@@ -116,7 +166,7 @@ export async function reconcileRoomStatusesForOrganization(
   const now = new Date().toISOString()
 
   for (const room of rooms ?? []) {
-    const occupying = pickOccupyingBooking(byRoom.get(room.id) ?? [])
+    const occupying = pickRoomStatusBooking(byRoom.get(room.id) ?? [])
     const next = deriveRoomStatusFromOccupying(occupying, room.status)
     if (!next || normStatus(next) === normStatus(room.status)) continue
 
@@ -137,6 +187,39 @@ export async function reconcileRoomStatusesForOrganization(
   }
 
   return result
+}
+
+/** Reconcile a single room after a booking releases or changes that room. */
+export async function reconcileRoomStatusForRoom(
+  supabase: SupabaseClient,
+  roomId: string,
+): Promise<{ updated: boolean; status: string | null }> {
+  const [{ data: room, error: roomErr }, { data: bookings, error: bookErr }] = await Promise.all([
+    supabase.from('rooms').select('id, status').eq('id', roomId).maybeSingle(),
+    supabase
+      .from('bookings')
+      .select('id, room_id, status, check_in, check_out, folio_status')
+      .eq('room_id', roomId)
+      .in('status', [...OCCUPYING_BOOKING_STATUSES]),
+  ])
+
+  if (roomErr) throw roomErr
+  if (bookErr) throw bookErr
+  if (!room) return { updated: false, status: null }
+
+  const occupying = pickRoomStatusBooking((bookings ?? []) as OccupyingBookingRow[])
+  const next = deriveRoomStatusFromOccupying(occupying, room.status)
+  if (!next || normStatus(next) === normStatus(room.status)) {
+    return { updated: false, status: room.status ?? null }
+  }
+
+  const { error } = await supabase
+    .from('rooms')
+    .update({ status: next, updated_at: new Date().toISOString() })
+    .eq('id', roomId)
+  if (error) throw error
+
+  return { updated: true, status: next }
 }
 
 /** Room row status to apply after creating/updating a booking. */
