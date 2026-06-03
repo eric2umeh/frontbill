@@ -44,11 +44,10 @@ export function deriveRoomStatusFromOccupying(
   currentStatus: string | null | undefined,
 ): string | null {
   const cur = normStatus(currentStatus)
-  if (cur === 'maintenance' || cur === 'out_of_order') return null
+  if (cur === 'maintenance' || cur === 'out_of_order' || cur === 'cleaning') return null
 
   if (!occupying) {
     if (cur === 'occupied' || cur === 'reserved') return 'available'
-    if (cur === 'cleaning') return 'available'
     return null
   }
 
