@@ -8,13 +8,22 @@ import { DEPT_LABELS, type SupplyDept } from '@/lib/supply-chain/types'
 import { priceVariancePct } from '@/lib/supply-chain/calculations'
 import { SupplyStatRow, DeptPill } from '@/lib/supply-chain/supply-ui'
 import { formatNaira } from '@/lib/utils/currency'
-import { canonicalRoleKey } from '@/lib/permissions'
+import { canonicalRoleKey, hasPermission } from '@/lib/permissions'
+import { issueOutletPickerOptions } from '@/lib/store/outlet-departments'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { Package, AlertTriangle, ShoppingCart, TrendingUp } from 'lucide-react'
+import { Package, AlertTriangle, ShoppingCart, TrendingUp, ArrowRightFromLine } from 'lucide-react'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { Label } from '@/components/ui/label'
 import { toast } from 'sonner'
 import { PaginatedListShell } from '@/components/shared/paginated-list-shell'
 import {
@@ -27,6 +36,8 @@ import { PoApprovalPanel, poStatusBadge } from '@/components/supply-chain/po-app
 
 const DEPTS: SupplyDept[] = ['all', 'kitchen', 'bar', 'housekeeping', 'maintenance', 'front_office', 'laundry']
 
+const ISSUE_DESTINATIONS = issueOutletPickerOptions()
+
 export function StoreWorkspace() {
   const { name, role } = useAuth()
   const {
@@ -38,23 +49,22 @@ export function StoreWorkspace() {
     purchaseOrders,
     stats,
     activityLog,
-    issueFromStoreToBar,
+    issueFromStoreToDepartment,
     barStock,
   } = useSupplyChain()
   const [dept, setDept] = useState<SupplyDept>('all')
   const [qtyMap, setQtyMap] = useState<Record<string, string>>({})
   const [issueQtyMap, setIssueQtyMap] = useState<Record<string, string>>({})
+  const [issueDestination, setIssueDestination] = useState('')
+  const [issueReceivedBy, setIssueReceivedBy] = useState('')
+  const [issueNotes, setIssueNotes] = useState('')
   const [tab, setTab] = useState('stock')
+  const canIssue = hasPermission(role, 'store:issue')
 
   const filtered = useMemo(() => {
     if (dept === 'all') return storeItems
     return storeItems.filter((s) => s.dept === dept)
   }, [storeItems, dept])
-
-  const barStoreItems = useMemo(
-    () => storeItems.filter((s) => s.dept === 'bar'),
-    [storeItems],
-  )
 
   const basketByDept = useMemo(() => {
     const m = new Map<string, typeof basket>()
@@ -92,6 +102,12 @@ export function StoreWorkspace() {
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList className="flex h-auto flex-wrap">
           <TabsTrigger value="stock">Stock Levels</TabsTrigger>
+          {canIssue && (
+            <TabsTrigger value="stock_out" className="gap-1.5">
+              <ArrowRightFromLine className="h-3.5 w-3.5" />
+              Stock Out
+            </TabsTrigger>
+          )}
           <TabsTrigger value="purchase">Raise Purchase Request</TabsTrigger>
           <TabsTrigger value="orders">Purchase Orders</TabsTrigger>
           <TabsTrigger value="history">History</TabsTrigger>
@@ -189,74 +205,158 @@ export function StoreWorkspace() {
               </PaginatedListShell>
             </div>
           </div>
+        </TabsContent>
 
-          {(dept === 'bar' || dept === 'all') && barStoreItems.length > 0 && (
-            <div className="mt-4 rounded-xl border p-4 space-y-3">
+        {canIssue && (
+          <TabsContent value="stock_out" className="mt-4 space-y-4">
+            <div className="rounded-xl border p-4 space-y-4 bg-muted/20">
               <div>
-                <h3 className="font-semibold text-sm">Issue bar stock → Main Bar / Pool Bar POS</h3>
+                <h3 className="font-semibold text-sm">Issue stock to department / outlet</h3>
                 <p className="text-xs text-muted-foreground mt-1">
-                  Move bottles and mixers from central store to bar outlet stock. POS drink sales deduct from bar stock only.
+                  Transfers reduce central store on hand. Bar items sent to a bar outlet also credit bar POS stock.
+                  Kitchen raw for production batches can also be issued from{' '}
+                  <Link href="/supply/kitchen" className="underline font-medium">
+                    Kitchen
+                  </Link>
+                  .
                 </p>
               </div>
-              <div className="space-y-2">
-                {barStoreItems.map((item) => {
-                  const onBar = barStock.find((b) => b.storeItemId === item.id)
-                  const issueQty = Number(issueQtyMap[item.id] ?? 0)
-                  return (
-                    <div
-                      key={item.id}
-                      className="flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2 text-sm"
-                    >
-                      <div>
-                        <p className="font-medium">{item.name}</p>
-                        <p className="text-xs text-muted-foreground">
-                          Store: {item.quantityInStore} {item.unit}
-                          {onBar ? ` · Bar: ${onBar.quantityOnHand} ${item.unit}` : ' · Bar: not issued yet'}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Input
-                          type="number"
-                          min={0}
-                          className="h-8 w-20"
-                          value={issueQtyMap[item.id] ?? ''}
-                          onChange={(e) =>
-                            setIssueQtyMap((m) => ({ ...m, [item.id]: e.target.value }))
-                          }
-                        />
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          disabled={!issueQty}
-                          onClick={() => {
-                            const res = issueFromStoreToBar(item.id, issueQty, actor)
-                            if (res && 'error' in res) toast.error(res.error)
-                            else {
-                              toast.success(`Issued ${issueQty} ${item.unit} to bar`)
-                              setIssueQtyMap((m) => ({ ...m, [item.id]: '' }))
-                            }
-                          }}
-                        >
-                          Issue to bar
-                        </Button>
-                      </div>
-                    </div>
-                  )
-                })}
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                <div className="space-y-1.5 sm:col-span-2 lg:col-span-1">
+                  <Label htmlFor="issue-destination">Destination *</Label>
+                  <Select value={issueDestination} onValueChange={setIssueDestination}>
+                    <SelectTrigger id="issue-destination">
+                      <SelectValue placeholder="Select department or outlet" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {ISSUE_DESTINATIONS.map((d) => (
+                        <SelectItem key={d} value={d}>
+                          {d}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="issue-received-by">Received by</Label>
+                  <Input
+                    id="issue-received-by"
+                    placeholder="Name (optional)"
+                    value={issueReceivedBy}
+                    onChange={(e) => setIssueReceivedBy(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-1.5 sm:col-span-2 lg:col-span-1">
+                  <Label htmlFor="issue-notes">Notes</Label>
+                  <Input
+                    id="issue-notes"
+                    placeholder="Reference / remarks (optional)"
+                    value={issueNotes}
+                    onChange={(e) => setIssueNotes(e.target.value)}
+                  />
+                </div>
               </div>
             </div>
-          )}
 
-          {dept === 'kitchen' && (
-            <p className="mt-3 text-xs text-muted-foreground rounded-md border px-3 py-2">
-              Kitchen raw materials are issued when a production batch is opened in{' '}
-              <Link href="/supply/kitchen" className="underline font-medium">
-                Kitchen → Open Batch
-              </Link>
-              . Finished portions then feed restaurant &amp; banquets POS.
-            </p>
-          )}
-        </TabsContent>
+            <div className="rounded-xl border overflow-hidden">
+              <div className="border-b px-4 py-2 bg-muted/30 text-sm font-medium">
+                Items to issue
+              </div>
+              <div className="p-3">
+                <PaginatedListShell
+                  items={filtered}
+                  pageSize={15}
+                  searchPlaceholder="Search items to issue…"
+                  searchKeys={['name', 'dept']}
+                  emptyMessage="No items match your filters."
+                >
+                  {(pageItems) => (
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Item</TableHead>
+                          <TableHead>Dept</TableHead>
+                          <TableHead className="text-right">In Store</TableHead>
+                          <TableHead className="text-right">Qty to issue</TableHead>
+                          <TableHead />
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {pageItems.map((item) => {
+                          const level = getStockLevel(item.quantityInStore, item.reorderLevel)
+                          const issueQty = Number(issueQtyMap[item.id] ?? 0)
+                          const onBar =
+                            item.dept === 'bar'
+                              ? barStock.find((b) => b.storeItemId === item.id)
+                              : undefined
+                          return (
+                            <TableRow key={item.id}>
+                              <TableCell>
+                                <p className="font-medium">{item.name} ({item.unit})</p>
+                                {onBar != null && (
+                                  <p className="text-xs text-muted-foreground">
+                                    Bar stock: {onBar.quantityOnHand} {item.unit}
+                                  </p>
+                                )}
+                              </TableCell>
+                              <TableCell>
+                                <Badge variant="secondary">{DEPT_LABELS[item.dept]}</Badge>
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <span className={stockLevelNumberPillClass(level)}>
+                                  {item.quantityInStore} {item.unit}
+                                </span>
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <Input
+                                  type="number"
+                                  min={0}
+                                  step="any"
+                                  className="h-8 w-24 ml-auto text-right"
+                                  value={issueQtyMap[item.id] ?? ''}
+                                  onChange={(e) =>
+                                    setIssueQtyMap((m) => ({ ...m, [item.id]: e.target.value }))
+                                  }
+                                />
+                              </TableCell>
+                              <TableCell>
+                                <Button
+                                  size="sm"
+                                  disabled={!issueDestination || !issueQty}
+                                  onClick={() => {
+                                    const res = issueFromStoreToDepartment(
+                                      item.id,
+                                      issueQty,
+                                      issueDestination,
+                                      actor,
+                                      {
+                                        receivedBy: issueReceivedBy,
+                                        notes: issueNotes,
+                                      },
+                                    )
+                                    if (res && 'error' in res) toast.error(res.error)
+                                    else {
+                                      toast.success(
+                                        `Issued ${issueQty} ${item.unit} to ${issueDestination}`,
+                                      )
+                                      setIssueQtyMap((m) => ({ ...m, [item.id]: '' }))
+                                    }
+                                  }}
+                                >
+                                  Issue
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          )
+                        })}
+                      </TableBody>
+                    </Table>
+                  )}
+                </PaginatedListShell>
+              </div>
+            </div>
+          </TabsContent>
+        )}
 
         <TabsContent value="purchase" className="mt-4">
           <div className="grid gap-4 lg:grid-cols-[1fr_300px]">
