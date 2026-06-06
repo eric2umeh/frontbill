@@ -2,11 +2,15 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { createClient } from '@/lib/supabase/server'
 
 export async function resolveAuthedUserId(request: Request): Promise<string | null> {
-  const cookieSb = await createClient()
-  const {
-    data: { user },
-  } = await cookieSb.auth.getUser()
-  if (user?.id) return user.id
+  try {
+    const cookieSb = await createClient()
+    const {
+      data: { user },
+    } = await cookieSb.auth.getUser()
+    if (user?.id) return user.id
+  } catch {
+    // Treat local auth configuration/network failures as unauthenticated.
+  }
 
   const raw = request.headers.get('authorization')?.trim()
   const bearer = raw?.toLowerCase().startsWith('bearer ') ? raw.slice(7).trim() : null
