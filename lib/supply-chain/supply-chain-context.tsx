@@ -567,6 +567,65 @@ function useSupplyChainImpl() {
     [storeItems],
   )
 
+  function destinationCreditsBarStock(destination: string): boolean {
+    const d = destination.trim().toLowerCase()
+    return (
+      d === 'main bar' ||
+      d === 'beverages / mini-bar' ||
+      d === 'swimming pool' ||
+      d.includes('bar')
+    )
+  }
+
+  const issueFromStoreToDepartment = useCallback(
+    (
+      storeItemId: string,
+      qty: number,
+      destination: string,
+      actor: Actor,
+      opts?: { notes?: string; receivedBy?: string },
+    ): { ok: true } | { error: string } => {
+      const dest = destination.trim()
+      if (!dest) return { error: 'Select a destination department or outlet' }
+
+      const store = storeItems.find((s) => s.id === storeItemId)
+      if (!store) return { error: 'Item not found' }
+      if (!Number.isFinite(qty) || qty <= 0) return { error: 'Enter a quantity to issue' }
+      if (store.quantityInStore < qty) {
+        return {
+          error: `Insufficient stock (${store.quantityInStore} ${store.unit} on hand)`,
+        }
+      }
+
+      if (store.dept === 'bar' && destinationCreditsBarStock(dest)) {
+        const barRes = issueFromStoreToBar(storeItemId, qty, actor)
+        if (barRes && 'error' in barRes) return barRes
+        return { ok: true as const }
+      }
+
+      setStoreItems((items) =>
+        items.map((s) =>
+          s.id === storeItemId ? { ...s, quantityInStore: s.quantityInStore - qty } : s,
+        ),
+      )
+
+      const extra = [
+        opts?.receivedBy?.trim() ? `Received by: ${opts.receivedBy.trim()}` : '',
+        opts?.notes?.trim() ?? '',
+      ]
+        .filter(Boolean)
+        .join(' · ')
+
+      const summary = extra
+        ? `Stock out: ${qty} ${store.unit} ${store.name} → ${dest} (${extra})`
+        : `Stock out: ${qty} ${store.unit} ${store.name} → ${dest}`
+
+      setActivityLog((a) => log(a, 'stock_issued_out', actor, summary, storeItemId))
+      return { ok: true as const }
+    },
+    [storeItems, issueFromStoreToBar],
+  )
+
   /** Admin kickstart: set absolute on-hand qty for a menu item (creates kitchen/bar link if missing). */
   const kickstartOutletMenuStock = useCallback(
     (
@@ -824,6 +883,7 @@ function useSupplyChainImpl() {
     kitchenStock,
     barStock,
     issueFromStoreToBar,
+    issueFromStoreToDepartment,
     kickstartOutletMenuStock,
     issueRawToKitchenPortions,
     getOutletItemStock,
