@@ -101,7 +101,7 @@ export async function POST(request: Request) {
     const nights = Math.max(1, Number(additional_nights) || 0)
     const { data: booking } = await admin
       .from('bookings')
-      .select('id, organization_id, status, folio_status, guest_id, rate_per_night, check_out')
+      .select('id, organization_id, status, folio_status, guest_id, rate_per_night, check_in, check_out')
       .eq('id', booking_id)
       .single()
     if (!booking || booking.organization_id !== prof.organization_id) {
