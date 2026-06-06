@@ -48,7 +48,6 @@ export function deriveRoomStatusFromOccupying(
 
   if (!occupying) {
     if (cur === 'occupied' || cur === 'reserved') return 'available'
-    if (cur === 'cleaning') return 'available'
     return null
   }
 

@@ -9,6 +9,7 @@ import {
   buildBackdateRequestSummary,
   collectRoomIdsFromRequests,
 } from '@/lib/backdate/request-summary'
+import { resolveAuthedUserId } from '@/lib/supabase/resolve-authed-user-id'
 import { NextResponse } from 'next/server'
 
 function isBackdateDeciderRole(role: string | null | undefined): boolean {
@@ -32,6 +33,11 @@ export async function GET(request: Request) {
 
     if (!callerId) {
       return NextResponse.json({ error: 'caller_id is required' }, { status: 400 })
+    }
+
+    const authed = await resolveAuthedUserId(request)
+    if (!authed || authed !== callerId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     const admin = createAdminClient()
@@ -109,6 +115,11 @@ export async function POST(request: Request) {
 
     if (!caller_id || !request_type || !requested_check_in || !reason?.trim()) {
       return NextResponse.json({ error: 'caller_id, request_type, requested_check_in and reason are required' }, { status: 400 })
+    }
+
+    const authed = await resolveAuthedUserId(request)
+    if (!authed || authed !== caller_id) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     const admin = createAdminClient()
@@ -223,6 +234,11 @@ export async function PATCH(request: Request) {
 
     if (!caller_id || !request_id || !DECISION_STATUSES.includes(status)) {
       return NextResponse.json({ error: 'caller_id, request_id and a valid status are required' }, { status: 400 })
+    }
+
+    const authed = await resolveAuthedUserId(request)
+    if (!authed || authed !== caller_id) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     const admin = createAdminClient()

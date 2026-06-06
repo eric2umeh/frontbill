@@ -5,6 +5,7 @@ import { isStayCheckInConsideredBackdated } from '@/lib/hotel-date'
 import { notifyNightAuditRequestCreated } from '@/lib/night-audit/notify-request-created'
 import { isBookingCheckedOut } from '@/lib/utils/booking-checkout-ui'
 import { canonicalRoleKey, hasPermission } from '@/lib/permissions'
+import { resolveAuthedUserId } from '@/lib/supabase/resolve-authed-user-id'
 import { NextResponse } from 'next/server'
 
 const DECISION = ['approved', 'rejected'] as const
@@ -22,6 +23,11 @@ export async function GET(request: Request) {
 
     if (!callerId) {
       return NextResponse.json({ error: 'caller_id is required' }, { status: 400 })
+    }
+
+    const authed = await resolveAuthedUserId(request)
+    if (!authed || authed !== callerId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     const admin = createAdminClient()
@@ -91,6 +97,11 @@ export async function POST(request: Request) {
         { error: 'caller_id, booking_id, check_in, check_out and reason are required' },
         { status: 400 },
       )
+    }
+
+    const authed = await resolveAuthedUserId(request)
+    if (!authed || authed !== caller_id) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     if (!/^\d{4}-\d{2}-\d{2}$/.test(String(check_in)) || !/^\d{4}-\d{2}-\d{2}$/.test(String(check_out))) {
@@ -248,6 +259,11 @@ export async function PATCH(request: Request) {
         { error: 'caller_id, request_id and status (approved|rejected) are required' },
         { status: 400 },
       )
+    }
+
+    const authed = await resolveAuthedUserId(request)
+    if (!authed || authed !== caller_id) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     const admin = createAdminClient()

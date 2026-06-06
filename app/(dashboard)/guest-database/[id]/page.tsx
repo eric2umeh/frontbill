@@ -35,6 +35,8 @@ import { hasPermission } from '@/lib/permissions'
 import { toast } from 'sonner'
 import { folioGuestCreditAmount, folioPositiveOutstandingSum } from '@/lib/utils/booking-bill-balance'
 import { PageLoadingState } from '@/components/loading-screen'
+import { reconcileRoomStatusesClient } from '@/lib/rooms/reconcile-room-status-client'
+import { resolvedCheckoutDateForClosing } from '@/lib/utils/booking-checkout-ui'
 
 interface Guest {
   id: string
@@ -61,6 +63,7 @@ interface Booking {
   payment_status: string
   status: string
   folio_status?: string
+  room_id?: string | null
   rooms: { room_number: string; room_type: string } | null
 }
 
@@ -150,7 +153,7 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
       const [{ data: guestData }, { data: bookingData }] = await Promise.all([
         supabase.from('guests').select('*').eq('id', id).eq('organization_id', profile.organization_id).single(),
         supabase.from('bookings')
-          .select('id, folio_id, check_in, check_out, number_of_nights, total_amount, deposit, balance, payment_status, status, rooms(room_number, room_type)')
+          .select('id, folio_id, room_id, check_in, check_out, number_of_nights, total_amount, deposit, balance, payment_status, status, rooms(room_number, room_type)')
           .eq('guest_id', id)
           .order('check_in', { ascending: false }),
       ])
@@ -271,22 +274,37 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
 
   const handleCheckoutFolio = async () => {
     if (!selectedFolioId || isCheckingOut) return
+    const selectedBooking = bookings.find((b) => b.folio_id === selectedFolioId)
+    if (!selectedBooking) return
     setIsCheckingOut(true)
     try {
       const supabase = createClient()
+      const outDate = resolvedCheckoutDateForClosing(selectedBooking)
+      const updatePayload: Record<string, unknown> = {
+        status: 'checked_out',
+        check_out: outDate,
+        folio_status: 'checked_out',
+      }
+      if (currentUserId) updatePayload.updated_by = currentUserId
       const { error } = await supabase
         .from('bookings')
-        .update({ folio_status: 'checked_out' })
+        .update(updatePayload)
         .eq('folio_id', selectedFolioId)
       if (error) throw error
+      if (selectedBooking.room_id) {
+        await supabase.from('rooms').update({ status: 'available' }).eq('id', selectedBooking.room_id)
+      }
+      await reconcileRoomStatusesClient()
       // Update local bookings state to reflect checkout
       setBookings(bookings.map(b => 
         b.folio_id === selectedFolioId 
-          ? { ...b, folio_status: 'checked_out' as any } 
+          ? { ...b, status: 'checked_out', check_out: outDate, folio_status: 'checked_out' as any } 
           : b
       ))
+      toast.success('Folio checked out successfully')
     } catch (err) {
       console.error('Checkout error:', err)
+      toast.error('Failed to check out folio')
     } finally {
       setIsCheckingOut(false)
     }

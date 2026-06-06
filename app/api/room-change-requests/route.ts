@@ -2,6 +2,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
 import { canonicalRoleKey, hasPermission } from '@/lib/permissions'
 import { notifyNightAuditRequestCreated } from '@/lib/night-audit/notify-request-created'
+import { resolveAuthedUserId } from '@/lib/supabase/resolve-authed-user-id'
 
 const DECISION = ['approved', 'rejected'] as const
 
@@ -28,6 +29,11 @@ export async function GET(request: Request) {
 
     if (!callerId) {
       return NextResponse.json({ error: 'caller_id is required' }, { status: 400 })
+    }
+
+    const authed = await resolveAuthedUserId(request)
+    if (!authed || authed !== callerId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     const admin = createAdminClient()
@@ -96,6 +102,11 @@ export async function POST(request: Request) {
         { error: 'caller_id, booking_id, to_room_id and reason are required' },
         { status: 400 },
       )
+    }
+
+    const authed = await resolveAuthedUserId(request)
+    if (!authed || authed !== caller_id) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     const admin = createAdminClient()
@@ -260,6 +271,11 @@ export async function PATCH(request: Request) {
 
     if (!caller_id || !request_id || !DECISION.includes(status)) {
       return NextResponse.json({ error: 'caller_id, request_id and status (approved|rejected) are required' }, { status: 400 })
+    }
+
+    const authed = await resolveAuthedUserId(request)
+    if (!authed || authed !== caller_id) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     const admin = createAdminClient()
