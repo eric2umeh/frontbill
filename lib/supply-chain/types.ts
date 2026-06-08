@@ -30,6 +30,7 @@ export type ActivityAction =
   | 'stock_received'
   | 'stock_issued_kitchen'
   | 'stock_issued_bar'
+  | 'stock_issued_out'
   | 'batch_opened'
   | 'batch_closed'
   | 'fnb_order_posted'
