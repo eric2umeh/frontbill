@@ -148,9 +148,9 @@ export function FnbWorkspace() {
                   <div key={id} className="flex justify-between items-center text-sm">
                     <span>{m.name}</span>
                     <div className="flex items-center gap-2">
-                      <Button size="icon" variant="outline" className="h-7 w-7" onClick={() => setCart((c) => ({ ...c, [id]: Math.max(0, (c[id] ?? 0) - 1) }))}><Minus className="h-3 w-3" /></Button>
+                      <Button size="icon" variant="outline" className="h-7 w-7" allowRepeatClick onClick={() => setCart((c) => ({ ...c, [id]: Math.max(0, (c[id] ?? 0) - 1) }))}><Minus className="h-3 w-3" /></Button>
                       <span>{qty}</span>
-                      <Button size="icon" variant="outline" className="h-7 w-7" onClick={() => setCart((c) => ({ ...c, [id]: (c[id] ?? 0) + 1 }))}><Plus className="h-3 w-3" /></Button>
+                      <Button size="icon" variant="outline" className="h-7 w-7" allowRepeatClick onClick={() => setCart((c) => ({ ...c, [id]: (c[id] ?? 0) + 1 }))}><Plus className="h-3 w-3" /></Button>
                       <span className="w-16 text-right">{formatNaira(m.sellingPrice * qty)}</span>
                     </div>
                   </div>
