@@ -37,6 +37,39 @@ export type ActivityAction =
   | 'recipe_updated'
   | 'low_stock_alert'
 
+/** Kitchen raw-material grouping for batch builder & store catalogue. */
+export type KitchenMaterialCategory =
+  | 'protein'
+  | 'rice_grains'
+  | 'produce'
+  | 'seasonings'
+  | 'oils_fats'
+  | 'soups_stews'
+  | 'dairy'
+  | 'other'
+
+export const KITCHEN_MATERIAL_CATEGORY_LABELS: Record<KitchenMaterialCategory, string> = {
+  protein: 'Protein',
+  rice_grains: 'Rice & Grains',
+  produce: 'Produce',
+  seasonings: 'Seasonings & Spices',
+  oils_fats: 'Oils & Fats',
+  soups_stews: 'Soups & Stews',
+  dairy: 'Dairy',
+  other: 'Other',
+}
+
+export const KITCHEN_MATERIAL_CATEGORIES: KitchenMaterialCategory[] = [
+  'protein',
+  'rice_grains',
+  'produce',
+  'seasonings',
+  'oils_fats',
+  'soups_stews',
+  'dairy',
+  'other',
+]
+
 export interface StoreItem {
   id: string
   name: string
@@ -46,6 +79,22 @@ export interface StoreItem {
   reorderLevel: number
   lastPrice: number
   benchmarkPrice: number
+  /** Kitchen dept items only — drives category picker in batch builder. */
+  kitchenCategory?: KitchenMaterialCategory
+}
+
+export interface IssueOutRecord {
+  id: string
+  storeItemId: string
+  itemName: string
+  unit: string
+  quantity: number
+  destination: string
+  receivedBy?: string
+  receivedById?: string
+  notes?: string
+  issuedAt: string
+  issuedBy: string
 }
 
 export interface BasketLine {
@@ -124,9 +173,42 @@ export interface Recipe {
   sellingPricePerPortion: number
 }
 
+export interface BatchMaterialLine {
+  storeItemId: string
+  name: string
+  unit: string
+  quantity: number
+  unitCost: number
+}
+
+export interface CreateKitchenBatchInput {
+  batchName: string
+  menuCategory: string
+  plannedPortions: number
+  sellingPricePerPortion: number
+  materials: BatchMaterialLine[]
+  notes?: string
+  /** Reuse kitchen stock row when linking to an existing Restaurant menu item. */
+  kitchenStockId?: string
+}
+
+/** Draft new-batch cart — persisted while switching kitchen tabs. */
+export interface KitchenBatchDraft {
+  search: string
+  menuCategory: string
+  menuCategoryId: string | null
+  batchName: string
+  menuItemId: string | null
+  linkedKitchenStockId: string | null
+  plannedPortions: string
+  sellingPrice: string
+  notes: string
+  cart: BatchMaterialLine[]
+}
+
 export interface ProductionBatch {
   id: string
-  recipeId: string
+  recipeId?: string
   recipeName: string
   shift: string
   status: 'in_progress' | 'completed'
@@ -134,7 +216,10 @@ export interface ProductionBatch {
   actualPortions: number
   foodCostPct: number
   variancePct: number
+  batchCost?: number
+  sellingPricePerPortion?: number
   materialsUsed: string[]
+  kitchenStockId?: string
   openedAt: string
   openedBy: string
   closedAt?: string
@@ -159,6 +244,16 @@ export interface RawKitchenIssueInput {
   kitchenStockId?: string
   finishedItemName: string
   notes?: string
+}
+
+/** Raw kitchen materials at kitchen — issued from central store (kitchen dept). */
+export interface KitchenRawStockItem {
+  id: string
+  storeItemId: string
+  name: string
+  quantityOnHand: number
+  reorderLevel: number
+  unit: string
 }
 
 /** Bar outlet stock — issued from central store (bar dept). */
