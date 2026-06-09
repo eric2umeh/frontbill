@@ -87,6 +87,44 @@ export async function POST(request: Request) {
       console.log('Store user created: store@frontbill.com')
     }
 
+    const { error: chefError } = await supabase.auth.admin.createUser({
+      email: 'chef@frontbill.com',
+      password: 'Chef@123456',
+      email_confirm: true,
+      user_metadata: {
+        full_name: 'Head Chef',
+        role: 'chef',
+      },
+    })
+
+    if (chefError) {
+      console.error('Error creating chef user:', chefError)
+      if (!chefError.message.includes('already exists')) {
+        throw chefError
+      }
+    } else {
+      console.log('Chef user created: chef@frontbill.com')
+    }
+
+    const { error: purchaserError } = await supabase.auth.admin.createUser({
+      email: 'purchaser@frontbill.com',
+      password: 'Buy@123456',
+      email_confirm: true,
+      user_metadata: {
+        full_name: 'Market Purchaser',
+        role: 'purchaser',
+      },
+    })
+
+    if (purchaserError) {
+      console.error('Error creating purchaser user:', purchaserError)
+      if (!purchaserError.message.includes('already exists')) {
+        throw purchaserError
+      }
+    } else {
+      console.log('Purchaser user created: purchaser@frontbill.com')
+    }
+
     return NextResponse.json({
       message: 'Demo users seeded successfully',
       credentials: [
@@ -94,6 +132,8 @@ export async function POST(request: Request) {
         { email: 'frontdesk@frontbill.com', password: 'Desk@123456', role: 'Front Desk' },
         { email: 'store@frontbill.com', password: 'Store@123456', role: 'Store' },
         { email: 'cashier@frontbill.com', password: 'Cash@123456', role: 'Cashier' },
+        { email: 'chef@frontbill.com', password: 'Chef@123456', role: 'Chef' },
+        { email: 'purchaser@frontbill.com', password: 'Buy@123456', role: 'Purchaser' },
       ],
     })
   } catch (error: any) {
