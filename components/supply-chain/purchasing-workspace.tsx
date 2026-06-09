@@ -14,7 +14,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Info, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { PoApprovalPanel } from '@/components/supply-chain/po-approval-panel'
-
+import { PoDetailPanel } from '@/components/supply-chain/po-detail-card'
 export function PurchasingWorkspace() {
   const { name, role } = useAuth()
   const searchParams = useSearchParams()
@@ -51,6 +51,23 @@ export function PurchasingWorkspace() {
   )
   const refund = selected ? selected.cashDisbursed - actualSpent : 0
   const actor = { name: name ?? 'Staff', role: canonicalRoleKey(role) ?? 'staff' }
+
+  if (
+    selectedId &&
+    selected &&
+    ['pending_accountant', 'pending_manager'].includes(selected.status)
+  ) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-2xl font-bold">Purchasing</h1>
+          <p className="text-sm text-muted-foreground">PO awaiting approval — line items below</p>
+        </div>
+        <PoDetailPanel po={selected} onBack={() => setSelectedId(null)} />
+        <PoApprovalPanel compact />
+      </div>
+    )
+  }
 
   if (!selectedId || !selected) {
     return (
