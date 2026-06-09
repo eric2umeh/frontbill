@@ -1,21 +1,22 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useAuth } from '@/lib/auth-context'
 import { useSupplyChain } from '@/lib/supply-chain/supply-chain-context'
 import { DEPT_LABELS, type SupplyDept } from '@/lib/supply-chain/types'
 import { priceVariancePct } from '@/lib/supply-chain/calculations'
-import { SupplyStatRow, DeptPill } from '@/lib/supply-chain/supply-ui'
+import { DeptPill } from '@/lib/supply-chain/supply-ui'
 import { formatNaira } from '@/lib/utils/currency'
-import { canonicalRoleKey, hasPermission } from '@/lib/permissions'
+import { canonicalRoleKey, canIssueStockFromStore } from '@/lib/permissions'
 import { issueOutletPickerOptions } from '@/lib/store/outlet-departments'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { Package, AlertTriangle, ShoppingCart, TrendingUp, ArrowRightFromLine } from 'lucide-react'
+import { ArrowRightFromLine, History } from 'lucide-react'
+import { OrgStaffSearchField } from '@/components/shared/org-staff-search-field'
 import {
   Select,
   SelectContent,
@@ -32,24 +33,29 @@ import {
   stockLevelNumberPillClass,
   stockLevelStatusLabel,
 } from '@/lib/supply-chain/stock-level-ui'
-import { PoApprovalPanel, poStatusBadge } from '@/components/supply-chain/po-approval-panel'
+import { DraftBasketSidebar } from '@/components/supply-chain/draft-basket-sidebar'
+import { PoHistoryPanel } from '@/components/supply-chain/po-history-panel'
+import { ActivePurchaseOrderPanel } from '@/components/supply-chain/active-purchase-order-panel'
+import { canEditStorePurchaseOrder } from '@/lib/supply-chain/po-active'
+import type { StoreItem } from '@/lib/supply-chain/types'
 
 const DEPTS: SupplyDept[] = ['all', 'kitchen', 'bar', 'housekeeping', 'maintenance', 'front_office', 'laundry']
 
 const ISSUE_DESTINATIONS = issueOutletPickerOptions()
 
 export function StoreWorkspace() {
-  const { name, role } = useAuth()
+  const { name, role, userId } = useAuth()
   const {
     storeItems,
     basket,
-    addToBasket,
+    setBasketLineQty,
+    removeFromBasket,
     clearBasket,
-    submitBasketAsPo,
+    activePurchaseOrder,
     purchaseOrders,
     stats,
-    activityLog,
     issueFromStoreToDepartment,
+    issueOutLog,
     barStock,
   } = useSupplyChain()
   const [dept, setDept] = useState<SupplyDept>('all')
@@ -57,9 +63,13 @@ export function StoreWorkspace() {
   const [issueQtyMap, setIssueQtyMap] = useState<Record<string, string>>({})
   const [issueDestination, setIssueDestination] = useState('')
   const [issueReceivedBy, setIssueReceivedBy] = useState('')
+  const [issueReceivedById, setIssueReceivedById] = useState<string | null>(null)
   const [issueNotes, setIssueNotes] = useState('')
   const [tab, setTab] = useState('stock')
-  const canIssue = hasPermission(role, 'store:issue')
+  const canIssue = canIssueStockFromStore(role)
+  const purchaseLocked = Boolean(
+    activePurchaseOrder && !canEditStorePurchaseOrder(activePurchaseOrder),
+  )
 
   const filtered = useMemo(() => {
     if (dept === 'all') return storeItems
@@ -83,6 +93,45 @@ export function StoreWorkspace() {
 
   const actor = { name: name ?? 'Store', role: canonicalRoleKey(role) ?? 'store' }
 
+  useEffect(() => {
+    setQtyMap((prev) => {
+      const next: Record<string, string> = {}
+      for (const b of basket) next[b.stockItemId] = String(b.qtyToBuy)
+      return next
+    })
+  }, [basket])
+
+  const handlePurchaseQtyChange = (item: StoreItem, raw: string) => {
+    setQtyMap((m) => ({ ...m, [item.id]: raw }))
+    const qty = Number(raw)
+    if (!raw.trim() || !Number.isFinite(qty) || qty <= 0) {
+      removeFromBasket(item.id)
+      return
+    }
+    const err = setBasketLineQty(item, qty, item.lastPrice, actor)
+    if (err) toast.error(err)
+  }
+
+  const handleBasketQtyChange = (stockItemId: string, qty: number) => {
+    const item = storeItems.find((s) => s.id === stockItemId)
+    if (!item) return
+    const err = setBasketLineQty(item, qty, item.lastPrice, actor)
+    if (err) toast.error(err)
+  }
+
+  const basketSidebar = (
+    <DraftBasketSidebar
+      basket={basket}
+      basketByDept={basketByDept}
+      total={stats.basketTotal}
+      readOnly={purchaseLocked}
+      onClear={clearBasket}
+      onRemove={removeFromBasket}
+      onQtyChange={handleBasketQtyChange}
+      sendLabel="Send to accountant"
+    />
+  )
+
   return (
     <div className="space-y-6">
       <div>
@@ -90,23 +139,20 @@ export function StoreWorkspace() {
         <p className="text-sm text-muted-foreground">Stock levels, dept purchase lists & master PO</p>
       </div>
 
-      <SupplyStatRow
-        cards={[
-          { label: 'Total Items', value: stats.totalStoreItems, icon: Package, tone: 'green' },
-          { label: 'Stock Alerts', value: stats.stockAlerts, icon: AlertTriangle, tone: 'red' },
-          { label: 'Basket Items', value: stats.basketCount, icon: ShoppingCart, tone: 'amber' },
-          { label: 'Basket Total', value: formatNaira(stats.basketTotal), icon: TrendingUp, tone: 'green' },
-        ]}
-      />
-
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList className="flex h-auto flex-wrap">
           <TabsTrigger value="stock">Stock Levels</TabsTrigger>
           {canIssue && (
-            <TabsTrigger value="stock_out" className="gap-1.5">
-              <ArrowRightFromLine className="h-3.5 w-3.5" />
-              Stock Out
-            </TabsTrigger>
+            <>
+              <TabsTrigger value="issue_out" className="gap-1.5">
+                <ArrowRightFromLine className="h-3.5 w-3.5" />
+                Issue Out
+              </TabsTrigger>
+              <TabsTrigger value="issue_out_log" className="gap-1.5">
+                <History className="h-3.5 w-3.5" />
+                Issue Out Log
+              </TabsTrigger>
+            </>
           )}
           <TabsTrigger value="purchase">Raise Purchase Request</TabsTrigger>
           <TabsTrigger value="orders">Purchase Orders</TabsTrigger>
@@ -208,12 +254,12 @@ export function StoreWorkspace() {
         </TabsContent>
 
         {canIssue && (
-          <TabsContent value="stock_out" className="mt-4 space-y-4">
+          <TabsContent value="issue_out" className="mt-4 space-y-4">
             <div className="rounded-xl border p-4 space-y-4 bg-muted/20">
               <div>
-                <h3 className="font-semibold text-sm">Issue stock to department / outlet</h3>
+                <h3 className="font-semibold text-sm">Issue out to department / outlet</h3>
                 <p className="text-xs text-muted-foreground mt-1">
-                  Transfers reduce central store on hand. Bar items sent to a bar outlet also credit bar POS stock.
+                  Immediate transfer — no draft. Bar items sent to a bar outlet also credit bar POS stock.
                   Kitchen raw for production batches can also be issued from{' '}
                   <Link href="/supply/kitchen" className="underline font-medium">
                     Kitchen
@@ -237,15 +283,30 @@ export function StoreWorkspace() {
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="issue-received-by">Received by</Label>
-                  <Input
+                {userId ? (
+                  <OrgStaffSearchField
+                    callerId={userId}
                     id="issue-received-by"
-                    placeholder="Name (optional)"
+                    label="Received by"
+                    placeholder="Search staff…"
                     value={issueReceivedBy}
-                    onChange={(e) => setIssueReceivedBy(e.target.value)}
+                    staffId={issueReceivedById}
+                    onChange={(n, id) => {
+                      setIssueReceivedBy(n)
+                      setIssueReceivedById(id)
+                    }}
                   />
-                </div>
+                ) : (
+                  <div className="space-y-1.5">
+                    <Label htmlFor="issue-received-by">Received by</Label>
+                    <Input
+                      id="issue-received-by"
+                      placeholder="Name (optional)"
+                      value={issueReceivedBy}
+                      onChange={(e) => setIssueReceivedBy(e.target.value)}
+                    />
+                  </div>
+                )}
                 <div className="space-y-1.5 sm:col-span-2 lg:col-span-1">
                   <Label htmlFor="issue-notes">Notes</Label>
                   <Input
@@ -331,6 +392,7 @@ export function StoreWorkspace() {
                                       actor,
                                       {
                                         receivedBy: issueReceivedBy,
+                                        receivedById: issueReceivedById ?? undefined,
                                         notes: issueNotes,
                                       },
                                     )
@@ -358,11 +420,65 @@ export function StoreWorkspace() {
           </TabsContent>
         )}
 
+        {canIssue && (
+          <TabsContent value="issue_out_log" className="mt-4">
+            <div className="rounded-xl border overflow-hidden">
+              <div className="border-b px-4 py-2 bg-muted/30 text-sm font-medium">
+                Issue out history
+              </div>
+              {(issueOutLog ?? []).length === 0 ? (
+                <p className="text-sm text-muted-foreground p-6 text-center">
+                  No items issued out yet. Transfers from the Issue Out tab appear here.
+                </p>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>When</TableHead>
+                      <TableHead>Item</TableHead>
+                      <TableHead>Qty</TableHead>
+                      <TableHead>Destination</TableHead>
+                      <TableHead>Received by</TableHead>
+                      <TableHead>Issued by</TableHead>
+                      <TableHead>Notes</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {(issueOutLog ?? []).map((row) => (
+                      <TableRow key={row.id}>
+                        <TableCell className="text-xs whitespace-nowrap">
+                          {new Date(row.issuedAt).toLocaleString()}
+                        </TableCell>
+                        <TableCell className="font-medium">{row.itemName}</TableCell>
+                        <TableCell>
+                          {row.quantity} {row.unit}
+                        </TableCell>
+                        <TableCell>{row.destination}</TableCell>
+                        <TableCell>{row.receivedBy || '—'}</TableCell>
+                        <TableCell>{row.issuedBy}</TableCell>
+                        <TableCell className="text-xs text-muted-foreground max-w-[160px] truncate">
+                          {row.notes || '—'}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </div>
+          </TabsContent>
+        )}
+
         <TabsContent value="purchase" className="mt-4">
+          {purchaseLocked && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50/50 dark:bg-amber-950/20 p-3 text-sm text-muted-foreground mb-4">
+              A purchase order is already in the approval pipeline. You can add items again after the
+              accountant rejects it or once the current PO is retired.
+            </div>
+          )}
           <div className="grid gap-4 lg:grid-cols-[1fr_300px]">
             <div className="rounded-xl border">
               <div className="border-b px-4 py-2 text-sm text-muted-foreground">
-                Enter quantities to add to basket. Items are not submitted until you confirm in Purchase Orders.
+                Type a quantity to add to the active purchase list. Review and send from Purchase orders.
               </div>
               <div className="p-3">
                 <PaginatedListShell
@@ -381,8 +497,7 @@ export function StoreWorkspace() {
                           <TableHead className="text-right">In Store</TableHead>
                           <TableHead className="text-right">Qty to Buy</TableHead>
                           <TableHead className="text-right">Unit Price</TableHead>
-                          <TableHead className="text-right">Total</TableHead>
-                          <TableHead />
+                          <TableHead className="text-right">Line total</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -390,8 +505,9 @@ export function StoreWorkspace() {
                           const qty = Number(qtyMap[item.id] ?? 0)
                           const price = item.lastPrice
                           const level = getStockLevel(item.quantityInStore, item.reorderLevel)
+                          const inBasket = basket.some((b) => b.stockItemId === item.id)
                           return (
-                            <TableRow key={item.id}>
+                            <TableRow key={item.id} className={inBasket ? 'bg-amber-50/40' : undefined}>
                               <TableCell>{item.name} ({item.unit})</TableCell>
                               <TableCell><Badge variant="outline">{DEPT_LABELS[item.dept]}</Badge></TableCell>
                               <TableCell className="text-right">
@@ -403,18 +519,14 @@ export function StoreWorkspace() {
                                 <Input
                                   type="number"
                                   min={0}
+                                  disabled={purchaseLocked}
                                   className="h-8 w-20 ml-auto text-right"
                                   value={qtyMap[item.id] ?? ''}
-                                  onChange={(e) => setQtyMap((m) => ({ ...m, [item.id]: e.target.value }))}
+                                  onChange={(e) => handlePurchaseQtyChange(item, e.target.value)}
                                 />
                               </TableCell>
                               <TableCell className="text-right">{formatNaira(price)}</TableCell>
                               <TableCell className="text-right tabular-nums">{qty ? formatNaira(qty * price) : '—'}</TableCell>
-                              <TableCell>
-                                <Button size="sm" variant="outline" disabled={!qty} onClick={() => { addToBasket(item, qty, price); toast.success(`Added ${item.name}`) }}>
-                                  Add
-                                </Button>
-                              </TableCell>
                             </TableRow>
                           )
                         })}
@@ -424,129 +536,29 @@ export function StoreWorkspace() {
                 </PaginatedListShell>
               </div>
             </div>
-            <BasketSidebar basket={basket} basketByDept={basketByDept} total={stats.basketTotal} onClear={clearBasket} onSubmit={() => { submitBasketAsPo(actor); toast.success('PO raised — awaiting accountant approval'); setTab('orders') }} />
+            {basketSidebar}
           </div>
         </TabsContent>
 
         <TabsContent value="orders" className="mt-4 space-y-4">
-          <PoApprovalPanel />
-          <PaginatedListShell
-            items={purchaseOrders}
-            pageSize={10}
-            searchPlaceholder="Search PO number, week, status…"
-            searchMatch={(po, query) => {
-              const q = query.trim().toLowerCase()
-              return (
-                po.poNumber.toLowerCase().includes(q) ||
-                po.weekLabel.toLowerCase().includes(q) ||
-                po.status.toLowerCase().includes(q) ||
-                po.createdByName.toLowerCase().includes(q)
-              )
-            }}
-            emptyMessage="No purchase orders yet."
-          >
-            {(pagePos) => (
-              <div className="space-y-3">
-                {pagePos.map((po) => (
-                  <div key={po.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-4">
-                    <div className="space-y-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <p className="font-medium">{po.poNumber} — {po.weekLabel}</p>
-                        {poStatusBadge(po.status)}
-                      </div>
-                      <p className="text-sm text-muted-foreground">
-                        {po.createdByName} · {formatNaira(po.totalAmount)}
-                      </p>
-                      {po.accountantComment && (
-                        <p className="text-xs text-muted-foreground">Accountant: {po.accountantComment}</p>
-                      )}
-                      {po.managerComment && (
-                        <p className="text-xs text-muted-foreground">Manager: {po.managerComment}</p>
-                      )}
-                    </div>
-                    <Button asChild variant="outline" size="sm">
-                      <Link href={`/supply/purchasing?po=${po.id}`}>View / Retire</Link>
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </PaginatedListShell>
+          <div className="rounded-lg border border-amber-200 bg-amber-50/50 dark:bg-amber-950/20 p-3 text-sm text-muted-foreground">
+            Only <strong className="text-foreground">one purchase order</strong> at a time. The list
+            stays here after you send to the accountant until the PO is retired. Approval is in{' '}
+            <Link href="/expenses?tab=purchase_orders" className="underline font-medium text-foreground">
+              Expenses → Purchase orders
+            </Link>
+            .
+          </div>
+          <ActivePurchaseOrderPanel actor={actor} storeItems={storeItems} />
         </TabsContent>
 
         <TabsContent value="history" className="mt-4">
-          <PaginatedListShell
-            items={activityLog}
-            pageSize={20}
-            searchPlaceholder="Search activity…"
-            searchKeys={['summary', 'action', 'actorName']}
-            emptyMessage="No activity recorded."
-          >
-            {(pageLog) => (
-              <ul className="space-y-2 text-sm">
-                {pageLog.map((a) => (
-                  <li key={a.id} className="border-b pb-2">
-                    <span className="text-muted-foreground">{new Date(a.timestamp).toLocaleString()} — </span>
-                    {a.summary}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </PaginatedListShell>
+          <p className="text-sm text-muted-foreground mb-4">
+            Accepted purchase orders (manager-approved and purchased). Click a PO to see every line item.
+          </p>
+          <PoHistoryPanel purchaseOrders={purchaseOrders} />
         </TabsContent>
       </Tabs>
-    </div>
-  )
-}
-
-function BasketSidebar({
-  basket,
-  basketByDept,
-  total,
-  onClear,
-  onSubmit,
-}: {
-  basket: ReturnType<typeof useSupplyChain>['basket']
-  basketByDept: Map<string, typeof basket>
-  total: number
-  onClear: () => void
-  onSubmit: () => void
-}) {
-  return (
-    <div className="rounded-xl border bg-card p-4 h-fit sticky top-4 shadow-md">
-      <div className="flex justify-between items-center mb-3">
-        <h3 className="font-semibold">Basket</h3>
-        {basket.length > 0 && (
-          <Button variant="ghost" size="sm" onClick={onClear}>Clear</Button>
-        )}
-      </div>
-      {!basket.length ? (
-        <p className="text-sm text-muted-foreground py-8 text-center">Empty</p>
-      ) : (
-        <div className="space-y-4 max-h-[400px] overflow-y-auto">
-          {[...basketByDept.entries()].map(([dept, lines]) => (
-            <div key={dept}>
-              <p className="text-xs font-bold text-muted-foreground mb-1">{DEPT_LABELS[dept as SupplyDept]?.toUpperCase()}</p>
-              {lines.map((l) => (
-                <div key={l.stockItemId} className="flex justify-between text-sm py-0.5">
-                  <span>{l.name} ({l.qtyToBuy} {l.unit})</span>
-                  <span className="tabular-nums">{formatNaira(l.qtyToBuy * l.unitPrice)}</span>
-                </div>
-              ))}
-              <p className="text-right text-sm font-medium text-emerald-600 mt-1">
-                {formatNaira(lines.reduce((s, l) => s + l.qtyToBuy * l.unitPrice, 0))}
-              </p>
-            </div>
-          ))}
-        </div>
-      )}
-      <div className="border-t mt-4 pt-3 flex justify-between font-bold">
-        <span>Total</span>
-        <span>{formatNaira(total)}</span>
-      </div>
-      <Button className="w-full mt-3" disabled={!basket.length} onClick={onSubmit}>
-        Go to Purchase Orders →
-      </Button>
     </div>
   )
 }
