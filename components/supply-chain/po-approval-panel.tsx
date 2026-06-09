@@ -17,6 +17,9 @@ import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { Info } from 'lucide-react'
 import { toast } from 'sonner'
+import { PoLinesTable } from '@/components/supply-chain/po-lines-table'
+import { formatPoRaisedAt } from '@/lib/supply-chain/po-format'
+import { getActivePurchaseOrder } from '@/lib/supply-chain/po-active'
 
 const WORKFLOW_STEPS = [
   'Store raises PO',
@@ -91,6 +94,9 @@ function PoDecisionCard({
           <p className="text-sm text-muted-foreground">
             {po.weekLabel} · {po.createdByName} · {formatNaira(po.totalAmount)}
           </p>
+          <p className="text-xs text-muted-foreground">
+            Raised {formatPoRaisedAt(po.createdAt)}
+          </p>
           {po.accountantComment && stage === 'manager' && (
             <p className="text-xs text-muted-foreground mt-1">
               Accountant: {po.accountantComment}
@@ -105,6 +111,14 @@ function PoDecisionCard({
         </Badge>
       )}
       <p className="text-xs font-medium text-muted-foreground">{title}</p>
+      {po.lines.length > 0 && (
+        <div className="rounded-md border bg-muted/20 p-2 overflow-x-auto">
+          <p className="text-[10px] font-semibold text-muted-foreground mb-2 uppercase tracking-wide">
+            Purchase list ({po.lines.length} items)
+          </p>
+          <PoLinesTable rows={po.lines.map((line) => ({ kind: 'po' as const, line }))} />
+        </div>
+      )}
       <Textarea
         placeholder="Comment required for accept or reject…"
         value={comment}
@@ -148,8 +162,9 @@ export function PoApprovalPanel({ compact }: { compact?: boolean }) {
     useSupplyChain()
   const actor = { name: name ?? 'Staff', role: canonicalRoleKey(role) ?? 'staff' }
 
-  const pendingAccountant = purchaseOrders.filter((p) => p.status === 'pending_accountant')
-  const pendingManager = purchaseOrders.filter((p) => p.status === 'pending_manager')
+  const activePo = getActivePurchaseOrder(purchaseOrders)
+  const pendingAccountant = activePo?.status === 'pending_accountant' ? [activePo] : []
+  const pendingManager = activePo?.status === 'pending_manager' ? [activePo] : []
   const canAccountant = canSupplyPoAccountantReview(role)
   const canManager = canSupplyPoManagerReview(role)
   const adminTester = canAdminTestApproveSupplyPo(role)
@@ -202,12 +217,17 @@ export function PoApprovalPanel({ compact }: { compact?: boolean }) {
                 }}
               />
             ) : (
-              <div key={po.id} className="rounded-lg border p-3 flex justify-between items-center gap-2">
-                <div>
-                  <p className="font-medium text-sm">{po.poNumber}</p>
-                  <p className="text-xs text-muted-foreground">Waiting for accountant review</p>
+              <div key={po.id} className="rounded-lg border p-3 space-y-2">
+                <div className="flex justify-between items-center gap-2">
+                  <div>
+                    <p className="font-medium text-sm">{po.poNumber}</p>
+                    <p className="text-xs text-muted-foreground">Waiting for accountant review</p>
+                  </div>
+                  {poStatusBadge(po.status)}
                 </div>
-                {poStatusBadge(po.status)}
+                {po.lines.length > 0 && (
+                  <PoLinesTable rows={po.lines.map((line) => ({ kind: 'po' as const, line }))} />
+                )}
               </div>
             ),
           )}
