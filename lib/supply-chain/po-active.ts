@@ -1,27 +1,39 @@
-import type { BasketLine, PoLine, PoStatus, PurchaseOrder, StoreItem } from './types'
+import type {
+  BasketLine,
+  PoLine,
+  PoStatus,
+  PurchaseOrder,
+  StoreItem,
+} from "./types";
 
 /** PO still in the store / accounting pipeline (only one allowed at a time). */
 export function isActiveStorePurchaseOrderStatus(status: PoStatus): boolean {
-  return status !== 'retired'
+  return status !== "retired";
 }
 
-export function canEditStorePurchaseOrder(po: PurchaseOrder | undefined): boolean {
-  if (!po) return true
-  return po.status === 'draft' || po.status === 'accountant_rejected'
+export function canEditStorePurchaseOrder(
+  po: PurchaseOrder | undefined,
+): boolean {
+  if (!po) return true;
+  return po.status === "draft" || po.status === "accountant_rejected";
 }
 
-export function isPurchaseOrderAwaitingAccountant(po: PurchaseOrder | undefined): boolean {
-  return po?.status === 'pending_accountant'
+export function isPurchaseOrderAwaitingAccountant(
+  po: PurchaseOrder | undefined,
+): boolean {
+  return po?.status === "pending_accountant";
 }
 
 /** Store draft list visible on Purchase orders tab (until accountant accepts). */
-export function showsStoreDraftPurchaseList(po: PurchaseOrder | undefined): boolean {
-  if (!po) return true
+export function showsStoreDraftPurchaseList(
+  po: PurchaseOrder | undefined,
+): boolean {
+  if (!po) return true;
   return (
-    po.status === 'draft' ||
-    po.status === 'pending_accountant' ||
-    po.status === 'accountant_rejected'
-  )
+    po.status === "draft" ||
+    po.status === "pending_accountant" ||
+    po.status === "accountant_rejected"
+  );
 }
 
 export function poLinesToBasketLines(lines: PoLine[]): BasketLine[] {
@@ -32,7 +44,7 @@ export function poLinesToBasketLines(lines: PoLine[]): BasketLine[] {
     unit: l.unit,
     qtyToBuy: l.quantityOrdered,
     unitPrice: l.unitPrice,
-  }))
+  }));
 }
 
 export function basketLineToPoLine(line: BasketLine, lineId?: string): PoLine {
@@ -45,10 +57,15 @@ export function basketLineToPoLine(line: BasketLine, lineId?: string): PoLine {
     quantityOrdered: line.qtyToBuy,
     unitPrice: line.unitPrice,
     lineTotal: line.qtyToBuy * line.unitPrice,
-  }
+  };
 }
 
-export function storeItemToPoLine(item: StoreItem, qty: number, unitPrice: number, lineId?: string): PoLine {
+export function storeItemToPoLine(
+  item: StoreItem,
+  qty: number,
+  unitPrice: number,
+  lineId?: string,
+): PoLine {
   return basketLineToPoLine(
     {
       stockItemId: item.id,
@@ -59,26 +76,36 @@ export function storeItemToPoLine(item: StoreItem, qty: number, unitPrice: numbe
       unitPrice,
     },
     lineId,
-  )
+  );
 }
 
-export function recalcPoTotals(lines: PoLine[]): { total: number; lines: PoLine[] } {
+export function recalcPoTotals(lines: PoLine[]): {
+  total: number;
+  lines: PoLine[];
+} {
   const next = lines.map((l) => ({
     ...l,
     lineTotal: l.quantityOrdered * l.unitPrice,
-  }))
-  const total = next.reduce((s, l) => s + l.lineTotal, 0)
-  return { total, lines: next }
+  }));
+  const total = next.reduce((s, l) => s + l.lineTotal, 0);
+  return { total, lines: next };
 }
 
 /** The single non-retired PO (newest if legacy data has more than one). */
-export function getActivePurchaseOrder(orders: PurchaseOrder[]): PurchaseOrder | undefined {
-  const active = orders.filter((p) => isActiveStorePurchaseOrderStatus(p.status))
-  if (!active.length) return undefined
-  return [...active].sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]
+export function getActivePurchaseOrder(
+  orders: PurchaseOrder[],
+): PurchaseOrder | undefined {
+  const active = orders.filter((p) =>
+    isActiveStorePurchaseOrderStatus(p.status),
+  );
+  if (!active.length) return undefined;
+  return [...active].sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
 }
 
-export function activePoDisplayLines(po: PurchaseOrder | undefined, basket: BasketLine[]): BasketLine[] {
-  if (po?.lines.length) return poLinesToBasketLines(po.lines)
-  return basket
+export function activePoDisplayLines(
+  po: PurchaseOrder | undefined,
+  basket: BasketLine[],
+): BasketLine[] {
+  if (po?.lines.length) return poLinesToBasketLines(po.lines);
+  return basket;
 }

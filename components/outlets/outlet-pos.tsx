@@ -144,7 +144,11 @@ export function OutletPos({
       ? categoryId
       : null
 
+  const hasMenuPicker =
+    search.trim().length > 0 || activeCategoryFilter != null || parentCategoryId != null
+
   const filteredItems = useMemo(() => {
+    if (!hasMenuPicker) return []
     const q = search.trim().toLowerCase()
     return items
       .filter((it) => it.is_active)
@@ -154,36 +158,24 @@ export function OutletPos({
           return subIds.includes(it.category_id || '') || it.category_id === parentCategoryId
         }
         if (activeCategoryFilter) return it.category_id === activeCategoryFilter
-        return true
+        return false
       })
       .filter((it) => {
         if (!q) return true
         return it.name.toLowerCase().includes(q) || (it.sku || '').toLowerCase().includes(q)
       })
       .sort(compareOutletMenuByName)
-  }, [items, search, activeCategoryFilter, parentCategoryId, categoryId, subCategories])
+  }, [items, search, activeCategoryFilter, parentCategoryId, categoryId, subCategories, hasMenuPicker])
 
   const groupedByCategory = useMemo(() => {
-    if (activeCategoryFilter || parentCategoryId) {
-      return [{ cat: null as OutletMenuCategoryRow | null, items: filteredItems }]
-    }
-    const map = new Map<string, OutletMenuItemRow[]>()
-    for (const it of filteredItems) {
-      const key = it.category_id || '__none__'
-      if (!map.has(key)) map.set(key, [])
-      map.get(key)!.push(it)
-    }
-    return [...map.entries()]
-      .map(([key, list]) => ({
-        cat: categories.find((c) => c.id === key) ?? null,
-        items: list,
-      }))
-      .sort((a, b) =>
-        compareOutletMenuByName(
-          { name: a.cat?.name ?? 'Uncategorized' },
-          { name: b.cat?.name ?? 'Uncategorized' },
-        ),
-      )
+    if (!filteredItems.length) return []
+    const activeCat =
+      activeCategoryFilter != null
+        ? categories.find((c) => c.id === activeCategoryFilter) ?? null
+        : parentCategoryId
+          ? categories.find((c) => c.id === parentCategoryId) ?? null
+          : null
+    return [{ cat: activeCat, items: filteredItems }]
   }, [filteredItems, categories, activeCategoryFilter, parentCategoryId])
 
   const cartItemsTotal = cart.reduce((s, l) => s + l.unitPrice * l.qty, 0)
@@ -1021,8 +1013,15 @@ export function OutletPos({
               </div>
             </section>
           ))}
-          {filteredItems.length === 0 && (
-            <p className="text-center text-muted-foreground py-12">No items — add menu items in the Menu tab.</p>
+          {!hasMenuPicker && (
+            <p className="text-center text-muted-foreground py-16 px-4 text-sm">
+              Pick a category or search for an item (e.g. fried rice). Items load on demand — not all at once.
+            </p>
+          )}
+          {hasMenuPicker && filteredItems.length === 0 && (
+            <p className="text-center text-muted-foreground py-12 text-sm">
+              No matches — try another category or search term.
+            </p>
           )}
         </ScrollArea>
       </div>

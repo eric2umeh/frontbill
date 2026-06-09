@@ -1,48 +1,72 @@
-'use client'
+"use client";
 
-import { useState } from 'react'
-import Link from 'next/link'
-import { useAuth } from '@/lib/auth-context'
-import { useSupplyChain } from '@/lib/supply-chain/supply-chain-context'
-import type { PurchaseOrder } from '@/lib/supply-chain/types'
-import { formatNaira } from '@/lib/utils/currency'
+import { useState } from "react";
+import Link from "next/link";
+import { useAuth } from "@/lib/auth-context";
+import { useSupplyChain } from "@/lib/supply-chain/supply-chain-context";
+import type { PurchaseOrder } from "@/lib/supply-chain/types";
+import { formatNaira } from "@/lib/utils/currency";
 import {
   canonicalRoleKey,
   canAdminTestApproveSupplyPo,
   canSupplyPoAccountantReview,
   canSupplyPoManagerReview,
-} from '@/lib/permissions'
-import { Button } from '@/components/ui/button'
-import { Textarea } from '@/components/ui/textarea'
-import { Badge } from '@/components/ui/badge'
-import { Info } from 'lucide-react'
-import { toast } from 'sonner'
-import { PoLinesTable } from '@/components/supply-chain/po-lines-table'
-import { formatPoRaisedAt } from '@/lib/supply-chain/po-format'
-import { getActivePurchaseOrder } from '@/lib/supply-chain/po-active'
+} from "@/lib/permissions";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
+import { Info } from "lucide-react";
+import { toast } from "sonner";
+import { PoLinesTable } from "@/components/supply-chain/po-lines-table";
+import { formatPoRaisedAt } from "@/lib/supply-chain/po-format";
+import { getActivePurchaseOrder } from "@/lib/supply-chain/po-active";
 
 const WORKFLOW_STEPS = [
-  'Store raises PO',
-  'Accountant accepts or rejects (comment required)',
-  'Manager / Admin accepts or rejects (comment required)',
-  'Cash disbursed — purchaser buys at market',
-  'Retirement updates central store stock',
-] as const
+  "Store raises PO",
+  "Accountant accepts or rejects (comment required)",
+  "Manager / Admin accepts or rejects (comment required)",
+  "Cash disbursed — purchaser buys at market",
+  "Retirement updates central store stock",
+] as const;
 
-function poStatusBadge(status: PurchaseOrder['status']) {
-  const map: Record<PurchaseOrder['status'], { label: string; className: string }> = {
-    draft: { label: 'Draft', className: 'bg-muted text-muted-foreground' },
-    pending_accountant: { label: 'Awaiting accountant', className: 'bg-amber-100 text-amber-900' },
-    accountant_rejected: { label: 'Accountant rejected', className: 'bg-red-100 text-red-800' },
-    pending_manager: { label: 'Awaiting manager', className: 'bg-blue-100 text-blue-900' },
-    manager_rejected: { label: 'Manager rejected', className: 'bg-red-100 text-red-800' },
-    approved: { label: 'Approved', className: 'bg-emerald-100 text-emerald-800' },
-    disbursed: { label: 'Disbursed — buy at market', className: 'bg-emerald-100 text-emerald-800' },
-    retirement_pending: { label: 'Retirement pending', className: 'bg-amber-100 text-amber-900' },
-    retired: { label: 'Retired', className: 'bg-muted text-muted-foreground' },
-  }
-  const s = map[status]
-  return <Badge className={s.className}>{s.label}</Badge>
+function poStatusBadge(status: PurchaseOrder["status"]) {
+  const map: Record<
+    PurchaseOrder["status"],
+    { label: string; className: string }
+  > = {
+    draft: { label: "Draft", className: "bg-muted text-muted-foreground" },
+    pending_accountant: {
+      label: "Awaiting accountant",
+      className: "bg-amber-100 text-amber-900",
+    },
+    accountant_rejected: {
+      label: "Accountant rejected",
+      className: "bg-red-100 text-red-800",
+    },
+    pending_manager: {
+      label: "Awaiting manager",
+      className: "bg-blue-100 text-blue-900",
+    },
+    manager_rejected: {
+      label: "Manager rejected",
+      className: "bg-red-100 text-red-800",
+    },
+    approved: {
+      label: "Approved",
+      className: "bg-emerald-100 text-emerald-800",
+    },
+    disbursed: {
+      label: "Disbursed — buy at market",
+      className: "bg-emerald-100 text-emerald-800",
+    },
+    retirement_pending: {
+      label: "Retirement pending",
+      className: "bg-amber-100 text-amber-900",
+    },
+    retired: { label: "Retired", className: "bg-muted text-muted-foreground" },
+  };
+  const s = map[status];
+  return <Badge className={s.className}>{s.label}</Badge>;
 }
 
 export function PoApprovalWorkflowBanner() {
@@ -52,9 +76,10 @@ export function PoApprovalWorkflowBanner() {
       <div className="space-y-2">
         <p className="font-medium">Purchase order approval chain</p>
         <p className="text-muted-foreground">
-          A raised PO cannot go to market until the accountant and then the manager each review it
-          with a comment. During testing, an Administrator may accept or reject a raised PO directly
-          from the queue below.
+          A raised PO cannot go to market until the accountant and then the
+          manager each review it with a comment. During testing, an
+          Administrator may accept or reject a raised PO directly from the queue
+          below.
         </p>
         <ol className="list-decimal list-inside text-xs text-muted-foreground space-y-0.5">
           {WORKFLOW_STEPS.map((step) => (
@@ -63,7 +88,7 @@ export function PoApprovalWorkflowBanner() {
         </ol>
       </div>
     </div>
-  )
+  );
 }
 
 function PoDecisionCard({
@@ -72,19 +97,19 @@ function PoDecisionCard({
   onDecide,
   testingAdmin,
 }: {
-  po: PurchaseOrder
-  stage: 'accountant' | 'manager' | 'admin_test'
-  onDecide: (approved: boolean, comment: string) => void
-  testingAdmin?: boolean
+  po: PurchaseOrder;
+  stage: "accountant" | "manager" | "admin_test";
+  onDecide: (approved: boolean, comment: string) => void;
+  testingAdmin?: boolean;
 }) {
-  const [comment, setComment] = useState('')
+  const [comment, setComment] = useState("");
 
   const title =
-    stage === 'admin_test'
-      ? 'Administrator (testing) — accept or reject with comment'
-      : stage === 'accountant'
-        ? 'Accountant review — accept or reject with comment'
-        : 'Manager review — accept or reject with comment'
+    stage === "admin_test"
+      ? "Administrator (testing) — accept or reject with comment"
+      : stage === "accountant"
+        ? "Accountant review — accept or reject with comment"
+        : "Manager review — accept or reject with comment";
 
   return (
     <div className="rounded-lg border p-4 space-y-3">
@@ -97,7 +122,7 @@ function PoDecisionCard({
           <p className="text-xs text-muted-foreground">
             Raised {formatPoRaisedAt(po.createdAt)}
           </p>
-          {po.accountantComment && stage === 'manager' && (
+          {po.accountantComment && stage === "manager" && (
             <p className="text-xs text-muted-foreground mt-1">
               Accountant: {po.accountantComment}
             </p>
@@ -106,7 +131,10 @@ function PoDecisionCard({
         {poStatusBadge(po.status)}
       </div>
       {testingAdmin && (
-        <Badge variant="outline" className="text-[10px] bg-amber-50 text-amber-900 border-amber-200">
+        <Badge
+          variant="outline"
+          className="text-[10px] bg-amber-50 text-amber-900 border-amber-200"
+        >
           Testing — admin fast-track (skips separate accountant/manager logins)
         </Badge>
       )}
@@ -116,7 +144,9 @@ function PoDecisionCard({
           <p className="text-[10px] font-semibold text-muted-foreground mb-2 uppercase tracking-wide">
             Purchase list ({po.lines.length} items)
           </p>
-          <PoLinesTable rows={po.lines.map((line) => ({ kind: 'po' as const, line }))} />
+          <PoLinesTable
+            rows={po.lines.map((line) => ({ kind: "po" as const, line }))}
+          />
         </div>
       )}
       <Textarea
@@ -130,53 +160,64 @@ function PoDecisionCard({
           size="sm"
           disabled={!comment.trim()}
           onClick={() => {
-            onDecide(true, comment.trim())
-            setComment('')
+            onDecide(true, comment.trim());
+            setComment("");
           }}
         >
-          {stage === 'admin_test'
-            ? 'Accept PO (release for market)'
-            : stage === 'accountant'
-              ? 'Accept & forward to manager'
-              : 'Approve for market'}
+          {stage === "admin_test"
+            ? "Accept PO (release for market)"
+            : stage === "accountant"
+              ? "Accept & forward to manager"
+              : "Approve for market"}
         </Button>
         <Button
           size="sm"
           variant="destructive"
           disabled={!comment.trim()}
           onClick={() => {
-            onDecide(false, comment.trim())
-            setComment('')
+            onDecide(false, comment.trim());
+            setComment("");
           }}
         >
           Reject
         </Button>
       </div>
     </div>
-  )
+  );
 }
 
 export function PoApprovalPanel({ compact }: { compact?: boolean }) {
-  const { name, role } = useAuth()
-  const { purchaseOrders, accountantDecision, managerDecision, adminTestPoDecision } =
-    useSupplyChain()
-  const actor = { name: name ?? 'Staff', role: canonicalRoleKey(role) ?? 'staff' }
+  const { name, role } = useAuth();
+  const {
+    purchaseOrders,
+    accountantDecision,
+    managerDecision,
+    adminTestPoDecision,
+  } = useSupplyChain();
+  const actor = {
+    name: name ?? "Staff",
+    role: canonicalRoleKey(role) ?? "staff",
+  };
 
-  const activePo = getActivePurchaseOrder(purchaseOrders)
-  const pendingAccountant = activePo?.status === 'pending_accountant' ? [activePo] : []
-  const pendingManager = activePo?.status === 'pending_manager' ? [activePo] : []
-  const canAccountant = canSupplyPoAccountantReview(role)
-  const canManager = canSupplyPoManagerReview(role)
-  const adminTester = canAdminTestApproveSupplyPo(role)
+  const activePo = getActivePurchaseOrder(purchaseOrders);
+  const pendingAccountant =
+    activePo?.status === "pending_accountant" ? [activePo] : [];
+  const pendingManager =
+    activePo?.status === "pending_manager" ? [activePo] : [];
+  const canAccountant = canSupplyPoAccountantReview(role);
+  const canManager = canSupplyPoManagerReview(role);
+  const adminTester = canAdminTestApproveSupplyPo(role);
 
   if (!pendingAccountant.length && !pendingManager.length) {
-    if (compact) return null
+    if (compact) return null;
     return (
       <div className="space-y-4">
         {!compact && <PoApprovalWorkflowBanner />}
-        <p className="text-sm text-muted-foreground">No purchase orders awaiting approval.</p>
+        <p className="text-sm text-muted-foreground">
+          No purchase orders awaiting approval.
+        </p>
       </div>
-    )
+    );
   }
 
   return (
@@ -196,12 +237,12 @@ export function PoApprovalPanel({ compact }: { compact?: boolean }) {
                 stage="admin_test"
                 testingAdmin
                 onDecide={(approved, comment) => {
-                  adminTestPoDecision(po.id, approved, comment, actor)
+                  adminTestPoDecision(po.id, approved, comment, actor);
                   toast.success(
                     approved
-                      ? 'PO accepted — released for market purchase (admin test)'
-                      : 'PO rejected (admin test)',
-                  )
+                      ? "PO accepted — released for market purchase (admin test)"
+                      : "PO rejected (admin test)",
+                  );
                 }}
               />
             ) : canAccountant ? (
@@ -210,10 +251,12 @@ export function PoApprovalPanel({ compact }: { compact?: boolean }) {
                 po={po}
                 stage="accountant"
                 onDecide={(approved, comment) => {
-                  accountantDecision(po.id, approved, comment, actor)
+                  accountantDecision(po.id, approved, comment, actor);
                   toast.success(
-                    approved ? 'Forwarded to manager for approval' : 'PO rejected by accountant',
-                  )
+                    approved
+                      ? "Forwarded to manager for approval"
+                      : "PO rejected by accountant",
+                  );
                 }}
               />
             ) : (
@@ -221,12 +264,19 @@ export function PoApprovalPanel({ compact }: { compact?: boolean }) {
                 <div className="flex justify-between items-center gap-2">
                   <div>
                     <p className="font-medium text-sm">{po.poNumber}</p>
-                    <p className="text-xs text-muted-foreground">Waiting for accountant review</p>
+                    <p className="text-xs text-muted-foreground">
+                      Waiting for accountant review
+                    </p>
                   </div>
                   {poStatusBadge(po.status)}
                 </div>
                 {po.lines.length > 0 && (
-                  <PoLinesTable rows={po.lines.map((line) => ({ kind: 'po' as const, line }))} />
+                  <PoLinesTable
+                    rows={po.lines.map((line) => ({
+                      kind: "po" as const,
+                      line,
+                    }))}
+                  />
                 )}
               </div>
             ),
@@ -236,7 +286,9 @@ export function PoApprovalPanel({ compact }: { compact?: boolean }) {
 
       {pendingManager.length > 0 && (
         <div className="space-y-3">
-          <p className="text-sm font-semibold">Manager queue ({pendingManager.length})</p>
+          <p className="text-sm font-semibold">
+            Manager queue ({pendingManager.length})
+          </p>
           {pendingManager.map((po) =>
             adminTester ? (
               <PoDecisionCard
@@ -245,12 +297,12 @@ export function PoApprovalPanel({ compact }: { compact?: boolean }) {
                 stage="admin_test"
                 testingAdmin
                 onDecide={(approved, comment) => {
-                  adminTestPoDecision(po.id, approved, comment, actor)
+                  adminTestPoDecision(po.id, approved, comment, actor);
                   toast.success(
                     approved
-                      ? 'PO accepted — released for market purchase (admin test)'
-                      : 'PO rejected (admin test)',
-                  )
+                      ? "PO accepted — released for market purchase (admin test)"
+                      : "PO rejected (admin test)",
+                  );
                 }}
               />
             ) : canManager ? (
@@ -259,19 +311,24 @@ export function PoApprovalPanel({ compact }: { compact?: boolean }) {
                 po={po}
                 stage="manager"
                 onDecide={(approved, comment) => {
-                  managerDecision(po.id, approved, comment, actor)
+                  managerDecision(po.id, approved, comment, actor);
                   toast.success(
                     approved
-                      ? 'Approved — cash released for market purchase'
-                      : 'PO rejected by manager',
-                  )
+                      ? "Approved — cash released for market purchase"
+                      : "PO rejected by manager",
+                  );
                 }}
               />
             ) : (
-              <div key={po.id} className="rounded-lg border p-3 flex justify-between items-center gap-2">
+              <div
+                key={po.id}
+                className="rounded-lg border p-3 flex justify-between items-center gap-2"
+              >
                 <div>
                   <p className="font-medium text-sm">{po.poNumber}</p>
-                  <p className="text-xs text-muted-foreground">Waiting for manager review</p>
+                  <p className="text-xs text-muted-foreground">
+                    Waiting for manager review
+                  </p>
                 </div>
                 {poStatusBadge(po.status)}
               </div>
@@ -282,16 +339,16 @@ export function PoApprovalPanel({ compact }: { compact?: boolean }) {
 
       {!canAccountant && !canManager && !adminTester && (
         <p className="text-xs text-muted-foreground">
-          You can view pending POs here. Approvals are handled by users with accountant or manager
-          permissions — open{' '}
+          You can view pending POs here. Approvals are handled by users with
+          accountant or manager permissions — open{" "}
           <Link href="/supply/purchasing" className="underline font-medium">
             Purchasing
-          </Link>{' '}
+          </Link>{" "}
           when assigned.
         </p>
       )}
     </div>
-  )
+  );
 }
 
-export { poStatusBadge }
+export { poStatusBadge };

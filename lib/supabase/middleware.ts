@@ -69,7 +69,13 @@ export async function updateSession(request: NextRequest) {
 
   const { user, timedOut } = await getVerifiedServerUser(supabase)
 
-  const effectiveUser = timedOut ? null : user
+  let effectiveUser = timedOut ? null : user
+
+  // Slow Auth API must not log users out — fall back to the session cookie.
+  if (!effectiveUser && timedOut) {
+    const { data: { session } } = await supabase.auth.getSession()
+    effectiveUser = session?.user ?? null
+  }
 
   const requestHeaders = new Headers(request.headers)
   if (effectiveUser?.id) {
@@ -85,7 +91,8 @@ export async function updateSession(request: NextRequest) {
     for (const cookie of supabaseResponse.cookies.getAll()) {
       target.cookies.set(cookie.name, cookie.value, cookie)
     }
-    if (timedOut) {
+    // Only clear cookies when there is no valid session (not on transient timeouts).
+    if (timedOut && !effectiveUser) {
       clearSupabaseAuthCookies(request, target)
     }
     return target
@@ -119,6 +126,7 @@ export async function updateSession(request: NextRequest) {
     '/store',
     '/outlets',
     '/supply',
+    '/refunds',
   ]
   const isProtected = protectedPaths.some((path) =>
     request.nextUrl.pathname.startsWith(path),
