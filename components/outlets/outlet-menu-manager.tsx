@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react'
 import type { OutletMenuCategoryRow, OutletMenuItemRow } from '@/lib/outlets/types'
 import { isStoreControlledFnbOutlet, type OutletDepartmentKey } from '@/lib/outlets/departments'
 import { itemAllowsPosPriceEdit } from '@/lib/outlets/category-price-editable'
+import { isKitchenSyncedMenuItem } from '@/lib/supply-chain/kitchen-menu-link'
 import { useAuth } from '@/lib/auth-context'
 import { canKickstartOutletStock, canonicalRoleKey } from '@/lib/permissions'
 import { Button } from '@/components/ui/button'
@@ -521,6 +522,11 @@ export function OutletMenuManager({ department, categories, items, canManage, on
                     >
                       <td className="p-2 font-medium">
                         {it.name}
+                        {isKitchenSyncedMenuItem(it.service_code) && (
+                          <Badge variant="outline" className="ml-1.5 text-[9px] h-4 px-1 border-orange-300 text-orange-800">
+                            Kitchen batch
+                          </Badge>
+                        )}
                         {itemAllowsPosPriceEdit(it, sortedCategories) && (
                           <Badge variant="secondary" className="ml-1.5 text-[9px] h-4 px-1">
                             {it.price_editable || Number(it.unit_price) === 0 ? 'Price at sale' : 'Flex price'}
@@ -932,7 +938,15 @@ export function OutletMenuManager({ department, categories, items, canManage, on
           <AlertDialogHeader>
             <AlertDialogTitle>Delete item?</AlertDialogTitle>
             <AlertDialogDescription>
-              Permanently remove &quot;{deleteItem?.name}&quot; from the menu? This cannot be undone.
+              Permanently remove &quot;{deleteItem?.name}&quot; from the Restaurant menu? This cannot be
+              undone.
+              {deleteItem && isKitchenSyncedMenuItem(deleteItem.service_code) && (
+                <>
+                  {' '}
+                  This item was synced from Kitchen — deleting here removes it from the menu only; batch
+                  standards in Kitchen may still exist until removed there.
+                </>
+              )}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
