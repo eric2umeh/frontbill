@@ -15,6 +15,7 @@ import {
 import { NightAuditPendingProvider } from '@/components/providers/night-audit-pending-provider'
 import { BrandingFavicon } from '@/components/branding/branding-favicon'
 import { BRAND_LOGO_SESSION_KEY } from '@/lib/branding/constants'
+import { getPostLoginPath } from '@/lib/utils/post-login-path'
 import { SupplyChainProvider } from '@/lib/supply-chain/supply-chain-context'
 
 const ROUTE_PERMISSIONS: Array<{ path: string; permission: Permission }> = [
@@ -191,9 +192,7 @@ export function DashboardShell({
     }
   }, [user.organizationId, user.organizationLogoUrl])
 
-  if (!canAccessPath(pathname, user.role)) {
-    return null
-  }
+  const allowed = canAccessPath(pathname, user.role)
 
   return (
     <AuthProvider
@@ -209,15 +208,32 @@ export function DashboardShell({
     >
       <BrandingFavicon href={user.organizationLogoUrl} />
       <SupplyChainProvider>
-      <NightAuditPendingProvider>
-        <div className="flex h-screen overflow-hidden bg-background">
-          <Sidebar mobileOpen={mobileMenuOpen} onMobileClose={() => setMobileMenuOpen(false)} />
-          <div className="flex flex-1 flex-col overflow-hidden">
-            <Header user={user} onMenuClick={() => setMobileMenuOpen(true)} />
-            <main className="flex-1 overflow-y-auto p-3 md:p-4 lg:p-5">{children}</main>
+        <NightAuditPendingProvider>
+          <div className="flex h-screen overflow-hidden bg-background">
+            {allowed && (
+              <Sidebar mobileOpen={mobileMenuOpen} onMobileClose={() => setMobileMenuOpen(false)} />
+            )}
+            <div className="flex flex-1 flex-col overflow-hidden">
+              {allowed && (
+                <Header user={user} onMenuClick={() => setMobileMenuOpen(true)} />
+              )}
+              {!allowed && (
+                <div className="flex flex-1 items-center justify-center">
+                  <p className="text-sm text-muted-foreground">Checking access…</p>
+                </div>
+              )}
+              <main
+                className={
+                  allowed
+                    ? 'flex-1 overflow-y-auto p-3 md:p-4 lg:p-5'
+                    : 'sr-only'
+                }
+              >
+                {children}
+              </main>
+            </div>
           </div>
-        </div>
-      </NightAuditPendingProvider>
+        </NightAuditPendingProvider>
       </SupplyChainProvider>
     </AuthProvider>
   )
