@@ -1,6 +1,7 @@
 import type {
   BarStockItem,
   FnbMenuItem,
+  KitchenRawStockItem,
   KitchenStockItem,
   ProductionBatch,
   PurchaseOrder,
@@ -9,13 +10,13 @@ import type {
 } from './types'
 
 export const MOCK_STORE_ITEMS: StoreItem[] = [
-  { id: 'stk-chicken', name: 'Chicken', unit: 'kg', dept: 'kitchen', quantityInStore: 15, reorderLevel: 5, lastPrice: 4700, benchmarkPrice: 4500 },
-  { id: 'stk-beef', name: 'Beef', unit: 'kg', dept: 'kitchen', quantityInStore: 8, reorderLevel: 3, lastPrice: 6000, benchmarkPrice: 5800 },
-  { id: 'stk-goat', name: 'Goat Meat', unit: 'kg', dept: 'kitchen', quantityInStore: 10, reorderLevel: 3, lastPrice: 5500, benchmarkPrice: 5400 },
-  { id: 'stk-rice-bag', name: 'Rice', unit: 'bag', dept: 'kitchen', quantityInStore: 12, reorderLevel: 4, lastPrice: 38000, benchmarkPrice: 37500 },
-  { id: 'stk-tomato', name: 'Tomatoes', unit: 'kg', dept: 'kitchen', quantityInStore: 6, reorderLevel: 2, lastPrice: 800, benchmarkPrice: 800 },
-  { id: 'stk-pepper-dry', name: 'Dry Pepper', unit: 'kg', dept: 'kitchen', quantityInStore: 3, reorderLevel: 1, lastPrice: 2500, benchmarkPrice: 2400 },
-  { id: 'stk-oil', name: 'Vegetable Oil', unit: 'litre', dept: 'kitchen', quantityInStore: 20, reorderLevel: 8, lastPrice: 1800, benchmarkPrice: 1750 },
+  { id: 'stk-chicken', name: 'Chicken', unit: 'kg', dept: 'kitchen', kitchenCategory: 'protein', quantityInStore: 15, reorderLevel: 5, lastPrice: 4700, benchmarkPrice: 4500 },
+  { id: 'stk-beef', name: 'Beef', unit: 'kg', dept: 'kitchen', kitchenCategory: 'protein', quantityInStore: 8, reorderLevel: 3, lastPrice: 6000, benchmarkPrice: 5800 },
+  { id: 'stk-goat', name: 'Goat Meat', unit: 'kg', dept: 'kitchen', kitchenCategory: 'protein', quantityInStore: 10, reorderLevel: 3, lastPrice: 5500, benchmarkPrice: 5400 },
+  { id: 'stk-rice-bag', name: 'Rice', unit: 'bag', dept: 'kitchen', kitchenCategory: 'rice_grains', quantityInStore: 12, reorderLevel: 4, lastPrice: 38000, benchmarkPrice: 37500 },
+  { id: 'stk-tomato', name: 'Tomatoes', unit: 'kg', dept: 'kitchen', kitchenCategory: 'produce', quantityInStore: 6, reorderLevel: 2, lastPrice: 800, benchmarkPrice: 800 },
+  { id: 'stk-pepper-dry', name: 'Dry Pepper', unit: 'kg', dept: 'kitchen', kitchenCategory: 'seasonings', quantityInStore: 3, reorderLevel: 1, lastPrice: 2500, benchmarkPrice: 2400 },
+  { id: 'stk-oil', name: 'Vegetable Oil', unit: 'litre', dept: 'kitchen', kitchenCategory: 'oils_fats', quantityInStore: 20, reorderLevel: 8, lastPrice: 1800, benchmarkPrice: 1750 },
   { id: 'stk-stout', name: 'Guinness Stout (big)', unit: 'bottle', dept: 'bar', quantityInStore: 12, reorderLevel: 36, lastPrice: 1200, benchmarkPrice: 1150 },
   { id: 'stk-chapman-mix', name: 'Chapman Mix', unit: 'litre', dept: 'bar', quantityInStore: 0, reorderLevel: 5, lastPrice: 3500, benchmarkPrice: 3400 },
   { id: 'stk-ago', name: 'AGO Fuel', unit: 'litre', dept: 'maintenance', quantityInStore: 200, reorderLevel: 50, lastPrice: 1200, benchmarkPrice: 1200 },
@@ -72,6 +73,9 @@ export const MOCK_KITCHEN_STOCK: KitchenStockItem[] = [
   { id: 'ks-jollof', name: 'Jollof Rice', source: 'produced', availablePortions: 30, reorderLevel: 10, linkedRecipeId: 'rcp-jollof' },
   { id: 'ks-egusi', name: 'Egusi Soup + Eba', source: 'produced', availablePortions: 15, reorderLevel: 5, linkedRecipeId: 'rcp-egusi' },
 ]
+
+/** Raw materials issued from central store → kitchen holding area. */
+export const MOCK_KITCHEN_RAW_STOCK: KitchenRawStockItem[] = []
 
 /** Issued from central store bar dept → main bar / pool bar POS. */
 export const MOCK_BAR_STOCK: BarStockItem[] = [
@@ -143,7 +147,7 @@ export const MOCK_POS: PurchaseOrder[] = [
     id: 'po-w23',
     poNumber: 'PO-W2026-23',
     weekLabel: 'Week of 2026-05-23',
-    status: 'retirement_pending',
+    status: 'retired',
     createdBy: 'store-1',
     createdByName: 'Alhaji Musa',
     createdAt: '2026-05-23T08:00:00Z',
@@ -166,20 +170,5 @@ export const MOCK_POS: PurchaseOrder[] = [
     cashDisbursed: 437500,
     totalAmount: 437500,
     lines: [],
-  },
-  {
-    id: 'po-draft',
-    poNumber: 'PO-DRAFT-001',
-    weekLabel: 'Week of 2026-05-30',
-    status: 'pending_accountant',
-    createdBy: 'store-1',
-    createdByName: 'Alhaji Musa',
-    createdAt: '2026-05-30T07:00:00Z',
-    cashDisbursed: 661000,
-    totalAmount: 661000,
-    lines: [
-      { id: 'l4', stockItemId: 'stk-chicken', name: 'Chicken', dept: 'kitchen', unit: 'kg', quantityOrdered: 40, unitPrice: 4500, lineTotal: 180000 },
-      { id: 'l5', stockItemId: 'stk-pepper-dry', name: 'Dry Pepper', dept: 'kitchen', unit: 'kg', quantityOrdered: 50, unitPrice: 2500, lineTotal: 125000 },
-    ],
   },
 ]
