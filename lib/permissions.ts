@@ -65,6 +65,8 @@ export type RoleKey =
   | 'store'
   | 'cashier'
   | 'food_beverage'
+  | 'chef'
+  | 'purchaser'
   | 'laundry'
   | 'gym'
 
@@ -253,6 +255,20 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
       'store:delete',
       'store:adjust',
       'store:issue',
+      'store:reports',
+      'supply:store',
+      'supply:activity',
+      'settings:view',
+    ],
+  },
+  {
+    key: 'purchaser',
+    label: 'Purchaser',
+    description:
+      'Market purchasing: retire approved POs, record actual spend, and view central store activity and stock movements.',
+    color: 'bg-violet-100 text-violet-950 dark:bg-violet-950/35 dark:text-violet-100',
+    permissions: [
+      'store:view',
       'store:reports',
       'supply:store',
       'supply:purchasing',
@@ -445,6 +461,18 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
     ],
   },
   {
+    key: 'chef',
+    label: 'Chef',
+    description:
+      'Kitchen production: recipes, finished & raw stock, production batches, and batch material lists. Can build batch carts; only Admin/Manager/Superadmin can create batch standards. No POS, store issue, or front office.',
+    color: 'bg-orange-100 text-orange-950 dark:bg-orange-950/35 dark:text-orange-100',
+    permissions: [
+      'supply:kitchen',
+      'supply:activity',
+      'settings:view',
+    ],
+  },
+  {
     key: 'laundry',
     label: 'Laundry',
     description:
@@ -504,6 +532,15 @@ const PROFILE_ROLE_ALIASES: Record<string, RoleKey> = {
   fnb: 'food_beverage',
   banquets_staff: 'food_beverage',
   events_staff: 'food_beverage',
+  chef: 'chef',
+  purchaser: 'purchaser',
+  buyer: 'purchaser',
+  procurement: 'purchaser',
+  head_chef: 'chef',
+  sous_chef: 'chef',
+  kitchen_staff: 'chef',
+  cook: 'chef',
+  cooks: 'chef',
   laundry_staff: 'laundry',
   gym_staff: 'gym',
   cash: 'cashier',
@@ -571,6 +608,18 @@ export function canSupplyPoManagerReview(userRole: string | null | undefined): b
 export function canKickstartOutletStock(userRole: string | null | undefined): boolean {
   const roleKey = canonicalRoleKey(userRole)
   return roleKey === 'admin' || roleKey === 'superadmin' || roleKey === 'manager'
+}
+
+/** Central Store → Issue Out tab (transfer stock to kitchen, bar, etc.). */
+export function canIssueStockFromStore(userRole: string | null | undefined): boolean {
+  if (hasPermission(userRole, 'store:issue') || hasPermission(userRole, 'store:adjust')) {
+    return true
+  }
+  const roleKey = canonicalRoleKey(userRole)
+  return (
+    (roleKey === 'superadmin' || roleKey === 'admin' || roleKey === 'manager') &&
+    hasPermission(userRole, 'supply:store')
+  )
 }
 
 export function hasPermission(userRole: string | null | undefined, permission: Permission): boolean {
