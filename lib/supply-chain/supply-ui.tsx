@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import { cn } from '@/lib/utils'
 import type { LucideIcon } from 'lucide-react'
 
@@ -46,6 +47,11 @@ export function DeptPill({
   onClick?: () => void
   label: string
 }) {
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => setMounted(true), [])
+
+  const showCount = mounted && count != null && count > 0
+
   return (
     <button
       type="button"
@@ -56,7 +62,7 @@ export function DeptPill({
       )}
     >
       {label}
-      {count != null && count > 0 && (
+      {showCount && (
         <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-yellow-400 px-0.5 text-[9px] font-bold text-yellow-950">
           {count}
         </span>
