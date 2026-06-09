@@ -150,7 +150,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
   const [entries, setEntries] = useState<RoomEntry[]>([makeEntry()])
   const [quickRoomCount, setQuickRoomCount] = useState<number | ''>('')
   const [quickRoomType, setQuickRoomType] = useState('')
-  const [fillLater, setFillLater] = useState(false)
+  const [fillLater, setFillLater] = useState(true)
   const [totalRoomsCount, setTotalRoomsCount] = useState<number | ''>('')
 
   const nights = checkIn && checkOut ? differenceInDays(checkOut, checkIn) : 0
@@ -926,7 +926,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
     setPayAboveBulkRoomTotal(false)
     setLedgerSearch(''); setLedgerResults([]); setSelectedLedger(null); setLedgerSearchOpen(false)
     setShowNewLedgerOrgForm(false); setNewLedgerOrgName(''); setNewLedgerOrgEmail(''); setNewLedgerOrgPhone('')
-    setEntries([makeEntry()]); setQuickRoomCount(''); setQuickRoomType(''); setFillLater(false); setTotalRoomsCount('')
+    setEntries([makeEntry()]); setQuickRoomCount(''); setQuickRoomType(''); setFillLater(true); setTotalRoomsCount('')
     setPickedRoomIds([])
     onClose()
   }
@@ -1340,14 +1340,14 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
                 <p className="text-sm font-semibold">Room Entries</p>
                 <Label className="flex items-center gap-2 cursor-pointer font-normal">
                   <Checkbox
-                    checked={fillLater}
+                    checked={!fillLater}
                     onCheckedChange={(c) => {
-                      const v = Boolean(c)
-                      setFillLater(v)
-                      if (v) setPickedRoomIds([])
+                      const fillNow = Boolean(c)
+                      setFillLater(!fillNow)
+                      if (!fillNow) setPickedRoomIds([])
                     }}
                   />
-                  <span className="text-sm">Fill room details later</span>
+                  <span className="text-sm">Fill room details now</span>
                 </Label>
               </div>
 
