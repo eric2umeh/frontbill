@@ -1,8 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { Suspense, useMemo, useState } from 'react'
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
+import { usePathname, useSearchParams } from 'next/navigation'
 import { cn } from '@/lib/utils'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Button } from '@/components/ui/button'
@@ -10,6 +10,11 @@ import { Badge } from '@/components/ui/badge'
 import { useAuth } from '@/lib/auth-context'
 import { canonicalRoleKey, hasPermission, type Permission } from '@/lib/permissions'
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible'
 import {
   LayoutDashboard,
   Calendar,
@@ -23,6 +28,7 @@ import {
   Settings,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   X,
   Hotel,
   Sparkles,
@@ -33,17 +39,23 @@ import {
   ShoppingCart,
   ClipboardCheck,
   Store,
+  RotateCcw,
+  Building2,
+  Package,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useNightAuditPendingCounts } from '@/hooks/use-night-audit-pending-counts'
 import { nightAuditHrefForPendingCounts } from '@/lib/night-audit/pending-approval-counts'
 
+type NavChild = { label: string; href: string; permission?: Permission; permissionAny?: Permission[] }
+
 type NavRoute = {
   label: string
   icon: LucideIcon
-  href: string
+  href?: string
   permission?: Permission
   permissionAny?: Permission[]
+  children?: NavChild[]
 }
 
 type NavSection = {
@@ -64,20 +76,25 @@ const NAV_SECTIONS: NavSection[] = [
   {
     title: 'Outlets & Services',
     routes: [
-      {
-        label: 'Outlets (POS)',
-        icon: Store,
-        href: '/outlets',
-        permission: 'outlet:view',
-      },
+      { label: 'Outlets (POS)', icon: Store, href: '/outlets', permission: 'outlet:view' },
+    ],
+  },
+  {
+    title: 'Kitchen',
+    routes: [
+      { label: 'Kitchen', icon: ChefHat, href: '/supply/kitchen', permission: 'supply:kitchen' },
     ],
   },
   {
     title: 'Supply Chain',
     routes: [
       { label: 'Central Store', icon: Warehouse, href: '/supply/store', permission: 'supply:store' },
-      { label: 'Kitchen', icon: ChefHat, href: '/supply/kitchen', permission: 'supply:kitchen' },
-      { label: 'Purchasing', icon: ShoppingCart, href: '/supply/purchasing', permissionAny: ['supply:purchasing', 'supply:approve_accountant', 'supply:approve_manager'] },
+      {
+        label: 'Purchasing',
+        icon: ShoppingCart,
+        href: '/supply/purchasing',
+        permissionAny: ['supply:purchasing', 'supply:approve_accountant', 'supply:approve_manager'],
+      },
       { label: 'Supply Log', icon: ClipboardCheck, href: '/supply/activity', permission: 'supply:activity' },
     ],
   },
@@ -87,7 +104,13 @@ const NAV_SECTIONS: NavSection[] = [
       { label: 'Expenses', icon: Wallet, href: '/expenses', permission: 'expenses:view' },
       { label: 'Reports', icon: FileBarChart, href: '/reports', permission: 'reports:view' },
       { label: 'Night Audit', icon: Moon, href: '/night-audit', permission: 'night_audit:view' },
-      { label: 'Transactions / Analytics', icon: Receipt, href: '/transactions', permissionAny: ['transactions:view', 'analytics:view'] },
+      {
+        label: 'Transactions / Analytics',
+        icon: Receipt,
+        href: '/transactions',
+        permissionAny: ['transactions:view', 'analytics:view'],
+      },
+      { label: 'Refunds', icon: RotateCcw, href: '/refunds', permission: 'payments:refund' },
     ],
   },
   {
@@ -107,9 +130,9 @@ const NAV_SECTIONS: NavSection[] = [
   },
 ]
 
-function routeIsVisible(route: NavRoute, role: string | null): boolean {
+function routeIsVisible(route: NavRoute | NavChild, role: string | null): boolean {
   const roleKey = canonicalRoleKey(role)
-  if (route.href === '/dashboard' && roleKey === 'cashier') return false
+  if ('href' in route && route.href === '/dashboard' && roleKey === 'cashier') return false
   if (route.permissionAny?.length) {
     return route.permissionAny.some((p) => hasPermission(role, p))
   }
@@ -117,7 +140,19 @@ function routeIsVisible(route: NavRoute, role: string | null): boolean {
   return hasPermission(role, route.permission)
 }
 
-function routeIsActive(pathname: string, href: string): boolean {
+function usesCompactNav(role: string | null): boolean {
+  const rk = canonicalRoleKey(role)
+  return rk === 'superadmin' || rk === 'admin' || rk === 'manager'
+}
+
+function routeIsActive(
+  pathname: string,
+  href: string,
+  _searchParams?: URLSearchParams | null,
+): boolean {
+  if (href === '/supply/kitchen') {
+    return pathname === '/supply/kitchen' || pathname.startsWith('/supply/kitchen/')
+  }
   if (href === '/outlets') {
     return pathname === '/outlets' || pathname.startsWith('/outlets/')
   }
@@ -143,13 +178,81 @@ function routeIsActive(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(`${href}/`)
 }
 
+function groupIsActive(
+  pathname: string,
+  children: NavChild[],
+  searchParams?: URLSearchParams | null,
+): boolean {
+  return children.some((c) => routeIsActive(pathname, c.href, searchParams))
+}
+
+function collapseRoutesToDropdown(
+  label: string,
+  icon: LucideIcon,
+  routes: NavRoute[],
+  role: string | null,
+): NavRoute[] {
+  const visibleChildren = routes
+    .filter((r) => r.href)
+    .map((r) => ({
+      label: r.label,
+      href: r.href!,
+      permission: r.permission,
+      permissionAny: r.permissionAny,
+    }))
+    .filter((c) => routeIsVisible(c, role))
+
+  if (visibleChildren.length === 0) return []
+  if (visibleChildren.length === 1) {
+    const only = routes.find((r) => r.href === visibleChildren[0].href)
+    return only ? [only] : []
+  }
+  return [{ label, icon, children: visibleChildren }]
+}
+
+const DROPDOWN_SECTIONS: Record<string, LucideIcon> = {
+  'Supply Chain': Package,
+  Accounting: Wallet,
+  Property: Building2,
+  Administration: ShieldCheck,
+}
+
+function buildSections(role: string | null): NavSection[] {
+  const compact = usesCompactNav(role)
+  return NAV_SECTIONS.map((section) => {
+    let routes = section.routes.filter((r) => routeIsVisible(r, role))
+
+    const dropdownIcon = DROPDOWN_SECTIONS[section.title]
+    const useDropdown =
+      dropdownIcon &&
+      routes.length > 1 &&
+      (section.title !== 'Accounting' || compact)
+
+    if (useDropdown && dropdownIcon) {
+      routes = collapseRoutesToDropdown(section.title, dropdownIcon, routes, role)
+    }
+
+    routes = routes
+      .map((r) => {
+        if (!r.children?.length) return r
+        const children = r.children.filter((c) => routeIsVisible(c, role))
+        if (!children.length) return null
+        return { ...r, children }
+      })
+      .filter(Boolean) as NavRoute[]
+
+    return { ...section, routes }
+  }).filter((s) => s.routes.length > 0)
+}
+
 interface SidebarProps {
   mobileOpen?: boolean
   onMobileClose?: () => void
 }
 
-export function Sidebar({ mobileOpen, onMobileClose }: SidebarProps = {}) {
+function SidebarInner({ mobileOpen, onMobileClose, isMobile = false }: SidebarProps & { isMobile?: boolean }) {
   const pathname = usePathname()
+  const searchParams = useSearchParams()
   const [collapsed, setCollapsed] = useState(false)
   const { role, organizationLogoUrl } = useAuth()
   const nightAuditPending = useNightAuditPendingCounts()
@@ -159,12 +262,32 @@ export function Sidebar({ mobileOpen, onMobileClose }: SidebarProps = {}) {
       ? nightAuditHrefForPendingCounts(nightAuditPending)
       : '/night-audit'
 
-  const visibleSections = NAV_SECTIONS.map((section) => ({
-    ...section,
-    routes: section.routes.filter((route) => routeIsVisible(route, role)),
-  })).filter((section) => section.routes.length > 0)
+  const visibleSections = useMemo(() => buildSections(role), [role])
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({})
 
-  const SidebarContent = ({ isMobile = false }: { isMobile?: boolean }) => (
+  const isGroupOpen = (key: string, children: NavChild[]) => {
+    if (openGroups[key] !== undefined) return openGroups[key]
+    return groupIsActive(pathname, children, searchParams)
+  }
+
+  const linkClass = (active: boolean) =>
+    cn(
+      'flex items-center rounded-lg px-3 py-2.5 text-sm font-medium transition-colors',
+      !collapsed || isMobile ? 'gap-3' : 'justify-center gap-0',
+      active
+        ? 'bg-primary text-primary-foreground'
+        : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
+    )
+
+  const childLinkClass = (active: boolean) =>
+    cn(
+      'flex items-center rounded-md px-3 py-2 text-sm transition-colors ml-6',
+      active
+        ? 'bg-primary/10 text-primary font-medium'
+        : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
+    )
+
+  return (
     <div
       className={cn(
         'h-full flex flex-col border-r bg-card',
@@ -214,21 +337,85 @@ export function Sidebar({ mobileOpen, onMobileClose }: SidebarProps = {}) {
               <div className="space-y-0.5">
                 {section.routes.map((route) => {
                   const Icon = route.icon
-                  const href = route.href === '/night-audit' ? nightAuditHref : route.href
-                  const isActive = routeIsActive(pathname, route.href)
+                  const groupKey = `${section.title}-${route.label}`
+
+                  if (route.children?.length) {
+                    const open = isGroupOpen(groupKey, route.children)
+                    const active = groupIsActive(pathname, route.children, searchParams)
+
+                    if (collapsed && !isMobile) {
+                      return (
+                        <Link
+                          key={groupKey}
+                          href={route.children[0].href}
+                          className={linkClass(active)}
+                          title={route.label}
+                        >
+                          <Icon className="h-4 w-4 flex-shrink-0" />
+                        </Link>
+                      )
+                    }
+
+                    return (
+                      <Collapsible
+                        key={groupKey}
+                        open={open}
+                        onOpenChange={(v) => setOpenGroups((p) => ({ ...p, [groupKey]: v }))}
+                      >
+                        <CollapsibleTrigger
+                          className={cn(
+                            'flex w-full items-center rounded-lg px-3 py-2.5 text-sm font-medium transition-colors',
+                            'gap-3',
+                            active
+                              ? 'bg-primary/10 text-primary'
+                              : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
+                          )}
+                        >
+                          <Icon className="h-4 w-4 flex-shrink-0" />
+                          <span className="flex-1 text-left">{route.label}</span>
+                          <ChevronDown
+                            className={cn(
+                              'h-4 w-4 shrink-0 transition-transform',
+                              open && 'rotate-180',
+                            )}
+                          />
+                        </CollapsibleTrigger>
+                        <CollapsibleContent className="space-y-0.5 pt-0.5 pb-1">
+                          {route.children.map((child) => {
+                            const href =
+                              child.href === '/night-audit' ? nightAuditHref : child.href
+                            const childActive = routeIsActive(pathname, child.href, searchParams)
+                            return (
+                              <Link
+                                key={child.href}
+                                href={href}
+                                onClick={() => isMobile && onMobileClose?.()}
+                                className={childLinkClass(childActive)}
+                              >
+                                <span className="flex-1">{child.label}</span>
+                                {child.href === '/night-audit' && pendingNightAuditTotal > 0 && (
+                                  <Badge variant="destructive" className="tabular-nums text-[10px]">
+                                    {pendingNightAuditTotal > 99 ? '99+' : pendingNightAuditTotal}
+                                  </Badge>
+                                )}
+                              </Link>
+                            )
+                          })}
+                        </CollapsibleContent>
+                      </Collapsible>
+                    )
+                  }
+
+                  const href =
+                    route.href === '/night-audit' ? nightAuditHref : route.href!
+                  const isActive = routeIsActive(pathname, route.href!, searchParams)
 
                   return (
                     <Link
                       key={route.href}
                       href={href}
                       onClick={() => isMobile && onMobileClose?.()}
-                      className={cn(
-                        'flex items-center rounded-lg px-3 py-2.5 text-sm font-medium transition-colors',
-                        !collapsed || isMobile ? 'gap-3' : 'justify-center gap-0',
-                        isActive
-                          ? 'bg-primary text-primary-foreground'
-                          : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
-                      )}
+                      className={linkClass(isActive)}
                       title={
                         collapsed && !isMobile
                           ? route.href === '/night-audit' && pendingNightAuditTotal > 0
@@ -285,19 +472,21 @@ export function Sidebar({ mobileOpen, onMobileClose }: SidebarProps = {}) {
       )}
     </div>
   )
+}
 
+export function Sidebar({ mobileOpen, onMobileClose }: SidebarProps = {}) {
   return (
-    <>
+    <Suspense fallback={<div className="hidden md:block w-64 border-r bg-card" />}>
       <div className="hidden md:block">
-        <SidebarContent />
+        <SidebarInner />
       </div>
 
       <Sheet open={mobileOpen} onOpenChange={onMobileClose}>
         <SheetContent side="left" className="p-0 w-64" aria-describedby={undefined}>
           <SheetTitle className="sr-only">Navigation Menu</SheetTitle>
-          <SidebarContent isMobile />
+          <SidebarInner isMobile mobileOpen={mobileOpen} onMobileClose={onMobileClose} />
         </SheetContent>
       </Sheet>
-    </>
+    </Suspense>
   )
 }
