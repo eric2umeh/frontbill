@@ -128,6 +128,32 @@ function persistStock(key: string, value: unknown) {
   }
 }
 
+const EMPTY_BASKET: BasketLine[] = [];
+const EMPTY_ISSUE_OUT_LOG: IssueOutRecord[] = [];
+
+/** SSR-safe: start with fallback, then hydrate from storage after mount. */
+function usePersistedArrayState<T>(
+  key: string,
+  fallback: T[],
+): [T[], React.Dispatch<React.SetStateAction<T[]>>] {
+  const fallbackRef = useRef(fallback);
+  fallbackRef.current = fallback;
+  const [state, setState] = useState<T[]>(() => [...fallbackRef.current]);
+  const storageReadyRef = useRef(false);
+
+  useEffect(() => {
+    setState(loadPersistedStock(key, fallbackRef.current));
+    storageReadyRef.current = true;
+  }, [key]);
+
+  useEffect(() => {
+    if (!storageReadyRef.current) return;
+    persistStock(key, state);
+  }, [key, state]);
+
+  return [state, setState];
+}
+
 function upsertKitchenStockRow(
   prev: KitchenStockItem[],
   stockId: string,
@@ -174,32 +200,41 @@ const SupplyChainContext = createContext<ReturnType<
 export { SupplyChainContext };
 
 function useSupplyChainImpl() {
-  const [storeItems, setStoreItems] = useState<StoreItem[]>(() =>
-    loadPersistedStock(STORE_ITEMS_STORAGE_KEY, MOCK_STORE_ITEMS),
+  const [storeItems, setStoreItems] = usePersistedArrayState<StoreItem>(
+    STORE_ITEMS_STORAGE_KEY,
+    MOCK_STORE_ITEMS,
   );
-  const [basket, setBasket] = useState<BasketLine[]>(() =>
-    loadPersistedStock(BASKET_STORAGE_KEY, []),
+  const [basket, setBasket] = usePersistedArrayState<BasketLine>(
+    BASKET_STORAGE_KEY,
+    EMPTY_BASKET,
   );
-  const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>(() =>
-    loadPersistedStock(PURCHASE_ORDERS_STORAGE_KEY, MOCK_POS),
+  const [purchaseOrders, setPurchaseOrders] = usePersistedArrayState<PurchaseOrder>(
+    PURCHASE_ORDERS_STORAGE_KEY,
+    MOCK_POS,
   );
-  const [recipes, setRecipes] = useState<Recipe[]>(() =>
-    loadPersistedStock(RECIPES_STORAGE_KEY, MOCK_RECIPES),
+  const [recipes, setRecipes] = usePersistedArrayState<Recipe>(
+    RECIPES_STORAGE_KEY,
+    MOCK_RECIPES,
   );
-  const [kitchenStock, setKitchenStock] = useState<KitchenStockItem[]>(() =>
-    loadPersistedStock(KITCHEN_STOCK_STORAGE_KEY, MOCK_KITCHEN_STOCK),
+  const [kitchenStock, setKitchenStock] = usePersistedArrayState<KitchenStockItem>(
+    KITCHEN_STOCK_STORAGE_KEY,
+    MOCK_KITCHEN_STOCK,
   );
-  const [barStock, setBarStock] = useState<BarStockItem[]>(() =>
-    loadPersistedStock(BAR_STOCK_STORAGE_KEY, MOCK_BAR_STOCK),
+  const [barStock, setBarStock] = usePersistedArrayState<BarStockItem>(
+    BAR_STOCK_STORAGE_KEY,
+    MOCK_BAR_STOCK,
   );
-  const [kitchenRawStock, setKitchenRawStock] = useState<KitchenRawStockItem[]>(
-    () => loadPersistedStock(KITCHEN_RAW_STOCK_STORAGE_KEY, MOCK_KITCHEN_RAW_STOCK),
+  const [kitchenRawStock, setKitchenRawStock] = usePersistedArrayState<KitchenRawStockItem>(
+    KITCHEN_RAW_STOCK_STORAGE_KEY,
+    MOCK_KITCHEN_RAW_STOCK,
   );
-  const [issueOutLog, setIssueOutLog] = useState<IssueOutRecord[]>(() =>
-    loadPersistedStock(ISSUE_OUT_LOG_STORAGE_KEY, []),
+  const [issueOutLog, setIssueOutLog] = usePersistedArrayState<IssueOutRecord>(
+    ISSUE_OUT_LOG_STORAGE_KEY,
+    EMPTY_ISSUE_OUT_LOG,
   );
-  const [batches, setBatches] = useState<ProductionBatch[]>(() =>
-    loadPersistedStock(BATCHES_STORAGE_KEY, MOCK_BATCHES),
+  const [batches, setBatches] = usePersistedArrayState<ProductionBatch>(
+    BATCHES_STORAGE_KEY,
+    MOCK_BATCHES,
   );
   const [fnbOrders, setFnbOrders] = useState<FnbMenuItem[]>(() => [
     ...MOCK_FNB_MENU,
@@ -215,42 +250,6 @@ function useSupplyChainImpl() {
       summary: "Chapman — 86 OUT (bar stock depleted from sales)",
     },
   ]);
-
-  useEffect(() => {
-    persistStock(KITCHEN_STOCK_STORAGE_KEY, kitchenStock);
-  }, [kitchenStock]);
-
-  useEffect(() => {
-    persistStock(BAR_STOCK_STORAGE_KEY, barStock);
-  }, [barStock]);
-
-  useEffect(() => {
-    persistStock(STORE_ITEMS_STORAGE_KEY, storeItems);
-  }, [storeItems]);
-
-  useEffect(() => {
-    persistStock(RECIPES_STORAGE_KEY, recipes);
-  }, [recipes]);
-
-  useEffect(() => {
-    persistStock(BATCHES_STORAGE_KEY, batches);
-  }, [batches]);
-
-  useEffect(() => {
-    persistStock(KITCHEN_RAW_STOCK_STORAGE_KEY, kitchenRawStock);
-  }, [kitchenRawStock]);
-
-  useEffect(() => {
-    persistStock(ISSUE_OUT_LOG_STORAGE_KEY, issueOutLog);
-  }, [issueOutLog]);
-
-  useEffect(() => {
-    persistStock(BASKET_STORAGE_KEY, basket);
-  }, [basket]);
-
-  useEffect(() => {
-    persistStock(PURCHASE_ORDERS_STORAGE_KEY, purchaseOrders);
-  }, [purchaseOrders]);
 
   useEffect(() => {
     const reloadFromStorage = () => {
