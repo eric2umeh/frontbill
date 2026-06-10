@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { resolveHotelTimeZone } from '@/lib/hotel-date'
-import { isInHouseOnCalendarDay, todayYmdHotel } from '@/lib/utils/booking-in-house-dates'
+import { bookingYmdHotel, isInHouseOnCalendarDay, todayYmdHotel } from '@/lib/utils/booking-in-house-dates'
 
 export const OCCUPYING_BOOKING_STATUSES = ['checked_in', 'confirmed', 'reserved'] as const
 
@@ -17,18 +17,20 @@ function normStatus(s: string | null | undefined): string {
   return String(s || '').toLowerCase().replace(/-/g, '_')
 }
 
+function isOpenOccupyingStatus(b: OccupyingBookingRow): boolean {
+  const fs = String(b.folio_status || 'active').toLowerCase()
+  if (fs === 'checked_out' || fs === 'cancelled') return false
+  if (b.status === 'checked_out' || b.status === 'cancelled') return false
+  return OCCUPYING_BOOKING_STATUSES.includes(b.status as (typeof OCCUPYING_BOOKING_STATUSES)[number])
+}
+
 /** Active in-house folio on a room (matches bookings in-house list / outlets charge-to-room). */
 export function pickOccupyingBooking<T extends OccupyingBookingRow>(rows: T[]): T | null {
   const today = todayYmdHotel()
   const tz = resolveHotelTimeZone()
 
   const open = rows.filter((b) => {
-    const fs = String(b.folio_status || 'active').toLowerCase()
-    if (fs === 'checked_out' || fs === 'cancelled') return false
-    if (b.status === 'checked_out' || b.status === 'cancelled') return false
-    if (!OCCUPYING_BOOKING_STATUSES.includes(b.status as (typeof OCCUPYING_BOOKING_STATUSES)[number])) {
-      return false
-    }
+    if (!isOpenOccupyingStatus(b)) return false
     if (b.status === 'checked_in') return true
     return isInHouseOnCalendarDay(b.check_in, b.check_out, today, tz)
   })
@@ -38,17 +40,46 @@ export function pickOccupyingBooking<T extends OccupyingBookingRow>(rows: T[]): 
   return open[0] ?? null
 }
 
+/** Active booking that should own rooms.status, including current/future room holds. */
+export function pickRoomStatusBooking<T extends OccupyingBookingRow>(rows: T[]): T | null {
+  const today = todayYmdHotel()
+  const tz = resolveHotelTimeZone()
+
+  const open = rows.filter((b) => {
+    if (!isOpenOccupyingStatus(b)) return false
+    if (b.status === 'checked_in') return true
+
+    const checkOut = bookingYmdHotel(b.check_out, tz)
+    return Boolean(checkOut && checkOut >= today)
+  })
+
+  const rank = (b: OccupyingBookingRow) => {
+    if (b.status === 'checked_in') return 0
+    if (isInHouseOnCalendarDay(b.check_in, b.check_out, today, tz)) {
+      return b.status === 'confirmed' ? 1 : 2
+    }
+    return b.status === 'confirmed' ? 3 : 4
+  }
+
+  open.sort((a, b) => {
+    const rankDelta = rank(a) - rank(b)
+    if (rankDelta !== 0) return rankDelta
+    return bookingYmdHotel(a.check_in, tz).localeCompare(bookingYmdHotel(b.check_in, tz))
+  })
+
+  return open[0] ?? null
+}
+
 /** PMS room status from the active folio on that room. Returns null if housekeeping block should stay. */
 export function deriveRoomStatusFromOccupying(
   occupying: Pick<OccupyingBookingRow, 'status'> | null,
   currentStatus: string | null | undefined,
 ): string | null {
   const cur = normStatus(currentStatus)
-  if (cur === 'maintenance' || cur === 'out_of_order') return null
+  if (cur === 'cleaning' || cur === 'maintenance' || cur === 'out_of_order') return null
 
   if (!occupying) {
     if (cur === 'occupied' || cur === 'reserved') return 'available'
-    if (cur === 'cleaning') return 'available'
     return null
   }
 
@@ -116,7 +147,7 @@ export async function reconcileRoomStatusesForOrganization(
   const now = new Date().toISOString()
 
   for (const room of rooms ?? []) {
-    const occupying = pickOccupyingBooking(byRoom.get(room.id) ?? [])
+    const occupying = pickRoomStatusBooking(byRoom.get(room.id) ?? [])
     const next = deriveRoomStatusFromOccupying(occupying, room.status)
     if (!next || normStatus(next) === normStatus(room.status)) continue
 
