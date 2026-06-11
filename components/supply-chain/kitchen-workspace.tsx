@@ -1,6 +1,7 @@
 'use client'
 
 import { useMemo, useState } from 'react'
+import { useClientMounted } from '@/hooks/use-client-mounted'
 import { useAuth } from '@/lib/auth-context'
 import { useSupplyChain } from '@/lib/supply-chain/supply-chain-context'
 import { formatNaira } from '@/lib/utils/currency'
@@ -12,7 +13,18 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { Flame, Pencil, Plus, Trash2 } from 'lucide-react'
+import { Flame, Pencil, Plus, Trash2, UtensilsCrossed } from 'lucide-react'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog'
 import { toast } from 'sonner'
 import { PaginatedListShell } from '@/components/shared/paginated-list-shell'
 import { KitchenBatchBuilder } from '@/components/supply-chain/kitchen-batch-builder'
@@ -41,6 +53,7 @@ export function KitchenWorkspace() {
     closeBatch,
     updateRecipe,
     deleteRecipe,
+    clearKitchenRestaurantMenu,
     getRecipeEconomics,
   } = useSupplyChain()
 
@@ -93,7 +106,9 @@ export function KitchenWorkspace() {
 
     return rows
   }, [kitchenRawStock, kitchenReceipts])
+  const mounted = useClientMounted()
   const [tab, setTab] = useState('stock')
+  const [clearingMenu, setClearingMenu] = useState(false)
   const [batchDialog, setBatchDialog] = useState<{ recipeId: string } | null>(null)
   const [closeDialog, setCloseDialog] = useState<string | null>(null)
   const [editRecipe, setEditRecipe] = useState<Recipe | null>(null)
@@ -102,7 +117,8 @@ export function KitchenWorkspace() {
   const [actual, setActual] = useState(4)
   const actor = { name: name ?? 'Kitchen', role: canonicalRoleKey(role) ?? 'staff' }
   const roleKey = canonicalRoleKey(role) ?? ''
-  const canManageBatchStandards = roleKey === 'superadmin' || roleKey === 'admin'
+  const canManageBatchStandards =
+    roleKey === 'superadmin' || roleKey === 'admin' || roleKey === 'manager'
 
   return (
     <div className="space-y-6">
@@ -113,13 +129,77 @@ export function KitchenWorkspace() {
           description="Production batches, raw stock, and Restaurant menu sync"
           trailing={<RoomInventoryStatsStrip className="shrink-0 scale-90 origin-right" />}
         />
-        {tab !== 'new-batch' && (
-          <Button className="shrink-0" onClick={() => setTab('new-batch')}>
-            <Plus className="h-4 w-4 mr-2" /> Open New Batch
-          </Button>
-        )}
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
+          {canManageBatchStandards && (
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="outline" size="sm" disabled={clearingMenu}>
+                  <UtensilsCrossed className="h-4 w-4 mr-2" />
+                  Clear restaurant & kitchen menu
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Clear all restaurant & kitchen menu items?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    Deletes every Restaurant outlet menu item (including kickstart quantities from
+                    kitchen stock). Also clears kitchen finished stock, batch standards, and
+                    production records on this device. Menu categories are kept.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={async () => {
+                      setClearingMenu(true)
+                      try {
+                        const res = await fetch('/api/supply/clear-restaurant-kitchen-menu', {
+                          method: 'POST',
+                          credentials: 'include',
+                        })
+                        const json = await res.json().catch(() => ({}))
+                        if (!res.ok) {
+                          toast.error(json.error ?? 'Failed to clear restaurant items')
+                          return
+                        }
+                        const local = clearKitchenRestaurantMenu(actor)
+                        if ('error' in local) {
+                          toast.error(local.error)
+                          return
+                        }
+                        const parts = [
+                          json.deleted
+                            ? `${json.deleted} restaurant item(s) removed`
+                            : 'No restaurant items in database',
+                          `${local.recipesCleared} batch standard(s)`,
+                          `${local.stockCleared} kitchen stock row(s)`,
+                          `${local.batchesCleared} production record(s)`,
+                        ]
+                        toast.success(`Menu cleared — ${parts.join(', ')}. Categories kept.`)
+                      } catch {
+                        toast.error('Could not reach server')
+                      } finally {
+                        setClearingMenu(false)
+                      }
+                    }}
+                  >
+                    Clear all items
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          )}
+          {tab !== 'new-batch' && (
+            <Button className="shrink-0" onClick={() => setTab('new-batch')}>
+              <Plus className="h-4 w-4 mr-2" /> Open New Batch
+            </Button>
+          )}
+        </div>
       </div>
 
+      {!mounted ? (
+        <div className="h-24 rounded-lg bg-muted/40 animate-pulse" />
+      ) : (
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList className="flex h-auto flex-wrap">
           <TabsTrigger value="stock">Finished Batch</TabsTrigger>
@@ -425,6 +505,7 @@ export function KitchenWorkspace() {
         </div>
         </TabsContent>
       </Tabs>
+      )}
 
       <Dialog open={!!batchDialog} onOpenChange={() => setBatchDialog(null)}>
         <DialogContent>
