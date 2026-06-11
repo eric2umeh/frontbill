@@ -18,6 +18,7 @@ import { Badge } from "@/components/ui/badge";
 import { Info } from "lucide-react";
 import { toast } from "sonner";
 import { PoLinesTable } from "@/components/supply-chain/po-lines-table";
+import { PoCommentBanner } from "@/components/supply-chain/po-comment-banner";
 import { formatPoRaisedAt } from "@/lib/supply-chain/po-format";
 import { getActivePurchaseOrder } from "@/lib/supply-chain/po-active";
 
@@ -62,6 +63,14 @@ function poStatusBadge(status: PurchaseOrder["status"]) {
     retirement_pending: {
       label: "Retirement pending",
       className: "bg-amber-100 text-amber-900",
+    },
+    retirement_pending_accountant: {
+      label: "Retirement — awaiting accountant",
+      className: "bg-violet-100 text-violet-900",
+    },
+    retirement_rejected: {
+      label: "Retirement rejected",
+      className: "bg-red-100 text-red-800",
     },
     retired: { label: "Retired", className: "bg-muted text-muted-foreground" },
   };
@@ -123,9 +132,14 @@ function PoDecisionCard({
             Raised {formatPoRaisedAt(po.createdAt)}
           </p>
           {po.accountantComment && stage === "manager" && (
-            <p className="text-xs text-muted-foreground mt-1">
-              Accountant: {po.accountantComment}
-            </p>
+            <div className="mt-2 w-full">
+              <PoCommentBanner
+                label="Accountant comment"
+                comment={po.accountantComment}
+                variant="info"
+                compact
+              />
+            </div>
           )}
         </div>
         {poStatusBadge(po.status)}
@@ -140,7 +154,7 @@ function PoDecisionCard({
       )}
       <p className="text-xs font-medium text-muted-foreground">{title}</p>
       {po.lines.length > 0 && (
-        <div className="rounded-md border bg-muted/20 p-2 overflow-x-auto">
+        <div className="rounded-md border bg-muted/20 p-2">
           <p className="text-[10px] font-semibold text-muted-foreground mb-2 uppercase tracking-wide">
             Purchase list ({po.lines.length} items)
           </p>
@@ -186,6 +200,84 @@ function PoDecisionCard({
   );
 }
 
+function RetirementReviewCard({
+  po,
+  canReview,
+  onDecide,
+}: {
+  po: PurchaseOrder;
+  canReview: boolean;
+  onDecide: (approved: boolean, comment: string) => void;
+}) {
+  const [comment, setComment] = useState("");
+  const r = po.retirement;
+
+  return (
+    <div className="rounded-lg border p-4 space-y-3">
+      <div className="flex flex-wrap justify-between gap-2">
+        <div>
+          <p className="font-medium">{po.poNumber}</p>
+          <p className="text-sm text-muted-foreground">
+            Submitted by {r?.submittedBy} · Est. spend{" "}
+            {formatNaira(r?.actualSpent ?? 0)} · Refund{" "}
+            {formatNaira(r?.refundToCashier ?? 0)}
+          </p>
+        </div>
+        {poStatusBadge(po.status)}
+      </div>
+      {r?.lines?.length ? (
+        <div className="rounded-md border bg-muted/20 p-2 text-xs space-y-1">
+          {r.lines.map((line) => {
+            const notBought = line.notBought ?? line.removed;
+            return (
+              <p key={line.lineId} className={notBought ? "line-through opacity-60" : ""}>
+                {notBought ? "* " : ""}
+                {line.name} — bought {line.quantityBought} @ {formatNaira(line.actualPrice)} ={" "}
+                {formatNaira(line.totalPaid)}
+              </p>
+            );
+          })}
+        </div>
+      ) : null}
+      {canReview ? (
+        <>
+          <Textarea
+            placeholder="Comment required for accept or reject…"
+            value={comment}
+            onChange={(e) => setComment(e.target.value)}
+            rows={2}
+          />
+          <div className="flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              disabled={!comment.trim()}
+              onClick={() => {
+                onDecide(true, comment.trim());
+                setComment("");
+              }}
+            >
+              Accept retirement & update stock
+            </Button>
+            <Button
+              size="sm"
+              variant="destructive"
+              disabled={!comment.trim()}
+              onClick={() => {
+                onDecide(false, comment.trim());
+                setComment("");
+              }}
+            >
+              Reject — send to Purchasing
+            </Button>
+          </div>
+        </>
+      ) : (
+        <p className="text-xs text-muted-foreground">Waiting for accountant review.</p>
+      )}
+    </div>
+  );
+}
+
 export function PoApprovalPanel({ compact }: { compact?: boolean }) {
   const { name, role } = useAuth();
   const {
@@ -193,6 +285,7 @@ export function PoApprovalPanel({ compact }: { compact?: boolean }) {
     accountantDecision,
     managerDecision,
     adminTestPoDecision,
+    accountantRetirementDecision,
   } = useSupplyChain();
   const actor = {
     name: name ?? "Staff",
@@ -204,11 +297,18 @@ export function PoApprovalPanel({ compact }: { compact?: boolean }) {
     activePo?.status === "pending_accountant" ? [activePo] : [];
   const pendingManager =
     activePo?.status === "pending_manager" ? [activePo] : [];
+  const pendingRetirement = purchaseOrders.filter(
+    (p) => p.status === "retirement_pending_accountant",
+  );
   const canAccountant = canSupplyPoAccountantReview(role);
   const canManager = canSupplyPoManagerReview(role);
   const adminTester = canAdminTestApproveSupplyPo(role);
 
-  if (!pendingAccountant.length && !pendingManager.length) {
+  if (
+    !pendingAccountant.length &&
+    !pendingManager.length &&
+    !pendingRetirement.length
+  ) {
     if (compact) return null;
     return (
       <div className="space-y-4">
@@ -334,6 +434,36 @@ export function PoApprovalPanel({ compact }: { compact?: boolean }) {
               </div>
             ),
           )}
+        </div>
+      )}
+
+      {pendingRetirement.length > 0 && (
+        <div className="space-y-3">
+          <p className="text-sm font-semibold">
+            Retirement review — awaiting accountant ({pendingRetirement.length})
+          </p>
+          {pendingRetirement.map((po) => (
+            <RetirementReviewCard
+              key={po.id}
+              po={po}
+              canReview={canAccountant || adminTester}
+              onDecide={(approved, comment) => {
+                const res = accountantRetirementDecision(
+                  po.id,
+                  approved,
+                  comment,
+                  actor,
+                );
+                if ("error" in res) toast.error(res.error);
+                else
+                  toast.success(
+                    approved
+                      ? "Retirement approved — stock updated"
+                      : "Retirement sent back to Purchasing",
+                  );
+              }}
+            />
+          ))}
         </div>
       )}
 
