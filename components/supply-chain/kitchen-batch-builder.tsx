@@ -20,6 +20,7 @@ import {
 import { OutletCategorySearchField } from '@/components/supply-chain/outlet-category-search-field'
 import { OutletMenuItemSearchField } from '@/components/supply-chain/outlet-menu-item-search-field'
 import { outletStockSlug } from '@/lib/outlets/outlet-stock-slug'
+import { convertQtyBetweenUnits } from '@/lib/supply-chain/recipe-units'
 
 const BATCH_CREATOR_ROLES = new Set(['superadmin', 'admin', 'manager'])
 
@@ -91,11 +92,20 @@ export function KitchenBatchBuilder() {
     [storeItems],
   )
 
+  const [rawStockTick, setRawStockTick] = useState(0)
+
+  useEffect(() => {
+    const onRaw = () => setRawStockTick((t) => t + 1)
+    window.addEventListener('frontbill:kitchen-raw-stock', onRaw)
+    return () => window.removeEventListener('frontbill:kitchen-raw-stock', onRaw)
+  }, [])
+
   const searchResults = useMemo(() => {
     const q = search.trim().toLowerCase()
     if (!q) return []
     return kitchenStoreItems.filter((s) => s.name.toLowerCase().includes(q)).slice(0, 30)
-  }, [kitchenStoreItems, search])
+    // rawStockTick keeps search/cart in sync after store issue-out without refresh
+  }, [kitchenStoreItems, search, kitchenRawStock, rawStockTick])
 
   const batchCost = cart.reduce((sum, l) => sum + l.quantity * l.unitCost, 0)
   const planned = Number(plannedPortions) || 0
@@ -134,8 +144,23 @@ export function KitchenBatchBuilder() {
       return
     }
     setCart((prev) =>
-      prev.map((c) => (c.storeItemId === storeItemId ? { ...c, quantity: qty } : c)),
+      prev.map((c) => {
+        if (c.storeItemId !== storeItemId) return c
+        const store = storeItems.find((s) => s.id === storeItemId)
+        const unitCost = store?.lastPrice ?? c.unitCost
+        return { ...c, quantity: qty, unitCost }
+      }),
     )
+  }
+
+  const lineCostHint = (line: BatchMaterialLine) => {
+    const store = storeItems.find((s) => s.id === line.storeItemId)
+    if (!store) return null
+    const converted = convertQtyBetweenUnits(line.quantity, line.unit, store.unit)
+    if (converted != null && converted !== line.quantity) {
+      return `${line.quantity} ${line.unit} ≈ ${converted} ${store.unit} store units`
+    }
+    return null
   }
 
   const rawOnHand = (storeItemId: string) => kitchenRawOnHand(storeItemId)
@@ -291,66 +316,66 @@ export function KitchenBatchBuilder() {
                 </p>
               </div>
             ) : (
-              <ul className="space-y-2">
+              <ul className="grid gap-2 grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
                 {cart.map((line) => {
                   const onHand = rawOnHand(line.storeItemId)
                   return (
                     <li
                       key={line.storeItemId}
-                      className="rounded-lg border p-3 text-sm space-y-2 bg-background"
+                      className="rounded-lg border p-1.5 text-[11px] space-y-1 bg-background"
                     >
-                      <div className="flex justify-between gap-2">
-                        <div>
-                          <p className="font-medium">{line.name}</p>
-                          <p className="text-xs text-muted-foreground">
-                            Kitchen stock: {onHand} {line.unit}
+                      <div className="flex justify-between gap-1">
+                        <div className="min-w-0">
+                          <p className="font-medium truncate text-xs">{line.name}</p>
+                          <p className="text-[10px] text-muted-foreground truncate">
+                            Stock {onHand} {line.unit}
                           </p>
                         </div>
                         <Button
                           type="button"
                           variant="ghost"
                           size="icon"
-                          className="h-8 w-8 text-destructive shrink-0"
+                          className="h-6 w-6 text-destructive shrink-0"
                           onClick={() => setLineQty(line.storeItemId, 0)}
                         >
-                          <Trash2 className="h-4 w-4" />
+                          <Trash2 className="h-3 w-3" />
                         </Button>
                       </div>
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-1">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="icon"
-                          className="h-8 w-8"
-                          allowRepeatClick
-                          onClick={() => setLineQty(line.storeItemId, line.quantity - 1)}
-                        >
-                            <Minus className="h-4 w-4" />
+                      <div className="flex items-center justify-between gap-1">
+                        <div className="flex items-center gap-0.5">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="icon"
+                            className="h-6 w-6"
+                            allowRepeatClick
+                            onClick={() => setLineQty(line.storeItemId, line.quantity - 1)}
+                          >
+                            <Minus className="h-3 w-3" />
                           </Button>
                           <Input
                             type="number"
                             min={0}
                             step="any"
-                            className="h-8 w-20 text-center"
+                            className="h-6 w-12 px-1 text-center text-[11px]"
                             value={line.quantity}
                             onChange={(e) =>
                               setLineQty(line.storeItemId, Number(e.target.value) || 0)
                             }
                           />
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="icon"
-                          className="h-8 w-8"
-                          allowRepeatClick
-                          onClick={() => setLineQty(line.storeItemId, line.quantity + 1)}
-                        >
-                            <Plus className="h-4 w-4" />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="icon"
+                            className="h-6 w-6"
+                            allowRepeatClick
+                            onClick={() => setLineQty(line.storeItemId, line.quantity + 1)}
+                          >
+                            <Plus className="h-3 w-3" />
                           </Button>
-                          <span className="text-xs text-muted-foreground ml-1">{line.unit}</span>
+                          <span className="text-[10px] text-muted-foreground">{line.unit}</span>
                         </div>
-                        <span className="text-sm font-medium tabular-nums">
+                        <span className="text-[10px] font-semibold tabular-nums shrink-0">
                           {formatNaira(line.quantity * line.unitCost)}
                         </span>
                       </div>
