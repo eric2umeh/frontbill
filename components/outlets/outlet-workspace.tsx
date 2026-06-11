@@ -76,6 +76,14 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
     void loadMenu()
   }, [loadMenu])
 
+  useEffect(() => {
+    const onCleared = () => {
+      if (department === 'restaurant') void loadMenu()
+    }
+    window.addEventListener('frontbill:outlet-menu-cleared', onCleared)
+    return () => window.removeEventListener('frontbill:outlet-menu-cleared', onCleared)
+  }, [department, loadMenu])
+
   if (!def) return null
   if (loading) return <LoadingSpinner />
 
