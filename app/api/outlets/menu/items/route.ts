@@ -41,6 +41,15 @@ export async function POST(request: Request) {
   if (!isOutletDepartmentKey(department) || !name) {
     return NextResponse.json({ error: 'department and name required' }, { status: 400 })
   }
+  if (department === 'restaurant') {
+    return NextResponse.json(
+      {
+        error:
+          'Restaurant menu items are created from Kitchen → New batch only. Use categories here; dishes sync automatically.',
+      },
+      { status: 403 },
+    )
+  }
   if (!canAccessOutletDepartment(auth.ctx.role, department)) {
     return NextResponse.json({ error: 'No access to this outlet' }, { status: 403 })
   }
