@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import { useClientMounted } from '@/hooks/use-client-mounted'
 import Link from 'next/link'
 import { useAuth } from '@/lib/auth-context'
 import { useSupplyChain } from '@/lib/supply-chain/supply-chain-context'
@@ -65,6 +66,7 @@ export function StoreWorkspace() {
   const [issueReceivedBy, setIssueReceivedBy] = useState('')
   const [issueReceivedById, setIssueReceivedById] = useState<string | null>(null)
   const [issueNotes, setIssueNotes] = useState('')
+  const mounted = useClientMounted()
   const [tab, setTab] = useState('stock')
   const canIssue = canIssueStockFromStore(role)
   const purchaseLocked = Boolean(
@@ -139,6 +141,9 @@ export function StoreWorkspace() {
         <p className="text-sm text-muted-foreground">Stock levels, dept purchase lists & master PO</p>
       </div>
 
+      {!mounted ? (
+        <div className="h-24 rounded-lg bg-muted/40 animate-pulse" />
+      ) : (
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList className="flex h-auto flex-wrap">
           <TabsTrigger value="stock">Stock Levels</TabsTrigger>
@@ -559,6 +564,7 @@ export function StoreWorkspace() {
           <PoHistoryPanel purchaseOrders={purchaseOrders} />
         </TabsContent>
       </Tabs>
+      )}
     </div>
   )
 }
