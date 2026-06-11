@@ -18,6 +18,8 @@ export type PoStatus =
   | 'approved'
   | 'disbursed'
   | 'retirement_pending'
+  | 'retirement_pending_accountant'
+  | 'retirement_rejected'
   | 'retired'
 
 export type ActivityAction =
@@ -130,6 +132,7 @@ export interface PurchaseOrder {
   totalAmount: number
   accountantComment?: string
   managerComment?: string
+  retirementComment?: string
   retirement?: RetirementRecord
 }
 
@@ -142,7 +145,10 @@ export interface RetirementLine {
   actualPrice: number
   totalPaid: number
   varianceReason?: string
+  /** @deprecated use notBought */
   removed?: boolean
+  /** When false, item was not purchased at market (shown with *). Default true = bought. */
+  notBought?: boolean
 }
 
 export interface RetirementRecord {
@@ -152,6 +158,9 @@ export interface RetirementRecord {
   lines: RetirementLine[]
   submittedAt: string
   submittedBy: string
+  accountantComment?: string
+  reviewedAt?: string
+  reviewedBy?: string
 }
 
 export interface RecipeIngredient {
