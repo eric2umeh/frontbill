@@ -1,22 +1,33 @@
 'use client'
 
-import { useState } from 'react'
-import Link from 'next/link'
 import { useSupplyChain } from '@/lib/supply-chain/supply-chain-context'
 import {
+  canDeleteStorePurchaseOrder,
   canEditStorePurchaseOrder,
   isPurchaseOrderAwaitingAccountant,
   showsStoreDraftPurchaseList,
 } from '@/lib/supply-chain/po-active'
 import { formatNaira } from '@/lib/utils/currency'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { PoLinesTable } from '@/components/supply-chain/po-lines-table'
 import { PoDetailCard } from '@/components/supply-chain/po-detail-card'
+import { PoCommentBanner } from '@/components/supply-chain/po-comment-banner'
 import { poStatusBadge } from '@/components/supply-chain/po-approval-panel'
 import { toast } from 'sonner'
-import { Pencil, Send } from 'lucide-react'
+import { Send, Trash2 } from 'lucide-react'
+import Link from 'next/link'
 import type { StoreItem } from '@/lib/supply-chain/types'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog'
 
 type Props = {
   actor: { name: string; role: string }
@@ -29,31 +40,24 @@ export function ActivePurchaseOrderPanel({ actor, storeItems }: Props) {
     basket,
     stats,
     setBasketLineQty,
+    removeFromBasket,
     sendBasketForApproval,
+    deleteActivePurchaseOrder,
   } = useSupplyChain()
-  const [editMode, setEditMode] = useState(false)
 
   const po = activePurchaseOrder
   const canEdit = canEditStorePurchaseOrder(po)
+  const canDelete = canDeleteStorePurchaseOrder(po)
   const awaitingAccountant = isPurchaseOrderAwaitingAccountant(po)
   const showDraftList = showsStoreDraftPurchaseList(po)
   const isDraft = po?.status === 'draft'
   const isRejected = po?.status === 'accountant_rejected'
-  const linesEditable = canEdit && (isDraft || (isRejected && editMode))
-
-  const handleEditClick = () => {
-    if (awaitingAccountant) {
-      toast.error('Cannot edit — accountant is reviewing this purchase order.')
-      return
-    }
-    if (isRejected) setEditMode((v) => !v)
-  }
+  const linesEditable = canEdit && (isDraft || isRejected)
 
   const handleSend = () => {
     const res = sendBasketForApproval(actor)
     if ('error' in res) toast.error(res.error)
     else {
-      setEditMode(false)
       toast.success(
         `${res.po.poNumber} sent — open Accounting → Purchase orders to approve`,
       )
@@ -65,6 +69,12 @@ export function ActivePurchaseOrderPanel({ actor, storeItems }: Props) {
     if (!item) return
     const err = setBasketLineQty(item, qty, item.lastPrice, actor)
     if (err) toast.error(err)
+  }
+
+  const handleDeletePo = () => {
+    const res = deleteActivePurchaseOrder(actor)
+    if ('error' in res) toast.error(res.error)
+    else toast.success('Purchase order deleted')
   }
 
   if (!po) {
@@ -88,7 +98,9 @@ export function ActivePurchaseOrderPanel({ actor, storeItems }: Props) {
           po={po}
           defaultOpen
           action={
-            ['approved', 'disbursed', 'retirement_pending'].includes(po.status) ? (
+            ['approved', 'disbursed', 'retirement_pending', 'retirement_rejected'].includes(
+              po.status,
+            ) ? (
               <Button asChild variant="outline" size="sm">
                 <Link href={`/supply/purchasing?po=${po.id}`}>Retire at market</Link>
               </Button>
@@ -104,8 +116,13 @@ export function ActivePurchaseOrderPanel({ actor, storeItems }: Props) {
   }
 
   const showSend = canEdit && basket.length > 0 && !awaitingAccountant
-  const showEditButton = isRejected || awaitingAccountant
-  const displayRows = basket.map((line) => ({ kind: 'basket' as const, line }))
+  const displayRows = basket.map((line) => ({
+    kind: 'basket' as const,
+    line,
+    editable: linesEditable,
+    onQtyChange: linesEditable ? handleQtyChange : undefined,
+    onDelete: linesEditable ? (id: string) => handleQtyChange(id, 0) : undefined,
+  }))
 
   return (
     <div className="rounded-xl border overflow-hidden">
@@ -118,58 +135,23 @@ export function ActivePurchaseOrderPanel({ actor, storeItems }: Props) {
       </div>
 
       {po.accountantComment && isRejected && (
-        <p className="text-xs text-red-700 bg-red-50 border-b border-red-100 px-4 py-2">
-          Accountant: {po.accountantComment}
-        </p>
+        <div className="p-3 border-b">
+          <PoCommentBanner
+            label="Accountant rejection"
+            comment={po.accountantComment}
+            variant="reject"
+            compact
+          />
+        </div>
       )}
 
       {basket.length === 0 ? (
         <p className="text-sm text-muted-foreground text-center py-8 px-4">
           No line items — add quantities on Raise purchase request.
         </p>
-      ) : linesEditable ? (
-        <div className="p-3">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b text-left text-muted-foreground">
-                <th className="pb-2 font-medium">Item</th>
-                <th className="pb-2 font-medium text-right">Qty</th>
-                <th className="pb-2 font-medium text-right">Unit</th>
-                <th className="pb-2 font-medium text-right">Line total</th>
-              </tr>
-            </thead>
-            <tbody>
-              {basket.map((line) => (
-                <tr key={line.stockItemId} className="border-b last:border-0">
-                  <td className="py-2 pr-2">
-                    {line.name}{' '}
-                    <span className="text-muted-foreground">({line.unit})</span>
-                  </td>
-                  <td className="py-2 text-right">
-                    <Input
-                      type="number"
-                      min={0}
-                      className="h-8 w-20 ml-auto text-right"
-                      value={line.qtyToBuy}
-                      onChange={(e) =>
-                        handleQtyChange(line.stockItemId, Number(e.target.value) || 0)
-                      }
-                    />
-                  </td>
-                  <td className="py-2 text-right tabular-nums text-muted-foreground">
-                    {formatNaira(line.unitPrice)}
-                  </td>
-                  <td className="py-2 text-right tabular-nums font-medium">
-                    {formatNaira(line.qtyToBuy * line.unitPrice)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
       ) : (
         <div className="p-3">
-          <PoLinesTable rows={displayRows} />
+          <PoLinesTable rows={displayRows} compact showDept={false} />
         </div>
       )}
 
@@ -179,16 +161,38 @@ export function ActivePurchaseOrderPanel({ actor, storeItems }: Props) {
             ? 'Sent to accountant — list stays visible until approved. Editing is locked while under review.'
             : isDraft
               ? 'Adjust quantities here or on Raise purchase request, then send to accountant.'
-              : isRejected && !editMode
-                ? 'Accountant rejected this PO — click Edit to change lines, then send again.'
+              : isRejected
+                ? 'Accountant rejected — edit quantities directly, then send again.'
                 : 'Update lines, then send to accountant again.'}
         </p>
         <div className="flex flex-wrap gap-2">
-          {showEditButton && (
-            <Button type="button" variant="outline" size="sm" onClick={handleEditClick}>
-              <Pencil className="h-3.5 w-3.5 mr-1" />
-              {isRejected && editMode ? 'Done editing' : 'Edit'}
-            </Button>
+          {canDelete && (
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button type="button" variant="outline" size="sm" className="text-destructive">
+                  <Trash2 className="h-3.5 w-3.5 mr-1" />
+                  Delete PO
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Delete this purchase order?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This removes all lines and data for {po.poNumber}. You can start a fresh PO from
+                    Raise purchase request.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction
+                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                    onClick={handleDeletePo}
+                  >
+                    Delete entire PO
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           )}
           {showSend && (
             <Button type="button" size="sm" onClick={handleSend}>
