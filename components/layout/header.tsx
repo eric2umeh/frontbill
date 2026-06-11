@@ -19,6 +19,12 @@ import { Bell, Menu, LogOut, User as UserIcon, Loader2 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { useAuth } from '@/lib/auth-context'
+import { canonicalRoleKey } from '@/lib/permissions'
+import {
+  markAllSupplyNotificationsRead,
+  markSupplyNotificationRead,
+  supplyNotificationsForRole,
+} from '@/lib/supply-chain/supply-notifications'
 import { formatNaira } from '@/lib/utils/currency'
 import { playNotificationBeep } from '@/lib/utils/play-notification-beep'
 import { addDays, formatDistanceToNow, setHours, setMinutes } from 'date-fns'
@@ -60,8 +66,10 @@ interface Notification {
     | 'backdate_pending'
     | 'backdate_decided'
     | 'night_audit_pending'
+    | 'supply_chain'
   actionLabel?: string
   href?: string
+  supplyNotificationId?: string
 }
 
 export function Header({ user, onMenuClick }: HeaderProps) {
@@ -74,6 +82,8 @@ export function Header({ user, onMenuClick }: HeaderProps) {
   const nonBackdateNotificationsRef = useRef<Notification[]>([])
   const backdateDecidedNotificationsRef = useRef<Notification[]>([])
   const nightAuditPendingNotificationsRef = useRef<Notification[]>([])
+  const supplyNotificationsRef = useRef<Notification[]>([])
+  const roleKey = canonicalRoleKey(user.role) ?? ''
   const router = useRouter()
   const { organizationId } = useAuth()
   const notificationStorageKey = `frontbill-read-notifications-${organizationId || user.id}`
@@ -102,12 +112,31 @@ export function Header({ user, onMenuClick }: HeaderProps) {
   const mergeNotificationSlices = useCallback(() => {
     setNotifications(
       [
+        ...supplyNotificationsRef.current,
         ...nightAuditPendingNotificationsRef.current,
         ...backdateDecidedNotificationsRef.current,
         ...nonBackdateNotificationsRef.current,
       ].slice(0, 20),
     )
   }, [])
+
+  const loadSupplyChainNotifications = useCallback(() => {
+    supplyNotificationsRef.current = supplyNotificationsForRole(roleKey).map((n) => ({
+      id: `supply-${n.id}`,
+      supplyNotificationId: n.id,
+      description: `${n.title} — ${n.body}`,
+      amount: 0,
+      created_at: n.createdAt,
+      read: n.read,
+      booking_id: null,
+      guest_id: null,
+      folio_id: null,
+      type: 'supply_chain' as const,
+      href: n.href ?? '/supply',
+      actionLabel: 'Open supply chain',
+    }))
+    mergeNotificationSlices()
+  }, [roleKey, mergeNotificationSlices])
 
   const fetchCoreNotifications = useCallback(async () => {
     const supabase = createClient()
@@ -461,6 +490,13 @@ export function Header({ user, onMenuClick }: HeaderProps) {
   }, [organizationId, readIds, user.id, user.role, mergeNotificationSlices])
 
   useEffect(() => {
+    loadSupplyChainNotifications()
+    const onSupply = () => loadSupplyChainNotifications()
+    window.addEventListener('frontbill:supply-notifications', onSupply)
+    return () => window.removeEventListener('frontbill:supply-notifications', onSupply)
+  }, [loadSupplyChainNotifications])
+
+  useEffect(() => {
     void fetchCoreNotifications()
     const interval = window.setInterval(() => void fetchCoreNotifications(), NOTIFICATION_CORE_POLL_MS)
     return () => window.clearInterval(interval)
@@ -491,7 +527,9 @@ export function Header({ user, onMenuClick }: HeaderProps) {
     const allIds = new Set(notifications.map((n) => n.id))
     setReadIds(allIds)
     persistReadIds(allIds)
+    markAllSupplyNotificationsRead()
     setNotifications((prev) => prev.map((n) => ({ ...n, read: true })))
+    loadSupplyChainNotifications()
   }
 
   const handleNotificationClick = (n: Notification) => {
@@ -503,6 +541,12 @@ export function Header({ user, onMenuClick }: HeaderProps) {
     })
     setNotifications((prev) => prev.map((x) => x.id === n.id ? { ...x, read: true } : x))
     setNotifOpen(false)
+    if (n.type === 'supply_chain' && n.supplyNotificationId) {
+      markSupplyNotificationRead(n.supplyNotificationId)
+      loadSupplyChainNotifications()
+      router.push(n.href || '/supply')
+      return
+    }
     if (n.type === 'night_audit_pending' || n.type === 'backdate_pending') {
       router.push(n.href || '/night-audit')
       return
