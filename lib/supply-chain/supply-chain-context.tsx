@@ -66,6 +66,14 @@ import {
   showsStoreDraftPurchaseList,
   storeItemToPoLine,
 } from "./po-active";
+import { pushSupplyNotification } from "./supply-notifications";
+import { clearKitchenBatchDraft } from "./kitchen-batch-draft";
+
+function notifyKitchenRawStockChanged() {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("frontbill:kitchen-raw-stock"));
+  }
+}
 
 type Actor = { name: string; role: string };
 
@@ -512,6 +520,12 @@ function useSupplyChainImpl() {
           submitted.id,
         ),
       );
+      pushSupplyNotification({
+        audience: ["accountant", "manager"],
+        title: `PO raised — ${submitted.poNumber}`,
+        body: `${actor.name} sent ${submitted.poNumber} (₦${total.toLocaleString()}) for approval`,
+        href: "/expenses?tab=purchase_orders",
+      });
       return { po: submitted };
     },
     [basket, purchaseOrders],
@@ -547,8 +561,26 @@ function useSupplyChainImpl() {
           poId,
         ),
       );
+      const po = purchaseOrders.find((p) => p.id === poId);
+      if (po) {
+        if (approved) {
+          pushSupplyNotification({
+            audience: ["manager"],
+            title: `PO awaiting manager — ${po.poNumber}`,
+            body: `Accountant approved. Forwarded for manager review.`,
+            href: "/expenses?tab=purchase_orders",
+          });
+        } else {
+          pushSupplyNotification({
+            audience: ["store"],
+            title: `PO rejected — ${po.poNumber}`,
+            body: comment || "Accountant rejected this purchase order.",
+            href: "/supply/store",
+          });
+        }
+      }
     },
-    [],
+    [purchaseOrders],
   );
 
   const managerDecision = useCallback(
@@ -573,8 +605,26 @@ function useSupplyChainImpl() {
           poId,
         ),
       );
+      const po = purchaseOrders.find((p) => p.id === poId);
+      if (po) {
+        if (approved) {
+          pushSupplyNotification({
+            audience: ["purchasing", "store"],
+            title: `PO approved for market — ${po.poNumber}`,
+            body: `Cash disbursed (₦${po.cashDisbursed.toLocaleString()}). Ready for market purchase.`,
+            href: "/supply/purchasing",
+          });
+        } else {
+          pushSupplyNotification({
+            audience: ["store", "accountant"],
+            title: `PO rejected by manager — ${po.poNumber}`,
+            body: comment || "Manager rejected this purchase order.",
+            href: "/supply/store",
+          });
+        }
+      }
     },
-    [],
+    [purchaseOrders],
   );
 
   /** Testing: admin approves or rejects a raised PO in one step (skips accountant → manager chain). */
@@ -602,7 +652,6 @@ function useSupplyChainImpl() {
               ...po,
               status: "disbursed" as const,
               accountantComment: `[Admin test] ${comment}`,
-              managerComment: `[Admin test] ${comment}`,
             };
           }
           if (po.status === "pending_manager") {
@@ -628,8 +677,48 @@ function useSupplyChainImpl() {
           poId,
         ),
       );
+      const po = purchaseOrders.find((p) => p.id === poId);
+      if (po && approved) {
+        pushSupplyNotification({
+          audience: ["purchasing", "store"],
+          title: `PO approved (admin test) — ${po.poNumber}`,
+          body: comment,
+          href: "/supply/purchasing",
+        });
+      } else if (po && !approved) {
+        pushSupplyNotification({
+          audience: ["store"],
+          title: `PO rejected (admin test) — ${po.poNumber}`,
+          body: comment,
+          href: "/supply/store",
+        });
+      }
     },
     [purchaseOrders],
+  );
+
+  const applyRetirementToStock = useCallback(
+    (po: PurchaseOrder, lines: RetirementLine[]) => {
+      setStoreItems((items) => {
+        const next = [...items];
+        for (const rl of lines) {
+          const notBought = rl.notBought === true || rl.removed === true;
+          if (notBought || rl.quantityBought <= 0) continue;
+          const pl = po.lines.find((l) => l.id === rl.lineId);
+          if (!pl) continue;
+          const idx = next.findIndex((s) => s.id === pl.stockItemId);
+          if (idx >= 0) {
+            next[idx] = {
+              ...next[idx],
+              quantityInStore: next[idx].quantityInStore + rl.quantityBought,
+              lastPrice: rl.actualPrice,
+            };
+          }
+        }
+        return next;
+      });
+    },
+    [],
   );
 
   const submitRetirement = useCallback(
@@ -637,54 +726,43 @@ function useSupplyChainImpl() {
       setPurchaseOrders((prev) => {
         const po = prev.find((p) => p.id === poId);
         if (!po) return prev;
-        const actualSpent = lines
-          .filter((l) => !l.removed)
+        const normalized = lines.map((l) => ({
+          ...l,
+          notBought: l.notBought ?? l.removed ?? false,
+        }));
+        const actualSpent = normalized
+          .filter((l) => !l.notBought)
           .reduce((s, l) => s + l.totalPaid, 0);
         const refund = po.cashDisbursed - actualSpent;
-
-        setStoreItems((items) => {
-          const next = [...items];
-          for (const rl of lines) {
-            if (rl.removed || rl.quantityBought <= 0) continue;
-            const pl = po.lines.find((l) => l.id === rl.lineId);
-            if (!pl) continue;
-            const idx = next.findIndex((s) => s.id === pl.stockItemId);
-            if (idx >= 0) {
-              next[idx] = {
-                ...next[idx],
-                quantityInStore: next[idx].quantityInStore + rl.quantityBought,
-                lastPrice: rl.actualPrice,
-              };
-            }
-          }
-          return next;
-        });
 
         setActivityLog((a) =>
           log(
             a,
             "retirement_submitted",
             actor,
-            `Retirement complete — stock updated, refund ₦${refund.toLocaleString()}`,
+            `Retirement submitted for accountant review — est. spend ₦${actualSpent.toLocaleString()}, refund ₦${refund.toLocaleString()}`,
             poId,
           ),
         );
 
-        const wasActive = Boolean(
-          prev.find((p) => p.id === poId && p.status !== "retired"),
-        );
-        if (wasActive) setBasket([]);
+        pushSupplyNotification({
+          audience: ["accountant"],
+          title: `Retirement submitted — ${po.poNumber}`,
+          body: `${actor.name} submitted market retirement (₦${actualSpent.toLocaleString()} spent)`,
+          href: "/expenses?tab=purchase_orders",
+        });
+
         return prev.map((p) =>
           p.id === poId
             ? {
                 ...p,
-                status: "retired" as const,
+                status: "retirement_pending_accountant" as const,
                 retirement: {
                   actualSpent,
                   refundToCashier: refund,
-                  priceChanges: lines.filter((l) => l.poPrice !== l.actualPrice)
+                  priceChanges: normalized.filter((l) => l.poPrice !== l.actualPrice)
                     .length,
-                  lines,
+                  lines: normalized,
                   submittedAt: new Date().toISOString(),
                   submittedBy: actor.name,
                 },
@@ -694,6 +772,123 @@ function useSupplyChainImpl() {
       });
     },
     [],
+  );
+
+  const accountantRetirementDecision = useCallback(
+    (
+      poId: string,
+      approved: boolean,
+      comment: string,
+      actor: Actor,
+    ): { ok: true } | { error: string } => {
+      const po = purchaseOrders.find((p) => p.id === poId);
+      if (!po?.retirement) return { error: "Retirement not found" };
+      if (po.status !== "retirement_pending_accountant") {
+        return { error: "This PO is not awaiting retirement review" };
+      }
+
+      if (!approved) {
+        setPurchaseOrders((prev) =>
+          prev.map((p) =>
+            p.id === poId
+              ? {
+                  ...p,
+                  status: "retirement_rejected" as const,
+                  retirementComment: comment,
+                  retirement: {
+                    ...p.retirement!,
+                    accountantComment: comment,
+                    reviewedAt: new Date().toISOString(),
+                    reviewedBy: actor.name,
+                  },
+                }
+              : p,
+          ),
+        );
+        setActivityLog((a) =>
+          log(
+            a,
+            "retirement_submitted",
+            actor,
+            `Retirement rejected by accountant: ${comment}`,
+            poId,
+          ),
+        );
+        pushSupplyNotification({
+          audience: ["purchasing"],
+          title: `Retirement rejected — ${po.poNumber}`,
+          body: comment || "Accountant rejected the retirement submission.",
+          href: "/supply/purchasing",
+        });
+        return { ok: true };
+      }
+
+      applyRetirementToStock(po, po.retirement.lines);
+      setPurchaseOrders((prev) =>
+        prev.map((p) =>
+          p.id === poId
+            ? {
+                ...p,
+                status: "retired" as const,
+                retirementComment: comment,
+                retirement: {
+                  ...p.retirement!,
+                  accountantComment: comment,
+                  reviewedAt: new Date().toISOString(),
+                  reviewedBy: actor.name,
+                },
+              }
+            : p,
+        ),
+      );
+      setBasket([]);
+      setActivityLog((a) =>
+        log(
+          a,
+          "retirement_submitted",
+          actor,
+          `Retirement approved — central store stock updated. ${comment}`,
+          poId,
+        ),
+      );
+      pushSupplyNotification({
+        audience: ["store", "purchasing"],
+        title: `Retirement accepted — ${po.poNumber}`,
+        body: "Central store stock updated from market purchase.",
+        href: "/supply/store",
+      });
+      return { ok: true };
+    },
+    [purchaseOrders, applyRetirementToStock],
+  );
+
+  const deleteActivePurchaseOrder = useCallback(
+    (actor: Actor): { ok: true } | { error: string } => {
+      const po = getActivePurchaseOrder(purchaseOrders);
+      if (!po) return { error: "No active purchase order to delete" };
+      if (
+        !["draft", "accountant_rejected", "retirement_rejected"].includes(
+          po.status,
+        )
+      ) {
+        return {
+          error: "Only draft, accountant-rejected, or retirement-rejected POs can be deleted",
+        };
+      }
+      setPurchaseOrders((prev) => prev.filter((p) => p.id !== po.id));
+      setBasket([]);
+      setActivityLog((a) =>
+        log(
+          a,
+          "po_created",
+          actor,
+          `Purchase order ${po.poNumber} deleted`,
+          po.id,
+        ),
+      );
+      return { ok: true };
+    },
+    [purchaseOrders],
   );
 
   const kitchenRawOnHand = useCallback(
@@ -793,7 +988,9 @@ function useSupplyChainImpl() {
         if (!store || store.dept !== "kitchen") {
           return { error: `${line.name} is not a kitchen store item` };
         }
-        const onHand = kitchenRawOnHand(line.storeItemId);
+        const onHand =
+          kitchenRawStock.find((k) => k.storeItemId === line.storeItemId)
+            ?.quantityOnHand ?? 0;
         if (onHand < line.quantity) {
           return {
             error: `Insufficient ${line.name} issued to kitchen (${onHand} ${line.unit} on hand; need ${line.quantity}). Ask store to issue out first.`,
@@ -915,7 +1112,7 @@ function useSupplyChainImpl() {
       );
       return { ok: true, batch, kitchenStockId };
     },
-    [storeItems, kitchenRawOnHand, deductKitchenRawMaterials],
+    [storeItems, kitchenRawStock, deductKitchenRawMaterials],
   );
 
   const updateRecipe = useCallback(
@@ -1016,6 +1213,38 @@ function useSupplyChainImpl() {
     },
     [recipes, batches],
   );
+
+  /** Wipe kitchen finished stock, batch standards, production runs, and batch draft. Categories stay in Restaurant outlet DB. */
+  const clearKitchenRestaurantMenu = useCallback((actor: Actor) => {
+    const recipeCount = recipes.length;
+    const stockCount = kitchenStock.length;
+    const batchCount = batches.length;
+
+    setRecipes([]);
+    setKitchenStock([]);
+    setBatches([]);
+    clearKitchenBatchDraft();
+
+    setActivityLog((a) =>
+      log(
+        a,
+        "recipe_updated",
+        actor,
+        `Cleared kitchen menu — ${recipeCount} batch standard(s), ${stockCount} finished stock row(s), ${batchCount} production record(s)`,
+      ),
+    );
+
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("frontbill:outlet-menu-cleared"));
+    }
+
+    return {
+      ok: true as const,
+      recipesCleared: recipeCount,
+      stockCleared: stockCount,
+      batchesCleared: batchCount,
+    };
+  }, [recipes, kitchenStock, batches]);
 
   const closeBatch = useCallback(
     (
@@ -1312,6 +1541,7 @@ function useSupplyChainImpl() {
             storeItemId,
           ),
         );
+        notifyKitchenRawStockChanged();
       }
 
       const extra = [
@@ -1671,6 +1901,8 @@ function useSupplyChainImpl() {
     managerDecision,
     adminTestPoDecision,
     submitRetirement,
+    accountantRetirementDecision,
+    deleteActivePurchaseOrder,
     recipes,
     kitchenStock,
     kitchenRawStock,
@@ -1690,6 +1922,7 @@ function useSupplyChainImpl() {
     openKitchenBatchFromMaterials,
     updateRecipe,
     deleteRecipe,
+    clearKitchenRestaurantMenu,
     kitchenRawOnHand,
     closeBatch,
     postFnbOrder,
@@ -1729,6 +1962,15 @@ export function useSupplyChain() {
       (() => ({ error: "Supply chain not ready — refresh the page" })),
     deleteRecipe:
       ctx.deleteRecipe ??
+      (() => ({ error: "Supply chain not ready — refresh the page" })),
+    clearKitchenRestaurantMenu:
+      ctx.clearKitchenRestaurantMenu ??
+      (() => ({ error: "Supply chain not ready — refresh the page" })),
+    accountantRetirementDecision:
+      ctx.accountantRetirementDecision ??
+      (() => ({ error: "Supply chain not ready — refresh the page" })),
+    deleteActivePurchaseOrder:
+      ctx.deleteActivePurchaseOrder ??
       (() => ({ error: "Supply chain not ready — refresh the page" })),
     basket: ctx.basket ?? [],
     activePurchaseOrder: ctx.activePurchaseOrder ?? undefined,
