@@ -697,7 +697,7 @@ export function OutletMenuManager({ department, categories, items, canManage, on
           </CardContent>
         </Card>
 
-        {canManage ? (
+        {canManage && department !== 'restaurant' ? (
           <Card>
             <CardHeader>
               <CardTitle>Add menu item</CardTitle>
@@ -755,6 +755,16 @@ export function OutletMenuManager({ department, categories, items, canManage, on
                 Add item
               </Button>
             </CardContent>
+          </Card>
+        ) : department === 'restaurant' ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>Restaurant dishes</CardTitle>
+              <CardDescription>
+                Food items are created only from Kitchen → New batch. Categories can still be managed
+                here; batches sync to this menu automatically with portions and pricing.
+              </CardDescription>
+            </CardHeader>
           </Card>
         ) : (
           <Card>
