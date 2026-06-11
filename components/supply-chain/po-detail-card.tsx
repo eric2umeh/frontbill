@@ -4,8 +4,9 @@ import type { ReactNode } from "react";
 import type { PurchaseOrder } from "@/lib/supply-chain/types";
 import { formatNaira } from "@/lib/utils/currency";
 import { poStatusBadge } from "@/components/supply-chain/po-approval-panel";
-import { formatPoRaisedAt } from "@/lib/supply-chain/po-format";
+import { formatPoRaisedAt, getPoHistoryLines } from "@/lib/supply-chain/po-format";
 import { PoLinesTable } from "@/components/supply-chain/po-lines-table";
+import { PoCommentBanner } from "@/components/supply-chain/po-comment-banner";
 import { Button } from "@/components/ui/button";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -26,6 +27,10 @@ export function PoDetailCard({
   defaultOpen = false,
 }: Props) {
   const open = expanded ?? defaultOpen;
+  const showManagerComment =
+    po.managerComment &&
+    po.managerComment.trim() !== (po.accountantComment?.trim() ?? "");
+  const historyLines = getPoHistoryLines(po);
 
   return (
     <div className="rounded-lg border overflow-hidden">
@@ -57,29 +62,14 @@ export function PoDetailCard({
             ))}
           <div className="space-y-1 min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <p className="font-medium">
-                {po.poNumber} — {po.weekLabel}
-              </p>
+              <p className="font-medium">{po.poNumber}</p>
               {poStatusBadge(po.status)}
             </div>
             <p className="text-sm text-muted-foreground">
-              {po.createdByName} · {formatNaira(po.totalAmount)} ·{" "}
-              {po.lines.length} item
-              {po.lines.length === 1 ? "" : "s"}
+              Raised {formatPoRaisedAt(po.createdAt)} · {po.createdByName} ·{" "}
+              {formatNaira(po.totalAmount)}
             </p>
-            <p className="text-xs text-muted-foreground">
-              Raised {formatPoRaisedAt(po.createdAt)}
-            </p>
-            {po.accountantComment && (
-              <p className="text-xs text-muted-foreground">
-                Accountant: {po.accountantComment}
-              </p>
-            )}
-            {po.managerComment && (
-              <p className="text-xs text-muted-foreground">
-                Manager: {po.managerComment}
-              </p>
-            )}
+            <p className="text-xs text-muted-foreground">{po.weekLabel}</p>
           </div>
         </div>
         {action && (
@@ -92,9 +82,55 @@ export function PoDetailCard({
         )}
       </div>
       {open && (
-        <div className="border-t bg-muted/20 px-4 py-3">
+        <div className="border-t bg-muted/20 px-3 py-2 space-y-2">
+          {po.accountantComment && (
+            <PoCommentBanner
+              label="Accountant comment"
+              comment={po.accountantComment}
+              variant={
+                po.status === "accountant_rejected" ? "reject" : "info"
+              }
+              compact
+            />
+          )}
+          {showManagerComment && (
+            <PoCommentBanner
+              label="Manager comment"
+              comment={po.managerComment!}
+              variant={po.status === "manager_rejected" ? "reject" : "manager"}
+              compact
+            />
+          )}
+          {po.retirementComment && (
+            <PoCommentBanner
+              label="Retirement review"
+              comment={po.retirementComment}
+              variant="info"
+              compact
+            />
+          )}
           <PoLinesTable
-            rows={po.lines.map((line) => ({ kind: "po" as const, line }))}
+            rows={
+              historyLines.mode === "retirement"
+                ? historyLines.lines.map((line) => {
+                    const orig = po.lines.find((l) => l.id === line.id);
+                    return {
+                      kind: "po" as const,
+                      line: {
+                        id: line.id,
+                        stockItemId: orig?.stockItemId ?? line.id,
+                        name: line.notBought ? `* ${line.name}` : line.name,
+                        dept: orig?.dept ?? "kitchen",
+                        unit: line.unit,
+                        quantityOrdered: line.quantity,
+                        unitPrice: line.unitPrice,
+                        lineTotal: line.lineTotal,
+                      },
+                    };
+                  })
+                : po.lines.map((line) => ({ kind: "po" as const, line }))
+            }
+            compact
           />
         </div>
       )}
