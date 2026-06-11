@@ -2,6 +2,7 @@
 
 import { useSupplyChain } from '@/lib/supply-chain/supply-chain-context'
 import { PaginatedListShell } from '@/components/shared/paginated-list-shell'
+import { ExpandableText } from '@/components/shared/expandable-text'
 
 export default function SupplyActivityPage() {
   const { activityLog } = useSupplyChain()
@@ -34,7 +35,7 @@ export default function SupplyActivityPage() {
           <ul className="space-y-3">
             {pageLog.map((a) => (
               <li key={a.id} className="rounded-lg border p-3 text-sm">
-                <p>{a.summary}</p>
+                <ExpandableText text={a.summary} maxLength={150} />
                 <p className="text-xs text-muted-foreground mt-1">
                   {new Date(a.timestamp).toLocaleString()} · {a.actorName} ({a.actorRole}) ·{' '}
                   {a.action.replace(/_/g, ' ')}
