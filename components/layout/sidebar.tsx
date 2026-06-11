@@ -1,6 +1,6 @@
 'use client'
 
-import { Suspense, useMemo, useState } from 'react'
+import { Suspense, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useSearchParams } from 'next/navigation'
 import { cn } from '@/lib/utils'
@@ -264,6 +264,11 @@ function SidebarInner({ mobileOpen, onMobileClose, isMobile = false }: SidebarPr
 
   const visibleSections = useMemo(() => buildSections(role), [role])
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({})
+  const [radixReady, setRadixReady] = useState(false)
+
+  useEffect(() => {
+    setRadixReady(true)
+  }, [])
 
   const isGroupOpen = (key: string, children: NavChild[]) => {
     if (openGroups[key] !== undefined) return openGroups[key]
@@ -353,6 +358,39 @@ function SidebarInner({ mobileOpen, onMobileClose, isMobile = false }: SidebarPr
                         >
                           <Icon className="h-4 w-4 flex-shrink-0" />
                         </Link>
+                      )
+                    }
+
+                    if (!radixReady) {
+                      return (
+                        <div key={groupKey} className="space-y-0.5">
+                          <div
+                            className={cn(
+                              'flex w-full items-center rounded-lg px-3 py-2.5 text-sm font-medium gap-3',
+                              active
+                                ? 'bg-primary/10 text-primary'
+                                : 'text-muted-foreground',
+                            )}
+                          >
+                            <Icon className="h-4 w-4 flex-shrink-0" />
+                            <span className="flex-1 text-left">{route.label}</span>
+                          </div>
+                          {route.children.map((child) => {
+                            const href =
+                              child.href === '/night-audit' ? nightAuditHref : child.href
+                            const childActive = routeIsActive(pathname, child.href, searchParams)
+                            return (
+                              <Link
+                                key={child.href}
+                                href={href}
+                                onClick={() => isMobile && onMobileClose?.()}
+                                className={childLinkClass(childActive)}
+                              >
+                                <span className="flex-1">{child.label}</span>
+                              </Link>
+                            )
+                          })}
+                        </div>
                       )
                     }
 
