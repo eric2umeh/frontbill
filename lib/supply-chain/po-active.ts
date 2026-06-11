@@ -18,6 +18,13 @@ export function canEditStorePurchaseOrder(
   return po.status === "draft" || po.status === "accountant_rejected";
 }
 
+export function canDeleteStorePurchaseOrder(
+  po: PurchaseOrder | undefined,
+): boolean {
+  if (!po) return false;
+  return ["draft", "accountant_rejected", "retirement_rejected"].includes(po.status);
+}
+
 export function isPurchaseOrderAwaitingAccountant(
   po: PurchaseOrder | undefined,
 ): boolean {
