@@ -4,12 +4,18 @@ import {
   EMPTY_NIGHT_AUDIT_PENDING_COUNTS,
   fetchNightAuditPendingCounts,
 } from '@/lib/night-audit/pending-approval-counts'
+import { resolveAuthedUserId } from '@/lib/api/resolve-authed-user-id'
 
 export async function GET(request: Request) {
   try {
     const callerId = new URL(request.url).searchParams.get('caller_id')
     if (!callerId) {
       return NextResponse.json({ error: 'caller_id is required' }, { status: 400 })
+    }
+
+    const authed = await resolveAuthedUserId(request)
+    if (!authed || authed !== callerId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     const admin = createAdminClient()
