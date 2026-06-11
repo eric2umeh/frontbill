@@ -1,4 +1,5 @@
 import { endOfWeek, format, startOfWeek } from "date-fns";
+import type { PurchaseOrder, RetirementLine } from "./types";
 
 /** ISO week number (1–53) for purchase order numbering. */
 export function isoWeekNumber(date = new Date()): number {
@@ -38,7 +39,84 @@ export function formatPoRaisedAt(iso: string): string {
 
 /** POs that finished approval and left the store draft queue. */
 export function isPurchaseOrderHistoryStatus(status: string): boolean {
-  return ["disbursed", "retirement_pending", "retired"].includes(status);
+  return [
+    "disbursed",
+    "retirement_pending",
+    "retirement_pending_accountant",
+    "retired",
+  ].includes(status);
+}
+
+/** Lines to show in PO history — retirement snapshot when available. */
+export function getPoHistoryLines(po: PurchaseOrder): {
+  mode: "order" | "retirement";
+  lines: Array<{
+    id: string;
+    name: string;
+    quantity: number;
+    unit: string;
+    unitPrice: number;
+    lineTotal: number;
+    notBought?: boolean;
+  }>;
+} {
+  const retirement = po.retirement?.lines;
+  const useRetirement =
+    retirement?.length &&
+    [
+      "retirement_pending_accountant",
+      "retirement_rejected",
+      "retired",
+      "retirement_pending",
+    ].includes(po.status);
+
+  if (useRetirement && retirement) {
+    return {
+      mode: "retirement",
+      lines: retirement.map((rl: RetirementLine) => {
+        const notBought = rl.notBought === true || rl.removed === true;
+        const poLine = po.lines.find((l) => l.id === rl.lineId);
+        return {
+          id: rl.lineId,
+          name: rl.name,
+          quantity: notBought ? rl.quantityOrdered : rl.quantityBought,
+          unit: poLine?.unit ?? "",
+          unitPrice: notBought ? rl.poPrice : rl.actualPrice,
+          lineTotal: notBought ? 0 : rl.totalPaid,
+          notBought,
+        };
+      }),
+    };
+  }
+
+  return {
+    mode: "order",
+    lines: po.lines.map((line) => ({
+      id: line.id,
+      name: line.name,
+      quantity: line.quantityOrdered,
+      unit: line.unit,
+      unitPrice: line.unitPrice,
+      lineTotal: line.lineTotal,
+    })),
+  };
+}
+
+/** POs the purchaser can retire at market (cash already disbursed). */
+export function isPurchasingRetireCandidate(status: string): boolean {
+  return ["disbursed", "approved", "retirement_pending", "retirement_rejected"].includes(
+    status,
+  );
+}
+
+/** Retirement submitted — awaiting accountant sign-off. */
+export function isPurchasingRetirementInReview(status: string): boolean {
+  return status === "retirement_pending_accountant";
+}
+
+/** Fully retired POs for purchaser history. */
+export function isPurchasingRetiredHistory(status: string): boolean {
+  return status === "retired";
 }
 
 /** POs still in the approval workflow (not draft, not yet at market). */
