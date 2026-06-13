@@ -2,6 +2,8 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
 import { canonicalRoleKey, hasPermission } from '@/lib/permissions'
 import { notifyNightAuditRequestCreated } from '@/lib/night-audit/notify-request-created'
+import { callerMatchesAuthenticatedUser } from '@/lib/api/resolve-authed-user-id'
+import { reconcileRoomStatusForRoom } from '@/lib/rooms/room-occupancy'
 
 const DECISION = ['approved', 'rejected'] as const
 
@@ -28,6 +30,9 @@ export async function GET(request: Request) {
 
     if (!callerId) {
       return NextResponse.json({ error: 'caller_id is required' }, { status: 400 })
+    }
+    if (!(await callerMatchesAuthenticatedUser(request, callerId))) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     const admin = createAdminClient()
@@ -96,6 +101,9 @@ export async function POST(request: Request) {
         { error: 'caller_id, booking_id, to_room_id and reason are required' },
         { status: 400 },
       )
+    }
+    if (!(await callerMatchesAuthenticatedUser(request, caller_id))) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     const admin = createAdminClient()
@@ -261,6 +269,9 @@ export async function PATCH(request: Request) {
     if (!caller_id || !request_id || !DECISION.includes(status)) {
       return NextResponse.json({ error: 'caller_id, request_id and status (approved|rejected) are required' }, { status: 400 })
     }
+    if (!(await callerMatchesAuthenticatedUser(request, caller_id))) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
 
     const admin = createAdminClient()
     const { data: callerProfile, error: callerError } = await admin
@@ -388,11 +399,14 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: bookUpErr.message }, { status: 500 })
     }
 
-    await admin.from('rooms').update({ status: 'available', updated_at: decidedAt }).eq('id', row.from_room_id)
-    await admin
-      .from('rooms')
-      .update({ status: 'occupied', updated_at: decidedAt })
-      .eq('id', row.to_room_id)
+    await reconcileRoomStatusForRoom(admin, {
+      roomId: row.from_room_id,
+      organizationId: row.organization_id,
+    })
+    await reconcileRoomStatusForRoom(admin, {
+      roomId: row.to_room_id,
+      organizationId: row.organization_id,
+    })
 
     const noteDescription =
       `Room change (approved): ${row.from_room_label} → ${row.to_room_label}. Reason on request: ${String(row.reason || '').slice(0, 500)}`

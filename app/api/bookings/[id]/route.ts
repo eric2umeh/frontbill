@@ -5,6 +5,7 @@ import {
   roomHousekeepingAfterEdit,
 } from '@/lib/booking/edit-booking-patch'
 import { hasRoomDateConflict } from '@/lib/booking/room-date-conflict'
+import { callerMatchesAuthenticatedUser } from '@/lib/api/resolve-authed-user-id'
 import { isBookingCheckedOut } from '@/lib/utils/booking-checkout-ui'
 import { NextResponse } from 'next/server'
 
@@ -33,6 +34,9 @@ export async function PATCH(request: Request, ctx: { params: Promise<{ id: strin
     }
     if (Object.keys(parsed.data).length === 0) {
       return NextResponse.json({ error: 'patch must include at least one field' }, { status: 400 })
+    }
+    if (!(await callerMatchesAuthenticatedUser(request, caller_id))) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     const admin = createAdminClient()
@@ -170,6 +174,9 @@ export async function DELETE(request: Request, ctx: { params: Promise<{ id: stri
 
     if (!caller_id) {
       return NextResponse.json({ error: 'caller_id is required' }, { status: 400 })
+    }
+    if (!(await callerMatchesAuthenticatedUser(request, caller_id))) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     const admin = createAdminClient()
