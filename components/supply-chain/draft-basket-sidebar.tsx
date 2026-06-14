@@ -3,6 +3,7 @@
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { DEPT_LABELS, type BasketLine, type SupplyDept } from '@/lib/supply-chain/types'
+import { parseQuantityValue } from '@/lib/supply-chain/measurement-units'
 import { formatNaira } from '@/lib/utils/currency'
 import { Minus, Plus, Send, Trash2 } from 'lucide-react'
 
@@ -41,7 +42,7 @@ export function DraftBasketSidebar({
           </p>
         </div>
         {!readOnly && basket.length > 0 && (
-          <Button variant="ghost" size="sm" onClick={onClear}>
+          <Button type="button" variant="ghost" size="sm" onClick={onClear}>
             Clear all
           </Button>
         )}
@@ -100,12 +101,14 @@ export function DraftBasketSidebar({
                             <Minus className="h-3 w-3" />
                           </Button>
                           <Input
-                            type="number"
-                            min={0}
+                            inputMode="decimal"
                             className="h-7 w-14 text-center px-1"
-                            value={l.qtyToBuy}
+                            value={String(l.qtyToBuy)}
                             onChange={(e) =>
-                              onQtyChange(l.stockItemId, Number(e.target.value) || 0)
+                              onQtyChange(
+                                l.stockItemId,
+                                parseQuantityValue(e.target.value),
+                              )
                             }
                           />
                           <Button
