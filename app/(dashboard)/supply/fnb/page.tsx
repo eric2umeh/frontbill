@@ -1,6 +1,5 @@
-import { redirect } from 'next/navigation'
+import { FnbStoreWorkspace } from '@/components/supply-chain/fnb-store-workspace'
 
-/** F&B sales use the full outlet POS (room charge, fees, settle/open bills). */
 export default function SupplyFnbPage() {
-  redirect('/outlets')
+  return <FnbStoreWorkspace />
 }
