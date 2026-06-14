@@ -10,24 +10,60 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Minus, Plus, Search, Trash2, ChefHat } from 'lucide-react'
+import { Search, Trash2, ChefHat } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   clearKitchenBatchDraft,
+  KITCHEN_BATCH_DRAFT_VERSION,
   loadKitchenBatchDraft,
   persistKitchenBatchDraft,
 } from '@/lib/supply-chain/kitchen-batch-draft'
+import {
+  mergeUnitFactors,
+  needsUnitFactor,
+} from '@/lib/supply-chain/unit-factor-storage'
+import { UnitConversionField } from '@/components/supply-chain/unit-conversion-field'
 import { OutletCategorySearchField } from '@/components/supply-chain/outlet-category-search-field'
 import { OutletMenuItemSearchField } from '@/components/supply-chain/outlet-menu-item-search-field'
 import { outletStockSlug } from '@/lib/outlets/outlet-stock-slug'
-import { convertQtyBetweenUnits } from '@/lib/supply-chain/recipe-units'
+import {
+  defaultUnitForStoreItem,
+  formatQuantityDisplay,
+  materialCostForUnit,
+  parseQuantityInput,
+  sanitizeQuantityInput,
+} from '@/lib/supply-chain/measurement-units'
+import { UnitSelect } from '@/components/supply-chain/unit-select'
+import { toTitleCaseWords } from '@/lib/supply-chain/title-case'
+import type { BatchOutletMenuSync } from '@/lib/supply-chain/batch-outlet-sync'
+import {
+  batchOutletMenuSyncLabel,
+  normalizeBatchOutletMenuSync,
+  shouldSyncBatchToOutlet,
+} from '@/lib/supply-chain/batch-outlet-sync'
+import { syncBatchToRestaurantOutlet } from '@/lib/supply-chain/sync-restaurant-outlet'
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 
 const BATCH_CREATOR_ROLES = new Set(['superadmin', 'admin', 'manager'])
 
-export function KitchenBatchBuilder() {
+type Props = {
+  /** When set, builder edits an existing batch standard instead of creating new. */
+  editRecipeId?: string | null
+  onSaved?: () => void
+  onCancel?: () => void
+}
+
+export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props = {}) {
   const { name, role } = useAuth()
-  const { storeItems, kitchenRawStock, kitchenRawOnHand, openKitchenBatchFromMaterials } =
-    useSupplyChain()
+  const {
+    storeItems,
+    kitchenRawStock,
+    kitchenRawOnHand,
+    recipes,
+    openKitchenBatchFromMaterials,
+    updateRecipe,
+  } = useSupplyChain()
+  const editing = Boolean(editRecipeId)
   const [draftLoaded, setDraftLoaded] = useState(false)
   const [search, setSearch] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
@@ -36,12 +72,19 @@ export function KitchenBatchBuilder() {
   const [linkedKitchenStockId, setLinkedKitchenStockId] = useState<string | null>(null)
   const [menuCategory, setMenuCategory] = useState('')
   const [menuCategoryId, setMenuCategoryId] = useState<string | null>(null)
-  const [plannedPortions, setPlannedPortions] = useState('4')
+  const [plannedPortions, setPlannedPortions] = useState('')
   const [sellingPrice, setSellingPrice] = useState('')
+  const [overheadLabour, setOverheadLabour] = useState('')
+  const [overheadGas, setOverheadGas] = useState('')
+  const [overheadOther, setOverheadOther] = useState('')
+  const [outletMenuSync, setOutletMenuSync] = useState<BatchOutletMenuSync>('none')
   const [notes, setNotes] = useState('')
   const [cart, setCart] = useState<BatchMaterialLine[]>([])
+  const [qtyInputMap, setQtyInputMap] = useState<Record<string, string>>({})
+  const [factorMap, setFactorMap] = useState<Record<string, Record<string, number>>>({})
 
   useEffect(() => {
+    if (editRecipeId) return
     const draft = loadKitchenBatchDraft()
     setSearch(draft.search)
     setMenuCategory(draft.menuCategory)
@@ -51,14 +94,57 @@ export function KitchenBatchBuilder() {
     setLinkedKitchenStockId(draft.linkedKitchenStockId)
     setPlannedPortions(draft.plannedPortions)
     setSellingPrice(draft.sellingPrice)
+    setOverheadLabour(draft.overheadLabour)
+    setOverheadGas(draft.overheadGas)
+    setOverheadOther(draft.overheadOther)
     setNotes(draft.notes)
     setCart(draft.cart)
+    setQtyInputMap(
+      Object.fromEntries(draft.cart.map((c) => [c.storeItemId, String(c.quantity)])),
+    )
+    setOutletMenuSync('none')
     setDraftLoaded(true)
-  }, [])
+  }, [editRecipeId])
 
   useEffect(() => {
-    if (!draftLoaded) return
+    if (!editRecipeId) return
+    const recipe = recipes.find((r) => r.id === editRecipeId)
+    if (!recipe) return
+    setBatchName(recipe.name)
+    setMenuCategory(recipe.category)
+    setPlannedPortions(String(recipe.yieldPortions))
+    setSellingPrice(String(recipe.sellingPricePerPortion))
+    setOverheadLabour(recipe.overheadLabour ? String(recipe.overheadLabour) : '')
+    setOverheadGas(recipe.overheadGas ? String(recipe.overheadGas) : '')
+    setOverheadOther(
+      recipe.overheadOther || recipe.overheadCost
+        ? String(recipe.overheadOther ?? recipe.overheadCost)
+        : '',
+    )
+    setOutletMenuSync(
+      normalizeBatchOutletMenuSync(recipe.outletMenuSync ?? recipe.fnbEligible),
+    )
+    setCart(
+      recipe.ingredients.map((ing) => ({
+        storeItemId: ing.stockItemId,
+        name: ing.name,
+        unit: ing.unit,
+        quantity: ing.quantity,
+        unitCost: ing.quantity > 0 ? ing.cost / ing.quantity : 0,
+      })),
+    )
+    setQtyInputMap(
+      Object.fromEntries(
+        recipe.ingredients.map((ing) => [ing.stockItemId, String(ing.quantity)]),
+      ),
+    )
+    setDraftLoaded(true)
+  }, [editRecipeId, recipes])
+
+  useEffect(() => {
+    if (!draftLoaded || editing) return
     persistKitchenBatchDraft({
+      draftVersion: KITCHEN_BATCH_DRAFT_VERSION,
       search,
       menuCategory,
       menuCategoryId,
@@ -67,6 +153,10 @@ export function KitchenBatchBuilder() {
       linkedKitchenStockId,
       plannedPortions,
       sellingPrice,
+      overheadLabour,
+      overheadGas,
+      overheadOther,
+      outletMenuSync,
       notes,
       cart,
     })
@@ -80,6 +170,10 @@ export function KitchenBatchBuilder() {
     linkedKitchenStockId,
     plannedPortions,
     sellingPrice,
+    overheadLabour,
+    overheadGas,
+    overheadOther,
+    outletMenuSync,
     notes,
     cart,
   ])
@@ -107,27 +201,41 @@ export function KitchenBatchBuilder() {
     // rawStockTick keeps search/cart in sync after store issue-out without refresh
   }, [kitchenStoreItems, search, kitchenRawStock, rawStockTick])
 
-  const batchCost = cart.reduce((sum, l) => sum + l.quantity * l.unitCost, 0)
+  const ingredientCost = cart.reduce((sum, l) => {
+    const store = storeItems.find((s) => s.id === l.storeItemId)
+    const cost = store
+      ? materialCostForUnit(l.quantity, l.unit, store.unit, store.lastPrice)
+      : l.quantity * l.unitCost
+    return sum + cost
+  }, 0)
+  const overheadTotal =
+    (Number(overheadLabour) || 0) + (Number(overheadGas) || 0) + (Number(overheadOther) || 0)
+  const batchCost = ingredientCost + overheadTotal
   const planned = Number(plannedPortions) || 0
   const sell = Number(sellingPrice) || 0
   const revenue = planned * sell
+  const costPerPortion = planned > 0 ? batchCost / planned : 0
   const marginPct =
     revenue > 0 ? Math.round(((revenue - batchCost) / revenue) * 1000) / 10 : 0
 
   const addMaterial = (item: StoreItem) => {
+    const unit = defaultUnitForStoreItem(item.unit)
     setCart((prev) => {
       const ex = prev.find((c) => c.storeItemId === item.id)
       if (ex) {
+        const nextQty = ex.quantity + 1
+        setQtyInputMap((m) => ({ ...m, [item.id]: String(nextQty) }))
         return prev.map((c) =>
-          c.storeItemId === item.id ? { ...c, quantity: c.quantity + 1 } : c,
+          c.storeItemId === item.id ? { ...c, quantity: nextQty } : c,
         )
       }
+      setQtyInputMap((m) => ({ ...m, [item.id]: '1' }))
       return [
         ...prev,
         {
           storeItemId: item.id,
           name: item.name,
-          unit: item.unit,
+          unit,
           quantity: 1,
           unitCost: item.lastPrice,
         },
@@ -138,32 +246,123 @@ export function KitchenBatchBuilder() {
     setSearchOpen(false)
   }
 
-  const setLineQty = (storeItemId: string, qty: number) => {
-    if (qty <= 0) {
-      setCart((prev) => prev.filter((c) => c.storeItemId !== storeItemId))
+  const removeLine = (storeItemId: string) => {
+    setCart((prev) => prev.filter((c) => c.storeItemId !== storeItemId))
+    setQtyInputMap((m) => {
+      const next = { ...m }
+      delete next[storeItemId]
+      return next
+    })
+  }
+
+  const setLineUnit = (storeItemId: string, unit: string) => {
+    setCart((prev) =>
+      prev.map((c) => (c.storeItemId === storeItemId ? { ...c, unit } : c)),
+    )
+  }
+
+  const commitLineQty = (storeItemId: string, raw: string, unit: string) => {
+    const parsed = parseQuantityInput(raw, unit)
+    if (!parsed || parsed.quantity <= 0) {
+      removeLine(storeItemId)
       return
     }
     setCart((prev) =>
       prev.map((c) => {
         if (c.storeItemId !== storeItemId) return c
         const store = storeItems.find((s) => s.id === storeItemId)
-        const unitCost = store?.lastPrice ?? c.unitCost
-        return { ...c, quantity: qty, unitCost }
+        return {
+          ...c,
+          quantity: parsed.quantity,
+          unit: parsed.unit,
+          unitCost: store?.lastPrice ?? c.unitCost,
+        }
+      }),
+    )
+    setQtyInputMap((m) => ({ ...m, [storeItemId]: raw.trim() || String(parsed.quantity) }))
+  }
+
+  const handleLineQtyChange = (storeItemId: string, raw: string, unit: string) => {
+    const cleaned = sanitizeQuantityInput(raw)
+    setQtyInputMap((m) => ({ ...m, [storeItemId]: cleaned }))
+    const trimmed = cleaned.trim()
+    if (!trimmed) return
+    const parsed = parseQuantityInput(trimmed, unit)
+    if (!parsed || parsed.quantity <= 0) return
+    setCart((prev) =>
+      prev.map((c) => {
+        if (c.storeItemId !== storeItemId) return c
+        const store = storeItems.find((s) => s.id === storeItemId)
+        return {
+          ...c,
+          quantity: parsed.quantity,
+          unit: parsed.unit,
+          unitCost: store?.lastPrice ?? c.unitCost,
+        }
       }),
     )
   }
 
-  const lineCostHint = (line: BatchMaterialLine) => {
+  const itemFactors = (storeItemId: string, storeUnit: string) => {
+    const item = storeItems.find((s) => s.id === storeItemId)
+    return mergeUnitFactors(storeItemId, storeUnit, item?.unitFactors)
+  }
+
+  const lineCost = (line: BatchMaterialLine) => {
     const store = storeItems.find((s) => s.id === line.storeItemId)
-    if (!store) return null
-    const converted = convertQtyBetweenUnits(line.quantity, line.unit, store.unit)
-    if (converted != null && converted !== line.quantity) {
-      return `${line.quantity} ${line.unit} ≈ ${converted} ${store.unit} store units`
-    }
-    return null
+    if (!store) return line.quantity * line.unitCost
+    const factors = factorMap[line.storeItemId] ?? itemFactors(line.storeItemId, store.unit)
+    return materialCostForUnit(
+      line.quantity,
+      line.unit,
+      store.unit,
+      store.lastPrice,
+      factors,
+    )
   }
 
   const rawOnHand = (storeItemId: string) => kitchenRawOnHand(storeItemId)
+
+  const syncToOutlet = async (
+    name: string,
+    category: string,
+    kitchenStockId: string,
+    unitPrice: number,
+    sync: BatchOutletMenuSync,
+  ) => {
+    if (!shouldSyncBatchToOutlet(sync)) return { ok: true as const }
+    const res = await syncBatchToRestaurantOutlet({
+      batchName: name,
+      categoryName: category,
+      kitchenStockId,
+      unitPrice,
+      menuItemId,
+      outletMenuSync: sync,
+    })
+    if (!res.ok) {
+      toast.warning(`Saved locally but outlet sync failed: ${res.error}`)
+    }
+    return res
+  }
+
+  const resetForm = () => {
+    setCart([])
+    setQtyInputMap({})
+    setBatchName('')
+    setMenuItemId(null)
+    setLinkedKitchenStockId(null)
+    setMenuCategory('')
+    setMenuCategoryId(null)
+    setPlannedPortions('')
+    setSellingPrice('')
+    setOverheadLabour('')
+    setOverheadGas('')
+    setOverheadOther('')
+    setOutletMenuSync('none')
+    setNotes('')
+    setSearch('')
+    clearKitchenBatchDraft()
+  }
 
   const handleCreate = async () => {
     if (!canCreateBatch) {
@@ -171,21 +370,63 @@ export function KitchenBatchBuilder() {
       return
     }
     if (!menuCategory.trim()) {
-      toast.error('Menu category is required — it syncs to the Restaurant outlet')
+      toast.error('Menu category is required for the batch standard')
       return
     }
+    const titledName = toTitleCaseWords(batchName)
+    const titledCategory = toTitleCaseWords(menuCategory)
     const stockId =
-      linkedKitchenStockId?.trim() || `ks-${outletStockSlug(batchName.trim())}`
+      linkedKitchenStockId?.trim() || `ks-${outletStockSlug(titledName)}`
+
+    if (editing && editRecipeId) {
+      const res = updateRecipe(
+        editRecipeId,
+        {
+          name: titledName,
+          category: titledCategory,
+          yieldPortions: planned,
+          sellingPricePerPortion: sell,
+          overheadLabour: Number(overheadLabour) || 0,
+          overheadGas: Number(overheadGas) || 0,
+          overheadOther: Number(overheadOther) || 0,
+          outletMenuSync,
+          ingredients: cart.map((m) => ({
+            stockItemId: m.storeItemId,
+            name: m.name,
+            quantity: m.quantity,
+            unit: m.unit,
+            cost: lineCost(m),
+          })),
+        },
+        actor,
+      )
+      if ('error' in res) {
+        toast.error(res.error)
+        return
+      }
+      await syncToOutlet(res.menuItemName, res.category, res.kitchenStockId, sell, res.outletMenuSync)
+      toast.success(
+        shouldSyncBatchToOutlet(res.outletMenuSync)
+          ? `Batch "${titledName}" updated — ${batchOutletMenuSyncLabel(res.outletMenuSync)}`
+          : `Batch "${titledName}" updated`,
+      )
+      onSaved?.()
+      return
+    }
 
     const res = openKitchenBatchFromMaterials(
       {
-        batchName: batchName.trim(),
-        menuCategory: menuCategory.trim(),
+        batchName: titledName,
+        menuCategory: titledCategory,
         plannedPortions: planned,
         sellingPricePerPortion: sell,
         materials: cart,
         notes: notes.trim() || undefined,
         kitchenStockId: stockId,
+        overheadLabour: Number(overheadLabour) || 0,
+        overheadGas: Number(overheadGas) || 0,
+        overheadOther: Number(overheadOther) || 0,
+        outletMenuSync,
       },
       actor,
     )
@@ -194,44 +435,14 @@ export function KitchenBatchBuilder() {
       return
     }
 
-    try {
-      const sync = await fetch('/api/supply/sync-restaurant-batch', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
-          batchName: batchName.trim(),
-          categoryName: menuCategory.trim(),
-          unitPrice: sell,
-          kitchenStockId: res.kitchenStockId,
-          menuItemId: menuItemId ?? undefined,
-        }),
-      })
-      const syncJson = await sync.json().catch(() => ({}))
-      if (!sync.ok) {
-        toast.warning(
-          `Batch created locally but Restaurant menu sync failed: ${syncJson.error ?? 'unknown error'}`,
-        )
-      } else {
-        toast.success(
-          `Batch "${batchName}" created and synced to Restaurant menu (${res.kitchenStockId})`,
-        )
-      }
-    } catch {
-      toast.warning('Batch created but could not reach server to sync Restaurant menu')
-    }
-
-    setCart([])
-    setBatchName('')
-    setMenuItemId(null)
-    setLinkedKitchenStockId(null)
-    setMenuCategory('')
-    setMenuCategoryId(null)
-    setPlannedPortions('4')
-    setSellingPrice('')
-    setNotes('')
-    setSearch('')
-    clearKitchenBatchDraft()
+    await syncToOutlet(titledName, titledCategory, res.kitchenStockId, sell, outletMenuSync)
+    toast.success(
+      shouldSyncBatchToOutlet(outletMenuSync)
+        ? `Batch standard "${titledName}" saved — ${batchOutletMenuSyncLabel(outletMenuSync)}`
+        : `Batch standard "${titledName}" saved (not listed on outlet POS yet)`,
+    )
+    resetForm()
+    onSaved?.()
   }
 
   return (
@@ -298,10 +509,12 @@ export function KitchenBatchBuilder() {
         <div className="border-b px-4 py-3 bg-muted/30 shrink-0">
           <h3 className="font-semibold text-sm flex items-center gap-2">
             <ChefHat className="h-4 w-4" />
-            New batch
+            {editing ? 'Edit batch' : 'New batch'}
           </h3>
           <p className="text-xs text-muted-foreground mt-1">
-            Selected materials and batch details. Saved automatically.
+            {editing
+              ? 'Update ingredients, overhead, and selling price.'
+              : 'Recipe definition — raw stock is not required. Saved automatically.'}
           </p>
         </div>
 
@@ -310,75 +523,91 @@ export function KitchenBatchBuilder() {
             {cart.length === 0 ? (
               <div className="flex flex-col items-center justify-center rounded-lg border border-dashed py-20 text-center">
                 <ChefHat className="h-10 w-10 text-muted-foreground/40 mb-3" />
-                <p className="text-sm font-medium text-muted-foreground">No materials yet</p>
+                <p className="text-sm font-medium text-muted-foreground">No materials yet (optional)</p>
                 <p className="text-xs text-muted-foreground mt-1 max-w-sm">
-                  Search on the left and pick items — they will appear here.
+                  You can create a batch without materials, or search on the left to add ingredients.
                 </p>
               </div>
             ) : (
               <ul className="grid gap-2 grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
                 {cart.map((line) => {
                   const onHand = rawOnHand(line.storeItemId)
+                  const store = storeItems.find((s) => s.id === line.storeItemId)
+                  const inputVal = qtyInputMap[line.storeItemId] ?? String(line.quantity)
+                  const factors =
+                    factorMap[line.storeItemId] ??
+                    (store ? itemFactors(line.storeItemId, store.unit) : {})
+                  const showFactor =
+                    store &&
+                    needsUnitFactor(line.unit, store.unit, factors)
                   return (
                     <li
                       key={line.storeItemId}
-                      className="rounded-lg border p-1.5 text-[11px] space-y-1 bg-background"
+                      className="rounded-lg border p-2 text-xs bg-background space-y-1.5"
                     >
-                      <div className="flex justify-between gap-1">
-                        <div className="min-w-0">
-                          <p className="font-medium truncate text-xs">{line.name}</p>
-                          <p className="text-[10px] text-muted-foreground truncate">
-                            Stock {onHand} {line.unit}
-                          </p>
-                        </div>
+                      <div className="flex justify-between gap-1 items-start">
+                        <p className="font-medium truncate text-xs leading-tight">{line.name}</p>
                         <Button
                           type="button"
                           variant="ghost"
                           size="icon"
                           className="h-6 w-6 text-destructive shrink-0"
-                          onClick={() => setLineQty(line.storeItemId, 0)}
+                          onClick={() => removeLine(line.storeItemId)}
                         >
                           <Trash2 className="h-3 w-3" />
                         </Button>
                       </div>
-                      <div className="flex items-center justify-between gap-1">
-                        <div className="flex items-center gap-0.5">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="icon"
-                            className="h-6 w-6"
-                            allowRepeatClick
-                            onClick={() => setLineQty(line.storeItemId, line.quantity - 1)}
-                          >
-                            <Minus className="h-3 w-3" />
-                          </Button>
-                          <Input
-                            type="number"
-                            min={0}
-                            step="any"
-                            className="h-6 w-12 px-1 text-center text-[11px]"
-                            value={line.quantity}
-                            onChange={(e) =>
-                              setLineQty(line.storeItemId, Number(e.target.value) || 0)
-                            }
-                          />
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="icon"
-                            className="h-6 w-6"
-                            allowRepeatClick
-                            onClick={() => setLineQty(line.storeItemId, line.quantity + 1)}
-                          >
-                            <Plus className="h-3 w-3" />
-                          </Button>
-                          <span className="text-[10px] text-muted-foreground">{line.unit}</span>
-                        </div>
-                        <span className="text-[10px] font-semibold tabular-nums shrink-0">
-                          {formatNaira(line.quantity * line.unitCost)}
-                        </span>
+                      <p className="text-[11px] text-muted-foreground truncate">
+                        Stock {onHand} {store?.unit ?? line.unit}
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <Input
+                          className="h-8 w-14 shrink-0 text-center text-xs px-1.5"
+                          inputMode="decimal"
+                          placeholder="Qty"
+                          value={inputVal}
+                          onChange={(e) =>
+                            handleLineQtyChange(line.storeItemId, e.target.value, line.unit)
+                          }
+                          onBlur={(e) =>
+                            commitLineQty(line.storeItemId, e.target.value, line.unit)
+                          }
+                        />
+                      <UnitSelect
+                        storeUnit={store?.unit ?? line.unit}
+                        itemName={line.name}
+                        value={line.unit}
+                        onChange={(u) => {
+                          setLineUnit(line.storeItemId, u)
+                          const raw = qtyInputMap[line.storeItemId]
+                          if (raw?.trim()) commitLineQty(line.storeItemId, raw, u)
+                        }}
+                        className="h-8 w-[76px] text-xs shrink-0"
+                      />
                       </div>
+                      {store && (showFactor || line.unit !== store.unit) && (
+                        <UnitConversionField
+                          compact
+                          storeItemId={line.storeItemId}
+                          storeUnit={store.unit}
+                          selectedUnit={line.unit}
+                          factors={factors}
+                          onFactorsChange={(next) =>
+                            setFactorMap((m) => ({ ...m, [line.storeItemId]: next }))
+                          }
+                        />
+                      )}
+                      <p className="text-[11px] text-muted-foreground truncate">
+                        {formatQuantityDisplay(
+                          line.quantity,
+                          line.unit,
+                          store?.unit,
+                          factors,
+                        )}
+                      </p>
+                      <p className="text-xs font-semibold tabular-nums">
+                        {formatNaira(lineCost(line))}
+                      </p>
                     </li>
                   )
                 })}
@@ -422,50 +651,136 @@ export function KitchenBatchBuilder() {
             <div>
               <Label className="text-xs">Planned portions</Label>
               <Input
-                type="number"
-                min={1}
+                inputMode="decimal"
+                placeholder="e.g. 6"
                 className="h-9 mt-0.5"
                 value={plannedPortions}
-                onChange={(e) => setPlannedPortions(e.target.value)}
+                onChange={(e) =>
+                  setPlannedPortions(sanitizeQuantityInput(e.target.value))
+                }
               />
+            </div>
+            <div>
+              <Label className="text-xs">Overhead — labour (₦)</Label>
+              <Input
+                inputMode="decimal"
+                placeholder="Labour"
+                className="h-9 mt-0.5"
+                value={overheadLabour}
+                onChange={(e) => setOverheadLabour(sanitizeQuantityInput(e.target.value))}
+              />
+            </div>
+            <div>
+              <Label className="text-xs">Overhead — gas (₦)</Label>
+              <Input
+                inputMode="decimal"
+                placeholder="Gas"
+                className="h-9 mt-0.5"
+                value={overheadGas}
+                onChange={(e) => setOverheadGas(sanitizeQuantityInput(e.target.value))}
+              />
+            </div>
+            <div>
+              <Label className="text-xs">Overhead — other (₦)</Label>
+              <Input
+                inputMode="decimal"
+                placeholder="Other"
+                className="h-9 mt-0.5"
+                value={overheadOther}
+                onChange={(e) => setOverheadOther(sanitizeQuantityInput(e.target.value))}
+              />
+            </div>
+          </div>
+          <div className="space-y-2 rounded-lg border bg-muted/20 p-3">
+            <Label className="text-xs font-semibold">Outlet POS listing (optional)</Label>
+            <p className="text-[11px] text-muted-foreground leading-snug">
+              Kitchen batches always supply Restaurant. Select an outlet to sell on POS, or leave
+              unselected until you are ready.
+            </p>
+            <RadioGroup
+              value={outletMenuSync === 'none' ? '' : outletMenuSync}
+              onValueChange={(v) => {
+                if (v === 'restaurant' || v === 'restaurant_fnb') {
+                  setOutletMenuSync(v)
+                }
+              }}
+            >
+              <div className="flex items-start gap-2">
+                <RadioGroupItem value="restaurant" id="batch-outlet-restaurant" className="mt-0.5" />
+                <Label htmlFor="batch-outlet-restaurant" className="font-normal cursor-pointer leading-snug">
+                  Restaurant outlet
+                </Label>
+              </div>
+              <div className="flex items-start gap-2">
+                <RadioGroupItem value="restaurant_fnb" id="batch-outlet-fnb" className="mt-0.5" />
+                <Label htmlFor="batch-outlet-fnb" className="font-normal cursor-pointer leading-snug">
+                  Restaurant / F&amp;B outlet
+                </Label>
+              </div>
+            </RadioGroup>
+            {outletMenuSync !== 'none' && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2 text-xs"
+                onClick={() => setOutletMenuSync('none')}
+              >
+                Clear outlet listing
+              </Button>
+            )}
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2 items-end rounded-lg border bg-background p-3">
+            <div className="space-y-1 min-w-0">
+              <p className="text-xs font-medium text-muted-foreground">Batch cost (incl. overhead)</p>
+              <p className="text-lg font-semibold tabular-nums">{formatNaira(batchCost)}</p>
+              {planned > 0 ? (
+                <p className="text-xs text-muted-foreground">
+                  Cost price / portion:{' '}
+                  <span className="font-medium text-foreground">{formatNaira(costPerPortion)}</span>
+                  {sell > 0
+                    ? ` · margin vs sell ${Math.round(((sell - costPerPortion) / sell) * 1000) / 10}%`
+                    : ''}
+                </p>
+              ) : (
+                <p className="text-xs text-muted-foreground">Enter planned portions to see cost / portion</p>
+              )}
+              {revenue > 0 && (
+                <p className="text-xs text-emerald-700">
+                  Est. revenue {formatNaira(revenue)} · margin {marginPct}%
+                </p>
+              )}
             </div>
             <div>
               <Label className="text-xs">Selling price / portion (₦)</Label>
               <Input
-                type="number"
-                min={0}
+                inputMode="decimal"
+                placeholder="Selling price"
                 className="h-9 mt-0.5"
                 value={sellingPrice}
-                onChange={(e) => setSellingPrice(e.target.value)}
+                onChange={(e) => setSellingPrice(sanitizeQuantityInput(e.target.value))}
               />
             </div>
           </div>
-          <div className="flex flex-wrap items-center justify-between gap-2 text-sm font-medium pt-1">
-            <span>Batch cost</span>
-            <span className="text-base">{formatNaira(batchCost)}</span>
-          </div>
-          {revenue > 0 && (
-            <p className="text-xs text-emerald-700">
-              Est. revenue {formatNaira(revenue)} · margin {marginPct}%
-            </p>
-          )}
           {!canCreateBatch && (
             <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-2 py-1.5">
               Chefs can build the list; only Admin / Manager / Superadmin can create the batch.
             </p>
           )}
-          <Button
-            className="w-full"
-            disabled={
-              !canCreateBatch ||
-              !cart.length ||
-              !batchName.trim() ||
-              !menuCategory.trim()
-            }
-            onClick={handleCreate}
-          >
-            Create batch &amp; sync to Restaurant
-          </Button>
+          <div className="flex gap-2">
+            {onCancel && (
+              <Button type="button" variant="outline" className="flex-1" onClick={onCancel}>
+                Cancel
+              </Button>
+            )}
+            <Button
+              className="flex-1"
+              disabled={!canCreateBatch || !batchName.trim() || !menuCategory.trim()}
+              onClick={handleCreate}
+            >
+              {editing ? 'Save batch' : 'Create batch'}
+            </Button>
+          </div>
         </div>
       </div>
     </div>
