@@ -1,8 +1,17 @@
 import type { Recipe } from './types'
 
+export function recipeOverheadTotal(recipe: Recipe): number {
+  const breakdown =
+    (recipe.overheadLabour ?? 0) +
+    (recipe.overheadGas ?? 0) +
+    (recipe.overheadOther ?? 0)
+  if (breakdown > 0) return breakdown
+  return recipe.overheadCost ?? 0
+}
+
 export function recipeTotalCost(recipe: Recipe): number {
   const ingredients = recipe.ingredients.reduce((s, i) => s + i.cost, 0)
-  return ingredients + recipe.overheadCost
+  return ingredients + recipeOverheadTotal(recipe)
 }
 
 export function recipeCostPerPortion(recipe: Recipe): number {
