@@ -9,14 +9,20 @@ import { DEPT_LABELS, type SupplyDept } from '@/lib/supply-chain/types'
 import { priceVariancePct } from '@/lib/supply-chain/calculations'
 import { DeptPill } from '@/lib/supply-chain/supply-ui'
 import { formatNaira } from '@/lib/utils/currency'
-import { canonicalRoleKey, canIssueStockFromStore } from '@/lib/permissions'
+import {
+  canonicalRoleKey,
+  canAddStoreItemDirect,
+  canApproveStoreItems,
+  canIssueStockFromStore,
+  canSubmitStoreItemForApproval,
+} from '@/lib/permissions'
 import { issueOutletPickerOptions } from '@/lib/store/outlet-departments'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { ArrowRightFromLine, History } from 'lucide-react'
+import { ArrowRightFromLine, History, Pencil } from 'lucide-react'
 import { OrgStaffSearchField } from '@/components/shared/org-staff-search-field'
 import {
   Select,
@@ -38,7 +44,25 @@ import { DraftBasketSidebar } from '@/components/supply-chain/draft-basket-sideb
 import { PoHistoryPanel } from '@/components/supply-chain/po-history-panel'
 import { ActivePurchaseOrderPanel } from '@/components/supply-chain/active-purchase-order-panel'
 import { canEditStorePurchaseOrder } from '@/lib/supply-chain/po-active'
-import type { StoreItem } from '@/lib/supply-chain/types'
+import {
+  defaultUnitForStoreItem,
+  isCompleteQuantityInput,
+  parseQuantityValue,
+  sanitizeQuantityInput,
+} from '@/lib/supply-chain/measurement-units'
+import { handleSupplyActionError } from '@/lib/supply-chain/handle-supply-action-error'
+import {
+  convertToStoreUnitsWithFactors,
+  mergeUnitFactors,
+  needsUnitFactor,
+} from '@/lib/supply-chain/unit-factor-storage'
+import { UnitSelect } from '@/components/supply-chain/unit-select'
+import { UnitConversionField } from '@/components/supply-chain/unit-conversion-field'
+import type { IssueOutCartLine, StoreItem } from '@/lib/supply-chain/types'
+import { StoreAddItemDialog } from '@/components/supply-chain/store-add-item-dialog'
+import { StoreEditItemDialog } from '@/components/supply-chain/store-edit-item-dialog'
+import { IssueOutCartSidebar } from '@/components/supply-chain/issue-out-cart-sidebar'
+import { SupplyHistoryClearButton } from '@/components/supply-chain/supply-history-clear-button'
 
 const DEPTS: SupplyDept[] = ['all', 'kitchen', 'bar', 'housekeeping', 'maintenance', 'front_office', 'laundry']
 
@@ -55,20 +79,43 @@ export function StoreWorkspace() {
     activePurchaseOrder,
     purchaseOrders,
     stats,
+    pendingStoreItems,
     issueFromStoreToDepartment,
+    issueOutCart,
     issueOutLog,
     barStock,
+    addStoreItemDirect,
+    updateStoreItemDirect,
+    submitStoreItemForApproval,
+    approvePendingStoreItem,
+    rejectPendingStoreItem,
   } = useSupplyChain()
   const [dept, setDept] = useState<SupplyDept>('all')
   const [qtyMap, setQtyMap] = useState<Record<string, string>>({})
   const [issueQtyMap, setIssueQtyMap] = useState<Record<string, string>>({})
+  const [issueUnitMap, setIssueUnitMap] = useState<Record<string, string>>({})
+  const [purchaseUnitMap, setPurchaseUnitMap] = useState<Record<string, string>>({})
+  const [factorMap, setFactorMap] = useState<Record<string, Record<string, number>>>({})
+
+  const factorsFor = (item: StoreItem) =>
+    factorMap[item.id] ?? mergeUnitFactors(item.id, item.unit, item.unitFactors)
+
+  const toStoreQty = (item: StoreItem, qty: number, unit: string): number | null =>
+    convertToStoreUnitsWithFactors(qty, unit, item.unit, factorsFor(item))
   const [issueDestination, setIssueDestination] = useState('')
   const [issueReceivedBy, setIssueReceivedBy] = useState('')
   const [issueReceivedById, setIssueReceivedById] = useState<string | null>(null)
   const [issueNotes, setIssueNotes] = useState('')
+  const [issueCart, setIssueCart] = useState<IssueOutCartLine[]>([])
+  const [issuingCart, setIssuingCart] = useState(false)
   const mounted = useClientMounted()
   const [tab, setTab] = useState('stock')
+  const [editItem, setEditItem] = useState<StoreItem | null>(null)
   const canIssue = canIssueStockFromStore(role)
+  const canAddDirect = canAddStoreItemDirect(role)
+  const canSubmitItem = canSubmitStoreItemForApproval(role)
+  const canApproveItems = canApproveStoreItems(role)
+  const pendingApprovals = (pendingStoreItems ?? []).filter((p) => p.status === 'pending')
   const purchaseLocked = Boolean(
     activePurchaseOrder && !canEditStorePurchaseOrder(activePurchaseOrder),
   )
@@ -97,28 +144,148 @@ export function StoreWorkspace() {
 
   useEffect(() => {
     setQtyMap((prev) => {
-      const next: Record<string, string> = {}
-      for (const b of basket) next[b.stockItemId] = String(b.qtyToBuy)
-      return next
+      const next = { ...prev }
+      let changed = false
+      for (const b of basket) {
+        if (!(b.stockItemId in next)) {
+          next[b.stockItemId] = String(b.qtyToBuy)
+          changed = true
+        }
+      }
+      return changed ? next : prev
     })
   }, [basket])
 
-  const handlePurchaseQtyChange = (item: StoreItem, raw: string) => {
-    setQtyMap((m) => ({ ...m, [item.id]: raw }))
-    const qty = Number(raw)
-    if (!raw.trim() || !Number.isFinite(qty) || qty <= 0) {
-      removeFromBasket(item.id)
+  const commitPurchaseQty = (item: StoreItem, raw: string) => {
+    const trimmed = raw.trim()
+    const issueUnit = purchaseUnitMap[item.id] ?? defaultUnitForStoreItem(item.unit)
+    if (!trimmed) {
+      const res = removeFromBasket(item.id)
+      if (res && 'error' in res) toast.error(res.error)
+      else {
+        setQtyMap((m) => {
+          const next = { ...m }
+          delete next[item.id]
+          return next
+        })
+      }
       return
     }
-    const err = setBasketLineQty(item, qty, item.lastPrice, actor)
+    const qty = parseQuantityValue(trimmed)
+    if (qty <= 0) return
+    const storeQty = toStoreQty(item, qty, issueUnit)
+    if (storeQty == null) {
+      toast.error(`Set pack size for ${item.name} (${issueUnit} per ${item.unit})`)
+      return
+    }
+    const err = setBasketLineQty(item, storeQty, item.lastPrice, actor)
     if (err) toast.error(err)
+  }
+
+  const handlePurchaseQtyChange = (item: StoreItem, raw: string) => {
+    const cleaned = sanitizeQuantityInput(raw)
+    setQtyMap((m) => ({ ...m, [item.id]: cleaned }))
+    if (!purchaseUnitMap[item.id]) {
+      setPurchaseUnitMap((m) => ({
+        ...m,
+        [item.id]: defaultUnitForStoreItem(item.unit),
+      }))
+    }
+    if (isCompleteQuantityInput(cleaned)) {
+      commitPurchaseQty(item, cleaned)
+    }
+  }
+
+  const handleClearBasket = () => {
+    const res = clearBasket()
+    if (res && 'error' in res) {
+      toast.error(res.error)
+      return
+    }
+    setQtyMap({})
+  }
+
+  const handleRemoveFromBasket = (stockItemId: string) => {
+    const res = removeFromBasket(stockItemId)
+    if (res && 'error' in res) {
+      toast.error(res.error)
+      return
+    }
+    setQtyMap((m) => {
+      const next = { ...m }
+      delete next[stockItemId]
+      return next
+    })
   }
 
   const handleBasketQtyChange = (stockItemId: string, qty: number) => {
     const item = storeItems.find((s) => s.id === stockItemId)
     if (!item) return
+    if (qty <= 0) {
+      handleRemoveFromBasket(stockItemId)
+      return
+    }
+    setQtyMap((m) => ({ ...m, [stockItemId]: String(qty) }))
     const err = setBasketLineQty(item, qty, item.lastPrice, actor)
     if (err) toast.error(err)
+  }
+
+  const addToIssueCart = (item: StoreItem, rawQty: string, unit?: string) => {
+    const issueUnit = unit ?? issueUnitMap[item.id] ?? defaultUnitForStoreItem(item.unit)
+    const qty = Number(rawQty)
+    if (!Number.isFinite(qty) || qty <= 0) {
+      setIssueCart((prev) => prev.filter((l) => l.storeItemId !== item.id))
+      return
+    }
+    const storeQty = toStoreQty(item, qty, issueUnit)
+    if (storeQty == null) return
+    if (storeQty > item.quantityInStore) {
+      toast.error(`Only ${item.quantityInStore} ${item.unit} on hand`)
+      return
+    }
+    setIssueCart((prev) => {
+      const ex = prev.find((l) => l.storeItemId === item.id)
+      const line: IssueOutCartLine = {
+        storeItemId: item.id,
+        name: item.name,
+        unit: issueUnit,
+        storeUnit: item.unit,
+        dept: item.dept,
+        quantity: qty,
+        maxAvailable: item.quantityInStore,
+      }
+      if (ex) return prev.map((l) => (l.storeItemId === item.id ? line : l))
+      return [...prev, line]
+    })
+  }
+
+  const handleCommitIssueCart = () => {
+    if (!issueDestination.trim()) {
+      toast.error('Select a destination')
+      return
+    }
+    if (!issueReceivedBy.trim()) {
+      toast.error('Received by is required')
+      return
+    }
+    setIssuingCart(true)
+    const res = issueOutCart(issueCart, issueDestination, actor, {
+      receivedBy: issueReceivedBy,
+      receivedById: issueReceivedById ?? undefined,
+      notes: issueNotes,
+    })
+    setIssuingCart(false)
+    if ('error' in res) {
+      handleSupplyActionError(res, {
+        title: 'Cannot issue — stock short',
+        fallbackMessage: 'The following central store items are short. Reduce quantities or receive stock first.',
+      })
+      return
+    }
+    toast.success(`Issued ${res.issued} item(s) to ${issueDestination}`)
+    setIssueCart([])
+    setIssueQtyMap({})
+    setIssueUnitMap({})
   }
 
   const basketSidebar = (
@@ -127,8 +294,8 @@ export function StoreWorkspace() {
       basketByDept={basketByDept}
       total={stats.basketTotal}
       readOnly={purchaseLocked}
-      onClear={clearBasket}
-      onRemove={removeFromBasket}
+      onClear={handleClearBasket}
+      onRemove={handleRemoveFromBasket}
       onQtyChange={handleBasketQtyChange}
       sendLabel="Send to accountant"
     />
@@ -177,7 +344,91 @@ export function StoreWorkspace() {
           ))}
         </div>
 
-        <TabsContent value="stock" className="mt-4">
+        <TabsContent value="stock" className="mt-4 space-y-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <StoreAddItemDialog
+              canAddDirect={canAddDirect}
+              canSubmit={canSubmitItem}
+              onAddDirect={(input) => {
+                const res = addStoreItemDirect(input, actor)
+                if ('error' in res) {
+                  toast.error(res.error)
+                  return res
+                }
+                toast.success(`Added ${input.name} to central store`)
+                return { ok: true as const }
+              }}
+              onSubmitForApproval={(input) => {
+                if (!userId) {
+                  toast.error('Sign in to submit items')
+                  return { error: 'Not signed in' }
+                }
+                const res = submitStoreItemForApproval(
+                  {
+                    ...input,
+                    submittedBy: userId,
+                    submittedByName: name ?? 'Store',
+                  },
+                  actor,
+                )
+                if ('error' in res) {
+                  toast.error(res.error)
+                  return res
+                }
+                toast.success('Submitted for admin approval')
+                return { ok: true as const }
+              }}
+            />
+          </div>
+
+          {canApproveItems && pendingApprovals.length > 0 && (
+            <div className="rounded-xl border p-4 space-y-3 bg-amber-50/40">
+              <h3 className="font-semibold text-sm">Pending store item approvals</h3>
+              <ul className="space-y-2">
+                {pendingApprovals.map((p) => (
+                  <li
+                    key={p.id}
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-background px-3 py-2 text-sm"
+                  >
+                    <div>
+                      <span className="font-medium">{p.name}</span>
+                      <span className="text-muted-foreground">
+                        {' '}
+                        · {p.unit} · {DEPT_LABELS[p.dept]} · ₦{p.lastPrice} · qty {p.quantityInStore}
+                      </span>
+                      <p className="text-xs text-muted-foreground">
+                        By {p.submittedByName} · {new Date(p.submittedAt).toLocaleString()}
+                      </p>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        onClick={() => {
+                          const res = approvePendingStoreItem(p.id, actor)
+                          if ('error' in res) toast.error(res.error)
+                          else toast.success(`Approved ${p.name}`)
+                        }}
+                      >
+                        Approve
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          const res = rejectPendingStoreItem(p.id, actor)
+                          if ('error' in res) toast.error(res.error)
+                          else toast.info(`Rejected ${p.name}`)
+                        }}
+                      >
+                        Reject
+                      </Button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           <div className="rounded-xl border overflow-hidden">
             <div className="border-b px-4 py-2 bg-muted/30 flex flex-wrap items-center justify-between gap-2">
               <span className="text-sm font-medium">All Stock Items</span>
@@ -223,6 +474,7 @@ export function StoreWorkspace() {
                         <TableHead className="text-right">Benchmark</TableHead>
                         <TableHead className="text-right">Variance</TableHead>
                         <TableHead>Status</TableHead>
+                        {canAddDirect && <TableHead className="w-12" />}
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -247,6 +499,20 @@ export function StoreWorkspace() {
                                 {stockLevelStatusLabel(level)}
                               </Badge>
                             </TableCell>
+                            {canAddDirect && (
+                              <TableCell>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8"
+                                  title="Edit item"
+                                  onClick={() => setEditItem(item)}
+                                >
+                                  <Pencil className="h-3.5 w-3.5" />
+                                </Button>
+                              </TableCell>
+                            )}
                           </TableRow>
                         )
                       })}
@@ -256,6 +522,23 @@ export function StoreWorkspace() {
               </PaginatedListShell>
             </div>
           </div>
+          <StoreEditItemDialog
+            item={editItem}
+            open={!!editItem}
+            onOpenChange={(open) => {
+              if (!open) setEditItem(null)
+            }}
+            onSave={(input) => {
+              if (!editItem) return { error: 'No item selected' }
+              const res = updateStoreItemDirect(editItem.id, input, actor)
+              if ('error' in res) {
+                toast.error(res.error)
+                return res
+              }
+              toast.success(`Updated ${input.name}`)
+              return { ok: true as const }
+            }}
+          />
         </TabsContent>
 
         {canIssue && (
@@ -264,12 +547,8 @@ export function StoreWorkspace() {
               <div>
                 <h3 className="font-semibold text-sm">Issue out to department / outlet</h3>
                 <p className="text-xs text-muted-foreground mt-1">
-                  Immediate transfer — no draft. Bar items sent to a bar outlet also credit bar POS stock.
-                  Kitchen raw for production batches can also be issued from{' '}
-                  <Link href="/supply/kitchen" className="underline font-medium">
-                    Kitchen
-                  </Link>
-                  .
+                  Add quantities to the issue cart, review on the right, then issue in one step.
+                  Received by is required. Bar items to Restaurant credit F&amp;B raw stock.
                 </p>
               </div>
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -292,7 +571,7 @@ export function StoreWorkspace() {
                   <OrgStaffSearchField
                     callerId={userId}
                     id="issue-received-by"
-                    label="Received by"
+                    label="Received by *"
                     placeholder="Search staff…"
                     value={issueReceivedBy}
                     staffId={issueReceivedById}
@@ -303,10 +582,11 @@ export function StoreWorkspace() {
                   />
                 ) : (
                   <div className="space-y-1.5">
-                    <Label htmlFor="issue-received-by">Received by</Label>
+                    <Label htmlFor="issue-received-by">Received by *</Label>
                     <Input
                       id="issue-received-by"
-                      placeholder="Name (optional)"
+                      placeholder="Name (required)"
+                      required
                       value={issueReceivedBy}
                       onChange={(e) => setIssueReceivedBy(e.target.value)}
                     />
@@ -324,9 +604,10 @@ export function StoreWorkspace() {
               </div>
             </div>
 
+            <div className="grid gap-4 lg:grid-cols-[1fr_300px]">
             <div className="rounded-xl border overflow-hidden">
               <div className="border-b px-4 py-2 bg-muted/30 text-sm font-medium">
-                Items to issue
+                Items to issue — enter qty to add to cart
               </div>
               <div className="p-3">
                 <PaginatedListShell
@@ -343,14 +624,12 @@ export function StoreWorkspace() {
                           <TableHead>Item</TableHead>
                           <TableHead>Dept</TableHead>
                           <TableHead className="text-right">In Store</TableHead>
-                          <TableHead className="text-right">Qty to issue</TableHead>
-                          <TableHead />
+                          <TableHead className="text-right">Qty / unit</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
                         {pageItems.map((item) => {
                           const level = getStockLevel(item.quantityInStore, item.reorderLevel)
-                          const issueQty = Number(issueQtyMap[item.id] ?? 0)
                           const onBar =
                             item.dept === 'bar'
                               ? barStock.find((b) => b.storeItemId === item.id)
@@ -374,44 +653,58 @@ export function StoreWorkspace() {
                                 </span>
                               </TableCell>
                               <TableCell className="text-right">
-                                <Input
-                                  type="number"
-                                  min={0}
-                                  step="any"
-                                  className="h-8 w-24 ml-auto text-right"
-                                  value={issueQtyMap[item.id] ?? ''}
-                                  onChange={(e) =>
-                                    setIssueQtyMap((m) => ({ ...m, [item.id]: e.target.value }))
-                                  }
-                                />
-                              </TableCell>
-                              <TableCell>
-                                <Button
-                                  size="sm"
-                                  disabled={!issueDestination || !issueQty}
-                                  onClick={() => {
-                                    const res = issueFromStoreToDepartment(
-                                      item.id,
-                                      issueQty,
-                                      issueDestination,
-                                      actor,
-                                      {
-                                        receivedBy: issueReceivedBy,
-                                        receivedById: issueReceivedById ?? undefined,
-                                        notes: issueNotes,
-                                      },
-                                    )
-                                    if (res && 'error' in res) toast.error(res.error)
-                                    else {
-                                      toast.success(
-                                        `Issued ${issueQty} ${item.unit} to ${issueDestination}`,
-                                      )
-                                      setIssueQtyMap((m) => ({ ...m, [item.id]: '' }))
+                                <div className="flex items-center justify-end gap-1">
+                                  <Input
+                                    inputMode="decimal"
+                                    className="h-8 w-20 text-right"
+                                    value={issueQtyMap[item.id] ?? ''}
+                                    onChange={(e) => {
+                                      const v = sanitizeQuantityInput(e.target.value)
+                                      setIssueQtyMap((m) => ({ ...m, [item.id]: v }))
+                                      const u =
+                                        issueUnitMap[item.id] ??
+                                        defaultUnitForStoreItem(item.unit)
+                                      addToIssueCart(item, v, u)
+                                    }}
+                                  />
+                                  <UnitSelect
+                                    storeUnit={item.unit}
+                                    itemName={item.name}
+                                    value={
+                                      issueUnitMap[item.id] ??
+                                      defaultUnitForStoreItem(item.unit)
                                     }
-                                  }}
-                                >
-                                  Issue
-                                </Button>
+                                    onChange={(u) => {
+                                      setIssueUnitMap((m) => ({ ...m, [item.id]: u }))
+                                      const v = issueQtyMap[item.id] ?? ''
+                                      if (v) addToIssueCart(item, v, u)
+                                    }}
+                                  />
+                                </div>
+                                {needsUnitFactor(
+                                  issueUnitMap[item.id] ?? defaultUnitForStoreItem(item.unit),
+                                  item.unit,
+                                  factorsFor(item),
+                                ) && (
+                                  <UnitConversionField
+                                    compact
+                                    storeItemId={item.id}
+                                    storeUnit={item.unit}
+                                    selectedUnit={
+                                      issueUnitMap[item.id] ??
+                                      defaultUnitForStoreItem(item.unit)
+                                    }
+                                    factors={factorsFor(item)}
+                                    onFactorsChange={(next) => {
+                                      setFactorMap((m) => ({ ...m, [item.id]: next }))
+                                      const v = issueQtyMap[item.id] ?? ''
+                                      const u =
+                                        issueUnitMap[item.id] ??
+                                        defaultUnitForStoreItem(item.unit)
+                                      if (v) addToIssueCart(item, v, u)
+                                    }}
+                                  />
+                                )}
                               </TableCell>
                             </TableRow>
                           )
@@ -422,11 +715,82 @@ export function StoreWorkspace() {
                 </PaginatedListShell>
               </div>
             </div>
+            <IssueOutCartSidebar
+              cart={issueCart}
+              destination={issueDestination}
+              receivedBy={issueReceivedBy}
+              committing={issuingCart}
+              onClear={() => {
+                setIssueCart([])
+                setIssueQtyMap({})
+                setIssueUnitMap({})
+              }}
+              onRemove={(id) => {
+                setIssueCart((prev) => prev.filter((l) => l.storeItemId !== id))
+                setIssueQtyMap((m) => ({ ...m, [id]: '' }))
+              }}
+              onQtyChange={(id, qty) => {
+                const item = storeItems.find((s) => s.id === id)
+                if (!item) return
+                const line = issueCart.find((l) => l.storeItemId === id)
+                const issueUnit = line?.unit ?? issueUnitMap[id] ?? defaultUnitForStoreItem(item.unit)
+                if (qty <= 0) {
+                  setIssueCart((prev) => prev.filter((l) => l.storeItemId !== id))
+                  setIssueQtyMap((m) => ({ ...m, [id]: '' }))
+                  return
+                }
+                const storeQty = toStoreQty(item, qty, issueUnit)
+                if (storeQty == null) {
+                  toast.error(`Set pack size for ${item.name} first`)
+                  return
+                }
+                if (storeQty > item.quantityInStore) {
+                  toast.error(`Only ${item.quantityInStore} ${item.unit} on hand`)
+                  return
+                }
+                setIssueQtyMap((m) => ({ ...m, [id]: String(qty) }))
+                setIssueCart((prev) =>
+                  prev.map((l) =>
+                    l.storeItemId === id
+                      ? { ...l, quantity: qty, unit: issueUnit, maxAvailable: item.quantityInStore }
+                      : l,
+                  ),
+                )
+              }}
+              onUnitChange={(id, unit) => {
+                const item = storeItems.find((s) => s.id === id)
+                const line = issueCart.find((l) => l.storeItemId === id)
+                if (!item || !line) return
+                setIssueUnitMap((m) => ({ ...m, [id]: unit }))
+                const qty = line.quantity
+                const storeQty = toStoreQty(item, qty, unit)
+                if (storeQty == null) {
+                  toast.error(`Set pack size for ${item.name} first`)
+                  return
+                }
+                if (storeQty > item.quantityInStore) {
+                  toast.error(`Only ${item.quantityInStore} ${item.unit} on hand in ${unit}`)
+                  return
+                }
+                setIssueCart((prev) =>
+                  prev.map((l) => (l.storeItemId === id ? { ...l, unit } : l)),
+                )
+              }}
+              onCommit={handleCommitIssueCart}
+            />
+            </div>
           </TabsContent>
         )}
 
         {canIssue && (
-          <TabsContent value="issue_out_log" className="mt-4">
+          <TabsContent value="issue_out_log" className="mt-4 space-y-3">
+            {canAddDirect && (
+              <SupplyHistoryClearButton
+                actor={actor}
+                label="Clear issue & PO history"
+                description="Clears issue-out log, purchase order history, and supply activity log on this device."
+              />
+            )}
             <div className="rounded-xl border overflow-hidden">
               <div className="border-b px-4 py-2 bg-muted/30 text-sm font-medium">
                 Issue out history
@@ -449,8 +813,8 @@ export function StoreWorkspace() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {(issueOutLog ?? []).map((row) => (
-                      <TableRow key={row.id}>
+                    {(issueOutLog ?? []).map((row, index) => (
+                      <TableRow key={`${row.id}-${index}`}>
                         <TableCell className="text-xs whitespace-nowrap">
                           {new Date(row.issuedAt).toLocaleString()}
                         </TableCell>
@@ -500,14 +864,19 @@ export function StoreWorkspace() {
                           <TableHead>Item</TableHead>
                           <TableHead>Dept</TableHead>
                           <TableHead className="text-right">In Store</TableHead>
-                          <TableHead className="text-right">Qty to Buy</TableHead>
+                          <TableHead className="text-right">Qty / unit</TableHead>
                           <TableHead className="text-right">Unit Price</TableHead>
                           <TableHead className="text-right">Line total</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
                         {pageItems.map((item) => {
-                          const qty = Number(qtyMap[item.id] ?? 0)
+                          const rawQty = qtyMap[item.id] ?? ''
+                          const purchaseUnit =
+                            purchaseUnitMap[item.id] ?? defaultUnitForStoreItem(item.unit)
+                          const qty = parseQuantityValue(rawQty)
+                          const storeQty =
+                            qty > 0 ? toStoreQty(item, qty, purchaseUnit) : null
                           const price = item.lastPrice
                           const level = getStockLevel(item.quantityInStore, item.reorderLevel)
                           const inBasket = basket.some((b) => b.stockItemId === item.id)
@@ -521,17 +890,39 @@ export function StoreWorkspace() {
                                 </span>
                               </TableCell>
                               <TableCell className="text-right">
-                                <Input
-                                  type="number"
-                                  min={0}
-                                  disabled={purchaseLocked}
-                                  className="h-8 w-20 ml-auto text-right"
-                                  value={qtyMap[item.id] ?? ''}
-                                  onChange={(e) => handlePurchaseQtyChange(item, e.target.value)}
-                                />
+                                <div className="flex items-center justify-end gap-1">
+                                  <Input
+                                    inputMode="decimal"
+                                    disabled={purchaseLocked}
+                                    className="h-8 w-20 text-right"
+                                    value={rawQty}
+                                    onChange={(e) =>
+                                      handlePurchaseQtyChange(item, e.target.value)
+                                    }
+                                    onBlur={(e) => commitPurchaseQty(item, e.target.value)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') {
+                                        e.currentTarget.blur()
+                                        commitPurchaseQty(item, e.currentTarget.value)
+                                      }
+                                    }}
+                                  />
+                                  <UnitSelect
+                                    storeUnit={item.unit}
+                                    itemName={item.name}
+                                    disabled={purchaseLocked}
+                                    value={purchaseUnit}
+                                    onChange={(u) => {
+                                      setPurchaseUnitMap((m) => ({ ...m, [item.id]: u }))
+                                      if (rawQty.trim()) commitPurchaseQty(item, rawQty)
+                                    }}
+                                  />
+                                </div>
                               </TableCell>
-                              <TableCell className="text-right">{formatNaira(price)}</TableCell>
-                              <TableCell className="text-right tabular-nums">{qty ? formatNaira(qty * price) : '—'}</TableCell>
+                              <TableCell className="text-right">{formatNaira(price)}/{item.unit}</TableCell>
+                              <TableCell className="text-right tabular-nums">
+                                {storeQty != null && storeQty > 0 ? formatNaira(storeQty * price) : '—'}
+                              </TableCell>
                             </TableRow>
                           )
                         })}
@@ -557,10 +948,19 @@ export function StoreWorkspace() {
           <ActivePurchaseOrderPanel actor={actor} storeItems={storeItems} />
         </TabsContent>
 
-        <TabsContent value="history" className="mt-4">
-          <p className="text-sm text-muted-foreground mb-4">
-            Accepted purchase orders (manager-approved and purchased). Click a PO to see every line item.
-          </p>
+        <TabsContent value="history" className="mt-4 space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm text-muted-foreground">
+              Accepted purchase orders (manager-approved and purchased). Click a PO to see every line
+              item.
+            </p>
+            {canAddDirect && (
+              <SupplyHistoryClearButton
+                actor={actor}
+                description="Clears PO history, issue-out log, and supply activity log on this device."
+              />
+            )}
+          </div>
           <PoHistoryPanel purchaseOrders={purchaseOrders} />
         </TabsContent>
       </Tabs>
