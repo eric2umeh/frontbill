@@ -2,7 +2,10 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { ArrowLeft, Loader2, LogOut, Ban } from 'lucide-react'
+import { ArrowLeft, Loader2, LogOut, Ban, CalendarClock, Receipt } from 'lucide-react'
+import { ExtendStayModal } from '@/components/bookings/extend-stay-modal'
+import { AddChargeModal } from '@/components/bookings/add-charge-modal'
+import { hideChargeExtendInBookingsTable } from '@/lib/utils/booking-checkout-ui'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/lib/auth-context'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -34,6 +37,35 @@ export default function BulkBookingDetailPage({ params }: { params: Promise<{ gr
   const [checkoutAllLoading, setCheckoutAllLoading] = useState(false)
   const [checkoutDraft, setCheckoutDraft] = useState<BulkPageCheckoutDraft | null>(null)
   const [orgCheckoutTime, setOrgCheckoutTime] = useState(DEFAULT_ORG_CHECKOUT_TIME)
+  const [extendModalOpen, setExtendModalOpen] = useState(false)
+  const [addChargeModalOpen, setAddChargeModalOpen] = useState(false)
+  const [actionBooking, setActionBooking] = useState<any | null>(null)
+
+  const rowToActionBooking = (row: any) => ({
+    id: row.id,
+    folioId: row.folio_id,
+    guestName: row.guests?.name || 'Guest',
+    guestId: row.guest_id || '',
+    room: row.rooms?.room_number ? `Room ${row.rooms.room_number}` : 'Unassigned',
+    currentCheckOut: row.check_out,
+    ratePerNight: Number(row.rate_per_night || 0),
+    organization_id: row.organization_id,
+    created_by: row.created_by,
+    status: row.status,
+    check_in: row.check_in,
+    folio_status: row.folio_status,
+  })
+
+  const rowChargeExtendHidden = (row: any) =>
+    hideChargeExtendInBookingsTable(
+      {
+        status: row.status,
+        check_in: row.check_in,
+        check_out: row.check_out,
+        folio_status: row.folio_status,
+      },
+      orgCheckoutTime,
+    )
 
   useEffect(() => {
     if (!organizationId) return
@@ -210,8 +242,33 @@ export default function BulkBookingDetailPage({ params }: { params: Promise<{ gr
     return <PageLoadingState />
   }
 
+  const groupHasInHouse = rows.some((r) => r.status === 'checked_in' || r.status === 'confirmed')
+
   return (
     <div className="space-y-6">
+      {actionBooking && (
+        <>
+          <ExtendStayModal
+            open={extendModalOpen}
+            onClose={() => {
+              setExtendModalOpen(false)
+              setActionBooking(null)
+            }}
+            onSuccess={() => void fetchBulkRows(groupId)}
+            booking={actionBooking}
+          />
+          <AddChargeModal
+            open={addChargeModalOpen}
+            onClose={() => {
+              setAddChargeModalOpen(false)
+              setActionBooking(null)
+              void fetchBulkRows(groupId)
+            }}
+            booking={actionBooking}
+          />
+        </>
+      )}
+
       <CheckoutConfirmDialog
         open={checkoutDraft !== null}
         onClose={() => {
@@ -293,7 +350,9 @@ export default function BulkBookingDetailPage({ params }: { params: Promise<{ gr
       </div>
 
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">Bulk reservation details</h1>
+        <h1 className="text-3xl font-bold tracking-tight">
+          {groupHasInHouse ? 'Bulk booking details' : 'Bulk reservation details'}
+        </h1>
         <p className="text-muted-foreground">Group reference: {groupId}</p>
       </div>
 
@@ -388,29 +447,59 @@ export default function BulkBookingDetailPage({ params }: { params: Promise<{ gr
                   <TableCell className="text-right">{formatNaira(row.total_amount || 0)}</TableCell>
                   {canManageFolio && (
                     <TableCell className="text-right">
-                      {checkoutRowEligible(row) ? (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="text-xs text-amber-600 hover:text-amber-700 border-amber-200 hover:bg-amber-50"
-                          disabled={checkoutRowId === row.id}
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            handleCheckoutOneRow(row)
-                          }}
-                        >
-                          {checkoutRowId === row.id ? (
-                            <Loader2 className="h-3 w-3 animate-spin" />
-                          ) : (
-                            <>
-                              <LogOut className="mr-1 h-3 w-3 inline" />
-                              Check out
-                            </>
-                          )}
-                        </Button>
-                      ) : (
-                        <span className="text-muted-foreground text-xs">—</span>
-                      )}
+                      <div
+                        className="flex flex-wrap justify-end gap-1"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        {row.room_id && !rowChargeExtendHidden(row) && (
+                          <>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-7 px-2 text-[11px]"
+                              onClick={() => {
+                                setActionBooking(rowToActionBooking(row))
+                                setAddChargeModalOpen(true)
+                              }}
+                            >
+                              <Receipt className="mr-1 h-3 w-3 inline" />
+                              Charge
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-7 px-2 text-[11px]"
+                              onClick={() => {
+                                setActionBooking(rowToActionBooking(row))
+                                setExtendModalOpen(true)
+                              }}
+                            >
+                              <CalendarClock className="mr-1 h-3 w-3 inline" />
+                              Extend
+                            </Button>
+                          </>
+                        )}
+                        {checkoutRowEligible(row) ? (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 px-2 text-[11px] text-amber-600 hover:text-amber-700 border-amber-200 hover:bg-amber-50"
+                            disabled={checkoutRowId === row.id}
+                            onClick={() => handleCheckoutOneRow(row)}
+                          >
+                            {checkoutRowId === row.id ? (
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                            ) : (
+                              <>
+                                <LogOut className="mr-1 h-3 w-3 inline" />
+                                Out
+                              </>
+                            )}
+                          </Button>
+                        ) : !row.room_id || rowChargeExtendHidden(row) ? (
+                          <span className="text-muted-foreground text-xs self-center">—</span>
+                        ) : null}
+                      </div>
                     </TableCell>
                   )}
                 </TableRow>
