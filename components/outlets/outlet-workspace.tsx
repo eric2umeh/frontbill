@@ -78,10 +78,22 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
 
   useEffect(() => {
     const onCleared = () => {
-      if (department === 'restaurant') void loadMenu()
+      void loadMenu()
+    }
+    const onSynced = () => {
+      if (department === 'restaurant' || department === 'main_bar') void loadMenu()
+    }
+    const onSupply = () => {
+      void loadMenu()
     }
     window.addEventListener('frontbill:outlet-menu-cleared', onCleared)
-    return () => window.removeEventListener('frontbill:outlet-menu-cleared', onCleared)
+    window.addEventListener('frontbill:outlet-menu-synced', onSynced)
+    window.addEventListener('frontbill:supply-stock-changed', onSupply)
+    return () => {
+      window.removeEventListener('frontbill:outlet-menu-cleared', onCleared)
+      window.removeEventListener('frontbill:outlet-menu-synced', onSynced)
+      window.removeEventListener('frontbill:supply-stock-changed', onSupply)
+    }
   }, [department, loadMenu])
 
   if (!def) return null
