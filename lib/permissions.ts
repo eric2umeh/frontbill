@@ -972,6 +972,33 @@ export function canKickstartOutletStock(
   );
 }
 
+/** Add catalogue items directly to central store (no approval). */
+export function canAddStoreItemDirect(
+  userRole: string | null | undefined,
+): boolean {
+  const roleKey = canonicalRoleKey(userRole);
+  return roleKey === "admin" || roleKey === "superadmin";
+}
+
+/** Submit new store catalogue items for admin approval. */
+export function canSubmitStoreItemForApproval(
+  userRole: string | null | undefined,
+): boolean {
+  const roleKey = canonicalRoleKey(userRole);
+  return (
+    roleKey === "store" ||
+    canAddStoreItemDirect(userRole) ||
+    hasPermission(userRole, "store:adjust")
+  );
+}
+
+/** Approve or reject pending store catalogue submissions. */
+export function canApproveStoreItems(
+  userRole: string | null | undefined,
+): boolean {
+  return canAddStoreItemDirect(userRole);
+}
+
 /** Central Store → Issue Out tab (transfer stock to kitchen, bar, etc.). */
 export function canIssueStockFromStore(
   userRole: string | null | undefined,
