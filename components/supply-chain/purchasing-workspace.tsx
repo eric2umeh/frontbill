@@ -6,7 +6,8 @@ import { useAuth } from "@/lib/auth-context";
 import { useSupplyChain } from "@/lib/supply-chain/supply-chain-context";
 import type { PurchaseOrder, RetirementLine } from "@/lib/supply-chain/types";
 import { formatNaira } from "@/lib/utils/currency";
-import { canonicalRoleKey } from "@/lib/permissions";
+import { canonicalRoleKey, canAddStoreItemDirect } from "@/lib/permissions";
+import { SupplyHistoryClearButton } from "@/components/supply-chain/supply-history-clear-button";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -135,6 +136,7 @@ export function PurchasingWorkspace() {
     name: name ?? "Staff",
     role: canonicalRoleKey(role) ?? "staff",
   };
+  const canClearHistory = canAddStoreItemDirect(role);
 
   if (
     selectedId &&
@@ -381,11 +383,19 @@ export function PurchasingWorkspace() {
           </TabsContent>
 
           <TabsContent value="history" className="mt-4 space-y-3">
-            <div>
-              <h2 className="font-medium">Retired purchase orders</h2>
-              <p className="text-xs text-muted-foreground">
-                Completed retirements — click a row to see what was bought, edited, or not purchased.
-              </p>
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div>
+                <h2 className="font-medium">Retired purchase orders</h2>
+                <p className="text-xs text-muted-foreground">
+                  Completed retirements — click a row to see what was bought, edited, or not purchased.
+                </p>
+              </div>
+              {canClearHistory && (
+                <SupplyHistoryClearButton
+                  actor={actor}
+                  description="Clears retired PO history, issue-out log, and supply activity log on this device."
+                />
+              )}
             </div>
             <PoHistoryPanel
               purchaseOrders={purchaseOrders}
