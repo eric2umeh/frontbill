@@ -1,4 +1,5 @@
-import { headers } from 'next/headers'
+import { cookies, headers } from 'next/headers'
+import { getAuthUserFromCookies } from '@/lib/supabase/auth-from-cookies'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import {
@@ -31,7 +32,8 @@ type ProfileRow = {
   organization_id: string | null
 }
 
-const PROFILE_FETCH_MS = 10_000
+const PROFILE_FETCH_MS = 2_500
+const ADMIN_PROFILE_FETCH_MS = 2_500
 
 function isAllowedLoginRole(roleKey: RoleKey | null): roleKey is RoleKey {
   return roleKey != null && APP_LOGIN_ROLE_KEYS.includes(roleKey)
@@ -73,48 +75,74 @@ async function fetchProfileById(userId: string): Promise<{
 }> {
   let metadataRole: string | null = null
 
+  // Prefer session cookies (fast). Admin/service-role calls can hang when Supabase is unhealthy.
   try {
-    const admin = createAdminClient()
-    const [profileResult, authResult] = await Promise.all([
-      admin
-        .from('profiles')
-        .select('full_name, role, organization_id')
-        .eq('id', userId)
-        .maybeSingle(),
-      admin.auth.admin.getUserById(userId),
-    ])
-
-    const meta = authResult.data.user?.user_metadata?.role
-    metadataRole =
-      typeof meta === 'string' && meta.trim() ? meta.trim() : null
-
-    if (!profileResult.error && profileResult.data) {
-      return {
-        profile: profileResult.data,
-        profileError: null,
-        metadataRole,
-      }
+    const supabase = await createClient()
+    const { data: profile, error: profileError } = await fetchProfileWithTimeout(
+      supabase,
+      userId,
+    )
+    if (profile && !profileError) {
+      return { profile, profileError: null, metadataRole }
     }
-
-    if (profileResult.error) {
-      console.warn('loadDashboardUser: admin profile fetch failed', profileResult.error.message)
+    if (profileError) {
+      console.warn('loadDashboardUser: session profile fetch failed', profileError.message)
     }
   } catch (error) {
     console.warn(
-      'loadDashboardUser: admin client unavailable, falling back to session client',
+      'loadDashboardUser: session client profile fetch error',
       error instanceof Error ? error.message : error,
     )
   }
 
-  const supabase = await createClient()
-  const { data: profile, error: profileError } = await fetchProfileWithTimeout(
-    supabase,
-    userId,
-  )
+  try {
+    const adminResult = await Promise.race([
+      (async () => {
+        const admin = createAdminClient()
+        const [profileResult, authResult] = await Promise.all([
+          admin
+            .from('profiles')
+            .select('full_name, role, organization_id')
+            .eq('id', userId)
+            .maybeSingle(),
+          admin.auth.admin.getUserById(userId),
+        ])
+
+        const meta = authResult.data.user?.user_metadata?.role
+        const roleFromMeta =
+          typeof meta === 'string' && meta.trim() ? meta.trim() : null
+
+        if (!profileResult.error && profileResult.data) {
+          return {
+            profile: profileResult.data,
+            profileError: null as { message: string } | null,
+            metadataRole: roleFromMeta,
+          }
+        }
+
+        if (profileResult.error) {
+          console.warn(
+            'loadDashboardUser: admin profile fetch failed',
+            profileResult.error.message,
+          )
+        }
+
+        return null
+      })(),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), ADMIN_PROFILE_FETCH_MS)),
+    ])
+
+    if (adminResult) return adminResult
+  } catch (error) {
+    console.warn(
+      'loadDashboardUser: admin client unavailable',
+      error instanceof Error ? error.message : error,
+    )
+  }
 
   return {
-    profile: profile ?? null,
-    profileError: profileError ?? null,
+    profile: null,
+    profileError: { message: 'Profile unavailable' },
     metadataRole,
   }
 }
@@ -128,11 +156,17 @@ export async function loadDashboardUser(): Promise<LoadDashboardUserResult> {
 
   try {
     const hdrs = await headers()
-    const userId = hdrs.get(AUTH_USER_ID_HEADER)
-    const email = hdrs.get(AUTH_USER_EMAIL_HEADER) || ''
+    let userId = hdrs.get(AUTH_USER_ID_HEADER)
+    let email = hdrs.get(AUTH_USER_EMAIL_HEADER) || ''
 
     if (!userId) {
-      return { status: 'unauthenticated' }
+      const cookieStore = await cookies()
+      const fromCookie = getAuthUserFromCookies(cookieStore.getAll())
+      if (!fromCookie) {
+        return { status: 'unauthenticated' }
+      }
+      userId = fromCookie.id
+      email = fromCookie.email
     }
 
     const { profile, profileError, metadataRole } = await fetchProfileById(userId)
