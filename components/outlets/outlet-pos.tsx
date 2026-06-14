@@ -16,6 +16,7 @@ import { isStoreControlledFnbOutlet } from '@/lib/outlets/departments'
 import { OUTLET_ORDER_TYPE_OPTIONS } from '@/lib/outlets/order-types'
 import { OutletWaiterField } from '@/components/outlets/outlet-waiter-field'
 import { itemAllowsPosPriceEdit } from '@/lib/outlets/category-price-editable'
+import { handleSupplyActionError } from '@/lib/supply-chain/handle-supply-action-error'
 import {
   cartLineUsesCustomPrice,
   menuDefaultUnitPrice,
@@ -415,7 +416,10 @@ export function OutletPos({
       const cartLines = cart.map((l) => ({ item: l.item, qty: l.qty }))
       const stockCheck = supply.validateOutletCart(department, cartLines)
       if ('error' in stockCheck) {
-        toast.error(stockCheck.error)
+        handleSupplyActionError(stockCheck, {
+          title: 'Cannot complete order — stock short',
+          fallbackMessage: 'Reduce quantities or produce/issue more stock for these items.',
+        })
         return
       }
 
