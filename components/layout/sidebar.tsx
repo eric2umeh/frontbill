@@ -83,6 +83,7 @@ const NAV_SECTIONS: NavSection[] = [
     title: 'Kitchen',
     routes: [
       { label: 'Kitchen', icon: ChefHat, href: '/supply/kitchen', permission: 'supply:kitchen' },
+      { label: 'F&B Store', icon: Store, href: '/supply/fnb', permission: 'supply:kitchen' },
     ],
   },
   {
