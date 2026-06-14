@@ -27,7 +27,9 @@ import {
 } from '@/components/ui/select'
 import { toast } from 'sonner'
 import { Loader2, Printer, Search } from 'lucide-react'
+import { useAuth } from '@/lib/auth-context'
 import { hotelCalendarTodayYmd } from '@/lib/hotel-date'
+import { canonicalRoleKey } from '@/lib/permissions'
 
 type Props = {
   department: OutletDepartmentKey
@@ -60,6 +62,10 @@ export function OutletOrdersTabSection({
   onPrintSettled,
   onSettled,
 }: Props) {
+  const { role } = useAuth()
+  const roleKey = canonicalRoleKey(role)
+  const canClearAllOrders =
+    roleKey === 'admin' || roleKey === 'superadmin'
   const todayYmd = hotelCalendarTodayYmd()
   const [dateFrom, setDateFrom] = useState(todayYmd)
   const [dateTo, setDateTo] = useState(todayYmd)
@@ -416,10 +422,12 @@ export function OutletOrdersTabSection({
         <OutletOrdersPanel
           orders={filteredOrders}
           organizationId={organizationId}
+          department={department}
           departmentLabel={departmentLabel}
           canPrintReceipt={canPrintReceipt}
           canSell={canSell}
           canManageOrders={canManageOrders}
+          canClearAllOrders={canClearAllOrders}
           showTodaySummary={false}
           onPrintUnsettled={onPrintUnsettled}
           onPrintSettled={onPrintSettled}
