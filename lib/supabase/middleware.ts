@@ -1,5 +1,6 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
+import { getAuthUserFromCookies } from '@/lib/supabase/auth-from-cookies'
 import { getVerifiedServerUser } from '@/lib/supabase/server-auth'
 import {
   AUTH_USER_EMAIL_HEADER,
@@ -9,21 +10,12 @@ import {
 /** Paths that must render immediately — no Supabase Auth server round-trip. */
 function isPublicAuthPath(pathname: string) {
   return (
+    pathname === '/' ||
     pathname.startsWith('/auth/') ||
     pathname.startsWith('/api/auth/') ||
-    pathname.startsWith('/api/setup/')
+    pathname.startsWith('/api/setup/') ||
+    pathname === '/access-denied'
   )
-}
-
-function clearSupabaseAuthCookies(
-  request: NextRequest,
-  response: NextResponse,
-) {
-  for (const cookie of request.cookies.getAll()) {
-    if (cookie.name.startsWith('sb-') && cookie.name.includes('auth-token')) {
-      response.cookies.set(cookie.name, '', { maxAge: 0, path: '/' })
-    }
-  }
 }
 
 export async function updateSession(request: NextRequest) {
@@ -67,14 +59,14 @@ export async function updateSession(request: NextRequest) {
     },
   )
 
-  const { user, timedOut } = await getVerifiedServerUser(supabase)
+  const cookieUser = getAuthUserFromCookies(request.cookies.getAll())
 
-  let effectiveUser = timedOut ? null : user
+  // Prefer cookie JWT (instant). Only hit Supabase Auth when there is no valid cookie.
+  let effectiveUser: { id: string; email?: string | null } | null = cookieUser
 
-  // Slow Auth API must not log users out — fall back to the session cookie.
-  if (!effectiveUser && timedOut) {
-    const { data: { session } } = await supabase.auth.getSession()
-    effectiveUser = session?.user ?? null
+  if (!cookieUser) {
+    const verified = await getVerifiedServerUser(supabase)
+    effectiveUser = verified.user
   }
 
   const requestHeaders = new Headers(request.headers)
@@ -91,10 +83,7 @@ export async function updateSession(request: NextRequest) {
     for (const cookie of supabaseResponse.cookies.getAll()) {
       target.cookies.set(cookie.name, cookie.value, cookie)
     }
-    // Only clear cookies when there is no valid session (not on transient timeouts).
-    if (timedOut && !effectiveUser) {
-      clearSupabaseAuthCookies(request, target)
-    }
+    // Never clear cookies on Auth API timeouts — that logs users out after a slow login.
     return target
   }
 
@@ -135,6 +124,10 @@ export async function updateSession(request: NextRequest) {
   if (isProtected && !effectiveUser) {
     const url = request.nextUrl.clone()
     url.pathname = '/auth/login'
+    url.searchParams.set(
+      'error',
+      'Your session expired or could not be read. Please sign in again.',
+    )
     return copySessionCookies(NextResponse.redirect(url))
   }
 
