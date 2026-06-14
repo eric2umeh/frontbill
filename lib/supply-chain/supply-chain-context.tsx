@@ -12,29 +12,32 @@ import {
 } from "react";
 import {
   MOCK_BATCHES,
-  MOCK_BAR_STOCK,
-  MOCK_FNB_MENU,
-  MOCK_KITCHEN_RAW_STOCK,
   MOCK_KITCHEN_STOCK,
-  MOCK_POS,
   MOCK_RECIPES,
-  MOCK_STORE_ITEMS,
 } from "./mock-data";
 import {
   calcVat,
   recipeCostPerPortion,
   recipeGrossMarginPct,
+  recipeOverheadTotal,
   recipeTotalCost,
 } from "./calculations";
+import { toTitleCaseWords } from "./title-case";
+import {
+  normalizeBatchOutletMenuSync,
+} from "./batch-outlet-sync";
 import type {
   ActivityAction,
   ActivityEntry,
   BasketLine,
   CreateKitchenBatchInput,
   FnbOrder,
+  FnbRawStockItem,
+  IssueOutCartLine,
   IssueOutRecord,
   KitchenRawStockItem,
   KitchenStockItem,
+  PendingStoreItem,
   ProductionBatch,
   PurchaseOrder,
   RawKitchenIssueInput,
@@ -68,17 +71,47 @@ import {
 } from "./po-active";
 import { pushSupplyNotification } from "./supply-notifications";
 import { clearKitchenBatchDraft } from "./kitchen-batch-draft";
+import { convertToStoreUnits } from "./measurement-units";
+import {
+  convertToStoreUnitsWithFactors,
+  mergeUnitFactors,
+} from "./unit-factor-storage";
+import type { StockShortageLine } from "@/lib/ui/stock-shortage-dialog";
 
 function notifyKitchenRawStockChanged() {
   if (typeof window !== "undefined") {
     window.dispatchEvent(new CustomEvent("frontbill:kitchen-raw-stock"));
+    window.dispatchEvent(new CustomEvent("frontbill:supply-stock-changed"));
+  }
+}
+
+function notifyBarStockChanged() {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("frontbill:bar-stock-changed"));
+    window.dispatchEvent(new CustomEvent("frontbill:supply-stock-changed"));
+  }
+}
+
+function notifyFnbRawStockChanged() {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("frontbill:fnb-raw-stock-changed"));
+    window.dispatchEvent(new CustomEvent("frontbill:supply-stock-changed"));
+  }
+}
+
+function notifyIssueOutLogChanged() {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("frontbill:issue-out-log-changed"));
+    window.dispatchEvent(new CustomEvent("frontbill:supply-stock-changed"));
   }
 }
 
 type Actor = { name: string; role: string };
 
+let uidSeq = 0;
 function uid(p: string) {
-  return `${p}-${Date.now().toString(36)}`;
+  uidSeq += 1;
+  return `${p}-${Date.now().toString(36)}-${uidSeq.toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 function log(
@@ -111,6 +144,71 @@ const KITCHEN_RAW_STOCK_STORAGE_KEY = "frontbill_kitchen_raw_stock";
 const ISSUE_OUT_LOG_STORAGE_KEY = "frontbill_issue_out_log";
 const BASKET_STORAGE_KEY = "frontbill_supply_basket";
 const PURCHASE_ORDERS_STORAGE_KEY = "frontbill_supply_purchase_orders";
+const PENDING_STORE_ITEMS_KEY = "frontbill_pending_store_items";
+const FNB_RAW_STOCK_KEY = "frontbill_fnb_raw_stock";
+const ACTIVITY_LOG_STORAGE_KEY = "frontbill_supply_activity_log";
+
+const EMPTY_STORE_ITEMS: StoreItem[] = [];
+const EMPTY_ACTIVITY_LOG: ActivityEntry[] = [];
+const EMPTY_RECIPES: Recipe[] = [];
+const EMPTY_KITCHEN_STOCK: KitchenStockItem[] = [];
+const EMPTY_KITCHEN_RAW_STOCK: KitchenRawStockItem[] = [];
+const EMPTY_BAR_STOCK: BarStockItem[] = [];
+const EMPTY_BATCHES: ProductionBatch[] = [];
+const EMPTY_PURCHASE_ORDERS: PurchaseOrder[] = [];
+
+const SUPPLY_STORAGE_VERSION = 2;
+const SUPPLY_STORAGE_VERSION_KEY = "frontbill_supply_storage_version";
+
+const ALL_SUPPLY_STORAGE_KEYS = [
+  STORE_ITEMS_STORAGE_KEY,
+  PENDING_STORE_ITEMS_KEY,
+  PURCHASE_ORDERS_STORAGE_KEY,
+  BASKET_STORAGE_KEY,
+  RECIPES_STORAGE_KEY,
+  KITCHEN_STOCK_STORAGE_KEY,
+  KITCHEN_RAW_STOCK_STORAGE_KEY,
+  FNB_RAW_STOCK_KEY,
+  BAR_STOCK_STORAGE_KEY,
+  BATCHES_STORAGE_KEY,
+  ISSUE_OUT_LOG_STORAGE_KEY,
+  ACTIVITY_LOG_STORAGE_KEY,
+] as const;
+
+function isLegacyDemoKitchen(
+  recipes: Recipe[],
+  batches: ProductionBatch[],
+  stock: KitchenStockItem[],
+): boolean {
+  if (recipes.length === 0 && batches.length === 0 && stock.length === 0) return false;
+
+  const mockRecipeIds = new Set(MOCK_RECIPES.map((r) => r.id));
+  if (recipes.some((r) => !mockRecipeIds.has(r.id))) return false;
+
+  const mockBatchIds = new Set(MOCK_BATCHES.map((b) => b.id));
+  if (batches.some((b) => !mockBatchIds.has(b.id))) return false;
+
+  const mockStockIds = new Set(MOCK_KITCHEN_STOCK.map((s) => s.id));
+  if (stock.some((s) => !mockStockIds.has(s.id))) return false;
+
+  return true;
+}
+
+function removePersistedStock(key: string) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(key);
+    window.sessionStorage.removeItem(key);
+  } catch {
+    /* ignore */
+  }
+}
+
+function removeAllPersistedSupplyKeys() {
+  for (const key of ALL_SUPPLY_STORAGE_KEYS) {
+    removePersistedStock(key);
+  }
+}
 
 function loadPersistedStock<T>(key: string, fallback: T[]): T[] {
   if (typeof window === "undefined") return [...fallback];
@@ -158,6 +256,20 @@ function usePersistedArrayState<T>(
     if (!storageReadyRef.current) return;
     persistStock(key, state);
   }, [key, state]);
+
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== key || e.newValue == null) return;
+      try {
+        const parsed = JSON.parse(e.newValue) as T[];
+        if (Array.isArray(parsed)) setState(parsed);
+      } catch {
+        /* ignore */
+      }
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, [key]);
 
   return [state, setState];
 }
@@ -210,31 +322,41 @@ export { SupplyChainContext };
 function useSupplyChainImpl() {
   const [storeItems, setStoreItems] = usePersistedArrayState<StoreItem>(
     STORE_ITEMS_STORAGE_KEY,
-    MOCK_STORE_ITEMS,
+    EMPTY_STORE_ITEMS,
   );
+  const [pendingStoreItems, setPendingStoreItems] =
+    usePersistedArrayState<PendingStoreItem>(PENDING_STORE_ITEMS_KEY, []);
   const [basket, setBasket] = usePersistedArrayState<BasketLine>(
     BASKET_STORAGE_KEY,
     EMPTY_BASKET,
   );
+  const basketRef = useRef(basket);
+  useEffect(() => {
+    basketRef.current = basket;
+  }, [basket]);
   const [purchaseOrders, setPurchaseOrders] = usePersistedArrayState<PurchaseOrder>(
     PURCHASE_ORDERS_STORAGE_KEY,
-    MOCK_POS,
+    EMPTY_PURCHASE_ORDERS,
   );
   const [recipes, setRecipes] = usePersistedArrayState<Recipe>(
     RECIPES_STORAGE_KEY,
-    MOCK_RECIPES,
+    EMPTY_RECIPES,
   );
   const [kitchenStock, setKitchenStock] = usePersistedArrayState<KitchenStockItem>(
     KITCHEN_STOCK_STORAGE_KEY,
-    MOCK_KITCHEN_STOCK,
+    EMPTY_KITCHEN_STOCK,
   );
   const [barStock, setBarStock] = usePersistedArrayState<BarStockItem>(
     BAR_STOCK_STORAGE_KEY,
-    MOCK_BAR_STOCK,
+    EMPTY_BAR_STOCK,
   );
   const [kitchenRawStock, setKitchenRawStock] = usePersistedArrayState<KitchenRawStockItem>(
     KITCHEN_RAW_STOCK_STORAGE_KEY,
-    MOCK_KITCHEN_RAW_STOCK,
+    EMPTY_KITCHEN_RAW_STOCK,
+  );
+  const [fnbRawStock, setFnbRawStock] = usePersistedArrayState<FnbRawStockItem>(
+    FNB_RAW_STOCK_KEY,
+    [],
   );
   const [issueOutLog, setIssueOutLog] = usePersistedArrayState<IssueOutRecord>(
     ISSUE_OUT_LOG_STORAGE_KEY,
@@ -242,47 +364,66 @@ function useSupplyChainImpl() {
   );
   const [batches, setBatches] = usePersistedArrayState<ProductionBatch>(
     BATCHES_STORAGE_KEY,
-    MOCK_BATCHES,
+    EMPTY_BATCHES,
   );
-  const [fnbOrders, setFnbOrders] = useState<FnbMenuItem[]>(() => [
-    ...MOCK_FNB_MENU,
-  ]);
+  const [fnbOrders, setFnbOrders] = useState<FnbMenuItem[]>([]);
   const [orders, setOrders] = useState<FnbOrder[]>([]);
-  const [activityLog, setActivityLog] = useState<ActivityEntry[]>([
-    {
-      id: "act-seed",
-      action: "low_stock_alert",
-      actorName: "System",
-      actorRole: "system",
-      timestamp: new Date().toISOString(),
-      summary: "Chapman — 86 OUT (bar stock depleted from sales)",
-    },
-  ]);
+  const [activityLog, setActivityLog] = usePersistedArrayState<ActivityEntry>(
+    ACTIVITY_LOG_STORAGE_KEY,
+    EMPTY_ACTIVITY_LOG,
+  );
+
+  /** Drop legacy demo kitchen seed (Peppered Chicken / Jollof / Egusi) once per browser. */
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const version = Number(window.localStorage.getItem(SUPPLY_STORAGE_VERSION_KEY) || "1");
+    if (version >= SUPPLY_STORAGE_VERSION) return;
+
+    const storedRecipes = loadPersistedStock<Recipe>(RECIPES_STORAGE_KEY, EMPTY_RECIPES);
+    const storedBatches = loadPersistedStock<ProductionBatch>(BATCHES_STORAGE_KEY, EMPTY_BATCHES);
+    const storedKitchenStock = loadPersistedStock<KitchenStockItem>(
+      KITCHEN_STOCK_STORAGE_KEY,
+      EMPTY_KITCHEN_STOCK,
+    );
+
+    if (isLegacyDemoKitchen(storedRecipes, storedBatches, storedKitchenStock)) {
+      removePersistedStock(RECIPES_STORAGE_KEY);
+      removePersistedStock(BATCHES_STORAGE_KEY);
+      removePersistedStock(KITCHEN_STOCK_STORAGE_KEY);
+      removePersistedStock(KITCHEN_RAW_STOCK_STORAGE_KEY);
+      clearKitchenBatchDraft();
+      setRecipes([]);
+      setKitchenStock([]);
+      setKitchenRawStock([]);
+      setBatches([]);
+      notifyKitchenRawStockChanged();
+    }
+
+    window.localStorage.setItem(SUPPLY_STORAGE_VERSION_KEY, String(SUPPLY_STORAGE_VERSION));
+  }, []);
 
   useEffect(() => {
-    const reloadFromStorage = () => {
-      const orders = loadPersistedStock(PURCHASE_ORDERS_STORAGE_KEY, MOCK_POS);
+    const reloadFromStorage = (e?: StorageEvent) => {
+      if (e && e.key !== PURCHASE_ORDERS_STORAGE_KEY && e.key !== BASKET_STORAGE_KEY) {
+        return;
+      }
+      const orders = loadPersistedStock(PURCHASE_ORDERS_STORAGE_KEY, EMPTY_PURCHASE_ORDERS);
       setPurchaseOrders(orders);
       const active = getActivePurchaseOrder(orders);
-      if (active?.lines.length) {
+      if (active?.lines.length && showsStoreDraftPurchaseList(active)) {
         setBasket(poLinesToBasketLines(active.lines));
-      } else {
+      } else if (!active) {
         setBasket(loadPersistedStock(BASKET_STORAGE_KEY, []));
+      } else {
+        setBasket([]);
       }
     };
     const onStorage = (e: StorageEvent) => {
-      if (
-        e.key === PURCHASE_ORDERS_STORAGE_KEY ||
-        e.key === BASKET_STORAGE_KEY
-      ) {
-        reloadFromStorage();
-      }
+      reloadFromStorage(e);
     };
     window.addEventListener("storage", onStorage);
-    window.addEventListener("focus", reloadFromStorage);
     return () => {
       window.removeEventListener("storage", onStorage);
-      window.removeEventListener("focus", reloadFromStorage);
     };
   }, []);
 
@@ -294,15 +435,15 @@ function useSupplyChainImpl() {
   const basketMigratedRef = useRef(false);
 
   useEffect(() => {
-    if (
-      activePurchaseOrder?.lines.length &&
-      showsStoreDraftPurchaseList(activePurchaseOrder)
-    ) {
-      setBasket(poLinesToBasketLines(activePurchaseOrder.lines));
-    } else if (activePurchaseOrder && !showsStoreDraftPurchaseList(activePurchaseOrder)) {
+    if (!activePurchaseOrder) return;
+    if (!showsStoreDraftPurchaseList(activePurchaseOrder)) {
       setBasket([]);
+      return;
     }
-  }, [activePurchaseOrder]);
+    if (activePurchaseOrder.lines.length) {
+      setBasket(poLinesToBasketLines(activePurchaseOrder.lines));
+    }
+  }, [activePurchaseOrder?.id, activePurchaseOrder?.status]);
 
   useEffect(() => {
     if (basketMigratedRef.current || activePurchaseOrder) return;
@@ -337,6 +478,7 @@ function useSupplyChainImpl() {
       actor: Actor,
     ): string | undefined => {
       let err: string | undefined;
+      let basketPatch: BasketLine[] | "remove-item" | undefined;
       setPurchaseOrders((prev) => {
         const active = getActivePurchaseOrder(prev);
         if (active && !canEditStorePurchaseOrder(active)) {
@@ -347,14 +489,14 @@ function useSupplyChainImpl() {
 
         if (!Number.isFinite(qty) || qty <= 0) {
           if (!active) {
-            setBasket((b) => b.filter((x) => x.stockItemId !== item.id));
+            basketPatch = "remove-item";
             return prev;
           }
           const nextLines = active.lines.filter(
             (l) => l.stockItemId !== item.id,
           );
           const { total, lines } = recalcPoTotals(nextLines);
-          setBasket(poLinesToBasketLines(lines));
+          basketPatch = poLinesToBasketLines(lines);
           return prev.map((p) =>
             p.id === active.id
               ? { ...p, lines, totalAmount: total, cashDisbursed: total }
@@ -363,8 +505,16 @@ function useSupplyChainImpl() {
         }
 
         if (!active) {
-          const line = storeItemToPoLine(item, qty, unitPrice);
-          const { total, lines } = recalcPoTotals([line]);
+          const baseLines = basketRef.current.map((b) => basketLineToPoLine(b));
+          const existing = baseLines.find((l) => l.stockItemId === item.id);
+          const mergedLines = existing
+            ? baseLines.map((l) =>
+                l.stockItemId === item.id
+                  ? storeItemToPoLine(item, qty, unitPrice, l.id)
+                  : l,
+              )
+            : [...baseLines, storeItemToPoLine(item, qty, unitPrice)];
+          const { total, lines } = recalcPoTotals(mergedLines);
           const now = new Date();
           const po: PurchaseOrder = {
             id: uid("po"),
@@ -378,7 +528,7 @@ function useSupplyChainImpl() {
             totalAmount: total,
             lines,
           };
-          setBasket(poLinesToBasketLines(lines));
+          basketPatch = poLinesToBasketLines(lines);
           return [po, ...prev];
         }
 
@@ -391,13 +541,18 @@ function useSupplyChainImpl() {
             )
           : [...active.lines, storeItemToPoLine(item, qty, unitPrice)];
         const { total, lines } = recalcPoTotals(nextLines);
-        setBasket(poLinesToBasketLines(lines));
+        basketPatch = poLinesToBasketLines(lines);
         return prev.map((p) =>
           p.id === active.id
             ? { ...p, lines, totalAmount: total, cashDisbursed: total }
             : p,
         );
       });
+      if (basketPatch === "remove-item") {
+        setBasket((b) => b.filter((x) => x.stockItemId !== item.id));
+      } else if (basketPatch !== undefined) {
+        setBasket(basketPatch);
+      }
       return err;
     },
     [],
@@ -416,19 +571,25 @@ function useSupplyChainImpl() {
     [upsertActivePoLine],
   );
 
-  const clearBasket = useCallback(() => {
+  const clearBasket = useCallback((): { ok: true } | { error: string } => {
+    const active = getActivePurchaseOrder(purchaseOrders);
+    if (active && !canEditStorePurchaseOrder(active)) {
+      return {
+        error: "Cannot clear — purchase order is locked while in approval.",
+      };
+    }
     setPurchaseOrders((prev) => {
-      const active = getActivePurchaseOrder(prev);
-      if (!active || !canEditStorePurchaseOrder(active)) return prev;
-      setBasket([]);
+      const current = getActivePurchaseOrder(prev);
+      if (!current || !canEditStorePurchaseOrder(current)) return prev;
       return prev.map((p) =>
-        p.id === active.id
+        p.id === current.id
           ? { ...p, lines: [], totalAmount: 0, cashDisbursed: 0 }
           : p,
       );
     });
     setBasket([]);
-  }, []);
+    return { ok: true };
+  }, [purchaseOrders]);
 
   const setBasketLineQty = useCallback(
     (item: StoreItem, qty: number, unitPrice: number, actor?: Actor) => {
@@ -442,20 +603,34 @@ function useSupplyChainImpl() {
     [upsertActivePoLine],
   );
 
-  const removeFromBasket = useCallback((stockItemId: string) => {
-    setPurchaseOrders((prev) => {
-      const active = getActivePurchaseOrder(prev);
-      if (!active || !canEditStorePurchaseOrder(active)) return prev;
-      const nextLines = active.lines.filter((l) => l.stockItemId !== stockItemId);
-      const { total, lines } = recalcPoTotals(nextLines);
-      setBasket(poLinesToBasketLines(lines));
-      return prev.map((p) =>
-        p.id === active.id
-          ? { ...p, lines, totalAmount: total, cashDisbursed: total }
-          : p,
-      );
-    });
-  }, []);
+  const removeFromBasket = useCallback(
+    (stockItemId: string): { ok: true } | { error: string } => {
+      const active = getActivePurchaseOrder(purchaseOrders);
+      if (active && !canEditStorePurchaseOrder(active)) {
+        return {
+          error: "Cannot remove — purchase order is locked while in approval.",
+        };
+      }
+      let basketPatch: BasketLine[] | undefined;
+      setPurchaseOrders((prev) => {
+        const current = getActivePurchaseOrder(prev);
+        if (!current || !canEditStorePurchaseOrder(current)) return prev;
+        const nextLines = current.lines.filter(
+          (l) => l.stockItemId !== stockItemId,
+        );
+        const { total, lines } = recalcPoTotals(nextLines);
+        basketPatch = poLinesToBasketLines(lines);
+        return prev.map((p) =>
+          p.id === current.id
+            ? { ...p, lines, totalAmount: total, cashDisbursed: total }
+            : p,
+        );
+      });
+      if (basketPatch !== undefined) setBasket(basketPatch);
+      return { ok: true };
+    },
+    [purchaseOrders],
+  );
 
   const sendBasketForApproval = useCallback(
     (actor: Actor): { po: PurchaseOrder } | { error: string } => {
@@ -906,18 +1081,63 @@ function useSupplyChainImpl() {
           return { ...k, quantityOnHand: Math.max(0, k.quantityOnHand - line.quantity) };
         }),
       );
+      notifyKitchenRawStockChanged();
     },
     [],
   );
 
+  const returnKitchenRawMaterials = useCallback(
+    (lines: { storeItemId: string; quantity: number }[]) => {
+      setKitchenRawStock((prev) => {
+        const next = [...prev];
+        for (const line of lines) {
+          const idx = next.findIndex((k) => k.storeItemId === line.storeItemId);
+          if (idx >= 0) {
+            next[idx] = {
+              ...next[idx],
+              quantityOnHand: next[idx].quantityOnHand + line.quantity,
+            };
+          } else {
+            const store = storeItems.find((s) => s.id === line.storeItemId);
+            next.push({
+              id: `kraw-${line.storeItemId}`,
+              storeItemId: line.storeItemId,
+              name: store?.name ?? "Material",
+              quantityOnHand: line.quantity,
+              reorderLevel: store?.reorderLevel ?? 0,
+              unit: store?.unit ?? "unit",
+            });
+          }
+        }
+        return next;
+      });
+      notifyKitchenRawStockChanged();
+    },
+    [storeItems],
+  );
+
   const openBatch = useCallback(
-    (recipeId: string, plannedPortions: number, actor: Actor) => {
+    (
+      recipeId: string,
+      plannedPortions: number,
+      actor: Actor,
+    ): { ok: true; batch: ProductionBatch } | { error: string } => {
       const recipe = recipes.find((r) => r.id === recipeId);
-      if (!recipe) return null;
+      if (!recipe) return { error: "Batch standard not found" };
       if (!Number.isFinite(plannedPortions) || plannedPortions <= 0) {
         return { error: "Enter planned portions" };
       }
 
+      const inProgress = batches.find(
+        (b) => b.recipeId === recipeId && b.status === "in_progress",
+      );
+      if (inProgress) {
+        return {
+          error: `${recipe.name} already has a production run in progress. Close it before opening another.`,
+        };
+      }
+
+      const kitchenRow = kitchenStock.find((k) => k.linkedRecipeId === recipeId);
       const scale =
         recipe.yieldPortions > 0 ? plannedPortions / recipe.yieldPortions : 1;
       const materialLines = recipe.ingredients.map((ing) => ({
@@ -927,92 +1147,79 @@ function useSupplyChainImpl() {
         quantity: Math.round(ing.quantity * scale * 1000) / 1000,
       }));
 
-      for (const line of materialLines) {
-        const onHand = kitchenRawOnHand(line.storeItemId);
-        if (onHand < line.quantity) {
-          return {
-            error: `Insufficient ${line.name} issued to kitchen (${onHand} ${line.unit} on hand; need ${line.quantity}). Ask store to issue out first.`,
-          };
-        }
-      }
-
-      deductKitchenRawMaterials(materialLines);
+      const batchCost =
+        (recipeTotalCost(recipe) / Math.max(1, recipe.yieldPortions)) *
+        plannedPortions;
 
       const batch: ProductionBatch = {
         id: uid("bat"),
         recipeId,
         recipeName: recipe.name,
-        shift: "Morning",
+        shift: "Production",
         status: "in_progress",
         plannedPortions,
         actualPortions: 0,
-        foodCostPct: 0,
+        foodCostPct: recipeGrossMarginPct(recipe),
         variancePct: 0,
+        batchCost,
+        sellingPricePerPortion: recipe.sellingPricePerPortion,
         materialsUsed: materialLines.map(
           (i) => `${i.quantity} ${i.unit} ${i.name}`,
         ),
+        kitchenStockId: kitchenRow?.id,
         openedAt: new Date().toISOString(),
         openedBy: actor.name,
+        createdBy: actor.name,
       };
       setBatches((b) => [batch, ...b]);
       setActivityLog((a) =>
         log(
           a,
-          "stock_issued_kitchen",
+          "batch_opened",
           actor,
-          `Opened batch: ${recipe.name} — raw materials from kitchen stock (cost ₦${recipeTotalCost(recipe).toLocaleString()})`,
+          `Production run opened: ${recipe.name} — ${plannedPortions} portions (raw stock deducts on close)`,
           batch.id,
         ),
       );
-      return { batch };
+      return { ok: true, batch };
     },
-    [recipes, kitchenRawOnHand, deductKitchenRawMaterials],
+    [recipes, kitchenStock, batches],
   );
 
   const openKitchenBatchFromMaterials = useCallback(
     (
       input: CreateKitchenBatchInput,
       actor: Actor,
-    ): { ok: true; batch: ProductionBatch; kitchenStockId: string } | { error: string } => {
-      const batchName = input.batchName.trim();
-      const menuCategory = input.menuCategory.trim();
+    ): { ok: true; kitchenStockId: string; recipeId: string } | { error: string } => {
+      const batchName = toTitleCaseWords(input.batchName);
+      const menuCategory = toTitleCaseWords(input.menuCategory);
       if (!batchName) return { error: "Enter a batch / menu name" };
       if (!menuCategory) return { error: "Select a menu category for the restaurant" };
-      if (!input.materials.length) return { error: "Add at least one raw material" };
       if (!Number.isFinite(input.plannedPortions) || input.plannedPortions <= 0) {
         return { error: "Enter planned portions for this batch" };
       }
 
-      for (const line of input.materials) {
+      const materials = input.materials.filter((m) => m.quantity > 0);
+      for (const line of materials) {
         const store = storeItems.find((s) => s.id === line.storeItemId);
-        if (!store || store.dept !== "kitchen") {
+        if (store && store.dept !== "kitchen") {
           return { error: `${line.name} is not a kitchen store item` };
-        }
-        const onHand =
-          kitchenRawStock.find((k) => k.storeItemId === line.storeItemId)
-            ?.quantityOnHand ?? 0;
-        if (onHand < line.quantity) {
-          return {
-            error: `Insufficient ${line.name} issued to kitchen (${onHand} ${line.unit} on hand; need ${line.quantity}). Ask store to issue out first.`,
-          };
         }
       }
 
-      const batchCost = input.materials.reduce(
+      const overheadLabour = Math.max(0, input.overheadLabour ?? 0);
+      const overheadGas = Math.max(0, input.overheadGas ?? 0);
+      const overheadOther = Math.max(0, input.overheadOther ?? 0);
+      const ingredientCost = materials.reduce(
         (sum, line) => sum + line.quantity * line.unitCost,
         0,
       );
+      const batchCost = ingredientCost + overheadLabour + overheadGas + overheadOther;
       const sell = Math.max(0, input.sellingPricePerPortion);
       const revenue = sell * input.plannedPortions;
       const marginPct =
         revenue > 0 ? Math.round(((revenue - batchCost) / revenue) * 1000) / 10 : 0;
 
-      deductKitchenRawMaterials(
-        input.materials.map((m) => ({
-          storeItemId: m.storeItemId,
-          quantity: m.quantity,
-        })),
-      );
 
       const kitchenStockId =
         input.kitchenStockId?.trim() || `ks-${outletStockSlug(batchName)}`;
@@ -1025,7 +1232,7 @@ function useSupplyChainImpl() {
             i === idx
               ? {
                   ...k,
-                  availablePortions: k.availablePortions + input.plannedPortions,
+                  name: batchName,
                   source: "produced" as const,
                   linkedRecipeId: recipeId,
                 }
@@ -1038,7 +1245,7 @@ function useSupplyChainImpl() {
             id: kitchenStockId,
             name: batchName,
             source: "produced" as const,
-            availablePortions: input.plannedPortions,
+            availablePortions: 0,
             reorderLevel: Math.max(2, Math.ceil(input.plannedPortions * 0.15)),
             linkedRecipeId: recipeId,
           },
@@ -1051,15 +1258,21 @@ function useSupplyChainImpl() {
         category: menuCategory,
         yieldPortions: input.plannedPortions,
         yieldLabel: `${input.plannedPortions} portions`,
-        ingredients: input.materials.map((m) => ({
+        ingredients: materials.map((m) => ({
           stockItemId: m.storeItemId,
           name: m.name,
           quantity: m.quantity,
           unit: m.unit,
           cost: m.quantity * m.unitCost,
         })),
-        overheadCost: 0,
+        overheadCost: overheadLabour + overheadGas + overheadOther,
+        overheadLabour,
+        overheadGas,
+        overheadOther,
         sellingPricePerPortion: sell,
+        outletMenuSync: normalizeBatchOutletMenuSync(
+          input.outletMenuSync ?? input.fnbEligible,
+        ),
       };
       setRecipes((prev) => {
         const idx = prev.findIndex((r) => r.id === recipeId || r.name === batchName);
@@ -1069,50 +1282,18 @@ function useSupplyChainImpl() {
         return [recipeRow, ...prev];
       });
 
-      const materialsUsed = input.materials.map(
-        (m) => `${m.quantity} ${m.unit} ${m.name}`,
-      );
-      if (input.notes?.trim()) materialsUsed.push(input.notes.trim());
-
-      const batch: ProductionBatch = {
-        id: uid("bat"),
-        recipeId,
-        recipeName: batchName,
-        shift: "Production",
-        status: "in_progress",
-        plannedPortions: input.plannedPortions,
-        actualPortions: 0,
-        foodCostPct: marginPct,
-        variancePct: 0,
-        batchCost,
-        sellingPricePerPortion: sell,
-        materialsUsed,
-        kitchenStockId,
-        openedAt: new Date().toISOString(),
-        openedBy: actor.name,
-      };
-      setBatches((b) => [batch, ...b]);
-      setActivityLog((a) =>
-        log(
-          a,
-          "batch_opened",
-          actor,
-          `New batch "${batchName}" — ${input.plannedPortions} portions, cost ₦${batchCost.toLocaleString()}, margin ${marginPct}%`,
-          batch.id,
-        ),
-      );
       setActivityLog((a) =>
         log(
           a,
           "recipe_updated",
           actor,
-          `Recipe standard saved: ${batchName} (${input.materials.length} ingredients)`,
+          `Batch standard saved: ${batchName} — ${input.plannedPortions} std portions, ${materials.length} ingredient(s). Open a production run from All Batches when ready.`,
           recipeId,
         ),
       );
-      return { ok: true, batch, kitchenStockId };
+      return { ok: true, kitchenStockId, recipeId };
     },
-    [storeItems, kitchenRawStock, deductKitchenRawMaterials],
+    [storeItems],
   );
 
   const updateRecipe = useCallback(
@@ -1124,30 +1305,42 @@ function useSupplyChainImpl() {
         yieldPortions?: number;
         sellingPricePerPortion?: number;
         overheadCost?: number;
+        overheadLabour?: number;
+        overheadGas?: number;
+        overheadOther?: number;
+        outletMenuSync?: import("./types").BatchOutletMenuSync;
+        /** @deprecated */
+        fnbEligible?: boolean;
         ingredients?: Recipe["ingredients"];
       },
       actor: Actor,
-    ): { ok: true } | { error: string } => {
+    ):
+      | { ok: true; kitchenStockId: string; menuItemName: string; category: string; outletMenuSync: import("./types").BatchOutletMenuSync }
+      | { error: string } => {
       const existing = recipes.find((r) => r.id === recipeId);
       if (!existing) return { error: "Batch standard not found" };
 
-      const name = (patch.name ?? existing.name).trim();
-      const category = (patch.category ?? existing.category).trim();
+      const name = toTitleCaseWords(patch.name ?? existing.name);
+      const category = toTitleCaseWords(patch.category ?? existing.category);
       const yieldPortions = patch.yieldPortions ?? existing.yieldPortions;
       const sellingPricePerPortion =
         patch.sellingPricePerPortion ?? existing.sellingPricePerPortion;
-      const overheadCost = patch.overheadCost ?? existing.overheadCost;
+      const overheadLabour = patch.overheadLabour ?? existing.overheadLabour ?? 0;
+      const overheadGas = patch.overheadGas ?? existing.overheadGas ?? 0;
+      const overheadOther =
+        patch.overheadOther ?? existing.overheadOther ?? patch.overheadCost ?? existing.overheadCost ?? 0;
       const ingredients = patch.ingredients ?? existing.ingredients;
+      const outletMenuSync = normalizeBatchOutletMenuSync(
+        patch.outletMenuSync ?? patch.fnbEligible ?? existing.outletMenuSync ?? existing.fnbEligible,
+      );
 
       if (!name) return { error: "Enter a batch name" };
       if (!category) return { error: "Enter a menu category" };
       if (!Number.isFinite(yieldPortions) || yieldPortions <= 0) {
         return { error: "Enter valid planned portions" };
       }
-      if (!ingredients.length) {
-        return { error: "Add at least one ingredient" };
-      }
 
+      const overheadCost = overheadLabour + overheadGas + overheadOther;
       const updated: Recipe = {
         ...existing,
         name,
@@ -1156,8 +1349,16 @@ function useSupplyChainImpl() {
         yieldLabel: `${yieldPortions} portions`,
         sellingPricePerPortion,
         overheadCost,
+        overheadLabour,
+        overheadGas,
+        overheadOther,
+        outletMenuSync,
         ingredients,
       };
+
+      const kitchenRow = kitchenStock.find((k) => k.linkedRecipeId === recipeId);
+      const kitchenStockId =
+        kitchenRow?.id ?? `ks-${outletStockSlug(name)}`;
 
       setRecipes((prev) =>
         prev.map((r) => (r.id === recipeId ? updated : r)),
@@ -1176,9 +1377,9 @@ function useSupplyChainImpl() {
           recipeId,
         ),
       );
-      return { ok: true };
+      return { ok: true, kitchenStockId, menuItemName: name, category, outletMenuSync };
     },
-    [recipes],
+    [recipes, kitchenStock],
   );
 
   const deleteRecipe = useCallback(
@@ -1214,23 +1415,40 @@ function useSupplyChainImpl() {
     [recipes, batches],
   );
 
-  /** Wipe kitchen finished stock, batch standards, production runs, and batch draft. Categories stay in Restaurant outlet DB. */
+  /** Wipe kitchen finished stock, raw-from-store, batch standards, production runs, and batch draft. Categories stay in Restaurant outlet DB. */
   const clearKitchenRestaurantMenu = useCallback((actor: Actor) => {
     const recipeCount = recipes.length;
     const stockCount = kitchenStock.length;
     const batchCount = batches.length;
+    const rawCount = kitchenRawStock.length;
+    const kitchenIssueCount = issueOutLog.filter((r) => {
+      const d = r.destination.trim().toLowerCase();
+      return d === "kitchen" || d.includes("kitchen");
+    }).length;
 
     setRecipes([]);
     setKitchenStock([]);
+    setKitchenRawStock([]);
     setBatches([]);
+    setIssueOutLog((prev) =>
+      prev.filter((r) => {
+        const d = r.destination.trim().toLowerCase();
+        return d !== "kitchen" && !d.includes("kitchen");
+      }),
+    );
+    removePersistedStock(RECIPES_STORAGE_KEY);
+    removePersistedStock(BATCHES_STORAGE_KEY);
+    removePersistedStock(KITCHEN_STOCK_STORAGE_KEY);
+    removePersistedStock(KITCHEN_RAW_STOCK_STORAGE_KEY);
     clearKitchenBatchDraft();
+    notifyKitchenRawStockChanged();
 
     setActivityLog((a) =>
       log(
         a,
         "recipe_updated",
         actor,
-        `Cleared kitchen menu — ${recipeCount} batch standard(s), ${stockCount} finished stock row(s), ${batchCount} production record(s)`,
+        `Cleared kitchen menu — ${recipeCount} batch standard(s), ${stockCount} finished stock, ${rawCount} raw material row(s), ${batchCount} production record(s)`,
       ),
     );
 
@@ -1242,9 +1460,275 @@ function useSupplyChainImpl() {
       ok: true as const,
       recipesCleared: recipeCount,
       stockCleared: stockCount,
+      rawStockCleared: rawCount,
+      kitchenIssuesCleared: kitchenIssueCount,
       batchesCleared: batchCount,
     };
-  }, [recipes, kitchenStock, batches]);
+  }, [recipes, kitchenStock, kitchenRawStock, issueOutLog, batches]);
+
+  const deleteInProgressBatch = useCallback(
+    (batchId: string, actor: Actor): { ok: true } | { error: string } => {
+      const batch = batches.find((b) => b.id === batchId);
+      if (!batch) return { error: "Production batch not found" };
+      if (batch.status !== "in_progress") {
+        return { error: "Only in-progress batches can be deleted" };
+      }
+
+      if (batch.deductedMaterials?.length) {
+        returnKitchenRawMaterials(batch.deductedMaterials);
+      }
+
+      setBatches((prev) => prev.filter((b) => b.id !== batchId));
+      setActivityLog((a) =>
+        log(
+          a,
+          "batch_closed",
+          actor,
+          `Deleted in-progress production run "${batch.recipeName}" (no stock was moved)`,
+          batchId,
+        ),
+      );
+      return { ok: true };
+    },
+    [batches, returnKitchenRawMaterials],
+  );
+
+  const clearAllStoreItems = useCallback((actor: Actor) => {
+    const count = storeItems.length;
+    setStoreItems([]);
+    setActivityLog((a) =>
+      log(
+        a,
+        "stock_received",
+        actor,
+        `Cleared central store catalogue (${count} item(s))`,
+      ),
+    );
+    return { ok: true as const, cleared: count };
+  }, [storeItems]);
+
+  const clearSupplyHistory = useCallback((_actor: Actor) => {
+    const poCount = purchaseOrders.length;
+    const issueCount = issueOutLog.length;
+    const activityCount = activityLog.length;
+    setPurchaseOrders([]);
+    setBasket([]);
+    setIssueOutLog([]);
+    setActivityLog([]);
+    return {
+      ok: true as const,
+      purchaseOrdersCleared: poCount,
+      issueOutCleared: issueCount,
+      activityCleared: activityCount,
+    };
+  }, [purchaseOrders, issueOutLog, activityLog]);
+
+  const clearAllSupplyChainData = useCallback((actor: Actor) => {
+    setStoreItems([]);
+    setPendingStoreItems([]);
+    setPurchaseOrders([]);
+    setBasket([]);
+    setRecipes([]);
+    setKitchenStock([]);
+    setKitchenRawStock([]);
+    setFnbRawStock([]);
+    setBarStock([]);
+    setBatches([]);
+    setIssueOutLog([]);
+    setActivityLog([]);
+    removeAllPersistedSupplyKeys();
+    clearKitchenBatchDraft();
+    notifyKitchenRawStockChanged();
+    notifyBarStockChanged();
+    notifyFnbRawStockChanged();
+    notifyIssueOutLogChanged();
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("frontbill:outlet-menu-cleared"));
+    }
+    void actor;
+    return { ok: true as const };
+  }, []);
+
+  const addStoreItemDirect = useCallback(
+    (
+      input: Omit<StoreItem, "id"> & { name: string },
+      actor: Actor,
+    ): { ok: true; item: StoreItem } | { error: string } => {
+      const name = toTitleCaseWords(input.name);
+      if (!name) return { error: "Enter an item name" };
+      if (!input.unit.trim()) return { error: "Enter SI unit" };
+      const item: StoreItem = {
+        id: uid("si"),
+        name,
+        unit: input.unit.trim(),
+        dept: input.dept,
+        quantityInStore: Math.max(0, input.quantityInStore),
+        reorderLevel: Math.max(0, input.reorderLevel),
+        lastPrice: Math.max(0, input.lastPrice),
+        benchmarkPrice: Math.max(0, input.benchmarkPrice || input.lastPrice),
+        kitchenCategory: input.kitchenCategory,
+        unitFactors: input.unitFactors,
+      };
+      setStoreItems((prev) => [item, ...prev]);
+      setActivityLog((a) =>
+        log(a, "stock_received", actor, `Added store item: ${name}`, item.id),
+      );
+      return { ok: true, item };
+    },
+    [],
+  );
+
+  const updateStoreItemDirect = useCallback(
+    (
+      itemId: string,
+      input: Partial<Omit<StoreItem, "id">>,
+      actor: Actor,
+    ): { ok: true } | { error: string } => {
+      const existing = storeItems.find((s) => s.id === itemId);
+      if (!existing) return { error: "Store item not found" };
+      const name = input.name != null ? toTitleCaseWords(input.name) : existing.name;
+      if (!name) return { error: "Enter an item name" };
+      setStoreItems((prev) =>
+        prev.map((s) =>
+          s.id === itemId
+            ? {
+                ...s,
+                ...input,
+                name,
+                unit: input.unit?.trim() || s.unit,
+                quantityInStore:
+                  input.quantityInStore != null
+                    ? Math.max(0, input.quantityInStore)
+                    : s.quantityInStore,
+                reorderLevel:
+                  input.reorderLevel != null
+                    ? Math.max(0, input.reorderLevel)
+                    : s.reorderLevel,
+                lastPrice:
+                  input.lastPrice != null ? Math.max(0, input.lastPrice) : s.lastPrice,
+                benchmarkPrice:
+                  input.benchmarkPrice != null
+                    ? Math.max(0, input.benchmarkPrice)
+                    : s.benchmarkPrice,
+              }
+            : s,
+        ),
+      );
+      setActivityLog((a) =>
+        log(a, "stock_received", actor, `Updated store item: ${name}`, itemId),
+      );
+      return { ok: true };
+    },
+    [storeItems],
+  );
+
+  const submitStoreItemForApproval = useCallback(
+    (
+      input: Omit<PendingStoreItem, "id" | "status" | "submittedAt" | "submittedBy" | "submittedByName"> & {
+        name: string;
+        submittedBy: string;
+        submittedByName: string;
+      },
+      actor: Actor,
+    ): { ok: true } | { error: string } => {
+      const name = toTitleCaseWords(input.name);
+      if (!name) return { error: "Enter an item name" };
+      if (!input.unit.trim()) return { error: "Enter SI unit" };
+      const row: PendingStoreItem = {
+        id: uid("psi"),
+        name,
+        unit: input.unit.trim(),
+        dept: input.dept,
+        quantityInStore: Math.max(0, input.quantityInStore),
+        reorderLevel: Math.max(0, input.reorderLevel),
+        lastPrice: Math.max(0, input.lastPrice),
+        benchmarkPrice: Math.max(0, input.benchmarkPrice || input.lastPrice),
+        kitchenCategory: input.kitchenCategory,
+        status: "pending",
+        submittedBy: input.submittedBy,
+        submittedByName: input.submittedByName,
+        submittedAt: new Date().toISOString(),
+      };
+      setPendingStoreItems((prev) => [row, ...prev]);
+      setActivityLog((a) =>
+        log(
+          a,
+          "stock_received",
+          actor,
+          `Store item submitted for approval: ${name}`,
+          row.id,
+        ),
+      );
+      pushSupplyNotification({
+        audience: ["admin"],
+        title: `Store item pending approval`,
+        body: `${input.submittedByName} submitted "${name}" for central store.`,
+        href: "/supply/store",
+      });
+      return { ok: true };
+    },
+    [],
+  );
+
+  const approvePendingStoreItem = useCallback(
+    (pendingId: string, actor: Actor): { ok: true } | { error: string } => {
+      const pending = pendingStoreItems.find((p) => p.id === pendingId);
+      if (!pending || pending.status !== "pending") {
+        return { error: "Pending item not found" };
+      }
+      const res = addStoreItemDirect(
+        {
+          name: pending.name,
+          unit: pending.unit,
+          dept: pending.dept,
+          quantityInStore: pending.quantityInStore,
+          reorderLevel: pending.reorderLevel,
+          lastPrice: pending.lastPrice,
+          benchmarkPrice: pending.benchmarkPrice,
+          kitchenCategory: pending.kitchenCategory,
+        },
+        actor,
+      );
+      if ("error" in res) return res;
+      setPendingStoreItems((prev) =>
+        prev.map((p) =>
+          p.id === pendingId
+            ? {
+                ...p,
+                status: "approved" as const,
+                reviewedBy: actor.name,
+                reviewedAt: new Date().toISOString(),
+              }
+            : p,
+        ),
+      );
+      return { ok: true };
+    },
+    [pendingStoreItems, addStoreItemDirect],
+  );
+
+  const rejectPendingStoreItem = useCallback(
+    (pendingId: string, actor: Actor): { ok: true } | { error: string } => {
+      const pending = pendingStoreItems.find((p) => p.id === pendingId);
+      if (!pending || pending.status !== "pending") {
+        return { error: "Pending item not found" };
+      }
+      setPendingStoreItems((prev) =>
+        prev.map((p) =>
+          p.id === pendingId
+            ? {
+                ...p,
+                status: "rejected" as const,
+                reviewedBy: actor.name,
+                reviewedAt: new Date().toISOString(),
+              }
+            : p,
+        ),
+      );
+      return { ok: true };
+    },
+    [pendingStoreItems],
+  );
 
   const closeBatch = useCallback(
     (
@@ -1257,14 +1741,73 @@ function useSupplyChainImpl() {
         returned: number;
       },
       actor: Actor,
-    ) => {
+    ): { ok: true } | { error: string } => {
       const batch = batches.find((b) => b.id === batchId);
-      if (!batch) return;
+      if (!batch) return { error: "Production batch not found" };
+      if (batch.status !== "in_progress") {
+        return { error: "This production run is already closed" };
+      }
+      if (!Number.isFinite(actualPortions) || actualPortions <= 0) {
+        return { error: "Enter valid portions to close" };
+      }
+
       const recipe = batch.recipeId
         ? recipes.find((r) => r.id === batch.recipeId)
         : undefined;
 
-      const foodCost = batch.batchCost ?? (recipe ? recipeTotalCost(recipe) : 0);
+      const scale =
+        recipe && recipe.yieldPortions > 0
+          ? actualPortions / recipe.yieldPortions
+          : 1;
+      const materialLines =
+        recipe?.ingredients.map((ing) => ({
+          storeItemId: ing.stockItemId,
+          name: ing.name,
+          unit: ing.unit,
+          quantity: Math.round(ing.quantity * scale * 1000) / 1000,
+        })) ?? [];
+
+      const shortages: StockShortageLine[] = [];
+      for (const line of materialLines) {
+        if (line.quantity <= 0) continue;
+        const onHand = kitchenRawOnHand(line.storeItemId);
+        if (onHand < line.quantity) {
+          shortages.push({
+            name: line.name,
+            need: line.quantity,
+            onHand,
+            unit: line.unit,
+          });
+        }
+      }
+
+      if (shortages.length) {
+        return {
+          error:
+            shortages.length === 1
+              ? `Insufficient ${shortages[0].name} in kitchen raw stock. Issue from store first.`
+              : `${shortages.length} raw materials are short for this batch. Issue from store first.`,
+          shortages,
+        };
+      }
+
+      if (materialLines.length) {
+        deductKitchenRawMaterials(
+          materialLines
+            .filter((l) => l.quantity > 0)
+            .map((l) => ({
+              storeItemId: l.storeItemId,
+              quantity: l.quantity,
+            })),
+        );
+      }
+
+      const foodCost =
+        batch.batchCost ??
+        (recipe
+          ? (recipeTotalCost(recipe) / Math.max(1, recipe.yieldPortions)) *
+            actualPortions
+          : 0);
       const foodCostPct =
         batch.foodCostPct ||
         (recipe ? recipeGrossMarginPct(recipe) : 0);
@@ -1277,6 +1820,12 @@ function useSupplyChainImpl() {
             ) / 10
           : 0;
 
+      const sellable =
+        actualPortions -
+        disposition.staff -
+        disposition.waste -
+        disposition.returned;
+
       setBatches((prev) =>
         prev.map((b) =>
           b.id === batchId
@@ -1286,8 +1835,18 @@ function useSupplyChainImpl() {
                 actualPortions,
                 foodCostPct,
                 variancePct,
+                batchCost: foodCost,
                 closedAt: new Date().toISOString(),
                 disposition,
+                deductedMaterials: materialLines
+                  .filter((l) => l.quantity > 0)
+                  .map((l) => ({
+                    storeItemId: l.storeItemId,
+                    quantity: l.quantity,
+                  })),
+                materialsUsed: materialLines.map(
+                  (i) => `${i.quantity} ${i.unit} ${i.name}`,
+                ),
               }
             : b,
         ),
@@ -1298,22 +1857,28 @@ function useSupplyChainImpl() {
         (recipe
           ? kitchenStock.find((k) => k.linkedRecipeId === recipe.id)?.id
           : undefined);
-      if (stockId) {
-        setKitchenStock((ks) =>
-          ks.map((k) =>
-            k.id === stockId
-              ? {
-                  ...k,
-                  availablePortions:
-                    k.availablePortions +
-                    actualPortions -
-                    disposition.staff -
-                    disposition.waste -
-                    disposition.returned,
-                }
-              : k,
-          ),
-        );
+      if (stockId && sellable > 0) {
+        setKitchenStock((ks) => {
+          const idx = ks.findIndex((k) => k.id === stockId);
+          if (idx >= 0) {
+            return ks.map((k, i) =>
+              i === idx
+                ? { ...k, availablePortions: k.availablePortions + sellable }
+                : k,
+            );
+          }
+          return [
+            ...ks,
+            {
+              id: stockId,
+              name: batch.recipeName,
+              source: "produced" as const,
+              availablePortions: sellable,
+              reorderLevel: Math.max(2, Math.ceil(sellable * 0.15)),
+              linkedRecipeId: recipe?.id,
+            },
+          ];
+        });
       }
 
       setActivityLog((a) =>
@@ -1321,12 +1886,13 @@ function useSupplyChainImpl() {
           a,
           "batch_closed",
           actor,
-          `Closed ${batch.recipeName}: ${actualPortions} portions → F&B stock (+${actualPortions - disposition.staff - disposition.waste - disposition.returned} sellable). Cost ₦${foodCost.toLocaleString()}, margin ${foodCostPct}%`,
+          `Closed ${batch.recipeName}: ${actualPortions} portions produced, ${sellable} to finished stock. Raw materials deducted.`,
           batchId,
         ),
       );
+      return { ok: true };
     },
-    [batches, recipes, kitchenStock],
+    [batches, recipes, kitchenStock, kitchenRawOnHand, deductKitchenRawMaterials],
   );
 
   const postFnbOrder = useCallback(
@@ -1405,7 +1971,18 @@ function useSupplyChainImpl() {
   );
 
   const issueFromStoreToBar = useCallback(
-    (storeItemId: string, qty: number, actor: Actor) => {
+    (
+      storeItemId: string,
+      qty: number,
+      actor: Actor,
+      opts?: {
+        destination?: string;
+        receivedBy?: string;
+        receivedById?: string;
+        notes?: string;
+        issueUnit?: string;
+      },
+    ) => {
       if (qty <= 0) return { error: "Enter a quantity to issue" };
       const store = storeItems.find((s) => s.id === storeItemId);
       if (!store || store.dept !== "bar") {
@@ -1448,15 +2025,51 @@ function useSupplyChainImpl() {
         ];
       });
 
+      const dest = opts?.destination?.trim() || "Main Bar";
+      const receivedBy = opts?.receivedBy?.trim() || actor.name;
+      const displayUnit = opts?.issueUnit?.trim() || store.unit;
+      const displayQty =
+        displayUnit === store.unit
+          ? qty
+          : Math.round(qty * 1000) / 1000;
+
+      setIssueOutLog((prev) => [
+        {
+          id: uid("issue"),
+          storeItemId,
+          itemName: store.name,
+          unit: displayUnit,
+          quantity: displayQty,
+          destination: dest,
+          receivedBy,
+          receivedById: opts?.receivedById,
+          notes: opts?.notes,
+          issuedAt: new Date().toISOString(),
+          issuedBy: actor.name,
+        },
+        ...prev,
+      ]);
+
       setActivityLog((a) =>
         log(
           a,
           "stock_issued_bar",
           actor,
-          `Issued ${qty} ${store.unit} ${store.name} from store → bar stock`,
+          `Issued ${displayQty} ${displayUnit} ${store.name} from store → ${dest}`,
           storeItemId,
         ),
       );
+      setActivityLog((a) =>
+        log(
+          a,
+          "stock_issued_out",
+          actor,
+          `Stock out: ${displayQty} ${displayUnit} ${store.name} → ${dest}`,
+          storeItemId,
+        ),
+      );
+      notifyBarStockChanged();
+      notifyIssueOutLogChanged();
       return { ok: true as const };
     },
     [storeItems],
@@ -1477,16 +2090,29 @@ function useSupplyChainImpl() {
     return d === "kitchen" || d === "staff cafeteria" || d.includes("kitchen");
   }
 
+  function destinationCreditsFnbRaw(destination: string): boolean {
+    const d = destination.trim().toLowerCase();
+    return d === "restaurant" || d.includes("fnb") || d.includes("food");
+  }
+
   const issueFromStoreToDepartment = useCallback(
     (
       storeItemId: string,
       qty: number,
       destination: string,
       actor: Actor,
-      opts?: { notes?: string; receivedBy?: string; receivedById?: string },
+      opts?: {
+        notes?: string;
+        receivedBy?: string;
+        receivedById?: string;
+        issueUnit?: string;
+        issueDisplayQty?: number;
+      },
     ): { ok: true } | { error: string } => {
       const dest = destination.trim();
       if (!dest) return { error: "Select a destination department or outlet" };
+      const receivedBy = opts?.receivedBy?.trim();
+      if (!receivedBy) return { error: "Received by is required" };
 
       const store = storeItems.find((s) => s.id === storeItemId);
       if (!store) return { error: "Item not found" };
@@ -1499,7 +2125,13 @@ function useSupplyChainImpl() {
       }
 
       if (store.dept === "bar" && destinationCreditsBarStock(dest)) {
-        const barRes = issueFromStoreToBar(storeItemId, qty, actor);
+        const barRes = issueFromStoreToBar(storeItemId, qty, actor, {
+          destination: dest,
+          receivedBy,
+          receivedById: opts?.receivedById,
+          notes: opts?.notes,
+          issueUnit: opts?.issueUnit,
+        });
         if (barRes && "error" in barRes) return barRes;
         return { ok: true as const };
       }
@@ -1544,28 +2176,50 @@ function useSupplyChainImpl() {
         notifyKitchenRawStockChanged();
       }
 
+      if (store.dept === "bar" && destinationCreditsFnbRaw(dest)) {
+        setFnbRawStock((prev) => {
+          const idx = prev.findIndex((f) => f.storeItemId === storeItemId);
+          if (idx >= 0) {
+            return prev.map((f, i) =>
+              i === idx ? { ...f, quantityOnHand: f.quantityOnHand + qty } : f,
+            );
+          }
+          return [
+            ...prev,
+            {
+              id: `fnb-${storeItemId}`,
+              storeItemId,
+              name: store.name,
+              quantityOnHand: qty,
+              reorderLevel: store.reorderLevel,
+              unit: store.unit,
+            },
+          ];
+        });
+        notifyFnbRawStockChanged();
+      }
+
+      const displayUnit = opts?.issueUnit?.trim() || store.unit;
+      const displayQty = opts?.issueDisplayQty ?? qty;
+
       const extra = [
-        opts?.receivedBy?.trim()
-          ? `Received by: ${opts.receivedBy.trim()}`
-          : "",
+        `Received by: ${receivedBy}`,
         opts?.notes?.trim() ?? "",
       ]
         .filter(Boolean)
         .join(" · ");
 
-      const summary = extra
-        ? `Stock out: ${qty} ${store.unit} ${store.name} → ${dest} (${extra})`
-        : `Stock out: ${qty} ${store.unit} ${store.name} → ${dest}`;
+      const summary = `Stock out: ${displayQty} ${displayUnit} ${store.name} → ${dest} (${extra})`;
 
       setIssueOutLog((prev) => [
         {
           id: uid("issue"),
           storeItemId,
           itemName: store.name,
-          unit: store.unit,
-          quantity: qty,
+          unit: displayUnit,
+          quantity: displayQty,
           destination: dest,
-          receivedBy: opts?.receivedBy?.trim() || undefined,
+          receivedBy,
           receivedById: opts?.receivedById || undefined,
           notes: opts?.notes?.trim() || undefined,
           issuedAt: new Date().toISOString(),
@@ -1576,9 +2230,125 @@ function useSupplyChainImpl() {
       setActivityLog((a) =>
         log(a, "stock_issued_out", actor, summary, storeItemId),
       );
+      notifyIssueOutLogChanged();
       return { ok: true as const };
     },
     [storeItems, issueFromStoreToBar],
+  );
+
+  const issueOutCart = useCallback(
+    (
+      lines: IssueOutCartLine[],
+      destination: string,
+      actor: Actor,
+      opts: { receivedBy: string; receivedById?: string; notes?: string },
+    ): { ok: true; issued: number } | { error: string; shortages?: StockShortageLine[] } => {
+      if (!lines.length) return { error: "Add at least one item to the issue cart" };
+      const receivedBy = opts.receivedBy?.trim();
+      if (!receivedBy) return { error: "Received by is required" };
+
+      const shortages: StockShortageLine[] = [];
+      for (const line of lines) {
+        if (!Number.isFinite(line.quantity) || line.quantity <= 0) {
+          return { error: `Enter quantity for ${line.name}` };
+        }
+        const storeUnit = line.storeUnit || line.unit;
+        const storeItem = storeItems.find((s) => s.id === line.storeItemId);
+        const factors = storeItem
+          ? mergeUnitFactors(line.storeItemId, storeItem.unit, storeItem.unitFactors)
+          : undefined;
+        const storeQty = convertToStoreUnitsWithFactors(
+          line.quantity,
+          line.unit,
+          storeUnit,
+          factors,
+        );
+        if (storeQty == null) {
+          return {
+            error: `Set pack size for ${line.name} (${line.unit} → ${storeUnit}) before issuing`,
+          };
+        }
+        if (storeQty > line.maxAvailable) {
+          shortages.push({
+            name: line.name,
+            need: storeQty,
+            onHand: line.maxAvailable,
+            unit: storeUnit,
+          });
+        }
+      }
+
+      if (shortages.length) {
+        return {
+          error:
+            shortages.length === 1
+              ? `Insufficient ${shortages[0].name} in central store.`
+              : `${shortages.length} items are short in central store.`,
+          shortages,
+        };
+      }
+
+      for (const line of lines) {
+        const storeUnit = line.storeUnit || line.unit;
+        const storeItem = storeItems.find((s) => s.id === line.storeItemId);
+        const factors = storeItem
+          ? mergeUnitFactors(line.storeItemId, storeItem.unit, storeItem.unitFactors)
+          : undefined;
+        const storeQty =
+          convertToStoreUnitsWithFactors(
+            line.quantity,
+            line.unit,
+            storeUnit,
+            factors,
+          ) ?? 0;
+        const res = issueFromStoreToDepartment(
+          line.storeItemId,
+          storeQty,
+          destination,
+          actor,
+          {
+            receivedBy,
+            receivedById: opts.receivedById,
+            notes: opts.notes,
+            issueUnit: line.unit,
+            issueDisplayQty: line.quantity,
+          },
+        );
+        if ("error" in res) return res;
+      }
+      return { ok: true, issued: lines.length };
+    },
+    [issueFromStoreToDepartment, storeItems],
+  );
+
+  const updateFnbRawSellingPrice = useCallback(
+    (
+      fnbRawId: string,
+      sellingPrice: number,
+      actor: Actor,
+    ): { ok: true; storeItemId: string; name: string } | { error: string } => {
+      const row = fnbRawStock.find((f) => f.id === fnbRawId);
+      if (!row) return { error: "F&B stock item not found" };
+      if (!Number.isFinite(sellingPrice) || sellingPrice < 0) {
+        return { error: "Enter a valid selling price" };
+      }
+      setFnbRawStock((prev) =>
+        prev.map((f) =>
+          f.id === fnbRawId ? { ...f, sellingPricePerPortion: sellingPrice } : f,
+        ),
+      );
+      setActivityLog((a) =>
+        log(
+          a,
+          "recipe_updated",
+          actor,
+          `F&B selling price set: ${row.name} → ₦${sellingPrice}`,
+          fnbRawId,
+        ),
+      );
+      return { ok: true, storeItemId: row.storeItemId, name: row.name };
+    },
+    [fnbRawStock],
   );
 
   /** Admin kickstart: set absolute on-hand qty for a menu item (creates kitchen/bar link if missing). */
@@ -1769,7 +2539,8 @@ function useSupplyChainImpl() {
     (
       department: OutletDepartmentKey,
       lines: { item: OutletMenuItemRow; qty: number }[],
-    ): { ok: true } | { error: string } => {
+    ): { ok: true } | { error: string; shortages?: StockShortageLine[] } => {
+      const shortages: StockShortageLine[] = [];
       for (const line of lines) {
         const link = resolveOutletItemStock(
           line.item,
@@ -1780,17 +2551,23 @@ function useSupplyChainImpl() {
         if (!link.tracked) continue;
         const need = link.portionsPerSale * line.qty;
         const maxQty = maxSellableQty(link);
-        if (line.qty > maxQty) {
-          const src = link.source === "kitchen" ? "kitchen" : "bar";
-          return {
-            error: `${line.item.name} — only ${maxQty} available (${src}: ${link.available} on hand)`,
-          };
+        if (line.qty > maxQty || need > link.available) {
+          shortages.push({
+            name: line.item.name,
+            need,
+            onHand: link.available,
+            unit: link.unit,
+          });
         }
-        if (need > link.available) {
-          return {
-            error: `${line.item.name} — insufficient ${link.source} stock`,
-          };
-        }
+      }
+      if (shortages.length) {
+        return {
+          error:
+            shortages.length === 1
+              ? `${shortages[0].name} — not enough stock on hand.`
+              : `${shortages.length} items are out of stock for this order.`,
+          shortages,
+        };
       }
       return { ok: true };
     },
@@ -1853,13 +2630,18 @@ function useSupplyChainImpl() {
 
   const draftLines = useMemo(() => {
     if (
+      activePurchaseOrder &&
+      !showsStoreDraftPurchaseList(activePurchaseOrder)
+    ) {
+      return [];
+    }
+    if (
       activePurchaseOrder?.lines.length &&
       showsStoreDraftPurchaseList(activePurchaseOrder)
     ) {
       return poLinesToBasketLines(activePurchaseOrder.lines);
     }
-    if (!activePurchaseOrder && basket.length) return basket;
-    return [];
+    return basket;
   }, [activePurchaseOrder, basket]);
 
   const stats = useMemo(
@@ -1888,6 +2670,7 @@ function useSupplyChainImpl() {
 
   return {
     storeItems,
+    pendingStoreItems,
     basket: draftLines,
     activePurchaseOrder,
     addToBasket,
@@ -1906,10 +2689,21 @@ function useSupplyChainImpl() {
     recipes,
     kitchenStock,
     kitchenRawStock,
+    fnbRawStock,
     issueOutLog,
     barStock,
     issueFromStoreToBar,
     issueFromStoreToDepartment,
+    issueOutCart,
+    addStoreItemDirect,
+    updateStoreItemDirect,
+    submitStoreItemForApproval,
+    approvePendingStoreItem,
+    rejectPendingStoreItem,
+    clearAllStoreItems,
+    clearAllSupplyChainData,
+    clearSupplyHistory,
+    updateFnbRawSellingPrice,
     kickstartOutletMenuStock,
     issueRawToKitchenPortions,
     getOutletItemStock,
@@ -1923,6 +2717,7 @@ function useSupplyChainImpl() {
     updateRecipe,
     deleteRecipe,
     clearKitchenRestaurantMenu,
+    deleteInProgressBatch,
     kitchenRawOnHand,
     closeBatch,
     postFnbOrder,
@@ -1966,6 +2761,46 @@ export function useSupplyChain() {
     clearKitchenRestaurantMenu:
       ctx.clearKitchenRestaurantMenu ??
       (() => ({ error: "Supply chain not ready — refresh the page" })),
+    pendingStoreItems: ctx.pendingStoreItems ?? [],
+    fnbRawStock: ctx.fnbRawStock ?? [],
+    issueOutCart:
+      ctx.issueOutCart ??
+      (() => ({ error: "Supply chain not ready — refresh the page" })),
+    addStoreItemDirect:
+      ctx.addStoreItemDirect ??
+      (() => ({ error: "Supply chain not ready — refresh the page" })),
+    updateStoreItemDirect:
+      ctx.updateStoreItemDirect ??
+      (() => ({ error: "Supply chain not ready — refresh the page" })),
+    submitStoreItemForApproval:
+      ctx.submitStoreItemForApproval ??
+      (() => ({ error: "Supply chain not ready — refresh the page" })),
+    approvePendingStoreItem:
+      ctx.approvePendingStoreItem ??
+      (() => ({ error: "Supply chain not ready — refresh the page" })),
+    rejectPendingStoreItem:
+      ctx.rejectPendingStoreItem ??
+      (() => ({ error: "Supply chain not ready — refresh the page" })),
+    clearAllStoreItems:
+      ctx.clearAllStoreItems ??
+      (() => ({ ok: true as const, cleared: 0 })),
+    clearAllSupplyChainData:
+      ctx.clearAllSupplyChainData ??
+      (() => ({ ok: true as const })),
+    clearSupplyHistory:
+      ctx.clearSupplyHistory ??
+      (() => ({
+        ok: true as const,
+        purchaseOrdersCleared: 0,
+        issueOutCleared: 0,
+        activityCleared: 0,
+      })),
+    deleteInProgressBatch:
+      ctx.deleteInProgressBatch ??
+      (() => ({ error: "Supply chain not ready — refresh the page" })),
+    updateFnbRawSellingPrice:
+      ctx.updateFnbRawSellingPrice ??
+      (() => ({ error: "Supply chain not ready — refresh the page" })),
     accountantRetirementDecision:
       ctx.accountantRetirementDecision ??
       (() => ({ error: "Supply chain not ready — refresh the page" })),
@@ -1977,7 +2812,7 @@ export function useSupplyChain() {
     purchaseOrders: ctx.purchaseOrders ?? [],
     setBasketLineQty: ctx.setBasketLineQty ?? (() => {}),
     removeFromBasket: ctx.removeFromBasket ?? (() => {}),
-    clearBasket: ctx.clearBasket ?? (() => {}),
+    clearBasket: ctx.clearBasket ?? (() => ({ error: "Basket not ready — refresh the page" })),
     sendBasketForApproval:
       ctx.sendBasketForApproval ??
       (() => ({ error: "Basket not ready — refresh the page" })),
