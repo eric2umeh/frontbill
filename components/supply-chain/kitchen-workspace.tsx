@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState, useEffect } from 'react'
+import { useCallback, useMemo, useState, useEffect } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { useClientMounted } from '@/hooks/use-client-mounted'
@@ -43,6 +43,7 @@ import {
   stockLevelStatusLabel,
   stockLevelTextClass,
 } from '@/lib/supply-chain/stock-level-ui'
+import { mergeUnitFactors } from '@/lib/supply-chain/unit-factor-storage'
 
 function batchOutletsPortions(batch: {
   actualPortions?: number
@@ -151,6 +152,18 @@ export function KitchenWorkspace() {
   const roleKey = canonicalRoleKey(role) ?? ''
   const canManageBatchStandards =
     roleKey === 'superadmin' || roleKey === 'admin' || roleKey === 'manager'
+  const kitchenMaterialStoreItem = useCallback(
+    (storeItemId: string) => {
+      const storeItem = storeItems.find((s) => s.id === storeItemId)
+      if (!storeItem) return undefined
+
+      return {
+        ...storeItem,
+        unitFactors: mergeUnitFactors(storeItem.id, storeItem.unit, storeItem.unitFactors),
+      }
+    },
+    [storeItems],
+  )
 
   const recipeCategoryFilterOptions = useMemo(() => {
     const cats = [...new Set(recipes.map((r) => r.category).filter(Boolean))].sort((a, b) =>
@@ -172,8 +185,20 @@ export function KitchenWorkspace() {
     : 0
   const openBatchShortages = useMemo(
     () =>
-      batchMaterialShortages(openBatchRecipe, openBatchPortions, kitchenRawOnHand),
-    [openBatchRecipe, openBatchPortions, kitchenRawOnHand, kitchenRawStock, stockTick],
+      batchMaterialShortages(
+        openBatchRecipe,
+        openBatchPortions,
+        kitchenRawOnHand,
+        kitchenMaterialStoreItem,
+      ),
+    [
+      openBatchRecipe,
+      openBatchPortions,
+      kitchenRawOnHand,
+      kitchenMaterialStoreItem,
+      kitchenRawStock,
+      stockTick,
+    ],
   )
 
   const closeBatchRecord = closeDialog
@@ -188,8 +213,16 @@ export function KitchenWorkspace() {
         closeBatchRecipe,
         closeBatchRecord?.plannedPortions ?? 0,
         kitchenRawOnHand,
+        kitchenMaterialStoreItem,
       ),
-    [closeBatchRecipe, closeBatchRecord?.plannedPortions, kitchenRawOnHand, kitchenRawStock, stockTick],
+    [
+      closeBatchRecipe,
+      closeBatchRecord?.plannedPortions,
+      kitchenRawOnHand,
+      kitchenMaterialStoreItem,
+      kitchenRawStock,
+      stockTick,
+    ],
   )
 
   return (

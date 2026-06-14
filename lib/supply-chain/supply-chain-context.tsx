@@ -71,6 +71,11 @@ import {
 } from "./po-active";
 import { pushSupplyNotification } from "./supply-notifications";
 import { clearKitchenBatchDraft } from "./kitchen-batch-draft";
+import {
+  batchMaterialLineToRecipeIngredient,
+  batchRecipeMaterialLines,
+  normalizeRecipeIngredient,
+} from "./kitchen-material-units";
 import { convertToStoreUnits } from "./measurement-units";
 import {
   convertToStoreUnitsWithFactors,
@@ -1072,6 +1077,23 @@ function useSupplyChainImpl() {
     [kitchenRawStock],
   );
 
+  const getKitchenMaterialStoreItem = useCallback(
+    (storeItemId: string) => {
+      const storeItem = storeItems.find((s) => s.id === storeItemId);
+      if (!storeItem) return undefined;
+
+      return {
+        ...storeItem,
+        unitFactors: mergeUnitFactors(
+          storeItem.id,
+          storeItem.unit,
+          storeItem.unitFactors,
+        ),
+      };
+    },
+    [storeItems],
+  );
+
   const deductKitchenRawMaterials = useCallback(
     (lines: { storeItemId: string; quantity: number }[]) => {
       setKitchenRawStock((prev) =>
@@ -1138,14 +1160,11 @@ function useSupplyChainImpl() {
       }
 
       const kitchenRow = kitchenStock.find((k) => k.linkedRecipeId === recipeId);
-      const scale =
-        recipe.yieldPortions > 0 ? plannedPortions / recipe.yieldPortions : 1;
-      const materialLines = recipe.ingredients.map((ing) => ({
-        storeItemId: ing.stockItemId,
-        name: ing.name,
-        unit: ing.unit,
-        quantity: Math.round(ing.quantity * scale * 1000) / 1000,
-      }));
+      const materialLines = batchRecipeMaterialLines(
+        recipe,
+        plannedPortions,
+        getKitchenMaterialStoreItem,
+      );
 
       const batchCost =
         (recipeTotalCost(recipe) / Math.max(1, recipe.yieldPortions)) *
@@ -1183,7 +1202,7 @@ function useSupplyChainImpl() {
       );
       return { ok: true, batch };
     },
-    [recipes, kitchenStock, batches],
+    [recipes, kitchenStock, batches, getKitchenMaterialStoreItem],
   );
 
   const openKitchenBatchFromMaterials = useCallback(
@@ -1207,11 +1226,18 @@ function useSupplyChainImpl() {
         }
       }
 
+      const normalizedIngredients = materials.map((line) =>
+        batchMaterialLineToRecipeIngredient(
+          line,
+          getKitchenMaterialStoreItem(line.storeItemId),
+        ),
+      );
+
       const overheadLabour = Math.max(0, input.overheadLabour ?? 0);
       const overheadGas = Math.max(0, input.overheadGas ?? 0);
       const overheadOther = Math.max(0, input.overheadOther ?? 0);
       const ingredientCost = materials.reduce(
-        (sum, line) => sum + line.quantity * line.unitCost,
+        (sum, _line, index) => sum + normalizedIngredients[index].cost,
         0,
       );
       const batchCost = ingredientCost + overheadLabour + overheadGas + overheadOther;
@@ -1258,13 +1284,7 @@ function useSupplyChainImpl() {
         category: menuCategory,
         yieldPortions: input.plannedPortions,
         yieldLabel: `${input.plannedPortions} portions`,
-        ingredients: materials.map((m) => ({
-          stockItemId: m.storeItemId,
-          name: m.name,
-          quantity: m.quantity,
-          unit: m.unit,
-          cost: m.quantity * m.unitCost,
-        })),
+        ingredients: normalizedIngredients,
         overheadCost: overheadLabour + overheadGas + overheadOther,
         overheadLabour,
         overheadGas,
@@ -1293,7 +1313,7 @@ function useSupplyChainImpl() {
       );
       return { ok: true, kitchenStockId, recipeId };
     },
-    [storeItems],
+    [storeItems, getKitchenMaterialStoreItem],
   );
 
   const updateRecipe = useCallback(
@@ -1329,7 +1349,12 @@ function useSupplyChainImpl() {
       const overheadGas = patch.overheadGas ?? existing.overheadGas ?? 0;
       const overheadOther =
         patch.overheadOther ?? existing.overheadOther ?? patch.overheadCost ?? existing.overheadCost ?? 0;
-      const ingredients = patch.ingredients ?? existing.ingredients;
+      const ingredients = (patch.ingredients ?? existing.ingredients).map((ingredient) =>
+        normalizeRecipeIngredient(
+          ingredient,
+          getKitchenMaterialStoreItem(ingredient.stockItemId),
+        ),
+      );
       const outletMenuSync = normalizeBatchOutletMenuSync(
         patch.outletMenuSync ?? patch.fnbEligible ?? existing.outletMenuSync ?? existing.fnbEligible,
       );
@@ -1379,7 +1404,7 @@ function useSupplyChainImpl() {
       );
       return { ok: true, kitchenStockId, menuItemName: name, category, outletMenuSync };
     },
-    [recipes, kitchenStock],
+    [recipes, kitchenStock, getKitchenMaterialStoreItem],
   );
 
   const deleteRecipe = useCallback(
@@ -1755,17 +1780,11 @@ function useSupplyChainImpl() {
         ? recipes.find((r) => r.id === batch.recipeId)
         : undefined;
 
-      const scale =
-        recipe && recipe.yieldPortions > 0
-          ? actualPortions / recipe.yieldPortions
-          : 1;
-      const materialLines =
-        recipe?.ingredients.map((ing) => ({
-          storeItemId: ing.stockItemId,
-          name: ing.name,
-          unit: ing.unit,
-          quantity: Math.round(ing.quantity * scale * 1000) / 1000,
-        })) ?? [];
+      const materialLines = batchRecipeMaterialLines(
+        recipe,
+        actualPortions,
+        getKitchenMaterialStoreItem,
+      );
 
       const shortages: StockShortageLine[] = [];
       for (const line of materialLines) {
@@ -1892,7 +1911,14 @@ function useSupplyChainImpl() {
       );
       return { ok: true };
     },
-    [batches, recipes, kitchenStock, kitchenRawOnHand, deductKitchenRawMaterials],
+    [
+      batches,
+      recipes,
+      kitchenStock,
+      kitchenRawOnHand,
+      deductKitchenRawMaterials,
+      getKitchenMaterialStoreItem,
+    ],
   );
 
   const postFnbOrder = useCallback(
