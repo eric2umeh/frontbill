@@ -1,6 +1,8 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useEffect } from 'react'
+import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 import { useClientMounted } from '@/hooks/use-client-mounted'
 import { useAuth } from '@/lib/auth-context'
 import { useSupplyChain } from '@/lib/supply-chain/supply-chain-context'
@@ -13,25 +15,27 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { Flame, Pencil, Plus, Trash2, UtensilsCrossed } from 'lucide-react'
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from '@/components/ui/alert-dialog'
+import { Flame, Pencil, Plus, Trash2, Upload } from 'lucide-react'
 import { toast } from 'sonner'
 import { PaginatedListShell } from '@/components/shared/paginated-list-shell'
-import { KitchenBatchBuilder } from '@/components/supply-chain/kitchen-batch-builder'
-import { RecipeBatchDialog } from '@/components/supply-chain/recipe-batch-dialog'
+import {
+  batchRowFromCsvCells,
+  csvRowsSkipHeader,
+  parseCsvText,
+} from '@/lib/supply-chain/parse-csv-row'
+import { recipeTotalCost } from '@/lib/supply-chain/calculations'
+import { sanitizeQuantityInput, parseQuantityValue } from '@/lib/supply-chain/measurement-units'
+import { batchMaterialShortages } from '@/lib/supply-chain/batch-material-shortages'
+import { BatchMaterialShortageList } from '@/components/supply-chain/batch-material-shortage-list'
+import { syncBatchToRestaurantOutlet } from '@/lib/supply-chain/sync-restaurant-outlet'
+import {
+  batchOutletMenuSyncLabel,
+  normalizeBatchOutletMenuSync,
+  shouldSyncBatchToOutlet,
+} from '@/lib/supply-chain/batch-outlet-sync'
+import { outletStockSlug } from '@/lib/outlets/outlet-stock-slug'
 import { PageHeader } from '@/components/layout/page-header'
 import { RoomInventoryStatsStrip } from '@/components/shared/room-inventory-stats-strip'
-import type { Recipe } from '@/lib/supply-chain/types'
 import {
   getStockLevel,
   stockLevelBadgeClass,
@@ -39,6 +43,15 @@ import {
   stockLevelStatusLabel,
   stockLevelTextClass,
 } from '@/lib/supply-chain/stock-level-ui'
+
+function batchOutletsPortions(batch: {
+  actualPortions?: number
+  disposition?: { sold: number; staff: number; waste: number; returned: number }
+}): number {
+  if (!batch.disposition) return 0
+  const { staff, waste, returned } = batch.disposition
+  return Math.max(0, (batch.actualPortions || 0) - staff - waste - returned)
+}
 
 export function KitchenWorkspace() {
   const { name, role } = useAuth()
@@ -50,12 +63,26 @@ export function KitchenWorkspace() {
     batches,
     recipes,
     openBatch,
+    openKitchenBatchFromMaterials,
     closeBatch,
-    updateRecipe,
     deleteRecipe,
-    clearKitchenRestaurantMenu,
+    deleteInProgressBatch,
     getRecipeEconomics,
+    kitchenRawOnHand,
   } = useSupplyChain()
+
+  const [stockTick, setStockTick] = useState(0)
+  useEffect(() => {
+    const bump = () => setStockTick((t) => t + 1)
+    window.addEventListener('frontbill:kitchen-raw-stock', bump)
+    window.addEventListener('frontbill:supply-stock-changed', bump)
+    window.addEventListener('frontbill:issue-out-log-changed', bump)
+    return () => {
+      window.removeEventListener('frontbill:kitchen-raw-stock', bump)
+      window.removeEventListener('frontbill:supply-stock-changed', bump)
+      window.removeEventListener('frontbill:issue-out-log-changed', bump)
+    }
+  }, [])
 
   const kitchenReceipts = useMemo(
     () =>
@@ -71,13 +98,13 @@ export function KitchenWorkspace() {
     const rawByName = new Map(rawStock.map((r) => [r.name.trim().toLowerCase(), r]))
     const seenRawIds = new Set<string>()
 
-    const rows = kitchenReceipts.map((receipt) => {
+    const rows = kitchenReceipts.map((receipt, index) => {
       const raw =
         rawByStoreId.get(receipt.storeItemId) ??
         rawByName.get(receipt.itemName.trim().toLowerCase())
       if (raw) seenRawIds.add(raw.id)
       return {
-        key: receipt.id,
+        key: `${receipt.id}-${index}`,
         itemName: receipt.itemName,
         onHand: raw?.quantityOnHand ?? null,
         reorder: raw?.reorderLevel ?? null,
@@ -105,20 +132,65 @@ export function KitchenWorkspace() {
     }
 
     return rows
-  }, [kitchenRawStock, kitchenReceipts])
+  }, [kitchenRawStock, kitchenReceipts, stockTick])
+  const searchParams = useSearchParams()
   const mounted = useClientMounted()
   const [tab, setTab] = useState('stock')
-  const [clearingMenu, setClearingMenu] = useState(false)
-  const [batchDialog, setBatchDialog] = useState<{ recipeId: string } | null>(null)
+  useEffect(() => {
+    const t = searchParams.get('tab')
+    if (t) setTab(t)
+  }, [searchParams])
+  const [batchDialog, setBatchDialog] = useState<{ recipeId: string; defaultPortions: number } | null>(null)
   const [closeDialog, setCloseDialog] = useState<string | null>(null)
-  const [editRecipe, setEditRecipe] = useState<Recipe | null>(null)
+  const [budgetQty, setBudgetQty] = useState<Record<string, string>>({})
+  const [csvOpen, setCsvOpen] = useState(false)
+  const [csvText, setCsvText] = useState('')
   const [deleteRecipeId, setDeleteRecipeId] = useState<string | null>(null)
-  const [planned, setPlanned] = useState(4)
-  const [actual, setActual] = useState(4)
+  const [plannedInput, setPlannedInput] = useState('')
   const actor = { name: name ?? 'Kitchen', role: canonicalRoleKey(role) ?? 'staff' }
   const roleKey = canonicalRoleKey(role) ?? ''
   const canManageBatchStandards =
     roleKey === 'superadmin' || roleKey === 'admin' || roleKey === 'manager'
+
+  const recipeCategoryFilterOptions = useMemo(() => {
+    const cats = [...new Set(recipes.map((r) => r.category).filter(Boolean))].sort((a, b) =>
+      a.localeCompare(b),
+    )
+    return cats.map((c) => ({ value: c, label: c }))
+  }, [recipes])
+
+  const recipeCategoryById = useMemo(
+    () => new Map(recipes.map((r) => [r.id, r.category])),
+    [recipes],
+  )
+
+  const openBatchRecipe = batchDialog
+    ? recipes.find((r) => r.id === batchDialog.recipeId)
+    : undefined
+  const openBatchPortions = batchDialog
+    ? parseQuantityValue(plannedInput) || batchDialog.defaultPortions
+    : 0
+  const openBatchShortages = useMemo(
+    () =>
+      batchMaterialShortages(openBatchRecipe, openBatchPortions, kitchenRawOnHand),
+    [openBatchRecipe, openBatchPortions, kitchenRawOnHand, kitchenRawStock, stockTick],
+  )
+
+  const closeBatchRecord = closeDialog
+    ? batches.find((b) => b.id === closeDialog)
+    : undefined
+  const closeBatchRecipe = closeBatchRecord?.recipeId
+    ? recipes.find((r) => r.id === closeBatchRecord.recipeId)
+    : undefined
+  const closeBatchShortages = useMemo(
+    () =>
+      batchMaterialShortages(
+        closeBatchRecipe,
+        closeBatchRecord?.plannedPortions ?? 0,
+        kitchenRawOnHand,
+      ),
+    [closeBatchRecipe, closeBatchRecord?.plannedPortions, kitchenRawOnHand, kitchenRawStock, stockTick],
+  )
 
   return (
     <div className="space-y-6">
@@ -131,69 +203,15 @@ export function KitchenWorkspace() {
         />
         <div className="flex flex-wrap items-center gap-2 shrink-0">
           {canManageBatchStandards && (
-            <AlertDialog>
-              <AlertDialogTrigger asChild>
-                <Button variant="outline" size="sm" disabled={clearingMenu}>
-                  <UtensilsCrossed className="h-4 w-4 mr-2" />
-                  Clear restaurant & kitchen menu
-                </Button>
-              </AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>Clear all restaurant & kitchen menu items?</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    Deletes every Restaurant outlet menu item (including kickstart quantities from
-                    kitchen stock). Also clears kitchen finished stock, batch standards, and
-                    production records on this device. Menu categories are kept.
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>Cancel</AlertDialogCancel>
-                  <AlertDialogAction
-                    onClick={async () => {
-                      setClearingMenu(true)
-                      try {
-                        const res = await fetch('/api/supply/clear-restaurant-kitchen-menu', {
-                          method: 'POST',
-                          credentials: 'include',
-                        })
-                        const json = await res.json().catch(() => ({}))
-                        if (!res.ok) {
-                          toast.error(json.error ?? 'Failed to clear restaurant items')
-                          return
-                        }
-                        const local = clearKitchenRestaurantMenu(actor)
-                        if ('error' in local) {
-                          toast.error(local.error)
-                          return
-                        }
-                        const parts = [
-                          json.deleted
-                            ? `${json.deleted} restaurant item(s) removed`
-                            : 'No restaurant items in database',
-                          `${local.recipesCleared} batch standard(s)`,
-                          `${local.stockCleared} kitchen stock row(s)`,
-                          `${local.batchesCleared} production record(s)`,
-                        ]
-                        toast.success(`Menu cleared — ${parts.join(', ')}. Categories kept.`)
-                      } catch {
-                        toast.error('Could not reach server')
-                      } finally {
-                        setClearingMenu(false)
-                      }
-                    }}
-                  >
-                    Clear all items
-                  </AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
-          )}
-          {tab !== 'new-batch' && (
-            <Button className="shrink-0" onClick={() => setTab('new-batch')}>
-              <Plus className="h-4 w-4 mr-2" /> Open New Batch
+            <Button variant="outline" size="sm" className="shrink-0" onClick={() => setCsvOpen(true)}>
+              <Upload className="h-4 w-4 mr-2" /> Bulk CSV
             </Button>
           )}
+          <Button className="shrink-0" asChild>
+            <Link href="/supply/kitchen/new">
+              <Plus className="h-4 w-4 mr-2" /> Open New Batch
+            </Link>
+          </Button>
         </div>
       </div>
 
@@ -204,9 +222,9 @@ export function KitchenWorkspace() {
         <TabsList className="flex h-auto flex-wrap">
           <TabsTrigger value="stock">Finished Batch</TabsTrigger>
           <TabsTrigger value="raw-stock">Raw from Store</TabsTrigger>
-          <TabsTrigger value="new-batch">New batch</TabsTrigger>
           <TabsTrigger value="production">Production Records</TabsTrigger>
           <TabsTrigger value="recipes">All Batches</TabsTrigger>
+          <TabsTrigger value="budget">Budget</TabsTrigger>
         </TabsList>
 
         <TabsContent value="raw-stock" className="mt-4 space-y-4">
@@ -227,7 +245,7 @@ export function KitchenWorkspace() {
                     <TableHead>Item</TableHead>
                     <TableHead className="text-right">On hand</TableHead>
                     <TableHead className="text-right">Reorder at</TableHead>
-                    <TableHead>When</TableHead>
+                    <TableHead>Time received</TableHead>
                     <TableHead>Qty issued</TableHead>
                     <TableHead>Received by</TableHead>
                     <TableHead>Issued by</TableHead>
@@ -255,7 +273,12 @@ export function KitchenWorkspace() {
                           {row.reorder != null ? `${row.reorder} ${row.unit}` : '—'}
                         </TableCell>
                         <TableCell className="text-xs whitespace-nowrap">
-                          {row.issuedAt ? new Date(row.issuedAt).toLocaleString() : '—'}
+                          {row.issuedAt
+                            ? new Date(row.issuedAt).toLocaleString(undefined, {
+                                dateStyle: 'medium',
+                                timeStyle: 'short',
+                              })
+                            : '—'}
                         </TableCell>
                         <TableCell>
                           {row.qtyIssued != null ? `${row.qtyIssued} ${row.unit}` : '—'}
@@ -275,7 +298,7 @@ export function KitchenWorkspace() {
         <TabsContent value="stock" className="mt-4">
         <div>
           <p className="text-sm text-muted-foreground mb-3">
-            Produced portions deplete as Restaurant orders are posted. Raw materials are consumed when batches open.
+            Finished portions increase only when a production run is closed. Batch standards start at 0.
           </p>
           <PaginatedListShell
             items={kitchenStock}
@@ -292,13 +315,24 @@ export function KitchenWorkspace() {
                   { value: 'ok', label: 'OK' },
                 ],
               },
+              {
+                key: 'source',
+                label: 'Source',
+                options: [
+                  { value: 'produced', label: 'Produced' },
+                  { value: 'issued_raw', label: 'From store issue' },
+                ],
+              },
             ]}
             filterMatch={(k, key, value) => {
-              if (key !== 'stockLevel') return undefined
-              const level = getStockLevel(k.availablePortions, k.reorderLevel)
-              if (value === 'out') return level === 'out'
-              if (value === 'low') return level === 'low'
-              return level === 'ok'
+              if (key === 'stockLevel') {
+                const level = getStockLevel(k.availablePortions, k.reorderLevel)
+                if (value === 'out') return level === 'out'
+                if (value === 'low') return level === 'low'
+                return level === 'ok'
+              }
+              if (key === 'source') return k.source === value
+              return undefined
             }}
           >
             {(pageItems) => (
@@ -338,16 +372,11 @@ export function KitchenWorkspace() {
         </div>
         </TabsContent>
 
-        <TabsContent value="new-batch" className="mt-4">
-          <KitchenBatchBuilder />
-        </TabsContent>
-
         <TabsContent value="production" className="mt-4">
         <div>
           <p className="text-sm text-muted-foreground rounded-lg border bg-muted/30 px-3 py-2 mb-4">
-            <strong className="text-foreground">Production records</strong> are live production runs
-            (opened / closed batches). <strong className="text-foreground">All Batches</strong> holds
-            the batch standards chefs open to add portions.
+            <strong className="text-foreground">Production records</strong> are chef production runs
+            opened from All Batches. Raw stock deducts and finished stock updates when a run is closed.
           </p>
           <PaginatedListShell
             items={batches}
@@ -368,13 +397,26 @@ export function KitchenWorkspace() {
                 label: 'Status',
                 options: [
                   { value: 'in_progress', label: 'In progress' },
-                  { value: 'closed', label: 'Closed' },
+                  { value: 'completed', label: 'Completed' },
                 ],
               },
+              ...(recipeCategoryFilterOptions.length
+                ? [
+                    {
+                      key: 'category',
+                      label: 'Category',
+                      options: recipeCategoryFilterOptions,
+                    },
+                  ]
+                : []),
             ]}
             filterMatch={(b, key, value) => {
-              if (key !== 'status') return undefined
-              return b.status === value
+              if (key === 'status') return b.status === value
+              if (key === 'category') {
+                const cat = b.recipeId ? recipeCategoryById.get(b.recipeId) : undefined
+                return cat === value
+              }
+              return undefined
             }}
             emptyMessage="No production batches yet."
           >
@@ -385,7 +427,10 @@ export function KitchenWorkspace() {
               <div className="flex justify-between">
                 <div>
                   <h3 className="font-semibold">{b.recipeName} <Badge variant="outline">{b.shift}</Badge></h3>
-                  <p className="text-xs text-muted-foreground">{b.openedAt.slice(0, 10)} · {b.openedBy}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {b.openedAt.slice(0, 10)} · opened by {b.openedBy}
+                    {b.createdBy && b.createdBy !== b.openedBy ? ` · created by ${b.createdBy}` : ''}
+                  </p>
                 </div>
                 <Badge className={b.status === 'in_progress' ? 'bg-amber-100 text-amber-900' : 'bg-emerald-100 text-emerald-800'}>
                   {b.status.replace('_', ' ')}
@@ -400,13 +445,35 @@ export function KitchenWorkspace() {
               <p className="text-xs"><span className="font-medium">Materials:</span> {b.materialsUsed.join(', ')}</p>
               {b.disposition && (
                 <p className="text-xs flex gap-3">
-                  <span className="text-emerald-600">{b.disposition.sold} Sold</span>
+                  <span className="text-emerald-600">{batchOutletsPortions(b)} Outlets</span>
                   <span className="text-blue-600">{b.disposition.staff} Staff</span>
                   <span className="text-red-600">{b.disposition.waste} Waste</span>
                 </p>
               )}
               {b.status === 'in_progress' && (
-                <Button size="sm" className="ml-auto" onClick={() => setCloseDialog(b.id)}>Close Batch & Record Disposition</Button>
+                <div className="flex flex-wrap gap-2 justify-end">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="text-destructive gap-1"
+                    onClick={() => {
+                      const res = deleteInProgressBatch(b.id, actor)
+                      if ('error' in res) toast.error(res.error)
+                      else toast.success('Production run deleted — no stock was changed')
+                    }}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    Delete batch
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      setCloseDialog(b.id)
+                    }}
+                  >
+                    Close Batch &amp; Record Disposition ({b.plannedPortions} portions)
+                  </Button>
+                </div>
               )}
             </div>
                 ))}
@@ -419,14 +486,45 @@ export function KitchenWorkspace() {
         <TabsContent value="recipes" className="mt-4 space-y-4">
         <div className="space-y-4">
           <p className="text-sm text-muted-foreground rounded-lg border bg-muted/30 px-3 py-2">
-            <strong className="text-foreground">All Batches</strong> holds every batch standard, ingredient
-            list, and costing. New batches from the kitchen sync to the Restaurant outlet menu automatically.
+            <strong className="text-foreground">All Batches</strong> holds batch standards and costing.
+            Default is not listed on outlet POS. Kitchen always supplies Restaurant — choose{' '}
+            <strong className="text-foreground">Restaurant outlet</strong> or{' '}
+            <strong className="text-foreground">Restaurant / F&amp;B outlet</strong> when creating
+            or editing a batch.
           </p>
           <PaginatedListShell
             items={recipes}
             pageSize={6}
-            searchPlaceholder="Search recipes…"
+            searchPlaceholder="Search batches…"
             searchKeys={['name', 'category']}
+            filters={[
+              ...(recipeCategoryFilterOptions.length
+                ? [
+                    {
+                      key: 'category',
+                      label: 'Category',
+                      options: recipeCategoryFilterOptions,
+                    },
+                  ]
+                : []),
+              {
+                key: 'outletSync',
+                label: 'Outlet listing',
+                options: [
+                  { value: 'restaurant', label: 'Restaurant outlet' },
+                  { value: 'restaurant_fnb', label: 'Restaurant / F&B' },
+                  { value: 'none', label: 'Not on POS' },
+                ],
+              },
+            ]}
+            filterMatch={(r, key, value) => {
+              if (key === 'category') return r.category === value
+              if (key === 'outletSync') {
+                const sync = normalizeBatchOutletMenuSync(r.outletMenuSync ?? r.fnbEligible)
+                return sync === value
+              }
+              return undefined
+            }}
             emptyMessage="No recipes defined."
           >
             {(pageRecipes) => (
@@ -435,9 +533,20 @@ export function KitchenWorkspace() {
             const econ = getRecipeEconomics(r)
             return (
               <div key={r.id} className="rounded-xl border p-4 space-y-3">
-                <div className="flex justify-between">
+                <div className="flex justify-between gap-2">
                   <h3 className="font-semibold">{r.name}</h3>
-                  <Badge variant="secondary">{r.category}</Badge>
+                  <div className="flex flex-wrap gap-1.5 justify-end items-start shrink-0">
+                    <Badge variant="secondary">{r.category}</Badge>
+                    {shouldSyncBatchToOutlet(
+                      normalizeBatchOutletMenuSync(r.outletMenuSync ?? r.fnbEligible),
+                    ) ? (
+                      <Badge variant="default">
+                        {batchOutletMenuSyncLabel(
+                          normalizeBatchOutletMenuSync(r.outletMenuSync ?? r.fnbEligible),
+                        )}
+                      </Badge>
+                    ) : null}
+                  </div>
                 </div>
                 <p className="text-sm text-muted-foreground">Yield: {r.yieldLabel}</p>
                 <p className="text-sm font-medium text-emerald-600">Gross margin: {econ.marginPct}%</p>
@@ -450,7 +559,17 @@ export function KitchenWorkspace() {
                   ))}
                   <li className="flex justify-between text-muted-foreground">
                     <span>Overhead (gas, labour, misc)</span>
-                    <span>{formatNaira(r.overheadCost)}</span>
+                    <span>
+                      {formatNaira(
+                        (() => {
+                          const breakdown =
+                            (r.overheadLabour ?? 0) +
+                            (r.overheadGas ?? 0) +
+                            (r.overheadOther ?? 0)
+                          return breakdown > 0 ? breakdown : r.overheadCost
+                        })(),
+                      )}
+                    </span>
                   </li>
                 </ul>
                 <div className="flex justify-between text-sm border-t pt-2">
@@ -468,10 +587,12 @@ export function KitchenWorkspace() {
                         variant="outline"
                         size="sm"
                         className="gap-1"
-                        onClick={() => setEditRecipe(r)}
+                        asChild
                       >
-                        <Pencil className="h-3.5 w-3.5" />
-                        Edit
+                        <Link href={`/supply/kitchen/edit/${r.id}`}>
+                          <Pencil className="h-3.5 w-3.5" />
+                          Edit
+                        </Link>
                       </Button>
                       <Button
                         type="button"
@@ -488,9 +609,12 @@ export function KitchenWorkspace() {
                   <Button
                     className="flex-1 min-w-[140px]"
                     variant="outline"
+                    disabled={batches.some(
+                      (b) => b.recipeId === r.id && b.status === 'in_progress',
+                    )}
                     onClick={() => {
-                      setPlanned(r.yieldPortions)
-                      setBatchDialog({ recipeId: r.id })
+                      setPlannedInput(String(r.yieldPortions))
+                      setBatchDialog({ recipeId: r.id, defaultPortions: r.yieldPortions })
                     }}
                   >
                     <Flame className="h-4 w-4 mr-2" /> Open batch (add portions)
@@ -504,35 +628,198 @@ export function KitchenWorkspace() {
           </PaginatedListShell>
         </div>
         </TabsContent>
+
+        <TabsContent value="budget" className="mt-4 space-y-4">
+          <p className="text-sm text-muted-foreground rounded-lg border bg-muted/30 px-3 py-2">
+            Plan market purchases: pick a batch standard and how many runs you need. Total cost
+            includes ingredients and overhead per standard yield.
+          </p>
+          <div className="rounded-xl border overflow-hidden">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Batch</TableHead>
+                  <TableHead>Category</TableHead>
+                  <TableHead className="text-right">Std yield</TableHead>
+                  <TableHead className="text-right">Cost / batch</TableHead>
+                  <TableHead className="text-right">Qty (runs)</TableHead>
+                  <TableHead className="text-right">Budget total</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {recipes.map((r) => {
+                  const qty = Number(budgetQty[r.id] ?? 0) || 0
+                  const unitCost = recipeTotalCost(r)
+                  return (
+                    <TableRow key={r.id}>
+                      <TableCell className="font-medium">{r.name}</TableCell>
+                      <TableCell>{r.category}</TableCell>
+                      <TableCell className="text-right">{r.yieldPortions}</TableCell>
+                      <TableCell className="text-right">{formatNaira(unitCost)}</TableCell>
+                      <TableCell className="text-right">
+                        <Input
+                          type="number"
+                          min={0}
+                          className="h-8 w-20 ml-auto text-right"
+                          value={budgetQty[r.id] ?? ''}
+                          onChange={(e) =>
+                            setBudgetQty((m) => ({ ...m, [r.id]: e.target.value }))
+                          }
+                        />
+                      </TableCell>
+                      <TableCell className="text-right font-medium">
+                        {qty > 0 ? formatNaira(unitCost * qty) : '—'}
+                      </TableCell>
+                    </TableRow>
+                  )
+                })}
+              </TableBody>
+            </Table>
+          </div>
+          <p className="text-sm font-medium text-right">
+            Grand total:{' '}
+            {formatNaira(
+              recipes.reduce((sum, r) => {
+                const qty = Number(budgetQty[r.id] ?? 0) || 0
+                return sum + recipeTotalCost(r) * qty
+              }, 0),
+            )}
+          </p>
+        </TabsContent>
       </Tabs>
       )}
 
-      <Dialog open={!!batchDialog} onOpenChange={() => setBatchDialog(null)}>
+      <Dialog open={csvOpen} onOpenChange={setCsvOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Bulk upload batches (CSV)</DialogTitle>
+          </DialogHeader>
+          <p className="text-xs text-muted-foreground">
+            Columns: name, category, portions, price, labour, gas, other, outlet (blank | restaurant | fnb).
+            Example: Fish,Mains,4,3500,0,0,0,restaurant
+          </p>
+          <Input
+            type="file"
+            accept=".csv,text/csv"
+            onChange={(e) => {
+              const file = e.target.files?.[0]
+              if (!file) return
+              const reader = new FileReader()
+              reader.onload = () => setCsvText(String(reader.result ?? ''))
+              reader.readAsText(file)
+            }}
+          />
+          <textarea
+            className="w-full min-h-[120px] rounded-md border p-2 text-sm font-mono"
+            placeholder="Or paste CSV rows here…"
+            value={csvText}
+            onChange={(e) => setCsvText(e.target.value)}
+          />
+          <DialogFooter>
+            <Button
+              onClick={async () => {
+                const rows = csvRowsSkipHeader(parseCsvText(csvText))
+                if (!rows.length) {
+                  toast.error('Add CSV rows')
+                  return
+                }
+                let ok = 0
+                for (const cells of rows) {
+                  const row = batchRowFromCsvCells(cells)
+                  if (!row) continue
+                  const res = openKitchenBatchFromMaterials(
+                    {
+                      batchName: row.name,
+                      menuCategory: row.category,
+                      plannedPortions: row.portions,
+                      sellingPricePerPortion: row.sellingPrice,
+                      materials: [],
+                      overheadLabour: row.overheadLabour,
+                      overheadGas: row.overheadGas,
+                      overheadOther: row.overheadOther,
+                      outletMenuSync: row.outletMenuSync,
+                    },
+                    actor,
+                  )
+                  if ('error' in res) {
+                    toast.error(`${row.name}: ${res.error}`)
+                    continue
+                  }
+                  if (shouldSyncBatchToOutlet(row.outletMenuSync)) {
+                    const sync = await syncBatchToRestaurantOutlet({
+                      batchName: row.name,
+                      categoryName: row.category,
+                      unitPrice: row.sellingPrice,
+                      kitchenStockId: res.kitchenStockId,
+                      outletMenuSync: row.outletMenuSync,
+                    })
+                    if (!sync.ok) {
+                      toast.warning(`${row.name}: saved but Restaurant sync failed — ${sync.error}`)
+                    }
+                  }
+                  ok++
+                }
+                if (!ok) {
+                  toast.error('No valid rows imported — check column order and values')
+                  return
+                }
+                toast.success(`Created ${ok} batch standard(s) from CSV`)
+                setCsvOpen(false)
+                setCsvText('')
+              }}
+            >
+              Import batches
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={!!batchDialog}
+        onOpenChange={(open) => {
+          if (!open) setBatchDialog(null)
+        }}
+      >
         <DialogContent>
           <DialogHeader><DialogTitle>Open production batch</DialogTitle></DialogHeader>
-          <div className="space-y-2">
-            <Label>Planned portions</Label>
-            <Input type="number" value={planned} onChange={(e) => setPlanned(Number(e.target.value))} />
-            <p className="text-xs text-muted-foreground">
-              Raw materials deduct from kitchen stock (must be issued out from Central Store first).
-              Finished portions are added when the batch closes.
-            </p>
+          <div className="space-y-3">
+            <div className="space-y-2">
+              <Label>Planned portions</Label>
+              <Input
+                inputMode="decimal"
+                placeholder="e.g. 6"
+                value={plannedInput}
+                onChange={(e) => setPlannedInput(sanitizeQuantityInput(e.target.value))}
+              />
+              <p className="text-xs text-muted-foreground">
+                Default is the batch standard yield ({batchDialog?.defaultPortions ?? 0} portions).
+                Raw stock deducts when you close the run — check materials below first.
+              </p>
+            </div>
+            <BatchMaterialShortageList
+              portions={openBatchPortions}
+              shortages={openBatchShortages}
+              shortHint="Issue these from central store → kitchen before you close the run."
+            />
           </div>
           <DialogFooter>
             <Button
               onClick={async () => {
                 if (!batchDialog) return
-                const res = openBatch(batchDialog.recipeId, planned, actor)
-                if (!res) {
-                  toast.error('Batch standard not found')
+                const planned =
+                  parseQuantityValue(plannedInput) || batchDialog.defaultPortions
+                if (planned <= 0) {
+                  toast.error('Enter valid planned portions')
                   return
                 }
+                const res = openBatch(batchDialog.recipeId, planned, actor)
                 if ('error' in res) {
                   toast.error(res.error)
                   return
                 }
-                toast.success('Production batch opened')
+                toast.success('Production run opened — close it when cooking is done')
                 setBatchDialog(null)
+                setTab('production')
               }}
             >
               Start batch
@@ -544,40 +831,93 @@ export function KitchenWorkspace() {
       <Dialog open={!!closeDialog} onOpenChange={() => setCloseDialog(null)}>
         <DialogContent>
           <DialogHeader><DialogTitle>Close batch</DialogTitle></DialogHeader>
-          <Label>Actual portions produced</Label>
-          <Input type="number" value={actual} onChange={(e) => setActual(Number(e.target.value))} className="mb-4" />
-          <DialogFooter>
-            <Button
-              onClick={async () => {
-                if (!closeDialog) return
-                closeBatch(closeDialog, actual, { sold: 0, staff: 0, waste: 0, returned: 0 }, actor)
-                toast.success(`${actual} portions added to kitchen finished stock`)
-                setCloseDialog(null)
-              }}
-            >
-              Close &amp; push to F&amp;B
-            </Button>
-          </DialogFooter>
+          {closeDialog && (() => {
+            const batch = closeBatchRecord
+            const portions = batch?.plannedPortions ?? 0
+            return (
+              <>
+                <p className="text-sm text-muted-foreground">
+                  Closes this production run and deducts raw materials from kitchen stock. Finished
+                  portions are added to outlet stock when you close.
+                </p>
+                <div className="space-y-3">
+                  <div className="space-y-2">
+                    <Label className="text-xs">Portions produced</Label>
+                    <Input readOnly className="bg-muted mt-0.5" value={String(portions)} />
+                  </div>
+                  <BatchMaterialShortageList
+                    portions={portions}
+                    shortages={closeBatchShortages}
+                    shortHint="Issue these from central store → kitchen, then close the run."
+                  />
+                </div>
+                <DialogFooter>
+                  <Button
+                    variant="outline"
+                    onClick={() => setCloseDialog(null)}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    disabled={closeBatchShortages.length > 0}
+                    onClick={async () => {
+                      const batch = batches.find((b) => b.id === closeDialog)
+                      const recipe = batch?.recipeId
+                        ? recipes.find((r) => r.id === batch.recipeId)
+                        : undefined
+                      const actual = batch?.plannedPortions ?? 0
+                      if (actual <= 0) {
+                        toast.error('Invalid portions for this batch')
+                        return
+                      }
+                      const res = closeBatch(
+                        closeDialog,
+                        actual,
+                        { sold: actual, staff: 0, waste: 0, returned: 0 },
+                        actor,
+                      )
+                      if ('error' in res) {
+                        toast.error(res.error)
+                        return
+                      }
+                      const outletSync = recipe
+                        ? normalizeBatchOutletMenuSync(recipe.outletMenuSync ?? recipe.fnbEligible)
+                        : 'none'
+                      if (shouldSyncBatchToOutlet(outletSync)) {
+                        const kitchenStockId =
+                          batch?.kitchenStockId ?? `ks-${outletStockSlug(recipe!.name)}`
+                        const sync = await syncBatchToRestaurantOutlet({
+                          batchName: recipe!.name,
+                          categoryName: recipe!.category,
+                          kitchenStockId,
+                          unitPrice: recipe!.sellingPricePerPortion,
+                          outletMenuSync: outletSync,
+                        })
+                        if (sync.ok) {
+                          toast.success(
+                            `${actual} portions of ${recipe!.name} ready — ${batchOutletMenuSyncLabel(outletSync)}`,
+                          )
+                        } else {
+                          toast.warning(
+                            `Production closed but outlet sync failed: ${sync.error}. Edit batch and select an outlet listing, then save.`,
+                          )
+                        }
+                      } else {
+                        toast.success(
+                          `${actual} portions added to finished batch (not listed on outlet POS)`,
+                        )
+                      }
+                      setCloseDialog(null)
+                    }}
+                  >
+                    Close production run
+                  </Button>
+                </DialogFooter>
+              </>
+            )
+          })()}
         </DialogContent>
       </Dialog>
-
-      <RecipeBatchDialog
-        recipe={editRecipe}
-        open={!!editRecipe}
-        onOpenChange={(open) => {
-          if (!open) setEditRecipe(null)
-        }}
-        onSave={async (patch) => {
-          if (!editRecipe) return
-          const res = updateRecipe(editRecipe.id, patch, actor)
-          if ('error' in res) {
-            toast.error(res.error)
-            return
-          }
-          toast.success('Batch standard updated')
-          setEditRecipe(null)
-        }}
-      />
 
       <Dialog open={!!deleteRecipeId} onOpenChange={() => setDeleteRecipeId(null)}>
         <DialogContent>
