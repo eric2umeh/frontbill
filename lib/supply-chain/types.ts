@@ -1,5 +1,8 @@
 /** Supply chain — accountable F&B flow (mock-first, revamp branch). */
 
+import type { BatchOutletMenuSync } from './batch-outlet-sync'
+export type { BatchOutletMenuSync } from './batch-outlet-sync'
+
 export type SupplyDept =
   | 'all'
   | 'kitchen'
@@ -83,6 +86,41 @@ export interface StoreItem {
   benchmarkPrice: number
   /** Kitchen dept items only — drives category picker in batch builder. */
   kitchenCategory?: KitchenMaterialCategory
+  /** Custom units per 1 catalogue unit (e.g. { bottle: 24 } = 1 crate has 24 bottles). */
+  unitFactors?: Record<string, number>
+}
+
+/** Store clerk submission — requires admin/superadmin approval before catalogue add. */
+export interface PendingStoreItem {
+  id: string
+  name: string
+  unit: string
+  dept: Exclude<SupplyDept, 'all'>
+  quantityInStore: number
+  reorderLevel: number
+  lastPrice: number
+  benchmarkPrice: number
+  kitchenCategory?: KitchenMaterialCategory
+  status: 'pending' | 'approved' | 'rejected'
+  submittedBy: string
+  submittedByName: string
+  submittedAt: string
+  reviewedBy?: string
+  reviewedAt?: string
+}
+
+export interface IssueOutCartLine {
+  storeItemId: string
+  name: string
+  /** Unit the user is issuing in (crate, bottle, kg, …). */
+  unit: string
+  /** Central store catalogue unit — used for stock deduction. */
+  storeUnit: string
+  dept: Exclude<SupplyDept, 'all'>
+  /** Qty in `unit`. */
+  quantity: number
+  /** Max issuable in store catalogue units. */
+  maxAvailable: number
 }
 
 export interface IssueOutRecord {
@@ -178,8 +216,16 @@ export interface Recipe {
   yieldPortions: number
   yieldLabel: string
   ingredients: RecipeIngredient[]
+  /** @deprecated use overheadLabour + overheadGas + overheadOther */
   overheadCost: number
+  overheadLabour?: number
+  overheadGas?: number
+  overheadOther?: number
   sellingPricePerPortion: number
+  /** Outlet POS listing — kitchen always supplies Restaurant; this picks where to sell. */
+  outletMenuSync?: BatchOutletMenuSync
+  /** @deprecated use outletMenuSync */
+  fnbEligible?: boolean
 }
 
 export interface BatchMaterialLine {
@@ -199,10 +245,17 @@ export interface CreateKitchenBatchInput {
   notes?: string
   /** Reuse kitchen stock row when linking to an existing Restaurant menu item. */
   kitchenStockId?: string
+  overheadLabour?: number
+  overheadGas?: number
+  overheadOther?: number
+  outletMenuSync?: BatchOutletMenuSync
+  /** @deprecated use outletMenuSync */
+  fnbEligible?: boolean
 }
 
 /** Draft new-batch cart — persisted while switching kitchen tabs. */
 export interface KitchenBatchDraft {
+  draftVersion?: number
   search: string
   menuCategory: string
   menuCategoryId: string | null
@@ -211,6 +264,10 @@ export interface KitchenBatchDraft {
   linkedKitchenStockId: string | null
   plannedPortions: string
   sellingPrice: string
+  overheadLabour: string
+  overheadGas: string
+  overheadOther: string
+  outletMenuSync: BatchOutletMenuSync
   notes: string
   cart: BatchMaterialLine[]
 }
@@ -228,11 +285,25 @@ export interface ProductionBatch {
   batchCost?: number
   sellingPricePerPortion?: number
   materialsUsed: string[]
+  /** Raw materials deducted when batch opened — restored if in-progress batch is deleted. */
+  deductedMaterials?: { storeItemId: string; quantity: number }[]
   kitchenStockId?: string
   openedAt: string
   openedBy: string
+  createdBy?: string
   closedAt?: string
   disposition?: { sold: number; staff: number; waste: number; returned: number }
+}
+
+/** F&B raw stock — drinks/supplies issued from central store to Restaurant F&B. */
+export interface FnbRawStockItem {
+  id: string
+  storeItemId: string
+  name: string
+  quantityOnHand: number
+  reorderLevel: number
+  unit: string
+  sellingPricePerPortion?: number
 }
 
 export interface KitchenStockItem {
