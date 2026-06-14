@@ -1,7 +1,5 @@
-'use client'
+import { redirect } from 'next/navigation'
 
-import { ProfitabilityPanel } from '@/components/analytics/profitability-panel'
-
-export default function AnalyticsProfitabilityPage() {
-  return <ProfitabilityPanel />
+export default function AnalyticsProfitabilityRedirectPage() {
+  redirect('/transactions/analytics/profitability')
 }

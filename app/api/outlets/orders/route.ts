@@ -142,8 +142,18 @@ export async function POST(request: Request) {
       if (unitPrice !== menuUnitPrice && !itemAllowsPosPriceEdit(item, menuCategories ?? [])) {
         return NextResponse.json(
           {
-            error: `Custom price is not allowed for "${item.name}". Enable "Flexible price on POS" on its menu category.`,
+            error: `Custom price is not allowed for "${item.name}". Enable flexible price on the item or its menu category.`,
           },
+          { status: 400 },
+        )
+      }
+      if (
+        itemAllowsPosPriceEdit(item, menuCategories ?? []) &&
+        menuUnitPrice === 0 &&
+        unitPrice <= 0
+      ) {
+        return NextResponse.json(
+          { error: `"${item.name}" requires a sale price greater than zero.` },
           { status: 400 },
         )
       }

@@ -5,13 +5,15 @@ export async function outletApiHeaders(
   extra?: Record<string, string>,
 ): Promise<Record<string, string>> {
   const headers: Record<string, string> = { ...extra }
-  const supabase = createClient()
-  if (!supabase) return headers
-  const {
-    data: { session },
-  } = await supabase.auth.getSession()
-  if (session?.access_token) {
-    headers.Authorization = `Bearer ${session.access_token}`
+  try {
+    const supabase = createClient()
+    if (!supabase) return headers
+    const { data: { session }, error } = await supabase.auth.getSession()
+    if (!error && session?.access_token) {
+      headers.Authorization = `Bearer ${session.access_token}`
+    }
+  } catch {
+    // Supabase unreachable — same-origin API routes may still use session cookies
   }
   return headers
 }

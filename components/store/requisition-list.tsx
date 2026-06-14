@@ -21,6 +21,8 @@ import {
 import { Plus, Loader2 } from 'lucide-react'
 import { format, parseISO } from 'date-fns'
 import { toast } from 'sonner'
+import { usePaginatedList } from '@/lib/hooks/use-paginated-list'
+import { TableListControls } from '@/components/shared/table-list-controls'
 
 const statusVariant: Record<
   RequisitionStatus,
@@ -42,6 +44,35 @@ export function RequisitionList({ embedded = false }: { embedded?: boolean }) {
   const [rows, setRows] = useState<StoreRequisitionRow[]>([])
   const [names, setNames] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
+  const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState('all')
+
+  const {
+    paginatedItems: visibleRows,
+    page,
+    setPage,
+    totalPages,
+    totalCount,
+    startIndex,
+    pageSize,
+  } = usePaginatedList<StoreRequisitionRow>({
+    items: rows,
+    pageSize: 15,
+    search,
+    searchMatch: (r, query) => {
+      const q = query.trim().toLowerCase()
+      return (
+        r.reference.toLowerCase().includes(q) ||
+        r.department.toLowerCase().includes(q) ||
+        sectionLabel(r.store_section).toLowerCase().includes(q)
+      )
+    },
+    activeFilters: { status: statusFilter },
+    filterMatch: (r, key, value) => {
+      if (key !== 'status') return undefined
+      return r.status === value
+    },
+  })
 
   const load = useCallback(async () => {
     const supabase = createClient()
@@ -144,7 +175,34 @@ export function RequisitionList({ embedded = false }: { embedded?: boolean }) {
           ) : rows.length === 0 ? (
             <p className="py-8 text-center text-sm text-muted-foreground">No requisitions yet.</p>
           ) : (
-            <div className="rounded-md border overflow-x-auto">
+            <div className="space-y-3">
+              <TableListControls
+                section="toolbar"
+                search={search}
+                onSearchChange={setSearch}
+                searchPlaceholder="Search reference, department…"
+                filters={[
+                  {
+                    key: 'status',
+                    label: 'Status',
+                    options: [
+                      { value: 'submitted', label: 'Submitted' },
+                      { value: 'processing', label: 'Processing' },
+                      { value: 'fulfilled', label: 'Fulfilled' },
+                      { value: 'cancelled', label: 'Cancelled' },
+                    ],
+                  },
+                ]}
+                activeFilters={{ status: statusFilter }}
+                onFilterChange={(_, value) => setStatusFilter(value)}
+                page={page}
+                totalPages={totalPages}
+                onPageChange={setPage}
+                startIndex={startIndex}
+                pageSize={pageSize}
+                totalCount={totalCount}
+              />
+              <div className="rounded-md border overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -158,7 +216,7 @@ export function RequisitionList({ embedded = false }: { embedded?: boolean }) {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {rows.map((r) => (
+                  {visibleRows.map((r) => (
                     <TableRow key={r.id}>
                       <TableCell className="font-medium whitespace-nowrap">{r.reference}</TableCell>
                       <TableCell className="whitespace-nowrap">
@@ -181,6 +239,21 @@ export function RequisitionList({ embedded = false }: { embedded?: boolean }) {
                   ))}
                 </TableBody>
               </Table>
+              </div>
+              {totalCount === 0 && (
+                <p className="py-6 text-center text-sm text-muted-foreground">No requisitions match your filters.</p>
+              )}
+              {totalPages > 1 && (
+                <TableListControls
+                  section="pagination"
+                  page={page}
+                  totalPages={totalPages}
+                  onPageChange={setPage}
+                  startIndex={startIndex}
+                  pageSize={pageSize}
+                  totalCount={totalCount}
+                />
+              )}
             </div>
           )}
         </CardContent>

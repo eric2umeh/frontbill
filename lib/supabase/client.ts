@@ -11,7 +11,23 @@ export function createClient() {
   }
 
   try {
-    const client = createBrowserClient(url, key)
+    const client = createBrowserClient(url, key, {
+      global: {
+        fetch: async (input, init) => {
+          try {
+            return await fetch(input, init)
+          } catch (error) {
+            if (process.env.NODE_ENV === 'development') {
+              console.warn(
+                '[Supabase] Network request failed — verify NEXT_PUBLIC_SUPABASE_URL and that your project is reachable.',
+                error,
+              )
+            }
+            throw error
+          }
+        },
+      },
+    })
 
     if (process.env.NODE_ENV === 'production') {
       client.removeAllChannels()

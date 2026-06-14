@@ -1,6 +1,12 @@
-import { headers } from 'next/headers'
+import { cookies, headers } from 'next/headers'
+import { getAuthUserFromCookies } from '@/lib/supabase/auth-from-cookies'
 import { createClient } from '@/lib/supabase/server'
-import { APP_LOGIN_ROLE_KEYS, canonicalRoleKey } from '@/lib/permissions'
+import { createAdminClient } from '@/lib/supabase/admin'
+import {
+  APP_LOGIN_ROLE_KEYS,
+  canonicalRoleKey,
+  type RoleKey,
+} from '@/lib/permissions'
 import {
   AUTH_USER_EMAIL_HEADER,
   AUTH_USER_ID_HEADER,
@@ -20,9 +26,28 @@ export type LoadDashboardUserResult =
   | { status: 'unauthenticated' }
   | { status: 'forbidden' }
 
-const PROFILE_FETCH_MS = 10_000
+type ProfileRow = {
+  full_name: string | null
+  role: string | null
+  organization_id: string | null
+}
 
-async function fetchProfile(
+const PROFILE_FETCH_MS = 2_500
+const ADMIN_PROFILE_FETCH_MS = 2_500
+
+function isAllowedLoginRole(roleKey: RoleKey | null): roleKey is RoleKey {
+  return roleKey != null && APP_LOGIN_ROLE_KEYS.includes(roleKey)
+}
+
+function resolveLoginRole(...candidates: Array<string | null | undefined>): RoleKey | null {
+  for (const candidate of candidates) {
+    const roleKey = canonicalRoleKey(candidate)
+    if (isAllowedLoginRole(roleKey)) return roleKey
+  }
+  return null
+}
+
+async function fetchProfileWithTimeout(
   supabase: Awaited<ReturnType<typeof createClient>>,
   userId: string,
 ) {
@@ -32,7 +57,7 @@ async function fetchProfile(
     .eq('id', userId)
     .maybeSingle()
 
-  const raced = await Promise.race([
+  return Promise.race([
     query,
     new Promise<{ data: null; error: { message: string } }>((resolve) =>
       setTimeout(
@@ -41,8 +66,85 @@ async function fetchProfile(
       ),
     ),
   ])
+}
 
-  return raced
+async function fetchProfileById(userId: string): Promise<{
+  profile: ProfileRow | null
+  profileError: { message: string } | null
+  metadataRole: string | null
+}> {
+  let metadataRole: string | null = null
+
+  // Prefer session cookies (fast). Admin/service-role calls can hang when Supabase is unhealthy.
+  try {
+    const supabase = await createClient()
+    const { data: profile, error: profileError } = await fetchProfileWithTimeout(
+      supabase,
+      userId,
+    )
+    if (profile && !profileError) {
+      return { profile, profileError: null, metadataRole }
+    }
+    if (profileError) {
+      console.warn('loadDashboardUser: session profile fetch failed', profileError.message)
+    }
+  } catch (error) {
+    console.warn(
+      'loadDashboardUser: session client profile fetch error',
+      error instanceof Error ? error.message : error,
+    )
+  }
+
+  try {
+    const adminResult = await Promise.race([
+      (async () => {
+        const admin = createAdminClient()
+        const [profileResult, authResult] = await Promise.all([
+          admin
+            .from('profiles')
+            .select('full_name, role, organization_id')
+            .eq('id', userId)
+            .maybeSingle(),
+          admin.auth.admin.getUserById(userId),
+        ])
+
+        const meta = authResult.data.user?.user_metadata?.role
+        const roleFromMeta =
+          typeof meta === 'string' && meta.trim() ? meta.trim() : null
+
+        if (!profileResult.error && profileResult.data) {
+          return {
+            profile: profileResult.data,
+            profileError: null as { message: string } | null,
+            metadataRole: roleFromMeta,
+          }
+        }
+
+        if (profileResult.error) {
+          console.warn(
+            'loadDashboardUser: admin profile fetch failed',
+            profileResult.error.message,
+          )
+        }
+
+        return null
+      })(),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), ADMIN_PROFILE_FETCH_MS)),
+    ])
+
+    if (adminResult) return adminResult
+  } catch (error) {
+    console.warn(
+      'loadDashboardUser: admin client unavailable',
+      error instanceof Error ? error.message : error,
+    )
+  }
+
+  return {
+    profile: null,
+    profileError: { message: 'Profile unavailable' },
+    metadataRole,
+  }
 }
 
 export async function loadDashboardUser(): Promise<LoadDashboardUserResult> {
@@ -54,23 +156,35 @@ export async function loadDashboardUser(): Promise<LoadDashboardUserResult> {
 
   try {
     const hdrs = await headers()
-    const userId = hdrs.get(AUTH_USER_ID_HEADER)
-    const email = hdrs.get(AUTH_USER_EMAIL_HEADER) || ''
+    let userId = hdrs.get(AUTH_USER_ID_HEADER)
+    let email = hdrs.get(AUTH_USER_EMAIL_HEADER) || ''
 
     if (!userId) {
-      return { status: 'unauthenticated' }
+      const cookieStore = await cookies()
+      const fromCookie = getAuthUserFromCookies(cookieStore.getAll())
+      if (!fromCookie) {
+        return { status: 'unauthenticated' }
+      }
+      userId = fromCookie.id
+      email = fromCookie.email
     }
 
-    const supabase = await createClient()
-    const { data: profile, error: profileError } = await fetchProfile(supabase, userId)
+    const { profile, profileError, metadataRole } = await fetchProfileById(userId)
 
     if (profileError) {
       console.warn('loadDashboardUser: profile fetch failed', profileError.message)
     }
 
-    if (!profileError && profile) {
-      const rk = canonicalRoleKey(profile.role)
-      if (!rk || !APP_LOGIN_ROLE_KEYS.includes(rk)) {
+    const roleKey = resolveLoginRole(profile?.role, metadataRole)
+
+    if (profile) {
+      if (!roleKey) {
+        console.warn('loadDashboardUser: forbidden — unrecognized role', {
+          userId,
+          email,
+          profileRole: profile.role,
+          metadataRole,
+        })
         return { status: 'forbidden' }
       }
 
@@ -80,8 +194,22 @@ export async function loadDashboardUser(): Promise<LoadDashboardUserResult> {
           id: userId,
           email,
           name: profile.full_name || email.split('@')[0] || 'User',
-          role: rk,
+          role: roleKey,
           organizationId: profile.organization_id || '',
+          organizationLogoUrl: '',
+        },
+      }
+    }
+
+    if (roleKey) {
+      return {
+        status: 'ok',
+        user: {
+          id: userId,
+          email,
+          name: email.split('@')[0] || 'User',
+          role: roleKey,
+          organizationId: '',
           organizationLogoUrl: '',
         },
       }

@@ -31,6 +31,8 @@ build/
 .env.production.local
 .env.test.local
 .env.example
+.env.local.example
+.env*.example
 
 # OS files
 .DS_Store

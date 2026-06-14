@@ -21,6 +21,8 @@ import { Loader2, Plus } from 'lucide-react'
 import { format, parseISO } from 'date-fns'
 import { formatNaira } from '@/lib/utils/currency'
 import { toast } from 'sonner'
+import { usePaginatedList } from '@/lib/hooks/use-paginated-list'
+import { TableListControls } from '@/components/shared/table-list-controls'
 
 const statusVariant: Record<
   PurchaseOrderStatus,
@@ -38,6 +40,35 @@ export function PurchaseOrderList({ embedded = false }: { embedded?: boolean }) 
   const [rows, setRows] = useState<StorePurchaseOrderRow[]>([])
   const [names, setNames] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
+  const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState('all')
+
+  const {
+    paginatedItems: visibleRows,
+    page,
+    setPage,
+    totalPages,
+    totalCount,
+    startIndex,
+    pageSize,
+  } = usePaginatedList<StorePurchaseOrderRow>({
+    items: rows,
+    pageSize: 15,
+    search,
+    searchMatch: (r, query) => {
+      const q = query.trim().toLowerCase()
+      return (
+        r.reference.toLowerCase().includes(q) ||
+        r.department.toLowerCase().includes(q) ||
+        r.status.toLowerCase().includes(q)
+      )
+    },
+    activeFilters: { status: statusFilter },
+    filterMatch: (r, key, value) => {
+      if (key !== 'status') return undefined
+      return r.status === value
+    },
+  })
 
   const load = useCallback(async () => {
     const supabase = createClient()
@@ -136,7 +167,33 @@ export function PurchaseOrderList({ embedded = false }: { embedded?: boolean }) 
           ) : rows.length === 0 ? (
             <p className="py-8 text-center text-sm text-muted-foreground">No purchase orders yet.</p>
           ) : (
-            <div className="rounded-md border overflow-x-auto">
+            <div className="space-y-3">
+              <TableListControls
+                section="toolbar"
+                search={search}
+                onSearchChange={setSearch}
+                searchPlaceholder="Search reference, department…"
+                filters={[
+                  {
+                    key: 'status',
+                    label: 'Status',
+                    options: [
+                      { value: 'draft', label: 'Draft' },
+                      { value: 'locked', label: 'Locked' },
+                      { value: 'cancelled', label: 'Cancelled' },
+                    ],
+                  },
+                ]}
+                activeFilters={{ status: statusFilter }}
+                onFilterChange={(_, value) => setStatusFilter(value)}
+                page={page}
+                totalPages={totalPages}
+                onPageChange={setPage}
+                startIndex={startIndex}
+                pageSize={pageSize}
+                totalCount={totalCount}
+              />
+              <div className="rounded-md border overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -150,7 +207,7 @@ export function PurchaseOrderList({ embedded = false }: { embedded?: boolean }) 
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {rows.map((r) => (
+                  {visibleRows.map((r) => (
                     <TableRow key={r.id}>
                       <TableCell className="font-medium whitespace-nowrap">{r.reference}</TableCell>
                       <TableCell className="whitespace-nowrap">
@@ -173,6 +230,21 @@ export function PurchaseOrderList({ embedded = false }: { embedded?: boolean }) 
                   ))}
                 </TableBody>
               </Table>
+              </div>
+              {totalCount === 0 && (
+                <p className="py-6 text-center text-sm text-muted-foreground">No purchase orders match your filters.</p>
+              )}
+              {totalPages > 1 && (
+                <TableListControls
+                  section="pagination"
+                  page={page}
+                  totalPages={totalPages}
+                  onPageChange={setPage}
+                  startIndex={startIndex}
+                  pageSize={pageSize}
+                  totalCount={totalCount}
+                />
+              )}
             </div>
           )}
         </CardContent>

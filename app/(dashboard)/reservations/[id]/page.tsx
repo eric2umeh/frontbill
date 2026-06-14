@@ -10,7 +10,14 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { ArrowLeft, UserCheck, Trash2, CreditCard, AlertCircle, Loader2, CalendarRange } from 'lucide-react'
+import { ArrowLeft, UserCheck, Trash2, CreditCard, AlertCircle, Loader2, CalendarRange, CalendarClock, Receipt } from 'lucide-react'
+import { ExtendStayModal } from '@/components/bookings/extend-stay-modal'
+import { AddChargeModal } from '@/components/bookings/add-charge-modal'
+import {
+  DEFAULT_ORG_CHECKOUT_TIME,
+  hideChargeExtendInBookingsTable,
+} from '@/lib/utils/booking-checkout-ui'
+import { fetchOrgCheckoutTime } from '@/lib/utils/org-checkout-policy'
 import { RescheduleStayModal } from '@/components/bookings/reschedule-stay-modal'
 import { canRequestRescheduleStay, canRescheduleStayBooking } from '@/lib/booking/can-reschedule-stay'
 import { PageLoadingState } from '@/components/loading-screen'
@@ -33,7 +40,11 @@ export default function ReservationDetailPage({
 }) {
   const router = useRouter()
   const { role, userId, organizationId, name: userName } = useAuth()
+  const canManageFolio = role === 'superadmin' || role === 'admin' || role === 'front_desk'
   const canCancelReservation = hasPermission(role, 'reservations:delete')
+  const [extendModalOpen, setExtendModalOpen] = useState(false)
+  const [addChargeModalOpen, setAddChargeModalOpen] = useState(false)
+  const [orgCheckoutTime, setOrgCheckoutTime] = useState(DEFAULT_ORG_CHECKOUT_TIME)
   const [rescheduleOpen, setRescheduleOpen] = useState(false)
   const [reschedulePending, setReschedulePending] = useState(false)
   const [rid, setRid] = useState('')
@@ -60,6 +71,20 @@ export default function ReservationDetailPage({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  useEffect(() => {
+    if (!organizationId) return
+    let cancelled = false
+    ;(async () => {
+      const supabase = createClient()
+      if (!supabase) return
+      const checkoutTime = await fetchOrgCheckoutTime(supabase, organizationId)
+      if (!cancelled) setOrgCheckoutTime(checkoutTime)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [organizationId])
 
   async function loadReservation(bookingId: string) {
     try {
@@ -358,6 +383,39 @@ export default function ReservationDetailPage({
   const canCancelCurrentReservation =
     canCancelReservation && isCancellableReservationStatus(reservation.status)
 
+  const roomId = room?.id ?? reservation.room_id
+  const folioActionsLocked = hideChargeExtendInBookingsTable(
+    {
+      status: reservation.status,
+      check_in: reservation.check_in,
+      check_out: reservation.check_out,
+      folio_status: reservation.folio_status,
+    },
+    orgCheckoutTime,
+  )
+  const showChargeExtend =
+    canManageFolio &&
+    !!roomId &&
+    !folioActionsLocked &&
+    (reservation.status === 'checked_in' ||
+      reservation.status === 'confirmed' ||
+      (reservation.status === 'reserved' && !checkInNotReached))
+
+  const actionBooking = {
+    id: reservation.id,
+    folioId: reservation.folio_id,
+    guestName: guest?.name || 'Guest',
+    guestId: guest?.id || '',
+    room: room?.room_number ? `Room ${room.room_number}` : 'Unassigned',
+    currentCheckOut: reservation.check_out,
+    ratePerNight: Number(reservation.rate_per_night || 0),
+    organization_id: organizationId,
+    created_by: userId,
+    status: reservation.status,
+    check_in: reservation.check_in,
+    folio_status: reservation.folio_status,
+  }
+
   const statusColors: Record<string, string> = {
     reserved: 'bg-blue-500/10 text-blue-700',
     confirmed: 'bg-green-500/10 text-green-700',
@@ -441,6 +499,21 @@ export default function ReservationDetailPage({
         }
       />
 
+      <ExtendStayModal
+        open={extendModalOpen}
+        onClose={() => setExtendModalOpen(false)}
+        onSuccess={() => loadReservation(rid)}
+        booking={actionBooking}
+      />
+      <AddChargeModal
+        open={addChargeModalOpen}
+        onClose={() => {
+          setAddChargeModalOpen(false)
+          loadReservation(rid)
+        }}
+        booking={actionBooking}
+      />
+
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <Button variant="ghost" onClick={() => router.push('/reservations')}>
           <ArrowLeft className="mr-2 h-4 w-4" />
@@ -466,6 +539,28 @@ export default function ReservationDetailPage({
               <CalendarRange className="mr-2 h-4 w-4" />
               {reschedulePending ? 'Move dates pending' : 'Request move dates'}
             </Button>
+          )}
+          {showChargeExtend && (
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setAddChargeModalOpen(true)}
+                disabled={actionLoading}
+              >
+                <Receipt className="mr-2 h-4 w-4" />
+                Add charge
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setExtendModalOpen(true)}
+                disabled={actionLoading}
+              >
+                <CalendarClock className="mr-2 h-4 w-4" />
+                Extend stay
+              </Button>
+            </>
           )}
           <Button
             variant="default"

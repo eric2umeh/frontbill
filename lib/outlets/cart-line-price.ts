@@ -1,4 +1,6 @@
 /** Round money to 2 decimal places for outlet cart / order lines. */
+import { itemAllowsPosPriceEdit, type CategoryPriceFlag } from '@/lib/outlets/category-price-editable'
+
 export function roundOutletMoney(n: number): number {
   return Math.round(n * 100) / 100
 }
@@ -17,4 +19,12 @@ export function parseOutletUnitPriceInput(raw: string): number | null {
 
 export function cartLineUsesCustomPrice(unitPrice: number, menuUnitPrice: number): boolean {
   return roundOutletMoney(unitPrice) !== roundOutletMoney(menuUnitPrice)
+}
+
+/** Item has no fixed menu price — cashier must enter amount at sale. */
+export function outletItemIsPriceAtSale(
+  item: { unit_price: unknown; category_id: string | null; price_editable?: boolean | null },
+  categories: CategoryPriceFlag[],
+): boolean {
+  return itemAllowsPosPriceEdit(item, categories) && menuDefaultUnitPrice(item.unit_price) === 0
 }

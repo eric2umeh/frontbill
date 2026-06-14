@@ -22,6 +22,12 @@ import {
   Droplets, Flame, Wind, Package, AlertTriangle,
 } from 'lucide-react'
 import { RoomInventoryStatsStrip } from '@/components/shared/room-inventory-stats-strip'
+import { RoomStatusRemarksPanel } from '@/components/rooms/room-status-remarks-panel'
+import {
+  fetchRoomStatusRemarksClient,
+  patchRoomStatus,
+} from '@/lib/rooms/update-room-status-client'
+import type { RoomStatusRemark } from '@/lib/rooms/room-status-remarks'
 
 type OrderStatus = 'open' | 'in_progress' | 'resolved' | 'deferred'
 type OrderPriority = 'low' | 'normal' | 'high' | 'critical'
@@ -122,6 +128,10 @@ export default function MaintenancePage() {
   const [reportOpen, setReportOpen] = useState(false)
   const [statusChangeRoom, setStatusChangeRoom] = useState<Room | null>(null)
   const [statusComment, setStatusComment] = useState('')
+  const [pendingRoomStatus, setPendingRoomStatus] = useState<string | null>(null)
+  const [roomStatusSaving, setRoomStatusSaving] = useState(false)
+  const [statusRemarks, setStatusRemarks] = useState<RoomStatusRemark[]>([])
+  const [statusRemarksLoading, setStatusRemarksLoading] = useState(false)
 
   // New work order form
   const [orderForm, setOrderForm] = useState({
@@ -223,7 +233,14 @@ export default function MaintenancePage() {
 
       // Only roles with rooms:update_status (e.g. Housekeeping, Admin) may change operational room status
       if (canUpdateRoomStatus && ['critical', 'high'].includes(orderForm.priority)) {
-        await supabase.from('rooms').update({ status: 'maintenance', updated_by: userId, updated_at: new Date().toISOString() }).eq('id', orderForm.room_id)
+        const result = await patchRoomStatus({
+          room_id: orderForm.room_id,
+          room_number: room?.room_number ?? '',
+          status: 'maintenance',
+          source: 'maintenance',
+          scheduled_date: orderForm.scheduled_date,
+        })
+        if (!result.ok) throw new Error(result.message)
         setRooms(prev => prev.map(r => r.id === orderForm.room_id ? { ...r, status: 'maintenance' } : r))
       }
 
@@ -249,7 +266,32 @@ export default function MaintenancePage() {
     setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: newStatus } : t))
   }
 
-  const handleRoomStatusChange = async (roomId: string, newStatus: string) => {
+  const openRoomStatusModal = (room: Room) => {
+    setStatusChangeRoom(room)
+    setPendingRoomStatus(room.status)
+    setStatusComment('')
+    setStatusRemarks([])
+    setStatusRemarksLoading(true)
+    void fetchRoomStatusRemarksClient(room.id)
+      .then(setStatusRemarks)
+      .catch(() => setStatusRemarks([]))
+      .finally(() => setStatusRemarksLoading(false))
+  }
+
+  const closeRoomStatusModal = () => {
+    setStatusChangeRoom(null)
+    setPendingRoomStatus(null)
+    setStatusComment('')
+    setStatusRemarks([])
+    setStatusRemarksLoading(false)
+  }
+
+  const handleConfirmRoomStatusChange = async () => {
+    if (!statusChangeRoom || !pendingRoomStatus) {
+      toast.error('Select a room status')
+      return
+    }
+    const newStatus = pendingRoomStatus
     const allowed = new Set(MAINTENANCE_STATUS_PICKER.map((o) => o.value))
     if (!allowed.has(newStatus)) {
       toast.error(
@@ -261,33 +303,29 @@ export default function MaintenancePage() {
       toast.error('Only Housekeeping or an Administrator may change operational room status.')
       return
     }
-    const supabase = createClient()
-    const room = rooms.find(r => r.id === roomId)
-    const { error } = await supabase
-      .from('rooms')
-      .update({ status: newStatus, updated_by: userId, updated_at: new Date().toISOString() })
-      .eq('id', roomId)
-    if (error) return toast.error(error.message)
-    if (statusComment.trim() && room) {
-      await supabase.from('maintenance_tasks').insert([{
-        organization_id: organizationId,
-        room_id: roomId,
+
+    setRoomStatusSaving(true)
+    try {
+      const room = statusChangeRoom
+      const remark = statusComment.trim()
+      const result = await patchRoomStatus({
+        room_id: room.id,
         room_number: room.room_number,
-        issue_type: 'general',
-        description: `Room status changed to ${newStatus}`,
-        priority: 'normal',
-        notes: statusComment.trim(),
-        created_by: userId,
-        created_by_name: currentUserName,
+        status: newStatus,
+        source: 'maintenance',
+        remark: remark || undefined,
         scheduled_date: filterDate,
-        status: 'resolved',
-        resolved_at: new Date().toISOString(),
-      }])
+      })
+      if (!result.ok) throw new Error(result.message)
+
+      toast.success('Room status updated')
+      setRooms(prev => prev.map(r => r.id === room.id ? { ...r, status: newStatus } : r))
+      closeRoomStatusModal()
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Could not update room status')
+    } finally {
+      setRoomStatusSaving(false)
     }
-    toast.success('Room status updated')
-    setRooms(prev => prev.map(r => r.id === roomId ? { ...r, status: newStatus } : r))
-    setStatusChangeRoom(null)
-    setStatusComment('')
   }
 
   const handleSubmitReport = async () => {
@@ -519,7 +557,7 @@ export default function MaintenancePage() {
                     {canUpdateRoomStatus ? (
                       <button
                         type="button"
-                        onClick={() => setStatusChangeRoom(room)}
+                        onClick={() => openRoomStatusModal(room)}
                         className={`${badgeClass} hover:opacity-80 transition-opacity`}
                       >
                         <span>{sc.label}</span>
@@ -626,36 +664,49 @@ export default function MaintenancePage() {
 
       {/* Room Status Quick-Change Modal */}
       {statusChangeRoom && (
-        <Dialog open={!!statusChangeRoom} onOpenChange={() => setStatusChangeRoom(null)}>
+        <Dialog open={!!statusChangeRoom} onOpenChange={(open) => !open && closeRoomStatusModal()}>
           <DialogContent className="max-w-sm">
             <DialogHeader>
               <DialogTitle>Update Room {statusChangeRoom.room_number} Status</DialogTitle>
             </DialogHeader>
-            <div className="space-y-2 mb-3">
-              <Label>Comment</Label>
-              <Textarea
-                placeholder="Add note for this room status change..."
-                value={statusComment}
-                onChange={(e) => setStatusComment(e.target.value)}
-                rows={2}
-              />
-              <p className="text-xs text-muted-foreground">Created by {currentUserName}. Last updated by {currentUserName}.</p>
+            <div className="space-y-4">
+              <RoomStatusRemarksPanel remarks={statusRemarks} loading={statusRemarksLoading} />
+              <div className="grid grid-cols-2 gap-2">
+                {MAINTENANCE_STATUS_PICKER.map(opt => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => setPendingRoomStatus(opt.value)}
+                    className={`rounded-lg px-4 py-3 text-sm font-medium text-left transition-all hover:scale-105 active:scale-95 ${opt.color} ${pendingRoomStatus === opt.value ? 'ring-2 ring-offset-1 ring-primary' : ''}`}
+                  >
+                    {opt.label}
+                    {statusChangeRoom.status === opt.value && (
+                      <span className="block text-xs font-normal opacity-70 mt-0.5">Current</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+              <div className="space-y-2">
+                <Label>Comment</Label>
+                <Textarea
+                  placeholder="Add note for this room status change..."
+                  value={statusComment}
+                  onChange={(e) => setStatusComment(e.target.value)}
+                  rows={2}
+                />
+              </div>
             </div>
-            <div className="grid grid-cols-2 gap-2">
-              {MAINTENANCE_STATUS_PICKER.map(opt => (
-                <button
-                  key={opt.value}
-                  type="button"
-                  onClick={() => handleRoomStatusChange(statusChangeRoom.id, opt.value)}
-                  className={`rounded-lg px-4 py-3 text-sm font-medium text-left transition-all hover:scale-105 active:scale-95 ${opt.color} ${statusChangeRoom.status === opt.value ? 'ring-2 ring-offset-1 ring-primary' : ''}`}
-                >
-                  {opt.label}
-                  {statusChangeRoom.status === opt.value && (
-                    <span className="block text-xs font-normal opacity-70 mt-0.5">Current</span>
-                  )}
-                </button>
-              ))}
-            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={closeRoomStatusModal} disabled={roomStatusSaving}>
+                Cancel
+              </Button>
+              <Button
+                onClick={() => void handleConfirmRoomStatusChange()}
+                disabled={roomStatusSaving || !pendingRoomStatus}
+              >
+                {roomStatusSaving ? 'Saving…' : 'Update status'}
+              </Button>
+            </DialogFooter>
           </DialogContent>
         </Dialog>
       )}

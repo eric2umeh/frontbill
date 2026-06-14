@@ -2,6 +2,8 @@ import type { OutletMenuCategoryRow } from '@/lib/outlets/types'
 
 type CategoryPriceFlag = Pick<OutletMenuCategoryRow, 'id' | 'parent_id' | 'price_editable'>
 
+export type { CategoryPriceFlag }
+
 /** True when the item's category (or a parent category) allows per-order price edits on POS. */
 export function resolveCategoryPriceEditable(
   categoryId: string | null | undefined,
@@ -21,8 +23,9 @@ export function resolveCategoryPriceEditable(
 }
 
 export function itemAllowsPosPriceEdit(
-  item: { category_id: string | null },
+  item: { category_id: string | null; price_editable?: boolean | null },
   categories: CategoryPriceFlag[],
 ): boolean {
+  if (item.price_editable) return true
   return resolveCategoryPriceEditable(item.category_id, categories)
 }

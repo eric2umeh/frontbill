@@ -80,7 +80,15 @@ export function getOutletDepartment(key: string): OutletDepartmentDef | undefine
 }
 
 export function isOutletDepartmentKey(key: string): key is OutletDepartmentKey {
-  return OUTLET_DEPARTMENTS.some((d) => d.key === key)
+  return OUTLET_DEPARTMENTS.find((d) => d.key === key) != null
+}
+
+/**
+ * F&B aliases (fnb, f&b, food and beverage, food & beverage) map to restaurant + bar outlets.
+ * These two POS departments are fed automatically from central store → kitchen / bar stock.
+ */
+export function isStoreControlledFnbOutlet(department: OutletDepartmentKey): boolean {
+  return department === 'restaurant' || department === 'main_bar'
 }
 
 export function outletDepartmentLabel(key: string): string {

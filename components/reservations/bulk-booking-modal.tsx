@@ -150,7 +150,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
   const [entries, setEntries] = useState<RoomEntry[]>([makeEntry()])
   const [quickRoomCount, setQuickRoomCount] = useState<number | ''>('')
   const [quickRoomType, setQuickRoomType] = useState('')
-  const [fillLater, setFillLater] = useState(false)
+  const [fillLater, setFillLater] = useState(true)
   const [totalRoomsCount, setTotalRoomsCount] = useState<number | ''>('')
 
   const nights = checkIn && checkOut ? differenceInDays(checkOut, checkIn) : 0
@@ -698,6 +698,13 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
       const guestCache = new Map<string, string | null>()
       const orgNameKey = normalizeNameKey(selectedOrg?.name || '')
       const bulkGroupId = createBulkGroupId()
+      const hotelTz = resolveHotelTimeZone()
+      const todayYmd = formatYMDInTimeZone(new Date(), hotelTz)
+      const checkInYmd = toLocalDateStr(checkIn)
+      /** Walk-in on check-in day = in-house; future arrival = reserved. */
+      const bulkInitialStatus = checkInYmd > todayYmd ? 'reserved' : 'checked_in'
+      const bulkRoomStatus = bulkInitialStatus === 'checked_in' ? 'occupied' : 'reserved'
+
       const findOrCreateGuest = async (name: string, phone?: string | null) => {
         const formattedName = formatPersonName(name)
         const guestKey = normalizeNameKey(formattedName)
@@ -778,7 +785,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
             deposit: 0,
             balance: totalAmt,
             payment_status: 'pending',
-            status: 'reserved',
+            status: bulkInitialStatus,
             created_by: currentUserId,
             notes,
           }])
@@ -851,12 +858,12 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
               number_of_nights: nights, rate_per_night: ratePn,
               total_amount: total, deposit: depositAmt, balance: bookingBalance,
               payment_status: paymentStatus === 'paid' ? 'paid' : paymentStatus === 'partial' ? 'partial' : 'pending',
-              status: 'reserved', created_by: currentUserId,
+              status: bulkInitialStatus, created_by: currentUserId,
               notes,
             }]).select().single()
             if (be) throw be
 
-            await supabase.from('rooms').update({ status: 'reserved', updated_by: currentUserId, updated_at: new Date().toISOString() }).eq('id', room.id)
+            await supabase.from('rooms').update({ status: bulkRoomStatus, updated_by: currentUserId, updated_at: new Date().toISOString() }).eq('id', room.id)
             const { error: fcErr } = await insertFolioCharges(supabase, [{
               booking_id: booking.id,
               organization_id: orgId,
@@ -926,7 +933,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
     setPayAboveBulkRoomTotal(false)
     setLedgerSearch(''); setLedgerResults([]); setSelectedLedger(null); setLedgerSearchOpen(false)
     setShowNewLedgerOrgForm(false); setNewLedgerOrgName(''); setNewLedgerOrgEmail(''); setNewLedgerOrgPhone('')
-    setEntries([makeEntry()]); setQuickRoomCount(''); setQuickRoomType(''); setFillLater(false); setTotalRoomsCount('')
+    setEntries([makeEntry()]); setQuickRoomCount(''); setQuickRoomType(''); setFillLater(true); setTotalRoomsCount('')
     setPickedRoomIds([])
     onClose()
   }
@@ -1340,14 +1347,14 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
                 <p className="text-sm font-semibold">Room Entries</p>
                 <Label className="flex items-center gap-2 cursor-pointer font-normal">
                   <Checkbox
-                    checked={fillLater}
+                    checked={!fillLater}
                     onCheckedChange={(c) => {
-                      const v = Boolean(c)
-                      setFillLater(v)
-                      if (v) setPickedRoomIds([])
+                      const fillNow = Boolean(c)
+                      setFillLater(!fillNow)
+                      if (!fillNow) setPickedRoomIds([])
                     }}
                   />
-                  <span className="text-sm">Fill room details later</span>
+                  <span className="text-sm">Fill room details now</span>
                 </Label>
               </div>
 
