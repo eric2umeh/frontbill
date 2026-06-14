@@ -1,15 +1,33 @@
 'use client'
 
+import { useAuth } from '@/lib/auth-context'
 import { useSupplyChain } from '@/lib/supply-chain/supply-chain-context'
 import { PaginatedListShell } from '@/components/shared/paginated-list-shell'
 import { ExpandableText } from '@/components/shared/expandable-text'
+import { SupplyHistoryClearButton } from '@/components/supply-chain/supply-history-clear-button'
+import { canonicalRoleKey, canAddStoreItemDirect } from '@/lib/permissions'
 
 export default function SupplyActivityPage() {
+  const { name, role } = useAuth()
   const { activityLog } = useSupplyChain()
+  const actor = { name: name ?? 'Staff', role: canonicalRoleKey(role) ?? 'staff' }
+  const canClear = canAddStoreItemDirect(role)
+
   return (
     <div className="space-y-4">
-      <h1 className="text-2xl font-bold">Activity Log</h1>
-      <p className="text-sm text-muted-foreground">Full audit trail — who did what and when.</p>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <h1 className="text-2xl font-bold">Activity Log</h1>
+          <p className="text-sm text-muted-foreground">Full audit trail — who did what and when.</p>
+        </div>
+        {canClear && (
+          <SupplyHistoryClearButton
+            actor={actor}
+            label="Clear activity log"
+            description="Removes all supply activity log entries, purchase order history, and issue-out records on this device."
+          />
+        )}
+      </div>
       <PaginatedListShell
         items={activityLog}
         pageSize={25}
