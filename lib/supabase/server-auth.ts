@@ -1,7 +1,7 @@
 import type { SupabaseClient, User } from '@supabase/supabase-js'
 
-/** Max wait for Supabase Auth server validation — avoids multi-minute hangs. */
-const SERVER_AUTH_TIMEOUT_MS = 12_000
+/** Max wait for Supabase Auth server validation — keep low so login/navigation stays responsive. */
+const SERVER_AUTH_TIMEOUT_MS = 4_000
 
 type VerifiedUserResult =
   | { user: User; timedOut: false; error: null }
