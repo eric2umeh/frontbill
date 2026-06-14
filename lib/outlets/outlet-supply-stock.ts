@@ -162,6 +162,9 @@ export function resolveOutletItemStock(
   }
 
   const parsed = parseMenuStockLink(item.service_code)
+  if (parsed?.source === 'kitchen') {
+    return kitchenLink(parsed.stockId, parsed.portionsPerSale, kitchenStock)
+  }
   if (parsed && parsed.source === source) {
     return parsed.source === 'kitchen'
       ? kitchenLink(parsed.stockId, parsed.portionsPerSale, kitchenStock)
