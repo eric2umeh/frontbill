@@ -17,6 +17,7 @@ import { BrandingFavicon } from '@/components/branding/branding-favicon'
 import { BRAND_LOGO_SESSION_KEY } from '@/lib/branding/constants'
 import { getPostLoginPath } from '@/lib/utils/post-login-path'
 import { SupplyChainProvider } from '@/lib/supply-chain/supply-chain-context'
+import { StockShortageDialogHost } from '@/components/shared/stock-shortage-dialog-host'
 
 const ROUTE_PERMISSIONS: Array<{ path: string; permission: Permission }> = [
   { path: '/dashboard', permission: 'dashboard:view' },
@@ -209,6 +210,7 @@ export function DashboardShell({
       <BrandingFavicon href={user.organizationLogoUrl} />
       <SupplyChainProvider>
         <NightAuditPendingProvider>
+          <StockShortageDialogHost />
           <div className="flex h-screen overflow-hidden bg-background">
             {allowed && (
               <Sidebar mobileOpen={mobileMenuOpen} onMobileClose={() => setMobileMenuOpen(false)} />
