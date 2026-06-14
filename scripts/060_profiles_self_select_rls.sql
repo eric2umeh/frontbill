@@ -1,0 +1,2 @@
+-- Superseded by 061_fix_profiles_rls_recursion.sql (060 subquery caused infinite RLS recursion).
+-- Run 061 instead. Kept so migration order stays documented.

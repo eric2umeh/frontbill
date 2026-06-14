@@ -70,5 +70,33 @@ export function OrganizationsTable({ organizations }: OrganizationsTableProps) {
     },
   ]
 
-  return <DataTable columns={columns} data={organizations} pageSize={15} />
+  return (
+    <DataTable
+      columns={columns}
+      data={organizations}
+      pageSize={15}
+      searchPlaceholder="Search name, contact, phone…"
+      searchMatch={(org, query) => {
+        const q = query.trim().toLowerCase()
+        return (
+          org.name.toLowerCase().includes(q) ||
+          (org.contact_person ?? '').toLowerCase().includes(q) ||
+          (org.phone ?? '').toLowerCase().includes(q) ||
+          (org.email ?? '').toLowerCase().includes(q)
+        )
+      }}
+      filters={[
+        {
+          key: 'type',
+          label: 'Type',
+          options: [
+            { value: 'government', label: 'Government' },
+            { value: 'ngo', label: 'NGO' },
+            { value: 'private', label: 'Private' },
+            { value: 'individual', label: 'Individual' },
+          ],
+        },
+      ]}
+    />
+  )
 }

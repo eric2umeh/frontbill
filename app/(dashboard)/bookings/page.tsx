@@ -999,7 +999,8 @@ export default function BookingsPage() {
 
               if (booking.is_bulk) {
                 if (!canManageFolio) return null
-                const showBulkCheckout = (booking.bulk_members || []).some((m) =>
+                const members = booking.bulk_members || []
+                const showBulkCheckout = members.some((m) =>
                   manualCheckoutEligible(
                     {
                       status: m.status,
@@ -1010,29 +1011,120 @@ export default function BookingsPage() {
                     orgCheckoutTime,
                   ),
                 )
-                if (!showBulkCheckout) return null
+                const actionableMember = members.find(
+                  (m) =>
+                    m.room_id &&
+                    !hideChargeExtendInBookingsTable(
+                      {
+                        status: m.status,
+                        check_in: m.check_in,
+                        check_out: m.check_out,
+                        folio_status: m.folio_status,
+                      },
+                      orgCheckoutTime,
+                    ),
+                )
                 const gid = booking.bulk_group_id || ''
-                return (
-                  <div className="flex shrink-0 flex-nowrap gap-0.5">
+                if (!showBulkCheckout && !actionableMember) {
+                  return (
                     <Button
                       size="sm"
                       variant="outline"
-                      title="Check out all eligible rooms in this group"
-                      className="h-7 px-2 text-[11px] leading-tight text-amber-700 border-amber-200 hover:bg-amber-50"
-                      disabled={checkoutLoadingGroupId === gid}
+                      className="h-7 px-2 text-[11px]"
                       onClick={(e) => {
                         e.stopPropagation()
-                        handleBulkCheckoutFromTable(booking)
+                        router.push(`/bulk-bookings/${gid}`)
                       }}
                     >
-                      {checkoutLoadingGroupId === gid ? (
-                        <Loader2 className="h-3 w-3 animate-spin" />
-                      ) : (
-                        <>
-                          <LogOut className="mr-1 h-3 w-3" />
-                          Out
-                        </>
-                      )}
+                      Open group
+                    </Button>
+                  )
+                }
+                return (
+                  <div className="flex shrink-0 flex-wrap gap-0.5">
+                    {actionableMember && (
+                      <>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          title="Add charge to a room in this group"
+                          className="h-7 px-2 text-[11px] leading-tight whitespace-nowrap"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setSelectedBooking({
+                              id: actionableMember.id,
+                              folioId: actionableMember.folio_id,
+                              guestName: actionableMember.guests?.name,
+                              guestId: actionableMember.guest_id,
+                              room: `Room ${actionableMember.rooms?.room_number}`,
+                              currentCheckOut: actionableMember.check_out,
+                              ratePerNight: actionableMember.rate_per_night,
+                              organization_id: actionableMember.organization_id,
+                              created_by: actionableMember.created_by,
+                            })
+                            setAddChargeModalOpen(true)
+                          }}
+                        >
+                          Charge
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          title="Extend stay for a room in this group"
+                          className="h-7 px-2 text-[11px] leading-tight whitespace-nowrap"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setSelectedBooking({
+                              id: actionableMember.id,
+                              folioId: actionableMember.folio_id,
+                              guestName: actionableMember.guests?.name,
+                              guestId: actionableMember.guest_id,
+                              room: `Room ${actionableMember.rooms?.room_number}`,
+                              currentCheckOut: actionableMember.check_out,
+                              ratePerNight: actionableMember.rate_per_night,
+                              organization_id: actionableMember.organization_id,
+                              created_by: actionableMember.created_by,
+                            })
+                            setExtendModalOpen(true)
+                          }}
+                        >
+                          Extend
+                        </Button>
+                      </>
+                    )}
+                    {showBulkCheckout && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        title="Check out all eligible rooms in this group"
+                        className="h-7 px-2 text-[11px] leading-tight text-amber-700 border-amber-200 hover:bg-amber-50"
+                        disabled={checkoutLoadingGroupId === gid}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleBulkCheckoutFromTable(booking)
+                        }}
+                      >
+                        {checkoutLoadingGroupId === gid ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : (
+                          <>
+                            <LogOut className="mr-1 h-3 w-3" />
+                            Out
+                          </>
+                        )}
+                      </Button>
+                    )}
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      title="Open bulk group — extend/charge each room"
+                      className="h-7 px-2 text-[11px]"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        router.push(`/bulk-bookings/${gid}`)
+                      }}
+                    >
+                      Group
                     </Button>
                   </div>
                 )

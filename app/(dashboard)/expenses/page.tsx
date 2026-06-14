@@ -1,6 +1,7 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { useAuth } from '@/lib/auth-context'
 import { canAccessExpenseMenu, hasPermission } from '@/lib/permissions'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -10,12 +11,21 @@ import { ExpenseLedger } from '@/components/expenses/expense-ledger'
 import { ExpenseCategoriesManager } from '@/components/expenses/expense-categories-manager'
 import { ExpenseImportDialog } from '@/components/expenses/expense-import-dialog'
 import { ExpenseBudgetsPanel } from '@/components/expenses/expense-budgets-panel'
-import { Upload, Receipt, Tags, Target } from 'lucide-react'
+import { Upload, Receipt, Tags, Target, ShoppingCart } from 'lucide-react'
+import { PoApprovalPanel } from '@/components/supply-chain/po-approval-panel'
+import {
+  canAdminTestApproveSupplyPo,
+  canSupplyPoAccountantReview,
+  canSupplyPoManagerReview,
+} from '@/lib/permissions'
 
 export default function ExpensesPage() {
   const { userId, role } = useAuth()
+  const searchParams = useSearchParams()
+  const tabParam = searchParams.get('tab')
   const [importOpen, setImportOpen] = useState(false)
   const [refreshKey, setRefreshKey] = useState(0)
+  const [activeTab, setActiveTab] = useState('expenses')
 
   const canView = canAccessExpenseMenu(role) && hasPermission(role, 'expenses:view')
   const canAdd = hasPermission(role, 'expenses:create')
@@ -25,6 +35,16 @@ export default function ExpensesPage() {
   const canManageCategories = hasPermission(role, 'expenses:edit')
   const canImport = hasPermission(role, 'expenses:export')
   const canBudget = hasPermission(role, 'expenses:budget')
+  const canPurchaseOrders =
+    canSupplyPoAccountantReview(role) ||
+    canSupplyPoManagerReview(role) ||
+    canAdminTestApproveSupplyPo(role)
+
+  useEffect(() => {
+    if (tabParam === 'purchase_orders' && canPurchaseOrders) {
+      setActiveTab('purchase_orders')
+    }
+  }, [tabParam, canPurchaseOrders])
 
   if (!canView) {
     return (
@@ -52,12 +72,18 @@ export default function ExpensesPage() {
         )}
       </div>
 
-      <Tabs defaultValue="expenses" className="w-full">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1">
           <TabsTrigger value="expenses" className="gap-1.5">
             <Receipt className="h-4 w-4" />
             Expenses
           </TabsTrigger>
+          {canPurchaseOrders && (
+            <TabsTrigger value="purchase_orders" className="gap-1.5">
+              <ShoppingCart className="h-4 w-4" />
+              Purchase orders
+            </TabsTrigger>
+          )}
           <TabsTrigger value="categories" className="gap-1.5">
             <Tags className="h-4 w-4" />
             Categories
@@ -83,6 +109,23 @@ export default function ExpensesPage() {
             <p className="text-sm text-muted-foreground">Sign in to record expenses.</p>
           )}
         </TabsContent>
+
+        {canPurchaseOrders && (
+          <TabsContent value="purchase_orders" className="mt-4">
+            <Card>
+              <CardHeader>
+                <CardTitle>Store purchase orders</CardTitle>
+                <CardDescription>
+                  Accountant accepts or rejects raised POs, then manager / admin approves for market purchase.
+                  Store staff send POs from Supply chain → Central store.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <PoApprovalPanel />
+              </CardContent>
+            </Card>
+          </TabsContent>
+        )}
 
         <TabsContent value="categories" className="mt-4">
           <Card>

@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react'
 import { format, parseISO } from 'date-fns'
 import { formatNaira } from '@/lib/utils/currency'
 import { formatPaymentMethodLabel } from '@/lib/payments/payment-methods'
+import type { OutletDepartmentKey } from '@/lib/outlets/departments'
 import type { OutletOrderRow } from '@/lib/outlets/types'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -25,14 +26,18 @@ import { OutletSettleOrderDialog } from '@/components/outlets/outlet-settle-orde
 import { OutletEditOrderDialog } from '@/components/outlets/outlet-edit-order-dialog'
 import { outletApiHeaders } from '@/lib/outlets/outlet-api-headers'
 import { toast } from 'sonner'
+import { usePaginatedList } from '@/lib/hooks/use-paginated-list'
+import { TableListControls } from '@/components/shared/table-list-controls'
 
 type Props = {
   orders: OutletOrderRow[]
   organizationId: string
+  department: OutletDepartmentKey
   departmentLabel: string
   canPrintReceipt?: boolean
   canSell?: boolean
   canManageOrders?: boolean
+  canClearAllOrders?: boolean
   showTodaySummary?: boolean
   onPrintUnsettled?: (order: OutletOrderRow) => void
   onPrintSettled?: (order: OutletOrderRow) => void
@@ -43,10 +48,12 @@ type Props = {
 export function OutletOrdersPanel({
   orders,
   organizationId,
+  department,
   departmentLabel,
   canPrintReceipt,
   canSell,
   canManageOrders,
+  canClearAllOrders,
   showTodaySummary = true,
   onPrintUnsettled,
   onPrintSettled,
@@ -58,6 +65,45 @@ export function OutletOrdersPanel({
   const [deleteTarget, setDeleteTarget] = useState<OutletOrderRow | null>(null)
   const [voidReason, setVoidReason] = useState('')
   const [deleting, setDeleting] = useState(false)
+  const [clearingAll, setClearingAll] = useState(false)
+  const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState('all')
+
+  const {
+    paginatedItems: visibleOrders,
+    page,
+    setPage,
+    totalPages,
+    totalCount,
+    startIndex,
+    pageSize,
+  } = usePaginatedList<OutletOrderRow>({
+    items: orders,
+    pageSize: 20,
+    search,
+    searchMatch: (o, query) => {
+      const q = query.trim().toLowerCase()
+      const itemNames = (o.outlet_order_lines ?? [])
+        .map((l) => l.item_name)
+        .join(' ')
+        .toLowerCase()
+      return (
+        o.order_number.toLowerCase().includes(q) ||
+        (o.guest_name ?? '').toLowerCase().includes(q) ||
+        (o.room_number ?? '').toLowerCase().includes(q) ||
+        (o.table_label ?? '').toLowerCase().includes(q) ||
+        itemNames.includes(q)
+      )
+    },
+    activeFilters: { status: statusFilter },
+    filterMatch: (o, key, value) => {
+      if (key !== 'status') return undefined
+      if (value === 'open') return o.status === 'open'
+      if (value === 'settled') return o.status === 'settled'
+      if (value === 'void') return o.status === 'void'
+      return true
+    },
+  })
 
   const todayTotal = useMemo(() => {
     const today = format(new Date(), 'yyyy-MM-dd')
@@ -106,6 +152,29 @@ export function OutletOrdersPanel({
     }
   }
 
+  const confirmClearAll = async () => {
+    setClearingAll(true)
+    try {
+      const res = await fetch('/api/outlets/orders/clear-all', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(await outletApiHeaders()) },
+        credentials: 'include',
+        body: JSON.stringify({ department }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        toast.error(json.error || 'Could not clear orders')
+        return
+      }
+      toast.success(`Cleared ${Number(json.deleted) || 0} order(s)`)
+      onOrdersChanged?.()
+    } catch {
+      toast.error('Network error')
+    } finally {
+      setClearingAll(false)
+    }
+  }
+
   const showActionsCol = canManageOrders || canSell || canPrintReceipt
 
   return (
@@ -125,6 +194,67 @@ export function OutletOrdersPanel({
         </Card>
       )}
 
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <TableListControls
+          section="toolbar"
+          search={search}
+          onSearchChange={setSearch}
+          searchPlaceholder="Search receipt #, guest, room, items…"
+          filters={[
+            {
+              key: 'status',
+              label: 'Status',
+              options: [
+                { value: 'open', label: 'Unsettled' },
+                { value: 'settled', label: 'Settled' },
+                { value: 'void', label: 'Void' },
+              ],
+            },
+          ]}
+          activeFilters={{ status: statusFilter }}
+          onFilterChange={(_, value) => setStatusFilter(value)}
+          page={page}
+          totalPages={totalPages}
+          onPageChange={setPage}
+          startIndex={startIndex}
+          pageSize={pageSize}
+          totalCount={totalCount}
+        />
+        {canClearAllOrders && orders.length > 0 && (
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button
+                type="button"
+                variant="destructive"
+                size="sm"
+                disabled={clearingAll}
+              >
+                {clearingAll ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  'Clear all orders'
+                )}
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Clear all {departmentLabel} orders?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  Permanently deletes every order and line for this outlet on the server. This
+                  cannot be undone.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction onClick={() => void confirmClearAll()}>
+                  Clear all
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        )}
+      </div>
+
       <div className="border rounded-lg overflow-x-auto">
         <table className="w-full text-xs">
           <thead className="bg-muted/50">
@@ -132,7 +262,8 @@ export function OutletOrdersPanel({
               <th className="text-left p-2">Receipt #</th>
               <th className="text-left p-2">Time</th>
               <th className="text-left p-2">Guest</th>
-              <th className="text-right p-2">Items</th>
+              <th className="text-left p-2 min-w-[140px]">Items</th>
+              <th className="text-right p-2">Qty</th>
               <th className="text-right p-2">Total</th>
               <th className="p-2">Pay</th>
               <th className="p-2">Status</th>
@@ -140,14 +271,21 @@ export function OutletOrdersPanel({
             </tr>
           </thead>
           <tbody>
-            {orders.map((o) => (
+            {visibleOrders.map((o) => (
               <tr key={o.id} className="border-t">
                 <td className="p-2 font-mono">{o.order_number}</td>
                 <td className="p-2 text-muted-foreground">
                   {format(parseISO(o.created_at), 'dd MMM · HH:mm')}
                 </td>
                 <td className="p-2">{o.guest_name || o.room_number || '—'}</td>
-                <td className="p-2 text-right text-muted-foreground">
+                <td className="p-2 text-muted-foreground max-w-[220px]">
+                  <span className="line-clamp-2">
+                    {(o.outlet_order_lines ?? [])
+                      .map((l) => `${l.item_name} ×${Number(l.qty) || 0}`)
+                      .join(', ') || '—'}
+                  </span>
+                </td>
+                <td className="p-2 text-right text-muted-foreground tabular-nums">
                   {(o.outlet_order_lines ?? []).reduce((s, l) => s + (Number(l.qty) || 0), 0)}
                 </td>
                 <td className="p-2 text-right font-medium">{formatNaira(o.subtotal)}</td>
@@ -238,10 +376,24 @@ export function OutletOrdersPanel({
             ))}
           </tbody>
         </table>
-        {orders.length === 0 && (
-          <p className="p-6 text-center text-muted-foreground text-sm">No orders yet</p>
+        {totalCount === 0 && (
+          <p className="p-6 text-center text-muted-foreground text-sm">
+            {orders.length === 0 ? 'No orders yet' : 'No orders match your search or filters'}
+          </p>
         )}
       </div>
+
+      {totalPages > 1 && (
+        <TableListControls
+          section="pagination"
+          page={page}
+          totalPages={totalPages}
+          onPageChange={setPage}
+          startIndex={startIndex}
+          pageSize={pageSize}
+          totalCount={totalCount}
+        />
+      )}
 
       <OutletSettleOrderDialog
         order={settleTarget}

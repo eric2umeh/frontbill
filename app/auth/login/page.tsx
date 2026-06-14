@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useActionState, useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import {
@@ -22,19 +22,22 @@ import { Label } from '@/components/ui/label'
 import { Hotel, Loader2, AlertCircle, Eye, EyeOff } from 'lucide-react'
 import Link from 'next/link'
 import { toast } from 'sonner'
-import { LOGIN_SUCCESS_TOAST_KEY } from '@/lib/auth/constants'
 import { BRAND_LOGO_SESSION_KEY } from '@/lib/branding/constants'
+import { LoginPendingOverlay, LoginSubmitButton } from '@/components/auth/login-form-fields'
+import { loginAction, type LoginFormState } from './actions'
+
+const initialState: LoginFormState = {}
 
 export default function Page() {
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
+  const [state, formAction] = useActionState(loginAction, initialState)
   const [showPassword, setShowPassword] = useState(false)
-  const [isLoading, setIsLoading] = useState(false)
   const [isConfigured, setIsConfigured] = useState(true)
   const [showForgotPassword, setShowForgotPassword] = useState(false)
   const [resetEmail, setResetEmail] = useState('')
   const [resetLoading, setResetLoading] = useState(false)
   const [sessionBrandLogo, setSessionBrandLogo] = useState<string | null>(null)
+  const [urlError, setUrlError] = useState<string | null>(null)
+
   useEffect(() => {
     try {
       const u = sessionStorage.getItem(BRAND_LOGO_SESSION_KEY)
@@ -45,14 +48,31 @@ export default function Page() {
   }, [])
 
   useEffect(() => {
-    const supabase = createClient()
-    if (!supabase) {
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+    const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+    if (!url || !key) {
       setIsConfigured(false)
-      return
     }
-    // Drop stale sessions (e.g. after switching from local Docker Supabase to cloud).
-    void supabase.auth.signOut({ scope: 'local' })
   }, [])
+
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search)
+      const err = params.get('error')
+      if (err) {
+        setUrlError(decodeURIComponent(err))
+        window.history.replaceState({}, '', '/auth/login')
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [])
+
+  useEffect(() => {
+    if (state.error) {
+      toast.error(state.error)
+    }
+  }, [state.error])
 
   const handleForgotPassword = async () => {
     if (!resetEmail) {
@@ -76,77 +96,18 @@ export default function Page() {
       toast.success('Password reset email sent! Check your inbox.')
       setShowForgotPassword(false)
       setResetEmail('')
-    } catch (error: any) {
-      toast.error(error.message || 'Failed to send reset email')
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Failed to send reset email'
+      toast.error(message)
     } finally {
       setResetLoading(false)
     }
   }
 
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setIsLoading(true)
-
-    try {
-      try {
-        localStorage.removeItem('supabase-auth-token')
-      } catch {
-        /* legacy storage key — remove so it does not overwrite SSR cookies */
-      }
-
-      const supabase = createClient()
-      if (!supabase) {
-        toast.error('Supabase not configured. Please add environment variables.')
-        setIsConfigured(false)
-        setIsLoading(false)
-        return
-      }
-
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      })
-
-      if (error) {
-        throw error
-      }
-
-      if (!data.session) {
-        throw new Error('Login succeeded but no session was returned. Try again.')
-      }
-
-      const cookieRes = await fetch('/api/auth/establish-session', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
-          access_token: data.session.access_token,
-          refresh_token: data.session.refresh_token,
-        }),
-      })
-      const cookieJson = await cookieRes.json().catch(() => ({}))
-      if (!cookieRes.ok) {
-        throw new Error(cookieJson.error || 'Could not establish server session')
-      }
-
-      try {
-        sessionStorage.setItem(LOGIN_SUCCESS_TOAST_KEY, '1')
-      } catch {
-        /* ignore */
-      }
-
-      // Redirect immediately — do not wait on profiles (often 504/timeouts). Role routing runs in the dashboard shell.
-      window.location.replace('/dashboard')
-      return
-    } catch (error: any) {
-      toast.error(error.message || 'Failed to login')
-    } finally {
-      setIsLoading(false)
-    }
-  }
+  const displayError = urlError || state.error
 
   return (
-    <div className="flex min-h-svh w-full items-center justify-center p-6 md:p-10 bg-gradient-to-br from-slate-50 to-slate-100">
+    <div className="relative flex min-h-svh w-full items-center justify-center p-6 md:p-10 bg-gradient-to-br from-slate-50 to-slate-100">
       <div className="w-full max-w-sm">
         <div className="flex flex-col gap-6">
           <Card>
@@ -179,17 +140,25 @@ export default function Page() {
                 </div>
               )}
 
-              <form onSubmit={handleLogin}>
+              {displayError && (
+                <div className="mb-4 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+                  {displayError}
+                </div>
+              )}
+
+              {/* Server Action login — works even when client fetch fails */}
+              <form action={formAction}>
+                <LoginPendingOverlay />
                 <div className="flex flex-col gap-6">
                   <div className="grid gap-2">
                     <Label htmlFor="email">Email</Label>
                     <Input
                       id="email"
+                      name="email"
                       type="email"
-                      placeholder="m@example.com"
+                      autoComplete="email"
+                      placeholder="admin@frontbill.com"
                       required
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
                       disabled={!isConfigured}
                     />
                   </div>
@@ -198,10 +167,10 @@ export default function Page() {
                     <div className="relative">
                       <Input
                         id="password"
+                        name="password"
                         type={showPassword ? 'text' : 'password'}
+                        autoComplete="current-password"
                         required
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
                         disabled={!isConfigured}
                         className="pr-10"
                       />
@@ -219,16 +188,7 @@ export default function Page() {
                       </button>
                     </div>
                   </div>
-                  <Button type="submit" className="w-full" disabled={isLoading || !isConfigured}>
-                    {isLoading ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Logging in...
-                      </>
-                    ) : (
-                      'Login'
-                    )}
-                  </Button>
+                  <LoginSubmitButton disabled={!isConfigured} />
                   <div className="text-center">
                     <button
                       type="button"
@@ -239,22 +199,12 @@ export default function Page() {
                     </button>
                   </div>
                 </div>
-                {/* <div className="mt-4 text-center text-sm">
-                  Don&apos;t have an account?{' '}
-                  <Link
-                    href="/auth/sign-up"
-                    className="underline underline-offset-4"
-                  >
-                    Sign up
-                  </Link>
-                </div> */}
               </form>
             </CardContent>
           </Card>
         </div>
       </div>
 
-      {/* Forgot Password Dialog */}
       <Dialog open={showForgotPassword} onOpenChange={setShowForgotPassword}>
         <DialogContent>
           <DialogHeader>

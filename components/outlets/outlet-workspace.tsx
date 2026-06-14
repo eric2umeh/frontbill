@@ -76,6 +76,26 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
     void loadMenu()
   }, [loadMenu])
 
+  useEffect(() => {
+    const onCleared = () => {
+      void loadMenu()
+    }
+    const onSynced = () => {
+      if (department === 'restaurant' || department === 'main_bar') void loadMenu()
+    }
+    const onSupply = () => {
+      void loadMenu()
+    }
+    window.addEventListener('frontbill:outlet-menu-cleared', onCleared)
+    window.addEventListener('frontbill:outlet-menu-synced', onSynced)
+    window.addEventListener('frontbill:supply-stock-changed', onSupply)
+    return () => {
+      window.removeEventListener('frontbill:outlet-menu-cleared', onCleared)
+      window.removeEventListener('frontbill:outlet-menu-synced', onSynced)
+      window.removeEventListener('frontbill:supply-stock-changed', onSupply)
+    }
+  }, [department, loadMenu])
+
   if (!def) return null
   if (loading) return <LoadingSpinner />
 
@@ -98,7 +118,11 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
     <div className="space-y-2">
       <PageHeader
         title={def.label}
-        description="POS · menu · orders · reports"
+        description={
+          department === 'gym'
+            ? 'POS · memberships & day passes (Menu tab) · orders · reports'
+            : 'POS · room charge · service fees · open & settled bills · reports'
+        }
         backLink={
           <Button variant="ghost" size="sm" asChild className="h-7 px-2 shrink-0">
             <Link href="/outlets">

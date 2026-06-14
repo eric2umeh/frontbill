@@ -30,6 +30,8 @@ import {
   type ExpenseCategoryOption,
   type ExpenseEntryRecord,
 } from '@/components/expenses/expense-entry-form-dialog'
+import { usePaginatedList } from '@/lib/hooks/use-paginated-list'
+import { TableListControls } from '@/components/shared/table-list-controls'
 
 type PeriodMode = 'month' | 'day' | 'range'
 
@@ -145,6 +147,19 @@ export function ExpenseLedger({ userId, canAdd, canModify, canDelete }: Props) {
     () => filtered.reduce((s, e) => s + (Number(e.amount) || 0), 0),
     [filtered],
   )
+
+  const {
+    paginatedItems: pageEntries,
+    page,
+    setPage,
+    totalPages,
+    totalCount,
+    startIndex,
+    pageSize,
+  } = usePaginatedList<ExpenseEntryRecord>({
+    items: filtered,
+    pageSize: 12,
+  })
 
   const handleDelete = async () => {
     if (!deleteTarget?.id) return
@@ -290,7 +305,17 @@ export function ExpenseLedger({ userId, canAdd, canModify, canDelete }: Props) {
         </Card>
       ) : (
         <div className="space-y-3">
-          {filtered.map((entry) => (
+          <TableListControls
+            section="toolbar"
+            hideSearch
+            page={page}
+            totalPages={totalPages}
+            onPageChange={setPage}
+            startIndex={startIndex}
+            pageSize={pageSize}
+            totalCount={totalCount}
+          />
+          {pageEntries.map((entry) => (
             <Card key={entry.id} className="overflow-hidden">
               <CardContent className="space-y-3 p-4">
                 <div className="flex items-start justify-between gap-3">
@@ -354,6 +379,17 @@ export function ExpenseLedger({ userId, canAdd, canModify, canDelete }: Props) {
               </CardContent>
             </Card>
           ))}
+          {totalPages > 1 && (
+            <TableListControls
+              section="pagination"
+              page={page}
+              totalPages={totalPages}
+              onPageChange={setPage}
+              startIndex={startIndex}
+              pageSize={pageSize}
+              totalCount={totalCount}
+            />
+          )}
         </div>
       )}
 

@@ -83,5 +83,44 @@ export function PaymentsTable({ payments }: PaymentsTableProps) {
     },
   ]
 
-  return <DataTable columns={columns} data={payments} pageSize={15} />
+  return (
+    <DataTable
+      columns={columns}
+      data={payments}
+      pageSize={15}
+      searchPlaceholder="Search reference, payer, amount…"
+      searchMatch={(payment, query) => {
+        const q = query.trim().toLowerCase()
+        const row = payment as Record<string, unknown>
+        const ref = String(row.reference_number || row.payment_reference || payment.id)
+        const org = (row.organization as { name?: string } | undefined)?.name ?? ''
+        const guest =
+          (row.guests as { name?: string } | undefined)?.name ??
+          (row.guest as { name?: string; first_name?: string; last_name?: string } | undefined)?.name ??
+          ''
+        return (
+          ref.toLowerCase().includes(q) ||
+          org.toLowerCase().includes(q) ||
+          guest.toLowerCase().includes(q) ||
+          String(payment.amount).includes(q)
+        )
+      }}
+      filters={[
+        {
+          key: 'payment_method',
+          label: 'Method',
+          options: [
+            { value: 'cash', label: 'Cash' },
+            { value: 'pos', label: 'POS' },
+            { value: 'transfer', label: 'Transfer' },
+            { value: 'card', label: 'Card' },
+          ],
+        },
+      ]}
+      filterMatch={(payment, key, value) => {
+        if (key !== 'payment_method') return undefined
+        return String(payment.payment_method).toLowerCase() === value
+      }}
+    />
+  )
 }

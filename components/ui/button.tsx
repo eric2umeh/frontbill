@@ -1,3 +1,5 @@
+'use client'
+
 import * as React from 'react'
 import { Slot } from '@radix-ui/react-slot'
 import { cva, type VariantProps } from 'class-variance-authority'
@@ -33,20 +35,73 @@ const buttonVariants = cva(
   },
 )
 
+const CLICK_LOCK_MS = 550
+
+function isPromiseLike(v: unknown): v is PromiseLike<unknown> {
+  return v != null && typeof v === 'object' && 'then' in v && typeof (v as PromiseLike<unknown>).then === 'function'
+}
+
 export interface ButtonProps
   extends
     React.ButtonHTMLAttributes<HTMLButtonElement>,
     VariantProps<typeof buttonVariants> {
   asChild?: boolean
+  /** Allow rapid repeated clicks (qty +/-). Default false — clicks are briefly locked. */
+  allowRepeatClick?: boolean
 }
 
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ className, variant, size, asChild = false, ...props }, ref) => {
+  (
+    {
+      className,
+      variant,
+      size,
+      asChild = false,
+      onClick,
+      disabled,
+      allowRepeatClick = false,
+      ...props
+    },
+    ref,
+  ) => {
+    const pendingRef = React.useRef(false)
+    const [pending, setPending] = React.useState(false)
+
+    const release = React.useCallback(() => {
+      window.setTimeout(() => {
+        pendingRef.current = false
+        setPending(false)
+      }, CLICK_LOCK_MS)
+    }, [])
+
+    const handleClick = React.useCallback(
+      (e: React.MouseEvent<HTMLButtonElement>) => {
+        if (pendingRef.current) {
+          e.preventDefault()
+          e.stopPropagation()
+          return
+        }
+        const result = onClick?.(e)
+        if (allowRepeatClick || asChild) return
+
+        pendingRef.current = true
+        setPending(true)
+        if (isPromiseLike(result)) {
+          void Promise.resolve(result).finally(release)
+        } else {
+          release()
+        }
+      },
+      [onClick, allowRepeatClick, asChild, release],
+    )
+
     const Comp = asChild ? Slot : 'button'
     return (
       <Comp
         className={cn(buttonVariants({ variant, size, className }))}
         ref={ref}
+        onClick={asChild ? onClick : handleClick}
+        disabled={disabled || pending}
         {...props}
       />
     )
