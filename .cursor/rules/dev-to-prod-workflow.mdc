@@ -1,0 +1,33 @@
+---
+description: Dev→prod safety checklist and SQL rules — remind before merges and DB work
+alwaysApply: true
+---
+
+# Dev → prod workflow (FrontBill)
+
+## During development — do NOT
+
+- Run new SQL scripts on **production** Supabase while still coding or testing.
+- Point local `.env.local` at production Supabase keys for daily work.
+- Merge to `main` without testing on **dev/staging** Supabase first.
+
+## Before merging to main — remind the user to confirm
+
+- [ ] Tested on **dev/staging** Supabase
+- [ ] PR reviewed
+- [ ] New SQL listed in PR with **“run on prod after deploy”**
+
+## After merge to main — remind the user to confirm
+
+- [ ] Vercel **production** deploy succeeded
+- [ ] Run **new SQL scripts in prod Supabase only** (never before deploy unless intentional)
+- [ ] Quick smoke test on live URL
+
+## Environment split
+
+- **Local** (`pnpm dev`): `.env.local` → staging Supabase + `SUPABASE_ENV=staging`
+- **Vercel Production**: prod Supabase keys only
+- **Vercel Preview / Development**: staging Supabase keys
+- **SQL scripts in repo**: updating Git does not change any database until run manually in Supabase SQL Editor per project
+
+When the user discusses merges, PRs, SQL migrations, Vercel deploys, or prod releases, surface this checklist proactively.
