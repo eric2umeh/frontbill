@@ -8,23 +8,24 @@ import { redirect } from 'next/navigation'
 
 export type LoginFormState = {
   error?: string
+  email?: string
 }
 
 export async function loginAction(
   _prevState: LoginFormState,
   formData: FormData,
 ): Promise<LoginFormState> {
-  const email = String(formData.get('email') ?? '')
+  const email = String(formData.get('email') ?? '').trim()
   const password = String(formData.get('password') ?? '')
 
   const result = await performPasswordLogin(email, password)
   if ('error' in result) {
-    return { error: result.error }
+    return { error: result.error, email }
   }
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
   if (!supabaseUrl) {
-    return { error: 'Supabase not configured' }
+    return { error: 'Supabase not configured', email }
   }
 
   try {
@@ -38,7 +39,7 @@ export async function loginAction(
     })
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'Could not save session'
-    return { error: `Login succeeded but session could not be saved: ${msg}` }
+    return { error: `Login succeeded but session could not be saved: ${msg}`, email }
   }
 
   redirect('/dashboard')
