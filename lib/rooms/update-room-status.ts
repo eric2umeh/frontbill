@@ -1,11 +1,13 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { canSetOutOfOrderFromHousekeeping } from '@/lib/rooms/room-status-auth'
+import { pickOccupyingBooking, type OccupyingBookingRow } from '@/lib/rooms/room-occupancy'
 
 export type RoomStatusUpdateSource = 'housekeeping' | 'maintenance'
 
 const HK_ALLOWED = new Set(['available', 'cleaning', 'out_of_order'])
 const HK_DISALLOWED = new Set(['occupied', 'reserved', 'maintenance'])
 const MAINTENANCE_ALLOWED = new Set(['available', 'maintenance'])
+const OCCUPANCY_CLEARING_STATUSES = new Set(['available', 'cleaning'])
 
 const HK_STATUS_LABELS: Record<string, string> = {
   available: 'Available',
@@ -88,6 +90,29 @@ export async function applyRoomStatusUpdate(
   }
 
   const roomNumber = String(room.room_number || params.roomNumber)
+
+  if (OCCUPANCY_CLEARING_STATUSES.has(newStatus)) {
+    const { data: bookings, error: bookingFetchError } = await admin
+      .from('bookings')
+      .select('id, room_id, status, check_in, check_out, folio_status')
+      .eq('organization_id', params.organizationId)
+      .eq('room_id', params.roomId)
+      .in('status', ['checked_in', 'confirmed', 'reserved'])
+
+    if (bookingFetchError) {
+      return { ok: false, message: bookingFetchError.message }
+    }
+
+    const occupying = pickOccupyingBooking((bookings ?? []) as OccupyingBookingRow[])
+    if (occupying) {
+      const statusLabel =
+        newStatus === 'available' ? 'available' : HK_STATUS_LABELS[newStatus] ?? newStatus
+      return {
+        ok: false,
+        message: `Room ${roomNumber} has an active in-house booking and cannot be marked ${statusLabel}. Check out or move the booking first.`,
+      }
+    }
+  }
 
   const { error: updateError } = await admin
     .from('rooms')
