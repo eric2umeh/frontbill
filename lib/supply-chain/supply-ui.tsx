@@ -35,7 +35,6 @@ export function SupplyStatRow({
 }
 
 export function DeptPill({
-  dept,
   count,
   active,
   onClick,
@@ -57,14 +56,23 @@ export function DeptPill({
       type="button"
       onClick={onClick}
       className={cn(
-        'relative rounded-full border px-3 py-1 text-xs font-medium transition-colors',
+        'relative inline-flex items-center overflow-visible rounded-full border px-3 py-1.5 text-xs font-medium transition-colors',
+        showCount && 'pr-5',
         active ? 'bg-primary text-primary-foreground border-primary' : 'bg-muted/50 hover:bg-muted',
       )}
     >
-      {label}
+      <span className="leading-tight">{label}</span>
       {showCount && (
-        <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-yellow-400 px-0.5 text-[9px] font-bold text-yellow-950">
-          {count}
+        <span
+          className={cn(
+            'pointer-events-none absolute -right-1 -top-1 flex h-[1.125rem] min-w-[1.125rem] items-center justify-center rounded-full border bg-background px-1 text-[9px] font-bold leading-none tabular-nums',
+            active
+              ? 'border-primary-foreground text-primary-foreground'
+              : 'border-foreground text-foreground',
+          )}
+          aria-label={`${count} items`}
+        >
+          {count! > 99 ? '99+' : count}
         </span>
       )}
     </button>
