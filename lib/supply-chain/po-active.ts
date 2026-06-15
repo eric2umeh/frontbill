@@ -5,6 +5,7 @@ import type {
   PurchaseOrder,
   StoreItem,
 } from "./types";
+import { storeItemDepartments } from "./types";
 
 /** PO still in the store / accounting pipeline (only one allowed at a time). */
 export function isActiveStorePurchaseOrderStatus(status: PoStatus): boolean {
@@ -77,7 +78,7 @@ export function storeItemToPoLine(
     {
       stockItemId: item.id,
       name: item.name,
-      dept: item.dept,
+      dept: storeItemDepartments(item)[0],
       unit: item.unit,
       qtyToBuy: qty,
       unitPrice,
