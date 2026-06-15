@@ -2,14 +2,16 @@
 
 import { useEffect, useState } from 'react'
 import {
-  DEPT_LABELS,
   KITCHEN_MATERIAL_CATEGORIES,
   KITCHEN_MATERIAL_CATEGORY_LABELS,
+  normalizeStoreItemDepts,
+  storeItemDepartments,
   type KitchenMaterialCategory,
   type StoreItem,
   type SupplyDept,
 } from '@/lib/supply-chain/types'
-import { toTitleCaseWords } from '@/lib/supply-chain/title-case'
+import { titleCaseWhileTyping, toTitleCaseWords } from '@/lib/supply-chain/title-case'
+import { formatUnitLabel } from '@/lib/supply-chain/measurement-units'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -28,15 +30,9 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { UnitSelect } from '@/components/supply-chain/unit-select'
+import { StoreDeptMultiSelect } from '@/components/supply-chain/store-dept-multi-select'
 
-const DEPTS: Exclude<SupplyDept, 'all'>[] = [
-  'kitchen',
-  'bar',
-  'housekeeping',
-  'maintenance',
-  'front_office',
-  'laundry',
-]
+type Dept = Exclude<SupplyDept, 'all'>
 
 type Props = {
   item: StoreItem | null
@@ -45,10 +41,12 @@ type Props = {
   onSave: (input: {
     name: string
     unit: string
-    dept: Exclude<SupplyDept, 'all'>
+    dept: Dept
+    depts?: Dept[]
     reorderLevel: number
     lastPrice: number
     benchmarkPrice: number
+    quantityInStore?: number
     kitchenCategory?: KitchenMaterialCategory
   }) => { ok: true } | { error: string }
 }
@@ -56,20 +54,22 @@ type Props = {
 export function StoreEditItemDialog({ item, open, onOpenChange, onSave }: Props) {
   const [name, setName] = useState('')
   const [unit, setUnit] = useState('kg')
-  const [dept, setDept] = useState<Exclude<SupplyDept, 'all'>>('kitchen')
+  const [depts, setDepts] = useState<Dept[]>(['kitchen'])
   const [reorder, setReorder] = useState('')
   const [price, setPrice] = useState('')
   const [benchmark, setBenchmark] = useState('')
+  const [qty, setQty] = useState('')
   const [kitchenCategory, setKitchenCategory] = useState<KitchenMaterialCategory>('other')
 
   useEffect(() => {
     if (!item || !open) return
     setName(item.name)
     setUnit(item.unit)
-    setDept(item.dept)
+    setDepts(storeItemDepartments(item))
     setReorder(String(item.reorderLevel))
     setPrice(String(item.lastPrice))
     setBenchmark(String(item.benchmarkPrice))
+    setQty(String(item.quantityInStore))
     setKitchenCategory(item.kitchenCategory ?? 'other')
   }, [item, open])
 
@@ -77,7 +77,7 @@ export function StoreEditItemDialog({ item, open, onOpenChange, onSave }: Props)
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Edit store item</DialogTitle>
         </DialogHeader>
@@ -87,8 +87,7 @@ export function StoreEditItemDialog({ item, open, onOpenChange, onSave }: Props)
             <Input
               className="mt-0.5"
               value={name}
-              onChange={(e) => setName(e.target.value)}
-              onBlur={() => setName(toTitleCaseWords(name))}
+              onChange={(e) => setName(titleCaseWhileTyping(e.target.value))}
             />
           </div>
           <div>
@@ -97,26 +96,24 @@ export function StoreEditItemDialog({ item, open, onOpenChange, onSave }: Props)
               <UnitSelect value={unit} onChange={setUnit} className="w-full h-9" />
             </div>
           </div>
-          <div>
-            <Label className="text-xs">Dept *</Label>
-            <Select value={dept} onValueChange={(v) => setDept(v as typeof dept)}>
-              <SelectTrigger className="mt-0.5">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {DEPTS.map((d) => (
-                  <SelectItem key={d} value={d}>
-                    {DEPT_LABELS[d]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          <div className="sm:col-span-2">
+            <Label className="text-xs">Departments *</Label>
+            <StoreDeptMultiSelect
+              className="mt-0.5"
+              value={depts}
+              onChange={setDepts}
+            />
           </div>
           <div>
             <Label className="text-xs">In store qty</Label>
-            <Input className="mt-0.5 bg-muted" readOnly value={String(item.quantityInStore)} />
+            <Input
+              inputMode="decimal"
+              className="mt-0.5"
+              value={qty}
+              onChange={(e) => setQty(e.target.value)}
+            />
             <p className="text-[10px] text-muted-foreground mt-1">
-              Adjust via issue-out, purchase receipt, or stock count — not here.
+              Shared across all selected departments ({formatUnitLabel(unit)}).
             </p>
           </div>
           <div>
@@ -146,7 +143,7 @@ export function StoreEditItemDialog({ item, open, onOpenChange, onSave }: Props)
               onChange={(e) => setBenchmark(e.target.value)}
             />
           </div>
-          {dept === 'kitchen' && (
+          {depts.includes('kitchen') && (
             <div className="sm:col-span-2">
               <Label className="text-xs">Kitchen category</Label>
               <Select
@@ -173,14 +170,18 @@ export function StoreEditItemDialog({ item, open, onOpenChange, onSave }: Props)
           </Button>
           <Button
             onClick={() => {
+              if (!depts.length) return
+              const normalized = normalizeStoreItemDepts(depts)
               const res = onSave({
                 name: toTitleCaseWords(name),
                 unit: unit.trim(),
-                dept,
+                dept: normalized.dept,
+                depts: normalized.depts,
                 reorderLevel: Number(reorder) || 0,
                 lastPrice: Number(price) || 0,
                 benchmarkPrice: Number(benchmark) || Number(price) || 0,
-                kitchenCategory: dept === 'kitchen' ? kitchenCategory : undefined,
+                quantityInStore: Math.max(0, Number(qty) || 0),
+                kitchenCategory: depts.includes('kitchen') ? kitchenCategory : undefined,
               })
               if ('error' in res) return
               onOpenChange(false)
