@@ -5,15 +5,17 @@ import { useClientMounted } from '@/hooks/use-client-mounted'
 import Link from 'next/link'
 import { useAuth } from '@/lib/auth-context'
 import { useSupplyChain } from '@/lib/supply-chain/supply-chain-context'
-import { DEPT_LABELS, type SupplyDept } from '@/lib/supply-chain/types'
+import { DEPT_LABELS, STORE_DEPT_PICKER_OPTIONS, isBarStoreDept, storeItemDepartments, storeItemMatchesDept, type SupplyDept } from '@/lib/supply-chain/types'
 import { priceVariancePct } from '@/lib/supply-chain/calculations'
 import { DeptPill } from '@/lib/supply-chain/supply-ui'
 import { formatNaira } from '@/lib/utils/currency'
+import { cn } from '@/lib/utils'
 import {
   canonicalRoleKey,
   canAddStoreItemDirect,
   canApproveStoreItems,
   canIssueStockFromStore,
+  canManageStoreCatalog,
   canSubmitStoreItemForApproval,
 } from '@/lib/permissions'
 import { issueOutletPickerOptions } from '@/lib/store/outlet-departments'
@@ -22,7 +24,7 @@ import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { ArrowRightFromLine, History, Pencil } from 'lucide-react'
+import { ArrowRightFromLine, History, Pencil, Trash2 } from 'lucide-react'
 import { OrgStaffSearchField } from '@/components/shared/org-staff-search-field'
 import {
   Select,
@@ -44,8 +46,10 @@ import { DraftBasketSidebar } from '@/components/supply-chain/draft-basket-sideb
 import { PoHistoryPanel } from '@/components/supply-chain/po-history-panel'
 import { ActivePurchaseOrderPanel } from '@/components/supply-chain/active-purchase-order-panel'
 import { canEditStorePurchaseOrder } from '@/lib/supply-chain/po-active'
+import { RESPONSIVE_HIDE_MD, RESPONSIVE_HIDE_LG } from '@/lib/ui/responsive-table'
 import {
   defaultUnitForStoreItem,
+  formatUnitLabel,
   isCompleteQuantityInput,
   parseQuantityValue,
   sanitizeQuantityInput,
@@ -63,8 +67,19 @@ import { StoreAddItemDialog } from '@/components/supply-chain/store-add-item-dia
 import { StoreEditItemDialog } from '@/components/supply-chain/store-edit-item-dialog'
 import { IssueOutCartSidebar } from '@/components/supply-chain/issue-out-cart-sidebar'
 import { SupplyHistoryClearButton } from '@/components/supply-chain/supply-history-clear-button'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog'
 
-const DEPTS: SupplyDept[] = ['all', 'kitchen', 'bar', 'housekeeping', 'maintenance', 'front_office', 'laundry']
+const DEPTS: SupplyDept[] = ['all', ...STORE_DEPT_PICKER_OPTIONS]
 
 const ISSUE_DESTINATIONS = issueOutletPickerOptions()
 
@@ -86,6 +101,7 @@ export function StoreWorkspace() {
     barStock,
     addStoreItemDirect,
     updateStoreItemDirect,
+    deleteStoreItemDirect,
     submitStoreItemForApproval,
     approvePendingStoreItem,
     rejectPendingStoreItem,
@@ -111,8 +127,10 @@ export function StoreWorkspace() {
   const mounted = useClientMounted()
   const [tab, setTab] = useState('stock')
   const [editItem, setEditItem] = useState<StoreItem | null>(null)
+  const [stockQtyMap, setStockQtyMap] = useState<Record<string, string>>({})
   const canIssue = canIssueStockFromStore(role)
   const canAddDirect = canAddStoreItemDirect(role)
+  const canManageCatalog = canManageStoreCatalog(role)
   const canSubmitItem = canSubmitStoreItemForApproval(role)
   const canApproveItems = canApproveStoreItems(role)
   const pendingApprovals = (pendingStoreItems ?? []).filter((p) => p.status === 'pending')
@@ -122,7 +140,7 @@ export function StoreWorkspace() {
 
   const filtered = useMemo(() => {
     if (dept === 'all') return storeItems
-    return storeItems.filter((s) => s.dept === dept)
+    return storeItems.filter((s) => storeItemMatchesDept(s, dept))
   }, [storeItems, dept])
 
   const basketByDept = useMemo(() => {
@@ -134,13 +152,35 @@ export function StoreWorkspace() {
     return m
   }, [basket])
 
-  const deptBasketCounts = useMemo(() => {
+  const deptCatalogCounts = useMemo(() => {
     const c: Partial<Record<SupplyDept, number>> = {}
-    for (const b of basket) c[b.dept] = (c[b.dept] ?? 0) + 1
+    for (const item of storeItems) {
+      for (const d of storeItemDepartments(item)) {
+        c[d] = (c[d] ?? 0) + 1
+      }
+    }
     return c
-  }, [basket])
+  }, [storeItems])
 
   const actor = { name: name ?? 'Store', role: canonicalRoleKey(role) ?? 'store' }
+
+  const unitLabel = (unit: string) => formatUnitLabel(unit)
+
+  const commitStockQty = (item: StoreItem, raw: string) => {
+    const qty = parseQuantityValue(raw)
+    if (qty < 0) {
+      toast.error('Enter a valid quantity')
+      setStockQtyMap((m) => ({ ...m, [item.id]: String(item.quantityInStore) }))
+      return
+    }
+    const res = updateStoreItemDirect(item.id, { quantityInStore: qty }, actor)
+    if ('error' in res) {
+      toast.error(res.error)
+      setStockQtyMap((m) => ({ ...m, [item.id]: String(item.quantityInStore) }))
+      return
+    }
+    toast.success(`Updated ${item.name} to ${qty} ${unitLabel(item.unit)}`)
+  }
 
   useEffect(() => {
     setQtyMap((prev) => {
@@ -175,7 +215,7 @@ export function StoreWorkspace() {
     if (qty <= 0) return
     const storeQty = toStoreQty(item, qty, issueUnit)
     if (storeQty == null) {
-      toast.error(`Set pack size for ${item.name} (${issueUnit} per ${item.unit})`)
+      toast.error(`Set pack size for ${item.name} (${unitLabel(issueUnit)} per ${unitLabel(item.unit)})`)
       return
     }
     const err = setBasketLineQty(item, storeQty, item.lastPrice, actor)
@@ -240,7 +280,7 @@ export function StoreWorkspace() {
     const storeQty = toStoreQty(item, qty, issueUnit)
     if (storeQty == null) return
     if (storeQty > item.quantityInStore) {
-      toast.error(`Only ${item.quantityInStore} ${item.unit} on hand`)
+      toast.error(`Only ${item.quantityInStore} ${unitLabel(item.unit)} on hand`)
       return
     }
     setIssueCart((prev) => {
@@ -331,21 +371,21 @@ export function StoreWorkspace() {
           <TabsTrigger value="history">History</TabsTrigger>
         </TabsList>
 
-        <div className="flex flex-wrap gap-2 mt-4">
+        <div className="mt-4 flex flex-wrap gap-2 overflow-visible pt-1.5 pr-1">
           {DEPTS.map((d) => (
             <DeptPill
               key={d}
               dept={d}
               label={DEPT_LABELS[d]}
               active={dept === d}
-              count={d !== 'all' ? deptBasketCounts[d] : undefined}
+              count={d !== 'all' ? deptCatalogCounts[d] : undefined}
               onClick={() => setDept(d)}
             />
           ))}
         </div>
 
         <TabsContent value="stock" className="mt-4 space-y-4">
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex justify-end">
             <StoreAddItemDialog
               canAddDirect={canAddDirect}
               canSubmit={canSubmitItem}
@@ -394,7 +434,11 @@ export function StoreWorkspace() {
                       <span className="font-medium">{p.name}</span>
                       <span className="text-muted-foreground">
                         {' '}
-                        · {p.unit} · {DEPT_LABELS[p.dept]} · ₦{p.lastPrice} · qty {p.quantityInStore}
+                        · {unitLabel(p.unit)} ·{' '}
+                        {(p.depts?.length ? p.depts : [p.dept])
+                          .map((d) => DEPT_LABELS[d])
+                          .join(', ')}{' '}
+                        · ₦{p.lastPrice} · qty {p.quantityInStore}
                       </span>
                       <p className="text-xs text-muted-foreground">
                         By {p.submittedByName} · {new Date(p.submittedAt).toLocaleString()}
@@ -463,61 +507,240 @@ export function StoreWorkspace() {
                 emptyMessage="No stock items match your filters."
               >
                 {(pageItems) => (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Item</TableHead>
-                        <TableHead>Dept</TableHead>
-                        <TableHead className="text-right">In Store</TableHead>
-                        <TableHead className="text-right">Reorder</TableHead>
-                        <TableHead className="text-right">Last Price</TableHead>
-                        <TableHead className="text-right">Benchmark</TableHead>
-                        <TableHead className="text-right">Variance</TableHead>
-                        <TableHead>Status</TableHead>
-                        {canAddDirect && <TableHead className="w-12" />}
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
+                  <>
+                    <div className="md:hidden space-y-2">
                       {pageItems.map((item) => {
                         const level = getStockLevel(item.quantityInStore, item.reorderLevel)
-                        const varPct = priceVariancePct(item.lastPrice, item.benchmarkPrice)
                         return (
-                          <TableRow key={item.id}>
-                            <TableCell className="font-medium">{item.name} ({item.unit})</TableCell>
-                            <TableCell><Badge variant="secondary">{DEPT_LABELS[item.dept]}</Badge></TableCell>
-                            <TableCell className="text-right">
-                              <span className={stockLevelNumberPillClass(level)}>
-                                {item.quantityInStore} {item.unit}
-                              </span>
-                            </TableCell>
-                            <TableCell className="text-right tabular-nums">{item.reorderLevel}</TableCell>
-                            <TableCell className="text-right">{formatNaira(item.lastPrice)}</TableCell>
-                            <TableCell className="text-right">{formatNaira(item.benchmarkPrice)}</TableCell>
-                            <TableCell className="text-right text-emerald-600">{varPct.toFixed(1)}%</TableCell>
-                            <TableCell>
+                          <div key={item.id} className="rounded-lg border p-3 space-y-2">
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="min-w-0">
+                                <p className="font-medium text-sm leading-snug">
+                                  {item.name} ({unitLabel(item.unit)})
+                                </p>
+                                <div className="mt-1 flex flex-wrap gap-1">
+                                  {storeItemDepartments(item).map((d) => (
+                                    <Badge key={d} variant="secondary" className="text-[10px]">
+                                      {DEPT_LABELS[d]}
+                                    </Badge>
+                                  ))}
+                                </div>
+                              </div>
                               <Badge className={stockLevelBadgeClass(level)}>
                                 {stockLevelStatusLabel(level)}
                               </Badge>
-                            </TableCell>
-                            {canAddDirect && (
-                              <TableCell>
+                            </div>
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-xs text-muted-foreground">In store</span>
+                              {canManageCatalog ? (
+                                <Input
+                                  inputMode="decimal"
+                                  className="h-8 w-28 text-right tabular-nums"
+                                  value={stockQtyMap[item.id] ?? String(item.quantityInStore)}
+                                  onChange={(e) =>
+                                    setStockQtyMap((m) => ({
+                                      ...m,
+                                      [item.id]: sanitizeQuantityInput(e.target.value),
+                                    }))
+                                  }
+                                  onBlur={(e) => commitStockQty(item, e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') e.currentTarget.blur()
+                                  }}
+                                />
+                              ) : (
+                                <span className={stockLevelNumberPillClass(level)}>
+                                  {item.quantityInStore} {unitLabel(item.unit)}
+                                </span>
+                              )}
+                            </div>
+                            {canManageCatalog && (
+                              <div className="flex justify-end gap-1 border-t pt-2">
                                 <Button
                                   type="button"
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-8 w-8"
-                                  title="Edit item"
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-8 gap-1"
                                   onClick={() => setEditItem(item)}
                                 >
                                   <Pencil className="h-3.5 w-3.5" />
+                                  Edit
                                 </Button>
-                              </TableCell>
+                                <AlertDialog>
+                                  <AlertDialogTrigger asChild>
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-8 text-destructive hover:text-destructive"
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5" />
+                                    </Button>
+                                  </AlertDialogTrigger>
+                                  <AlertDialogContent>
+                                    <AlertDialogHeader>
+                                      <AlertDialogTitle>Delete {item.name}?</AlertDialogTitle>
+                                      <AlertDialogDescription>
+                                        Removes this item from the central store catalogue on this
+                                        device. Purchase and issue history are kept.
+                                      </AlertDialogDescription>
+                                    </AlertDialogHeader>
+                                    <AlertDialogFooter>
+                                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                      <AlertDialogAction
+                                        onClick={() => {
+                                          const res = deleteStoreItemDirect(item.id, actor)
+                                          if ('error' in res) toast.error(res.error)
+                                          else toast.success(`Deleted ${item.name}`)
+                                        }}
+                                      >
+                                        Delete
+                                      </AlertDialogAction>
+                                    </AlertDialogFooter>
+                                  </AlertDialogContent>
+                                </AlertDialog>
+                              </div>
                             )}
-                          </TableRow>
+                          </div>
                         )
                       })}
-                    </TableBody>
-                  </Table>
+                    </div>
+                    <div className="hidden md:block overflow-x-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Item</TableHead>
+                            <TableHead className={RESPONSIVE_HIDE_MD}>Dept</TableHead>
+                            <TableHead className="text-right">In Store</TableHead>
+                            <TableHead className={`text-right ${RESPONSIVE_HIDE_LG}`}>Reorder</TableHead>
+                            <TableHead className={`text-right ${RESPONSIVE_HIDE_MD}`}>Last Price</TableHead>
+                            <TableHead className={`text-right ${RESPONSIVE_HIDE_LG}`}>Benchmark</TableHead>
+                            <TableHead className={`text-right ${RESPONSIVE_HIDE_LG}`}>Variance</TableHead>
+                            <TableHead>Status</TableHead>
+                            {canManageCatalog && (
+                              <TableHead className="w-24 text-right">Actions</TableHead>
+                            )}
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {pageItems.map((item) => {
+                            const level = getStockLevel(item.quantityInStore, item.reorderLevel)
+                            const varPct = priceVariancePct(item.lastPrice, item.benchmarkPrice)
+                            return (
+                              <TableRow key={item.id}>
+                                <TableCell className="font-medium">
+                                  {item.name} ({unitLabel(item.unit)})
+                                </TableCell>
+                                <TableCell className={RESPONSIVE_HIDE_MD}>
+                                  <div className="flex flex-wrap gap-1">
+                                    {storeItemDepartments(item).map((d) => (
+                                      <Badge key={d} variant="secondary" className="text-[10px]">
+                                        {DEPT_LABELS[d]}
+                                      </Badge>
+                                    ))}
+                                  </div>
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  {canManageCatalog ? (
+                                    <Input
+                                      inputMode="decimal"
+                                      className="h-8 w-24 ml-auto text-right tabular-nums"
+                                      value={
+                                        stockQtyMap[item.id] ?? String(item.quantityInStore)
+                                      }
+                                      onChange={(e) =>
+                                        setStockQtyMap((m) => ({
+                                          ...m,
+                                          [item.id]: sanitizeQuantityInput(e.target.value),
+                                        }))
+                                      }
+                                      onBlur={(e) => commitStockQty(item, e.target.value)}
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Enter') {
+                                          e.currentTarget.blur()
+                                        }
+                                      }}
+                                    />
+                                  ) : (
+                                    <span className={stockLevelNumberPillClass(level)}>
+                                      {item.quantityInStore} {unitLabel(item.unit)}
+                                    </span>
+                                  )}
+                                </TableCell>
+                                <TableCell className={`text-right tabular-nums ${RESPONSIVE_HIDE_LG}`}>
+                                  {item.reorderLevel}
+                                </TableCell>
+                                <TableCell className={`text-right ${RESPONSIVE_HIDE_MD}`}>
+                                  {formatNaira(item.lastPrice)}
+                                </TableCell>
+                                <TableCell className={`text-right ${RESPONSIVE_HIDE_LG}`}>
+                                  {formatNaira(item.benchmarkPrice)}
+                                </TableCell>
+                                <TableCell className={`text-right text-emerald-600 ${RESPONSIVE_HIDE_LG}`}>
+                                  {varPct.toFixed(1)}%
+                                </TableCell>
+                                <TableCell>
+                                  <Badge className={stockLevelBadgeClass(level)}>
+                                    {stockLevelStatusLabel(level)}
+                                  </Badge>
+                                </TableCell>
+                                {canManageCatalog && (
+                                  <TableCell className="text-right">
+                                    <div className="flex justify-end gap-1">
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-8 w-8"
+                                        title="Edit item"
+                                        onClick={() => setEditItem(item)}
+                                      >
+                                        <Pencil className="h-3.5 w-3.5" />
+                                      </Button>
+                                      <AlertDialog>
+                                        <AlertDialogTrigger asChild>
+                                          <Button
+                                            type="button"
+                                            variant="ghost"
+                                            size="icon"
+                                            className="h-8 w-8 text-destructive hover:text-destructive"
+                                            title="Delete item"
+                                          >
+                                            <Trash2 className="h-3.5 w-3.5" />
+                                          </Button>
+                                        </AlertDialogTrigger>
+                                        <AlertDialogContent>
+                                          <AlertDialogHeader>
+                                            <AlertDialogTitle>Delete {item.name}?</AlertDialogTitle>
+                                            <AlertDialogDescription>
+                                              Removes this item from the central store catalogue on
+                                              this device. Purchase and issue history are kept.
+                                            </AlertDialogDescription>
+                                          </AlertDialogHeader>
+                                          <AlertDialogFooter>
+                                            <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                            <AlertDialogAction
+                                              onClick={() => {
+                                                const res = deleteStoreItemDirect(item.id, actor)
+                                                if ('error' in res) toast.error(res.error)
+                                                else toast.success(`Deleted ${item.name}`)
+                                              }}
+                                            >
+                                              Delete
+                                            </AlertDialogAction>
+                                          </AlertDialogFooter>
+                                        </AlertDialogContent>
+                                      </AlertDialog>
+                                    </div>
+                                  </TableCell>
+                                )}
+                              </TableRow>
+                            )
+                          })}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </>
                 )}
               </PaginatedListShell>
             </div>
@@ -618,99 +841,162 @@ export function StoreWorkspace() {
                   emptyMessage="No items match your filters."
                 >
                   {(pageItems) => (
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Item</TableHead>
-                          <TableHead>Dept</TableHead>
-                          <TableHead className="text-right">In Store</TableHead>
-                          <TableHead className="text-right">Qty / unit</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
+                    <>
+                      <div className="md:hidden space-y-2">
                         {pageItems.map((item) => {
                           const level = getStockLevel(item.quantityInStore, item.reorderLevel)
-                          const onBar =
-                            item.dept === 'bar'
-                              ? barStock.find((b) => b.storeItemId === item.id)
-                              : undefined
                           return (
-                            <TableRow key={item.id}>
-                              <TableCell>
-                                <p className="font-medium">{item.name} ({item.unit})</p>
-                                {onBar != null && (
-                                  <p className="text-xs text-muted-foreground">
-                                    Bar stock: {onBar.quantityOnHand} {item.unit}
-                                  </p>
-                                )}
-                              </TableCell>
-                              <TableCell>
-                                <Badge variant="secondary">{DEPT_LABELS[item.dept]}</Badge>
-                              </TableCell>
-                              <TableCell className="text-right">
-                                <span className={stockLevelNumberPillClass(level)}>
-                                  {item.quantityInStore} {item.unit}
-                                </span>
-                              </TableCell>
-                              <TableCell className="text-right">
-                                <div className="flex items-center justify-end gap-1">
-                                  <Input
-                                    inputMode="decimal"
-                                    className="h-8 w-20 text-right"
-                                    value={issueQtyMap[item.id] ?? ''}
-                                    onChange={(e) => {
-                                      const v = sanitizeQuantityInput(e.target.value)
-                                      setIssueQtyMap((m) => ({ ...m, [item.id]: v }))
-                                      const u =
-                                        issueUnitMap[item.id] ??
-                                        defaultUnitForStoreItem(item.unit)
-                                      addToIssueCart(item, v, u)
-                                    }}
-                                  />
-                                  <UnitSelect
-                                    storeUnit={item.unit}
-                                    itemName={item.name}
-                                    value={
-                                      issueUnitMap[item.id] ??
-                                      defaultUnitForStoreItem(item.unit)
-                                    }
-                                    onChange={(u) => {
-                                      setIssueUnitMap((m) => ({ ...m, [item.id]: u }))
-                                      const v = issueQtyMap[item.id] ?? ''
-                                      if (v) addToIssueCart(item, v, u)
-                                    }}
-                                  />
+                            <div key={item.id} className="rounded-lg border p-3 space-y-2">
+                              <div>
+                                <p className="font-medium text-sm">
+                                  {item.name} ({unitLabel(item.unit)})
+                                </p>
+                                <div className="mt-1 flex flex-wrap gap-1">
+                                  {storeItemDepartments(item).map((d) => (
+                                    <Badge key={d} variant="secondary" className="text-[10px]">
+                                      {DEPT_LABELS[d]}
+                                    </Badge>
+                                  ))}
                                 </div>
-                                {needsUnitFactor(
-                                  issueUnitMap[item.id] ?? defaultUnitForStoreItem(item.unit),
-                                  item.unit,
-                                  factorsFor(item),
-                                ) && (
-                                  <UnitConversionField
-                                    compact
-                                    storeItemId={item.id}
-                                    storeUnit={item.unit}
-                                    selectedUnit={
-                                      issueUnitMap[item.id] ??
-                                      defaultUnitForStoreItem(item.unit)
-                                    }
-                                    factors={factorsFor(item)}
-                                    onFactorsChange={(next) => {
-                                      setFactorMap((m) => ({ ...m, [item.id]: next }))
-                                      const v = issueQtyMap[item.id] ?? ''
-                                      const u =
-                                        issueUnitMap[item.id] ??
-                                        defaultUnitForStoreItem(item.unit)
-                                      if (v) addToIssueCart(item, v, u)
-                                    }}
-                                  />
-                                )}
-                              </TableCell>
-                            </TableRow>
+                              </div>
+                              <div className="flex items-center justify-between text-sm">
+                                <span className="text-muted-foreground">In store</span>
+                                <span className={stockLevelNumberPillClass(level)}>
+                                  {item.quantityInStore} {unitLabel(item.unit)}
+                                </span>
+                              </div>
+                              <div className="flex items-center justify-end gap-1">
+                                <Input
+                                  inputMode="decimal"
+                                  className="h-8 w-24 text-right"
+                                  value={issueQtyMap[item.id] ?? ''}
+                                  onChange={(e) => {
+                                    const v = sanitizeQuantityInput(e.target.value)
+                                    setIssueQtyMap((m) => ({ ...m, [item.id]: v }))
+                                    const u =
+                                      issueUnitMap[item.id] ?? defaultUnitForStoreItem(item.unit)
+                                    addToIssueCart(item, v, u)
+                                  }}
+                                />
+                                <UnitSelect
+                                  storeUnit={item.unit}
+                                  itemName={item.name}
+                                  value={
+                                    issueUnitMap[item.id] ?? defaultUnitForStoreItem(item.unit)
+                                  }
+                                  onChange={(u) => {
+                                    setIssueUnitMap((m) => ({ ...m, [item.id]: u }))
+                                    const v = issueQtyMap[item.id] ?? ''
+                                    if (v) addToIssueCart(item, v, u)
+                                  }}
+                                />
+                              </div>
+                            </div>
                           )
                         })}
-                      </TableBody>
-                    </Table>
+                      </div>
+                      <div className="hidden md:block overflow-x-auto">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Item</TableHead>
+                              <TableHead className={RESPONSIVE_HIDE_MD}>Dept</TableHead>
+                              <TableHead className="text-right">In Store</TableHead>
+                              <TableHead className="text-right">Qty / unit</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {pageItems.map((item) => {
+                              const level = getStockLevel(item.quantityInStore, item.reorderLevel)
+                              const onBar =
+                                isBarStoreDept(item.dept)
+                                  ? barStock.find((b) => b.storeItemId === item.id)
+                                  : undefined
+                              return (
+                                <TableRow key={item.id}>
+                                  <TableCell>
+                                    <p className="font-medium">{item.name} ({unitLabel(item.unit)})</p>
+                                    {onBar != null && (
+                                      <p className="text-xs text-muted-foreground">
+                                        Bar stock: {onBar.quantityOnHand} {unitLabel(item.unit)}
+                                      </p>
+                                    )}
+                                  </TableCell>
+                                  <TableCell className={RESPONSIVE_HIDE_MD}>
+                                    <div className="flex flex-wrap gap-1">
+                                      {storeItemDepartments(item).map((d) => (
+                                        <Badge key={d} variant="secondary" className="text-[10px]">
+                                          {DEPT_LABELS[d]}
+                                        </Badge>
+                                      ))}
+                                    </div>
+                                  </TableCell>
+                                  <TableCell className="text-right">
+                                    <span className={stockLevelNumberPillClass(level)}>
+                                      {item.quantityInStore} {unitLabel(item.unit)}
+                                    </span>
+                                  </TableCell>
+                                  <TableCell className="text-right">
+                                    <div className="flex items-center justify-end gap-1">
+                                      <Input
+                                        inputMode="decimal"
+                                        className="h-8 w-20 text-right"
+                                        value={issueQtyMap[item.id] ?? ''}
+                                        onChange={(e) => {
+                                          const v = sanitizeQuantityInput(e.target.value)
+                                          setIssueQtyMap((m) => ({ ...m, [item.id]: v }))
+                                          const u =
+                                            issueUnitMap[item.id] ??
+                                            defaultUnitForStoreItem(item.unit)
+                                          addToIssueCart(item, v, u)
+                                        }}
+                                      />
+                                      <UnitSelect
+                                        storeUnit={item.unit}
+                                        itemName={item.name}
+                                        value={
+                                          issueUnitMap[item.id] ??
+                                          defaultUnitForStoreItem(item.unit)
+                                        }
+                                        onChange={(u) => {
+                                          setIssueUnitMap((m) => ({ ...m, [item.id]: u }))
+                                          const v = issueQtyMap[item.id] ?? ''
+                                          if (v) addToIssueCart(item, v, u)
+                                        }}
+                                      />
+                                    </div>
+                                    {needsUnitFactor(
+                                      issueUnitMap[item.id] ?? defaultUnitForStoreItem(item.unit),
+                                      item.unit,
+                                      factorsFor(item),
+                                    ) && (
+                                      <UnitConversionField
+                                        compact
+                                        storeItemId={item.id}
+                                        storeUnit={item.unit}
+                                        selectedUnit={
+                                          issueUnitMap[item.id] ??
+                                          defaultUnitForStoreItem(item.unit)
+                                        }
+                                        factors={factorsFor(item)}
+                                        onFactorsChange={(next) => {
+                                          setFactorMap((m) => ({ ...m, [item.id]: next }))
+                                          const v = issueQtyMap[item.id] ?? ''
+                                          const u =
+                                            issueUnitMap[item.id] ??
+                                            defaultUnitForStoreItem(item.unit)
+                                          if (v) addToIssueCart(item, v, u)
+                                        }}
+                                      />
+                                    )}
+                                  </TableCell>
+                                </TableRow>
+                              )
+                            })}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    </>
                   )}
                 </PaginatedListShell>
               </div>
@@ -745,7 +1031,7 @@ export function StoreWorkspace() {
                   return
                 }
                 if (storeQty > item.quantityInStore) {
-                  toast.error(`Only ${item.quantityInStore} ${item.unit} on hand`)
+                  toast.error(`Only ${item.quantityInStore} ${unitLabel(item.unit)} on hand`)
                   return
                 }
                 setIssueQtyMap((m) => ({ ...m, [id]: String(qty) }))
@@ -769,7 +1055,7 @@ export function StoreWorkspace() {
                   return
                 }
                 if (storeQty > item.quantityInStore) {
-                  toast.error(`Only ${item.quantityInStore} ${item.unit} on hand in ${unit}`)
+                  toast.error(`Only ${item.quantityInStore} ${unitLabel(item.unit)} on hand in ${unitLabel(unit)}`)
                   return
                 }
                 setIssueCart((prev) =>
@@ -800,38 +1086,62 @@ export function StoreWorkspace() {
                   No items issued out yet. Transfers from the Issue Out tab appear here.
                 </p>
               ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>When</TableHead>
-                      <TableHead>Item</TableHead>
-                      <TableHead>Qty</TableHead>
-                      <TableHead>Destination</TableHead>
-                      <TableHead>Received by</TableHead>
-                      <TableHead>Issued by</TableHead>
-                      <TableHead>Notes</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
+                <>
+                  <div className="md:hidden divide-y">
                     {(issueOutLog ?? []).map((row, index) => (
-                      <TableRow key={`${row.id}-${index}`}>
-                        <TableCell className="text-xs whitespace-nowrap">
+                      <div key={`${row.id}-${index}-m`} className="p-3 space-y-1">
+                        <div className="flex items-start justify-between gap-2">
+                          <p className="font-medium text-sm">{row.itemName}</p>
+                          <span className="text-sm tabular-nums shrink-0">
+                            {row.quantity} {unitLabel(row.unit)}
+                          </span>
+                        </div>
+                        <p className="text-xs text-muted-foreground">{row.destination}</p>
+                        <p className="text-[10px] text-muted-foreground">
                           {new Date(row.issuedAt).toLocaleString()}
-                        </TableCell>
-                        <TableCell className="font-medium">{row.itemName}</TableCell>
-                        <TableCell>
-                          {row.quantity} {row.unit}
-                        </TableCell>
-                        <TableCell>{row.destination}</TableCell>
-                        <TableCell>{row.receivedBy || '—'}</TableCell>
-                        <TableCell>{row.issuedBy}</TableCell>
-                        <TableCell className="text-xs text-muted-foreground max-w-[160px] truncate">
-                          {row.notes || '—'}
-                        </TableCell>
-                      </TableRow>
+                        </p>
+                      </div>
                     ))}
-                  </TableBody>
-                </Table>
+                  </div>
+                  <div className="hidden md:block overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className={RESPONSIVE_HIDE_LG}>When</TableHead>
+                          <TableHead>Item</TableHead>
+                          <TableHead>Qty</TableHead>
+                          <TableHead>Destination</TableHead>
+                          <TableHead className={RESPONSIVE_HIDE_MD}>Received by</TableHead>
+                          <TableHead className={RESPONSIVE_HIDE_LG}>Issued by</TableHead>
+                          <TableHead className={RESPONSIVE_HIDE_LG}>Notes</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {(issueOutLog ?? []).map((row, index) => (
+                          <TableRow key={`${row.id}-${index}`}>
+                            <TableCell className={`text-xs whitespace-nowrap ${RESPONSIVE_HIDE_LG}`}>
+                              {new Date(row.issuedAt).toLocaleString()}
+                            </TableCell>
+                            <TableCell className="font-medium">{row.itemName}</TableCell>
+                            <TableCell>
+                              {row.quantity} {unitLabel(row.unit)}
+                            </TableCell>
+                            <TableCell>{row.destination}</TableCell>
+                            <TableCell className={RESPONSIVE_HIDE_MD}>
+                              {row.receivedBy || '—'}
+                            </TableCell>
+                            <TableCell className={RESPONSIVE_HIDE_LG}>{row.issuedBy}</TableCell>
+                            <TableCell
+                              className={`text-xs text-muted-foreground max-w-[160px] truncate ${RESPONSIVE_HIDE_LG}`}
+                            >
+                              {row.notes || '—'}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </>
               )}
             </div>
           </TabsContent>
@@ -858,18 +1168,8 @@ export function StoreWorkspace() {
                   emptyMessage="No items match your search."
                 >
                   {(pageItems) => (
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Item</TableHead>
-                          <TableHead>Dept</TableHead>
-                          <TableHead className="text-right">In Store</TableHead>
-                          <TableHead className="text-right">Qty / unit</TableHead>
-                          <TableHead className="text-right">Unit Price</TableHead>
-                          <TableHead className="text-right">Line total</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
+                    <>
+                      <div className="md:hidden space-y-2">
                         {pageItems.map((item) => {
                           const rawQty = qtyMap[item.id] ?? ''
                           const purchaseUnit =
@@ -881,31 +1181,38 @@ export function StoreWorkspace() {
                           const level = getStockLevel(item.quantityInStore, item.reorderLevel)
                           const inBasket = basket.some((b) => b.stockItemId === item.id)
                           return (
-                            <TableRow key={item.id} className={inBasket ? 'bg-amber-50/40' : undefined}>
-                              <TableCell>{item.name} ({item.unit})</TableCell>
-                              <TableCell><Badge variant="outline">{DEPT_LABELS[item.dept]}</Badge></TableCell>
-                              <TableCell className="text-right">
+                            <div
+                              key={item.id}
+                              className={cn(
+                                'rounded-lg border p-3 space-y-2',
+                                inBasket && 'bg-amber-50/40',
+                              )}
+                            >
+                              <p className="font-medium text-sm">
+                                {item.name} ({unitLabel(item.unit)})
+                              </p>
+                              <div className="flex flex-wrap gap-1">
+                                {storeItemDepartments(item).map((d) => (
+                                  <Badge key={d} variant="outline" className="text-[10px]">
+                                    {DEPT_LABELS[d]}
+                                  </Badge>
+                                ))}
+                              </div>
+                              <div className="flex items-center justify-between text-sm">
+                                <span className="text-muted-foreground">In store</span>
                                 <span className={stockLevelNumberPillClass(level)}>
                                   {item.quantityInStore}
                                 </span>
-                              </TableCell>
-                              <TableCell className="text-right">
-                                <div className="flex items-center justify-end gap-1">
+                              </div>
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="flex items-center gap-1">
                                   <Input
                                     inputMode="decimal"
                                     disabled={purchaseLocked}
                                     className="h-8 w-20 text-right"
                                     value={rawQty}
-                                    onChange={(e) =>
-                                      handlePurchaseQtyChange(item, e.target.value)
-                                    }
+                                    onChange={(e) => handlePurchaseQtyChange(item, e.target.value)}
                                     onBlur={(e) => commitPurchaseQty(item, e.target.value)}
-                                    onKeyDown={(e) => {
-                                      if (e.key === 'Enter') {
-                                        e.currentTarget.blur()
-                                        commitPurchaseQty(item, e.currentTarget.value)
-                                      }
-                                    }}
                                   />
                                   <UnitSelect
                                     storeUnit={item.unit}
@@ -918,16 +1225,108 @@ export function StoreWorkspace() {
                                     }}
                                   />
                                 </div>
-                              </TableCell>
-                              <TableCell className="text-right">{formatNaira(price)}/{item.unit}</TableCell>
-                              <TableCell className="text-right tabular-nums">
-                                {storeQty != null && storeQty > 0 ? formatNaira(storeQty * price) : '—'}
-                              </TableCell>
-                            </TableRow>
+                                <span className="text-sm font-medium tabular-nums">
+                                  {storeQty != null && storeQty > 0
+                                    ? formatNaira(storeQty * price)
+                                    : '—'}
+                                </span>
+                              </div>
+                            </div>
                           )
                         })}
-                      </TableBody>
-                    </Table>
+                      </div>
+                      <div className="hidden md:block overflow-x-auto">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Item</TableHead>
+                              <TableHead className={RESPONSIVE_HIDE_MD}>Dept</TableHead>
+                              <TableHead className="text-right">In Store</TableHead>
+                              <TableHead className="text-right">Qty / unit</TableHead>
+                              <TableHead className={`text-right ${RESPONSIVE_HIDE_MD}`}>
+                                Unit Price
+                              </TableHead>
+                              <TableHead className="text-right">Line total</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {pageItems.map((item) => {
+                              const rawQty = qtyMap[item.id] ?? ''
+                              const purchaseUnit =
+                                purchaseUnitMap[item.id] ?? defaultUnitForStoreItem(item.unit)
+                              const qty = parseQuantityValue(rawQty)
+                              const storeQty =
+                                qty > 0 ? toStoreQty(item, qty, purchaseUnit) : null
+                              const price = item.lastPrice
+                              const level = getStockLevel(item.quantityInStore, item.reorderLevel)
+                              const inBasket = basket.some((b) => b.stockItemId === item.id)
+                              return (
+                                <TableRow
+                                  key={item.id}
+                                  className={inBasket ? 'bg-amber-50/40' : undefined}
+                                >
+                                  <TableCell>
+                                    {item.name} ({unitLabel(item.unit)})
+                                  </TableCell>
+                                  <TableCell className={RESPONSIVE_HIDE_MD}>
+                                    <div className="flex flex-wrap gap-1">
+                                      {storeItemDepartments(item).map((d) => (
+                                        <Badge key={d} variant="outline" className="text-[10px]">
+                                          {DEPT_LABELS[d]}
+                                        </Badge>
+                                      ))}
+                                    </div>
+                                  </TableCell>
+                                  <TableCell className="text-right">
+                                    <span className={stockLevelNumberPillClass(level)}>
+                                      {item.quantityInStore}
+                                    </span>
+                                  </TableCell>
+                                  <TableCell className="text-right">
+                                    <div className="flex items-center justify-end gap-1">
+                                      <Input
+                                        inputMode="decimal"
+                                        disabled={purchaseLocked}
+                                        className="h-8 w-20 text-right"
+                                        value={rawQty}
+                                        onChange={(e) =>
+                                          handlePurchaseQtyChange(item, e.target.value)
+                                        }
+                                        onBlur={(e) => commitPurchaseQty(item, e.target.value)}
+                                        onKeyDown={(e) => {
+                                          if (e.key === 'Enter') {
+                                            e.currentTarget.blur()
+                                            commitPurchaseQty(item, e.currentTarget.value)
+                                          }
+                                        }}
+                                      />
+                                      <UnitSelect
+                                        storeUnit={item.unit}
+                                        itemName={item.name}
+                                        disabled={purchaseLocked}
+                                        value={purchaseUnit}
+                                        onChange={(u) => {
+                                          setPurchaseUnitMap((m) => ({ ...m, [item.id]: u }))
+                                          if (rawQty.trim()) commitPurchaseQty(item, rawQty)
+                                        }}
+                                      />
+                                    </div>
+                                  </TableCell>
+                                  <TableCell className={`text-right ${RESPONSIVE_HIDE_MD}`}>
+                                    {formatNaira(price)}/{unitLabel(item.unit)}
+                                  </TableCell>
+                                  <TableCell className="text-right tabular-nums">
+                                    {storeQty != null && storeQty > 0
+                                      ? formatNaira(storeQty * price)
+                                      : '—'}
+                                  </TableCell>
+                                </TableRow>
+                              )
+                            })}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    </>
                   )}
                 </PaginatedListShell>
               </div>

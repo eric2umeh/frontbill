@@ -577,7 +577,7 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
     key: "auditor",
     label: "Auditor",
     description:
-      "Internal audit: read-only view of the hotel store, daily movement summaries, and detailed stock audit trail; may also open system audit trails elsewhere.",
+      "Internal audit: central store, kitchen & F&B stock views, outlet reports, movement summaries, and audit trails (read-only).",
     color: "bg-slate-200 text-slate-900 dark:bg-slate-800 dark:text-slate-100",
     permissions: [
       "store:view",
@@ -585,7 +585,11 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
       "store:reports",
       "store:audit",
       "supply:store",
+      "supply:kitchen",
+      "supply:fnb",
       "supply:activity",
+      "outlet:view",
+      "outlet:reports",
       "night_audit:view",
       "audit_trails:view",
       "settings:view",
@@ -994,6 +998,13 @@ export function canSubmitStoreItemForApproval(
 
 /** Approve or reject pending store catalogue submissions. */
 export function canApproveStoreItems(
+  userRole: string | null | undefined,
+): boolean {
+  return canAddStoreItemDirect(userRole);
+}
+
+/** Edit catalogue, adjust on-hand qty, or delete central store items. */
+export function canManageStoreCatalog(
   userRole: string | null | undefined,
 ): boolean {
   return canAddStoreItemDirect(userRole);

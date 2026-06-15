@@ -1,7 +1,9 @@
 /** All units — alphabetically sorted for dropdowns. */
 export const MEASUREMENT_UNITS = [
+  'bag',
   'basket',
   'bottle',
+  'carton',
   'crate',
   'cup',
   'g',
@@ -63,6 +65,12 @@ const UNIT_ALIASES: Record<string, string> = {
   set: 'set',
   sets: 'set',
   basket: 'basket',
+  bag: 'bag',
+  bags: 'bag',
+  carton: 'carton',
+  cartons: 'carton',
+  ctn: 'carton',
+  ctns: 'carton',
 }
 
 export function normalizeMeasurementUnit(raw: string): string {
@@ -79,6 +87,8 @@ export function formatUnitLabel(unit: string): string {
   if (normalized === 'kg') return 'kg'
   if (normalized === 'g') return 'g'
   if (normalized === 'pcs') return 'pcs'
+  if (normalized === 'bag') return 'bag'
+  if (normalized === 'carton') return 'carton'
   return normalized
 }
 
@@ -114,11 +124,29 @@ export function unitOptionsForStoreItem(storeUnit: string, itemName?: string): s
     options.add('pack')
     options.add('pcs')
   }
-  if (['pack', 'pcs', 'sachet', 'tin'].includes(base)) {
+  if (['pack', 'pcs', 'sachet', 'tin', 'carton', 'bag'].includes(base)) {
     options.add('pack')
     options.add('pcs')
     options.add('sachet')
     options.add('tin')
+    options.add('carton')
+    options.add('bag')
+  }
+  const dryGoodsHint =
+    ['bag', 'kg', 'pack'].includes(base) ||
+    /\b(rice|flour|semolina|beans|garri|yam|grain|sugar|salt)\b/.test(name)
+  if (dryGoodsHint) {
+    options.add('bag')
+    options.add('kg')
+    options.add('pack')
+  }
+  const cartonHint =
+    base === 'carton' ||
+    /\b(soap|bleach|hypo|detergent|tissue|serviette|napkin|toilet)\b/.test(name)
+  if (cartonHint) {
+    options.add('carton')
+    options.add('pack')
+    options.add('pcs')
   }
 
   return [...options].sort()

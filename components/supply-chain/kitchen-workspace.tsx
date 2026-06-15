@@ -17,7 +17,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Flame, Pencil, Plus, Trash2, Upload } from 'lucide-react'
 import { toast } from 'sonner'
-import { PaginatedListShell } from '@/components/shared/paginated-list-shell'
+import { RESPONSIVE_HIDE_MD, RESPONSIVE_HIDE_LG } from '@/lib/ui/responsive-table'
 import {
   batchRowFromCsvCells,
   csvRowsSkipHeader,
@@ -244,11 +244,11 @@ export function KitchenWorkspace() {
                   <TableRow>
                     <TableHead>Item</TableHead>
                     <TableHead className="text-right">On hand</TableHead>
-                    <TableHead className="text-right">Reorder at</TableHead>
-                    <TableHead>Time received</TableHead>
-                    <TableHead>Qty issued</TableHead>
-                    <TableHead>Received by</TableHead>
-                    <TableHead>Issued by</TableHead>
+                    <TableHead className={`text-right ${RESPONSIVE_HIDE_MD}`}>Reorder at</TableHead>
+                    <TableHead className={RESPONSIVE_HIDE_LG}>Time received</TableHead>
+                    <TableHead className={RESPONSIVE_HIDE_MD}>Qty issued</TableHead>
+                    <TableHead className={RESPONSIVE_HIDE_LG}>Received by</TableHead>
+                    <TableHead className={RESPONSIVE_HIDE_LG}>Issued by</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -269,10 +269,10 @@ export function KitchenWorkspace() {
                             '—'
                           )}
                         </TableCell>
-                        <TableCell className="text-right text-muted-foreground text-sm">
+                        <TableCell className={`text-right text-muted-foreground text-sm ${RESPONSIVE_HIDE_MD}`}>
                           {row.reorder != null ? `${row.reorder} ${row.unit}` : '—'}
                         </TableCell>
-                        <TableCell className="text-xs whitespace-nowrap">
+                        <TableCell className={`text-xs whitespace-nowrap ${RESPONSIVE_HIDE_LG}`}>
                           {row.issuedAt
                             ? new Date(row.issuedAt).toLocaleString(undefined, {
                                 dateStyle: 'medium',
@@ -280,11 +280,11 @@ export function KitchenWorkspace() {
                               })
                             : '—'}
                         </TableCell>
-                        <TableCell>
+                        <TableCell className={RESPONSIVE_HIDE_MD}>
                           {row.qtyIssued != null ? `${row.qtyIssued} ${row.unit}` : '—'}
                         </TableCell>
-                        <TableCell>{row.receivedBy || '—'}</TableCell>
-                        <TableCell>{row.issuedBy || '—'}</TableCell>
+                        <TableCell className={RESPONSIVE_HIDE_LG}>{row.receivedBy || '—'}</TableCell>
+                        <TableCell className={RESPONSIVE_HIDE_LG}>{row.issuedBy || '—'}</TableCell>
                       </TableRow>
                     )
                   })}
@@ -340,9 +340,9 @@ export function KitchenWorkspace() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Item</TableHead>
-                    <TableHead>Source</TableHead>
+                    <TableHead className={RESPONSIVE_HIDE_MD}>Source</TableHead>
                     <TableHead className="text-right">Available</TableHead>
-                    <TableHead className="text-right">Reorder</TableHead>
+                    <TableHead className={`text-right ${RESPONSIVE_HIDE_MD}`}>Reorder</TableHead>
                     <TableHead>Status</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -352,11 +352,15 @@ export function KitchenWorkspace() {
                     return (
                       <TableRow key={k.id} className={stockLevelRowClass(level)}>
                         <TableCell className="font-medium">{k.name}</TableCell>
-                        <TableCell><Badge className="bg-emerald-100 text-emerald-800">Produced</Badge></TableCell>
+                        <TableCell className={RESPONSIVE_HIDE_MD}>
+                          <Badge className="bg-emerald-100 text-emerald-800">Produced</Badge>
+                        </TableCell>
                         <TableCell className={`text-right ${stockLevelTextClass(level)}`}>
                           {k.availablePortions} portions
                         </TableCell>
-                        <TableCell className="text-right">{k.reorderLevel}</TableCell>
+                        <TableCell className={`text-right ${RESPONSIVE_HIDE_MD}`}>
+                          {k.reorderLevel}
+                        </TableCell>
                         <TableCell>
                           <Badge className={stockLevelBadgeClass(level)}>
                             {stockLevelStatusLabel(level)}
@@ -639,9 +643,9 @@ export function KitchenWorkspace() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Batch</TableHead>
-                  <TableHead>Category</TableHead>
-                  <TableHead className="text-right">Std yield</TableHead>
-                  <TableHead className="text-right">Cost / batch</TableHead>
+                  <TableHead className={RESPONSIVE_HIDE_MD}>Category</TableHead>
+                  <TableHead className={`text-right ${RESPONSIVE_HIDE_LG}`}>Std yield</TableHead>
+                  <TableHead className={`text-right ${RESPONSIVE_HIDE_MD}`}>Cost / batch</TableHead>
                   <TableHead className="text-right">Qty (runs)</TableHead>
                   <TableHead className="text-right">Budget total</TableHead>
                 </TableRow>
@@ -653,9 +657,13 @@ export function KitchenWorkspace() {
                   return (
                     <TableRow key={r.id}>
                       <TableCell className="font-medium">{r.name}</TableCell>
-                      <TableCell>{r.category}</TableCell>
-                      <TableCell className="text-right">{r.yieldPortions}</TableCell>
-                      <TableCell className="text-right">{formatNaira(unitCost)}</TableCell>
+                      <TableCell className={RESPONSIVE_HIDE_MD}>{r.category}</TableCell>
+                      <TableCell className={`text-right ${RESPONSIVE_HIDE_LG}`}>
+                        {r.yieldPortions}
+                      </TableCell>
+                      <TableCell className={`text-right ${RESPONSIVE_HIDE_MD}`}>
+                        {formatNaira(unitCost)}
+                      </TableCell>
                       <TableCell className="text-right">
                         <Input
                           type="number"

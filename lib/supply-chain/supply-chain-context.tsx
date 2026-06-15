@@ -46,6 +46,7 @@ import type {
   StoreItem,
   BarStockItem,
 } from "./types";
+import { isBarStoreDept, normalizeSupplyDept, normalizeStoreItemDepts } from "./types";
 import type { OutletDepartmentKey } from "@/lib/outlets/departments";
 import { isStoreControlledFnbOutlet } from "@/lib/outlets/departments";
 import type { OutletMenuItemRow } from "@/lib/outlets/types";
@@ -400,6 +401,46 @@ function useSupplyChainImpl() {
     }
 
     window.localStorage.setItem(SUPPLY_STORAGE_VERSION_KEY, String(SUPPLY_STORAGE_VERSION));
+  }, []);
+
+  /** Migrate legacy store dept keys (`bar` → `main_bar`) on dept and depts[]. */
+  useEffect(() => {
+    const migrateDeptRow = <T extends { dept: string; depts?: string[] }>(
+      rows: T[],
+    ): T[] | null => {
+      let changed = false;
+      const next = rows.map((row) => {
+        const dept = normalizeSupplyDept(row.dept);
+        const depts = row.depts?.length
+          ? [...new Set(row.depts.map((d) => normalizeSupplyDept(d)))]
+          : undefined;
+        const deptChanged = dept !== row.dept;
+        const deptsChanged =
+          depts != null &&
+          (row.depts == null ||
+            depts.length !== row.depts.length ||
+            depts.some((d, i) => d !== row.depts![i]));
+        if (!deptChanged && !deptsChanged) return row;
+        changed = true;
+        return {
+          ...row,
+          dept,
+          ...(depts != null
+            ? depts.length > 1
+              ? { depts }
+              : { depts: undefined }
+            : {}),
+        };
+      });
+      return changed ? next : null;
+    };
+
+    setStoreItems((prev) => migrateDeptRow(prev) ?? prev);
+    setPendingStoreItems((prev) => migrateDeptRow(prev) ?? prev);
+    setBasket((prev) => {
+      const migrated = migrateDeptRow(prev);
+      return migrated ?? prev;
+    });
   }, []);
 
   useEffect(() => {
@@ -1557,11 +1598,16 @@ function useSupplyChainImpl() {
       const name = toTitleCaseWords(input.name);
       if (!name) return { error: "Enter an item name" };
       if (!input.unit.trim()) return { error: "Enter SI unit" };
+      const deptInput = input.depts?.length
+        ? input.depts
+        : [input.dept];
+      const { dept, depts } = normalizeStoreItemDepts(deptInput);
       const item: StoreItem = {
         id: uid("si"),
         name,
         unit: input.unit.trim(),
-        dept: input.dept,
+        dept,
+        depts,
         quantityInStore: Math.max(0, input.quantityInStore),
         reorderLevel: Math.max(0, input.reorderLevel),
         lastPrice: Math.max(0, input.lastPrice),
@@ -1588,12 +1634,21 @@ function useSupplyChainImpl() {
       if (!existing) return { error: "Store item not found" };
       const name = input.name != null ? toTitleCaseWords(input.name) : existing.name;
       if (!name) return { error: "Enter an item name" };
+      const deptPatch =
+        input.depts != null
+          ? normalizeStoreItemDepts(
+              input.depts.length ? input.depts : [input.dept ?? existing.dept],
+            )
+          : input.dept != null
+            ? normalizeStoreItemDepts([input.dept])
+            : null;
       setStoreItems((prev) =>
         prev.map((s) =>
           s.id === itemId
             ? {
                 ...s,
                 ...input,
+                ...(deptPatch ?? {}),
                 name,
                 unit: input.unit?.trim() || s.unit,
                 quantityInStore:
@@ -1622,6 +1677,26 @@ function useSupplyChainImpl() {
     [storeItems],
   );
 
+  const deleteStoreItemDirect = useCallback(
+    (itemId: string, actor: Actor): { ok: true } | { error: string } => {
+      const existing = storeItems.find((s) => s.id === itemId);
+      if (!existing) return { error: "Store item not found" };
+      setStoreItems((prev) => prev.filter((s) => s.id !== itemId));
+      setBasket((prev) => prev.filter((b) => b.stockItemId !== itemId));
+      setActivityLog((a) =>
+        log(
+          a,
+          "stock_received",
+          actor,
+          `Deleted store item: ${existing.name}`,
+          itemId,
+        ),
+      );
+      return { ok: true };
+    },
+    [storeItems],
+  );
+
   const submitStoreItemForApproval = useCallback(
     (
       input: Omit<PendingStoreItem, "id" | "status" | "submittedAt" | "submittedBy" | "submittedByName"> & {
@@ -1634,11 +1709,14 @@ function useSupplyChainImpl() {
       const name = toTitleCaseWords(input.name);
       if (!name) return { error: "Enter an item name" };
       if (!input.unit.trim()) return { error: "Enter SI unit" };
+      const deptInput = input.depts?.length ? input.depts : [input.dept];
+      const normalized = normalizeStoreItemDepts(deptInput);
       const row: PendingStoreItem = {
         id: uid("psi"),
         name,
         unit: input.unit.trim(),
-        dept: input.dept,
+        dept: normalized.dept,
+        depts: normalized.depts,
         quantityInStore: Math.max(0, input.quantityInStore),
         reorderLevel: Math.max(0, input.reorderLevel),
         lastPrice: Math.max(0, input.lastPrice),
@@ -1681,6 +1759,7 @@ function useSupplyChainImpl() {
           name: pending.name,
           unit: pending.unit,
           dept: pending.dept,
+          depts: pending.depts,
           quantityInStore: pending.quantityInStore,
           reorderLevel: pending.reorderLevel,
           lastPrice: pending.lastPrice,
@@ -1985,7 +2064,7 @@ function useSupplyChainImpl() {
     ) => {
       if (qty <= 0) return { error: "Enter a quantity to issue" };
       const store = storeItems.find((s) => s.id === storeItemId);
-      if (!store || store.dept !== "bar") {
+      if (!store || !isBarStoreDept(store.dept)) {
         return {
           error: "Only bar department store items can be issued to the bar",
         };
@@ -2124,7 +2203,7 @@ function useSupplyChainImpl() {
         };
       }
 
-      if (store.dept === "bar" && destinationCreditsBarStock(dest)) {
+      if (isBarStoreDept(store.dept) && destinationCreditsBarStock(dest)) {
         const barRes = issueFromStoreToBar(storeItemId, qty, actor, {
           destination: dest,
           receivedBy,
@@ -2176,7 +2255,7 @@ function useSupplyChainImpl() {
         notifyKitchenRawStockChanged();
       }
 
-      if (store.dept === "bar" && destinationCreditsFnbRaw(dest)) {
+      if (isBarStoreDept(store.dept) && destinationCreditsFnbRaw(dest)) {
         setFnbRawStock((prev) => {
           const idx = prev.findIndex((f) => f.storeItemId === storeItemId);
           if (idx >= 0) {
@@ -2399,7 +2478,7 @@ function useSupplyChainImpl() {
         const stockId = link.stockId || `bar-${outletStockSlug(item.name)}`;
         const matchedStore = storeItems.find(
           (s) =>
-            s.dept === "bar" &&
+            isBarStoreDept(s.dept) &&
             s.name.trim().toLowerCase() === item.name.trim().toLowerCase(),
         );
         const barUnit =
@@ -2697,6 +2776,7 @@ function useSupplyChainImpl() {
     issueOutCart,
     addStoreItemDirect,
     updateStoreItemDirect,
+    deleteStoreItemDirect,
     submitStoreItemForApproval,
     approvePendingStoreItem,
     rejectPendingStoreItem,
@@ -2771,6 +2851,9 @@ export function useSupplyChain() {
       (() => ({ error: "Supply chain not ready — refresh the page" })),
     updateStoreItemDirect:
       ctx.updateStoreItemDirect ??
+      (() => ({ error: "Supply chain not ready — refresh the page" })),
+    deleteStoreItemDirect:
+      ctx.deleteStoreItemDirect ??
       (() => ({ error: "Supply chain not ready — refresh the page" })),
     submitStoreItemForApproval:
       ctx.submitStoreItemForApproval ??

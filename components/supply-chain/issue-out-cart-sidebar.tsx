@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input'
 import { DEPT_LABELS, type IssueOutCartLine, type SupplyDept } from '@/lib/supply-chain/types'
 import { UnitSelect } from '@/components/supply-chain/unit-select'
 import { Send, Trash2 } from 'lucide-react'
-import { sanitizeQuantityInput } from '@/lib/supply-chain/measurement-units'
+import { sanitizeQuantityInput, formatUnitLabel } from '@/lib/supply-chain/measurement-units'
 
 type Props = {
   cart: IssueOutCartLine[]
@@ -74,7 +74,7 @@ export function IssueOutCartSidebar({
                     <div className="flex justify-between gap-2 items-start">
                       <span className="font-medium leading-snug">
                         {l.name}{' '}
-                        <span className="text-muted-foreground font-normal">({l.unit})</span>
+                        <span className="text-muted-foreground font-normal">({formatUnitLabel(l.unit)})</span>
                       </span>
                       <Button
                         type="button"
@@ -105,11 +105,11 @@ export function IssueOutCartSidebar({
                           className="h-7 w-[72px] text-[10px]"
                         />
                       ) : (
-                        <span className="text-xs text-muted-foreground">{l.unit}</span>
+                        <span className="text-xs text-muted-foreground">{formatUnitLabel(l.unit)}</span>
                       )}
                     </div>
                     <span className="text-[10px] text-muted-foreground">
-                      max {l.maxAvailable} {l.storeUnit}
+                      max {l.maxAvailable} {formatUnitLabel(l.storeUnit)}
                     </span>
                   </li>
                 ))}

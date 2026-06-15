@@ -6,11 +6,84 @@ export type { BatchOutletMenuSync } from './batch-outlet-sync'
 export type SupplyDept =
   | 'all'
   | 'kitchen'
-  | 'bar'
+  | 'main_bar'
+  | 'restaurant'
+  | 'general_store'
+  | 'pastry'
+  | 'account'
+  | 'administration'
+  | 'frozen'
+  | 'beverage'
   | 'housekeeping'
   | 'maintenance'
   | 'front_office'
   | 'laundry'
+
+/** Legacy persisted value — migrated to `main_bar` on load. */
+export type LegacySupplyDept = SupplyDept | 'bar'
+
+export const STORE_CATALOG_DEPTS: Exclude<SupplyDept, 'all'>[] = [
+  'kitchen',
+  'main_bar',
+  'restaurant',
+  'general_store',
+  'pastry',
+  'account',
+  'administration',
+  'frozen',
+  'beverage',
+  'housekeeping',
+  'maintenance',
+  'front_office',
+  'laundry',
+]
+
+/** Dept options in add/edit store item UI (excludes internal legacy bucket). */
+export const STORE_DEPT_PICKER_OPTIONS: Exclude<SupplyDept, 'all'>[] =
+  STORE_CATALOG_DEPTS.filter((d) => d !== 'general_store')
+
+/** Normalize legacy `bar` dept from older localStorage rows. */
+export function normalizeSupplyDept(dept: string): Exclude<SupplyDept, 'all'> {
+  if (dept === 'bar') return 'main_bar'
+  if (STORE_CATALOG_DEPTS.includes(dept as Exclude<SupplyDept, 'all'>)) {
+    return dept as Exclude<SupplyDept, 'all'>
+  }
+  return 'restaurant'
+}
+
+export function storeItemDepartments(
+  item: Pick<StoreItem, 'dept' | 'depts'>,
+): Exclude<SupplyDept, 'all'>[] {
+  const primary = normalizeSupplyDept(item.dept)
+  if (item.depts?.length) {
+    const merged = item.depts.map((d) => normalizeSupplyDept(d))
+    merged.push(primary)
+    return [...new Set(merged)]
+  }
+  return [primary]
+}
+
+export function storeItemMatchesDept(
+  item: Pick<StoreItem, 'dept' | 'depts'>,
+  filter: SupplyDept,
+): boolean {
+  if (filter === 'all') return true
+  return storeItemDepartments(item).includes(filter)
+}
+
+export function normalizeStoreItemDepts(
+  depts: Exclude<SupplyDept, 'all'>[],
+): { dept: Exclude<SupplyDept, 'all'>; depts?: Exclude<SupplyDept, 'all'>[] } {
+  const unique = [...new Set(depts.filter(Boolean))]
+  if (!unique.length) return { dept: 'kitchen' }
+  if (unique.length === 1) return { dept: unique[0] }
+  return { dept: unique[0], depts: unique }
+}
+
+/** Store catalogue rows that feed main/pool bar stock pipelines. */
+export function isBarStoreDept(dept: string): boolean {
+  return dept === 'main_bar' || dept === 'bar'
+}
 
 export type PoStatus =
   | 'draft'
@@ -80,6 +153,8 @@ export interface StoreItem {
   name: string
   unit: string
   dept: Exclude<SupplyDept, 'all'>
+  /** When set, item appears under each dept with one shared on-hand qty. */
+  depts?: Exclude<SupplyDept, 'all'>[]
   quantityInStore: number
   reorderLevel: number
   lastPrice: number
@@ -96,6 +171,8 @@ export interface PendingStoreItem {
   name: string
   unit: string
   dept: Exclude<SupplyDept, 'all'>
+  /** When set, item appears under each dept with one shared on-hand qty. */
+  depts?: Exclude<SupplyDept, 'all'>[]
   quantityInStore: number
   reorderLevel: number
   lastPrice: number
@@ -382,9 +459,21 @@ export interface ActivityEntry {
 export const DEPT_LABELS: Record<SupplyDept, string> = {
   all: 'All',
   kitchen: 'Kitchen',
-  bar: 'Bar',
+  main_bar: 'Main Bar',
+  restaurant: 'Restaurant',
+  general_store: 'General Store',
+  pastry: 'Pastry',
+  account: 'Account',
+  administration: 'Admin',
+  frozen: 'Frozen',
+  beverage: 'Beverage',
   housekeeping: 'Housekeeping',
   maintenance: 'Maintenance',
   front_office: 'Front Office',
   laundry: 'Laundry',
 }
+
+/** Picker options sorted A–Z by display label. */
+export const STORE_DEPT_PICKER_OPTIONS_SORTED: Exclude<SupplyDept, 'all'>[] = [
+  ...STORE_DEPT_PICKER_OPTIONS,
+].sort((a, b) => DEPT_LABELS[a].localeCompare(DEPT_LABELS[b]))

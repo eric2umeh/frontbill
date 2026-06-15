@@ -30,6 +30,8 @@ const initialState: LoginFormState = {}
 
 export default function Page() {
   const [state, formAction] = useActionState(loginAction, initialState)
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [isConfigured, setIsConfigured] = useState(true)
   const [showForgotPassword, setShowForgotPassword] = useState(false)
@@ -71,8 +73,9 @@ export default function Page() {
   useEffect(() => {
     if (state.error) {
       toast.error(state.error)
+      if (state.email) setEmail(state.email)
     }
-  }, [state.error])
+  }, [state.error, state.email])
 
   const handleForgotPassword = async () => {
     if (!resetEmail) {
@@ -160,6 +163,8 @@ export default function Page() {
                       placeholder="admin@frontbill.com"
                       required
                       disabled={!isConfigured}
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
                     />
                   </div>
                   <div className="grid gap-2">
@@ -173,6 +178,8 @@ export default function Page() {
                         required
                         disabled={!isConfigured}
                         className="pr-10"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
                       />
                       <button
                         type="button"

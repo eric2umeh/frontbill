@@ -3,7 +3,7 @@
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { DEPT_LABELS, type BasketLine, type SupplyDept } from '@/lib/supply-chain/types'
-import { parseQuantityValue } from '@/lib/supply-chain/measurement-units'
+import { parseQuantityValue, formatUnitLabel } from '@/lib/supply-chain/measurement-units'
 import { formatNaira } from '@/lib/utils/currency'
 import { Minus, Plus, Send, Trash2 } from 'lucide-react'
 
@@ -68,7 +68,7 @@ export function DraftBasketSidebar({
                     <div className="flex justify-between gap-2 items-start">
                       <span className="font-medium leading-snug">
                         {l.name}{' '}
-                        <span className="text-muted-foreground font-normal">({l.unit})</span>
+                        <span className="text-muted-foreground font-normal">({formatUnitLabel(l.unit)})</span>
                       </span>
                       {!readOnly && (
                         <Button

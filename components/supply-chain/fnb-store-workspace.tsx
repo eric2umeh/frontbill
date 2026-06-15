@@ -11,6 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Badge } from '@/components/ui/badge'
 import { toast } from 'sonner'
 import { PageHeader } from '@/components/layout/page-header'
+import { RESPONSIVE_HIDE_MD } from '@/lib/ui/responsive-table'
 
 export function FnbStoreWorkspace() {
   const { name, role } = useAuth()
@@ -102,7 +103,7 @@ export function FnbStoreWorkspace() {
             <TableHeader>
               <TableRow>
                 <TableHead>Item</TableHead>
-                <TableHead>Source</TableHead>
+                <TableHead className={RESPONSIVE_HIDE_MD}>Source</TableHead>
                 <TableHead className="text-right">Stock qty</TableHead>
                 <TableHead className="text-right">Selling price (₦)</TableHead>
                 <TableHead />
@@ -118,7 +119,7 @@ export function FnbStoreWorkspace() {
                     <TableCell className="font-medium">
                       {row.name} ({row.unit})
                     </TableCell>
-                    <TableCell>
+                    <TableCell className={RESPONSIVE_HIDE_MD}>
                       <Badge variant="outline">
                         {row.source === 'bar' ? 'Main Bar' : 'Restaurant'}
                       </Badge>
