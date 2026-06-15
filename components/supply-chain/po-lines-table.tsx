@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import type { BasketLine, PoLine } from '@/lib/supply-chain/types'
 import { DEPT_LABELS } from '@/lib/supply-chain/types'
+import { formatUnitLabel } from '@/lib/supply-chain/measurement-units'
 import { formatNaira } from '@/lib/utils/currency'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -14,6 +15,9 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Eye } from 'lucide-react'
+
+const PO_QTY_INPUT_CLASS =
+  'h-8 ml-auto text-right tabular-nums [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none'
 
 type BasketRow = {
   kind: 'basket'
@@ -75,9 +79,9 @@ export function PoLinesTable({ rows, showDept = true, compact = false }: Props) 
               <div className="flex items-center justify-between gap-2">
                 {editable && row.onQtyChange ? (
                   <Input
-                    type="number"
+                    inputMode="decimal"
                     min={0}
-                    className="h-8 w-20"
+                    className={`w-20 ${PO_QTY_INPUT_CLASS}`}
                     value={qty}
                     onChange={(e) =>
                       row.onQtyChange!(line.stockItemId, Number(e.target.value) || 0)
@@ -137,9 +141,9 @@ export function PoLinesTable({ rows, showDept = true, compact = false }: Props) 
                   <td className="py-2 text-right">
                     {row.editable && row.onQtyChange ? (
                       <Input
-                        type="number"
+                        inputMode="decimal"
                         min={0}
-                        className="h-8 w-16 ml-auto text-right"
+                        className={`w-16 ${PO_QTY_INPUT_CLASS}`}
                         value={l.qtyToBuy}
                         onChange={(e) =>
                           row.onQtyChange!(l.stockItemId, Number(e.target.value) || 0)
