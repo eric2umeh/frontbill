@@ -2,13 +2,13 @@
 
 import { useState } from 'react'
 import {
-  DEPT_LABELS,
   KITCHEN_MATERIAL_CATEGORIES,
   KITCHEN_MATERIAL_CATEGORY_LABELS,
+  normalizeStoreItemDepts,
   type KitchenMaterialCategory,
   type SupplyDept,
 } from '@/lib/supply-chain/types'
-import { toTitleCaseWords } from '@/lib/supply-chain/title-case'
+import { titleCaseWhileTyping, toTitleCaseWords } from '@/lib/supply-chain/title-case'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -27,18 +27,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { toast } from 'sonner'
 import { Plus } from 'lucide-react'
 import { UnitSelect } from '@/components/supply-chain/unit-select'
 import { DEFAULT_MEASUREMENT_UNIT } from '@/lib/supply-chain/measurement-units'
+import { StoreDeptMultiSelect } from '@/components/supply-chain/store-dept-multi-select'
 
-const DEPTS: Exclude<SupplyDept, 'all'>[] = [
-  'kitchen',
-  'bar',
-  'housekeeping',
-  'maintenance',
-  'front_office',
-  'laundry',
-]
+type Dept = Exclude<SupplyDept, 'all'>
 
 type Props = {
   canAddDirect: boolean
@@ -46,7 +41,8 @@ type Props = {
   onAddDirect: (input: {
     name: string
     unit: string
-    dept: Exclude<SupplyDept, 'all'>
+    dept: Dept
+    depts?: Dept[]
     quantityInStore: number
     reorderLevel: number
     lastPrice: number
@@ -56,7 +52,8 @@ type Props = {
   onSubmitForApproval: (input: {
     name: string
     unit: string
-    dept: Exclude<SupplyDept, 'all'>
+    dept: Dept
+    depts?: Dept[]
     quantityInStore: number
     reorderLevel: number
     lastPrice: number
@@ -74,7 +71,7 @@ export function StoreAddItemDialog({
   const [open, setOpen] = useState(false)
   const [name, setName] = useState('')
   const [unit, setUnit] = useState(DEFAULT_MEASUREMENT_UNIT)
-  const [dept, setDept] = useState<Exclude<SupplyDept, 'all'>>('kitchen')
+  const [depts, setDepts] = useState<Dept[]>([])
   const [qty, setQty] = useState('')
   const [reorder, setReorder] = useState('')
   const [price, setPrice] = useState('')
@@ -84,7 +81,7 @@ export function StoreAddItemDialog({
   const reset = () => {
     setName('')
     setUnit(DEFAULT_MEASUREMENT_UNIT)
-    setDept('kitchen')
+    setDepts([])
     setQty('')
     setReorder('')
     setPrice('')
@@ -92,16 +89,20 @@ export function StoreAddItemDialog({
     setKitchenCategory('other')
   }
 
-  const buildInput = () => ({
-    name: toTitleCaseWords(name),
-    unit: unit.trim(),
-    dept,
-    quantityInStore: Number(qty) || 0,
-    reorderLevel: Number(reorder) || 0,
-    lastPrice: Number(price) || 0,
-    benchmarkPrice: Number(benchmark) || Number(price) || 0,
-    kitchenCategory: dept === 'kitchen' ? kitchenCategory : undefined,
-  })
+  const buildInput = () => {
+    const normalized = normalizeStoreItemDepts(depts)
+    return {
+      name: toTitleCaseWords(name),
+      unit: unit.trim(),
+      dept: normalized.dept,
+      depts: normalized.depts,
+      quantityInStore: Number(qty) || 0,
+      reorderLevel: Number(reorder) || 0,
+      lastPrice: Number(price) || 0,
+      benchmarkPrice: Number(benchmark) || Number(price) || 0,
+      kitchenCategory: depts.includes('kitchen') ? kitchenCategory : undefined,
+    }
+  }
 
   if (!canAddDirect && !canSubmit) return null
 
@@ -113,7 +114,7 @@ export function StoreAddItemDialog({
           Add item
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Add central store item</DialogTitle>
         </DialogHeader>
@@ -123,9 +124,8 @@ export function StoreAddItemDialog({
             <Input
               className="mt-0.5"
               value={name}
-              onChange={(e) => setName(e.target.value)}
-              onBlur={() => setName(toTitleCaseWords(name))}
-              placeholder="Rice, Coke, Detergent…"
+              onChange={(e) => setName(titleCaseWhileTyping(e.target.value))}
+              placeholder="Hypo Bleach, Rice, Milk…"
             />
           </div>
           <div>
@@ -137,20 +137,13 @@ export function StoreAddItemDialog({
               Price below is per this unit (e.g. ₦10,000 / kg).
             </p>
           </div>
-          <div>
-            <Label className="text-xs">Dept *</Label>
-            <Select value={dept} onValueChange={(v) => setDept(v as typeof dept)}>
-              <SelectTrigger className="mt-0.5">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {DEPTS.map((d) => (
-                  <SelectItem key={d} value={d}>
-                    {DEPT_LABELS[d]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          <div className="sm:col-span-2">
+            <Label className="text-xs">Departments *</Label>
+            <StoreDeptMultiSelect
+              className="mt-0.5"
+              value={depts}
+              onChange={setDepts}
+            />
           </div>
           <div>
             <Label className="text-xs">In store qty</Label>
@@ -175,8 +168,7 @@ export function StoreAddItemDialog({
           <div>
             <Label className="text-xs">Price (₦) *</Label>
             <Input
-              type="number"
-              min={0}
+              inputMode="decimal"
               className="mt-0.5"
               value={price}
               onChange={(e) => setPrice(e.target.value)}
@@ -185,15 +177,14 @@ export function StoreAddItemDialog({
           <div>
             <Label className="text-xs">Benchmark (₦)</Label>
             <Input
-              type="number"
-              min={0}
+              inputMode="decimal"
               className="mt-0.5"
               value={benchmark}
               onChange={(e) => setBenchmark(e.target.value)}
               placeholder="Same as price if empty"
             />
           </div>
-          {dept === 'kitchen' && (
+          {depts.includes('kitchen') && (
             <div className="sm:col-span-2">
               <Label className="text-xs">Kitchen category</Label>
               <Select
@@ -219,6 +210,10 @@ export function StoreAddItemDialog({
             <Button
               className="w-full sm:w-auto"
               onClick={() => {
+                if (!depts.length) {
+                  toast.error('Select at least one department')
+                  return
+                }
                 const res = onAddDirect(buildInput())
                 if ('error' in res) return
                 reset()
@@ -231,6 +226,10 @@ export function StoreAddItemDialog({
             <Button
               className="w-full sm:w-auto"
               onClick={() => {
+                if (!depts.length) {
+                  toast.error('Select at least one department')
+                  return
+                }
                 const res = onSubmitForApproval(buildInput())
                 if ('error' in res) return
                 reset()
