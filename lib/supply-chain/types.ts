@@ -1,4 +1,4 @@
-/** Supply chain — accountable F&B flow (mock-first, revamp branch). */
+/** Supply chain — accountable F&B flow. */
 
 import type { BatchOutletMenuSync } from './batch-outlet-sync'
 export type { BatchOutletMenuSync } from './batch-outlet-sync'
@@ -124,6 +124,7 @@ export type KitchenMaterialCategory =
   | 'oils_fats'
   | 'soups_stews'
   | 'dairy'
+  | 'consumable'
   | 'other'
 
 export const KITCHEN_MATERIAL_CATEGORY_LABELS: Record<KitchenMaterialCategory, string> = {
@@ -134,6 +135,7 @@ export const KITCHEN_MATERIAL_CATEGORY_LABELS: Record<KitchenMaterialCategory, s
   oils_fats: 'Oils & Fats',
   soups_stews: 'Soups & Stews',
   dairy: 'Dairy',
+  consumable: 'Consumable',
   other: 'Other',
 }
 
@@ -145,6 +147,7 @@ export const KITCHEN_MATERIAL_CATEGORIES: KitchenMaterialCategory[] = [
   'oils_fats',
   'soups_stews',
   'dairy',
+  'consumable',
   'other',
 ]
 
