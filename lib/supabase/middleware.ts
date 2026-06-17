@@ -13,7 +13,6 @@ function isPublicAuthPath(pathname: string) {
     pathname === '/' ||
     pathname.startsWith('/auth/') ||
     pathname.startsWith('/api/auth/') ||
-    pathname.startsWith('/api/setup/') ||
     pathname === '/access-denied'
   )
 }
