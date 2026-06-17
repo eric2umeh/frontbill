@@ -15,14 +15,10 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { Flame, Pencil, Plus, Trash2, Upload } from 'lucide-react'
+import { Flame, Pencil, Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { RESPONSIVE_HIDE_MD, RESPONSIVE_HIDE_LG } from '@/lib/ui/responsive-table'
-import {
-  batchRowFromCsvCells,
-  csvRowsSkipHeader,
-  parseCsvText,
-} from '@/lib/supply-chain/parse-csv-row'
+import { PaginatedListShell } from '@/components/shared/paginated-list-shell'
 import { recipeTotalCost } from '@/lib/supply-chain/calculations'
 import { sanitizeQuantityInput, parseQuantityValue } from '@/lib/supply-chain/measurement-units'
 import { batchMaterialShortages } from '@/lib/supply-chain/batch-material-shortages'
@@ -63,7 +59,6 @@ export function KitchenWorkspace() {
     batches,
     recipes,
     openBatch,
-    openKitchenBatchFromMaterials,
     closeBatch,
     deleteRecipe,
     deleteInProgressBatch,
@@ -143,8 +138,6 @@ export function KitchenWorkspace() {
   const [batchDialog, setBatchDialog] = useState<{ recipeId: string; defaultPortions: number } | null>(null)
   const [closeDialog, setCloseDialog] = useState<string | null>(null)
   const [budgetQty, setBudgetQty] = useState<Record<string, string>>({})
-  const [csvOpen, setCsvOpen] = useState(false)
-  const [csvText, setCsvText] = useState('')
   const [deleteRecipeId, setDeleteRecipeId] = useState<string | null>(null)
   const [plannedInput, setPlannedInput] = useState('')
   const actor = { name: name ?? 'Kitchen', role: canonicalRoleKey(role) ?? 'staff' }
@@ -202,11 +195,6 @@ export function KitchenWorkspace() {
           trailing={<RoomInventoryStatsStrip className="shrink-0 scale-90 origin-right" />}
         />
         <div className="flex flex-wrap items-center gap-2 shrink-0">
-          {canManageBatchStandards && (
-            <Button variant="outline" size="sm" className="shrink-0" onClick={() => setCsvOpen(true)}>
-              <Upload className="h-4 w-4 mr-2" /> Bulk CSV
-            </Button>
-          )}
           <Button className="shrink-0" asChild>
             <Link href="/supply/kitchen/new">
               <Plus className="h-4 w-4 mr-2" /> Open New Batch
@@ -696,91 +684,6 @@ export function KitchenWorkspace() {
         </TabsContent>
       </Tabs>
       )}
-
-      <Dialog open={csvOpen} onOpenChange={setCsvOpen}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Bulk upload batches (CSV)</DialogTitle>
-          </DialogHeader>
-          <p className="text-xs text-muted-foreground">
-            Columns: name, category, portions, price, labour, gas, other, outlet (blank | restaurant | fnb).
-            Example: Fish,Mains,4,3500,0,0,0,restaurant
-          </p>
-          <Input
-            type="file"
-            accept=".csv,text/csv"
-            onChange={(e) => {
-              const file = e.target.files?.[0]
-              if (!file) return
-              const reader = new FileReader()
-              reader.onload = () => setCsvText(String(reader.result ?? ''))
-              reader.readAsText(file)
-            }}
-          />
-          <textarea
-            className="w-full min-h-[120px] rounded-md border p-2 text-sm font-mono"
-            placeholder="Or paste CSV rows here…"
-            value={csvText}
-            onChange={(e) => setCsvText(e.target.value)}
-          />
-          <DialogFooter>
-            <Button
-              onClick={async () => {
-                const rows = csvRowsSkipHeader(parseCsvText(csvText))
-                if (!rows.length) {
-                  toast.error('Add CSV rows')
-                  return
-                }
-                let ok = 0
-                for (const cells of rows) {
-                  const row = batchRowFromCsvCells(cells)
-                  if (!row) continue
-                  const res = openKitchenBatchFromMaterials(
-                    {
-                      batchName: row.name,
-                      menuCategory: row.category,
-                      plannedPortions: row.portions,
-                      sellingPricePerPortion: row.sellingPrice,
-                      materials: [],
-                      overheadLabour: row.overheadLabour,
-                      overheadGas: row.overheadGas,
-                      overheadOther: row.overheadOther,
-                      outletMenuSync: row.outletMenuSync,
-                    },
-                    actor,
-                  )
-                  if ('error' in res) {
-                    toast.error(`${row.name}: ${res.error}`)
-                    continue
-                  }
-                  if (shouldSyncBatchToOutlet(row.outletMenuSync)) {
-                    const sync = await syncBatchToRestaurantOutlet({
-                      batchName: row.name,
-                      categoryName: row.category,
-                      unitPrice: row.sellingPrice,
-                      kitchenStockId: res.kitchenStockId,
-                      outletMenuSync: row.outletMenuSync,
-                    })
-                    if (!sync.ok) {
-                      toast.warning(`${row.name}: saved but Restaurant sync failed — ${sync.error}`)
-                    }
-                  }
-                  ok++
-                }
-                if (!ok) {
-                  toast.error('No valid rows imported — check column order and values')
-                  return
-                }
-                toast.success(`Created ${ok} batch standard(s) from CSV`)
-                setCsvOpen(false)
-                setCsvText('')
-              }}
-            >
-              Import batches
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       <Dialog
         open={!!batchDialog}

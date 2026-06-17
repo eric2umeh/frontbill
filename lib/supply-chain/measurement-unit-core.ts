@@ -14,6 +14,7 @@ export const MEASUREMENT_UNITS = [
   'pack',
   'pcs',
   'portion',
+  'roll',
   'sachet',
   'set',
   'spoon',
@@ -58,6 +59,8 @@ const UNIT_ALIASES: Record<string, string> = {
   sachets: 'sachet',
   portion: 'portion',
   portions: 'portion',
+  roll: 'roll',
+  rolls: 'roll',
   pac: 'pack',
   pack: 'pack',
   spoon: 'spoon',
@@ -89,6 +92,7 @@ export function formatUnitLabel(unit: string): string {
   if (normalized === 'pcs') return 'pcs'
   if (normalized === 'bag') return 'bag'
   if (normalized === 'carton') return 'carton'
+  if (normalized === 'roll') return 'roll'
   return normalized
 }
 
@@ -124,13 +128,14 @@ export function unitOptionsForStoreItem(storeUnit: string, itemName?: string): s
     options.add('pack')
     options.add('pcs')
   }
-  if (['pack', 'pcs', 'sachet', 'tin', 'carton', 'bag'].includes(base)) {
+  if (['pack', 'pcs', 'sachet', 'tin', 'carton', 'bag', 'roll'].includes(base)) {
     options.add('pack')
     options.add('pcs')
     options.add('sachet')
     options.add('tin')
     options.add('carton')
     options.add('bag')
+    options.add('roll')
   }
   const dryGoodsHint =
     ['bag', 'kg', 'pack'].includes(base) ||

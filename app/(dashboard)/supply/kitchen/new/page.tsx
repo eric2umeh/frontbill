@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { ArrowLeft } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { KitchenBatchBuilder } from '@/components/supply-chain/kitchen-batch-builder'
+import { KitchenBatchCsvUpload } from '@/components/supply-chain/kitchen-batch-csv-upload'
 
 export default function NewKitchenBatchPage() {
   const router = useRouter()
@@ -17,12 +18,20 @@ export default function NewKitchenBatchPage() {
           Back to Kitchen
         </Link>
       </Button>
-      <div>
-        <h1 className="text-2xl font-bold">New batch standard</h1>
-        <p className="text-sm text-muted-foreground">
-          Define ingredients, overhead, and selling price. Production runs start from All Batches.
-        </p>
+
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="min-w-0 flex-1">
+          <h1 className="text-2xl font-bold">New batch standard</h1>
+          <p className="text-sm text-muted-foreground">
+            Define ingredients, overhead, and selling price. Production runs start from All Batches.
+          </p>
+        </div>
+        <KitchenBatchCsvUpload
+          variant="compact"
+          onComplete={() => router.push('/supply/kitchen?tab=recipes')}
+        />
       </div>
+
       <KitchenBatchBuilder
         onSaved={() => router.push('/supply/kitchen?tab=recipes')}
         onCancel={() => router.push('/supply/kitchen')}
