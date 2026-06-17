@@ -15,34 +15,68 @@ import { Label } from '@/components/ui/label'
 import { Plus } from 'lucide-react'
 import { toast } from 'sonner'
 import { useRouter } from 'next/navigation'
+import { createClient } from '@/lib/supabase/client'
+import { useAuth } from '@/lib/auth-context'
 
 export function NewGuestButton() {
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   const router = useRouter()
+  const { organizationId } = useAuth()
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
+    if (!organizationId) {
+      toast.error('Your account is not linked to a hotel yet')
+      return
+    }
+
     setLoading(true)
 
     const formData = new FormData(e.currentTarget)
-    const data = {
-      first_name: formData.get('first_name') as string,
-      last_name: formData.get('last_name') as string,
-      email: formData.get('email') as string,
-      phone: formData.get('phone') as string,
-      nationality: formData.get('nationality') as string || 'Nigeria',
+    const firstName = String(formData.get('first_name') ?? '').trim()
+    const lastName = String(formData.get('last_name') ?? '').trim()
+    const email = String(formData.get('email') ?? '').trim()
+    const phone = String(formData.get('phone') ?? '').trim()
+    const country = String(formData.get('nationality') ?? 'Nigeria').trim() || 'Nigeria'
+
+    if (!firstName || !lastName) {
+      toast.error('First and last name are required')
+      setLoading(false)
+      return
+    }
+    if (!phone) {
+      toast.error('Phone number is required')
+      setLoading(false)
+      return
     }
 
     try {
-      // Simulate API call with mock data
-      await new Promise(resolve => setTimeout(resolve, 500))
-      
+      const supabase = createClient()
+      if (!supabase) {
+        toast.error('Supabase not configured')
+        return
+      }
+
+      const { error } = await supabase.from('guests').insert([
+        {
+          organization_id: organizationId,
+          name: `${firstName} ${lastName}`.trim(),
+          email: email || null,
+          phone,
+          country,
+        },
+      ])
+
+      if (error) throw error
+
       toast.success('Guest added successfully')
       setOpen(false)
+      e.currentTarget.reset()
       router.refresh()
-    } catch (error: any) {
-      toast.error(error.message || 'Failed to add guest')
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Failed to add guest'
+      toast.error(message)
     } finally {
       setLoading(false)
     }
