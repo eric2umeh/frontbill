@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState, useEffect } from 'react'
+import { useMemo, useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { useClientMounted } from '@/hooks/use-client-mounted'
@@ -18,11 +18,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Flame, Pencil, Plus, Trash2, Upload } from 'lucide-react'
 import { toast } from 'sonner'
 import { RESPONSIVE_HIDE_MD, RESPONSIVE_HIDE_LG } from '@/lib/ui/responsive-table'
-import {
-  batchRowFromCsvCells,
-  csvRowsSkipHeader,
-  parseCsvText,
-} from '@/lib/supply-chain/parse-csv-row'
+import { parseKitchenBatchCsvText } from '@/lib/supply-chain/parse-csv-row'
 import { recipeTotalCost } from '@/lib/supply-chain/calculations'
 import { sanitizeQuantityInput, parseQuantityValue } from '@/lib/supply-chain/measurement-units'
 import { batchMaterialShortages } from '@/lib/supply-chain/batch-material-shortages'
@@ -35,6 +31,7 @@ import {
 } from '@/lib/supply-chain/batch-outlet-sync'
 import { outletStockSlug } from '@/lib/outlets/outlet-stock-slug'
 import { PageHeader } from '@/components/layout/page-header'
+import { PaginatedListShell } from '@/components/shared/paginated-list-shell'
 import { RoomInventoryStatsStrip } from '@/components/shared/room-inventory-stats-strip'
 import {
   getStockLevel,
@@ -144,7 +141,8 @@ export function KitchenWorkspace() {
   const [closeDialog, setCloseDialog] = useState<string | null>(null)
   const [budgetQty, setBudgetQty] = useState<Record<string, string>>({})
   const [csvOpen, setCsvOpen] = useState(false)
-  const [csvText, setCsvText] = useState('')
+  const [csvBusy, setCsvBusy] = useState(false)
+  const csvInputRef = useRef<HTMLInputElement>(null)
   const [deleteRecipeId, setDeleteRecipeId] = useState<string | null>(null)
   const [plannedInput, setPlannedInput] = useState('')
   const actor = { name: name ?? 'Kitchen', role: canonicalRoleKey(role) ?? 'staff' }
@@ -191,6 +189,68 @@ export function KitchenWorkspace() {
       ),
     [closeBatchRecipe, closeBatchRecord?.plannedPortions, kitchenRawOnHand, kitchenRawStock, stockTick],
   )
+
+  const handleKitchenCsvUpload = async (file: File) => {
+    if (csvBusy) return
+    setCsvBusy(true)
+    try {
+      const text = await file.text()
+      const parsed = parseKitchenBatchCsvText(text)
+      if (!parsed.ok) {
+        toast.error(parsed.error)
+        return
+      }
+
+      let okCount = 0
+      let errCount = 0
+      for (const row of parsed.rows) {
+        const res = openKitchenBatchFromMaterials(
+          {
+            batchName: row.name,
+            menuCategory: row.category,
+            plannedPortions: row.portions,
+            sellingPricePerPortion: row.sellingPrice,
+            materials: [],
+            overheadLabour: row.overheadLabour,
+            overheadGas: row.overheadGas,
+            overheadOther: row.overheadOther,
+            outletMenuSync: row.outletMenuSync,
+          },
+          actor,
+        )
+        if ('error' in res) {
+          errCount++
+          toast.error(`${row.name}: ${res.error}`)
+          continue
+        }
+        if (shouldSyncBatchToOutlet(row.outletMenuSync)) {
+          const sync = await syncBatchToRestaurantOutlet({
+            batchName: row.name,
+            categoryName: row.category,
+            unitPrice: row.sellingPrice,
+            kitchenStockId: res.kitchenStockId,
+            outletMenuSync: row.outletMenuSync,
+          })
+          if (!sync.ok) {
+            toast.warning(`${row.name}: saved but Restaurant sync failed — ${sync.error}`)
+          }
+        }
+        okCount++
+      }
+
+      if (!okCount) {
+        toast.error('No batch standards were imported')
+        return
+      }
+
+      toast.success(
+        `CSV import complete: ${okCount} batch standard(s) added${errCount ? `, ${errCount} failed` : ''}`,
+      )
+      setCsvOpen(false)
+    } finally {
+      setCsvBusy(false)
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -698,87 +758,43 @@ export function KitchenWorkspace() {
       )}
 
       <Dialog open={csvOpen} onOpenChange={setCsvOpen}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto overflow-x-hidden">
           <DialogHeader>
             <DialogTitle>Bulk upload batches (CSV)</DialogTitle>
           </DialogHeader>
-          <p className="text-xs text-muted-foreground">
-            Columns: name, category, portions, price, labour, gas, other, outlet (blank | restaurant | fnb).
-            Example: Fish,Mains,4,3500,0,0,0,restaurant
-          </p>
-          <Input
-            type="file"
-            accept=".csv,text/csv"
-            onChange={(e) => {
-              const file = e.target.files?.[0]
-              if (!file) return
-              const reader = new FileReader()
-              reader.onload = () => setCsvText(String(reader.result ?? ''))
-              reader.readAsText(file)
-            }}
-          />
-          <textarea
-            className="w-full min-h-[120px] rounded-md border p-2 text-sm font-mono"
-            placeholder="Or paste CSV rows here…"
-            value={csvText}
-            onChange={(e) => setCsvText(e.target.value)}
-          />
-          <DialogFooter>
-            <Button
-              onClick={async () => {
-                const rows = csvRowsSkipHeader(parseCsvText(csvText))
-                if (!rows.length) {
-                  toast.error('Add CSV rows')
-                  return
-                }
-                let ok = 0
-                for (const cells of rows) {
-                  const row = batchRowFromCsvCells(cells)
-                  if (!row) continue
-                  const res = openKitchenBatchFromMaterials(
-                    {
-                      batchName: row.name,
-                      menuCategory: row.category,
-                      plannedPortions: row.portions,
-                      sellingPricePerPortion: row.sellingPrice,
-                      materials: [],
-                      overheadLabour: row.overheadLabour,
-                      overheadGas: row.overheadGas,
-                      overheadOther: row.overheadOther,
-                      outletMenuSync: row.outletMenuSync,
-                    },
-                    actor,
-                  )
-                  if ('error' in res) {
-                    toast.error(`${row.name}: ${res.error}`)
-                    continue
-                  }
-                  if (shouldSyncBatchToOutlet(row.outletMenuSync)) {
-                    const sync = await syncBatchToRestaurantOutlet({
-                      batchName: row.name,
-                      categoryName: row.category,
-                      unitPrice: row.sellingPrice,
-                      kitchenStockId: res.kitchenStockId,
-                      outletMenuSync: row.outletMenuSync,
-                    })
-                    if (!sync.ok) {
-                      toast.warning(`${row.name}: saved but Restaurant sync failed — ${sync.error}`)
-                    }
-                  }
-                  ok++
-                }
-                if (!ok) {
-                  toast.error('No valid rows imported — check column order and values')
-                  return
-                }
-                toast.success(`Created ${ok} batch standard(s) from CSV`)
-                setCsvOpen(false)
-                setCsvText('')
-              }}
-            >
-              Import batches
-            </Button>
-          </DialogFooter>
+          <div>
+            <Label className="text-xs">Bulk add via CSV</Label>
+            <div className="mt-0.5">
+              <input
+                ref={csvInputRef}
+                type="file"
+                accept=".csv,text/csv"
+                className="sr-only"
+                disabled={csvBusy}
+                onChange={(e) => {
+                  const f = e.target.files?.[0]
+                  if (!f) return
+                  void handleKitchenCsvUpload(f)
+                  e.currentTarget.value = ''
+                }}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="w-full sm:w-auto"
+                disabled={csvBusy}
+                onClick={() => csvInputRef.current?.click()}
+              >
+                <Upload className="h-4 w-4 mr-2" />
+                {csvBusy ? 'Uploading…' : 'Choose CSV file'}
+              </Button>
+            </div>
+            <p className="text-[10px] text-muted-foreground mt-1 break-words">
+              Columns: name or names, category, portions, price (optional), labour, gas, other
+              (optional), outlet (optional: restaurant | fnb | blank).
+            </p>
+          </div>
         </DialogContent>
       </Dialog>
 
