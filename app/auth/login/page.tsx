@@ -25,10 +25,12 @@ import { toast } from 'sonner'
 import { BRAND_LOGO_SESSION_KEY } from '@/lib/branding/constants'
 import { LoginPendingOverlay, LoginSubmitButton } from '@/components/auth/login-form-fields'
 import { loginAction, type LoginFormState } from './actions'
+import { isPublicSignupEnabledClient } from '@/lib/auth/public-signup'
 
 const initialState: LoginFormState = {}
 
 export default function Page() {
+  const signupEnabled = isPublicSignupEnabledClient()
   const [state, formAction] = useActionState(loginAction, initialState)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -160,7 +162,7 @@ export default function Page() {
                       name="email"
                       type="email"
                       autoComplete="email"
-                      placeholder="admin@frontbill.com"
+                      placeholder="you@hotel.com"
                       required
                       disabled={!isConfigured}
                       value={email}
@@ -196,6 +198,14 @@ export default function Page() {
                     </div>
                   </div>
                   <LoginSubmitButton disabled={!isConfigured} />
+                  {signupEnabled && (
+                    <p className="text-center text-sm text-muted-foreground">
+                      New hotel?{' '}
+                      <Link href="/auth/sign-up" className="text-primary hover:underline">
+                        Create account
+                      </Link>
+                    </p>
+                  )}
                   <div className="text-center">
                     <button
                       type="button"
