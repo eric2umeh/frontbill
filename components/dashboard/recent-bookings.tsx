@@ -5,11 +5,8 @@ import { Badge } from '@/components/ui/badge'
 import { Calendar } from 'lucide-react'
 import { formatNaira } from '@/lib/utils/currency'
 
-// Mock bookings data
-const mockBookings: any[] = []
-
 export function RecentBookings() {
-  const bookings = mockBookings
+  const bookings: never[] = []
 
   const statusColors: Record<string, string> = {
     pending: 'bg-yellow-100 text-yellow-800',
