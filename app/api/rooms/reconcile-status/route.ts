@@ -1,3 +1,4 @@
+import { ensureHotelOwnerFromAuthUser } from '@/lib/auth/ensure-hotel-owner-profile'
 import { createClient } from '@/lib/supabase/server'
 import { reconcileRoomStatusesForOrganization } from '@/lib/rooms/room-occupancy'
 import { NextResponse } from 'next/server'
@@ -19,9 +20,15 @@ export async function POST() {
       .eq('id', user.id)
       .maybeSingle()
 
-    const organizationId = profile?.organization_id
+    let organizationId = profile?.organization_id ?? null
+
     if (!organizationId) {
-      return NextResponse.json({ error: 'No organization' }, { status: 400 })
+      const repaired = await ensureHotelOwnerFromAuthUser(user)
+      organizationId = repaired.organizationId
+    }
+
+    if (!organizationId) {
+      return NextResponse.json({ ok: true, skipped: true, reason: 'no_organization' })
     }
 
     const result = await reconcileRoomStatusesForOrganization(supabase, organizationId)
