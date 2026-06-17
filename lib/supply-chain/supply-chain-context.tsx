@@ -46,7 +46,12 @@ import type {
   StoreItem,
   BarStockItem,
 } from "./types";
-import { isBarStoreDept, normalizeSupplyDept, normalizeStoreItemDepts } from "./types";
+import {
+  normalizeSupplyDept,
+  normalizeStoreItemDepts,
+  storeItemHasBarDept,
+  storeItemHasDept,
+} from "./types";
 import type { OutletDepartmentKey } from "@/lib/outlets/departments";
 import { isStoreControlledFnbOutlet } from "@/lib/outlets/departments";
 import type { OutletMenuItemRow } from "@/lib/outlets/types";
@@ -1243,7 +1248,7 @@ function useSupplyChainImpl() {
       const materials = input.materials.filter((m) => m.quantity > 0);
       for (const line of materials) {
         const store = storeItems.find((s) => s.id === line.storeItemId);
-        if (store && store.dept !== "kitchen") {
+        if (store && !storeItemHasDept(store, "kitchen")) {
           return { error: `${line.name} is not a kitchen store item` };
         }
       }
@@ -2064,7 +2069,7 @@ function useSupplyChainImpl() {
     ) => {
       if (qty <= 0) return { error: "Enter a quantity to issue" };
       const store = storeItems.find((s) => s.id === storeItemId);
-      if (!store || !isBarStoreDept(store.dept)) {
+      if (!store || !storeItemHasBarDept(store)) {
         return {
           error: "Only bar department store items can be issued to the bar",
         };
@@ -2203,7 +2208,7 @@ function useSupplyChainImpl() {
         };
       }
 
-      if (isBarStoreDept(store.dept) && destinationCreditsBarStock(dest)) {
+      if (storeItemHasBarDept(store) && destinationCreditsBarStock(dest)) {
         const barRes = issueFromStoreToBar(storeItemId, qty, actor, {
           destination: dest,
           receivedBy,
@@ -2223,7 +2228,7 @@ function useSupplyChainImpl() {
         ),
       );
 
-      if (store.dept === "kitchen" && destinationCreditsKitchenRaw(dest)) {
+      if (storeItemHasDept(store, "kitchen") && destinationCreditsKitchenRaw(dest)) {
         setKitchenRawStock((prev) => {
           const idx = prev.findIndex((k) => k.storeItemId === storeItemId);
           if (idx >= 0) {
@@ -2255,7 +2260,7 @@ function useSupplyChainImpl() {
         notifyKitchenRawStockChanged();
       }
 
-      if (isBarStoreDept(store.dept) && destinationCreditsFnbRaw(dest)) {
+      if (storeItemHasBarDept(store) && destinationCreditsFnbRaw(dest)) {
         setFnbRawStock((prev) => {
           const idx = prev.findIndex((f) => f.storeItemId === storeItemId);
           if (idx >= 0) {
@@ -2478,7 +2483,7 @@ function useSupplyChainImpl() {
         const stockId = link.stockId || `bar-${outletStockSlug(item.name)}`;
         const matchedStore = storeItems.find(
           (s) =>
-            isBarStoreDept(s.dept) &&
+            storeItemHasBarDept(s) &&
             s.name.trim().toLowerCase() === item.name.trim().toLowerCase(),
         );
         const barUnit =
@@ -2537,7 +2542,7 @@ function useSupplyChainImpl() {
       }
 
       const store = storeItems.find((s) => s.id === input.storeItemId);
-      if (!store || store.dept !== "kitchen") {
+      if (!store || !storeItemHasDept(store, "kitchen")) {
         return {
           error: "Only kitchen department store items can be issued this way",
         };

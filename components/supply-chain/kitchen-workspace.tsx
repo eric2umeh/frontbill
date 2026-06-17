@@ -17,6 +17,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Flame, Pencil, Plus, Trash2, Upload } from 'lucide-react'
 import { toast } from 'sonner'
+import { PaginatedListShell } from '@/components/shared/paginated-list-shell'
 import { RESPONSIVE_HIDE_MD, RESPONSIVE_HIDE_LG } from '@/lib/ui/responsive-table'
 import {
   batchRowFromCsvCells,

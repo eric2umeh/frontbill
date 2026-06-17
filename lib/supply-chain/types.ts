@@ -85,6 +85,19 @@ export function isBarStoreDept(dept: string): boolean {
   return dept === 'main_bar' || dept === 'bar'
 }
 
+export function storeItemHasDept(
+  item: Pick<StoreItem, 'dept' | 'depts'>,
+  dept: Exclude<SupplyDept, 'all'>,
+): boolean {
+  return storeItemDepartments(item).includes(dept)
+}
+
+export function storeItemHasBarDept(
+  item: Pick<StoreItem, 'dept' | 'depts'>,
+): boolean {
+  return storeItemDepartments(item).some(isBarStoreDept)
+}
+
 export type PoStatus =
   | 'draft'
   | 'pending_accountant'
