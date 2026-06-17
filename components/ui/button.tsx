@@ -74,16 +74,22 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
       }, CLICK_LOCK_MS)
     }, [])
 
+    // Only lock clicks when a custom onClick is provided. Submit buttons rely on
+    // native form submission — locking here disables the button before submit fires.
+    const useClickLock = Boolean(onClick) && !allowRepeatClick && !asChild
+
     const handleClick = React.useCallback(
       (e: React.MouseEvent<HTMLButtonElement>) => {
+        if (!useClickLock) {
+          onClick?.(e)
+          return
+        }
         if (pendingRef.current) {
           e.preventDefault()
           e.stopPropagation()
           return
         }
         const result = onClick?.(e)
-        if (allowRepeatClick || asChild) return
-
         pendingRef.current = true
         setPending(true)
         if (isPromiseLike(result)) {
@@ -92,7 +98,7 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
           release()
         }
       },
-      [onClick, allowRepeatClick, asChild, release],
+      [onClick, useClickLock, release],
     )
 
     const Comp = asChild ? Slot : 'button'
@@ -101,7 +107,7 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
         className={cn(buttonVariants({ variant, size, className }))}
         ref={ref}
         onClick={asChild ? onClick : handleClick}
-        disabled={disabled || pending}
+        disabled={disabled || (useClickLock && pending)}
         {...props}
       />
     )
