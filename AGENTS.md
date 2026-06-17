@@ -20,18 +20,12 @@ Next.js 16 removed the built-in `next lint` subcommand, so `pnpm lint` does not 
 ### Tests
 No test framework or test files exist in this codebase.
 
-### Authentication & demo accounts
+### Authentication
 Supabase secrets (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`) must be provided as environment variables (injected via Cursor Secrets or `.env.local`).
 
 If login fails with `fetch failed` to `127.0.0.1:54321`, `.env.local` still targets local Docker or the browser has stale auth cookies — use cloud URL in `.env.local`, restart `pnpm dev`, open `/auth/login` (clears local session), or visit `/api/auth/logout`.
 
-To seed demo users with auto-confirmed emails (cloud project only), call:
-```
-curl -X POST http://localhost:3000/api/setup/seed-users
-```
-This creates:
-- `admin@frontbill.com` / `Admin@123456` (Admin)
-- `frontdesk@frontbill.com` / `Desk@123456` (Front Desk)
+On **staging/dev**, hotel owners register at `/auth/sign-up` (requires `NEXT_PUBLIC_ENABLE_PUBLIC_SIGNUP=true` or `SUPABASE_ENV=staging`). Staff are added by an admin under **Users & Roles** — there are no built-in demo logins.
 
 ### Key caveats
 - The `pnpm-lock.yaml` is listed in `.gitignore` but is present in the repo; `pnpm install` works from the lockfile.
