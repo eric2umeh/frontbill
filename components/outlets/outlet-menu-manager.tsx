@@ -84,6 +84,9 @@ function parseItemUnitPrice(raw: string, priceEditable: boolean): number | null 
   return n
 }
 
+const numberInputValue = (value: number | null | undefined) =>
+  value != null && Number(value) !== 0 ? String(value) : ''
+
 export function OutletMenuManager({ department, categories, items, canManage, onRefresh }: Props) {
   const { name: staffName, role } = useAuth()
   const supply = useSupplyChain()
@@ -141,7 +144,7 @@ export function OutletMenuManager({ department, categories, items, canManage, on
   const openStockEdit = (it: OutletMenuItemRow) => {
     const link = supply.getOutletItemStock(department, it)
     setStockEditItem(it)
-    setStockEditQty(String(link.tracked ? link.available : 0))
+    setStockEditQty(numberInputValue(link.tracked ? link.available : 0))
     setStockEditUnit(link.unit || (stockPipeline === 'bar' ? 'bottle' : 'portion'))
   }
 
@@ -183,7 +186,7 @@ export function OutletMenuManager({ department, categories, items, canManage, on
     setEditItemForm({
       name: it.name,
       category_id: it.category_id || '',
-      unit_price: String(it.unit_price),
+      unit_price: numberInputValue(it.unit_price),
       description: isLegacyDefaultDescription(it.description) ? '' : it.description || '',
       tags: [...(it.tags || [])],
       price_editable: !!it.price_editable,
@@ -273,7 +276,7 @@ export function OutletMenuManager({ department, categories, items, canManage, on
     if (!form.name.trim() || unitPrice == null) {
       toast.error(
         form.price_editable
-          ? 'Name required. For price-at-sale items, leave price blank or enter 0.'
+          ? 'Name required. For price-at-sale items, leave price blank.'
           : 'Name and price required',
       )
       return
@@ -312,7 +315,7 @@ export function OutletMenuManager({ department, categories, items, canManage, on
     if (!editItem || !editItemForm.name.trim() || unitPrice == null) {
       toast.error(
         editItemForm.price_editable
-          ? 'Name required. For price-at-sale items, leave price blank or enter 0.'
+          ? 'Name required. For price-at-sale items, leave price blank.'
           : 'Name and price required',
       )
       return
@@ -733,7 +736,7 @@ export function OutletMenuManager({ department, categories, items, canManage, on
                   min={0}
                   value={form.unit_price}
                   onChange={(e) => setForm((f) => ({ ...f, unit_price: e.target.value }))}
-                  placeholder={form.price_editable ? '0 for price-at-sale items' : undefined}
+                  placeholder={form.price_editable ? 'Leave blank for price-at-sale items' : undefined}
                 />
               </div>
               <div className="flex items-center gap-2 rounded-md border bg-muted/30 px-2 py-2">
@@ -743,7 +746,7 @@ export function OutletMenuManager({ department, categories, items, canManage, on
                   onCheckedChange={(v) => setForm((f) => ({ ...f, price_editable: v }))}
                 />
                 <Label htmlFor="add-item-price-editable" className="text-xs font-normal cursor-pointer leading-snug">
-                  Flexible price at POS — cashier enters amount per order (use ₦0 when price depends on the plate)
+                  Flexible price at POS — cashier enters amount per order (leave price blank when it depends on the plate)
                 </Label>
               </div>
               <OutletItemMetaFields
@@ -850,7 +853,7 @@ export function OutletMenuManager({ department, categories, items, canManage, on
                 min={0}
                 value={editItemForm.unit_price}
                 onChange={(e) => setEditItemForm((f) => ({ ...f, unit_price: e.target.value }))}
-                placeholder={editItemForm.price_editable ? '0 for price-at-sale items' : undefined}
+                placeholder={editItemForm.price_editable ? 'Leave blank for price-at-sale items' : undefined}
               />
             </div>
             <div className="flex items-center gap-2 rounded-md border bg-muted/30 px-2 py-2">
