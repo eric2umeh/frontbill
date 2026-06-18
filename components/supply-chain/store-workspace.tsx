@@ -113,6 +113,7 @@ export function StoreWorkspace() {
   const [issueQtyMap, setIssueQtyMap] = useState<Record<string, string>>({})
   const [issueUnitMap, setIssueUnitMap] = useState<Record<string, string>>({})
   const [purchaseUnitMap, setPurchaseUnitMap] = useState<Record<string, string>>({})
+  const [purchasePriceMap, setPurchasePriceMap] = useState<Record<string, string>>({})
   const [factorMap, setFactorMap] = useState<Record<string, Record<string, number>>>({})
 
   const factorsFor = (item: StoreItem) =>
@@ -199,11 +200,33 @@ export function StoreWorkspace() {
       }
       return changed ? next : prev
     })
+    setPurchaseUnitMap((prev) => {
+      const next = { ...prev }
+      let changed = false
+      for (const b of basket) {
+        if (b.unit && next[b.stockItemId] !== b.unit) {
+          next[b.stockItemId] = b.unit
+          changed = true
+        }
+      }
+      return changed ? next : prev
+    })
+    setPurchasePriceMap((prev) => {
+      const next = { ...prev }
+      let changed = false
+      for (const b of basket) {
+        if (Number.isFinite(b.unitPrice) && b.unitPrice > 0 && !(b.stockItemId in next)) {
+          next[b.stockItemId] = String(b.unitPrice)
+          changed = true
+        }
+      }
+      return changed ? next : prev
+    })
   }, [basket])
 
-  const commitPurchaseQty = (item: StoreItem, raw: string) => {
+  const commitPurchaseQty = (item: StoreItem, raw: string, unitOverride?: string) => {
     const trimmed = raw.trim()
-    const issueUnit = purchaseUnitMap[item.id] ?? defaultUnitForStoreItem(item.unit)
+    const purchaseUnit = unitOverride ?? purchaseUnitMap[item.id] ?? defaultUnitForStoreItem(item.unit)
     if (!trimmed) {
       const res = removeFromBasket(item.id)
       if (res && 'error' in res) toast.error(res.error)
@@ -218,12 +241,25 @@ export function StoreWorkspace() {
     }
     const qty = parseQuantityValue(trimmed)
     if (qty <= 0) return
-    const storeQty = toStoreQty(item, qty, issueUnit)
+    const storeQty = toStoreQty(item, qty, purchaseUnit)
     if (storeQty == null) {
-      toast.error(`Set pack size for ${item.name} (${unitLabel(issueUnit)} per ${unitLabel(item.unit)})`)
+      toast.error(`Set pack size for ${item.name} (${unitLabel(purchaseUnit)} per ${unitLabel(item.unit)})`)
       return
     }
-    const err = setBasketLineQty(item, storeQty, item.lastPrice, actor)
+    const fallbackPurchasePrice =
+      qty > 0 ? (storeQty / qty) * item.lastPrice : item.lastPrice
+    const purchaseUnitPrice =
+      Number(purchasePriceMap[item.id]) > 0
+        ? Number(purchasePriceMap[item.id])
+        : fallbackPurchasePrice
+    const storeUnitPrice = storeQty > 0 ? (qty * purchaseUnitPrice) / storeQty : item.lastPrice
+    const err = setBasketLineQty(item, storeQty, storeUnitPrice, actor, {
+      purchaseUnit,
+      purchaseQty: qty,
+      purchaseUnitPrice,
+      storeQty,
+      storeUnitPrice,
+    })
     if (err) toast.error(err)
   }
 
@@ -248,6 +284,8 @@ export function StoreWorkspace() {
       return
     }
     setQtyMap({})
+    setPurchaseUnitMap({})
+    setPurchasePriceMap({})
   }
 
   const handleRemoveFromBasket = (stockItemId: string) => {
@@ -257,6 +295,16 @@ export function StoreWorkspace() {
       return
     }
     setQtyMap((m) => {
+      const next = { ...m }
+      delete next[stockItemId]
+      return next
+    })
+    setPurchaseUnitMap((m) => {
+      const next = { ...m }
+      delete next[stockItemId]
+      return next
+    })
+    setPurchasePriceMap((m) => {
       const next = { ...m }
       delete next[stockItemId]
       return next
@@ -271,7 +319,22 @@ export function StoreWorkspace() {
       return
     }
     setQtyMap((m) => ({ ...m, [stockItemId]: String(qty) }))
-    const err = setBasketLineQty(item, qty, item.lastPrice, actor)
+    const existing = basket.find((b) => b.stockItemId === stockItemId)
+    const storeQty =
+      existing?.storeQtyToBuy && existing.qtyToBuy > 0
+        ? (qty / existing.qtyToBuy) * existing.storeQtyToBuy
+        : qty
+    const purchaseUnitPrice = existing?.unitPrice ?? item.lastPrice
+    const storeUnitPrice =
+      existing?.storeUnitPrice ??
+      (storeQty > 0 ? (qty * purchaseUnitPrice) / storeQty : item.lastPrice)
+    const err = setBasketLineQty(item, storeQty, storeUnitPrice, actor, {
+      purchaseUnit: existing?.unit ?? item.unit,
+      purchaseQty: qty,
+      purchaseUnitPrice,
+      storeQty,
+      storeUnitPrice,
+    })
     if (err) toast.error(err)
   }
 
@@ -986,6 +1049,7 @@ export function StoreWorkspace() {
                                         factors={factorsFor(item)}
                                         onFactorsChange={(next) => {
                                           setFactorMap((m) => ({ ...m, [item.id]: next }))
+                                          updateStoreItemDirect(item.id, { unitFactors: next }, actor)
                                           const v = issueQtyMap[item.id] ?? ''
                                           const u =
                                             issueUnitMap[item.id] ??
@@ -1175,7 +1239,13 @@ export function StoreWorkspace() {
                           const qty = parseQuantityValue(rawQty)
                           const storeQty =
                             qty > 0 ? toStoreQty(item, qty, purchaseUnit) : null
-                          const price = item.lastPrice
+                          const defaultPurchasePrice =
+                            storeQty != null && qty > 0
+                              ? (storeQty / qty) * item.lastPrice
+                              : item.lastPrice
+                          const price = Number(purchasePriceMap[item.id]) > 0
+                            ? Number(purchasePriceMap[item.id])
+                            : defaultPurchasePrice
                           const level = getStockLevel(item.quantityInStore, item.reorderLevel)
                           const inBasket = basket.some((b) => b.stockItemId === item.id)
                           return (
@@ -1219,16 +1289,54 @@ export function StoreWorkspace() {
                                     value={purchaseUnit}
                                     onChange={(u) => {
                                       setPurchaseUnitMap((m) => ({ ...m, [item.id]: u }))
-                                      if (rawQty.trim()) commitPurchaseQty(item, rawQty)
+                                      if (rawQty.trim()) commitPurchaseQty(item, rawQty, u)
                                     }}
                                   />
                                 </div>
+                                <Input
+                                  inputMode="decimal"
+                                  disabled={purchaseLocked}
+                                  className="h-8 w-24 text-right"
+                                  placeholder={`₦/${unitLabel(purchaseUnit)}`}
+                                  value={purchasePriceMap[item.id] ?? ''}
+                                  onChange={(e) =>
+                                    setPurchasePriceMap((m) => ({
+                                      ...m,
+                                      [item.id]: sanitizeQuantityInput(e.target.value),
+                                    }))
+                                  }
+                                  onBlur={() => {
+                                    if (rawQty.trim()) commitPurchaseQty(item, rawQty)
+                                  }}
+                                />
                                 <span className="text-sm font-medium tabular-nums">
                                   {storeQty != null && storeQty > 0
-                                    ? formatNaira(storeQty * price)
+                                    ? formatNaira(qty * price)
                                     : '—'}
                                 </span>
                               </div>
+                              {storeQty != null && storeQty > 0 && purchaseUnit !== item.unit && (
+                                <p className="text-[11px] text-muted-foreground">
+                                  Receives {storeQty} {unitLabel(item.unit)} into store
+                                  {price > 0
+                                    ? ` · computed ${formatNaira((qty * price) / storeQty)}/${unitLabel(item.unit)}`
+                                    : ''}
+                                </p>
+                              )}
+                              {needsUnitFactor(purchaseUnit, item.unit, factorsFor(item)) && (
+                                <UnitConversionField
+                                  compact
+                                  storeItemId={item.id}
+                                  storeUnit={item.unit}
+                                  selectedUnit={purchaseUnit}
+                                  factors={factorsFor(item)}
+                                  onFactorsChange={(next) => {
+                                    setFactorMap((m) => ({ ...m, [item.id]: next }))
+                                    updateStoreItemDirect(item.id, { unitFactors: next }, actor)
+                                    if (rawQty.trim()) commitPurchaseQty(item, rawQty)
+                                  }}
+                                />
+                              )}
                             </div>
                           )
                         })}
@@ -1255,7 +1363,13 @@ export function StoreWorkspace() {
                               const qty = parseQuantityValue(rawQty)
                               const storeQty =
                                 qty > 0 ? toStoreQty(item, qty, purchaseUnit) : null
-                              const price = item.lastPrice
+                              const defaultPurchasePrice =
+                                storeQty != null && qty > 0
+                                  ? (storeQty / qty) * item.lastPrice
+                                  : item.lastPrice
+                              const price = Number(purchasePriceMap[item.id]) > 0
+                                ? Number(purchasePriceMap[item.id])
+                                : defaultPurchasePrice
                               const level = getStockLevel(item.quantityInStore, item.reorderLevel)
                               const inBasket = basket.some((b) => b.stockItemId === item.id)
                               return (
@@ -1305,17 +1419,57 @@ export function StoreWorkspace() {
                                         value={purchaseUnit}
                                         onChange={(u) => {
                                           setPurchaseUnitMap((m) => ({ ...m, [item.id]: u }))
-                                          if (rawQty.trim()) commitPurchaseQty(item, rawQty)
+                                          if (rawQty.trim()) commitPurchaseQty(item, rawQty, u)
                                         }}
                                       />
                                     </div>
+                                    {storeQty != null && storeQty > 0 && purchaseUnit !== item.unit && (
+                                      <p className="mt-1 text-[10px] text-muted-foreground">
+                                        Receives {storeQty} {unitLabel(item.unit)}
+                                      </p>
+                                    )}
+                                    {needsUnitFactor(purchaseUnit, item.unit, factorsFor(item)) && (
+                                      <UnitConversionField
+                                        compact
+                                        storeItemId={item.id}
+                                        storeUnit={item.unit}
+                                        selectedUnit={purchaseUnit}
+                                        factors={factorsFor(item)}
+                                        onFactorsChange={(next) => {
+                                          setFactorMap((m) => ({ ...m, [item.id]: next }))
+                                          updateStoreItemDirect(item.id, { unitFactors: next }, actor)
+                                          if (rawQty.trim()) commitPurchaseQty(item, rawQty)
+                                        }}
+                                      />
+                                    )}
                                   </TableCell>
                                   <TableCell className={`text-right ${RESPONSIVE_HIDE_MD}`}>
-                                    {formatNaira(price)}/{unitLabel(item.unit)}
+                                    <Input
+                                      inputMode="decimal"
+                                      disabled={purchaseLocked}
+                                      className="h-8 w-24 ml-auto text-right"
+                                      placeholder={formatNaira(defaultPurchasePrice)}
+                                      value={purchasePriceMap[item.id] ?? ''}
+                                      onChange={(e) =>
+                                        setPurchasePriceMap((m) => ({
+                                          ...m,
+                                          [item.id]: sanitizeQuantityInput(e.target.value),
+                                        }))
+                                      }
+                                      onBlur={() => {
+                                        if (rawQty.trim()) commitPurchaseQty(item, rawQty)
+                                      }}
+                                    />
+                                    <p className="mt-1 text-[10px] text-muted-foreground">
+                                      per {unitLabel(purchaseUnit)}
+                                      {storeQty != null && storeQty > 0
+                                        ? ` · ${formatNaira((qty * price) / storeQty)}/${unitLabel(item.unit)}`
+                                        : ''}
+                                    </p>
                                   </TableCell>
                                   <TableCell className="text-right tabular-nums">
                                     {storeQty != null && storeQty > 0
-                                      ? formatNaira(storeQty * price)
+                                      ? formatNaira(qty * price)
                                       : '—'}
                                   </TableCell>
                                 </TableRow>
