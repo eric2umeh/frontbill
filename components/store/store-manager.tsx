@@ -104,6 +104,9 @@ function movementDisplayAt(m: MovementRow): string {
   return raw
 }
 
+const numberInputValue = (value: number | null | undefined) =>
+  value != null && Number(value) !== 0 ? String(value) : ''
+
 export function StoreManager({ initialTab }: { initialTab?: 'requisitions' | 'purchase_orders' } = {}) {
   const { role, userId, organizationId } = useAuth()
   const canCreate = hasPermission(role, 'store:create')
@@ -181,7 +184,7 @@ export function StoreManager({ initialTab }: { initialTab?: 'requisitions' | 'pu
   const [adjustTarget, setAdjustTarget] = useState('')
   const [adjustSaving, setAdjustSaving] = useState(false)
   const [adjustMovementAt, setAdjustMovementAt] = useState(() => format(new Date(), "yyyy-MM-dd'T'HH:mm"))
-  const [adjustUnitPrice, setAdjustUnitPrice] = useState('0')
+  const [adjustUnitPrice, setAdjustUnitPrice] = useState('')
 
   const [bulkOpen, setBulkOpen] = useState(false)
 
@@ -673,7 +676,7 @@ export function StoreManager({ initialTab }: { initialTab?: 'requisitions' | 'pu
     setAdjustDept(atOutlet ? storeOutletContext : '')
     setAdjustReceivedBy('')
     setAdjustMovementAt(format(new Date(), "yyyy-MM-dd'T'HH:mm"))
-    setAdjustUnitPrice(String(Number(it.unit_price ?? 0)))
+    setAdjustUnitPrice(numberInputValue(it.unit_price))
     setAdjustOpen(true)
   }
 
@@ -1701,7 +1704,7 @@ export function StoreManager({ initialTab }: { initialTab?: 'requisitions' | 'pu
                   type="number"
                   min={0}
                   step="0.001"
-                  value={itemForm.quantity_on_hand}
+                  value={numberInputValue(itemForm.quantity_on_hand)}
                   onChange={e => setItemForm(f => ({ ...f, quantity_on_hand: parseFloat(e.target.value) || 0 }))}
                   disabled={!!editingItem}
                 />
@@ -1715,7 +1718,7 @@ export function StoreManager({ initialTab }: { initialTab?: 'requisitions' | 'pu
                   type="number"
                   min={0}
                   step="0.001"
-                  value={itemForm.reorder_level}
+                  value={numberInputValue(itemForm.reorder_level)}
                   onChange={e => setItemForm(f => ({ ...f, reorder_level: parseFloat(e.target.value) || 0 }))}
                 />
               </div>
@@ -1725,7 +1728,7 @@ export function StoreManager({ initialTab }: { initialTab?: 'requisitions' | 'pu
                   type="number"
                   min={0}
                   step="0.01"
-                  value={itemForm.unit_price}
+                  value={numberInputValue(itemForm.unit_price)}
                   onChange={e => setItemForm(f => ({ ...f, unit_price: parseFloat(e.target.value) || 0 }))}
                 />
               </div>
