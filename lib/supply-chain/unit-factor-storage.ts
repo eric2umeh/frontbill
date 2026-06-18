@@ -51,7 +51,7 @@ export function unitFactorDefinition(
   if (store === selected) return null
   if (convertQtyBetweenUnits(1, selected, store) != null) return null
 
-  const containerUnits = new Set(['crate', 'pack', 'bag', 'basket', 'tin', 'set', 'roll'])
+  const containerUnits = new Set(['crate', 'pack', 'bag', 'basket', 'tin', 'can', 'set', 'roll'])
   if (containerUnits.has(selected) && !containerUnits.has(store)) {
     return {
       storageKey: `__per_${selected}`,
@@ -79,7 +79,7 @@ export function needsUnitFactor(
   const def = unitFactorDefinition(store, from)
   if (!def) return false
   const n = factors?.[def.storageKey]
-  return !(Number.isFinite(n) && n > 0)
+  return !(typeof n === 'number' && Number.isFinite(n) && n > 0)
 }
 
 export function convertToStoreUnitsWithFactors(
