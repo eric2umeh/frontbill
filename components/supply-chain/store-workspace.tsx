@@ -66,7 +66,6 @@ import type { IssueOutCartLine, StoreItem } from '@/lib/supply-chain/types'
 import { StoreAddItemDialog } from '@/components/supply-chain/store-add-item-dialog'
 import { StoreEditItemDialog } from '@/components/supply-chain/store-edit-item-dialog'
 import { IssueOutCartSidebar } from '@/components/supply-chain/issue-out-cart-sidebar'
-import { SupplyHistoryClearButton } from '@/components/supply-chain/supply-history-clear-button'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -82,6 +81,9 @@ import {
 const DEPTS: SupplyDept[] = ['all', ...STORE_DEPT_PICKER_OPTIONS]
 
 const ISSUE_DESTINATIONS = issueOutletPickerOptions()
+
+const numberInputValue = (value: number | null | undefined) =>
+  value != null && Number(value) !== 0 ? String(value) : ''
 
 export function StoreWorkspace() {
   const { name, role, userId } = useAuth()
@@ -539,7 +541,7 @@ export function StoreWorkspace() {
                                 <Input
                                   inputMode="decimal"
                                   className="h-8 w-28 text-right tabular-nums"
-                                  value={stockQtyMap[item.id] ?? String(item.quantityInStore)}
+                                  value={stockQtyMap[item.id] ?? numberInputValue(item.quantityInStore)}
                                   onChange={(e) =>
                                     setStockQtyMap((m) => ({
                                       ...m,
@@ -649,7 +651,7 @@ export function StoreWorkspace() {
                                       inputMode="decimal"
                                       className="h-8 w-24 ml-auto text-right tabular-nums"
                                       value={
-                                        stockQtyMap[item.id] ?? String(item.quantityInStore)
+                                        stockQtyMap[item.id] ?? numberInputValue(item.quantityInStore)
                                       }
                                       onChange={(e) =>
                                         setStockQtyMap((m) => ({
@@ -1073,13 +1075,6 @@ export function StoreWorkspace() {
 
         {canIssue && (
           <TabsContent value="issue_out_log" className="mt-4 space-y-3">
-            {canAddDirect && (
-              <SupplyHistoryClearButton
-                actor={actor}
-                label="Clear issue & PO history"
-                description="Clears issue-out log, purchase order history, and supply activity log on this device."
-              />
-            )}
             <div className="rounded-xl border overflow-hidden">
               <div className="border-b px-4 py-2 bg-muted/30 text-sm font-medium">
                 Issue out history
@@ -1351,18 +1346,10 @@ export function StoreWorkspace() {
         </TabsContent>
 
         <TabsContent value="history" className="mt-4 space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-sm text-muted-foreground">
-              Accepted purchase orders (manager-approved and purchased). Click a PO to see every line
-              item.
-            </p>
-            {canAddDirect && (
-              <SupplyHistoryClearButton
-                actor={actor}
-                description="Clears PO history, issue-out log, and supply activity log on this device."
-              />
-            )}
-          </div>
+          <p className="text-sm text-muted-foreground">
+            Accepted purchase orders (manager-approved and purchased). Click a PO to see every line
+            item.
+          </p>
           <PoHistoryPanel purchaseOrders={purchaseOrders} />
         </TabsContent>
       </Tabs>
