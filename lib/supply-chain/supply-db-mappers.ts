@@ -1,5 +1,12 @@
 import type { KitchenMaterialCategory, StoreItem, SupplyDept } from './types'
-import { normalizeStoreItemDepts, normalizeSupplyDept } from './types'
+import {
+  applyStoreItemDeptFields,
+  normalizeStoreItemDepts,
+  normalizeSupplyDept,
+  sanitizeAssignableStoreDepts,
+  storeItemDeptFieldsForDb,
+  storeItemDepartments,
+} from './types'
 
 export type SupplyCatalogRow = {
   id: string
@@ -21,13 +28,12 @@ export type SupplyCatalogRow = {
 export function catalogRowToStoreItem(row: SupplyCatalogRow): StoreItem {
   const dept = normalizeSupplyDept(row.dept)
   const depts = row.depts?.length
-    ? ([...new Set(row.depts.map((d) => normalizeSupplyDept(d)))] as Exclude<
-        SupplyDept,
-        'all'
-      >[])
+    ? sanitizeAssignableStoreDepts(
+        row.depts.map((d) => normalizeSupplyDept(d)) as Exclude<SupplyDept, 'all'>[],
+      )
     : undefined
   const normalized = normalizeStoreItemDepts(depts?.length ? depts : [dept])
-  return {
+  return applyStoreItemDeptFields({
     id: row.id,
     name: row.name,
     unit: row.unit,
@@ -39,7 +45,7 @@ export function catalogRowToStoreItem(row: SupplyCatalogRow): StoreItem {
     benchmarkPrice: Number(row.benchmark_price) || 0,
     kitchenCategory: (row.kitchen_category as KitchenMaterialCategory | null) ?? undefined,
     unitFactors: row.unit_factors ?? undefined,
-  }
+  })
 }
 
 export function storeItemToCatalogInsert(
@@ -47,16 +53,14 @@ export function storeItemToCatalogInsert(
   orgId: string,
   userId?: string | null,
 ) {
-  const normalized = normalizeStoreItemDepts(
-    item.depts?.length ? item.depts : [item.dept],
-  )
+  const { dept, depts } = storeItemDeptFieldsForDb(item)
   return {
     id: item.id,
     organization_id: orgId,
     name: item.name,
     unit: item.unit,
-    dept: normalized.dept,
-    depts: normalized.depts ?? [normalized.dept],
+    dept,
+    depts,
     quantity_in_store: Math.max(0, item.quantityInStore),
     reorder_level: Math.max(0, item.reorderLevel),
     last_price: Math.max(0, item.lastPrice),
@@ -79,11 +83,12 @@ export function storeItemToCatalogUpdate(
   if (item.name != null) patch.name = item.name
   if (item.unit != null) patch.unit = item.unit
   if (item.dept != null || item.depts != null) {
-    const normalized = normalizeStoreItemDepts(
-      item.depts?.length ? item.depts : [item.dept ?? 'kitchen'],
-    )
-    patch.dept = normalized.dept
-    patch.depts = normalized.depts ?? [normalized.dept]
+    const { dept, depts } = storeItemDeptFieldsForDb({
+      dept: item.dept ?? 'kitchen',
+      depts: item.depts,
+    })
+    patch.dept = dept
+    patch.depts = depts
   }
   if (item.quantityInStore != null) patch.quantity_in_store = Math.max(0, item.quantityInStore)
   if (item.reorderLevel != null) patch.reorder_level = Math.max(0, item.reorderLevel)

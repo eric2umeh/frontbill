@@ -45,8 +45,9 @@ import type {
   RetirementLine,
   StoreItem,
   BarStockItem,
+  SupplyDept,
 } from "./types";
-import { isBarStoreDept, normalizeSupplyDept, normalizeStoreItemDepts } from "./types";
+import { isBarStoreDept, normalizeSupplyDept, normalizeStoreItemDepts, applyStoreItemDeptFields, storeItemDeptFieldsForDb } from "./types";
 import type { OutletDepartmentKey } from "@/lib/outlets/departments";
 import { isStoreControlledFnbOutlet } from "@/lib/outlets/departments";
 import type { OutletMenuItemRow } from "@/lib/outlets/types";
@@ -430,8 +431,9 @@ function useSupplyChainImpl() {
           STORE_ITEMS_STORAGE_KEY,
           EMPTY_STORE_ITEMS,
         );
-        const catalogItems =
-          catalog.length > 0 ? catalog : localCatalog.length > 0 ? localCatalog : [];
+        const catalogItems = (
+          catalog.length > 0 ? catalog : localCatalog.length > 0 ? localCatalog : []
+        ).map(applyStoreItemDeptFields);
 
         setStoreItems(catalogItems);
         if (Array.isArray(snapshots.recipes) && snapshots.recipes.length) {
@@ -551,7 +553,7 @@ function useSupplyChainImpl() {
   useEffect(() => {
     if (!useDbPersistence || !dbHydrated || catalogSyncSkipRef.current) return;
     const timer = window.setTimeout(() => {
-      void syncSupplyCatalog(userId, storeItems, orgIdRef.current || undefined).catch((err) => {
+      void syncSupplyCatalog(userId, storeItems.map(applyStoreItemDeptFields), orgIdRef.current || undefined).catch((err) => {
         const message =
           err instanceof Error ? err.message : "Failed to sync catalogue to database";
         console.error("[supply-chain] catalogue sync failed", err);
@@ -632,34 +634,20 @@ function useSupplyChainImpl() {
     window.localStorage.setItem(SUPPLY_STORAGE_VERSION_KEY, String(SUPPLY_STORAGE_VERSION));
   }, []);
 
-  /** Migrate legacy store dept keys (`bar` → `main_bar`) on dept and depts[]. */
+  /** Migrate legacy store dept keys (`bar` → `main_bar`) and strip retired depts. */
   useEffect(() => {
     const migrateDeptRow = <T extends { dept: string; depts?: string[] }>(
       rows: T[],
     ): T[] | null => {
       let changed = false;
       const next = rows.map((row) => {
-        const dept = normalizeSupplyDept(row.dept);
-        const depts = row.depts?.length
-          ? [...new Set(row.depts.map((d) => normalizeSupplyDept(d)))]
-          : undefined;
-        const deptChanged = dept !== row.dept;
-        const deptsChanged =
-          depts != null &&
-          (row.depts == null ||
-            depts.length !== row.depts.length ||
-            depts.some((d, i) => d !== row.depts![i]));
-        if (!deptChanged && !deptsChanged) return row;
+        const purified = applyStoreItemDeptFields(row as Pick<StoreItem, 'dept' | 'depts'> & T);
+        const sameDept = purified.dept === row.dept;
+        const sameDepts =
+          (purified.depts ?? []).join('|') === (row.depts ?? []).join('|');
+        if (sameDept && sameDepts) return row;
         changed = true;
-        return {
-          ...row,
-          dept,
-          ...(depts != null
-            ? depts.length > 1
-              ? { depts }
-              : { depts: undefined }
-            : {}),
-        };
+        return purified;
       });
       return changed ? next : null;
     };
@@ -1831,7 +1819,7 @@ function useSupplyChainImpl() {
         ? input.depts
         : [input.dept];
       const { dept, depts } = normalizeStoreItemDepts(deptInput);
-      const item: StoreItem = {
+      const item: StoreItem = applyStoreItemDeptFields({
         id: uid("si"),
         name,
         unit: input.unit.trim(),
@@ -1843,7 +1831,7 @@ function useSupplyChainImpl() {
         benchmarkPrice: Math.max(0, input.benchmarkPrice || input.lastPrice),
         kitchenCategory: input.kitchenCategory,
         unitFactors: input.unitFactors,
-      };
+      });
       setStoreItems((prev) => [item, ...prev]);
       setActivityLog((a) =>
         log(a, "stock_received", actor, `Added store item: ${name}`, item.id),
@@ -1876,18 +1864,21 @@ function useSupplyChainImpl() {
       if (!existing) return { error: "Store item not found" };
       const name = input.name != null ? toTitleCaseWords(input.name) : existing.name;
       if (!name) return { error: "Enter an item name" };
-      const deptPatch =
-        input.depts != null
-          ? normalizeStoreItemDepts(
-              input.depts.length ? input.depts : [input.dept ?? existing.dept],
-            )
-          : input.dept != null
-            ? normalizeStoreItemDepts([input.dept])
-            : null;
-      const nextItem: StoreItem = {
+      const { dept: _inputDept, depts: _inputDepts, ...restInput } = input;
+      const deptFields =
+        input.depts != null || input.dept != null
+          ? storeItemDeptFieldsForDb({
+              dept: (input.dept ?? existing.dept) as Exclude<SupplyDept, 'all'>,
+              depts: input.depts?.length
+                ? input.depts
+                : input.dept != null
+                  ? [input.dept]
+                  : undefined,
+            })
+          : null;
+      let nextItem: StoreItem = applyStoreItemDeptFields({
         ...existing,
-        ...input,
-        ...(deptPatch ?? {}),
+        ...restInput,
         name,
         unit: input.unit?.trim() || existing.unit,
         quantityInStore:
@@ -1904,7 +1895,13 @@ function useSupplyChainImpl() {
           input.benchmarkPrice != null
             ? Math.max(0, input.benchmarkPrice)
             : existing.benchmarkPrice,
-      };
+        ...(deptFields
+          ? {
+              dept: deptFields.dept,
+              depts: deptFields.depts.length > 1 ? deptFields.depts : undefined,
+            }
+          : {}),
+      });
       setStoreItems((prev) =>
         prev.map((s) => (s.id === itemId ? nextItem : s)),
       );
@@ -1913,7 +1910,15 @@ function useSupplyChainImpl() {
       );
       if (useDbPersistence) {
         catalogSyncSkipRef.current = true;
-        void updateSupplyCatalogItem(userId, itemId, nextItem, orgIdRef.current || undefined)
+        void updateSupplyCatalogItem(
+          userId,
+          itemId,
+          {
+            ...nextItem,
+            ...storeItemDeptFieldsForDb(nextItem),
+          },
+          orgIdRef.current || undefined,
+        )
           .catch((err) => {
             const message =
               err instanceof Error ? err.message : "Failed to update item in database";

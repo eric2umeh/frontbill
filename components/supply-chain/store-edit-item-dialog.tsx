@@ -5,6 +5,7 @@ import {
   KITCHEN_MATERIAL_CATEGORIES,
   KITCHEN_MATERIAL_CATEGORY_LABELS,
   normalizeStoreItemDepts,
+  sanitizeAssignableStoreDepts,
   storeItemDepartments,
   type KitchenMaterialCategory,
   type StoreItem,
@@ -170,18 +171,19 @@ export function StoreEditItemDialog({ item, open, onOpenChange, onSave }: Props)
           </Button>
           <Button
             onClick={() => {
-              if (!depts.length) return
-              const normalized = normalizeStoreItemDepts(depts)
+              const selected = sanitizeAssignableStoreDepts(depts)
+              if (!selected.length) return
+              const normalized = normalizeStoreItemDepts(selected)
               const res = onSave({
                 name: toTitleCaseWords(name),
                 unit: unit.trim(),
                 dept: normalized.dept,
-                depts: normalized.depts,
+                depts: normalized.depts ?? [normalized.dept],
                 reorderLevel: Number(reorder) || 0,
                 lastPrice: Number(price) || 0,
                 benchmarkPrice: Number(benchmark) || Number(price) || 0,
                 quantityInStore: Math.max(0, Number(qty) || 0),
-                kitchenCategory: depts.includes('kitchen') ? kitchenCategory : undefined,
+                kitchenCategory: selected.includes('kitchen') ? kitchenCategory : undefined,
               })
               if ('error' in res) return
               onOpenChange(false)

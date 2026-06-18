@@ -52,29 +52,27 @@ export function DeptPill({
   const showCount = mounted && count != null && count > 0
 
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        'relative inline-flex items-center overflow-visible rounded-full border px-3 py-1.5 text-xs font-medium transition-colors',
-        showCount && 'pr-5',
-        active ? 'bg-primary text-primary-foreground border-primary' : 'bg-muted/50 hover:bg-muted',
-      )}
-    >
-      <span className="leading-tight">{label}</span>
+    <span className="relative inline-flex shrink-0 pt-1 ml-1">
+      <button
+        type="button"
+        onClick={onClick}
+        className={cn(
+          'rounded-full border px-2.5 py-1 text-xs font-medium leading-none transition-colors',
+          active
+            ? 'border-foreground/70 bg-muted/40 text-foreground'
+            : 'border-border/60 bg-transparent text-muted-foreground hover:border-border hover:bg-muted/20',
+        )}
+      >
+        {label}
+      </button>
       {showCount && (
         <span
-          className={cn(
-            'pointer-events-none absolute -right-1 -top-1 flex h-[1.125rem] min-w-[1.125rem] items-center justify-center rounded-full border bg-background px-1 text-[9px] font-bold leading-none tabular-nums',
-            active
-              ? 'border-primary-foreground text-primary-foreground'
-              : 'border-foreground text-foreground',
-          )}
+          className="pointer-events-none absolute right-0 top-0 z-10 flex h-5 min-w-5 -translate-y-1/2 translate-x-1/2 items-center justify-center rounded-full border border-transparent bg-secondary px-1.5 text-[10px] font-semibold leading-none text-secondary-foreground tabular-nums shadow-sm"
           aria-label={`${count} items`}
         >
           {count! > 99 ? '99+' : count}
         </span>
       )}
-    </button>
+    </span>
   )
 }

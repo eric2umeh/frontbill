@@ -42,6 +42,18 @@ export const STORE_CATALOG_DEPTS: Exclude<SupplyDept, 'all'>[] = [
 export const STORE_DEPT_PICKER_OPTIONS: Exclude<SupplyDept, 'all'>[] =
   STORE_CATALOG_DEPTS.filter((d) => d !== 'general_store')
 
+/** Retired depts — stripped on load, display, edit, and save. */
+export const LEGACY_STORE_DEPTS: Exclude<SupplyDept, 'all'>[] = ['general_store']
+
+const ASSIGNABLE_STORE_DEPT_SET = new Set<string>(STORE_DEPT_PICKER_OPTIONS)
+
+/** Keep only depts that appear in the picker (drops legacy CSV defaults like general_store). */
+export function sanitizeAssignableStoreDepts(
+  depts: Exclude<SupplyDept, 'all'>[],
+): Exclude<SupplyDept, 'all'>[] {
+  return [...new Set(depts.map((d) => normalizeSupplyDept(d)).filter((d) => ASSIGNABLE_STORE_DEPT_SET.has(d)))]
+}
+
 /** Normalize legacy `bar` dept from older localStorage rows. */
 export function normalizeSupplyDept(dept: string): Exclude<SupplyDept, 'all'> {
   if (dept === 'bar') return 'main_bar'
@@ -54,13 +66,10 @@ export function normalizeSupplyDept(dept: string): Exclude<SupplyDept, 'all'> {
 export function storeItemDepartments(
   item: Pick<StoreItem, 'dept' | 'depts'>,
 ): Exclude<SupplyDept, 'all'>[] {
-  const primary = normalizeSupplyDept(item.dept)
-  if (item.depts?.length) {
-    const merged = item.depts.map((d) => normalizeSupplyDept(d))
-    merged.push(primary)
-    return [...new Set(merged)]
-  }
-  return [primary]
+  const raw = item.depts?.length
+    ? item.depts.map((d) => normalizeSupplyDept(d))
+    : [normalizeSupplyDept(item.dept)]
+  return sanitizeAssignableStoreDepts(raw)
 }
 
 export function storeItemMatchesDept(
@@ -74,10 +83,22 @@ export function storeItemMatchesDept(
 export function normalizeStoreItemDepts(
   depts: Exclude<SupplyDept, 'all'>[],
 ): { dept: Exclude<SupplyDept, 'all'>; depts?: Exclude<SupplyDept, 'all'>[] } {
-  const unique = [...new Set(depts.filter(Boolean))]
+  const unique = sanitizeAssignableStoreDepts(depts.filter(Boolean))
   if (!unique.length) return { dept: 'kitchen' }
   if (unique.length === 1) return { dept: unique[0] }
   return { dept: unique[0], depts: unique }
+}
+
+/** Canonical dept fields for DB — always replaces the full dept list. */
+export function storeItemDeptFieldsForDb(
+  item: Pick<StoreItem, 'dept' | 'depts'>,
+): { dept: Exclude<SupplyDept, 'all'>; depts: Exclude<SupplyDept, 'all'>[] } {
+  const list = storeItemDepartments(item)
+  const normalized = normalizeStoreItemDepts(list.length ? list : ['kitchen'])
+  return {
+    dept: normalized.dept,
+    depts: normalized.depts ?? [normalized.dept],
+  }
 }
 
 /** Store catalogue rows that feed main/pool bar stock pipelines. */
@@ -166,6 +187,17 @@ export interface StoreItem {
   kitchenCategory?: KitchenMaterialCategory
   /** Custom units per 1 catalogue unit (e.g. { bottle: 24 } = 1 crate has 24 bottles). */
   unitFactors?: Record<string, number>
+}
+
+/** Strip legacy depts (e.g. general_store) and align dept/depts on a catalogue row. */
+export function applyStoreItemDeptFields<T extends Pick<StoreItem, 'dept' | 'depts'>>(item: T): T {
+  const { dept, depts } = storeItemDeptFieldsForDb(item)
+  const next = { ...item, dept }
+  if (depts.length > 1) {
+    return { ...next, depts }
+  }
+  const { depts: _drop, ...withoutDepts } = next as T & { depts?: Exclude<SupplyDept, 'all'>[] }
+  return withoutDepts as T
 }
 
 /** Store clerk submission — requires admin/superadmin approval before catalogue add. */
@@ -460,7 +492,7 @@ export interface ActivityEntry {
 }
 
 export const DEPT_LABELS: Record<SupplyDept, string> = {
-  all: 'All',
+  all: 'All Items',
   kitchen: 'Kitchen',
   main_bar: 'Main Bar',
   restaurant: 'Restaurant',
