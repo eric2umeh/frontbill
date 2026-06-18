@@ -107,10 +107,15 @@ export function PurchasingWorkspace() {
       po.lines.map((l) => ({
         lineId: l.id,
         name: l.name,
+        unit: l.unit,
+        storeUnit: l.storeUnit,
         quantityOrdered: l.quantityOrdered,
+        stockQuantityOrdered: l.stockQuantityOrdered,
         quantityBought: l.quantityOrdered,
+        stockQuantityBought: l.stockQuantityOrdered,
         poPrice: l.unitPrice,
         actualPrice: l.unitPrice,
+        actualStockUnitPrice: l.stockUnitPrice,
         totalPaid: l.quantityOrdered * l.unitPrice,
         notBought: false,
       })),
@@ -231,7 +236,14 @@ export function PurchasingWorkspace() {
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 items-end">
                     <div>
                       <p className="text-[10px] text-muted-foreground mb-0.5">Ordered</p>
-                      <p className="tabular-nums">{line.quantityOrdered}</p>
+                      <p className="tabular-nums">
+                        {line.quantityOrdered} {line.unit ?? ''}
+                        {line.stockQuantityOrdered != null && line.storeUnit && line.storeUnit !== line.unit ? (
+                          <span className="block text-[10px] text-muted-foreground">
+                            Expected in store: {line.stockQuantityOrdered} {line.storeUnit}
+                          </span>
+                        ) : null}
+                      </p>
                     </div>
                     <div>
                       <p className="text-[10px] text-muted-foreground mb-0.5">Bought qty</p>
@@ -241,10 +253,20 @@ export function PurchasingWorkspace() {
                         value={line.quantityBought}
                         onChange={(e) => {
                           const q = Number(e.target.value);
+                          const stockQty =
+                            line.stockQuantityOrdered && line.quantityOrdered > 0
+                              ? (q / line.quantityOrdered) * line.stockQuantityOrdered
+                              : q;
                           setRetireLines((prev) =>
                             prev.map((l) =>
                               l.lineId === line.lineId
-                                ? { ...l, quantityBought: q, totalPaid: q * l.actualPrice }
+                                ? {
+                                    ...l,
+                                    quantityBought: q,
+                                    stockQuantityBought: stockQty,
+                                    actualStockUnitPrice: stockQty > 0 ? (q * l.actualPrice) / stockQty : l.actualPrice,
+                                    totalPaid: q * l.actualPrice,
+                                  }
                                 : l,
                             ),
                           );
@@ -262,7 +284,15 @@ export function PurchasingWorkspace() {
                           setRetireLines((prev) =>
                             prev.map((l) =>
                               l.lineId === line.lineId
-                                ? { ...l, actualPrice: p, totalPaid: l.quantityBought * p }
+                                ? {
+                                    ...l,
+                                    actualPrice: p,
+                                    actualStockUnitPrice:
+                                      l.stockQuantityBought && l.stockQuantityBought > 0
+                                        ? (l.quantityBought * p) / l.stockQuantityBought
+                                        : p,
+                                    totalPaid: l.quantityBought * p,
+                                  }
                                 : l,
                             ),
                           );
