@@ -67,7 +67,22 @@ export function ActivePurchaseOrderPanel({ actor, storeItems }: Props) {
   const handleQtyChange = (stockItemId: string, qty: number) => {
     const item = storeItems.find((s) => s.id === stockItemId)
     if (!item) return
-    const err = setBasketLineQty(item, qty, item.lastPrice, actor)
+    const existing = basket.find((line) => line.stockItemId === stockItemId)
+    const storeQty =
+      existing?.storeQtyToBuy && existing.qtyToBuy > 0
+        ? (qty / existing.qtyToBuy) * existing.storeQtyToBuy
+        : qty
+    const unitPrice = existing?.unitPrice ?? item.lastPrice
+    const storeUnitPrice =
+      existing?.storeUnitPrice ??
+      (storeQty > 0 ? (qty * unitPrice) / storeQty : item.lastPrice)
+    const err = setBasketLineQty(item, storeQty, storeUnitPrice, actor, {
+      purchaseUnit: existing?.unit ?? item.unit,
+      purchaseQty: qty,
+      purchaseUnitPrice: unitPrice,
+      storeQty,
+      storeUnitPrice,
+    })
     if (err) toast.error(err)
   }
 
