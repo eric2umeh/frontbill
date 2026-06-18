@@ -86,7 +86,7 @@ export function DraftBasketSidebar({
                     <div className="flex items-center justify-between gap-2">
                       {readOnly ? (
                         <span className="text-muted-foreground tabular-nums">
-                          {l.qtyToBuy} × {formatNaira(l.unitPrice)}
+                          {l.qtyToBuy} {formatUnitLabel(l.unit)} × {formatNaira(l.unitPrice)}
                         </span>
                       ) : (
                         <div className="flex items-center gap-1">
@@ -127,6 +127,14 @@ export function DraftBasketSidebar({
                         {formatNaira(l.qtyToBuy * l.unitPrice)}
                       </span>
                     </div>
+                    {l.storeQtyToBuy != null && l.storeUnit && l.storeUnit !== l.unit && (
+                      <p className="text-[11px] text-muted-foreground">
+                        Receives {l.storeQtyToBuy} {formatUnitLabel(l.storeUnit)} into store
+                        {l.storeUnitPrice
+                          ? ` · ${formatNaira(l.storeUnitPrice)}/${formatUnitLabel(l.storeUnit)}`
+                          : ''}
+                      </p>
+                    )}
                   </li>
                 ))}
               </ul>
