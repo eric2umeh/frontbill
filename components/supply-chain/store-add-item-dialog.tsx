@@ -261,7 +261,8 @@ export function StoreAddItemDialog({
           if (!parsed?.length) return
           parsedDepts = parsed
         } else {
-          parsedDepts = ['general_store']
+          toast.error(`Row ${rowNo}: dept required — add a dept or depts column`)
+          return
         }
 
         const qtyN = parseNumberOrNull(rawQty) ?? 0
@@ -448,8 +449,8 @@ export function StoreAddItemDialog({
               </Button>
             </div>
             <p className="text-[10px] text-muted-foreground mt-1 break-words">
-              Columns: name or names, unit, optional depts/dept (defaults to General Store if
-              blank), quantityInStore, reorderLevel, lastPrice or UNIT PRICE. Optional:
+              Columns: name or names, unit, depts/dept (required — e.g. Kitchen, Main Bar,
+              Restaurant), quantityInStore, reorderLevel, lastPrice or UNIT PRICE. Optional:
               benchmarkPrice, kitchenCategory.
             </p>
           </div>
