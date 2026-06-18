@@ -46,6 +46,9 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 
 const BATCH_CREATOR_ROLES = new Set(['superadmin', 'admin', 'manager'])
 
+const numberInputValue = (value: number | null | undefined) =>
+  value != null && Number(value) !== 0 ? String(value) : ''
+
 type Props = {
   /** When set, builder edits an existing batch standard instead of creating new. */
   editRecipeId?: string | null
@@ -112,8 +115,8 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
     if (!recipe) return
     setBatchName(recipe.name)
     setMenuCategory(recipe.category)
-    setPlannedPortions(String(recipe.yieldPortions))
-    setSellingPrice(String(recipe.sellingPricePerPortion))
+    setPlannedPortions(numberInputValue(recipe.yieldPortions))
+    setSellingPrice(numberInputValue(recipe.sellingPricePerPortion))
     setOverheadLabour(recipe.overheadLabour ? String(recipe.overheadLabour) : '')
     setOverheadGas(recipe.overheadGas ? String(recipe.overheadGas) : '')
     setOverheadOther(
@@ -135,7 +138,7 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
     )
     setQtyInputMap(
       Object.fromEntries(
-        recipe.ingredients.map((ing) => [ing.stockItemId, String(ing.quantity)]),
+        recipe.ingredients.map((ing) => [ing.stockItemId, numberInputValue(ing.quantity)]),
       ),
     )
     setDraftLoaded(true)
@@ -533,7 +536,7 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
                 {cart.map((line) => {
                   const onHand = rawOnHand(line.storeItemId)
                   const store = storeItems.find((s) => s.id === line.storeItemId)
-                  const inputVal = qtyInputMap[line.storeItemId] ?? String(line.quantity)
+                  const inputVal = qtyInputMap[line.storeItemId] ?? numberInputValue(line.quantity)
                   const factors =
                     factorMap[line.storeItemId] ??
                     (store ? itemFactors(line.storeItemId, store.unit) : {})
