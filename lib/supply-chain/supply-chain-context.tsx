@@ -734,6 +734,13 @@ function useSupplyChainImpl() {
       qty: number,
       unitPrice: number,
       actor: Actor,
+      meta?: {
+        purchaseUnit?: string;
+        purchaseQty?: number;
+        purchaseUnitPrice?: number;
+        storeQty?: number;
+        storeUnitPrice?: number;
+      },
     ): string | undefined => {
       let err: string | undefined;
       let basketPatch: BasketLine[] | "remove-item" | undefined;
@@ -768,10 +775,10 @@ function useSupplyChainImpl() {
           const mergedLines = existing
             ? baseLines.map((l) =>
                 l.stockItemId === item.id
-                  ? storeItemToPoLine(item, qty, unitPrice, l.id)
+                  ? storeItemToPoLine(item, qty, unitPrice, l.id, meta)
                   : l,
               )
-            : [...baseLines, storeItemToPoLine(item, qty, unitPrice)];
+            : [...baseLines, storeItemToPoLine(item, qty, unitPrice, undefined, meta)];
           const { total, lines } = recalcPoTotals(mergedLines);
           const now = new Date();
           const po: PurchaseOrder = {
@@ -794,10 +801,10 @@ function useSupplyChainImpl() {
         const nextLines = existing
           ? active.lines.map((l) =>
               l.stockItemId === item.id
-                ? storeItemToPoLine(item, qty, unitPrice, l.id)
+                ? storeItemToPoLine(item, qty, unitPrice, l.id, meta)
                 : l,
             )
-          : [...active.lines, storeItemToPoLine(item, qty, unitPrice)];
+          : [...active.lines, storeItemToPoLine(item, qty, unitPrice, undefined, meta)];
         const { total, lines } = recalcPoTotals(nextLines);
         basketPatch = poLinesToBasketLines(lines);
         return prev.map((p) =>
@@ -817,13 +824,26 @@ function useSupplyChainImpl() {
   );
 
   const addToBasket = useCallback(
-    (item: StoreItem, qty: number, unitPrice: number, actor?: Actor) => {
+    (
+      item: StoreItem,
+      qty: number,
+      unitPrice: number,
+      actor?: Actor,
+      meta?: {
+        purchaseUnit?: string;
+        purchaseQty?: number;
+        purchaseUnitPrice?: number;
+        storeQty?: number;
+        storeUnitPrice?: number;
+      },
+    ) => {
       if (qty <= 0) return;
       upsertActivePoLine(
         item,
         qty,
         unitPrice,
         actor ?? { name: "Store", role: "store" },
+        meta,
       );
     },
     [upsertActivePoLine],
@@ -850,12 +870,25 @@ function useSupplyChainImpl() {
   }, [purchaseOrders]);
 
   const setBasketLineQty = useCallback(
-    (item: StoreItem, qty: number, unitPrice: number, actor?: Actor) => {
+    (
+      item: StoreItem,
+      qty: number,
+      unitPrice: number,
+      actor?: Actor,
+      meta?: {
+        purchaseUnit?: string;
+        purchaseQty?: number;
+        purchaseUnitPrice?: number;
+        storeQty?: number;
+        storeUnitPrice?: number;
+      },
+    ) => {
       return upsertActivePoLine(
         item,
         qty,
         unitPrice,
         actor ?? { name: "Store", role: "store" },
+        meta,
       );
     },
     [upsertActivePoLine],
@@ -1141,10 +1174,18 @@ function useSupplyChainImpl() {
           if (!pl) continue;
           const idx = next.findIndex((s) => s.id === pl.stockItemId);
           if (idx >= 0) {
+            const stockQty =
+              rl.stockQuantityBought ??
+              (pl.stockQuantityOrdered && pl.quantityOrdered > 0
+                ? (rl.quantityBought / pl.quantityOrdered) * pl.stockQuantityOrdered
+                : rl.quantityBought);
+            const stockUnitPrice =
+              rl.actualStockUnitPrice ??
+              (stockQty > 0 ? rl.totalPaid / stockQty : rl.actualPrice);
             next[idx] = {
               ...next[idx],
-              quantityInStore: next[idx].quantityInStore + rl.quantityBought,
-              lastPrice: rl.actualPrice,
+              quantityInStore: next[idx].quantityInStore + stockQty,
+              lastPrice: stockUnitPrice,
             };
           }
         }
@@ -1990,6 +2031,7 @@ function useSupplyChainImpl() {
         lastPrice: Math.max(0, input.lastPrice),
         benchmarkPrice: Math.max(0, input.benchmarkPrice || input.lastPrice),
         kitchenCategory: input.kitchenCategory,
+        unitFactors: input.unitFactors,
         status: "pending",
         submittedBy: input.submittedBy,
         submittedByName: input.submittedByName,
@@ -2033,6 +2075,7 @@ function useSupplyChainImpl() {
           lastPrice: pending.lastPrice,
           benchmarkPrice: pending.benchmarkPrice,
           kitchenCategory: pending.kitchenCategory,
+          unitFactors: pending.unitFactors,
         },
         actor,
       );
