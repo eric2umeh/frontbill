@@ -68,7 +68,7 @@ function parseNumericToken(text: string): number | null {
 }
 
 const UNIT_SUFFIX_PATTERN =
-  /^(.+?)\s+(kg|g|ml|l|ltr|litre|liter|mudu|cups?|tbsp|tsp|pcs?|pieces?|tin|tins|bottle|bottles|crate|crates|sachet|sachets|portion|portions|pac|pack|roll|rolls|spoon|spoons|set|sets|basket)$/i
+  /^(.+?)\s+(kg|g|ml|l|ltr|litre|liter|mudu|cups?|tbsp|tsp|pcs?|pieces?|tin|tins|can|cans|bottle|bottles|crate|crates|sachet|sachets|portion|portions|pac|pack|roll|rolls|spoon|spoons|set|sets|basket)$/i
 
 /** Parse qty text like `0.3`, `1/4`, `0.4 kg`, optional trailing unit. */
 export function parseQuantityInput(
