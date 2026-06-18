@@ -147,6 +147,28 @@ async function fetchProfileById(userId: string): Promise<{
   }
 }
 
+export function resolveDashboardUserPayload(input: {
+  userId: string
+  email: string
+  profile: ProfileRow | null
+  metadataRole: string | null
+}): DashboardUserPayload | null {
+  const { userId, email, profile, metadataRole } = input
+  if (!profile?.organization_id) return null
+
+  const roleKey = resolveLoginRole(profile.role, metadataRole)
+  if (!roleKey) return null
+
+  return {
+    id: userId,
+    email,
+    name: profile.full_name || email.split('@')[0] || 'User',
+    role: roleKey,
+    organizationId: profile.organization_id,
+    organizationLogoUrl: '',
+  }
+}
+
 export async function loadDashboardUser(): Promise<LoadDashboardUserResult> {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
   const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
@@ -175,57 +197,17 @@ export async function loadDashboardUser(): Promise<LoadDashboardUserResult> {
       console.warn('loadDashboardUser: profile fetch failed', profileError.message)
     }
 
-    const roleKey = resolveLoginRole(profile?.role, metadataRole)
+    const user = resolveDashboardUserPayload({ userId, email, profile, metadataRole })
+    if (user) return { status: 'ok', user }
 
-    if (profile) {
-      if (!roleKey) {
-        console.warn('loadDashboardUser: forbidden — unrecognized role', {
-          userId,
-          email,
-          profileRole: profile.role,
-          metadataRole,
-        })
-        return { status: 'forbidden' }
-      }
-
-      return {
-        status: 'ok',
-        user: {
-          id: userId,
-          email,
-          name: profile.full_name || email.split('@')[0] || 'User',
-          role: roleKey,
-          organizationId: profile.organization_id || '',
-          organizationLogoUrl: '',
-        },
-      }
-    }
-
-    if (roleKey) {
-      return {
-        status: 'ok',
-        user: {
-          id: userId,
-          email,
-          name: email.split('@')[0] || 'User',
-          role: roleKey,
-          organizationId: '',
-          organizationLogoUrl: '',
-        },
-      }
-    }
-
-    return {
-      status: 'ok',
-      user: {
-        id: userId,
-        email,
-        name: email.split('@')[0] || 'User',
-        role: 'admin',
-        organizationId: '',
-        organizationLogoUrl: '',
-      },
-    }
+    console.warn('loadDashboardUser: forbidden — missing usable profile', {
+      id: userId,
+      email,
+      profileRole: profile?.role ?? null,
+      hasOrganization: Boolean(profile?.organization_id),
+      metadataRole,
+    })
+    return { status: 'forbidden' }
   } catch (error) {
     console.error('loadDashboardUser failed:', error)
     return { status: 'unauthenticated' }

@@ -27,28 +27,16 @@ export async function ensureHotelOwnerProfile(
 
   const orgName = hotelName.trim() || `${fullName.trim() || email.split('@')[0]} Hotel`
 
-  let organizationId: string | null = null
-
-  const { data: existingOrg } = await admin
+  const { data: org, error: orgError } = await admin
     .from('organizations')
+    .insert({ name: orgName, email })
     .select('id')
-    .eq('email', email)
-    .maybeSingle()
+    .single()
 
-  if (existingOrg?.id) {
-    organizationId = existingOrg.id
-  } else {
-    const { data: org, error: orgError } = await admin
-      .from('organizations')
-      .insert({ name: orgName, email })
-      .select('id')
-      .single()
-
-    if (orgError) {
-      return { organizationId: null, error: orgError.message }
-    }
-    organizationId = org.id
+  if (orgError) {
+    return { organizationId: null, error: orgError.message }
   }
+  const organizationId = org.id
 
   const { error: profileError } = await admin.from('profiles').upsert(
     {
