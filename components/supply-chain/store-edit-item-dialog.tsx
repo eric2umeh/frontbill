@@ -12,7 +12,7 @@ import {
   type SupplyDept,
 } from '@/lib/supply-chain/types'
 import { titleCaseWhileTyping, toTitleCaseWords } from '@/lib/supply-chain/title-case'
-import { formatUnitLabel } from '@/lib/supply-chain/measurement-units'
+import { formatUnitLabel, sanitizeQuantityInput } from '@/lib/supply-chain/measurement-units'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -32,8 +32,11 @@ import {
 } from '@/components/ui/select'
 import { UnitSelect } from '@/components/supply-chain/unit-select'
 import { StoreDeptMultiSelect } from '@/components/supply-chain/store-dept-multi-select'
+import { unitFactorDefinition } from '@/lib/supply-chain/unit-factor-storage'
+import type { UnitFactorMap } from '@/lib/supply-chain/unit-factor-types'
 
 type Dept = Exclude<SupplyDept, 'all'>
+const CONVERSION_UNITS = ['pack', 'carton', 'bag', 'roll', 'crate', 'tin', 'can', 'bottle', 'pcs'] as const
 
 type Props = {
   item: StoreItem | null
@@ -49,6 +52,7 @@ type Props = {
     benchmarkPrice: number
     quantityInStore?: number
     kitchenCategory?: KitchenMaterialCategory
+    unitFactors?: UnitFactorMap
   }) => { ok: true } | { error: string }
 }
 
@@ -64,6 +68,8 @@ export function StoreEditItemDialog({ item, open, onOpenChange, onSave }: Props)
   const [benchmark, setBenchmark] = useState('')
   const [qty, setQty] = useState('')
   const [kitchenCategory, setKitchenCategory] = useState<KitchenMaterialCategory>('other')
+  const [conversionUnit, setConversionUnit] = useState('pack')
+  const [conversionQty, setConversionQty] = useState('')
 
   useEffect(() => {
     if (!item || !open) return
@@ -75,9 +81,19 @@ export function StoreEditItemDialog({ item, open, onOpenChange, onSave }: Props)
     setBenchmark(numberInputValue(item.benchmarkPrice))
     setQty(numberInputValue(item.quantityInStore))
     setKitchenCategory(item.kitchenCategory ?? 'other')
+    const savedFactor = Object.entries(item.unitFactors ?? {})[0]
+    if (savedFactor) {
+      const [key, value] = savedFactor
+      setConversionUnit(key.startsWith('__per_') ? key.replace('__per_', '') : key)
+      setConversionQty(numberInputValue(value))
+    } else {
+      setConversionUnit('pack')
+      setConversionQty('')
+    }
   }, [item, open])
 
   if (!item) return null
+  const conversionDef = unitFactorDefinition(unit, conversionUnit)
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -98,6 +114,36 @@ export function StoreEditItemDialog({ item, open, onOpenChange, onSave }: Props)
             <Label className="text-xs">Unit of measure *</Label>
             <div className="mt-0.5">
               <UnitSelect value={unit} onChange={setUnit} className="w-full h-9" />
+            </div>
+          </div>
+          <div className="sm:col-span-2 rounded-md border border-dashed bg-muted/20 p-2">
+            <Label className="text-xs">Pack / issue conversion (optional)</Label>
+            <p className="mt-1 text-[10px] text-muted-foreground">
+              Use this for accountable buying and issuing. Example: 1 pack = 9 pcs.
+            </p>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <Select value={conversionUnit} onValueChange={setConversionUnit}>
+                <SelectTrigger className="h-8 w-28">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {CONVERSION_UNITS.map((u) => (
+                    <SelectItem key={u} value={u}>
+                      {u}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <span className="text-xs">{conversionDef?.label ?? 'No conversion needed'}</span>
+              <Input
+                inputMode="decimal"
+                className="h-8 w-24 text-center"
+                placeholder="Qty"
+                value={conversionQty}
+                onChange={(e) => setConversionQty(sanitizeQuantityInput(e.target.value))}
+                disabled={!conversionDef}
+              />
+              <span className="text-xs">{conversionDef?.suffix ?? ''}</span>
             </div>
           </div>
           <div className="sm:col-span-2">
@@ -177,6 +223,11 @@ export function StoreEditItemDialog({ item, open, onOpenChange, onSave }: Props)
               const selected = sanitizeAssignableStoreDepts(depts)
               if (!selected.length) return
               const normalized = normalizeStoreItemDepts(selected)
+              const conversionCount = Number(conversionQty)
+              const unitFactors =
+                conversionDef && Number.isFinite(conversionCount) && conversionCount > 0
+                  ? { [conversionDef.storageKey]: conversionCount }
+                  : undefined
               const res = onSave({
                 name: toTitleCaseWords(name),
                 unit: unit.trim(),
@@ -187,6 +238,7 @@ export function StoreEditItemDialog({ item, open, onOpenChange, onSave }: Props)
                 benchmarkPrice: Number(benchmark) || Number(price) || 0,
                 quantityInStore: Math.max(0, Number(qty) || 0),
                 kitchenCategory: selected.includes('kitchen') ? kitchenCategory : undefined,
+                unitFactors,
               })
               if ('error' in res) return
               onOpenChange(false)
