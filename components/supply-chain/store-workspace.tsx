@@ -139,8 +139,11 @@ export function StoreWorkspace() {
   )
 
   const filtered = useMemo(() => {
-    if (dept === 'all') return storeItems
-    return storeItems.filter((s) => storeItemMatchesDept(s, dept))
+    const list =
+      dept === 'all' ? storeItems : storeItems.filter((s) => storeItemMatchesDept(s, dept))
+    return [...list].sort((a, b) =>
+      a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true }),
+    )
   }, [storeItems, dept])
 
   const basketByDept = useMemo(() => {
@@ -371,14 +374,14 @@ export function StoreWorkspace() {
           <TabsTrigger value="history">History</TabsTrigger>
         </TabsList>
 
-        <div className="mt-4 flex flex-wrap gap-2 overflow-visible pt-1.5 pr-1">
+        <div className="mt-3 flex flex-wrap gap-x-3 gap-y-3 overflow-visible pt-3">
           {DEPTS.map((d) => (
             <DeptPill
               key={d}
               dept={d}
               label={DEPT_LABELS[d]}
               active={dept === d}
-              count={d !== 'all' ? deptCatalogCounts[d] : undefined}
+              count={d === 'all' ? storeItems.length : deptCatalogCounts[d]}
               onClick={() => setDept(d)}
             />
           ))}
@@ -435,7 +438,7 @@ export function StoreWorkspace() {
                       <span className="text-muted-foreground">
                         {' '}
                         · {unitLabel(p.unit)} ·{' '}
-                        {(p.depts?.length ? p.depts : [p.dept])
+                        {storeItemDepartments(p)
                           .map((d) => DEPT_LABELS[d])
                           .join(', ')}{' '}
                         · ₦{p.lastPrice} · qty {p.quantityInStore}
