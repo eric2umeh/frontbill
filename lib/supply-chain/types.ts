@@ -144,6 +144,7 @@ export type KitchenMaterialCategory =
   | 'seasonings'
   | 'oils_fats'
   | 'soups_stews'
+  | 'swallow'
   | 'dairy'
   | 'consumable'
   | 'other'
@@ -155,6 +156,7 @@ export const KITCHEN_MATERIAL_CATEGORY_LABELS: Record<KitchenMaterialCategory, s
   seasonings: 'Seasonings & Spices',
   oils_fats: 'Oils & Fats',
   soups_stews: 'Soups & Stews',
+  swallow: 'Swallow',
   dairy: 'Dairy',
   consumable: 'Consumable',
   other: 'Other',
@@ -167,6 +169,7 @@ export const KITCHEN_MATERIAL_CATEGORIES: KitchenMaterialCategory[] = [
   'seasonings',
   'oils_fats',
   'soups_stews',
+  'swallow',
   'dairy',
   'consumable',
   'other',
