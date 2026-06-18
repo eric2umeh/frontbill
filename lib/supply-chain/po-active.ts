@@ -52,6 +52,9 @@ export function poLinesToBasketLines(lines: PoLine[]): BasketLine[] {
     unit: l.unit,
     qtyToBuy: l.quantityOrdered,
     unitPrice: l.unitPrice,
+    storeUnit: l.storeUnit ?? l.unit,
+    storeQtyToBuy: l.stockQuantityOrdered ?? l.quantityOrdered,
+    storeUnitPrice: l.stockUnitPrice ?? l.unitPrice,
   }));
 }
 
@@ -64,6 +67,9 @@ export function basketLineToPoLine(line: BasketLine, lineId?: string): PoLine {
     unit: line.unit,
     quantityOrdered: line.qtyToBuy,
     unitPrice: line.unitPrice,
+    storeUnit: line.storeUnit ?? line.unit,
+    stockQuantityOrdered: line.storeQtyToBuy ?? line.qtyToBuy,
+    stockUnitPrice: line.storeUnitPrice ?? line.unitPrice,
     lineTotal: line.qtyToBuy * line.unitPrice,
   };
 }
@@ -73,15 +79,25 @@ export function storeItemToPoLine(
   qty: number,
   unitPrice: number,
   lineId?: string,
+  meta?: {
+    purchaseUnit?: string
+    purchaseQty?: number
+    purchaseUnitPrice?: number
+    storeQty?: number
+    storeUnitPrice?: number
+  },
 ): PoLine {
   return basketLineToPoLine(
     {
       stockItemId: item.id,
       name: item.name,
       dept: storeItemDepartments(item)[0],
-      unit: item.unit,
-      qtyToBuy: qty,
-      unitPrice,
+      unit: meta?.purchaseUnit ?? item.unit,
+      qtyToBuy: meta?.purchaseQty ?? qty,
+      unitPrice: meta?.purchaseUnitPrice ?? unitPrice,
+      storeUnit: item.unit,
+      storeQtyToBuy: meta?.storeQty ?? qty,
+      storeUnitPrice: meta?.storeUnitPrice ?? unitPrice,
     },
     lineId,
   );

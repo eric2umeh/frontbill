@@ -33,10 +33,13 @@ import { parseCsvText } from '@/lib/supply-chain/parse-csv-row'
 import { toast } from 'sonner'
 import { Plus, Upload } from 'lucide-react'
 import { UnitSelect } from '@/components/supply-chain/unit-select'
-import { DEFAULT_MEASUREMENT_UNIT } from '@/lib/supply-chain/measurement-units'
+import { DEFAULT_MEASUREMENT_UNIT, sanitizeQuantityInput } from '@/lib/supply-chain/measurement-units'
 import { StoreDeptMultiSelect } from '@/components/supply-chain/store-dept-multi-select'
+import { unitFactorDefinition } from '@/lib/supply-chain/unit-factor-storage'
+import type { UnitFactorMap } from '@/lib/supply-chain/unit-factor-types'
 
 type Dept = Exclude<SupplyDept, 'all'>
+const CONVERSION_UNITS = ['pack', 'carton', 'bag', 'roll', 'crate', 'tin', 'can', 'bottle', 'pcs'] as const
 
 type Props = {
   canAddDirect: boolean
@@ -51,6 +54,7 @@ type Props = {
     lastPrice: number
     benchmarkPrice: number
     kitchenCategory?: KitchenMaterialCategory
+    unitFactors?: UnitFactorMap
   }) => { ok: true } | { error: string }
   onSubmitForApproval: (input: {
     name: string
@@ -62,6 +66,7 @@ type Props = {
     lastPrice: number
     benchmarkPrice: number
     kitchenCategory?: KitchenMaterialCategory
+    unitFactors?: UnitFactorMap
   }) => { ok: true } | { error: string }
 }
 
@@ -80,6 +85,8 @@ export function StoreAddItemDialog({
   const [price, setPrice] = useState('')
   const [benchmark, setBenchmark] = useState('')
   const [kitchenCategory, setKitchenCategory] = useState<KitchenMaterialCategory>('other')
+  const [conversionUnit, setConversionUnit] = useState('pack')
+  const [conversionQty, setConversionQty] = useState('')
   const [csvBusy, setCsvBusy] = useState(false)
   const csvInputRef = useRef<HTMLInputElement>(null)
 
@@ -92,10 +99,18 @@ export function StoreAddItemDialog({
     setPrice('')
     setBenchmark('')
     setKitchenCategory('other')
+    setConversionUnit('pack')
+    setConversionQty('')
   }
 
   const buildInput = () => {
     const normalized = normalizeStoreItemDepts(depts)
+    const conversionDef = unitFactorDefinition(unit, conversionUnit)
+    const conversionCount = Number(conversionQty)
+    const unitFactors =
+      conversionDef && Number.isFinite(conversionCount) && conversionCount > 0
+        ? { [conversionDef.storageKey]: conversionCount }
+        : undefined
     return {
       name: toTitleCaseWords(name),
       unit: unit.trim(),
@@ -106,8 +121,10 @@ export function StoreAddItemDialog({
       lastPrice: Number(price) || 0,
       benchmarkPrice: Number(benchmark) || Number(price) || 0,
       kitchenCategory: depts.includes('kitchen') ? kitchenCategory : undefined,
+      unitFactors,
     }
   }
+  const conversionDef = unitFactorDefinition(unit, conversionUnit)
 
   const parseNumberOrNull = (raw: string | undefined): number | null => {
     const t = (raw ?? '').trim()
@@ -226,6 +243,20 @@ export function StoreAddItemDialog({
       ])
       const benchmarkIdx = indexOf(header, ['benchmarkPrice', 'benchmark'])
       const kitchenCategoryIdx = indexOf(header, ['kitchenCategory', 'kitchencategory'])
+      const conversionUnitIdx = indexOf(header, [
+        'conversionUnit',
+        'packUnit',
+        'containerUnit',
+        'purchaseUnit',
+      ])
+      const conversionQtyIdx = indexOf(header, [
+        'conversionQty',
+        'qtyPerPack',
+        'pcsPerPack',
+        'piecesPerPack',
+        'contentsPerPack',
+        'unitsPerPack',
+      ])
 
       if (nameIdx < 0) {
         toast.error(
@@ -246,6 +277,10 @@ export function StoreAddItemDialog({
         const rawBenchmark = benchmarkIdx >= 0 ? normalizeCell(cells[benchmarkIdx]) : ''
         const rawKitchenCategory =
           kitchenCategoryIdx >= 0 ? normalizeCell(cells[kitchenCategoryIdx]) : ''
+        const rawConversionUnit =
+          conversionUnitIdx >= 0 ? normalizeCell(cells[conversionUnitIdx]) : ''
+        const rawConversionQty =
+          conversionQtyIdx >= 0 ? normalizeCell(cells[conversionQtyIdx]) : ''
 
         if (!rawName) return
 
@@ -280,9 +315,18 @@ export function StoreAddItemDialog({
         }
 
         const normalized = normalizeStoreItemDepts(parsedDepts)
+        const rowUnit = (rawUnit || DEFAULT_MEASUREMENT_UNIT).trim()
+        const conversionDef = rawConversionUnit
+          ? unitFactorDefinition(rowUnit, rawConversionUnit)
+          : null
+        const conversionCount = parseNumberOrNull(rawConversionQty)
+        const unitFactors =
+          conversionDef && conversionCount != null && conversionCount > 0
+            ? { [conversionDef.storageKey]: conversionCount }
+            : undefined
         inputs.push({
           name: toTitleCaseWords(rawName),
-          unit: (rawUnit || DEFAULT_MEASUREMENT_UNIT).trim(),
+          unit: rowUnit,
           dept: normalized.dept as Dept,
           depts: normalized.depts as Dept[] | undefined,
           quantityInStore: qtyN,
@@ -292,6 +336,7 @@ export function StoreAddItemDialog({
           kitchenCategory: parsedDepts.includes('kitchen')
             ? (kitchenCat ?? 'other')
             : undefined,
+          unitFactors,
         })
       })
 
@@ -352,6 +397,36 @@ export function StoreAddItemDialog({
             <p className="text-[10px] text-muted-foreground mt-1">
               Price below is per this unit (e.g. ₦10,000 / kg).
             </p>
+          </div>
+          <div className="sm:col-span-2 rounded-md border border-dashed bg-muted/20 p-2">
+            <Label className="text-xs">Pack / issue conversion (optional)</Label>
+            <p className="mt-1 text-[10px] text-muted-foreground">
+              Use this for accountable buying and issuing. Example: 1 pack = 9 pcs.
+            </p>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <Select value={conversionUnit} onValueChange={setConversionUnit}>
+                <SelectTrigger className="h-8 w-28">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {CONVERSION_UNITS.map((u) => (
+                    <SelectItem key={u} value={u}>
+                      {u}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <span className="text-xs">{conversionDef?.label ?? 'No conversion needed'}</span>
+              <Input
+                inputMode="decimal"
+                className="h-8 w-24 text-center"
+                placeholder="Qty"
+                value={conversionQty}
+                onChange={(e) => setConversionQty(sanitizeQuantityInput(e.target.value))}
+                disabled={!conversionDef}
+              />
+              <span className="text-xs">{conversionDef?.suffix ?? ''}</span>
+            </div>
           </div>
           <div className="sm:col-span-2">
             <Label className="text-xs">Departments *</Label>
@@ -451,7 +526,7 @@ export function StoreAddItemDialog({
             <p className="text-[10px] text-muted-foreground mt-1 break-words">
               Columns: name or names, unit, depts/dept (required — e.g. Kitchen, Main Bar,
               Restaurant), quantityInStore, reorderLevel, lastPrice or UNIT PRICE. Optional:
-              benchmarkPrice, kitchenCategory.
+              benchmarkPrice, kitchenCategory, conversionUnit, qtyPerPack.
             </p>
           </div>
         </div>
