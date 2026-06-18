@@ -46,6 +46,9 @@ type Props = {
   onSaved: (order: OutletOrderRow) => void
 }
 
+const numberInputValue = (value: number | null | undefined) =>
+  value != null && Number(value) !== 0 ? String(value) : ''
+
 export function OutletEditOrderDialog({ order, open, onOpenChange, onSaved }: Props) {
   const [guestName, setGuestName] = useState('')
   const [roomNumber, setRoomNumber] = useState('')
@@ -69,8 +72,8 @@ export function OutletEditOrderDialog({ order, open, onOpenChange, onSaved }: Pr
     setWaiterName(order.waiter_name?.trim() || '')
     setNotes(order.notes?.trim() || '')
     setOrderType(order.order_type)
-    setRoomServiceFee(String(order.room_service_fee ?? 0))
-    setTakeawayFee(String(order.takeaway_fee ?? 0))
+    setRoomServiceFee(numberInputValue(order.room_service_fee))
+    setTakeawayFee(numberInputValue(order.takeaway_fee))
     const productLines = (order.outlet_order_lines ?? [])
       .filter((l) => !FEE_NAMES.has(String(l.item_name).trim()))
       .map((l) => ({
@@ -234,7 +237,7 @@ export function OutletEditOrderDialog({ order, open, onOpenChange, onSaved }: Pr
                         min={0.001}
                         step="1"
                         className="h-7 text-xs"
-                        value={l.qty}
+                        value={numberInputValue(l.qty)}
                         onChange={(e) => updateLine(i, { qty: Number(e.target.value) })}
                       />
                       <Input
@@ -242,7 +245,7 @@ export function OutletEditOrderDialog({ order, open, onOpenChange, onSaved }: Pr
                         min={0}
                         step="0.01"
                         className="h-7 text-xs"
-                        value={l.unit_price}
+                        value={numberInputValue(l.unit_price)}
                         onChange={(e) => updateLine(i, { unit_price: Number(e.target.value) })}
                       />
                       <Button

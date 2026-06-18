@@ -52,6 +52,9 @@ type Props = {
   }) => { ok: true } | { error: string }
 }
 
+const numberInputValue = (value: number | null | undefined) =>
+  value != null && Number(value) !== 0 ? String(value) : ''
+
 export function StoreEditItemDialog({ item, open, onOpenChange, onSave }: Props) {
   const [name, setName] = useState('')
   const [unit, setUnit] = useState('kg')
@@ -67,10 +70,10 @@ export function StoreEditItemDialog({ item, open, onOpenChange, onSave }: Props)
     setName(item.name)
     setUnit(item.unit)
     setDepts(storeItemDepartments(item))
-    setReorder(String(item.reorderLevel))
-    setPrice(String(item.lastPrice))
-    setBenchmark(String(item.benchmarkPrice))
-    setQty(String(item.quantityInStore))
+    setReorder(numberInputValue(item.reorderLevel))
+    setPrice(numberInputValue(item.lastPrice))
+    setBenchmark(numberInputValue(item.benchmarkPrice))
+    setQty(numberInputValue(item.quantityInStore))
     setKitchenCategory(item.kitchenCategory ?? 'other')
   }, [item, open])
 

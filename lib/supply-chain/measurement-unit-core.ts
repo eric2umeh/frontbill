@@ -3,6 +3,7 @@ export const MEASUREMENT_UNITS = [
   'bag',
   'basket',
   'bottle',
+  'can',
   'carton',
   'crate',
   'cup',
@@ -51,6 +52,8 @@ const UNIT_ALIASES: Record<string, string> = {
   pieces: 'pcs',
   tin: 'tin',
   tins: 'tin',
+  can: 'can',
+  cans: 'can',
   bottle: 'bottle',
   bottles: 'bottle',
   crate: 'crate',
@@ -118,21 +121,23 @@ export function unitOptionsForStoreItem(storeUnit: string, itemName?: string): s
     options.add('cup')
   }
   const beverageHint =
-    ['crate', 'bottle', 'pack', 'pcs', 'tin'].includes(base) ||
+    ['crate', 'bottle', 'can', 'pack', 'pcs', 'tin'].includes(base) ||
     /\b(coke|pepsi|fanta|sprite|beer|drink|juice|water|malt|wine|vodka|gin|tonic)\b/.test(
       name,
     )
   if (beverageHint) {
     options.add('crate')
     options.add('bottle')
+    options.add('can')
     options.add('pack')
     options.add('pcs')
   }
-  if (['pack', 'pcs', 'sachet', 'tin', 'carton', 'bag', 'roll'].includes(base)) {
+  if (['pack', 'pcs', 'sachet', 'tin', 'can', 'carton', 'bag', 'roll'].includes(base)) {
     options.add('pack')
     options.add('pcs')
     options.add('sachet')
     options.add('tin')
+    options.add('can')
     options.add('carton')
     options.add('bag')
     options.add('roll')

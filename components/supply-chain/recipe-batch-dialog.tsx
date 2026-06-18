@@ -28,13 +28,16 @@ type Props = {
   }) => void | Promise<void>
 }
 
+const numberInputValue = (value: number | null | undefined) =>
+  value != null && Number(value) !== 0 ? String(value) : ''
+
 export function RecipeBatchDialog({ recipe, open, onOpenChange, onSave }: Props) {
   const [name, setName] = useState('')
   const [category, setCategory] = useState('')
   const [categoryId, setCategoryId] = useState<string | null>(null)
   const [yieldPortions, setYieldPortions] = useState('4')
-  const [sellingPrice, setSellingPrice] = useState('0')
-  const [overhead, setOverhead] = useState('0')
+  const [sellingPrice, setSellingPrice] = useState('')
+  const [overhead, setOverhead] = useState('')
   const [ingredients, setIngredients] = useState<Recipe['ingredients']>([])
 
   useEffect(() => {
@@ -42,9 +45,9 @@ export function RecipeBatchDialog({ recipe, open, onOpenChange, onSave }: Props)
     setName(recipe.name)
     setCategory(recipe.category)
     setCategoryId(null)
-    setYieldPortions(String(recipe.yieldPortions))
-    setSellingPrice(String(recipe.sellingPricePerPortion))
-    setOverhead(String(recipe.overheadCost))
+    setYieldPortions(numberInputValue(recipe.yieldPortions))
+    setSellingPrice(numberInputValue(recipe.sellingPricePerPortion))
+    setOverhead(numberInputValue(recipe.overheadCost))
     setIngredients(recipe.ingredients.map((i) => ({ ...i })))
   }, [recipe, open])
 
@@ -113,7 +116,7 @@ export function RecipeBatchDialog({ recipe, open, onOpenChange, onSave }: Props)
                     min={0}
                     step="any"
                     className="h-8 w-20"
-                    value={ing.quantity}
+                    value={numberInputValue(ing.quantity)}
                     onChange={(e) => {
                       const qty = Number(e.target.value) || 0
                       setIngredients((prev) =>
