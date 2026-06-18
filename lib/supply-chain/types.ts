@@ -216,6 +216,7 @@ export interface PendingStoreItem {
   lastPrice: number
   benchmarkPrice: number
   kitchenCategory?: KitchenMaterialCategory
+  unitFactors?: Record<string, number>
   status: 'pending' | 'approved' | 'rejected'
   submittedBy: string
   submittedByName: string
@@ -256,9 +257,18 @@ export interface BasketLine {
   stockItemId: string
   name: string
   dept: Exclude<SupplyDept, 'all'>
+  /** Purchase/display unit selected on the PO (pack/carton/pcs/etc.). */
   unit: string
+  /** Qty in `unit` requested on the PO. */
   qtyToBuy: number
+  /** Price per selected purchase unit. */
   unitPrice: number
+  /** Store catalogue unit used for stock ledger accountability. */
+  storeUnit?: string
+  /** Equivalent stock quantity in `storeUnit`. */
+  storeQtyToBuy?: number
+  /** Computed cost per store catalogue unit. */
+  storeUnitPrice?: number
 }
 
 export interface PoLine {
@@ -266,9 +276,18 @@ export interface PoLine {
   stockItemId: string
   name: string
   dept: Exclude<SupplyDept, 'all'>
+  /** Purchase/display unit selected on the PO (pack/carton/pcs/etc.). */
   unit: string
+  /** Qty in `unit` requested on the PO. */
   quantityOrdered: number
+  /** Price per selected purchase unit. */
   unitPrice: number
+  /** Store catalogue unit used for stock ledger accountability. */
+  storeUnit?: string
+  /** Equivalent stock quantity in `storeUnit`. */
+  stockQuantityOrdered?: number
+  /** Computed cost per store catalogue unit. */
+  stockUnitPrice?: number
   lineTotal: number
 }
 
@@ -292,10 +311,15 @@ export interface PurchaseOrder {
 export interface RetirementLine {
   lineId: string
   name: string
+  unit?: string
+  storeUnit?: string
   quantityOrdered: number
+  stockQuantityOrdered?: number
   quantityBought: number
+  stockQuantityBought?: number
   poPrice: number
   actualPrice: number
+  actualStockUnitPrice?: number
   totalPaid: number
   varianceReason?: string
   /** @deprecated use notBought */
