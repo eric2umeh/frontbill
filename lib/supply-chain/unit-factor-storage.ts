@@ -32,6 +32,13 @@ export function writeUnitFactorOverride(
   return nextItem
 }
 
+export function mergeUnitFactorUpdate(
+  currentFactors: UnitFactorMap,
+  persistedOverrides: UnitFactorMap,
+): UnitFactorMap {
+  return { ...currentFactors, ...persistedOverrides }
+}
+
 export function mergeUnitFactors(
   storeItemId: string,
   storeUnit: string,

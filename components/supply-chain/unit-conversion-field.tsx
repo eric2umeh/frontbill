@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
+  mergeUnitFactorUpdate,
   unitFactorDefinition,
   writeUnitFactorOverride,
   type UnitFactorMap,
@@ -44,7 +45,10 @@ export function UnitConversionField({
   const commit = (raw: string) => {
     const n = Number(raw)
     if (!Number.isFinite(n) || n <= 0) return
-    const next = writeUnitFactorOverride(storeItemId, def.storageKey, n)
+    const next = mergeUnitFactorUpdate(
+      factors,
+      writeUnitFactorOverride(storeItemId, def.storageKey, n),
+    )
     onFactorsChange(next)
   }
 

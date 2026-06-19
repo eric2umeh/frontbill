@@ -71,6 +71,10 @@ import {
   showsStoreDraftPurchaseList,
   storeItemToPoLine,
 } from "./po-active";
+import {
+  type RetirementStockCredit,
+  validateRetirementStockCredits,
+} from "./po-retirement";
 import { pushSupplyNotification } from "./supply-notifications";
 import { toast } from "sonner";
 import { clearKitchenBatchDraft } from "./kitchen-batch-draft";
@@ -1164,28 +1168,16 @@ function useSupplyChainImpl() {
   );
 
   const applyRetirementToStock = useCallback(
-    (po: PurchaseOrder, lines: RetirementLine[]) => {
+    (credits: RetirementStockCredit[]) => {
       setStoreItems((items) => {
         const next = [...items];
-        for (const rl of lines) {
-          const notBought = rl.notBought === true || rl.removed === true;
-          if (notBought || rl.quantityBought <= 0) continue;
-          const pl = po.lines.find((l) => l.id === rl.lineId);
-          if (!pl) continue;
-          const idx = next.findIndex((s) => s.id === pl.stockItemId);
+        for (const credit of credits) {
+          const idx = next.findIndex((s) => s.id === credit.stockItemId);
           if (idx >= 0) {
-            const stockQty =
-              rl.stockQuantityBought ??
-              (pl.stockQuantityOrdered && pl.quantityOrdered > 0
-                ? (rl.quantityBought / pl.quantityOrdered) * pl.stockQuantityOrdered
-                : rl.quantityBought);
-            const stockUnitPrice =
-              rl.actualStockUnitPrice ??
-              (stockQty > 0 ? rl.totalPaid / stockQty : rl.actualPrice);
             next[idx] = {
               ...next[idx],
-              quantityInStore: next[idx].quantityInStore + stockQty,
-              lastPrice: stockUnitPrice,
+              quantityInStore: next[idx].quantityInStore + credit.stockQty,
+              lastPrice: credit.stockUnitPrice,
             };
           }
         }
@@ -1297,7 +1289,14 @@ function useSupplyChainImpl() {
         return { ok: true };
       }
 
-      applyRetirementToStock(po, po.retirement.lines);
+      const stockCredits = validateRetirementStockCredits(
+        po,
+        po.retirement.lines,
+        storeItems,
+      );
+      if ("error" in stockCredits) return stockCredits;
+
+      applyRetirementToStock(stockCredits.credits);
       setPurchaseOrders((prev) =>
         prev.map((p) =>
           p.id === poId
@@ -1333,7 +1332,7 @@ function useSupplyChainImpl() {
       });
       return { ok: true };
     },
-    [purchaseOrders, applyRetirementToStock],
+    [purchaseOrders, storeItems, applyRetirementToStock],
   );
 
   const deleteActivePurchaseOrder = useCallback(
