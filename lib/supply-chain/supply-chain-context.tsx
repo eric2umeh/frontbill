@@ -79,6 +79,10 @@ import {
   convertToStoreUnitsWithFactors,
   mergeUnitFactors,
 } from "./unit-factor-storage";
+import {
+  resolveRetirementStockReceipts,
+  type RetirementStockReceipt,
+} from "./purchase-retirement";
 import type { StockShortageLine } from "@/lib/ui/stock-shortage-dialog";
 import { useAuth } from "@/lib/auth-context";
 import {
@@ -1164,28 +1168,16 @@ function useSupplyChainImpl() {
   );
 
   const applyRetirementToStock = useCallback(
-    (po: PurchaseOrder, lines: RetirementLine[]) => {
+    (receipts: RetirementStockReceipt[]) => {
       setStoreItems((items) => {
         const next = [...items];
-        for (const rl of lines) {
-          const notBought = rl.notBought === true || rl.removed === true;
-          if (notBought || rl.quantityBought <= 0) continue;
-          const pl = po.lines.find((l) => l.id === rl.lineId);
-          if (!pl) continue;
-          const idx = next.findIndex((s) => s.id === pl.stockItemId);
+        for (const receipt of receipts) {
+          const idx = next.findIndex((s) => s.id === receipt.storeItemId);
           if (idx >= 0) {
-            const stockQty =
-              rl.stockQuantityBought ??
-              (pl.stockQuantityOrdered && pl.quantityOrdered > 0
-                ? (rl.quantityBought / pl.quantityOrdered) * pl.stockQuantityOrdered
-                : rl.quantityBought);
-            const stockUnitPrice =
-              rl.actualStockUnitPrice ??
-              (stockQty > 0 ? rl.totalPaid / stockQty : rl.actualPrice);
             next[idx] = {
               ...next[idx],
-              quantityInStore: next[idx].quantityInStore + stockQty,
-              lastPrice: stockUnitPrice,
+              quantityInStore: next[idx].quantityInStore + receipt.stockQty,
+              lastPrice: receipt.stockUnitPrice,
             };
           }
         }
@@ -1297,7 +1289,28 @@ function useSupplyChainImpl() {
         return { ok: true };
       }
 
-      applyRetirementToStock(po, po.retirement.lines);
+      const receiptResult = resolveRetirementStockReceipts(
+        po,
+        po.retirement.lines,
+        storeItems,
+      );
+      if ("error" in receiptResult) return receiptResult;
+
+      const receiptByLineId = new Map(
+        receiptResult.receipts.map((receipt) => [receipt.lineId, receipt]),
+      );
+      const resolvedRetirementLines = po.retirement.lines.map((line) => {
+        const receipt = receiptByLineId.get(line.lineId);
+        return receipt
+          ? {
+              ...line,
+              stockQuantityBought: receipt.stockQty,
+              actualStockUnitPrice: receipt.stockUnitPrice,
+            }
+          : line;
+      });
+
+      applyRetirementToStock(receiptResult.receipts);
       setPurchaseOrders((prev) =>
         prev.map((p) =>
           p.id === poId
@@ -1307,6 +1320,7 @@ function useSupplyChainImpl() {
                 retirementComment: comment,
                 retirement: {
                   ...p.retirement!,
+                  lines: resolvedRetirementLines,
                   accountantComment: comment,
                   reviewedAt: new Date().toISOString(),
                   reviewedBy: actor.name,
@@ -1333,7 +1347,7 @@ function useSupplyChainImpl() {
       });
       return { ok: true };
     },
-    [purchaseOrders, applyRetirementToStock],
+    [purchaseOrders, storeItems, applyRetirementToStock],
   );
 
   const deleteActivePurchaseOrder = useCallback(

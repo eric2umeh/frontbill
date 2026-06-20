@@ -1048,8 +1048,9 @@ export function StoreWorkspace() {
                                         }
                                         factors={factorsFor(item)}
                                         onFactorsChange={(next) => {
-                                          setFactorMap((m) => ({ ...m, [item.id]: next }))
-                                          updateStoreItemDirect(item.id, { unitFactors: next }, actor)
+                                          const merged = { ...(item.unitFactors ?? {}), ...next }
+                                          setFactorMap((m) => ({ ...m, [item.id]: merged }))
+                                          updateStoreItemDirect(item.id, { unitFactors: merged }, actor)
                                           const v = issueQtyMap[item.id] ?? ''
                                           const u =
                                             issueUnitMap[item.id] ??
@@ -1331,8 +1332,9 @@ export function StoreWorkspace() {
                                   selectedUnit={purchaseUnit}
                                   factors={factorsFor(item)}
                                   onFactorsChange={(next) => {
-                                    setFactorMap((m) => ({ ...m, [item.id]: next }))
-                                    updateStoreItemDirect(item.id, { unitFactors: next }, actor)
+                                    const merged = { ...(item.unitFactors ?? {}), ...next }
+                                    setFactorMap((m) => ({ ...m, [item.id]: merged }))
+                                    updateStoreItemDirect(item.id, { unitFactors: merged }, actor)
                                     if (rawQty.trim()) commitPurchaseQty(item, rawQty)
                                   }}
                                 />
@@ -1436,8 +1438,9 @@ export function StoreWorkspace() {
                                         selectedUnit={purchaseUnit}
                                         factors={factorsFor(item)}
                                         onFactorsChange={(next) => {
-                                          setFactorMap((m) => ({ ...m, [item.id]: next }))
-                                          updateStoreItemDirect(item.id, { unitFactors: next }, actor)
+                                          const merged = { ...(item.unitFactors ?? {}), ...next }
+                                          setFactorMap((m) => ({ ...m, [item.id]: merged }))
+                                          updateStoreItemDirect(item.id, { unitFactors: merged }, actor)
                                           if (rawQty.trim()) commitPurchaseQty(item, rawQty)
                                         }}
                                       />

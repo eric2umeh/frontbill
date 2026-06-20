@@ -226,8 +226,8 @@ export function StoreEditItemDialog({ item, open, onOpenChange, onSave }: Props)
               const conversionCount = Number(conversionQty)
               const unitFactors =
                 conversionDef && Number.isFinite(conversionCount) && conversionCount > 0
-                  ? { [conversionDef.storageKey]: conversionCount }
-                  : undefined
+                  ? { ...(item.unitFactors ?? {}), [conversionDef.storageKey]: conversionCount }
+                  : item.unitFactors
               const res = onSave({
                 name: toTitleCaseWords(name),
                 unit: unit.trim(),
