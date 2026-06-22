@@ -25,8 +25,14 @@ import { addDays, differenceInCalendarDays } from 'date-fns'
 import { X, Users, Building2 } from 'lucide-react'
 import { formatNaira } from '@/lib/utils/currency'
 import { toast } from 'sonner'
-import { isOrganizationMenuRecord, isSelectableLedgerName } from '@/lib/utils/ledger-organization'
+import { isSelectableLedgerName } from '@/lib/utils/ledger-organization'
 import { resolveOrganizationLedgerAccount } from '@/lib/utils/resolve-ledger-account'
+import {
+  filterCounterpartyOrganizationsClient,
+  loadCounterpartyOrganizations,
+  searchCounterpartyOrganizations,
+} from '@/lib/utils/search-counterparty-organizations'
+import { syncLedgerOrgCounterpartiesToOrganizationsTable } from '@/lib/utils/sync-ledger-org-counterparties-to-organizations'
 import { formatPersonName, normalizeNameKey } from '@/lib/utils/name-format'
 import { guestOrOrganizationNameTaken } from '@/lib/utils/guest-org-name-uniqueness'
 import { StayDateRangeFields } from '@/components/shared/stay-date-range-fields'
@@ -146,40 +152,32 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
   const loadData = async () => {
     try {
       const supabase = createClient()
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
-
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('organization_id')
-        .eq('id', user.id)
-        .single()
-
-      if (!profile?.organization_id) {
-        toast.error('Organization not found')
+      const orgId = authOrganizationId?.trim()
+      const uid = userId?.trim()
+      if (!orgId || !uid) {
+        toast.error('Missing hotel session — sign in again')
         return
       }
 
-      const orgId = profile.organization_id
       setOrganizationId(orgId)
+
+      await syncLedgerOrgCounterpartiesToOrganizationsTable(supabase, {
+        hotelTenantOrganizationId: orgId,
+        createdByUserId: uid,
+      })
 
       const [
         { data: guestData },
         { data: roomData },
         { data: bookingData },
         { data: cityLedgerData },
-        { data: orgsData },
+        counterpartyOrgs,
       ] = await Promise.all([
-        // Guests table
         supabase.from('guests').select('id, name, phone, email, address').eq('organization_id', orgId).order('name'),
-        // All inventory except maintenance — date conflicts + isRoomAssignable gate the picker
         supabase.from('rooms').select('id, room_number, room_type, price_per_night, status').eq('organization_id', orgId).order('room_number').limit(BOOKING_MODAL_ROOMS_LIMIT),
-        // Active bookings to check date conflicts
         supabase.from('bookings').select('room_id, check_in, check_out').eq('organization_id', orgId).in('status', ['confirmed', 'reserved', 'checked_in']).limit(BOOKING_MODAL_ROOMS_LIMIT),
-        // City ledger accounts — load ALL, split by type client-side
         supabase.from('city_ledger_accounts').select('id, account_name, account_type, contact_phone, balance').eq('organization_id', orgId).order('account_name'),
-        // Also load from organizations table as fallback (legacy orgs may live there)
-        supabase.from('organizations').select('id, name, phone, email, org_type, created_by').neq('id', orgId).order('name'),
+        loadCounterpartyOrganizations(supabase, orgId),
       ])
 
       const sanitizedRooms = normalizeRoomsForBookingPickers(roomData) as unknown as Room[]
@@ -199,34 +197,14 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
           source: 'city_ledger',
         }))
 
-      // Organizations must come from the Organizations menu, not generated hotel tenant records.
-      const orgNames = new Set<string>()
-      const orgFromLedger: LedgerAccount[] = (cityLedgerData || [])
-        .filter((a: any) => ['organization', 'corporate'].includes(a.account_type) && isSelectableLedgerName(a.account_name))
-        .map((a: any) => {
-          orgNames.add(String(a.account_name || '').toLowerCase())
-          return {
-            id: a.id,
-            account_name: a.account_name,
-            account_type: 'organization' as const,
-            contact_phone: a.contact_phone || '',
-            balance: a.balance || 0,
-            source: 'city_ledger',
-          }
-        })
-      const orgFromTable: LedgerAccount[] = (orgsData || [])
-        .filter((o: any) => isOrganizationMenuRecord(o, orgId) && !orgNames.has(o.name.toLowerCase()))
-        .map((o: any) => ({
-          id: o.id,
-          account_name: o.name,
-          account_type: 'organization' as const,
-          contact_phone: o.phone || '',
-          balance: 0,
-          source: 'organizations',
-        }))
-
-      const orgLedger: LedgerAccount[] = [...orgFromLedger, ...orgFromTable]
-        .sort((a, b) => a.account_name.localeCompare(b.account_name))
+      const orgLedger: LedgerAccount[] = counterpartyOrgs.map((o) => ({
+        id: o.ledger_account_id || o.id,
+        account_name: o.name,
+        account_type: 'organization' as const,
+        contact_phone: o.phone || '',
+        balance: o.balance ?? 0,
+        source: o.source,
+      }))
 
       setIndividualAccounts(individualLedger)
       setOrganizationAccounts(orgLedger)
@@ -299,44 +277,47 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
     }
     // Fallback: live search in case account was created after modal opened
     const supabase = createClient()
-    const [{ data: ledgerData }, { data: orgSearchData }] = await Promise.all([
-      supabase
+    const merged = await searchCounterpartyOrganizations(supabase, {
+      hotelTenantOrganizationId: organizationId || authOrganizationId,
+      searchTerm: value,
+      limit: 50,
+    })
+    const results: LedgerAccount[] =
+      ledgerTab === 'organization'
+        ? merged.map((o) => ({
+            id: o.ledger_account_id || o.id,
+            account_name: o.name,
+            account_type: 'organization' as const,
+            contact_phone: o.phone || '',
+            balance: o.balance ?? 0,
+            source: o.source,
+          }))
+        : []
+    if (ledgerTab === 'individual') {
+      const { data: ledgerData } = await supabase
         .from('city_ledger_accounts')
         .select('id, account_name, account_type, contact_phone, balance')
         .eq('organization_id', organizationId)
         .ilike('account_name', `%${value}%`)
-        .limit(10),
-      supabase
-        .from('organizations')
-        .select('id, name, phone, org_type, created_by')
-        .neq('id', organizationId)
-        .ilike('name', `%${value}%`)
-        .limit(10),
-    ])
-    const fromLedger: LedgerAccount[] = (ledgerData || [])
-        .filter((a: any) => ledgerTab === 'individual'
-          ? (a.account_type === 'individual' || a.account_type === 'guest') && isSelectableLedgerName(a.account_name)
-          : ['organization', 'corporate'].includes(a.account_type) && isSelectableLedgerName(a.account_name))
+        .limit(10)
+      const fromLedger: LedgerAccount[] = (ledgerData || [])
+        .filter(
+          (a: any) =>
+            (a.account_type === 'individual' || a.account_type === 'guest') &&
+            isSelectableLedgerName(a.account_name),
+        )
         .map((a: any) => ({
-      id: a.id,
-      account_name: a.account_name,
-      account_type: ledgerTab,
-      contact_phone: a.contact_phone || '',
-      balance: a.balance || 0,
-      source: 'city_ledger' as const,
+          id: a.id,
+          account_name: a.account_name,
+          account_type: 'individual' as const,
+          contact_phone: a.contact_phone || '',
+          balance: a.balance || 0,
+          source: 'city_ledger' as const,
         }))
-    const ledgerNames = new Set(fromLedger.map(a => a.account_name.toLowerCase()))
-    const fromOrgs: LedgerAccount[] = (orgSearchData || [])
-      .filter((o: any) => ledgerTab === 'organization' && isOrganizationMenuRecord(o, organizationId) && !ledgerNames.has(o.name.toLowerCase()))
-      .map((o: any) => ({
-        id: o.id,
-        account_name: o.name,
-        account_type: 'organization' as const,
-        contact_phone: o.phone || '',
-        balance: 0,
-        source: 'organizations' as const,
-      }))
-    const results = [...fromLedger, ...fromOrgs]
+      setFilteredLedgerAccounts(fromLedger)
+      setLedgerOpen(fromLedger.length > 0)
+      return
+    }
     setFilteredLedgerAccounts(results)
     setLedgerOpen(results.length > 0)
   }
