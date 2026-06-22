@@ -30,10 +30,10 @@ import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/lib/auth-context";
 import { insertFolioCharges } from "@/lib/utils/insert-folio-charges";
 import { guestOrOrganizationNameTaken } from "@/lib/utils/guest-org-name-uniqueness";
+import { isSelectableLedgerName } from "@/lib/utils/ledger-organization";
 import {
-  isOrganizationMenuRecord,
-  isSelectableLedgerName,
-} from "@/lib/utils/ledger-organization";
+  mergeCounterpartyOrganizationRows,
+} from "@/lib/utils/search-counterparty-organizations";
 import { resolveOrganizationLedgerAccount } from "@/lib/utils/resolve-ledger-account";
 import { canRequestExtendStayDiscount } from "@/lib/utils/booking-checkout-ui";
 import {
@@ -121,41 +121,30 @@ export function ExtendStayModal({
           .order("account_name"),
         supabase
           .from("organizations")
-          .select("id, name, phone, org_type")
+          .select("id, name, phone, org_type, created_by")
           .neq("id", booking.organization_id!)
           .order("name"),
       ]);
 
       if (ledgerError) throw ledgerError;
       if (orgError) throw orgError;
-      const ledgerOrgs = (ledgerData || [])
-        .filter((d: any) => isSelectableLedgerName(d.account_name))
-        .map((d: any) => ({
-          id: d.id,
-          name: d.account_name,
-          current_balance: d.balance || 0,
-          phone: d.contact_phone,
-          source: "city_ledger",
-        }));
-      const ledgerNames = new Set(
-        ledgerOrgs.map((org: any) => org.name.toLowerCase()),
+      const ledgerOrgs = (ledgerData || []).filter((d: any) =>
+        isSelectableLedgerName(d.account_name),
       );
-      const menuOrgs = (orgData || [])
-        .filter(
-          (d: any) =>
-            isOrganizationMenuRecord(d, booking.organization_id!) &&
-            !ledgerNames.has(String(d.name || "").toLowerCase()),
-        )
-        .map((d: any) => ({
-          id: d.id,
+      const menuOrgs = mergeCounterpartyOrganizationRows(
+        orgData || [],
+        ledgerOrgs,
+        booking.organization_id!,
+      );
+      const accounts = menuOrgs
+        .map((d) => ({
+          id: d.ledger_account_id || d.id,
           name: d.name,
-          current_balance: 0,
+          current_balance: d.balance ?? 0,
           phone: d.phone,
-          source: "organizations",
-        }));
-      const accounts = [...ledgerOrgs, ...menuOrgs].sort((a, b) =>
-        a.name.localeCompare(b.name),
-      );
+          source: d.source,
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name));
       setOrganizations(accounts);
       setFilteredOrganizations(accounts);
     } catch (error: any) {
@@ -424,7 +413,7 @@ export function ExtendStayModal({
           })
           .eq("id", booking.id);
       } else {
-        // Immediate payment (cash/pos/transfer/card) — increment deposit so Amount Paid is accurate
+        // Immediate payment (cash/pos/transfer) — increment deposit so Amount Paid is accurate
         const { data: freshBk } = await supabase
           .from("bookings")
           .select("deposit")
