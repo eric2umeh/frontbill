@@ -21,10 +21,14 @@ export function isGeneratedHotelName(name?: string | null) {
  * Exclude the logged-in user's hotel tenant row (profiles.organization_id). Exclude onboarding-style property names (`'s Hotel`).
  */
 export function isOrganizationMenuRecord(record: any, tenantOrganizationId?: string | null) {
-  if (!record?.id || !record?.org_type || String(record.org_type).trim() === '') return false
+  if (!record?.id || !record?.name) return false
   if (tenantOrganizationId && record.id === tenantOrganizationId) return false
   if (isPossessivePropertyHotelOrganizationName(record.name)) return false
-  return true
+  const orgType = String(record?.org_type ?? '').trim()
+  if (orgType) return true
+  // Counterparty rows created before org_type existed, or legacy sync rows
+  if (record.created_by) return true
+  return false
 }
 
 /** Use when showing city ledger account names / org-counterparty picks (booking, reservation, charges, …). */
