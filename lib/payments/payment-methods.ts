@@ -1,5 +1,5 @@
 /** Standard guest-facing payment methods (no cheque / other). */
-export const STANDARD_PAYMENT_METHODS = ['pos', 'cash', 'transfer', 'card'] as const
+export const STANDARD_PAYMENT_METHODS = ['pos', 'cash', 'transfer'] as const
 
 export type StandardPaymentMethod = (typeof STANDARD_PAYMENT_METHODS)[number]
 
@@ -10,7 +10,6 @@ export const PAYMENT_METHOD_SELECT_OPTIONS: { value: StandardPaymentMethod; labe
   { value: 'pos', label: 'POS' },
   { value: 'cash', label: 'Cash' },
   { value: 'transfer', label: 'Transfer' },
-  { value: 'card', label: 'Card' },
 ]
 
 /** Operating expense API + forms (same set as standard). */
@@ -21,6 +20,7 @@ export function formatPaymentMethodLabel(method: string | null | undefined): str
     .trim()
     .toLowerCase()
     .replace(/-/g, '_')
+  if (m === 'card') return 'POS'
   if (m === 'bank_transfer') return 'Transfer'
   const found = PAYMENT_METHOD_SELECT_OPTIONS.find((o) => o.value === m)
   if (found) return found.label
