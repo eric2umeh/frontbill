@@ -16,7 +16,7 @@ export type BackdateDedupeParts = {
 export function buildBackdateDedupeKey(parts: BackdateDedupeParts): string {
   const co = parts.requestedCheckOut ?? ''
   const room =
-    parts.requestType === 'bulk_booking'
+    parts.requestType === 'bulk_booking' || parts.requestType === 'bulk_reservation'
       ? parts.bulkFingerprint || 'bulk'
       : parts.roomId || 'no-room'
   return `${parts.organizationId}|${parts.requestedBy}|${parts.requestType}|${parts.requestedCheckIn}|${co}|${room}`
