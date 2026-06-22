@@ -37,9 +37,10 @@ import { DEFAULT_MEASUREMENT_UNIT, sanitizeQuantityInput } from '@/lib/supply-ch
 import { StoreDeptMultiSelect } from '@/components/supply-chain/store-dept-multi-select'
 import { unitFactorDefinition } from '@/lib/supply-chain/unit-factor-storage'
 import type { UnitFactorMap } from '@/lib/supply-chain/unit-factor-types'
+import { storeUnitPriceFromEntryPrice } from '@/lib/supply-chain/purchase-unit-pricing'
+import { PURCHASE_CONVERSION_UNITS } from '@/lib/supply-chain/conversion-units'
 
 type Dept = Exclude<SupplyDept, 'all'>
-const CONVERSION_UNITS = ['pack', 'carton', 'bag', 'roll', 'crate', 'tin', 'can', 'bottle', 'pcs'] as const
 
 type Props = {
   canAddDirect: boolean
@@ -103,6 +104,19 @@ export function StoreAddItemDialog({
     setConversionQty('')
   }
 
+  const conversionDef = unitFactorDefinition(unit, conversionUnit)
+
+  const validateBeforeSave = (): string | null => {
+    if (!name.trim()) return 'Enter item name'
+    if (conversionDef && conversionQty.trim()) {
+      const conversionCount = Number(conversionQty)
+      if (!Number.isFinite(conversionCount) || conversionCount <= 0) {
+        return `Enter purchase conversion qty (e.g. 50 ${unit} per ${conversionUnit})`
+      }
+    }
+    return null
+  }
+
   const buildInput = () => {
     const normalized = normalizeStoreItemDepts(depts)
     const conversionDef = unitFactorDefinition(unit, conversionUnit)
@@ -111,6 +125,16 @@ export function StoreAddItemDialog({
       conversionDef && Number.isFinite(conversionCount) && conversionCount > 0
         ? { [conversionDef.storageKey]: conversionCount }
         : undefined
+    const rawPrice = Number(price) || 0
+    const lastPrice =
+      unitFactors && conversionDef
+        ? storeUnitPriceFromEntryPrice(rawPrice, unit.trim(), conversionUnit, unitFactors)
+        : rawPrice
+    const rawBenchmark = Number(benchmark) || rawPrice
+    const benchmarkPrice =
+      unitFactors && conversionDef
+        ? storeUnitPriceFromEntryPrice(rawBenchmark, unit.trim(), conversionUnit, unitFactors)
+        : rawBenchmark || lastPrice
     return {
       name: toTitleCaseWords(name),
       unit: unit.trim(),
@@ -118,13 +142,12 @@ export function StoreAddItemDialog({
       depts: normalized.depts,
       quantityInStore: Number(qty) || 0,
       reorderLevel: Number(reorder) || 0,
-      lastPrice: Number(price) || 0,
-      benchmarkPrice: Number(benchmark) || Number(price) || 0,
+      lastPrice,
+      benchmarkPrice,
       kitchenCategory: depts.includes('kitchen') ? kitchenCategory : undefined,
       unitFactors,
     }
   }
-  const conversionDef = unitFactorDefinition(unit, conversionUnit)
 
   const parseNumberOrNull = (raw: string | undefined): number | null => {
     const t = (raw ?? '').trim()
@@ -395,11 +418,13 @@ export function StoreAddItemDialog({
               <UnitSelect value={unit} onChange={setUnit} className="w-full h-9" />
             </div>
             <p className="text-[10px] text-muted-foreground mt-1">
-              Price below is per this unit (e.g. ₦10,000 / kg).
+              {conversionDef
+                ? `Price is per ${conversionUnit} at market (stored as per ${unit}).`
+                : 'Price below is per this unit (e.g. ₦10,000 / kg).'}
             </p>
           </div>
           <div className="sm:col-span-2 rounded-md border border-dashed bg-muted/20 p-2">
-            <Label className="text-xs">Pack / issue conversion (optional)</Label>
+            <Label className="text-xs">Purchase conversion (optional)</Label>
             <p className="mt-1 text-[10px] text-muted-foreground">
               Use this for accountable buying and issuing. Example: 1 pack = 9 pcs.
             </p>
@@ -409,7 +434,7 @@ export function StoreAddItemDialog({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {CONVERSION_UNITS.map((u) => (
+                  {PURCHASE_CONVERSION_UNITS.map((u) => (
                     <SelectItem key={u} value={u}>
                       {u}
                     </SelectItem>
@@ -539,6 +564,11 @@ export function StoreAddItemDialog({
                   toast.error('Select at least one department')
                   return
                 }
+                const validationError = validateBeforeSave()
+                if (validationError) {
+                  toast.error(validationError)
+                  return
+                }
                 const res = onAddDirect(buildInput())
                 if ('error' in res) {
                   toast.error(res.error)
@@ -556,6 +586,11 @@ export function StoreAddItemDialog({
               onClick={() => {
                 if (!depts.length) {
                   toast.error('Select at least one department')
+                  return
+                }
+                const validationError = validateBeforeSave()
+                if (validationError) {
+                  toast.error(validationError)
                   return
                 }
                 const res = onSubmitForApproval(buildInput())
