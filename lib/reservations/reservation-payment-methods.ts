@@ -5,7 +5,6 @@ export const RESERVATION_PAYMENT_METHOD_OPTIONS = [
   { value: 'pos', label: 'POS' },
   { value: 'cash', label: 'Cash' },
   { value: 'transfer', label: 'Transfer' },
-  { value: 'card', label: 'Card' },
   {
     value: RESERVATION_PAYMENT_METHOD_PENDING,
     label: 'Pending (hold date, no payment)',
@@ -21,6 +20,7 @@ export function isReservationPendingHold(method: string | null | undefined): boo
 
 export function formatReservationPaymentMethodLabel(method: string | null | undefined): string {
   const m = String(method || '').trim().toLowerCase()
+  if (m === 'card') return 'POS'
   const found = RESERVATION_PAYMENT_METHOD_OPTIONS.find((o) => o.value === m)
   if (found) return found.label
   if (!m) return '—'
