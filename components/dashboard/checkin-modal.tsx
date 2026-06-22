@@ -21,12 +21,18 @@ import { addDays, differenceInCalendarDays, format } from 'date-fns'
 import { X } from 'lucide-react'
 import { formatNaira } from '@/lib/utils/currency'
 import { toast } from 'sonner'
-import { isOrganizationMenuRecord, isSelectableLedgerName } from '@/lib/utils/ledger-organization'
+import { searchCounterpartyOrganizations } from '@/lib/utils/search-counterparty-organizations'
+import { syncLedgerOrgCounterpartiesToOrganizationsTable } from '@/lib/utils/sync-ledger-org-counterparties-to-organizations'
 import { resolveOrganizationLedgerAccount } from '@/lib/utils/resolve-ledger-account'
 import { formatPersonName } from '@/lib/utils/name-format'
 import { guestOrOrganizationNameTaken } from '@/lib/utils/guest-org-name-uniqueness'
+import {
+  buildCounterpartyOrganizationRow,
+  describeSupabaseError,
+} from '@/lib/utils/counterparty-organization'
 import { insertFolioCharges } from '@/lib/utils/insert-folio-charges'
 import { StayDateRangeFields } from '@/components/shared/stay-date-range-fields'
+import { useAuth } from '@/lib/auth-context'
 import { BOOKING_MODAL_ROOMS_LIMIT, normalizeRoomsForBookingPickers } from '@/lib/utils/room-bookability'
 
 interface CheckinModalProps {
@@ -43,6 +49,7 @@ const toLocalDateStr = (date: Date) => {
 }
 
 export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
+  const { organizationId: authTenantOrgId, userId: authUserId } = useAuth()
   const [loading, setLoading] = useState(false)
   const [orgId, setOrgId] = useState('')
 
@@ -91,16 +98,20 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
   const loadData = async () => {
     try {
       const supabase = createClient()
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
-      const { data: profile } = await supabase.from('profiles').select('organization_id').eq('id', user.id).single()
-      if (!profile?.organization_id) return
-      setOrgId(profile.organization_id)
+      const tenantId = authTenantOrgId?.trim()
+      const uid = authUserId?.trim()
+      if (!tenantId || !uid) return
+      setOrgId(tenantId)
+
+      await syncLedgerOrgCounterpartiesToOrganizationsTable(supabase, {
+        hotelTenantOrganizationId: tenantId,
+        createdByUserId: uid,
+      })
 
       const [{ data: guestData }, { data: roomData }, { data: bookingData }] = await Promise.all([
-        supabase.from('guests').select('id, name, phone').eq('organization_id', profile.organization_id).order('name'),
-        supabase.from('rooms').select('id, room_number, room_type, price_per_night, status').eq('organization_id', profile.organization_id).order('room_number').limit(BOOKING_MODAL_ROOMS_LIMIT),
-        supabase.from('bookings').select('room_id, check_in, check_out').eq('organization_id', profile.organization_id).in('status', ['confirmed', 'reserved', 'checked_in']).limit(BOOKING_MODAL_ROOMS_LIMIT),
+        supabase.from('guests').select('id, name, phone').eq('organization_id', tenantId).order('name'),
+        supabase.from('rooms').select('id, room_number, room_type, price_per_night, status').eq('organization_id', tenantId).order('room_number').limit(BOOKING_MODAL_ROOMS_LIMIT),
+        supabase.from('bookings').select('room_id, check_in, check_out').eq('organization_id', tenantId).in('status', ['confirmed', 'reserved', 'checked_in']).limit(BOOKING_MODAL_ROOMS_LIMIT),
       ])
 
       setGuests(guestData || [])
@@ -198,45 +209,21 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
     }
 
     const supabase = createClient()
-    const [{ data: ledgerData }, { data: orgData }] = await Promise.all([
-      supabase
-        .from('city_ledger_accounts')
-        .select('id, account_name, account_type, contact_phone, balance')
-        .eq('organization_id', orgId)
-        .ilike('account_name', `%${term}%`)
-        .limit(8),
-      supabase
-        .from('organizations')
-        .select('id, name, phone, org_type, created_by')
-        .neq('id', orgId)
-        .ilike('name', `%${term}%`)
-        .limit(8),
-    ])
-
-    const fromLedger = (ledgerData || [])
-      .filter((account: any) => ['organization', 'corporate'].includes(account.account_type) && isSelectableLedgerName(account.account_name))
-      .map((account: any) => ({
-        id: account.id,
-        name: account.account_name,
-        account_name: account.account_name,
-        phone: account.contact_phone,
-        balance: account.balance || 0,
-        source: 'city_ledger',
-      }))
-    const ledgerNames = new Set(fromLedger.map((account: any) => String(account.name || '').toLowerCase()))
-    const fromOrgs = (orgData || [])
-      .filter((org: any) => isOrganizationMenuRecord(org, orgId) && !ledgerNames.has(String(org.name || '').toLowerCase()))
-      .map((org: any) => ({
-        id: org.id,
-        name: org.name,
-        account_name: org.name,
-        phone: org.phone,
-        balance: 0,
-        source: 'organizations',
-      }))
-
-    const results = [...fromLedger, ...fromOrgs]
-    setLedgerResults(results)
+    const results = await searchCounterpartyOrganizations(supabase, {
+      hotelTenantOrganizationId: orgId || authTenantOrgId,
+      searchTerm: term,
+      limit: 20,
+    })
+    setLedgerResults(
+      results.map((o) => ({
+        id: o.ledger_account_id || o.id,
+        name: o.name,
+        account_name: o.name,
+        phone: o.phone,
+        balance: o.balance ?? 0,
+        source: o.source,
+      })),
+    )
     setLedgerSearchOpen(results.length > 0)
   }
 
@@ -259,14 +246,13 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
         return
       }
 
-      const { error: orgInsertError } = await supabase.from('organizations').insert([{
+      const orgRow = buildCounterpartyOrganizationRow({
         name: newLedgerOrgName.trim(),
         org_type: 'other',
-        email: null,
-        phone: newLedgerOrgPhone.trim() || null,
-        current_balance: 0,
-        created_by: user?.id ?? null,
-      }])
+        phone: newLedgerOrgPhone,
+        created_by: user?.id ?? '',
+      })
+      const { error: orgInsertError } = await supabase.from('organizations').insert([orgRow])
       if (orgInsertError) throw orgInsertError
 
       const { data, error } = await supabase
@@ -295,8 +281,8 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
       setNewLedgerOrgName('')
       setNewLedgerOrgPhone('')
       toast.success(`Organization account "${account.name}" created and selected`)
-    } catch (error: any) {
-      toast.error(error.message || 'Failed to create organization account')
+    } catch (error: unknown) {
+      toast.error(describeSupabaseError(error) || 'Failed to create organization account')
     } finally {
       setCreatingLedgerOrg(false)
     }
@@ -582,7 +568,6 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
                   <SelectItem value="pos">POS</SelectItem>
                   <SelectItem value="cash">Cash</SelectItem>
                   <SelectItem value="transfer">Transfer</SelectItem>
-                  <SelectItem value="card">Card</SelectItem>
                   <SelectItem value="city_ledger">City Ledger</SelectItem>
                 </SelectContent>
               </Select>
