@@ -20,6 +20,7 @@ import { format } from 'date-fns'
 import { usePageData } from '@/hooks/use-page-data'
 import { PageLoadingState } from '@/components/loading-screen'
 import { useAuth } from '@/lib/auth-context'
+import { hasPermission } from '@/lib/permissions'
 import { isOrganizationMenuRecord } from '@/lib/utils/ledger-organization'
 import { getUserDisplayName } from '@/lib/utils/user-display'
 import { fetchUserDisplayNameMap } from '@/lib/utils/fetch-user-display-names'
@@ -27,6 +28,11 @@ import { normalizeNameKey } from '@/lib/utils/name-format'
 import { dedupeOrganizationsDisplayByNormalizedName } from '@/lib/utils/dedupe-organizations-display'
 import { guestOrOrganizationNameTaken } from '@/lib/utils/guest-org-name-uniqueness'
 import { syncLedgerOrgCounterpartiesToOrganizationsTable } from '@/lib/utils/sync-ledger-org-counterparties-to-organizations'
+import {
+  buildCounterpartyOrganizationRow,
+  describeSupabaseError,
+  ensureCityLedgerAccountForCounterparty,
+} from '@/lib/utils/counterparty-organization'
 
 interface Organization {
   id: string
@@ -65,7 +71,8 @@ export function OrganizationsPanel() {
   const router = useRouter()
   const [organizations, setOrganizations] = useState<Organization[]>([])
   const { initialLoading, startFetch, endFetch } = usePageData()
-  const { userId, organizationId } = useAuth()
+  const { userId, organizationId, role } = useAuth()
+  const canCreateOrganization = hasPermission(role, 'organizations:create')
   const [addOrgModalOpen, setAddOrgModalOpen] = useState(false)
   const [formData, setFormData] = useState({
     name: '',
@@ -139,8 +146,8 @@ export function OrganizationsPanel() {
 
       setOrganizations(dedupeOrganizationsDisplayByNormalizedName(transformed))
     } catch (error: unknown) {
-      console.error('Error fetching organizations:', error)
-      toast.error(error instanceof Error ? error.message : 'Failed to load organizations')
+      console.error('Error fetching organizations:', describeSupabaseError(error), error)
+      toast.error(describeSupabaseError(error) || 'Failed to load organizations')
     } finally {
       endFetch()
     }
@@ -155,6 +162,14 @@ export function OrganizationsPanel() {
     }
     if (!organizationId) {
       toast.error('Missing organization — sign in again')
+      return
+    }
+    if (!userId) {
+      toast.error('Missing user session — sign in again')
+      return
+    }
+    if (!canCreateOrganization) {
+      toast.error('Your role cannot create organizations')
       return
     }
 
@@ -183,20 +198,28 @@ export function OrganizationsPanel() {
         return
       }
 
-      const { error } = await supabase.from('organizations').insert([
-        {
-          name: trimmed,
-          org_type: formData.org_type,
-          email: formData.email || null,
-          phone: formData.phone || null,
-          contact_person: formData.contact_person || null,
-          address: formData.address || null,
-          current_balance: 0,
-          created_by: userId,
-        },
-      ])
+      const row = buildCounterpartyOrganizationRow({
+        name: trimmed,
+        org_type: formData.org_type,
+        email: formData.email,
+        phone: formData.phone,
+        contact_person: formData.contact_person,
+        address: formData.address,
+        created_by: userId,
+      })
+
+      const { data: created, error } = await supabase
+        .from('organizations')
+        .insert([row])
+        .select('id, name, email, phone')
+        .single()
 
       if (error) throw error
+
+      await ensureCityLedgerAccountForCounterparty(supabase, organizationId, trimmed, {
+        phone: row.phone,
+        email: created?.email ?? row.email,
+      })
 
       toast.success(
         `${formData.org_type.charAt(0).toUpperCase() + formData.org_type.slice(1)} "${trimmed}" created successfully`,
@@ -212,7 +235,15 @@ export function OrganizationsPanel() {
       setAddOrgModalOpen(false)
       void fetchOrganizations()
     } catch (error: unknown) {
-      toast.error(error instanceof Error ? error.message : 'Failed to create organization')
+      const detail = describeSupabaseError(error)
+      console.error('Error creating organization:', detail, error)
+      if (/row-level security|permission denied|42501/i.test(detail)) {
+        toast.error(
+          'Permission denied creating organization. Ask an admin to run scripts/068_fix_organization_insert_rls.sql on Supabase.',
+        )
+      } else {
+        toast.error(detail || 'Failed to create organization')
+      }
     } finally {
       setSubmitting(false)
     }
@@ -229,12 +260,14 @@ export function OrganizationsPanel() {
           NGOs, government, and private organizations for city ledger billing
         </p>
         <Dialog open={addOrgModalOpen} onOpenChange={setAddOrgModalOpen}>
-          <DialogTrigger asChild>
-            <Button size="sm">
-              <Plus className="mr-2 h-4 w-4" />
-              Add Organization
-            </Button>
-          </DialogTrigger>
+          {canCreateOrganization ? (
+            <DialogTrigger asChild>
+              <Button size="sm">
+                <Plus className="mr-2 h-4 w-4" />
+                Add Organization
+              </Button>
+            </DialogTrigger>
+          ) : null}
           <DialogContent className="max-w-2xl">
             <DialogHeader>
               <DialogTitle>Create New Organization</DialogTitle>
