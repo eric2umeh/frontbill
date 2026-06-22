@@ -4,6 +4,7 @@ export type SupplyNotificationAudience =
   | 'manager'
   | 'purchasing'
   | 'kitchen'
+  | 'cashier'
 
 export type SupplyNotification = {
   id: string
@@ -98,6 +99,8 @@ export function audiencesForRole(roleKey: string): SupplyNotificationAudience[] 
       return ['purchasing']
     case 'chef':
       return ['kitchen']
+    case 'cashier':
+      return ['cashier']
     default:
       return []
   }

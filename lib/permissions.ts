@@ -587,6 +587,7 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
       "supply:store",
       "supply:kitchen",
       "supply:fnb",
+      "supply:purchasing",
       "supply:activity",
       "outlet:view",
       "outlet:reports",

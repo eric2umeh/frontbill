@@ -31,6 +31,61 @@ import { cancelBookingReservation } from '@/lib/reservations/cancel-reservation'
 import { countInHouseRoomsFromBookings } from '@/lib/rooms/room-occupancy'
 import { reconcileRoomStatusesClient } from '@/lib/rooms/reconcile-room-status-client'
 
+const FOLIO_BOOKING_ID_CHUNK = 80
+const BOOKINGS_SCOPE_LIMIT = 500
+
+function describeFetchError(err: unknown): string {
+  if (err instanceof Error) return err.message
+  if (err && typeof err === 'object') {
+    const row = err as { message?: string; code?: string; details?: string }
+    if (row.message) return row.message
+    if (row.code) return row.code
+    if (row.details) return row.details
+  }
+  try {
+    return JSON.stringify(err)
+  } catch {
+    return String(err)
+  }
+}
+
+type FolioChargeRow = {
+  amount?: unknown
+  type?: string | null
+  charge_type?: string | null
+  payment_status?: string | null
+  payment_method?: string | null
+}
+
+async function fetchFolioChargesByBookingIds(
+  supabase: NonNullable<ReturnType<typeof createClient>>,
+  bookingIds: string[],
+): Promise<Record<string, FolioChargeRow[]>> {
+  const chargesByBooking: Record<string, FolioChargeRow[]> = {}
+  if (!bookingIds.length) return chargesByBooking
+
+  for (let i = 0; i < bookingIds.length; i += FOLIO_BOOKING_ID_CHUNK) {
+    const chunk = bookingIds.slice(i, i + FOLIO_BOOKING_ID_CHUNK)
+    const { data, error } = await supabase
+      .from('folio_charges')
+      .select('booking_id, amount, payment_status, charge_type, payment_method')
+      .in('booking_id', chunk)
+    if (error) throw error
+    for (const c of data ?? []) {
+      const id = (c as { booking_id: string }).booking_id
+      if (!chargesByBooking[id]) chargesByBooking[id] = []
+      chargesByBooking[id].push({
+        amount: (c as { amount?: unknown }).amount,
+        type: (c as { charge_type?: string | null }).charge_type,
+        charge_type: (c as { charge_type?: string | null }).charge_type,
+        payment_status: (c as { payment_status?: string | null }).payment_status,
+        payment_method: (c as { payment_method?: string | null }).payment_method,
+      })
+    }
+  }
+  return chargesByBooking
+}
+
 interface Booking {
   id: string
   folio_id: string
@@ -101,6 +156,8 @@ export default function BookingsPage() {
     payment_status: 'all',
   })
   const [tableSearchQuery, setTableSearchQuery] = useState('')
+  const [catalogScopeLoaded, setCatalogScopeLoaded] = useState<string | null>(null)
+  const [catalogLoading, setCatalogLoading] = useState(false)
   const [roomStats, setRoomStats] = useState<{
     total: number
     occupied: number
@@ -181,6 +238,55 @@ export default function BookingsPage() {
     })
   }, [organizationId])
 
+  function groupBulkRows(rows: Booking[]) {
+    const grouped = new Map<string, Booking[]>()
+    const singles: Booking[] = []
+
+    rows.forEach((row) => {
+      const groupId = getBulkGroupId(row)
+      if (!groupId) {
+        singles.push(row)
+        return
+      }
+      grouped.set(groupId, [...(grouped.get(groupId) || []), row])
+    })
+
+    const bulkRows = Array.from(grouped.entries()).map(([groupId, groupRows]) => {
+      const first = groupRows[0]
+      const guestNames = Array.from(new Set(groupRows.map((row) => row.guests?.name).filter(Boolean)))
+      const roomTypes = Array.from(new Set(groupRows.map((row) => row.rooms?.room_type).filter(Boolean)))
+      return {
+        ...first,
+        id: first.id,
+        folio_id: `Bulk ${groupId}`,
+        is_bulk: true,
+        bulk_group_id: groupId,
+        bulk_members: groupRows,
+        room_count: groupRows.length,
+        guest_count: guestNames.length,
+        total_amount: groupRows.reduce((sum, row) => sum + Number(row.total_amount || 0), 0),
+        deposit: groupRows.reduce((sum, row) => sum + Number(row.deposit || 0), 0),
+        balance: groupRows.reduce((sum, row) => sum + Number(row.balance || 0), 0),
+        guests: {
+          name:
+            guestNames.length > 1
+              ? `${guestNames[0]} + ${guestNames.length - 1} more`
+              : guestNames[0] || 'Bulk Guests',
+          phone: `${groupRows.length} room${groupRows.length === 1 ? '' : 's'}`,
+        },
+        guestName: guestNames.join(' '),
+        rooms: {
+          room_number: `${groupRows.length}`,
+          room_type: roomTypes.join(', ') || 'Multiple rooms',
+        },
+      }
+    })
+
+    return [...bulkRows, ...singles].sort(
+      (a, b) => new Date(b.check_in).getTime() - new Date(a.check_in).getTime(),
+    )
+  }
+
   const fetchBookings = useCallback(async () => {
     startFetch()
     try {
@@ -189,8 +295,12 @@ export default function BookingsPage() {
       if (!supabase || !organizationId) {
         setInHouseBookings([])
         setAllBookingsCatalog([])
+        setCatalogScopeLoaded(null)
         return
       }
+
+      setCatalogScopeLoaded(null)
+      setAllBookingsCatalog([])
 
       const loadScope = async (statusKey: string) => {
       const tz = resolveHotelTimeZone()
@@ -201,8 +311,9 @@ export default function BookingsPage() {
 
       let query = supabase
         .from('bookings')
-        .select('*, guests(name, phone), rooms(id, room_number, room_type), created_by, updated_by, updated_at')
+        .select('*, guests(name, phone), rooms(id, room_number, room_type)')
         .eq('organization_id', organizationId)
+        .limit(BOOKINGS_SCOPE_LIMIT)
 
       if (statusKey === 'checked_in') {
         // In-house: folio often stays "confirmed" after walk-in; avoid strict timestamp filters (TZ/casts).
@@ -277,55 +388,35 @@ export default function BookingsPage() {
       // Derive each booking's balance from folio (same rules as booking detail / bill card)
       const bookingIds = bookingsWithUsers.map((b: any) => b.id)
       if (bookingIds.length > 0) {
-        const { data: allFolioCharges } = await supabase
-          .from('folio_charges')
-          .select('booking_id, amount, payment_status, charge_type, payment_method')
-          .in('booking_id', bookingIds)
-        if (allFolioCharges) {
-          const chargesByBooking: Record<
-            string,
-            { amount?: unknown; type?: string | null; charge_type?: string | null; payment_status?: string | null; payment_method?: string | null }[]
-          > = {}
-          for (const c of allFolioCharges as any[]) {
-            const id = c.booking_id as string
-            if (!chargesByBooking[id]) chargesByBooking[id] = []
-            chargesByBooking[id].push({
-              amount: c.amount,
-              type: c.charge_type,
-              charge_type: c.charge_type,
-              payment_status: c.payment_status,
-              payment_method: c.payment_method,
-            })
-          }
+        const chargesByBooking = await fetchFolioChargesByBookingIds(supabase, bookingIds)
+        bookingsWithUsers.forEach((b: any) => {
+          const ch = chargesByBooking[b.id] ?? []
+          b.balance = folioPositiveOutstandingSum(ch)
+        })
+
+        const healIds = bookingsWithUsers
+          .filter((b: any) =>
+            shouldReconcileBookingPaymentPaid(
+              {
+                total_amount: b.total_amount,
+                deposit: b.deposit,
+                balance: b._db_balance,
+                payment_status: b.payment_status,
+              },
+              chargesByBooking[b.id] ?? [],
+            ),
+          )
+          .map((b: any) => b.id as string)
+
+        if (healIds.length > 0) {
           bookingsWithUsers.forEach((b: any) => {
-            const ch = chargesByBooking[b.id] ?? []
-            b.balance = folioPositiveOutstandingSum(ch)
+            if (healIds.includes(b.id)) b.payment_status = 'paid'
           })
-
-          const healIds = bookingsWithUsers
-            .filter((b: any) =>
-              shouldReconcileBookingPaymentPaid(
-                {
-                  total_amount: b.total_amount,
-                  deposit: b.deposit,
-                  balance: b._db_balance,
-                  payment_status: b.payment_status,
-                },
-                chargesByBooking[b.id] ?? [],
-              ),
-            )
-            .map((b: any) => b.id as string)
-
-          if (healIds.length > 0) {
-            bookingsWithUsers.forEach((b: any) => {
-              if (healIds.includes(b.id)) b.payment_status = 'paid'
-            })
-            void Promise.all(
-              healIds.map((id: string) =>
-                supabase.from('bookings').update({ payment_status: 'paid' }).eq('id', id),
-              ),
-            )
-          }
+          void Promise.all(
+            healIds.map((id: string) =>
+              supabase.from('bookings').update({ payment_status: 'paid' }).eq('id', id),
+            ),
+          )
         }
       }
 
@@ -333,37 +424,132 @@ export default function BookingsPage() {
         delete b._db_balance
       })
 
-      return groupBulkRows(bookingsWithUsers)
+      return bookingsWithUsers
       }
 
-      const loadBoth = async () => {
-        const [inHouse, catalog] = await Promise.all([
-          loadScope('checked_in'),
-          loadScope('all'),
-        ])
-        setInHouseBookings(inHouse)
-        setAllBookingsCatalog(catalog)
-      }
-
-      await Promise.race([
-        loadBoth(),
+      const inHouse = await Promise.race([
+        loadScope('checked_in'),
         new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('Bookings request timed out')), 25_000),
+          setTimeout(() => reject(new Error('Bookings request timed out')), 20_000),
         ),
       ])
-    } catch (error: any) {
-      console.error('Error fetching bookings:', error)
-      const msg = error?.message === 'Bookings request timed out'
-        ? 'Bookings took too long — showing empty list. Try Refresh or a narrower status filter.'
-        : 'Failed to load bookings'
+      setInHouseBookings(groupBulkRows(inHouse))
+    } catch (error: unknown) {
+      const detail = describeFetchError(error)
+      console.error('Error fetching bookings:', detail, error)
+      const msg =
+        detail === 'Bookings request timed out'
+          ? 'Bookings took too long — showing empty list. Try Refresh or a narrower status filter.'
+          : detail
+            ? `Failed to load bookings: ${detail}`
+            : 'Failed to load bookings'
       toast.error(msg)
       setInHouseBookings([])
-      setAllBookingsCatalog([])
     } finally {
       void refreshRoomStats()
       endFetch()
     }
   }, [organizationId, userId, refreshRoomStats, startFetch, endFetch])
+
+  const fetchBookingsCatalog = useCallback(
+    async (scopeKey: string) => {
+      if (!organizationId) return
+      const supabase = createClient()
+      if (!supabase) return
+
+      setCatalogLoading(true)
+      try {
+        const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+        const fortyFiveDaysAgo = new Date(Date.now() - 45 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+        const sixtyDaysAgo = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+
+        let query = supabase
+          .from('bookings')
+          .select('*, guests(name, phone), rooms(id, room_number, room_type)')
+          .eq('organization_id', organizationId)
+          .limit(BOOKINGS_SCOPE_LIMIT)
+
+        if (scopeKey === 'all') {
+          query = query
+            .in('status', ['confirmed', 'checked_in', 'reserved', 'checked_out'])
+            .gte('check_in', ninetyDaysAgo)
+        } else if (scopeKey === 'checked_out') {
+          query = query.eq('status', 'checked_out').gte('check_out', sixtyDaysAgo)
+        } else {
+          query = query.eq('status', scopeKey).gte('check_in', fortyFiveDaysAgo)
+        }
+
+        const { data, error } = await query
+          .order('check_in', { ascending: false })
+          .order('created_at', { ascending: false })
+
+        if (error) throw error
+
+        const userIds = Array.from(
+          new Set(
+            [...(data || []).map((b: any) => b.created_by), ...(data || []).map((b: any) => b.updated_by)].filter(
+              Boolean,
+            ),
+          ),
+        )
+        const userMap = await fetchUserDisplayNameMap(userIds as string[], userId)
+
+        let bookingsWithUsers = (data || []).map((booking: any) => {
+          let payment_method = 'cash'
+          let ledger_account_name = ''
+          if (booking.notes) {
+            if (booking.notes.startsWith('city_ledger:')) {
+              payment_method = 'city_ledger'
+              ledger_account_name = booking.notes.replace(/^city_ledger:\s*/i, '')
+            } else if (booking.notes.startsWith('City Ledger:')) {
+              payment_method = 'city_ledger'
+              ledger_account_name = booking.notes.replace(/^City Ledger:\s*/, '')
+            } else if (booking.notes.startsWith('payment_method:')) {
+              payment_method = booking.notes.replace(/^payment_method:\s*/, '').split('|')[0].trim()
+              const match = booking.notes.match(/\|ledger:(.+)/)
+              if (match) ledger_account_name = match[1].trim()
+            }
+          }
+          return {
+            ...booking,
+            _db_balance: Number(booking.balance ?? 0),
+            payment_method,
+            ledger_account_name,
+            guestName: booking.guests?.name || '',
+            guestPhone: booking.guests?.phone || '',
+            created_by_name: booking.created_by
+              ? userMap[booking.created_by] || getUserDisplayName(null, booking.created_by)
+              : 'System',
+            updated_by_name: booking.updated_by
+              ? userMap[booking.updated_by] || getUserDisplayName(null, booking.updated_by)
+              : null,
+          }
+        })
+
+        const bookingIds = bookingsWithUsers.map((b: any) => b.id)
+        if (bookingIds.length > 0) {
+          const chargesByBooking = await fetchFolioChargesByBookingIds(supabase, bookingIds)
+          bookingsWithUsers.forEach((b: any) => {
+            b.balance = folioPositiveOutstandingSum(chargesByBooking[b.id] ?? [])
+          })
+        }
+
+        bookingsWithUsers.forEach((b: any) => {
+          delete b._db_balance
+        })
+
+        setAllBookingsCatalog(groupBulkRows(bookingsWithUsers))
+        setCatalogScopeLoaded(scopeKey)
+      } catch (error: unknown) {
+        const detail = describeFetchError(error)
+        console.error('Error fetching bookings catalog:', detail, error)
+        toast.error(detail ? `Search catalog failed: ${detail}` : 'Search catalog failed')
+      } finally {
+        setCatalogLoading(false)
+      }
+    },
+    [organizationId, userId],
+  )
 
   useEffect(() => {
     if (!organizationId) {
@@ -374,6 +560,28 @@ export default function BookingsPage() {
     }
     fetchBookings()
   }, [organizationId, userId, fetchBookings, endFetch])
+
+  useEffect(() => {
+    if (!organizationId) return
+    const searching = tableSearchQuery.trim().length > 0
+    const statusKey = tableFilters.status || 'checked_in'
+    const needsCatalog = searching || statusKey !== 'checked_in'
+    if (!needsCatalog) return
+
+    const scopeKey = searching ? 'all' : statusKey
+    if (catalogLoading) return
+    if (catalogScopeLoaded === scopeKey && allBookingsCatalog.length > 0) return
+
+    void fetchBookingsCatalog(scopeKey)
+  }, [
+    organizationId,
+    tableSearchQuery,
+    tableFilters.status,
+    catalogScopeLoaded,
+    catalogLoading,
+    allBookingsCatalog.length,
+    fetchBookingsCatalog,
+  ])
 
   useEffect(() => {
     if (!organizationId) {
@@ -437,50 +645,6 @@ export default function BookingsPage() {
     const start = typeof checkIn === 'string' ? new Date(checkIn) : checkIn
     const end = typeof checkOut === 'string' ? new Date(checkOut) : checkOut
     return Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24))
-  }
-
-  const groupBulkRows = (rows: Booking[]) => {
-    const grouped = new Map<string, Booking[]>()
-    const singles: Booking[] = []
-
-    rows.forEach((row) => {
-      const groupId = getBulkGroupId(row)
-      if (!groupId) {
-        singles.push(row)
-        return
-      }
-      grouped.set(groupId, [...(grouped.get(groupId) || []), row])
-    })
-
-    const bulkRows = Array.from(grouped.entries()).map(([groupId, groupRows]) => {
-      const first = groupRows[0]
-      const guestNames = Array.from(new Set(groupRows.map(row => row.guests?.name).filter(Boolean)))
-      const roomTypes = Array.from(new Set(groupRows.map(row => row.rooms?.room_type).filter(Boolean)))
-      return {
-        ...first,
-        id: first.id,
-        folio_id: `Bulk ${groupId}`,
-        is_bulk: true,
-        bulk_group_id: groupId,
-        bulk_members: groupRows,
-        room_count: groupRows.length,
-        guest_count: guestNames.length,
-        total_amount: groupRows.reduce((sum, row) => sum + Number(row.total_amount || 0), 0),
-        deposit: groupRows.reduce((sum, row) => sum + Number(row.deposit || 0), 0),
-        balance: groupRows.reduce((sum, row) => sum + Number(row.balance || 0), 0),
-        guests: {
-          name: guestNames.length > 1 ? `${guestNames[0]} + ${guestNames.length - 1} more` : guestNames[0] || 'Bulk Guests',
-          phone: `${groupRows.length} room${groupRows.length === 1 ? '' : 's'}`,
-        },
-        guestName: guestNames.join(' '),
-        rooms: {
-          room_number: `${groupRows.length}`,
-          room_type: roomTypes.join(', ') || 'Multiple rooms',
-        },
-      }
-    })
-
-    return [...bulkRows, ...singles].sort((a, b) => new Date(b.check_in).getTime() - new Date(a.check_in).getTime())
   }
 
   const handleBulkCheckoutFromTable = (bulkRow: Booking) => {

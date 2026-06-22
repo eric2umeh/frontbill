@@ -36,7 +36,7 @@ const PAYMENT_LABELS: Record<string, string> = {
   cash: 'Cash',
   pos: 'POS',
   transfer: 'Transfer',
-  card: 'Card',
+  card: 'POS',
   city_ledger: 'City ledger / room',
 }
 

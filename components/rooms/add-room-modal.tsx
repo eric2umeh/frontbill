@@ -20,6 +20,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge'
 import { toast } from 'sonner'
 import { X } from 'lucide-react'
+import { useAuth } from '@/lib/auth-context'
 
 const availableAmenities = [
   'Work Desk',
@@ -46,6 +47,7 @@ interface AddRoomModalProps {
 }
 
 export function AddRoomModal({ open, onClose, onSuccess }: AddRoomModalProps) {
+  const { userId, organizationId } = useAuth()
   const [formData, setFormData] = useState({
     number: '',
     type: 'Deluxe',
@@ -78,36 +80,17 @@ export function AddRoomModal({ open, onClose, onSuccess }: AddRoomModalProps) {
     setLoading(true)
     try {
       const supabase = createClient()
-
-      // Get current user
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) {
-        toast.error('User not found')
+      const tenantId = organizationId?.trim()
+      const uid = userId?.trim()
+      if (!tenantId || !uid) {
+        toast.error('Missing hotel session — sign in again')
         return
       }
 
-      // Get user's organization and name
-      const { data: profile, error: profileError } = await supabase
-        .from('profiles')
-        .select('organization_id, full_name')
-        .eq('id', user.id)
-        .single()
-
-      if (profileError) {
-        toast.error(profileError.message || 'Failed to load profile')
-        return
-      }
-
-      if (!profile?.organization_id) {
-        toast.error('No organization linked to account. Please log out and sign up again.')
-        return
-      }
-
-      // Create room
       const { error } = await supabase
         .from('rooms')
         .insert([{
-          organization_id: profile.organization_id,
+          organization_id: tenantId,
           room_number: formData.number,
           floor_number: parseInt(formData.floor),
           room_type: formData.type,
@@ -115,7 +98,7 @@ export function AddRoomModal({ open, onClose, onSuccess }: AddRoomModalProps) {
           max_occupancy: formData.capacity,
           status: formData.status,
           amenities: selectedAmenities,
-          created_by: user.id,
+          created_by: uid,
         }])
 
       if (error) throw error
@@ -125,7 +108,7 @@ export function AddRoomModal({ open, onClose, onSuccess }: AddRoomModalProps) {
       // Reset form
       setFormData({
         number: '',
-        type: 'deluxe',
+        type: 'Deluxe',
         floor: '1',
         capacity: 2,
         rate: 25000,

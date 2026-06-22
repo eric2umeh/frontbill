@@ -1252,7 +1252,7 @@ export default function BookingDetailPage({
     })
     .reduce((sum: number, c: any) => sum + Number(c.amount), 0);
 
-  // Paid additional charges (cash/card/pos/transfer on the spot) - for folio display only
+  // Paid additional charges (cash/pos/transfer on the spot) - for folio display only
   const paidAdditionalCharges = folioCharges
     .filter(
       (c: any) =>
@@ -1634,9 +1634,6 @@ export default function BookingDetailPage({
                   <SelectItem value="pos">
                     POS (paid now - not added to Bill Balance)
                   </SelectItem>
-                  <SelectItem value="card">
-                    Card (paid now - not added to Bill Balance)
-                  </SelectItem>
                   <SelectItem value="transfer">
                     Transfer (paid now - not added to Bill Balance)
                   </SelectItem>
@@ -1769,7 +1766,6 @@ export default function BookingDetailPage({
                     <SelectContent>
                       <SelectItem value="cash">Cash</SelectItem>
                       <SelectItem value="pos">POS</SelectItem>
-                      <SelectItem value="card">Card</SelectItem>
                       <SelectItem value="transfer">Transfer</SelectItem>
                     </SelectContent>
                   </Select>
@@ -1827,7 +1823,6 @@ export default function BookingDetailPage({
                     <SelectContent>
                       <SelectItem value="cash">Cash</SelectItem>
                       <SelectItem value="pos">POS</SelectItem>
-                      <SelectItem value="card">Card</SelectItem>
                       <SelectItem value="transfer">Transfer</SelectItem>
                     </SelectContent>
                   </Select>

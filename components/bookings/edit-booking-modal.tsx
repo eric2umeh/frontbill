@@ -67,7 +67,7 @@ const PAYMENT_STATUSES = [
   { value: 'city_ledger', label: 'City ledger' },
 ]
 
-const PAYMENT_METHODS = ['cash', 'card', 'transfer', 'pos', 'city_ledger', 'complimentary']
+const PAYMENT_METHODS = ['cash', 'transfer', 'pos', 'city_ledger', 'complimentary']
 
 function toYmdInput(isoOrYmd: string) {
   if (!isoOrYmd) return ''

@@ -19,7 +19,6 @@ import { Flame, Pencil, Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { RESPONSIVE_HIDE_MD, RESPONSIVE_HIDE_LG } from '@/lib/ui/responsive-table'
 import { PaginatedListShell } from '@/components/shared/paginated-list-shell'
-import { recipeTotalCost } from '@/lib/supply-chain/calculations'
 import { sanitizeQuantityInput, parseQuantityValue } from '@/lib/supply-chain/measurement-units'
 import { batchMaterialShortages } from '@/lib/supply-chain/batch-material-shortages'
 import { BatchMaterialShortageList } from '@/components/supply-chain/batch-material-shortage-list'
@@ -156,6 +155,15 @@ export function KitchenWorkspace() {
     () => new Map(recipes.map((r) => [r.id, r.category])),
     [recipes],
   )
+  const recipeById = useMemo(() => new Map(recipes.map((r) => [r.id, r])), [recipes])
+
+  const displayBatchFoodCostPct = (batch: { recipeId?: string; status: string; batchCost?: number; foodCostPct: number }) => {
+    const recipe = batch.recipeId ? recipeById.get(batch.recipeId) : undefined
+    if (recipe && (batch.status === 'in_progress' || !batch.batchCost || batch.batchCost <= 0)) {
+      return getRecipeEconomics(recipe).marginPct
+    }
+    return batch.foodCostPct
+  }
 
   const openBatchRecipe = batchDialog
     ? recipes.find((r) => r.id === batchDialog.recipeId)
@@ -431,7 +439,7 @@ export function KitchenWorkspace() {
               <div className="grid grid-cols-4 gap-2 text-center text-sm">
                 <div className="rounded-lg bg-muted/50 p-2"><p className="text-muted-foreground">Planned</p><p className="font-bold">{b.plannedPortions}</p></div>
                 <div className="rounded-lg bg-muted/50 p-2"><p className="text-muted-foreground">Actual</p><p className="font-bold">{b.actualPortions || '—'}</p></div>
-                <div className="rounded-lg bg-muted/50 p-2"><p className="text-muted-foreground">Food Cost %</p><p className="font-bold">{b.foodCostPct}%</p></div>
+                <div className="rounded-lg bg-muted/50 p-2"><p className="text-muted-foreground">Food Cost %</p><p className="font-bold">{displayBatchFoodCostPct(b)}%</p></div>
                 <div className="rounded-lg bg-muted/50 p-2"><p className="text-muted-foreground">Variance</p><p className="font-bold">{b.variancePct}%</p></div>
               </div>
               <p className="text-xs"><span className="font-medium">Materials:</span> {b.materialsUsed.join(', ')}</p>
@@ -641,7 +649,7 @@ export function KitchenWorkspace() {
               <TableBody>
                 {recipes.map((r) => {
                   const qty = Number(budgetQty[r.id] ?? 0) || 0
-                  const unitCost = recipeTotalCost(r)
+                  const unitCost = getRecipeEconomics(r).totalCost
                   return (
                     <TableRow key={r.id}>
                       <TableCell className="font-medium">{r.name}</TableCell>
@@ -677,7 +685,7 @@ export function KitchenWorkspace() {
             {formatNaira(
               recipes.reduce((sum, r) => {
                 const qty = Number(budgetQty[r.id] ?? 0) || 0
-                return sum + recipeTotalCost(r) * qty
+                return sum + getRecipeEconomics(r).totalCost * qty
               }, 0),
             )}
           </p>

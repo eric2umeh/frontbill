@@ -22,6 +22,7 @@ import { formatNaira } from '@/lib/utils/currency'
 import { toast } from 'sonner'
 import { createClient } from '@/lib/supabase/client'
 import { isSelectableLedgerName } from '@/lib/utils/ledger-organization'
+import { mergeCounterpartyOrganizationRows } from '@/lib/utils/search-counterparty-organizations'
 import { resolveOrganizationLedgerAccount } from '@/lib/utils/resolve-ledger-account'
 
 interface AddChargeModalProps {
@@ -75,21 +76,26 @@ export function AddChargeModal({ open, onClose, booking }: AddChargeModalProps) 
           .order('account_name'),
         supabase
           .from('organizations')
-          .select('id, name, phone, org_type')
+          .select('id, name, phone, org_type, created_by')
           .neq('id', booking.organization_id!)
           .order('name'),
       ])
 
       if (ledgerError) throw ledgerError
       if (orgError) throw orgError
-      const ledgerOrgs = (ledgerData || [])
-        .filter((d: any) => ['organization', 'corporate'].includes(d.account_type) && isSelectableLedgerName(d.account_name))
-        .map((d: any) => ({ id: d.id, name: d.account_name, balance: d.balance || 0, phone: d.contact_phone, source: 'city_ledger' }))
-      const ledgerNames = new Set(ledgerOrgs.map((org: any) => org.name.toLowerCase()))
-      const menuOrgs = (orgData || [])
-        .filter((d: any) => d.org_type && isSelectableLedgerName(d.name) && !ledgerNames.has(String(d.name || '').toLowerCase()))
-        .map((d: any) => ({ id: d.id, name: d.name, balance: 0, phone: d.phone, source: 'organizations' }))
-      const accounts = [...ledgerOrgs, ...menuOrgs].sort((a, b) => a.name.localeCompare(b.name))
+      const ledgerOrgs = (ledgerData || []).filter((d: any) =>
+        ['organization', 'corporate'].includes(d.account_type),
+      )
+      const menuOrgs = mergeCounterpartyOrganizationRows(orgData || [], ledgerOrgs, booking.organization_id!)
+      const accounts = menuOrgs
+        .map((d) => ({
+          id: d.ledger_account_id || d.id,
+          name: d.name,
+          balance: d.balance ?? 0,
+          phone: d.phone,
+          source: d.source,
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name))
       setOrganizations(accounts)
       setFilteredOrganizations(accounts)
     } catch (error: any) {
@@ -163,7 +169,7 @@ export function AddChargeModal({ open, onClose, booking }: AddChargeModalProps) 
       const supabase = createClient()
       const { data: authData } = await supabase.auth.getUser()
       const currentUserId = authData.user?.id || booking.created_by || null
-      // Cash, POS, card, transfer = paid immediately
+      // Cash, POS, transfer = paid immediately
       // city_ledger = deferred (pending)
       const isPaidNow = paymentMethod !== 'city_ledger' && paymentMethod !== 'deferred'
 
@@ -372,7 +378,6 @@ export function AddChargeModal({ open, onClose, booking }: AddChargeModalProps) 
                   <SelectItem value="pos">POS</SelectItem>
                   <SelectItem value="cash">Cash</SelectItem>
                   <SelectItem value="transfer">Transfer</SelectItem>
-                  <SelectItem value="card">Card</SelectItem>
                   <SelectItem value="city_ledger">City Ledger</SelectItem>
                 </SelectContent>
               </Select>

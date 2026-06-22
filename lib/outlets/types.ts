@@ -2,7 +2,7 @@ import type { OutletDepartmentKey } from '@/lib/outlets/departments'
 
 export type OutletOrderStatus = 'open' | 'settled' | 'void'
 export type OutletOrderType = 'dine_in' | 'takeaway' | 'room_service' | 'walk_in'
-export type OutletPaymentMethod = 'cash' | 'pos' | 'transfer' | 'card' | 'city_ledger' | 'room_charge'
+export type OutletPaymentMethod = 'cash' | 'pos' | 'transfer' | 'city_ledger' | 'room_charge'
 
 export const OUTLET_ITEM_TAGS = [
   { key: 'available', label: 'Available' },

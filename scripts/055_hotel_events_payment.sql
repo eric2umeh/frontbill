@@ -9,7 +9,7 @@ ALTER TABLE public.hotel_events
   ADD COLUMN IF NOT EXISTS balance NUMERIC(12, 2) DEFAULT 0 CHECK (balance >= 0),
   ADD COLUMN IF NOT EXISTS remarks TEXT;
 
-COMMENT ON COLUMN public.hotel_events.payment_method IS 'cash, pos, card, transfer';
+COMMENT ON COLUMN public.hotel_events.payment_method IS 'cash, pos, transfer';
 COMMENT ON COLUMN public.hotel_events.payment_status IS 'paid = full, partial, pending = none yet';
 COMMENT ON COLUMN public.hotel_events.amount_paid IS 'Deposit / amount received at booking';
 COMMENT ON COLUMN public.hotel_events.balance IS 'Estimated value minus amount paid';

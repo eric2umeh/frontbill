@@ -25,10 +25,24 @@ import { Plus, Trash2, Loader2, Users, Building2, ChevronLeft, ChevronRight, X }
 import { format, differenceInDays, addDays } from 'date-fns'
 import { toast } from 'sonner'
 import { formatNaira } from '@/lib/utils/currency'
-import { isOrganizationMenuRecord, isSelectableLedgerName } from '@/lib/utils/ledger-organization'
 import { resolveOrganizationLedgerAccount } from '@/lib/utils/resolve-ledger-account'
 import { formatPersonName, normalizeName, normalizeNameKey } from '@/lib/utils/name-format'
 import { guestOrOrganizationNameTaken } from '@/lib/utils/guest-org-name-uniqueness'
+import {
+  buildCounterpartyOrganizationRow,
+  describeSupabaseError,
+  ensureCityLedgerAccountForCounterparty,
+} from '@/lib/utils/counterparty-organization'
+import { hasPermission } from '@/lib/permissions'
+import { useAuth } from '@/lib/auth-context'
+import { isStayCheckInConsideredBackdated, formatYMDInTimeZone, resolveHotelTimeZone } from '@/lib/hotel-date'
+import type { CounterpartyOrganizationOption } from '@/lib/utils/search-counterparty-organizations'
+import {
+  filterCounterpartyOrganizationsClient,
+  loadCounterpartyOrganizations,
+  searchCounterpartyOrganizations,
+} from '@/lib/utils/search-counterparty-organizations'
+import { syncLedgerOrgCounterpartiesToOrganizationsTable } from '@/lib/utils/sync-ledger-org-counterparties-to-organizations'
 import { appendBulkGroupNote, createBulkGroupId } from '@/lib/utils/bulk-booking'
 import { StayDateRangeFields } from '@/components/shared/stay-date-range-fields'
 import { BOOKING_MODAL_ROOMS_LIMIT, normalizeRoomsForBookingPickers } from '@/lib/utils/room-bookability'
@@ -42,8 +56,6 @@ import {
 } from '@/lib/reservations/reservation-payment-methods'
 import { applyPaymentToGuestCityLedger } from '@/lib/utils/guest-city-ledger'
 import { buildBackdateDedupeKey } from '@/lib/backdate/dedupe-key'
-import { hasPermission } from '@/lib/permissions'
-import { isStayCheckInConsideredBackdated, formatYMDInTimeZone, minSelectableCheckInYmdHotel, resolveHotelTimeZone } from '@/lib/hotel-date'
 
 const ROOM_TYPES_FALLBACK = ['Deluxe', 'Royal', 'Kings', 'Mini Suite', 'Executive Suite', 'Diplomatic Suite']
 
@@ -81,6 +93,7 @@ interface BulkBookingModalProps {
 }
 
 export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservation' }: BulkBookingModalProps) {
+  const { organizationId: authTenantOrgId, userId: authUserId, role: authRole } = useAuth()
   const [step, setStep] = useState(1)
   const [loading, setLoading] = useState(false)
   const [orgId, setOrgId] = useState('')
@@ -103,7 +116,8 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
 
   // Organization search — from organizations table
   const [orgSearch, setOrgSearch] = useState('')
-  const [orgResults, setOrgResults] = useState<any[]>([])
+  const [orgResults, setOrgResults] = useState<CounterpartyOrganizationOption[]>([])
+  const [allCounterpartyOrgs, setAllCounterpartyOrgs] = useState<CounterpartyOrganizationOption[]>([])
   const [orgSearching, setOrgSearching] = useState(false)
   const [selectedOrg, setSelectedOrg] = useState<any>(null)
   const [orgSearchOpen, setOrgSearchOpen] = useState(false)
@@ -161,49 +175,84 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
 
   const fetchBootstrap = async () => {
     const supabase = createClient()
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
-    setCurrentUserId(user.id)
-    const { data: profile } = await supabase.from('profiles').select('organization_id, role').eq('id', user.id).single()
-    if (!profile) return
-    setOrgId(profile.organization_id)
-    setCurrentUserRole(profile.role || '')
-    const [{ data: guestData }, { data: roomData }, { data: bookingData }] = await Promise.all([
-      supabase.from('guests').select('id, name, phone, email').eq('organization_id', profile.organization_id).order('name'),
+    const tenantId = authTenantOrgId?.trim()
+    if (!tenantId) {
+      toast.error('Missing hotel organization — sign in again')
+      return
+    }
+    const userId = authUserId?.trim()
+    if (!userId) return
+
+    setCurrentUserId(userId)
+    setOrgId(tenantId)
+    setCurrentUserRole(authRole || '')
+
+    await syncLedgerOrgCounterpartiesToOrganizationsTable(supabase, {
+      hotelTenantOrganizationId: tenantId,
+      createdByUserId: userId,
+    })
+
+    const [counterpartyOrgs, { data: guestData }, { data: roomData }, { data: bookingData }] = await Promise.all([
+      loadCounterpartyOrganizations(supabase, tenantId),
+      supabase.from('guests').select('id, name, phone, email').eq('organization_id', tenantId).order('name'),
       supabase
         .from('rooms')
         .select('id, room_number, room_type, price_per_night, status')
-        .eq('organization_id', profile.organization_id)
+        .eq('organization_id', tenantId)
         .order('room_number')
         .limit(BOOKING_MODAL_ROOMS_LIMIT),
-      supabase.from('bookings').select('room_id, check_in, check_out').eq('organization_id', profile.organization_id).in('status', ['confirmed', 'reserved', 'checked_in']).limit(BOOKING_MODAL_ROOMS_LIMIT),
+      supabase.from('bookings').select('room_id, check_in, check_out').eq('organization_id', tenantId).in('status', ['confirmed', 'reserved', 'checked_in']).limit(BOOKING_MODAL_ROOMS_LIMIT),
     ])
+    setAllCounterpartyOrgs(counterpartyOrgs)
     setAllGuests(guestData || [])
     setAllRooms(normalizeRoomsForBookingPickers(roomData) as any[])
     setAllActiveBookings(bookingData || [])
   }
 
-  // Search organizations from organizations table (not city_ledger_accounts)
-  const searchOrgs = async (term: string) => {
-    setOrgSearch(term)
-    setSelectedOrg(null)
-    if (!term.trim()) { setOrgResults([]); setOrgSearchOpen(false); return }
-    setOrgSearching(true)
+  const refreshCounterpartyOrgCache = async (term?: string): Promise<CounterpartyOrganizationOption[]> => {
+    const tenantId = orgId || authTenantOrgId
+    if (!tenantId) return []
     try {
       const supabase = createClient()
-      const { data } = await supabase
-        .from('organizations')
-        .select('id, name, email, phone, address, org_type, created_by')
-        .neq('id', orgId)
-        .ilike('name', `%${term}%`)
-        .order('name')
-        .limit(30)
-      const results = (data || []).filter((org: any) => isOrganizationMenuRecord(org, orgId))
-      setOrgResults(results)
-      setOrgSearchOpen(results.length > 0)
-      if (results.length === 0) setShowNewOrgForm(false)
-    } finally {
-      setOrgSearching(false)
+      const rows = term?.trim()
+        ? await searchCounterpartyOrganizations(supabase, {
+            hotelTenantOrganizationId: tenantId,
+            searchTerm: term,
+            limit: 50,
+          })
+        : await loadCounterpartyOrganizations(supabase, tenantId)
+      setAllCounterpartyOrgs(rows)
+      return rows
+    } catch (err: unknown) {
+      console.error('Counterparty org refresh failed:', describeSupabaseError(err), err)
+      return []
+    }
+  }
+
+  // Search organizations — preload cache + client filter (same pattern as guests)
+  const searchOrgs = (term: string) => {
+    setOrgSearch(term)
+    setSelectedOrg(null)
+    if (!term.trim()) {
+      setOrgResults([])
+      setOrgSearchOpen(false)
+      return
+    }
+
+    const filtered = filterCounterpartyOrganizationsClient(allCounterpartyOrgs, term, 30)
+    setOrgResults(filtered)
+    setOrgSearchOpen(filtered.length > 0)
+    if (filtered.length === 0) setShowNewOrgForm(false)
+
+    if (filtered.length === 0) {
+      setOrgSearching(true)
+      void refreshCounterpartyOrgCache(term)
+        .then((rows) => {
+          const refreshed = filterCounterpartyOrganizationsClient(rows, term, 30)
+          setOrgResults(refreshed)
+          setOrgSearchOpen(refreshed.length > 0)
+        })
+        .finally(() => setOrgSearching(false))
     }
   }
 
@@ -222,24 +271,49 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
         toast.error('This name already exists as a guest or organization')
         return
       }
-      const { data, error } = await supabase.from('organizations').insert([{
+      const row = buildCounterpartyOrganizationRow({
         name: newOrgName.trim(),
         org_type: newOrgType || 'other',
-        email: newOrgEmail.trim() || null,
-        phone: newOrgPhone.trim() || null,
-        address: newOrgAddress.trim() || null,
-        contact_person: newOrgContact.trim() || null,
-        current_balance: 0,
-        created_by: currentUserId,
-      }]).select().single()
+        email: newOrgEmail,
+        phone: newOrgPhone,
+        address: newOrgAddress,
+        contact_person: newOrgContact,
+        created_by: currentUserId!,
+      })
+      const { data, error } = await supabase
+        .from('organizations')
+        .insert([row])
+        .select()
+        .single()
       if (error) throw error
-      setSelectedOrg(data)
+      const tenantId = orgId || authTenantOrgId
+      if (tenantId) {
+        await ensureCityLedgerAccountForCounterparty(supabase, tenantId, data.name, {
+          phone: data.phone,
+          email: data.email,
+        })
+      }
+      const createdOption: CounterpartyOrganizationOption = {
+        id: data.id,
+        name: data.name,
+        email: data.email,
+        phone: data.phone,
+        org_type: data.org_type,
+        created_by: data.created_by,
+        source: 'organizations',
+      }
+      setAllCounterpartyOrgs((prev) => {
+        const key = normalizeNameKey(data.name)
+        const rest = prev.filter((o) => normalizeNameKey(o.name) !== key)
+        return [...rest, createdOption].sort((a, b) => a.name.localeCompare(b.name))
+      })
+      setSelectedOrg(createdOption)
       setOrgSearch(data.name)
       setShowNewOrgForm(false)
       setNewOrgName(''); setNewOrgType(''); setNewOrgContact(''); setNewOrgPhone(''); setNewOrgEmail(''); setNewOrgAddress('')
       toast.success(`Organization "${data.name}" created`)
-    } catch (err: any) {
-      toast.error(err.message || 'Failed to create organization')
+    } catch (err: unknown) {
+      toast.error(describeSupabaseError(err) || 'Failed to create organization')
     } finally {
       setCreatingOrg(false)
     }
@@ -260,14 +334,14 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
         return
       }
 
-      const { error: orgInsertError } = await supabase.from('organizations').insert([{
+      const ledgerRow = buildCounterpartyOrganizationRow({
         name: newLedgerOrgName.trim(),
         org_type: 'other',
-        email: newLedgerOrgEmail.trim() || null,
-        phone: newLedgerOrgPhone.trim() || null,
-        current_balance: 0,
-        created_by: currentUserId || null,
-      }])
+        email: newLedgerOrgEmail,
+        phone: newLedgerOrgPhone,
+        created_by: currentUserId || '',
+      })
+      const { error: orgInsertError } = await supabase.from('organizations').insert([ledgerRow])
       if (orgInsertError) throw orgInsertError
 
       const { data, error } = await supabase.from('city_ledger_accounts').insert([{
@@ -284,8 +358,8 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
       setShowNewLedgerOrgForm(false)
       setNewLedgerOrgName(''); setNewLedgerOrgEmail(''); setNewLedgerOrgPhone('')
       toast.success(`Organization account "${data.account_name}" created and selected`)
-    } catch (err: any) {
-      toast.error(err.message || 'Failed to create organization account')
+    } catch (err: unknown) {
+      toast.error(describeSupabaseError(err) || 'Failed to create organization account')
     } finally {
       setCreatingLedgerOrg(false)
     }
@@ -295,7 +369,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
     try {
       const supabase = createClient()
       const resolved = ledgerType === 'organization'
-        ? await resolveOrganizationLedgerAccount(supabase, orgId, account)
+        ? await resolveOrganizationLedgerAccount(supabase, orgId || authTenantOrgId, account)
         : account
       setSelectedLedger(resolved)
       setLedgerSearch(resolved.name || resolved.account_name)
@@ -326,21 +400,28 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
       setLedgerResults(filtered.slice(0, 8))
       setLedgerSearchOpen(filtered.length > 0)
     } else {
-      const supabase = createClient()
-      const [{ data: orgData }, { data: ledgerData }] = await Promise.all([
-        supabase.from('organizations').select('id, name, phone, email, org_type, created_by').neq('id', orgId).ilike('name', `%${term}%`).order('name').limit(30),
-        supabase.from('city_ledger_accounts').select('id, account_name, contact_phone, balance, account_type').eq('organization_id', orgId).ilike('account_name', `%${term}%`).order('account_name').limit(30),
-      ])
-      const fromLedger = (ledgerData || [])
-        .filter((d: any) => ['organization', 'corporate'].includes(d.account_type) && isSelectableLedgerName(d.account_name))
-        .map((d: any) => ({ ...d, name: d.account_name, phone: d.contact_phone, source: 'city_ledger' }))
-      const ledgerNames = new Set(fromLedger.map((d: any) => String(d.name || '').toLowerCase()))
-      const fromOrgs = (orgData || [])
-        .filter((d: any) => isOrganizationMenuRecord(d, orgId) && !ledgerNames.has(String(d.name || '').toLowerCase()))
-        .map((d: any) => ({ ...d, source: 'organizations' }))
-      const results = [...fromLedger, ...fromOrgs]
-      setLedgerResults(results)
-      setLedgerSearchOpen(results.length > 0)
+      const mapLedgerRows = (rows: CounterpartyOrganizationOption[]) =>
+        rows.map((o) => ({
+          ...o,
+          account_name: o.name,
+          contact_phone: o.phone,
+          balance: o.balance ?? 0,
+          source: o.source,
+        }))
+
+      let rows = filterCounterpartyOrganizationsClient(allCounterpartyOrgs, term, 30)
+      if (rows.length > 0) {
+        const results = mapLedgerRows(rows)
+        setLedgerResults(results)
+        setLedgerSearchOpen(true)
+        return
+      }
+
+      void refreshCounterpartyOrgCache(term).then((refreshed) => {
+        const results = mapLedgerRows(filterCounterpartyOrganizationsClient(refreshed, term, 30))
+        setLedgerResults(results)
+        setLedgerSearchOpen(results.length > 0)
+      })
     }
   }
 
@@ -498,6 +579,9 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
           confirm: 'Confirm bulk reservation',
         }
 
+  const bulkBackdateRequestType =
+    wording === 'booking' ? 'bulk_booking' : 'bulk_reservation'
+
   const buildBulkBackdateFingerprint = () => {
     if (!checkIn || !checkOut || !orgId || !currentUserId) return ''
     const cin = toLocalDateStr(checkIn)
@@ -509,7 +593,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
           .sort()
           .join('|')
     const roomsPart = pickedRoomIds.slice().sort().join(',')
-    return [bookingType, cin, cout, entryPart, String(customRate ?? ''), roomsPart].join('§')
+    return [wording, bookingType, cin, cout, entryPart, String(customRate ?? ''), roomsPart].join('§')
   }
 
   const hasApprovedBackdateRequest = async () => {
@@ -518,7 +602,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
     const dedupe = buildBackdateDedupeKey({
       organizationId: orgId,
       requestedBy: currentUserId,
-      requestType: 'bulk_booking',
+      requestType: bulkBackdateRequestType,
       requestedCheckIn: toLocalDateStr(checkIn),
       requestedCheckOut: checkOut ? toLocalDateStr(checkOut) : undefined,
       bulkFingerprint: fp,
@@ -527,7 +611,11 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
     const json = await res.json()
     if (!res.ok) return false
     return (json.requests || []).some((request: any) => {
-      if (request.status !== 'approved' || request.request_type !== 'bulk_booking') return false
+      if (request.status !== 'approved') return false
+      const typeOk =
+        request.request_type === bulkBackdateRequestType ||
+        request.request_type === 'bulk_booking'
+      if (!typeOk) return false
       if (request.dedupe_key === dedupe) return true
       return (
         request.requested_check_in === toLocalDateStr(checkIn)
@@ -549,11 +637,12 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
         credentials: 'include',
         body: JSON.stringify({
           caller_id: currentUserId,
-          request_type: 'bulk_booking',
+          request_type: bulkBackdateRequestType,
           requested_check_in: toLocalDateStr(checkIn),
           requested_check_out: checkOut ? toLocalDateStr(checkOut) : null,
           reason: backdateReason,
           metadata: {
+            wording,
             booking_type: bookingType,
             organization_name: selectedOrg?.name || null,
             room_count: fillLater ? totalRoomsCount : entries.reduce((sum, entry) => sum + entry.numberOfRooms, 0),
@@ -591,6 +680,20 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
     if (isBackdated && !canApproveBackdates && !(await hasApprovedBackdateRequest())) {
       toast.error(copy.backdateBlocked)
       return
+    }
+
+    const hotelTz = resolveHotelTimeZone()
+    const todayYmd = formatYMDInTimeZone(new Date(), hotelTz)
+    const checkInYmd = toLocalDateStr(checkIn)
+    if (!isBackdated) {
+      if (wording === 'booking' && checkInYmd > todayYmd) {
+        toast.error('Bulk booking is for guests checking in today. Use Bulk reservation for future dates.')
+        return
+      }
+      if (wording === 'reservation' && checkInYmd <= todayYmd) {
+        toast.error('Bulk reservation requires a future check-in date. Use Bulk booking for same-day arrivals.')
+        return
+      }
     }
 
     if (!fillLater && entries.length > 0 && !entries[0].guestName.trim()) {
@@ -698,11 +801,8 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
       const guestCache = new Map<string, string | null>()
       const orgNameKey = normalizeNameKey(selectedOrg?.name || '')
       const bulkGroupId = createBulkGroupId()
-      const hotelTz = resolveHotelTimeZone()
-      const todayYmd = formatYMDInTimeZone(new Date(), hotelTz)
-      const checkInYmd = toLocalDateStr(checkIn)
-      /** Walk-in on check-in day = in-house; future arrival = reserved. */
-      const bulkInitialStatus = checkInYmd > todayYmd ? 'reserved' : 'checked_in'
+      /** Bulk booking = same-day check-in; bulk reservation = future arrival, stays reserved. */
+      const bulkInitialStatus = wording === 'booking' ? 'checked_in' : 'reserved'
       const bulkRoomStatus = bulkInitialStatus === 'checked_in' ? 'occupied' : 'reserved'
 
       const findOrCreateGuest = async (name: string, phone?: string | null) => {
@@ -925,7 +1025,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
 
   const handleClose = () => {
     setStep(1); setBookingType('organization')
-    setOrgSearch(''); setOrgResults([]); setSelectedOrg(null); setOrgSearchOpen(false); setShowNewOrgForm(false)
+    setOrgSearch(''); setOrgResults([]); setAllCounterpartyOrgs([]); setSelectedOrg(null); setOrgSearchOpen(false); setShowNewOrgForm(false)
     setNewOrgName(''); setNewOrgType(''); setNewOrgContact(''); setNewOrgPhone(''); setNewOrgEmail(''); setNewOrgAddress('')
     setGroupGuestSearch(''); setGroupGuestResults([]); setSelectedGroupGuest(null); setGroupGuestSearchOpen(false)
     setCheckIn(undefined); setCheckOut(undefined); setBackdateReason(''); setRoomAvailabilityChecked(false); setAvailableRooms([])
@@ -990,16 +1090,22 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
                       placeholder="Search from organization database..."
                       value={orgSearch}
                       onChange={(e) => searchOrgs(e.target.value)}
+                      onFocus={() => {
+                        if (allCounterpartyOrgs.length === 0) void refreshCounterpartyOrgCache()
+                      }}
                       onBlur={() => setTimeout(() => setOrgSearchOpen(false), 150)}
                     />
                     {orgSearching && <Loader2 className="absolute right-3 top-3 h-4 w-4 animate-spin text-muted-foreground" />}
                     {orgSearchOpen && orgResults.length > 0 && (
                       <div className="absolute top-full left-0 right-0 mt-1 bg-background border rounded-md shadow-lg z-50 max-h-48 overflow-y-auto">
-                        {orgResults.map(org => (
-                          <button key={org.id} className="w-full text-left px-4 py-2 hover:bg-accent border-b last:border-b-0 text-sm"
+                        {orgResults.map((org) => (
+                          <button key={`${org.source}-${org.id}`} className="w-full text-left px-4 py-2 hover:bg-accent border-b last:border-b-0 text-sm"
                             onMouseDown={(e) => { e.preventDefault(); setSelectedOrg(org); setOrgSearch(org.name); setOrgSearchOpen(false) }}>
                             <div className="font-medium">{org.name}</div>
-                            <div className="text-xs text-muted-foreground">{org.phone} {org.email ? `· ${org.email}` : ''}</div>
+                            <div className="text-xs text-muted-foreground">
+                              {org.phone || ''}
+                              {org.email && !String(org.email).endsWith('@counterparty.invalid') ? ` · ${org.email}` : ''}
+                            </div>
                           </button>
                         ))}
                       </div>
@@ -1127,10 +1233,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
               }}
               showNights
               disableCalendar={(d) => {
-                const tz = resolveHotelTimeZone()
-                const dayYmd = formatYMDInTimeZone(d, tz)
-                const minYmd = minSelectableCheckInYmdHotel(new Date(), tz)
-                if (!checkIn) return dayYmd < minYmd
+                if (!checkIn) return false
                 if (!checkOut) return d <= checkIn
                 return false
               }}

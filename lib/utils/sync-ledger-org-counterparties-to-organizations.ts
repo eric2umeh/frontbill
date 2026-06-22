@@ -5,6 +5,7 @@ import {
   isSelectableLedgerName,
 } from '@/lib/utils/ledger-organization'
 import { guestOrOrganizationNameTaken } from '@/lib/utils/guest-org-name-uniqueness'
+import { buildCounterpartyOrganizationRow } from '@/lib/utils/counterparty-organization'
 
 /**
  * Ledger org bookings sometimes only have city_ledger_accounts rows; the Organizations menu reads from
@@ -67,12 +68,11 @@ export async function syncLedgerOrgCounterpartiesToOrganizationsTable(
     if (nameBlocked) continue
 
     const { error: insErr } = await supabase.from('organizations').insert([
-      {
+      buildCounterpartyOrganizationRow({
         name: trimmed,
         org_type: 'other',
-        current_balance: 0,
         created_by: createdByUserId,
-      },
+      }),
     ])
     if (insErr) {
       console.warn('[syncLedgerOrgCounterparties] insert skipped:', trimmed, insErr.message)

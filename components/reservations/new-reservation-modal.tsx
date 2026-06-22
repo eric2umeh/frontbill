@@ -23,8 +23,14 @@ import { addDays, differenceInDays, format } from 'date-fns'
 import { Plus, X, Loader2 } from 'lucide-react'
 import { formatNaira } from '@/lib/utils/currency'
 import { toast } from 'sonner'
-import { isOrganizationMenuRecord, isSelectableLedgerName } from '@/lib/utils/ledger-organization'
+import { isSelectableLedgerName } from '@/lib/utils/ledger-organization'
 import { resolveOrganizationLedgerAccount } from '@/lib/utils/resolve-ledger-account'
+import {
+  filterCounterpartyOrganizationsClient,
+  loadCounterpartyOrganizations,
+  searchCounterpartyOrganizations,
+} from '@/lib/utils/search-counterparty-organizations'
+import { syncLedgerOrgCounterpartiesToOrganizationsTable } from '@/lib/utils/sync-ledger-org-counterparties-to-organizations'
 import { formatPersonName, normalizeNameKey } from '@/lib/utils/name-format'
 import { guestOrOrganizationNameTaken } from '@/lib/utils/guest-org-name-uniqueness'
 import { StayDateRangeFields } from '@/components/shared/stay-date-range-fields'
@@ -42,6 +48,7 @@ import {
 import { buildBackdateDedupeKey } from '@/lib/backdate/dedupe-key'
 import { isStayCheckInConsideredBackdated } from '@/lib/hotel-date'
 import { hasPermission } from '@/lib/permissions'
+import { useAuth } from '@/lib/auth-context'
 import {
   FolioRemarksAttachmentsField,
   type FolioRemarksAttachmentsValue,
@@ -68,6 +75,7 @@ interface NewReservationModalProps {
 }
 
 export function NewReservationModal({ open, onClose, onSuccess }: NewReservationModalProps) {
+  const { userId: authUserId, role: authRole, organizationId: authTenantOrgId } = useAuth()
   const [loading, setLoading] = useState(false)
   const [orgId, setOrgId] = useState('')
   const [currentUserId, setCurrentUserId] = useState('')
@@ -115,6 +123,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
   const [newLedgerOrgPhone, setNewLedgerOrgPhone] = useState('')
   const [newLedgerOrgAddress, setNewLedgerOrgAddress] = useState('')
   const [creatingLedgerOrg, setCreatingLedgerOrg] = useState(false)
+  const [allCounterpartyOrgs, setAllCounterpartyOrgs] = useState<any[]>([])
 
   useEffect(() => {
     if (open) {
@@ -134,20 +143,26 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
   const loadData = async () => {
     try {
       const supabase = createClient()
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
-      setCurrentUserId(user.id)
-      const { data: profile } = await supabase.from('profiles').select('organization_id, role').eq('id', user.id).single()
-      if (!profile?.organization_id) return
-      setOrgId(profile.organization_id)
-      setCurrentUserRole(profile.role || '')
+      const tenantId = authTenantOrgId?.trim()
+      const uid = authUserId?.trim()
+      if (!tenantId || !uid) return
 
-      const [{ data: guestData }, { data: roomData }, { data: bookingData }] = await Promise.all([
-        supabase.from('guests').select('id, name, phone, email, address').eq('organization_id', profile.organization_id).order('name'),
-        supabase.from('rooms').select('id, room_number, room_type, price_per_night, status').eq('organization_id', profile.organization_id).order('room_number').limit(BOOKING_MODAL_ROOMS_LIMIT),
-        // Fetch active bookings to check date availability
-        supabase.from('bookings').select('room_id, check_in, check_out').eq('organization_id', profile.organization_id).in('status', ['confirmed', 'reserved', 'checked_in']).limit(BOOKING_MODAL_ROOMS_LIMIT),
+      setCurrentUserId(uid)
+      setOrgId(tenantId)
+      setCurrentUserRole(authRole || '')
+
+      await syncLedgerOrgCounterpartiesToOrganizationsTable(supabase, {
+        hotelTenantOrganizationId: tenantId,
+        createdByUserId: uid,
+      })
+
+      const [{ data: guestData }, { data: roomData }, { data: bookingData }, counterpartyOrgs] = await Promise.all([
+        supabase.from('guests').select('id, name, phone, email, address').eq('organization_id', tenantId).order('name'),
+        supabase.from('rooms').select('id, room_number, room_type, price_per_night, status').eq('organization_id', tenantId).order('room_number').limit(BOOKING_MODAL_ROOMS_LIMIT),
+        supabase.from('bookings').select('room_id, check_in, check_out').eq('organization_id', tenantId).in('status', ['confirmed', 'reserved', 'checked_in']).limit(BOOKING_MODAL_ROOMS_LIMIT),
+        loadCounterpartyOrganizations(supabase, tenantId),
       ])
+      setAllCounterpartyOrgs(counterpartyOrgs)
       setGuests(guestData || [])
       setRooms(normalizeRoomsForBookingPickers(roomData) as any[])
       setAllBookings(bookingData || [])
@@ -186,61 +201,66 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
     setLedgerSearch(term)
     setSelectedLedger(null)
     if (!term.trim()) { setLedgerResults([]); setLedgerSearchOpen(false); return }
-    const supabase = createClient()
 
-    // Re-fetch orgId from profile in case state hasn't populated yet
-    let effectiveOrgId = orgId
-    if (!effectiveOrgId) {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (user) {
-        const { data: profile } = await supabase.from('profiles').select('organization_id').eq('id', user.id).single()
-        effectiveOrgId = profile?.organization_id || ''
-        if (effectiveOrgId) setOrgId(effectiveOrgId)
-      }
-    }
+    const effectiveOrgId = orgId || authTenantOrgId
     if (!effectiveOrgId) return
 
-    // Query both city_ledger_accounts AND organizations table (same as new-booking-modal)
-    const [{ data: ledgerData }, { data: orgTableData }] = await Promise.all([
-      supabase
+    if (ledgerType === 'individual') {
+      const supabase = createClient()
+      const searchTerm = normalizeNameKey(term)
+      const fromGuests = guests.filter(
+        (g) => normalizeNameKey(g.name).includes(searchTerm) || (g.phone || '').includes(term),
+      )
+      if (fromGuests.length > 0) {
+        setLedgerResults(fromGuests.slice(0, 8))
+        setLedgerSearchOpen(true)
+        return
+      }
+      const { data: ledgerData } = await supabase
         .from('city_ledger_accounts')
         .select('id, account_name, account_type, contact_phone, balance')
         .eq('organization_id', effectiveOrgId)
         .ilike('account_name', `%${term}%`)
-        .limit(10),
-      ledgerType === 'organization'
-        ? supabase
-            .from('organizations')
-            .select('id, name, phone, org_type, created_by')
-            .neq('id', effectiveOrgId)
-            .ilike('name', `%${term}%`)
-            .limit(5)
-        : Promise.resolve({ data: [] }),
-    ])
+        .limit(10)
+      const fromLedger = (ledgerData || [])
+        .filter(
+          (d: any) =>
+            ['individual', 'guest'].includes(d.account_type) && isSelectableLedgerName(d.account_name),
+        )
+        .map((d: any) => ({ ...d, name: d.account_name, source: 'city_ledger' as const }))
+      setLedgerResults(fromLedger)
+      setLedgerSearchOpen(fromLedger.length > 0)
+      return
+    }
 
-    const fromLedger = (ledgerData || [])
-      .filter((d: any) => ledgerType === 'individual'
-        ? ['individual', 'guest'].includes(d.account_type) && isSelectableLedgerName(d.account_name)
-        : ['organization', 'corporate'].includes(d.account_type) && isSelectableLedgerName(d.account_name))
-      .map((d: any) => ({ ...d, name: d.account_name, source: 'city_ledger' as const }))
+    const mapOrgRows = (rows: ReturnType<typeof filterCounterpartyOrganizationsClient>) =>
+      rows.map((o) => ({
+        id: o.ledger_account_id || o.id,
+        name: o.name,
+        account_name: o.name,
+        account_type: 'organization' as const,
+        contact_phone: o.phone || '',
+        balance: o.balance ?? 0,
+        source: o.source,
+      }))
 
-    const fromOrgs = ledgerType === 'organization'
-      ? (orgTableData || [])
-          .filter((o: any) => isOrganizationMenuRecord(o, effectiveOrgId) && !fromLedger.some((l: any) => l.name.toLowerCase() === o.name.toLowerCase()))
-          .map((o: any) => ({
-            id: o.id,
-            name: o.name,
-            account_name: o.name,
-            account_type: 'organization' as const,
-            contact_phone: o.phone || '',
-            balance: 0,
-            source: 'organizations' as const,
-          }))
-      : []
+    let filtered = filterCounterpartyOrganizationsClient(allCounterpartyOrgs, term, 20)
+    if (filtered.length > 0) {
+      setLedgerResults(mapOrgRows(filtered))
+      setLedgerSearchOpen(true)
+      return
+    }
 
-    const combined = [...fromLedger, ...fromOrgs]
-    setLedgerResults(combined)
-    setLedgerSearchOpen(combined.length > 0)
+    const supabase = createClient()
+    const refreshed = await searchCounterpartyOrganizations(supabase, {
+      hotelTenantOrganizationId: effectiveOrgId,
+      searchTerm: term,
+      limit: 50,
+    })
+    setAllCounterpartyOrgs(refreshed)
+    filtered = filterCounterpartyOrganizationsClient(refreshed, term, 20)
+    setLedgerResults(mapOrgRows(filtered))
+    setLedgerSearchOpen(filtered.length > 0)
   }
 
   const createNewLedgerOrg = async () => {

@@ -113,7 +113,6 @@ export function PaymentsTable({ payments }: PaymentsTableProps) {
             { value: 'cash', label: 'Cash' },
             { value: 'pos', label: 'POS' },
             { value: 'transfer', label: 'Transfer' },
-            { value: 'card', label: 'Card' },
           ],
         },
       ]}

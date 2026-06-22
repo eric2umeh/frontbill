@@ -29,7 +29,7 @@ export function formatReceiptPaymentMethod(
   const map: Record<string, string> = {
     cash: "Cash",
     pos: "POS",
-    card: "Card",
+    card: "POS",
     transfer: "Transfer",
     bank_transfer: "Transfer",
     pending: "Pending (hold)",

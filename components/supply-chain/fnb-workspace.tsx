@@ -22,7 +22,7 @@ export function FnbWorkspace() {
   const [tab, setTab] = useState('orders')
   const [orderOpen, setOrderOpen] = useState(false)
   const [table, setTable] = useState('')
-  const [settlement, setSettlement] = useState('card')
+  const [settlement, setSettlement] = useState('pos')
   const [cart, setCart] = useState<Record<string, number>>({})
   const [search, setSearch] = useState('')
   const actor = { name: name ?? 'F&B', role: canonicalRoleKey(role) ?? 'food_beverage' }
@@ -165,7 +165,7 @@ export function FnbWorkspace() {
               <Select value={settlement} onValueChange={setSettlement}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="card">Card / POS</SelectItem>
+                  <SelectItem value="pos">POS</SelectItem>
                   <SelectItem value="cash">Cash</SelectItem>
                   <SelectItem value="room">Charge to room</SelectItem>
                 </SelectContent>

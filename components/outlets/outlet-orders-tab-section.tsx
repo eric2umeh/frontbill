@@ -297,7 +297,6 @@ export function OutletOrdersTabSection({
               <SelectItem value="cash">Cash</SelectItem>
               <SelectItem value="pos">POS</SelectItem>
               <SelectItem value="transfer">Transfer</SelectItem>
-              <SelectItem value="card">Card</SelectItem>
               <SelectItem value="city_ledger">City ledger</SelectItem>
               <SelectItem value="room_charge">Room charge</SelectItem>
               <SelectItem value="complimentary">Complimentary</SelectItem>

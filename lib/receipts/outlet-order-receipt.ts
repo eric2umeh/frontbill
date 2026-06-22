@@ -39,7 +39,7 @@ export function outletReceiptPaymentLabel(method: string | null | undefined): st
   const map: Record<string, string> = {
     cash: 'CASH',
     pos: 'POS',
-    card: 'CARD',
+    card: 'POS',
     transfer: 'TRANSFER',
     city_ledger: 'Folio Transfer',
     room_charge: 'Folio Transfer',
