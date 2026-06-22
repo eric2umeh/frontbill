@@ -51,7 +51,19 @@ export function unitFactorDefinition(
   if (store === selected) return null
   if (convertQtyBetweenUnits(1, selected, store) != null) return null
 
-  const containerUnits = new Set(['crate', 'pack', 'bag', 'basket', 'tin', 'can', 'set', 'roll'])
+  const containerUnits = new Set([
+    'crate',
+    'pack',
+    'bag',
+    'basket',
+    'tin',
+    'can',
+    'set',
+    'roll',
+    'carton',
+    'mudu',
+    'cup',
+  ])
   if (containerUnits.has(selected) && !containerUnits.has(store)) {
     return {
       storageKey: `__per_${selected}`,
