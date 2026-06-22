@@ -346,6 +346,8 @@ export interface RecipeIngredient {
   quantity: number
   unit: string
   cost: number
+  /** Shown on recipe but excluded from portion yield / batch cost. */
+  optional?: boolean
 }
 
 export interface Recipe {
@@ -373,6 +375,10 @@ export interface BatchMaterialLine {
   unit: string
   quantity: number
   unitCost: number
+  /** Garnish / optional — listed on recipe, not in portion cost. */
+  optional?: boolean
+  /** Computed line cost in naira (set when saving batch). */
+  lineCost?: number
 }
 
 export interface CreateKitchenBatchInput {
