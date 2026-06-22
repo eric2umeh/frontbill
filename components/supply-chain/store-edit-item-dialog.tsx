@@ -34,9 +34,10 @@ import { UnitSelect } from '@/components/supply-chain/unit-select'
 import { StoreDeptMultiSelect } from '@/components/supply-chain/store-dept-multi-select'
 import { unitFactorDefinition } from '@/lib/supply-chain/unit-factor-storage'
 import type { UnitFactorMap } from '@/lib/supply-chain/unit-factor-types'
+import { storeUnitPriceFromEntryPrice, purchaseUnitPriceFromStorePrice } from '@/lib/supply-chain/purchase-unit-pricing'
+import { PURCHASE_CONVERSION_UNITS } from '@/lib/supply-chain/conversion-units'
 
 type Dept = Exclude<SupplyDept, 'all'>
-const CONVERSION_UNITS = ['pack', 'carton', 'bag', 'roll', 'crate', 'tin', 'can', 'bottle', 'pcs'] as const
 
 type Props = {
   item: StoreItem | null
@@ -77,19 +78,33 @@ export function StoreEditItemDialog({ item, open, onOpenChange, onSave }: Props)
     setUnit(item.unit)
     setDepts(storeItemDepartments(item))
     setReorder(numberInputValue(item.reorderLevel))
-    setPrice(numberInputValue(item.lastPrice))
-    setBenchmark(numberInputValue(item.benchmarkPrice))
     setQty(numberInputValue(item.quantityInStore))
     setKitchenCategory(item.kitchenCategory ?? 'other')
     const savedFactor = Object.entries(item.unitFactors ?? {})[0]
+    let convUnit = 'pack'
+    let convQty = ''
     if (savedFactor) {
       const [key, value] = savedFactor
-      setConversionUnit(key.startsWith('__per_') ? key.replace('__per_', '') : key)
-      setConversionQty(numberInputValue(value))
+      convUnit = key.startsWith('__per_') ? key.replace('__per_', '') : key
+      convQty = numberInputValue(value)
+      setConversionUnit(convUnit)
+      setConversionQty(convQty)
     } else {
       setConversionUnit('pack')
       setConversionQty('')
     }
+    const def = unitFactorDefinition(item.unit, convUnit)
+    const factors = item.unitFactors
+    const displayPrice =
+      factors && def && convQty
+        ? purchaseUnitPriceFromStorePrice(item.lastPrice, convUnit, item.unit, factors)
+        : item.lastPrice
+    const displayBenchmark =
+      factors && def && convQty
+        ? purchaseUnitPriceFromStorePrice(item.benchmarkPrice, convUnit, item.unit, factors)
+        : item.benchmarkPrice
+    setPrice(numberInputValue(displayPrice))
+    setBenchmark(numberInputValue(displayBenchmark))
   }, [item, open])
 
   if (!item) return null
@@ -117,7 +132,7 @@ export function StoreEditItemDialog({ item, open, onOpenChange, onSave }: Props)
             </div>
           </div>
           <div className="sm:col-span-2 rounded-md border border-dashed bg-muted/20 p-2">
-            <Label className="text-xs">Pack / issue conversion (optional)</Label>
+            <Label className="text-xs">Purchase conversion (optional)</Label>
             <p className="mt-1 text-[10px] text-muted-foreground">
               Use this for accountable buying and issuing. Example: 1 pack = 9 pcs.
             </p>
@@ -127,7 +142,7 @@ export function StoreEditItemDialog({ item, open, onOpenChange, onSave }: Props)
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {CONVERSION_UNITS.map((u) => (
+                  {PURCHASE_CONVERSION_UNITS.map((u) => (
                     <SelectItem key={u} value={u}>
                       {u}
                     </SelectItem>
@@ -228,14 +243,24 @@ export function StoreEditItemDialog({ item, open, onOpenChange, onSave }: Props)
                 conversionDef && Number.isFinite(conversionCount) && conversionCount > 0
                   ? { [conversionDef.storageKey]: conversionCount }
                   : undefined
+              const rawPrice = Number(price) || 0
+              const lastPrice =
+                unitFactors && conversionDef
+                  ? storeUnitPriceFromEntryPrice(rawPrice, unit.trim(), conversionUnit, unitFactors)
+                  : rawPrice
+              const rawBenchmark = Number(benchmark) || rawPrice
+              const benchmarkPrice =
+                unitFactors && conversionDef
+                  ? storeUnitPriceFromEntryPrice(rawBenchmark, unit.trim(), conversionUnit, unitFactors)
+                  : rawBenchmark || lastPrice
               const res = onSave({
                 name: toTitleCaseWords(name),
                 unit: unit.trim(),
                 dept: normalized.dept,
                 depts: normalized.depts ?? [normalized.dept],
                 reorderLevel: Number(reorder) || 0,
-                lastPrice: Number(price) || 0,
-                benchmarkPrice: Number(benchmark) || Number(price) || 0,
+                lastPrice,
+                benchmarkPrice,
                 quantityInStore: Math.max(0, Number(qty) || 0),
                 kitchenCategory: selected.includes('kitchen') ? kitchenCategory : undefined,
                 unitFactors,
