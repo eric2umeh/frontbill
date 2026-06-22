@@ -60,6 +60,7 @@ import {
   mergeUnitFactors,
   needsUnitFactor,
 } from '@/lib/supply-chain/unit-factor-storage'
+import { purchaseUnitPriceFromStorePrice } from '@/lib/supply-chain/purchase-unit-pricing'
 import { UnitSelect } from '@/components/supply-chain/unit-select'
 import { UnitConversionField } from '@/components/supply-chain/unit-conversion-field'
 import type { IssueOutCartLine, StoreItem } from '@/lib/supply-chain/types'
@@ -246,13 +247,18 @@ export function StoreWorkspace() {
       toast.error(`Set pack size for ${item.name} (${unitLabel(purchaseUnit)} per ${unitLabel(item.unit)})`)
       return
     }
-    const fallbackPurchasePrice =
-      qty > 0 ? (storeQty / qty) * item.lastPrice : item.lastPrice
+    const factors = factorsFor(item)
+    const defaultPurchasePrice = purchaseUnitPriceFromStorePrice(
+      item.lastPrice,
+      purchaseUnit,
+      item.unit,
+      factors,
+    )
     const purchaseUnitPrice =
       Number(purchasePriceMap[item.id]) > 0
         ? Number(purchasePriceMap[item.id])
-        : fallbackPurchasePrice
-    const storeUnitPrice = storeQty > 0 ? (qty * purchaseUnitPrice) / storeQty : item.lastPrice
+        : defaultPurchasePrice
+    const storeUnitPrice = item.lastPrice
     const err = setBasketLineQty(item, storeQty, storeUnitPrice, actor, {
       purchaseUnit,
       purchaseQty: qty,
@@ -1239,10 +1245,13 @@ export function StoreWorkspace() {
                           const qty = parseQuantityValue(rawQty)
                           const storeQty =
                             qty > 0 ? toStoreQty(item, qty, purchaseUnit) : null
-                          const defaultPurchasePrice =
-                            storeQty != null && qty > 0
-                              ? (storeQty / qty) * item.lastPrice
-                              : item.lastPrice
+                          const factors = factorsFor(item)
+                          const defaultPurchasePrice = purchaseUnitPriceFromStorePrice(
+                            item.lastPrice,
+                            purchaseUnit,
+                            item.unit,
+                            factors,
+                          )
                           const price = Number(purchasePriceMap[item.id]) > 0
                             ? Number(purchasePriceMap[item.id])
                             : defaultPurchasePrice
@@ -1319,7 +1328,7 @@ export function StoreWorkspace() {
                                 <p className="text-[11px] text-muted-foreground">
                                   Receives {storeQty} {unitLabel(item.unit)} into store
                                   {price > 0
-                                    ? ` · computed ${formatNaira((qty * price) / storeQty)}/${unitLabel(item.unit)}`
+                                    ? ` · ${formatNaira(item.lastPrice)}/${unitLabel(item.unit)} in store`
                                     : ''}
                                 </p>
                               )}
@@ -1363,10 +1372,12 @@ export function StoreWorkspace() {
                               const qty = parseQuantityValue(rawQty)
                               const storeQty =
                                 qty > 0 ? toStoreQty(item, qty, purchaseUnit) : null
-                              const defaultPurchasePrice =
-                                storeQty != null && qty > 0
-                                  ? (storeQty / qty) * item.lastPrice
-                                  : item.lastPrice
+                              const defaultPurchasePrice = purchaseUnitPriceFromStorePrice(
+                                item.lastPrice,
+                                purchaseUnit,
+                                item.unit,
+                                factorsFor(item),
+                              )
                               const price = Number(purchasePriceMap[item.id]) > 0
                                 ? Number(purchasePriceMap[item.id])
                                 : defaultPurchasePrice
@@ -1463,7 +1474,7 @@ export function StoreWorkspace() {
                                     <p className="mt-1 text-[10px] text-muted-foreground">
                                       per {unitLabel(purchaseUnit)}
                                       {storeQty != null && storeQty > 0
-                                        ? ` · ${formatNaira((qty * price) / storeQty)}/${unitLabel(item.unit)}`
+                                        ? ` · ${formatNaira(item.lastPrice)}/${unitLabel(item.unit)} in store`
                                         : ''}
                                     </p>
                                   </TableCell>
