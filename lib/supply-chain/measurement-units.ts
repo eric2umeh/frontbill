@@ -6,6 +6,7 @@ import {
   convertToStoreUnitsWithFactors,
   type UnitFactorMap,
 } from '@/lib/supply-chain/unit-factor-storage'
+import { convertQtyBetweenUnits } from '@/lib/supply-chain/recipe-units'
 
 export {
   DEFAULT_MEASUREMENT_UNIT,
@@ -31,7 +32,12 @@ export function convertToStoreUnits(
     unitFactors,
   )
   if (converted != null) return converted
-  return qty
+  const from = normalizeMeasurementUnit(fromUnit)
+  const store = normalizeMeasurementUnit(storeUnit)
+  if (from === store) return qty
+  const viaSi = convertQtyBetweenUnits(qty, from, store)
+  if (viaSi != null) return viaSi
+  return 0
 }
 
 /** Prevent awkward leading zeros while typing (e.g. 007 → 7, keep 0.5 and 1/4). */
