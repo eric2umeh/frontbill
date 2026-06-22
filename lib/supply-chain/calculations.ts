@@ -10,7 +10,7 @@ export function recipeOverheadTotal(recipe: Recipe): number {
 }
 
 export function recipeTotalCost(recipe: Recipe): number {
-  const ingredients = recipe.ingredients.reduce((s, i) => s + i.cost, 0)
+  const ingredients = recipe.ingredients.reduce((s, i) => s + (i.optional ? 0 : i.cost), 0)
   return ingredients + recipeOverheadTotal(recipe)
 }
 
