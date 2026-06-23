@@ -19,3 +19,15 @@ export function resolveSupplySnapshot<T extends { id: string }>(
   if (remoteArr.length === 0) return local
   return mergeSnapshotRowsById(remoteArr, local)
 }
+
+/**
+ * Pick the snapshot array that should become local React state for append-only
+ * workflow snapshots that are migrated from localStorage into cloud storage.
+ */
+export function resolveLongerSupplySnapshot<T>(
+  local: T[],
+  remote: unknown,
+): T[] {
+  const remoteArr = Array.isArray(remote) ? (remote as T[]) : []
+  return local.length > remoteArr.length ? local : remoteArr
+}

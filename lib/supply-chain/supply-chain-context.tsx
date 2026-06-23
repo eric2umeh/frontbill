@@ -87,7 +87,7 @@ import {
   syncSupplyCatalog,
   updateSupplyCatalogItem,
 } from "./supply-db-client";
-import { resolveSupplySnapshot } from "./snapshot-merge";
+import { resolveLongerSupplySnapshot, resolveSupplySnapshot } from "./snapshot-merge";
 
 function notifyKitchenRawStockChanged() {
   if (typeof window !== "undefined") {
@@ -534,6 +534,16 @@ function useSupplyChainImpl() {
           ACTIVITY_LOG_STORAGE_KEY,
           EMPTY_ACTIVITY_LOG,
         );
+        const localPurchaseOrders = loadPersistedStock<PurchaseOrder>(
+          PURCHASE_ORDERS_STORAGE_KEY,
+          EMPTY_PURCHASE_ORDERS,
+        );
+        const localIssueOutLog = loadPersistedStock<IssueOutRecord>(
+          ISSUE_OUT_LOG_STORAGE_KEY,
+          EMPTY_ISSUE_OUT_LOG,
+        );
+        const localPendingItems = loadPersistedStock<PendingStoreItem>(PENDING_STORE_ITEMS_KEY, []);
+        const localBasket = loadPersistedStock<BasketLine>(BASKET_STORAGE_KEY, EMPTY_BASKET);
 
         const mergedRecipes = resolveSupplySnapshot(localRecipes, snapshots.recipes);
         const mergedBatches = resolveSupplySnapshot(localBatches, snapshots.batches);
@@ -542,6 +552,19 @@ function useSupplyChainImpl() {
         const mergedBarStock = resolveSupplySnapshot(localBarStock, snapshots.bar_stock);
         const mergedFnbRaw = resolveSupplySnapshot(localFnbRaw, snapshots.fnb_raw_stock);
         const mergedActivity = resolveSupplySnapshot(localActivity, snapshots.activity_log);
+        const mergedPurchaseOrders = resolveLongerSupplySnapshot(
+          localPurchaseOrders,
+          snapshots.purchase_orders,
+        );
+        const mergedIssueOutLog = resolveLongerSupplySnapshot(
+          localIssueOutLog,
+          snapshots.issue_out_log,
+        );
+        const mergedPendingItems = resolveLongerSupplySnapshot(
+          localPendingItems,
+          snapshots.pending_items,
+        );
+        const mergedBasket = resolveLongerSupplySnapshot(localBasket, snapshots.basket);
 
         if (mergedRecipes.length) setRecipes(mergedRecipes);
         if (mergedBatches.length) setBatches(mergedBatches);
@@ -550,18 +573,10 @@ function useSupplyChainImpl() {
         if (mergedBarStock.length) setBarStock(mergedBarStock);
         if (mergedFnbRaw.length) setFnbRawStock(mergedFnbRaw);
         if (mergedActivity.length) setActivityLog(mergedActivity);
-        if (Array.isArray(snapshots.purchase_orders) && snapshots.purchase_orders.length) {
-          setPurchaseOrders(snapshots.purchase_orders as PurchaseOrder[]);
-        }
-        if (Array.isArray(snapshots.issue_out_log) && snapshots.issue_out_log.length) {
-          setIssueOutLog(snapshots.issue_out_log as IssueOutRecord[]);
-        }
-        if (Array.isArray(snapshots.pending_items) && snapshots.pending_items.length) {
-          setPendingStoreItems(snapshots.pending_items as PendingStoreItem[]);
-        }
-        if (Array.isArray(snapshots.basket) && snapshots.basket.length) {
-          setBasket(snapshots.basket as BasketLine[]);
-        }
+        if (mergedPurchaseOrders.length) setPurchaseOrders(mergedPurchaseOrders);
+        if (mergedIssueOutLog.length) setIssueOutLog(mergedIssueOutLog);
+        if (mergedPendingItems.length) setPendingStoreItems(mergedPendingItems);
+        if (mergedBasket.length) setBasket(mergedBasket);
 
         if (catalog.length === 0 && localCatalog.length > 0) {
           await syncSupplyCatalog(userId, localCatalog, organizationId || undefined);
@@ -575,16 +590,10 @@ function useSupplyChainImpl() {
           bar_stock: mergedBarStock,
           fnb_raw_stock: mergedFnbRaw,
           activity_log: mergedActivity,
-          purchase_orders: loadPersistedStock<PurchaseOrder>(
-            PURCHASE_ORDERS_STORAGE_KEY,
-            EMPTY_PURCHASE_ORDERS,
-          ),
-          issue_out_log: loadPersistedStock<IssueOutRecord>(
-            ISSUE_OUT_LOG_STORAGE_KEY,
-            EMPTY_ISSUE_OUT_LOG,
-          ),
-          pending_items: loadPersistedStock<PendingStoreItem>(PENDING_STORE_ITEMS_KEY, []),
-          basket: loadPersistedStock<BasketLine>(BASKET_STORAGE_KEY, EMPTY_BASKET),
+          purchase_orders: mergedPurchaseOrders,
+          issue_out_log: mergedIssueOutLog,
+          pending_items: mergedPendingItems,
+          basket: mergedBasket,
         };
         const toUpload: Record<string, unknown> = {};
         for (const [key, localRows] of Object.entries(localSnapshots)) {
