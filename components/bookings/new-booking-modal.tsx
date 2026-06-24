@@ -42,7 +42,8 @@ import { BOOKING_MODAL_ROOMS_LIMIT, normalizeRoomsForBookingPickers } from '@/li
 import { Checkbox } from '@/components/ui/checkbox'
 import { insertFolioCharges } from '@/lib/utils/insert-folio-charges'
 import { applyPaymentToGuestCityLedger } from '@/lib/utils/guest-city-ledger'
-import { buildBackdateDedupeKey } from '@/lib/backdate/dedupe-key'
+import { buildBackdateDedupeKey, buildBackdateIntentFingerprint } from '@/lib/backdate/dedupe-key'
+import { isMatchingApprovedBackdateRequest } from '@/lib/backdate/approval-match'
 import type { SerializedBookingPayload } from '@/lib/backdate/booking-payload'
 import { isStayCheckInConsideredBackdated } from '@/lib/hotel-date'
 import {
@@ -562,6 +563,8 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
     if (!checkInDate) return false
     const orgKey = organizationId || authOrganizationId || ''
     if (!orgKey || !selectedRoom?.id) return false
+    const bookingPayload = buildBookingBackdatePayload()
+    if (!bookingPayload) return false
     const dedupe = buildBackdateDedupeKey({
       organizationId: orgKey,
       requestedBy: userId,
@@ -569,19 +572,16 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
       requestedCheckIn: toLocalDateStr(checkInDate),
       requestedCheckOut: checkOutDate ? toLocalDateStr(checkOutDate) : undefined,
       roomId: selectedRoom.id,
+      intentFingerprint: buildBackdateIntentFingerprint(bookingPayload),
     })
     const res = await fetch(`/api/backdate-requests?caller_id=${userId}`, { credentials: 'include' })
     const json = await res.json()
     if (!res.ok) return false
     return (json.requests || []).some((request: any) => {
-      if (request.status !== 'approved' || request.request_type !== 'booking') return false
-      if (request.dedupe_key === dedupe) return true
-      const md = request.metadata || {}
-      return (
-        request.requested_check_in === toLocalDateStr(checkInDate)
-        && (!checkOutDate || request.requested_check_out === toLocalDateStr(checkOutDate))
-        && (md.room_id ?? null) === (selectedRoom?.id ?? null)
-      )
+      return isMatchingApprovedBackdateRequest(request, {
+        requestType: 'booking',
+        dedupeKey: dedupe,
+      })
     })
   }
 
@@ -640,6 +640,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
             guest_name: fullName || guestId,
             room_id: selectedRoom.id,
             booking_payload,
+            dedupe_fingerprint: buildBackdateIntentFingerprint(booking_payload),
           },
         }),
       })

@@ -45,7 +45,8 @@ import {
   RESERVATION_PAYMENT_METHOD_PENDING,
   type ReservationPaymentMethod,
 } from '@/lib/reservations/reservation-payment-methods'
-import { buildBackdateDedupeKey } from '@/lib/backdate/dedupe-key'
+import { buildBackdateDedupeKey, buildBackdateIntentFingerprint } from '@/lib/backdate/dedupe-key'
+import { isMatchingApprovedBackdateRequest } from '@/lib/backdate/approval-match'
 import { isStayCheckInConsideredBackdated } from '@/lib/hotel-date'
 import { hasPermission } from '@/lib/permissions'
 import { useAuth } from '@/lib/auth-context'
@@ -412,8 +413,23 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
   const canApproveBackdates = hasPermission(currentUserRole, 'backdate:approve')
   const isBackdated = checkInDate ? isStayCheckInConsideredBackdated(toLocalDateStr(checkInDate)) : false
 
+  const buildReservationBackdateMetadata = () => ({
+    guest_name: fullName || guestId,
+    guest_phone: phone || null,
+    room_id: selectedRoom?.id || null,
+    room_number: selectedRoom?.room_number || null,
+    room_type: selectedRoom?.room_type || null,
+    price_per_night: pricePerNight,
+    custom_price: customPrice !== '' ? Number(customPrice) : 0,
+    nights,
+    payment_method: paymentMethod,
+    payment_status: paymentStatus,
+    amount_paid: partialAmount !== '' ? Number(partialAmount) : 0,
+  })
+
   const hasApprovedBackdateRequest = async () => {
     if (!checkInDate || !orgId || !selectedRoom?.id || !currentUserId) return false
+    const metadata = buildReservationBackdateMetadata()
     const dedupe = buildBackdateDedupeKey({
       organizationId: orgId,
       requestedBy: currentUserId,
@@ -421,19 +437,16 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
       requestedCheckIn: toLocalDateStr(checkInDate),
       requestedCheckOut: checkOutDate ? toLocalDateStr(checkOutDate) : undefined,
       roomId: selectedRoom.id,
+      intentFingerprint: buildBackdateIntentFingerprint(metadata),
     })
     const res = await fetch(`/api/backdate-requests?caller_id=${currentUserId}`, { credentials: 'include' })
     const json = await res.json()
     if (!res.ok) return false
     return (json.requests || []).some((request: any) => {
-      if (request.status !== 'approved' || request.request_type !== 'reservation') return false
-      if (request.dedupe_key === dedupe) return true
-      const md = request.metadata || {}
-      return (
-        request.requested_check_in === toLocalDateStr(checkInDate)
-        && (!checkOutDate || request.requested_check_out === toLocalDateStr(checkOutDate))
-        && (md.room_id ?? null) === (selectedRoom?.id ?? null)
-      )
+      return isMatchingApprovedBackdateRequest(request, {
+        requestType: 'reservation',
+        dedupeKey: dedupe,
+      })
     })
   }
 
@@ -442,6 +455,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
     if (!backdateReason.trim()) { toast.error('Enter a reason for the approver'); return }
     setLoading(true)
     try {
+      const metadata = buildReservationBackdateMetadata()
       const res = await fetch('/api/backdate-requests', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -453,17 +467,8 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
           requested_check_out: checkOutDate ? toLocalDateStr(checkOutDate) : null,
           reason: backdateReason,
           metadata: {
-            guest_name: fullName || guestId,
-            guest_phone: phone || null,
-            room_id: selectedRoom?.id || null,
-            room_number: selectedRoom?.room_number || null,
-            room_type: selectedRoom?.room_type || null,
-            price_per_night: pricePerNight,
-            custom_price: customPrice !== '' ? Number(customPrice) : 0,
-            nights,
-            payment_method: paymentMethod,
-            payment_status: paymentStatus,
-            amount_paid: partialAmount !== '' ? Number(partialAmount) : 0,
+            ...metadata,
+            dedupe_fingerprint: buildBackdateIntentFingerprint(metadata),
           },
         }),
       })

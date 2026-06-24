@@ -56,6 +56,7 @@ import {
 } from '@/lib/reservations/reservation-payment-methods'
 import { applyPaymentToGuestCityLedger } from '@/lib/utils/guest-city-ledger'
 import { buildBackdateDedupeKey } from '@/lib/backdate/dedupe-key'
+import { isMatchingApprovedBackdateRequest } from '@/lib/backdate/approval-match'
 
 const ROOM_TYPES_FALLBACK = ['Deluxe', 'Royal', 'Kings', 'Mini Suite', 'Executive Suite', 'Diplomatic Suite']
 
@@ -611,16 +612,10 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
     const json = await res.json()
     if (!res.ok) return false
     return (json.requests || []).some((request: any) => {
-      if (request.status !== 'approved') return false
-      const typeOk =
-        request.request_type === bulkBackdateRequestType ||
-        request.request_type === 'bulk_booking'
-      if (!typeOk) return false
-      if (request.dedupe_key === dedupe) return true
-      return (
-        request.requested_check_in === toLocalDateStr(checkIn)
-        && (!checkOut || request.requested_check_out === toLocalDateStr(checkOut))
-      )
+      return isMatchingApprovedBackdateRequest(request, {
+        requestType: bulkBackdateRequestType,
+        dedupeKey: dedupe,
+      })
     })
   }
 

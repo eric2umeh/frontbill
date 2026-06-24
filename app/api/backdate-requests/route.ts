@@ -1,5 +1,5 @@
 import { createAdminClient } from '@/lib/supabase/admin'
-import { buildBackdateDedupeKey } from '@/lib/backdate/dedupe-key'
+import { buildBackdateDedupeKey, buildBackdateIntentFingerprint } from '@/lib/backdate/dedupe-key'
 import { createBookingFromPayload, type SerializedBookingPayload } from '@/lib/backdate/booking-payload'
 import { canonicalRoleKey } from '@/lib/permissions'
 import { fetchOrganizationHotelTimeZone } from '@/lib/hotel-date-server'
@@ -23,6 +23,25 @@ function isUniqueViolation(err: { code?: string; message?: string } | null) {
   if (err.code === '23505') return true
   const m = err.message || ''
   return m.includes('idx_backdate_requests_org_pending_dedupe') || m.includes('duplicate key')
+}
+
+function backdateIntentFingerprint(requestType: string, metadata: Record<string, unknown>): string | null {
+  if (requestType === 'bulk_booking' || requestType === 'bulk_reservation') {
+    const fp = metadata.bulk_fingerprint
+    return typeof fp === 'string' && fp ? fp : null
+  }
+  if (requestType === 'booking' && metadata.booking_payload) {
+    return buildBackdateIntentFingerprint(metadata.booking_payload)
+  }
+  if (requestType === 'reservation') {
+    const {
+      dedupe_fingerprint: _dedupeFingerprint,
+      dedupe_key: _dedupeKey,
+      ...approvalPayload
+    } = metadata
+    return buildBackdateIntentFingerprint(approvalPayload)
+  }
+  return null
 }
 
 export async function GET(request: Request) {
@@ -137,6 +156,7 @@ export async function POST(request: Request) {
 
     const roomId = (metadata as any).room_id ?? (metadata as any).booking_payload?.room_id ?? null
     const bulkFingerprint = (metadata as any).bulk_fingerprint ?? null
+    const intentFingerprint = backdateIntentFingerprint(request_type, metadata as Record<string, unknown>)
 
     const dedupe_key = buildBackdateDedupeKey({
       organizationId: callerProfile.organization_id,
@@ -146,6 +166,7 @@ export async function POST(request: Request) {
       requestedCheckOut: requested_check_out || null,
       roomId,
       bulkFingerprint,
+      intentFingerprint,
     })
 
     const { data: dup } = await admin
@@ -164,6 +185,9 @@ export async function POST(request: Request) {
     }
 
     ;(metadata as any).dedupe_key = dedupe_key
+    if (intentFingerprint) {
+      ;(metadata as any).dedupe_fingerprint = intentFingerprint
+    }
 
     const { data, error } = await admin
       .from('backdate_requests')
