@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
@@ -27,7 +27,11 @@ export function UnitConversionField({
   onFactorsChange,
   compact = false,
 }: Props) {
-  const def = unitFactorDefinition(storeUnit, selectedUnit)
+  const def = useMemo(
+    () => unitFactorDefinition(storeUnit, selectedUnit),
+    [storeUnit, selectedUnit],
+  )
+  const existing = def ? factors[def.storageKey] : undefined
   const [local, setLocal] = useState('')
 
   useEffect(() => {
@@ -35,9 +39,8 @@ export function UnitConversionField({
       setLocal('')
       return
     }
-    const existing = factors[def.storageKey]
     setLocal(existing != null && existing > 0 ? String(existing) : '')
-  }, [def, factors, storeItemId, selectedUnit])
+  }, [def?.storageKey, existing, storeItemId])
 
   if (!def) return null
 
@@ -54,7 +57,7 @@ export function UnitConversionField({
         <span className="shrink-0">{def.label}</span>
         <Input
           inputMode="decimal"
-          className="h-6 w-12 px-1 text-center text-[10px]"
+          className="h-6 w-16 px-1 text-center text-[10px]"
           placeholder="?"
           value={local}
           onChange={(e) => setLocal(sanitizeQuantityInput(e.target.value))}
