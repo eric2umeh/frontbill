@@ -11,6 +11,7 @@ import { toast } from 'sonner'
 import { dispatchNightAuditPendingChanged } from '@/lib/utils/dispatch-night-audit-pending-changed'
 import { formatNaira } from '@/lib/utils/currency'
 import type { BackdateRequestSummary } from '@/lib/backdate/request-summary'
+import { PaginatedListShell } from '@/components/shared/paginated-list-shell'
 
 export interface BackdateRequest {
   id: string
@@ -187,6 +188,10 @@ export function BackdateRequestsTab({ userId }: Props) {
   }
 
   const pendingCount = requests.filter((r) => r.status === 'pending').length
+  const typeOptions = Array.from(new Set(requests.map((r) => r.request_type).filter(Boolean)))
+    .sort()
+    .map((type) => ({ value: type, label: type.replace(/_/g, ' ') }))
+  const requestDate = (request: BackdateRequest) => request.created_at.slice(0, 10)
 
   return (
     <Card>
@@ -211,11 +216,71 @@ export function BackdateRequestsTab({ userId }: Props) {
           <div className="flex justify-center py-12 text-muted-foreground">
             <Loader2 className="h-6 w-6 animate-spin" />
           </div>
-        ) : requests.length === 0 ? (
-          <p className="py-8 text-center text-sm text-muted-foreground">No backdate requests yet.</p>
         ) : (
-          <div className="grid gap-3">
-            {requests.map((request) => (
+          <PaginatedListShell
+            items={requests}
+            pageSize={8}
+            searchPlaceholder="Search request, guest, org, reason…"
+            filters={[
+              {
+                key: 'status',
+                label: 'Status',
+                options: [
+                  { value: 'pending', label: 'Pending' },
+                  { value: 'approved', label: 'Approved' },
+                  { value: 'rejected', label: 'Rejected' },
+                ],
+              },
+              ...(typeOptions.length > 1
+                ? [{ key: 'type', label: 'Type', options: typeOptions }]
+                : []),
+              {
+                key: 'created',
+                label: 'Submitted',
+                options: [
+                  { value: 'today', label: 'Today' },
+                  { value: '7d', label: 'Last 7 days' },
+                  { value: '30d', label: 'Last 30 days' },
+                ],
+              },
+            ]}
+            searchMatch={(request, query) => {
+              const q = query.trim().toLowerCase()
+              const s = request.summary
+              return [
+                request.id,
+                request.request_type,
+                request.reason,
+                request.requested_by_name,
+                request.status,
+                s?.guest_name,
+                s?.guest_phone,
+                s?.organization_name,
+                s?.room_number,
+                request.metadata?.created_folio_id,
+              ]
+                .filter(Boolean)
+                .some((value) => String(value).toLowerCase().includes(q))
+            }}
+            filterMatch={(request, key, value) => {
+              if (key === 'status') return request.status === value
+              if (key === 'type') return request.request_type === value
+              if (key === 'created') {
+                const created = requestDate(request)
+                const today = new Date()
+                const start = new Date()
+                if (value === 'today') return created === today.toISOString().slice(0, 10)
+                if (value === '7d') start.setDate(today.getDate() - 7)
+                if (value === '30d') start.setDate(today.getDate() - 30)
+                return new Date(`${created}T12:00:00`) >= start
+              }
+              return undefined
+            }}
+            emptyMessage="No matching backdate requests."
+          >
+            {(pageRequests) => (
+              <div className="grid gap-3">
+                {pageRequests.map((request) => (
               <Card key={request.id} className="border-muted shadow-none">
                 <CardContent className="space-y-3 p-4">
                   <div className="flex items-start justify-between gap-3">
@@ -287,8 +352,10 @@ export function BackdateRequestsTab({ userId }: Props) {
                   )}
                 </CardContent>
               </Card>
-            ))}
-          </div>
+                ))}
+              </div>
+            )}
+          </PaginatedListShell>
         )}
       </CardContent>
     </Card>
