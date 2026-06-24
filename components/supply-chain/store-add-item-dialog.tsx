@@ -42,6 +42,20 @@ import { PURCHASE_CONVERSION_UNITS } from '@/lib/supply-chain/conversion-units'
 
 type Dept = Exclude<SupplyDept, 'all'>
 
+const STORE_ITEM_CSV_SAMPLE =
+  'name,unit,depts,quantityInStore,reorderLevel,lastPrice,kitchenCategory,conversionUnit,qtyPerPack\n' +
+  'Rice,kg,Kitchen,50,10,1100,food,bag,50\n' +
+  'Vegetable Oil,l,Kitchen,20,5,2640,food,,\n' +
+  'Coca Cola,crate,Main Bar,10,2,9000,,,\n'
+
+function csvHeaderKey(value: string): string {
+  return value
+    .trim()
+    .replace(/^\uFEFF/, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')
+}
+
 type Props = {
   canAddDirect: boolean
   canSubmit: boolean
@@ -232,6 +246,13 @@ export function StoreAddItemDialog({
       const [header, ...dataRows] = rows
       if (!dataRows.length) {
         toast.error('CSV has headers but no rows')
+        return
+      }
+      const headerKeys = new Set(header.map(csvHeaderKey))
+      if (headerKeys.has('batchmenuname') || headerKeys.has('storeitems')) {
+        toast.error(
+          'This looks like a Kitchen recipe CSV. Upload it from Supply > Kitchen > Bulk CSV. Central Store CSV needs item rows with columns like name, unit, depts, quantityInStore, lastPrice.',
+        )
         return
       }
 
@@ -553,6 +574,9 @@ export function StoreAddItemDialog({
               Restaurant), quantityInStore, reorderLevel, lastPrice or UNIT PRICE. Optional:
               benchmarkPrice, kitchenCategory, conversionUnit, qtyPerPack.
             </p>
+            <pre className="mt-2 max-h-28 overflow-auto whitespace-pre-wrap rounded bg-muted/40 p-2 text-[10px] leading-relaxed">
+              {STORE_ITEM_CSV_SAMPLE}
+            </pre>
           </div>
         </div>
         <DialogFooter className="flex-col sm:flex-row gap-2">
