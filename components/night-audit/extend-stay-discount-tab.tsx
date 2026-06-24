@@ -10,6 +10,7 @@ import { toast } from 'sonner'
 import { dispatchNightAuditPendingChanged } from '@/lib/utils/dispatch-night-audit-pending-changed'
 import { formatNaira } from '@/lib/utils/currency'
 import { FolioAttachmentLinks } from '@/components/folio/folio-attachment-links'
+import { PaginatedListShell } from '@/components/shared/paginated-list-shell'
 
 interface Row {
   id: string
@@ -110,11 +111,57 @@ export function ExtendStayDiscountTab({ userId }: { userId: string }) {
           <div className="flex justify-center py-12">
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           </div>
-        ) : rows.length === 0 ? (
-          <p className="py-8 text-center text-sm text-muted-foreground">No discount requests.</p>
         ) : (
-          <div className="grid gap-3">
-            {rows.map((r) => (
+          <PaginatedListShell
+            items={rows}
+            pageSize={8}
+            searchPlaceholder="Search requester, reason, booking…"
+            filters={[
+              {
+                key: 'status',
+                label: 'Status',
+                options: [
+                  { value: 'pending', label: 'Pending' },
+                  { value: 'approved', label: 'Approved' },
+                  { value: 'rejected', label: 'Rejected' },
+                ],
+              },
+              {
+                key: 'payment',
+                label: 'Payment',
+                options: [
+                  { value: 'cash', label: 'Cash' },
+                  { value: 'pos', label: 'POS' },
+                  { value: 'transfer', label: 'Transfer' },
+                  { value: 'city_ledger', label: 'City ledger' },
+                  { value: 'pending', label: 'Pending' },
+                ],
+              },
+            ]}
+            searchMatch={(r, query) => {
+              const q = query.trim().toLowerCase()
+              return [
+                r.booking_id,
+                r.reason,
+                r.status,
+                r.payment_method,
+                r.requested_by_name,
+                r.approved_by_name,
+                r.decision_note,
+              ]
+                .filter(Boolean)
+                .some((value) => String(value).toLowerCase().includes(q))
+            }}
+            filterMatch={(r, key, value) => {
+              if (key === 'status') return r.status === value
+              if (key === 'payment') return String(r.payment_method || '').toLowerCase() === value
+              return undefined
+            }}
+            emptyMessage="No matching discount requests."
+          >
+            {(pageRows) => (
+              <div className="grid gap-3">
+                {pageRows.map((r) => (
               <Card key={r.id} className="border-muted shadow-none">
                 <CardContent className="p-4 space-y-2 text-sm">
                   <div className="flex flex-wrap items-start justify-between gap-2">
@@ -156,8 +203,10 @@ export function ExtendStayDiscountTab({ userId }: { userId: string }) {
                   </Button>
                 </CardContent>
               </Card>
-            ))}
-          </div>
+                ))}
+              </div>
+            )}
+          </PaginatedListShell>
         )}
       </CardContent>
     </Card>
