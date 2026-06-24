@@ -26,6 +26,7 @@ export const KITCHEN_BATCH_UNITS = [
   'tsp',
   'pcs',
   'pack',
+  'sachet',
   'bag',
   'basket',
   'roll',
