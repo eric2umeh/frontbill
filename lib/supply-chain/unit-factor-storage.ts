@@ -63,6 +63,7 @@ export function unitFactorDefinition(
     'carton',
     'mudu',
     'cup',
+    'sachet',
   ])
   if (containerUnits.has(selected) && !containerUnits.has(store)) {
     return {
