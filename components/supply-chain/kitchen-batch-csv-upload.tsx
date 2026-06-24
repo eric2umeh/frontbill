@@ -1,7 +1,7 @@
 'use client'
 
 import { useRef, useState } from 'react'
-import { Upload } from 'lucide-react'
+import { Download, Upload } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
@@ -27,6 +27,31 @@ type Props = {
   /** compact = icon button in page header; default = outline button */
   variant?: 'compact' | 'default'
   onComplete?: () => void
+}
+
+const RECIPE_LIST_SAMPLE = `batch / menu name,store items,main category,Planned portions,Selling price / portion (_)
+Jollof Rice 1kg,Rice = 1kg,Rice,6,2500
+,Vegetable oil = 300ml,,,
+,Tomato paste = 200g,,,
+,Onion = 2 pcs,,,
+,Salt to taste,,,
+Fried Rice 1kg,Rice = 1kg,Rice,6,3000
+,Chicken stock = 1 litre,,,
+,Mixed vegetables = 500g,,,
+,Curry powder = 1 tbsp,,,`
+
+const STANDARD_BATCH_SAMPLE = `name,category,portions,price,labour,gas,other,outlet
+Jollof Rice 1kg,Rice,6,2500,500,300,200,restaurant
+Fried Rice 1kg,Rice,6,3000,500,300,200,restaurant`
+
+function downloadSampleCsv(filename: string, text: string) {
+  const blob = new Blob([text], { type: 'text/csv;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
 }
 
 export function KitchenBatchCsvUpload({ variant = 'default', onComplete }: Props) {
@@ -171,15 +196,52 @@ export function KitchenBatchCsvUpload({ variant = 'default', onComplete }: Props
             <p className="text-[10px] text-muted-foreground mt-2 break-words space-y-1">
               <span className="block font-medium text-foreground/80">Recipe list (your format)</span>
               <span className="block">
-                Columns: <code className="text-[10px]">name</code>,{' '}
-                <code className="text-[10px]">store items</code> — one recipe per name row, ingredients
-                on following rows.
-              </span>
-              <span className="block font-medium text-foreground/80 mt-2">Or standard format</span>
-              <span className="block">
-                Columns: name, category, portions, price (optional), labour, gas, other, outlet.
+                Put the recipe name only on the first ingredient row. Leave the recipe-name cell blank for the
+                remaining ingredients under the same recipe.
               </span>
             </p>
+            <div className="mt-3 space-y-2 rounded-md border bg-muted/30 p-3">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs font-medium">Demo recipe-list CSV</p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-7 gap-1.5 px-2 text-xs"
+                  onClick={() => downloadSampleCsv('kitchen-recipe-list-sample.csv', RECIPE_LIST_SAMPLE)}
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  Download
+                </Button>
+              </div>
+              <pre className="max-h-44 overflow-auto whitespace-pre-wrap rounded bg-background p-2 text-[10px] leading-relaxed">
+                {RECIPE_LIST_SAMPLE}
+              </pre>
+            </div>
+            <p className="text-[10px] text-muted-foreground mt-3 break-words space-y-1">
+              <span className="block font-medium text-foreground/80">Or standard format</span>
+              <span className="block">
+                Use one row per menu/batch standard when you do not need ingredient lines.
+              </span>
+            </p>
+            <div className="mt-3 space-y-2 rounded-md border bg-muted/30 p-3">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs font-medium">Demo standard CSV</p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-7 gap-1.5 px-2 text-xs"
+                  onClick={() => downloadSampleCsv('kitchen-batch-standard-sample.csv', STANDARD_BATCH_SAMPLE)}
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  Download
+                </Button>
+              </div>
+              <pre className="max-h-32 overflow-auto whitespace-pre-wrap rounded bg-background p-2 text-[10px] leading-relaxed">
+                {STANDARD_BATCH_SAMPLE}
+              </pre>
+            </div>
           </div>
         </DialogContent>
       </Dialog>
