@@ -10,6 +10,7 @@ import { toast } from 'sonner'
 import { dispatchNightAuditPendingChanged } from '@/lib/utils/dispatch-night-audit-pending-changed'
 import { format } from 'date-fns'
 import { FolioAttachmentLinks } from '@/components/folio/folio-attachment-links'
+import { PaginatedListShell } from '@/components/shared/paginated-list-shell'
 
 export interface RescheduleStayRequestRow {
   id: string
@@ -122,11 +123,55 @@ export function RescheduleStayRequestsTab({ userId }: Props) {
           <div className="flex justify-center py-12 text-muted-foreground">
             <Loader2 className="h-6 w-6 animate-spin" />
           </div>
-        ) : requests.length === 0 ? (
-          <p className="py-8 text-center text-sm text-muted-foreground">No move-dates requests yet.</p>
         ) : (
-          <div className="grid gap-3">
-            {requests.map((request) => (
+          <PaginatedListShell
+            items={requests}
+            pageSize={8}
+            searchPlaceholder="Search guest, folio, room, reason…"
+            filters={[
+              {
+                key: 'status',
+                label: 'Status',
+                options: [
+                  { value: 'pending', label: 'Pending' },
+                  { value: 'approved', label: 'Approved' },
+                  { value: 'rejected', label: 'Rejected' },
+                ],
+              },
+              {
+                key: 'backdate',
+                label: 'Backdate',
+                options: [
+                  { value: 'yes', label: 'Backdated only' },
+                  { value: 'no', label: 'Non-backdated' },
+                ],
+              },
+            ]}
+            searchMatch={(request, query) => {
+              const q = query.trim().toLowerCase()
+              return [
+                request.guest_label,
+                request.folio_label,
+                request.room_label,
+                request.reason,
+                request.requested_by_name,
+                request.approved_by_name,
+                request.decision_note,
+                request.booking_id,
+              ]
+                .filter(Boolean)
+                .some((value) => String(value).toLowerCase().includes(q))
+            }}
+            filterMatch={(request, key, value) => {
+              if (key === 'status') return request.status === value
+              if (key === 'backdate') return value === 'yes' ? request.is_backdate : !request.is_backdate
+              return undefined
+            }}
+            emptyMessage="No matching move-dates requests."
+          >
+            {(pageRequests) => (
+              <div className="grid gap-3">
+                {pageRequests.map((request) => (
               <Card key={request.id} className="border-muted shadow-none">
                 <CardContent className="p-4 space-y-3">
                   <div className="flex items-start justify-between gap-3">
@@ -210,8 +255,10 @@ export function RescheduleStayRequestsTab({ userId }: Props) {
                   </div>
                 </CardContent>
               </Card>
-            ))}
-          </div>
+                ))}
+              </div>
+            )}
+          </PaginatedListShell>
         )}
       </CardContent>
     </Card>

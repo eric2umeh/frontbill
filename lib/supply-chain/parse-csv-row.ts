@@ -96,9 +96,7 @@ function headerKey(s: string): string {
     .trim()
     .replace(/^\uFEFF/, '')
     .toLowerCase()
-    .replace(/\s+/g, '')
-    .replace(/_/g, '')
-    .replace(/-/g, '')
+    .replace(/[^a-z0-9]/g, '')
 }
 
 function indexOfHeader(header: string[], keys: string[]): number {
@@ -177,18 +175,23 @@ function parseKitchenRecipeListCsvText(
   dataRows: string[][],
   nameIdx: number,
   itemsIdx: number,
+  categoryIdx = -1,
+  portionsIdx = -1,
+  priceIdx = -1,
 ): { ok: true; rows: BatchCsvRow[] } | { ok: false; error: string } {
   const out: BatchCsvRow[] = []
   let active: BatchCsvRow | undefined
 
-  const startRecipe = (rawName: string) => {
+  const startRecipe = (rawName: string, cells: string[] = []) => {
     const name = normalizeCell(rawName)
     if (!name) return
+    const category = categoryIdx >= 0 ? normalizeCell(cells[categoryIdx]) : ''
+    const portions = portionsIdx >= 0 ? parseNumberOrZero(cells[portionsIdx]) : 0
     active = {
       name,
-      category: inferCategoryFromRecipeName(name),
-      portions: parsePortionsFromRecipeName(name),
-      sellingPrice: 0,
+      category: category || inferCategoryFromRecipeName(name),
+      portions: portions > 0 ? portions : parsePortionsFromRecipeName(name),
+      sellingPrice: priceIdx >= 0 ? parseNumberOrZero(cells[priceIdx]) : 0,
       overheadLabour: 0,
       overheadGas: 0,
       overheadOther: 0,
@@ -205,11 +208,11 @@ function parseKitchenRecipeListCsvText(
     const rawItem = normalizeCell(cells[itemsIdx])
 
     if (rawName) {
-      startRecipe(rawName)
+      startRecipe(rawName, cells)
       if (rawItem && !looksLikeRecipeTitle(rawItem) && active) {
         active.ingredientLines!.push(rawItem)
       } else if (rawItem && looksLikeRecipeTitle(rawItem)) {
-        startRecipe(rawItem)
+        startRecipe(rawItem, cells)
       }
       continue
     }
@@ -217,7 +220,7 @@ function parseKitchenRecipeListCsvText(
     if (!rawItem) continue
 
     if (looksLikeRecipeTitle(rawItem)) {
-      startRecipe(rawItem)
+      startRecipe(rawItem, cells)
       continue
     }
 
@@ -256,6 +259,7 @@ export function parseKitchenBatchCsvText(
     'names',
     'batch',
     'batchname',
+    'batchmenuname',
     'item',
     'menu',
     'menuname',
@@ -264,6 +268,7 @@ export function parseKitchenBatchCsvText(
   ])
   const categoryIdx = indexOfHeader(header, [
     'category',
+    'maincategory',
     'menucategory',
     'cat',
     'type',
@@ -279,18 +284,6 @@ export function parseKitchenBatchCsvText(
     'itemlist',
   ])
 
-  if (nameIdx < 0) {
-    return {
-      ok: false,
-      error: `CSV missing name column (use "name" or "names"). Found: ${header.filter(Boolean).slice(0, 8).join(', ') || '(none)'}`,
-    }
-  }
-
-  // Recipe list: name + store items / ingredients (no category column)
-  if (categoryIdx < 0 && itemsIdx >= 0) {
-    return parseKitchenRecipeListCsvText(header, dataRows, nameIdx, itemsIdx)
-  }
-
   const portionsIdx = indexOfHeader(header, [
     'portions',
     'plannedportions',
@@ -303,12 +296,37 @@ export function parseKitchenBatchCsvText(
     'price',
     'sellingprice',
     'sellingpriceperportion',
+    'sellingpriceportion',
     'unitprice',
   ])
   const labourIdx = indexOfHeader(header, ['labour', 'labor', 'overheadlabour'])
   const gasIdx = indexOfHeader(header, ['gas', 'overheadgas'])
   const otherIdx = indexOfHeader(header, ['other', 'overheadother', 'overhead'])
   const outletIdx = indexOfHeader(header, ['outlet', 'outletmenusync', 'fnb', 'restaurant'])
+
+  if (nameIdx < 0) {
+    return {
+      ok: false,
+      error: `CSV missing name column (use "name" or "names"). Found: ${header.filter(Boolean).slice(0, 8).join(', ') || '(none)'}`,
+    }
+  }
+
+  const hasContinuationRows =
+    itemsIdx >= 0 &&
+    dataRows.some((cells) => !normalizeCell(cells[nameIdx]) && normalizeCell(cells[itemsIdx]))
+
+  // Recipe list: one recipe name row followed by ingredient rows in the store items column.
+  if (itemsIdx >= 0 && (categoryIdx < 0 || hasContinuationRows)) {
+    return parseKitchenRecipeListCsvText(
+      header,
+      dataRows,
+      nameIdx,
+      itemsIdx,
+      categoryIdx,
+      portionsIdx,
+      priceIdx,
+    )
+  }
 
   if (categoryIdx < 0) {
     return {

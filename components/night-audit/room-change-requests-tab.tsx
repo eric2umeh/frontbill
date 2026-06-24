@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge'
 import { Loader2, DoorOpen } from 'lucide-react'
 import { toast } from 'sonner'
 import { dispatchNightAuditPendingChanged } from '@/lib/utils/dispatch-night-audit-pending-changed'
+import { PaginatedListShell } from '@/components/shared/paginated-list-shell'
 
 export interface RoomChangeRequestRow {
   id: string
@@ -109,11 +110,45 @@ export function RoomChangeRequestsTab({ userId }: Props) {
           <div className="flex justify-center py-12 text-muted-foreground">
             <Loader2 className="h-6 w-6 animate-spin" />
           </div>
-        ) : requests.length === 0 ? (
-          <p className="py-8 text-center text-sm text-muted-foreground">No room change requests yet.</p>
         ) : (
-          <div className="grid gap-3">
-            {requests.map((request) => (
+          <PaginatedListShell
+            items={requests}
+            pageSize={8}
+            searchPlaceholder="Search room, requester, reason…"
+            filters={[
+              {
+                key: 'status',
+                label: 'Status',
+                options: [
+                  { value: 'pending', label: 'Pending' },
+                  { value: 'approved', label: 'Approved' },
+                  { value: 'rejected', label: 'Rejected' },
+                ],
+              },
+            ]}
+            searchMatch={(request, query) => {
+              const q = query.trim().toLowerCase()
+              return [
+                request.from_room_label,
+                request.to_room_label,
+                request.reason,
+                request.requested_by_name,
+                request.approved_by_name,
+                request.decision_note,
+                request.booking_id,
+              ]
+                .filter(Boolean)
+                .some((value) => String(value).toLowerCase().includes(q))
+            }}
+            filterMatch={(request, key, value) => {
+              if (key === 'status') return request.status === value
+              return undefined
+            }}
+            emptyMessage="No matching room change requests."
+          >
+            {(pageRequests) => (
+              <div className="grid gap-3">
+                {pageRequests.map((request) => (
               <Card key={request.id} className="border-muted shadow-none">
                 <CardContent className="p-4 space-y-3">
                   <div className="flex items-start justify-between gap-3">
@@ -175,8 +210,10 @@ export function RoomChangeRequestsTab({ userId }: Props) {
                   </Button>
                 </CardContent>
               </Card>
-            ))}
-          </div>
+                ))}
+              </div>
+            )}
+          </PaginatedListShell>
         )}
       </CardContent>
     </Card>

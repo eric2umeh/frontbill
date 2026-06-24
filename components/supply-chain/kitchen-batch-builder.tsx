@@ -12,8 +12,13 @@ import { Label } from '@/components/ui/label'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Checkbox } from '@/components/ui/checkbox'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
-import { Search, Trash2, ChefHat } from 'lucide-react'
+import { Search, Trash2, ChefHat, ChevronDown } from 'lucide-react'
 import { toast } from 'sonner'
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible'
 import {
   clearKitchenBatchDraft,
   KITCHEN_BATCH_DRAFT_VERSION,
@@ -32,8 +37,10 @@ import {
   defaultUnitForStoreItem,
   formatQuantityDisplay,
   materialCostForUnit,
+  normalizeMeasurementUnit,
   parseQuantityInput,
   sanitizeQuantityInput,
+  type MeasurementUnit,
 } from '@/lib/supply-chain/measurement-units'
 import { UnitSelect } from '@/components/supply-chain/unit-select'
 import { toTitleCaseWords } from '@/lib/supply-chain/title-case'
@@ -87,6 +94,7 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
   const [notes, setNotes] = useState('')
   const [cart, setCart] = useState<BatchMaterialLine[]>([])
   const [optionalCart, setOptionalCart] = useState<BatchMaterialLine[]>([])
+  const [optionalIngredientsOpen, setOptionalIngredientsOpen] = useState(false)
   const [qtyInputMap, setQtyInputMap] = useState<Record<string, string>>({})
   const [factorMap, setFactorMap] = useState<Record<string, Record<string, number>>>({})
 
@@ -106,7 +114,9 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
     setOverheadOther(draft.overheadOther)
     setNotes(draft.notes)
     setCart(draft.cart.filter((c) => !c.optional))
-    setOptionalCart(draft.cart.filter((c) => c.optional))
+    const draftOptionalCart = draft.cart.filter((c) => c.optional)
+    setOptionalCart(draftOptionalCart)
+    setOptionalIngredientsOpen(draftOptionalCart.length > 0)
     setQtyInputMap(
       Object.fromEntries(draft.cart.map((c) => [c.storeItemId, String(c.quantity)])),
     )
@@ -144,18 +154,18 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
           optional: false,
         })),
     )
-    setOptionalCart(
-      recipe.ingredients
-        .filter((ing) => ing.optional)
-        .map((ing) => ({
-          storeItemId: ing.stockItemId,
-          name: ing.name,
-          unit: ing.unit,
-          quantity: ing.quantity,
-          unitCost: ing.quantity > 0 ? ing.cost / ing.quantity : 0,
-          optional: true,
-        })),
-    )
+    const optionalIngredients = recipe.ingredients
+      .filter((ing) => ing.optional)
+      .map((ing) => ({
+        storeItemId: ing.stockItemId,
+        name: ing.name,
+        unit: ing.unit,
+        quantity: ing.quantity,
+        unitCost: ing.quantity > 0 ? ing.cost / ing.quantity : 0,
+        optional: true,
+      }))
+    setOptionalCart(optionalIngredients)
+    setOptionalIngredientsOpen(optionalIngredients.length > 0)
     setQtyInputMap(
       Object.fromEntries(
         recipe.ingredients.map((ing) => [ing.stockItemId, numberInputValue(ing.quantity)]),
@@ -227,6 +237,7 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
   }, [kitchenStoreItems, search, kitchenRawStock, rawStockTick])
 
   const addMaterial = (item: StoreItem, optional = false) => {
+    if (optional) setOptionalIngredientsOpen(true)
     const unit = defaultUnitForStoreItem(item.unit)
     const setter = optional ? setOptionalCart : setCart
     setter((prev) => {
@@ -273,7 +284,7 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
     optional = false,
   ) => {
     const setter = optional ? setOptionalCart : setCart
-    const parsed = parseQuantityInput(raw, unit)
+    const parsed = parseQuantityInput(raw, normalizeMeasurementUnit(unit) as MeasurementUnit)
     if (!parsed || parsed.quantity <= 0) {
       removeLine(storeItemId, optional)
       return
@@ -315,7 +326,7 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
     setQtyInputMap((m) => ({ ...m, [storeItemId]: cleaned }))
     const trimmed = cleaned.trim()
     if (!trimmed) return
-    const parsed = parseQuantityInput(trimmed, unit)
+    const parsed = parseQuantityInput(trimmed, normalizeMeasurementUnit(unit) as MeasurementUnit)
     if (!parsed || parsed.quantity <= 0) return
     const setter = optional ? setOptionalCart : setCart
     setter((prev) =>
@@ -389,6 +400,7 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
   const resetForm = () => {
     setCart([])
     setOptionalCart([])
+    setOptionalIngredientsOpen(false)
     setQtyInputMap({})
     setBatchName('')
     setMenuItemId(null)
@@ -684,19 +696,40 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
                 renderMaterialLines(cart, false)
               )}
             </div>
-            <div>
-              <h4 className="text-xs font-semibold mb-1">Optional ingredients</h4>
-              <p className="text-[11px] text-muted-foreground mb-2">
-                Listed on the final recipe only — quantities do not affect portions or production cost.
-              </p>
-              {optionalCart.length === 0 ? (
-                <div className="rounded-lg border border-dashed py-8 text-center text-xs text-muted-foreground">
-                  Tick &quot;Add search results as optional&quot; when adding garnish or extras.
-                </div>
-              ) : (
-                renderMaterialLines(optionalCart, true)
-              )}
-            </div>
+            <Collapsible
+              open={optionalIngredientsOpen}
+              onOpenChange={setOptionalIngredientsOpen}
+              className="rounded-lg border bg-muted/20"
+            >
+              <CollapsibleTrigger asChild>
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left"
+                >
+                  <div>
+                    <h4 className="text-xs font-semibold">Optional ingredients</h4>
+                    <p className="text-[11px] text-muted-foreground">
+                      Listed on final recipe only; excluded from portions and production cost.
+                      {optionalCart.length > 0 ? ` ${optionalCart.length} item(s) added.` : ''}
+                    </p>
+                  </div>
+                  <ChevronDown
+                    className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${
+                      optionalIngredientsOpen ? 'rotate-180' : ''
+                    }`}
+                  />
+                </button>
+              </CollapsibleTrigger>
+              <CollapsibleContent className="border-t p-3">
+                {optionalCart.length === 0 ? (
+                  <div className="rounded-lg border border-dashed py-8 text-center text-xs text-muted-foreground">
+                    Tick &quot;Add search results as optional&quot; when adding garnish or extras.
+                  </div>
+                ) : (
+                  renderMaterialLines(optionalCart, true)
+                )}
+              </CollapsibleContent>
+            </Collapsible>
           </div>
         </ScrollArea>
 

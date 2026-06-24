@@ -29,6 +29,7 @@ import { RescheduleStayRequestsTab } from '@/components/night-audit/reschedule-s
 import { ExtendStayDiscountTab } from '@/components/night-audit/extend-stay-discount-tab'
 import { useNightAuditPendingCounts } from '@/hooks/use-night-audit-pending-counts'
 import { LoadingSpinner } from '@/components/loading-screen'
+import { PaginatedListShell } from '@/components/shared/paginated-list-shell'
 import {
   formatHotelDateDisplayGB,
   nightAuditClosingDateYmd,
@@ -522,36 +523,53 @@ export default function NightAuditPage() {
               <CardDescription>Reservations arriving today</CardDescription>
             </CardHeader>
             <CardContent>
-              {auditData?.expectedArrivals?.length ? (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Folio ID</TableHead>
-                      <TableHead>Guest Name</TableHead>
-                      <TableHead>Room</TableHead>
-                      <TableHead>Check-in Date</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {auditData.expectedArrivals.map((b: any) => (
-                      <TableRow
-                        key={b.id}
-                        className="cursor-pointer"
-                        onClick={() => router.push(`/bookings/${b.id}`)}
-                      >
-                        <TableCell className="font-mono text-xs">
-                          {b.folio_id || b.id.slice(0, 8)}
-                        </TableCell>
-                        <TableCell>{b.guests?.name || '—'}</TableCell>
-                        <TableCell>{b.rooms?.room_number || '—'}</TableCell>
-                        <TableCell>{b.check_in}</TableCell>
+              <PaginatedListShell
+                items={auditData?.expectedArrivals || []}
+                pageSize={10}
+                searchPlaceholder="Search folio, guest, room…"
+                searchMatch={(b: any, query) => {
+                  const q = query.trim().toLowerCase()
+                  return [
+                    b.folio_id,
+                    b.id,
+                    b.guests?.name,
+                    b.rooms?.room_number,
+                    b.check_in,
+                  ]
+                    .filter(Boolean)
+                    .some((value) => String(value).toLowerCase().includes(q))
+                }}
+                emptyMessage="No expected arrivals for today."
+              >
+                {(pageRows) => (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Folio ID</TableHead>
+                        <TableHead>Guest Name</TableHead>
+                        <TableHead>Room</TableHead>
+                        <TableHead>Check-in Date</TableHead>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              ) : (
-                <div className="py-8 text-center text-sm text-muted-foreground">No expected arrivals for today.</div>
-              )}
+                    </TableHeader>
+                    <TableBody>
+                      {pageRows.map((b: any) => (
+                        <TableRow
+                          key={b.id}
+                          className="cursor-pointer"
+                          onClick={() => router.push(`/bookings/${b.id}`)}
+                        >
+                          <TableCell className="font-mono text-xs">
+                            {b.folio_id || b.id.slice(0, 8)}
+                          </TableCell>
+                          <TableCell>{b.guests?.name || '—'}</TableCell>
+                          <TableCell>{b.rooms?.room_number || '—'}</TableCell>
+                          <TableCell>{b.check_in}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </PaginatedListShell>
             </CardContent>
           </Card>
         </TabsContent>
@@ -563,38 +581,73 @@ export default function NightAuditPage() {
             <CardDescription>Guests expected to depart today</CardDescription>
           </CardHeader>
           <CardContent>
-              {auditData?.pendingCheckouts?.length ? (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Folio ID</TableHead>
-                  <TableHead>Guest Name</TableHead>
-                  <TableHead>Room</TableHead>
-                  <TableHead>Check-out Date</TableHead>
-                  <TableHead className="text-right">Balance</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {auditData.pendingCheckouts.map((b: any) => (
-                  <TableRow
-                    key={b.id}
-                    className="cursor-pointer"
-                    onClick={() => router.push(`/bookings/${b.id}`)}
-                  >
-                    <TableCell className="font-mono text-xs">
-                      {b.folio_id || b.booking_number || b.id.slice(0, 8)}
-                    </TableCell>
-                    <TableCell>{b.guests?.name || '—'}</TableCell>
-                    <TableCell>{b.rooms?.room_number || '—'}</TableCell>
-                    <TableCell>{b.check_out}</TableCell>
-                    <TableCell className="text-right">{formatNaira(b.balance || 0)}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-              ) : (
-                <div className="py-8 text-center text-sm text-muted-foreground">No pending checkouts for today.</div>
-              )}
+              <PaginatedListShell
+                items={auditData?.pendingCheckouts || []}
+                pageSize={10}
+                searchPlaceholder="Search folio, guest, room…"
+                filters={[
+                  {
+                    key: 'balance',
+                    label: 'Balance',
+                    options: [
+                      { value: 'due', label: 'Balance due' },
+                      { value: 'settled', label: 'Settled' },
+                    ],
+                  },
+                ]}
+                searchMatch={(b: any, query) => {
+                  const q = query.trim().toLowerCase()
+                  return [
+                    b.folio_id,
+                    b.booking_number,
+                    b.id,
+                    b.guests?.name,
+                    b.rooms?.room_number,
+                    b.check_out,
+                  ]
+                    .filter(Boolean)
+                    .some((value) => String(value).toLowerCase().includes(q))
+                }}
+                filterMatch={(b: any, key, value) => {
+                  if (key === 'balance') {
+                    const balance = Number(b.balance || 0)
+                    return value === 'due' ? balance > 0 : balance <= 0
+                  }
+                  return undefined
+                }}
+                emptyMessage="No pending checkouts for today."
+              >
+                {(pageRows) => (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Folio ID</TableHead>
+                        <TableHead>Guest Name</TableHead>
+                        <TableHead>Room</TableHead>
+                        <TableHead>Check-out Date</TableHead>
+                        <TableHead className="text-right">Balance</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {pageRows.map((b: any) => (
+                        <TableRow
+                          key={b.id}
+                          className="cursor-pointer"
+                          onClick={() => router.push(`/bookings/${b.id}`)}
+                        >
+                          <TableCell className="font-mono text-xs">
+                            {b.folio_id || b.booking_number || b.id.slice(0, 8)}
+                          </TableCell>
+                          <TableCell>{b.guests?.name || '—'}</TableCell>
+                          <TableCell>{b.rooms?.room_number || '—'}</TableCell>
+                          <TableCell>{b.check_out}</TableCell>
+                          <TableCell className="text-right">{formatNaira(b.balance || 0)}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </PaginatedListShell>
           </CardContent>
         </Card>
         </TabsContent>
@@ -677,63 +730,64 @@ export default function NightAuditPage() {
                   </div>
                 </div>
 
-            <Table>
-              <TableHeader>
-                <TableRow>
-                      <TableHead>Time</TableHead>
-                      <TableHead>Type</TableHead>
-                      <TableHead>Activity</TableHead>
-                      <TableHead>Actor</TableHead>
-                      <TableHead>Reference</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead className="text-right">Amount</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                    {logsLoading ? (
-                      <TableRow>
-                        <TableCell colSpan={7} className="py-10">
-                          <div className="flex justify-center" role="status" aria-label="Loading audit trails">
-                            <LoadingSpinner size="lg" />
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ) : auditLogs.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={7} className="py-8 text-center text-muted-foreground">
-                          No audit logs found for the selected filters.
-                        </TableCell>
-                      </TableRow>
-                    ) : auditLogs.map((log) => (
-                  <TableRow
-                        key={`${log.source}-${log.id}`}
-                        className={log.href ? 'cursor-pointer' : ''}
-                        onClick={() => log.href && router.push(log.href)}
-                      >
-                        <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
-                          {new Date(log.created_at).toLocaleString('en-GB')}
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant="outline">{log.category}</Badge>
-                        </TableCell>
-                        <TableCell>
-                          <div className="font-medium text-sm">{log.action}</div>
-                          <div className="text-xs text-muted-foreground line-clamp-1">{log.description}</div>
-                        </TableCell>
-                        <TableCell>{log.actor_name}</TableCell>
-                        <TableCell className="font-mono text-xs">{log.reference}</TableCell>
-                        <TableCell>
-                          <Badge variant={['rejected', 'failed', 'variance'].includes(log.status) ? 'destructive' : 'secondary'}>
-                            {log.status}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {log.amount ? formatNaira(log.amount) : '—'}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                {logsLoading ? (
+                  <div className="flex justify-center py-10" role="status" aria-label="Loading audit trails">
+                    <LoadingSpinner size="lg" />
+                  </div>
+                ) : (
+                  <PaginatedListShell
+                    items={auditLogs}
+                    pageSize={15}
+                    hideSearch
+                    emptyMessage="No audit logs found for the selected filters."
+                  >
+                    {(pageLogs) => (
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Time</TableHead>
+                            <TableHead>Type</TableHead>
+                            <TableHead>Activity</TableHead>
+                            <TableHead>Actor</TableHead>
+                            <TableHead>Reference</TableHead>
+                            <TableHead>Status</TableHead>
+                            <TableHead className="text-right">Amount</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {pageLogs.map((log) => (
+                            <TableRow
+                              key={`${log.source}-${log.id}`}
+                              className={log.href ? 'cursor-pointer' : ''}
+                              onClick={() => log.href && router.push(log.href)}
+                            >
+                              <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
+                                {new Date(log.created_at).toLocaleString('en-GB')}
+                              </TableCell>
+                              <TableCell>
+                                <Badge variant="outline">{log.category}</Badge>
+                              </TableCell>
+                              <TableCell>
+                                <div className="font-medium text-sm">{log.action}</div>
+                                <div className="text-xs text-muted-foreground line-clamp-1">{log.description}</div>
+                              </TableCell>
+                              <TableCell>{log.actor_name}</TableCell>
+                              <TableCell className="font-mono text-xs">{log.reference}</TableCell>
+                              <TableCell>
+                                <Badge variant={['rejected', 'failed', 'variance'].includes(log.status) ? 'destructive' : 'secondary'}>
+                                  {log.status}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="text-right">
+                                {log.amount ? formatNaira(log.amount) : '—'}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    )}
+                  </PaginatedListShell>
+                )}
           </CardContent>
         </Card>
           </TabsContent>
