@@ -7,7 +7,7 @@ import {
 } from '@/lib/hooks/use-paginated-list'
 import { TableListControls } from '@/components/shared/table-list-controls'
 
-type PaginatedListShellProps<T extends Record<string, unknown>> = {
+type PaginatedListShellProps<T extends object> = {
   items: T[]
   pageSize?: number
   searchPlaceholder?: string
@@ -20,7 +20,7 @@ type PaginatedListShellProps<T extends Record<string, unknown>> = {
   children: (paginatedItems: T[]) => ReactNode
 }
 
-export function PaginatedListShell<T extends Record<string, unknown>>({
+export function PaginatedListShell<T extends object>({
   items,
   pageSize = 15,
   searchPlaceholder = 'Search…',
