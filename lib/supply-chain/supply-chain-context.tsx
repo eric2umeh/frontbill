@@ -2324,7 +2324,7 @@ function useSupplyChainImpl() {
         returned: number;
       },
       actor: Actor,
-    ): { ok: true } | { error: string } => {
+    ): { ok: true } | { error: string; shortages?: StockShortageLine[] } => {
       const batch = batches.find((b) => b.id === batchId);
       if (!batch) return { error: "Production batch not found" };
       if (batch.status !== "in_progress") {
