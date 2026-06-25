@@ -55,6 +55,10 @@ import { KITCHEN_BATCH_UNITS } from '@/lib/supply-chain/conversion-units'
 
 const BATCH_CREATOR_ROLES = new Set(['superadmin', 'admin', 'manager'])
 
+type IngredientSearchItem =
+  | { source: 'raw'; id: string; name: string; unit: string; lastPrice: number; stockOnHand: number }
+  | { source: 'kitchen_stock'; id: string; name: string; unit: string; lastPrice: number; stockOnHand: number }
+
 const numberInputValue = (value: number | null | undefined) =>
   value != null && Number(value) !== 0 ? String(value) : ''
 
@@ -70,6 +74,7 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
   const {
     storeItems,
     kitchenRawStock,
+    kitchenStock,
     kitchenRawOnHand,
     recipes,
     openKitchenBatchFromMaterials,
@@ -86,6 +91,7 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
   const [menuCategory, setMenuCategory] = useState('')
   const [menuCategoryId, setMenuCategoryId] = useState<string | null>(null)
   const [plannedPortions, setPlannedPortions] = useState('')
+  const [yieldUnit, setYieldUnit] = useState('portion')
   const [sellingPrice, setSellingPrice] = useState('')
   const [overheadLabour, setOverheadLabour] = useState('')
   const [overheadGas, setOverheadGas] = useState('')
@@ -108,6 +114,7 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
     setMenuItemId(draft.menuItemId)
     setLinkedKitchenStockId(draft.linkedKitchenStockId)
     setPlannedPortions(draft.plannedPortions)
+    setYieldUnit(draft.yieldUnit ?? 'portion')
     setSellingPrice(draft.sellingPrice)
     setOverheadLabour(draft.overheadLabour)
     setOverheadGas(draft.overheadGas)
@@ -131,6 +138,7 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
     setBatchName(recipe.name)
     setMenuCategory(recipe.category)
     setPlannedPortions(numberInputValue(recipe.yieldPortions))
+    setYieldUnit(recipe.yieldUnit ?? 'portion')
     setSellingPrice(numberInputValue(recipe.sellingPricePerPortion))
     setOverheadLabour(recipe.overheadLabour ? String(recipe.overheadLabour) : '')
     setOverheadGas(recipe.overheadGas ? String(recipe.overheadGas) : '')
@@ -151,6 +159,7 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
           unit: ing.unit,
           quantity: ing.quantity,
           unitCost: ing.quantity > 0 ? ing.cost / ing.quantity : 0,
+          source: ing.source ?? 'raw',
           optional: false,
         })),
     )
@@ -162,6 +171,7 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
         unit: ing.unit,
         quantity: ing.quantity,
         unitCost: ing.quantity > 0 ? ing.cost / ing.quantity : 0,
+      source: ing.source ?? 'raw',
         optional: true,
       }))
     setOptionalCart(optionalIngredients)
@@ -185,6 +195,7 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
       menuItemId,
       linkedKitchenStockId,
       plannedPortions,
+      yieldUnit,
       sellingPrice,
       overheadLabour,
       overheadGas,
@@ -202,6 +213,7 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
     menuItemId,
     linkedKitchenStockId,
     plannedPortions,
+    yieldUnit,
     sellingPrice,
     overheadLabour,
     overheadGas,
@@ -229,19 +241,56 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
     return () => window.removeEventListener('frontbill:kitchen-raw-stock', onRaw)
   }, [])
 
-  const searchResults = useMemo(() => {
+  const kitchenStockUnitCost = (stockId: string): number => {
+    const stock = kitchenStock.find((k) => k.id === stockId)
+    const recipe = stock?.linkedRecipeId ? recipes.find((r) => r.id === stock.linkedRecipeId) : undefined
+    if (!recipe || recipe.yieldPortions <= 0) return 0
+    const cost =
+      recipe.ingredients
+        .filter((ing) => !ing.optional)
+        .reduce((sum, ing) => sum + Math.max(0, ing.cost || 0), 0) +
+      (recipe.overheadLabour || 0) +
+      (recipe.overheadGas || 0) +
+      (recipe.overheadOther || recipe.overheadCost || 0)
+    return cost / recipe.yieldPortions
+  }
+
+  const kitchenStockOnHand = (stockId: string) =>
+    kitchenStock.find((k) => k.id === stockId)?.availablePortions ?? 0
+
+  const searchResults = useMemo<IngredientSearchItem[]>(() => {
     const q = search.trim().toLowerCase()
     if (!q) return []
-    return kitchenStoreItems.filter((s) => s.name.toLowerCase().includes(q)).slice(0, 30)
+    const rawMatches: IngredientSearchItem[] = kitchenStoreItems
+      .filter((s) => s.name.toLowerCase().includes(q))
+      .map((s) => ({
+        source: 'raw' as const,
+        id: s.id,
+        name: s.name,
+        unit: defaultUnitForStoreItem(s.unit),
+        lastPrice: s.lastPrice,
+        stockOnHand: kitchenRawOnHand(s.id),
+      }))
+    const producedMatches: IngredientSearchItem[] = kitchenStock
+      .filter((s) => s.source === 'produced' && s.availablePortions > 0 && s.name.toLowerCase().includes(q))
+      .map((s) => ({
+        source: 'kitchen_stock' as const,
+        id: s.id,
+        name: s.name,
+        unit: s.unit || 'portion',
+        lastPrice: kitchenStockUnitCost(s.id),
+        stockOnHand: s.availablePortions,
+      }))
+    return [...rawMatches, ...producedMatches].slice(0, 30)
     // rawStockTick keeps search/cart in sync after store issue-out without refresh
-  }, [kitchenStoreItems, search, kitchenRawStock, rawStockTick])
+  }, [kitchenStoreItems, kitchenStock, recipes, search, kitchenRawStock, rawStockTick])
 
-  const addMaterial = (item: StoreItem, optional = false) => {
+  const addMaterial = (item: IngredientSearchItem, optional = false) => {
     if (optional) setOptionalIngredientsOpen(true)
     const unit = defaultUnitForStoreItem(item.unit)
     const setter = optional ? setOptionalCart : setCart
     setter((prev) => {
-      const ex = prev.find((c) => c.storeItemId === item.id)
+      const ex = prev.find((c) => c.storeItemId === item.id && (c.source ?? 'raw') === item.source)
       if (ex) {
         const nextQty = ex.quantity + 1
         setQtyInputMap((m) => ({ ...m, [item.id]: String(nextQty) }))
@@ -258,6 +307,7 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
           unit,
           quantity: 1,
           unitCost: item.lastPrice,
+          source: item.source,
           optional,
         },
       ]
@@ -293,11 +343,12 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
       prev.map((c) => {
         if (c.storeItemId !== storeItemId) return c
         const store = storeItems.find((s) => s.id === storeItemId)
+        const stock = kitchenStock.find((s) => s.id === storeItemId)
         return {
           ...c,
           quantity: parsed.quantity,
           unit: parsed.unit,
-          unitCost: store?.lastPrice ?? c.unitCost,
+          unitCost: c.source === 'kitchen_stock' ? kitchenStockUnitCost(stock?.id ?? '') : store?.lastPrice ?? c.unitCost,
           optional,
         }
       }),
@@ -333,11 +384,12 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
       prev.map((c) => {
         if (c.storeItemId !== storeItemId) return c
         const store = storeItems.find((s) => s.id === storeItemId)
+        const stock = kitchenStock.find((s) => s.id === storeItemId)
         return {
           ...c,
           quantity: parsed.quantity,
           unit: parsed.unit,
-          unitCost: store?.lastPrice ?? c.unitCost,
+          unitCost: c.source === 'kitchen_stock' ? kitchenStockUnitCost(stock?.id ?? '') : store?.lastPrice ?? c.unitCost,
           optional,
         }
       }),
@@ -350,6 +402,16 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
   }
 
   const lineCost = (line: BatchMaterialLine) => {
+    if (line.source === 'kitchen_stock') {
+      const stock = kitchenStock.find((s) => s.id === line.storeItemId)
+      const stockUnit = stock?.unit || line.unit
+      return materialCostForUnit(
+        line.quantity,
+        line.unit,
+        stockUnit,
+        kitchenStockUnitCost(line.storeItemId),
+      )
+    }
     const store = storeItems.find((s) => s.id === line.storeItemId)
     if (!store) return line.quantity * line.unitCost
     const factors = factorMap[line.storeItemId] ?? itemFactors(line.storeItemId, store.unit)
@@ -408,6 +470,7 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
     setMenuCategory('')
     setMenuCategoryId(null)
     setPlannedPortions('')
+    setYieldUnit('portion')
     setSellingPrice('')
     setOverheadLabour('')
     setOverheadGas('')
@@ -440,10 +503,11 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
     if (editing && editRecipeId) {
       const res = updateRecipe(
         editRecipeId,
-        {
+        ({
           name: titledName,
           category: titledCategory,
           yieldPortions: planned,
+          yieldUnit,
           sellingPricePerPortion: sell,
           overheadLabour: Number(overheadLabour) || 0,
           overheadGas: Number(overheadGas) || 0,
@@ -455,9 +519,10 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
             quantity: m.quantity,
             unit: m.unit,
             cost: m.lineCost ?? lineCost(m),
+            source: m.source ?? 'raw',
             optional: m.optional,
           })),
-        },
+        } as Parameters<typeof updateRecipe>[1] & { yieldUnit: string }),
         actor,
       )
       if ('error' in res) {
@@ -479,6 +544,7 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
         batchName: titledName,
         menuCategory: titledCategory,
         plannedPortions: planned,
+        yieldUnit,
         sellingPricePerPortion: sell,
         materials: materialsWithCost,
         notes: notes.trim() || undefined,
@@ -508,14 +574,22 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
   const renderMaterialLines = (lines: BatchMaterialLine[], optional: boolean) => (
     <ul className="grid gap-2 grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
       {lines.map((line) => {
-        const onHand = rawOnHand(line.storeItemId)
+        const source = line.source ?? 'raw'
+        const onHand =
+          source === 'kitchen_stock'
+            ? kitchenStockOnHand(line.storeItemId)
+            : rawOnHand(line.storeItemId)
         const store = storeItems.find((s) => s.id === line.storeItemId)
+        const stock = kitchenStock.find((s) => s.id === line.storeItemId)
+        const baseUnit = source === 'kitchen_stock' ? stock?.unit || line.unit : store?.unit ?? line.unit
         const inputVal = qtyInputMap[line.storeItemId] ?? numberInputValue(line.quantity)
         const factors =
-          factorMap[line.storeItemId] ??
-          (store ? itemFactors(line.storeItemId, store.unit) : {})
+          source === 'kitchen_stock'
+            ? {}
+            : factorMap[line.storeItemId] ??
+              (store ? itemFactors(line.storeItemId, store.unit) : {})
         const showFactor =
-          store && needsUnitFactor(line.unit, store.unit, factors)
+          source !== 'kitchen_stock' && store && needsUnitFactor(line.unit, store.unit, factors)
         return (
           <li
             key={`${optional ? 'opt-' : 'req-'}${line.storeItemId}`}
@@ -539,7 +613,7 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
               </Button>
             </div>
             <p className="text-[11px] text-muted-foreground truncate">
-              Stock {onHand} {store?.unit ?? line.unit}
+              {source === 'kitchen_stock' ? 'Prep stock' : 'Stock'} {onHand} {baseUnit}
             </p>
             <div className="flex items-center gap-2">
               <Input
@@ -555,7 +629,7 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
                 }
               />
               <UnitSelect
-                storeUnit={store?.unit ?? line.unit}
+                storeUnit={baseUnit}
                 itemName={line.name}
                 value={line.unit}
                 units={[...KITCHEN_BATCH_UNITS]}
@@ -580,7 +654,7 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
               />
             )}
             <p className="text-[11px] text-muted-foreground truncate">
-              {formatQuantityDisplay(line.quantity, line.unit, store?.unit, factors)}
+              {formatQuantityDisplay(line.quantity, line.unit, baseUnit, factors)}
             </p>
             <p className="text-xs font-semibold tabular-nums">
               {optional ? (
@@ -599,10 +673,9 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
     <div className="grid gap-4 lg:grid-cols-[minmax(240px,300px)_1fr] min-h-[min(72vh,720px)]">
       <div className="rounded-xl border flex flex-col overflow-hidden bg-card">
         <div className="p-4 border-b space-y-2">
-          <h3 className="font-semibold text-sm">Search store items</h3>
+          <h3 className="font-semibold text-sm">Search ingredients</h3>
           <p className="text-xs text-muted-foreground">
-            Materials must be issued from Central Store → Kitchen first. Type to search kitchen
-            stock.
+            Search raw materials issued from store, or produced prep stock like Chicken Stock.
           </p>
           <div className="flex items-center gap-2 pt-1">
             <Checkbox
@@ -634,13 +707,16 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
                   <li className="px-3 py-2 text-muted-foreground">No items match</li>
                 ) : (
                   searchResults.map((item) => {
-                    const inRequired = cart.find((c) => c.storeItemId === item.id)
-                    const inOptional = optionalCart.find((c) => c.storeItemId === item.id)
+                    const inRequired = cart.find(
+                      (c) => c.storeItemId === item.id && (c.source ?? 'raw') === item.source,
+                    )
+                    const inOptional = optionalCart.find(
+                      (c) => c.storeItemId === item.id && (c.source ?? 'raw') === item.source,
+                    )
                     const reserved = (inRequired?.quantity ?? 0) + (inOptional?.quantity ?? 0)
-                    const issued = kitchenRawOnHand(item.id)
-                    const available = Math.max(0, issued - reserved)
+                    const available = Math.max(0, item.stockOnHand - reserved)
                     return (
-                      <li key={item.id}>
+                      <li key={`${item.source}-${item.id}`}>
                         <button
                           type="button"
                           className="w-full px-3 py-2 text-left hover:bg-muted"
@@ -649,7 +725,8 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
                         >
                           <span className="font-medium">{item.name}</span>
                           <span className="block text-xs text-muted-foreground">
-                            {available} {item.unit} issued to kitchen
+                            {available} {item.unit}{' '}
+                            {item.source === 'kitchen_stock' ? 'prep stock available' : 'issued to kitchen'}
                             {inRequired ? ` · ${inRequired.quantity} in batch` : ''}
                             {inOptional ? ` · ${inOptional.quantity} optional` : ''}
                           </span>
@@ -663,7 +740,8 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
           </div>
         </div>
         <div className="flex-1 p-4 text-xs text-muted-foreground">
-          {kitchenRawStock.length} material(s) issued to kitchen. Results appear as you type.
+          {kitchenRawStock.length} raw material(s), {kitchenStock.filter((s) => s.source === 'produced').length}{' '}
+          prep/finished stock item(s). Results appear as you type.
         </div>
       </div>
 
@@ -766,16 +844,27 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
               />
             </div>
             <div>
-              <Label className="text-xs">Planned portions</Label>
-              <Input
-                inputMode="decimal"
-                placeholder="e.g. 6"
-                className="h-9 mt-0.5"
-                value={plannedPortions}
-                onChange={(e) =>
-                  setPlannedPortions(sanitizeQuantityInput(e.target.value))
-                }
-              />
+              <Label className="text-xs">Planned yield</Label>
+              <div className="mt-0.5 flex gap-2">
+                <Input
+                  inputMode="decimal"
+                  placeholder="e.g. 6"
+                  className="h-9"
+                  value={plannedPortions}
+                  onChange={(e) =>
+                    setPlannedPortions(sanitizeQuantityInput(e.target.value))
+                  }
+                />
+                <UnitSelect
+                  value={yieldUnit}
+                  units={[...KITCHEN_BATCH_UNITS]}
+                  onChange={setYieldUnit}
+                  className="h-9 w-[92px] text-xs shrink-0"
+                />
+              </div>
+              <p className="mt-1 text-[10px] text-muted-foreground">
+                Use portions for finished dishes; use litre/ml/kg for prep stock like chicken stock.
+              </p>
             </div>
             <div>
               <Label className="text-xs">Overhead — labour (₦)</Label>

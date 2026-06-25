@@ -346,6 +346,8 @@ export interface RecipeIngredient {
   quantity: number
   unit: string
   cost: number
+  /** Raw store-issued item by default; produced kitchen stock for prep/sub-recipes. */
+  source?: 'raw' | 'kitchen_stock'
   /** Shown on recipe but excluded from portion yield / batch cost. */
   optional?: boolean
 }
@@ -355,6 +357,8 @@ export interface Recipe {
   name: string
   category: string
   yieldPortions: number
+  /** Unit of the produced yield: portion for finished dishes, l/ml/kg/etc. for prep batches. */
+  yieldUnit?: string
   yieldLabel: string
   ingredients: RecipeIngredient[]
   /** @deprecated use overheadLabour + overheadGas + overheadOther */
@@ -375,6 +379,8 @@ export interface BatchMaterialLine {
   unit: string
   quantity: number
   unitCost: number
+  /** Raw store-issued item by default; produced kitchen stock for prep/sub-recipes. */
+  source?: 'raw' | 'kitchen_stock'
   /** Garnish / optional — listed on recipe, not in portion cost. */
   optional?: boolean
   /** Computed line cost in naira (set when saving batch). */
@@ -385,6 +391,7 @@ export interface CreateKitchenBatchInput {
   batchName: string
   menuCategory: string
   plannedPortions: number
+  yieldUnit?: string
   sellingPricePerPortion: number
   materials: BatchMaterialLine[]
   notes?: string
@@ -408,6 +415,7 @@ export interface KitchenBatchDraft {
   menuItemId: string | null
   linkedKitchenStockId: string | null
   plannedPortions: string
+  yieldUnit?: string
   sellingPrice: string
   overheadLabour: string
   overheadGas: string
@@ -432,6 +440,8 @@ export interface ProductionBatch {
   materialsUsed: string[]
   /** Raw materials deducted when batch opened — restored if in-progress batch is deleted. */
   deductedMaterials?: { storeItemId: string; quantity: number }[]
+  /** Produced kitchen stock consumed by this batch. */
+  deductedKitchenStock?: { kitchenStockId: string; quantity: number }[]
   kitchenStockId?: string
   openedAt: string
   openedBy: string
@@ -456,6 +466,8 @@ export interface KitchenStockItem {
   name: string
   source: 'produced' | 'issued_raw'
   availablePortions: number
+  /** Unit of availablePortions. Defaults to portion for older rows. */
+  unit?: string
   reorderLevel: number
   linkedRecipeId?: string
 }
