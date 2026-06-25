@@ -175,7 +175,10 @@ export function KitchenWorkspace() {
     () =>
       batchMaterialShortages(openBatchRecipe, openBatchPortions, (stockItemId, source) =>
         source === 'kitchen_stock'
-          ? kitchenStock.find((k) => k.id === stockItemId)?.availablePortions ?? 0
+          ? {
+              onHand: kitchenStock.find((k) => k.id === stockItemId)?.availablePortions ?? 0,
+              unit: kitchenStock.find((k) => k.id === stockItemId)?.unit,
+            }
           : kitchenRawOnHand(stockItemId),
       ),
     [openBatchRecipe, openBatchPortions, kitchenRawOnHand, kitchenRawStock, kitchenStock, stockTick],
@@ -194,7 +197,10 @@ export function KitchenWorkspace() {
         closeBatchRecord?.plannedPortions ?? 0,
         (stockItemId, source) =>
           source === 'kitchen_stock'
-            ? kitchenStock.find((k) => k.id === stockItemId)?.availablePortions ?? 0
+            ? {
+                onHand: kitchenStock.find((k) => k.id === stockItemId)?.availablePortions ?? 0,
+                unit: kitchenStock.find((k) => k.id === stockItemId)?.unit,
+              }
             : kitchenRawOnHand(stockItemId),
       ),
     [closeBatchRecipe, closeBatchRecord?.plannedPortions, kitchenRawOnHand, kitchenRawStock, kitchenStock, stockTick],
@@ -765,7 +771,7 @@ export function KitchenWorkspace() {
               <>
                 <p className="text-sm text-muted-foreground">
                   Closes this production run and deducts raw materials from kitchen stock. Finished
-                  {recipe?.yieldUnit || 'portion'} are added to finished/prep stock when you close.
+                  {closeBatchRecipe?.yieldUnit || 'portion'} are added to finished/prep stock when you close.
                 </p>
                 <div className="space-y-3">
                   <div className="space-y-2">

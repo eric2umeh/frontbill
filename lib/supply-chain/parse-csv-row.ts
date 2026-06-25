@@ -209,10 +209,8 @@ function parseKitchenRecipeListCsvText(
 
     if (rawName) {
       startRecipe(rawName, cells)
-      if (rawItem && !looksLikeRecipeTitle(rawItem) && active) {
+      if (rawItem && active) {
         active.ingredientLines!.push(rawItem)
-      } else if (rawItem && looksLikeRecipeTitle(rawItem)) {
-        startRecipe(rawItem, cells)
       }
       continue
     }
