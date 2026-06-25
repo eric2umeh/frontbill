@@ -173,8 +173,12 @@ export function KitchenWorkspace() {
     : 0
   const openBatchShortages = useMemo(
     () =>
-      batchMaterialShortages(openBatchRecipe, openBatchPortions, kitchenRawOnHand),
-    [openBatchRecipe, openBatchPortions, kitchenRawOnHand, kitchenRawStock, stockTick],
+      batchMaterialShortages(openBatchRecipe, openBatchPortions, (stockItemId, source) =>
+        source === 'kitchen_stock'
+          ? kitchenStock.find((k) => k.id === stockItemId)?.availablePortions ?? 0
+          : kitchenRawOnHand(stockItemId),
+      ),
+    [openBatchRecipe, openBatchPortions, kitchenRawOnHand, kitchenRawStock, kitchenStock, stockTick],
   )
 
   const closeBatchRecord = closeDialog
@@ -188,9 +192,12 @@ export function KitchenWorkspace() {
       batchMaterialShortages(
         closeBatchRecipe,
         closeBatchRecord?.plannedPortions ?? 0,
-        kitchenRawOnHand,
+        (stockItemId, source) =>
+          source === 'kitchen_stock'
+            ? kitchenStock.find((k) => k.id === stockItemId)?.availablePortions ?? 0
+            : kitchenRawOnHand(stockItemId),
       ),
-    [closeBatchRecipe, closeBatchRecord?.plannedPortions, kitchenRawOnHand, kitchenRawStock, stockTick],
+    [closeBatchRecipe, closeBatchRecord?.plannedPortions, kitchenRawOnHand, kitchenRawStock, kitchenStock, stockTick],
   )
 
   return (
@@ -216,7 +223,7 @@ export function KitchenWorkspace() {
       ) : (
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList className="flex h-auto flex-wrap">
-          <TabsTrigger value="stock">Finished Batch</TabsTrigger>
+          <TabsTrigger value="stock">Finished / Prep Stock</TabsTrigger>
           <TabsTrigger value="raw-stock">Raw from Store</TabsTrigger>
           <TabsTrigger value="production">Production Records</TabsTrigger>
           <TabsTrigger value="recipes">All Batches</TabsTrigger>
@@ -294,7 +301,7 @@ export function KitchenWorkspace() {
         <TabsContent value="stock" className="mt-4">
         <div>
           <p className="text-sm text-muted-foreground mb-3">
-            Finished portions increase only when a production run is closed. Batch standards start at 0.
+            Finished dishes and prep stock increase only when a production run is closed. Batch standards start at 0.
           </p>
           <PaginatedListShell
             items={kitchenStock}
@@ -352,7 +359,7 @@ export function KitchenWorkspace() {
                           <Badge className="bg-emerald-100 text-emerald-800">Produced</Badge>
                         </TableCell>
                         <TableCell className={`text-right ${stockLevelTextClass(level)}`}>
-                          {k.availablePortions} portions
+                          {k.availablePortions} {k.unit || 'portion'}
                         </TableCell>
                         <TableCell className={`text-right ${RESPONSIVE_HIDE_MD}`}>
                           {k.reorderLevel}
@@ -471,7 +478,7 @@ export function KitchenWorkspace() {
                       setCloseDialog(b.id)
                     }}
                   >
-                    Close Batch &amp; Record Disposition ({b.plannedPortions} portions)
+                    Close Batch &amp; Record Disposition ({b.plannedPortions} {closeBatchRecipe?.yieldUnit || 'portion'})
                   </Button>
                 </div>
               )}
@@ -617,7 +624,7 @@ export function KitchenWorkspace() {
                       setBatchDialog({ recipeId: r.id, defaultPortions: r.yieldPortions })
                     }}
                   >
-                    <Flame className="h-4 w-4 mr-2" /> Open batch (add portions)
+                    <Flame className="h-4 w-4 mr-2" /> Open batch
                   </Button>
                 </div>
               </div>
@@ -655,7 +662,7 @@ export function KitchenWorkspace() {
                       <TableCell className="font-medium">{r.name}</TableCell>
                       <TableCell className={RESPONSIVE_HIDE_MD}>{r.category}</TableCell>
                       <TableCell className={`text-right ${RESPONSIVE_HIDE_LG}`}>
-                        {r.yieldPortions}
+                        {r.yieldPortions} {r.yieldUnit || 'portion'}
                       </TableCell>
                       <TableCell className={`text-right ${RESPONSIVE_HIDE_MD}`}>
                         {formatNaira(unitCost)}
@@ -703,7 +710,7 @@ export function KitchenWorkspace() {
           <DialogHeader><DialogTitle>Open production batch</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div className="space-y-2">
-              <Label>Planned portions</Label>
+              <Label>Planned yield</Label>
               <Input
                 inputMode="decimal"
                 placeholder="e.g. 6"
@@ -711,7 +718,8 @@ export function KitchenWorkspace() {
                 onChange={(e) => setPlannedInput(sanitizeQuantityInput(e.target.value))}
               />
               <p className="text-xs text-muted-foreground">
-                Default is the batch standard yield ({batchDialog?.defaultPortions ?? 0} portions).
+                Default is the batch standard yield ({batchDialog?.defaultPortions ?? 0}{' '}
+                {openBatchRecipe?.yieldUnit || 'portion'}).
                 Raw stock deducts when you close the run — check materials below first.
               </p>
             </div>
@@ -728,7 +736,7 @@ export function KitchenWorkspace() {
                 const planned =
                   parseQuantityValue(plannedInput) || batchDialog.defaultPortions
                 if (planned <= 0) {
-                  toast.error('Enter valid planned portions')
+                  toast.error('Enter valid planned yield')
                   return
                 }
                 const res = openBatch(batchDialog.recipeId, planned, actor)
@@ -757,11 +765,11 @@ export function KitchenWorkspace() {
               <>
                 <p className="text-sm text-muted-foreground">
                   Closes this production run and deducts raw materials from kitchen stock. Finished
-                  portions are added to outlet stock when you close.
+                  {recipe?.yieldUnit || 'portion'} are added to finished/prep stock when you close.
                 </p>
                 <div className="space-y-3">
                   <div className="space-y-2">
-                    <Label className="text-xs">Portions produced</Label>
+                    <Label className="text-xs">Yield produced</Label>
                     <Input readOnly className="bg-muted mt-0.5" value={String(portions)} />
                   </div>
                   <BatchMaterialShortageList
@@ -786,9 +794,10 @@ export function KitchenWorkspace() {
                         : undefined
                       const actual = batch?.plannedPortions ?? 0
                       if (actual <= 0) {
-                        toast.error('Invalid portions for this batch')
+                        toast.error('Invalid yield for this batch')
                         return
                       }
+                      const unit = recipe?.yieldUnit || 'portion'
                       const res = closeBatch(
                         closeDialog,
                         actual,
@@ -814,7 +823,7 @@ export function KitchenWorkspace() {
                         })
                         if (sync.ok) {
                           toast.success(
-                            `${actual} portions of ${recipe!.name} ready — ${batchOutletMenuSyncLabel(outletSync)}`,
+                            `${actual} ${unit} of ${recipe!.name} ready — ${batchOutletMenuSyncLabel(outletSync)}`,
                           )
                         } else {
                           toast.warning(
@@ -823,7 +832,7 @@ export function KitchenWorkspace() {
                         }
                       } else {
                         toast.success(
-                          `${actual} portions added to finished batch (not listed on outlet POS)`,
+                          `${actual} ${unit} added to finished/prep stock (not listed on outlet POS)`,
                         )
                       }
                       setCloseDialog(null)
