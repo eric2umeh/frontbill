@@ -11,6 +11,7 @@ import {
 function isPublicAuthPath(pathname: string) {
   return (
     pathname === '/' ||
+    pathname === '/pricing' ||
     pathname.startsWith('/auth/') ||
     pathname.startsWith('/api/auth/') ||
     pathname === '/access-denied'
