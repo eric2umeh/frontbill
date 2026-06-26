@@ -765,7 +765,7 @@ export function KitchenWorkspace() {
               <>
                 <p className="text-sm text-muted-foreground">
                   Closes this production run and deducts raw materials from kitchen stock. Finished
-                  {recipe?.yieldUnit || 'portion'} are added to finished/prep stock when you close.
+                  {closeBatchRecipe?.yieldUnit || 'portion'} are added to finished/prep stock when you close.
                 </p>
                 <div className="space-y-3">
                   <div className="space-y-2">

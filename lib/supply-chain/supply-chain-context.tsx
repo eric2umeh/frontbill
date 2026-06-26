@@ -71,6 +71,7 @@ import {
 import { pushSupplyNotification } from "./supply-notifications";
 import { toast } from "sonner";
 import { clearKitchenBatchDraft } from "./kitchen-batch-draft";
+import { resolveKitchenBatchLinkIds } from "./kitchen-batch-link-ids";
 import { convertToStoreUnits, materialCostForUnit } from "./measurement-units";
 import {
   convertToStoreUnitsWithFactors,
@@ -1677,9 +1678,12 @@ function useSupplyChainImpl() {
         revenue > 0 ? Math.round(((revenue - batchCost) / revenue) * 1000) / 10 : 0;
 
 
-      const kitchenStockId =
-        input.kitchenStockId?.trim() || `ks-${outletStockSlug(batchName)}`;
-      const recipeId = `rcp-${outletStockSlug(batchName)}`;
+      const { kitchenStockId, recipeId } = resolveKitchenBatchLinkIds({
+        batchName,
+        inputKitchenStockId: input.kitchenStockId,
+        recipes,
+        kitchenStock,
+      });
       const yieldUnit = input.yieldUnit || "portion";
 
       setKitchenStock((prev) => {
@@ -1756,7 +1760,7 @@ function useSupplyChainImpl() {
       schedulePersistSnapshots();
       return { ok: true, kitchenStockId, recipeId };
     },
-    [storeItems, schedulePersistSnapshots],
+    [storeItems, recipes, kitchenStock, schedulePersistSnapshots],
   );
 
   const updateRecipe = useCallback(
