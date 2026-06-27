@@ -175,8 +175,18 @@ export function KitchenWorkspace() {
     () =>
       batchMaterialShortages(openBatchRecipe, openBatchPortions, (stockItemId, source) =>
         source === 'kitchen_stock'
-          ? kitchenStock.find((k) => k.id === stockItemId)?.availablePortions ?? 0
-          : kitchenRawOnHand(stockItemId),
+          ? (() => {
+              const stock = kitchenStock.find((k) => k.id === stockItemId)
+              return stock
+                ? { quantityOnHand: stock.availablePortions, unit: stock.unit || 'portion' }
+                : undefined
+            })()
+          : (() => {
+              const raw = kitchenRawStock.find((k) => k.storeItemId === stockItemId)
+              return raw
+                ? { quantityOnHand: raw.quantityOnHand, unit: raw.unit }
+                : { quantityOnHand: kitchenRawOnHand(stockItemId), unit: 'unit' }
+            })(),
       ),
     [openBatchRecipe, openBatchPortions, kitchenRawOnHand, kitchenRawStock, kitchenStock, stockTick],
   )
@@ -194,8 +204,18 @@ export function KitchenWorkspace() {
         closeBatchRecord?.plannedPortions ?? 0,
         (stockItemId, source) =>
           source === 'kitchen_stock'
-            ? kitchenStock.find((k) => k.id === stockItemId)?.availablePortions ?? 0
-            : kitchenRawOnHand(stockItemId),
+            ? (() => {
+                const stock = kitchenStock.find((k) => k.id === stockItemId)
+                return stock
+                  ? { quantityOnHand: stock.availablePortions, unit: stock.unit || 'portion' }
+                  : undefined
+              })()
+            : (() => {
+                const raw = kitchenRawStock.find((k) => k.storeItemId === stockItemId)
+                return raw
+                  ? { quantityOnHand: raw.quantityOnHand, unit: raw.unit }
+                  : { quantityOnHand: kitchenRawOnHand(stockItemId), unit: 'unit' }
+              })(),
       ),
     [closeBatchRecipe, closeBatchRecord?.plannedPortions, kitchenRawOnHand, kitchenRawStock, kitchenStock, stockTick],
   )

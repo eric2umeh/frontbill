@@ -71,7 +71,8 @@ import {
 import { pushSupplyNotification } from "./supply-notifications";
 import { toast } from "sonner";
 import { clearKitchenBatchDraft } from "./kitchen-batch-draft";
-import { convertToStoreUnits, materialCostForUnit } from "./measurement-units";
+import { materialCostForUnit } from "./measurement-units";
+import { resolveBatchMaterialStockUsage } from "./batch-material-usage";
 import {
   convertToStoreUnitsWithFactors,
   mergeUnitFactors,
@@ -1512,7 +1513,22 @@ function useSupplyChainImpl() {
             .filter((ing) => !ing.optional)
             .reduce((sum, ing) => sum + Math.max(0, ing.cost || 0), 0) +
           recipeOverheadTotal(linkedRecipe);
-        return (linkedCost / linkedRecipe.yieldPortions) * ingredient.quantity;
+        const stockUsage = resolveBatchMaterialStockUsage(
+          {
+            storeItemId: ingredient.stockItemId,
+            name: ingredient.name,
+            unit: ingredient.unit,
+            quantity: ingredient.quantity,
+            source: "kitchen_stock",
+          },
+          stock
+            ? {
+                quantityOnHand: stock.availablePortions,
+                unit: stock.unit || ingredient.unit,
+              }
+            : undefined,
+        );
+        return (linkedCost / linkedRecipe.yieldPortions) * (stockUsage?.quantity ?? ingredient.quantity);
       }
       const storeItem = storeItems.find((s) => s.id === ingredient.stockItemId);
       if (!storeItem || storeItem.lastPrice <= 0) return Math.max(0, ingredient.cost || 0);
@@ -2315,7 +2331,7 @@ function useSupplyChainImpl() {
         returned: number;
       },
       actor: Actor,
-    ): { ok: true } | { error: string } => {
+    ): { ok: true } | { error: string; shortages?: StockShortageLine[] } => {
       const batch = batches.find((b) => b.id === batchId);
       if (!batch) return { error: "Production batch not found" };
       if (batch.status !== "in_progress") {
@@ -2344,19 +2360,45 @@ function useSupplyChainImpl() {
             source: ing.source ?? "raw",
           })) ?? [];
 
-      const shortages: StockShortageLine[] = [];
-      for (const line of materialLines) {
-        if (line.quantity <= 0) continue;
-        const onHand =
+      const materialUsages = materialLines.map((line) => {
+        const stock =
           line.source === "kitchen_stock"
-            ? kitchenStock.find((k) => k.id === line.storeItemId)?.availablePortions ?? 0
-            : kitchenRawOnHand(line.storeItemId);
-        if (onHand < line.quantity) {
+            ? (() => {
+                const kitchenStockItem = kitchenStock.find((k) => k.id === line.storeItemId);
+                return kitchenStockItem
+                  ? {
+                      quantityOnHand: kitchenStockItem.availablePortions,
+                      unit: kitchenStockItem.unit || line.unit,
+                    }
+                  : undefined;
+              })()
+            : (() => {
+                const rawStock = kitchenRawStock.find((k) => k.storeItemId === line.storeItemId);
+                const storeItem = storeItems.find((s) => s.id === line.storeItemId);
+                const factors = storeItem
+                  ? mergeUnitFactors(line.storeItemId, storeItem.unit, storeItem.unitFactors)
+                  : undefined;
+                return {
+                  quantityOnHand: rawStock?.quantityOnHand ?? kitchenRawOnHand(line.storeItemId),
+                  unit: rawStock?.unit ?? storeItem?.unit ?? line.unit,
+                  unitFactors: factors,
+                };
+              })();
+        return {
+          ...line,
+          usage: resolveBatchMaterialStockUsage(line, stock),
+        };
+      });
+
+      const shortages: StockShortageLine[] = [];
+      for (const line of materialUsages) {
+        if (line.quantity <= 0) continue;
+        if (!line.usage || line.usage.onHand < line.usage.quantity) {
           shortages.push({
             name: line.name,
-            need: line.quantity,
-            onHand,
-            unit: line.unit,
+            need: line.usage?.quantity ?? line.quantity,
+            onHand: line.usage?.onHand ?? 0,
+            unit: line.usage?.unit ?? line.unit,
           });
         }
       }
@@ -2371,17 +2413,17 @@ function useSupplyChainImpl() {
         };
       }
 
-      if (materialLines.length) {
+      if (materialUsages.length) {
         deductKitchenRawMaterials(
-          materialLines
-            .filter((l) => l.quantity > 0 && l.source !== "kitchen_stock")
+          materialUsages
+            .filter((l) => l.usage && l.usage.quantity > 0 && l.source !== "kitchen_stock")
             .map((l) => ({
               storeItemId: l.storeItemId,
-              quantity: l.quantity,
+              quantity: l.usage?.quantity ?? 0,
             })),
         );
-        const kitchenStockLines = materialLines.filter(
-          (l) => l.quantity > 0 && l.source === "kitchen_stock",
+        const kitchenStockLines = materialUsages.filter(
+          (l) => l.usage && l.usage.quantity > 0 && l.source === "kitchen_stock",
         );
         if (kitchenStockLines.length) {
           setKitchenStock((prev) =>
@@ -2390,7 +2432,7 @@ function useSupplyChainImpl() {
               if (!line) return k;
               return {
                 ...k,
-                availablePortions: Math.max(0, k.availablePortions - line.quantity),
+                availablePortions: Math.max(0, k.availablePortions - (line.usage?.quantity ?? 0)),
               };
             }),
           );
@@ -2437,17 +2479,17 @@ function useSupplyChainImpl() {
                 batchCost: foodCost,
                 closedAt: new Date().toISOString(),
                 disposition,
-                deductedMaterials: materialLines
-                  .filter((l) => l.quantity > 0 && l.source !== "kitchen_stock")
+                deductedMaterials: materialUsages
+                  .filter((l) => l.usage && l.usage.quantity > 0 && l.source !== "kitchen_stock")
                   .map((l) => ({
                     storeItemId: l.storeItemId,
-                    quantity: l.quantity,
+                    quantity: l.usage?.quantity ?? 0,
                   })),
-                deductedKitchenStock: materialLines
-                  .filter((l) => l.quantity > 0 && l.source === "kitchen_stock")
+                deductedKitchenStock: materialUsages
+                  .filter((l) => l.usage && l.usage.quantity > 0 && l.source === "kitchen_stock")
                   .map((l) => ({
                     kitchenStockId: l.storeItemId,
-                    quantity: l.quantity,
+                    quantity: l.usage?.quantity ?? 0,
                   })),
                 materialsUsed: materialLines.map(
                   (i) => `${i.quantity} ${i.unit} ${i.name}`,
@@ -2502,6 +2544,8 @@ function useSupplyChainImpl() {
       batches,
       recipes,
       kitchenStock,
+      kitchenRawStock,
+      storeItems,
       kitchenRawOnHand,
       deductKitchenRawMaterials,
       recipeTotalCostWithLivePrices,

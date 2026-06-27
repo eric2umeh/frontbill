@@ -52,6 +52,11 @@ import {
 } from '@/lib/supply-chain/batch-outlet-sync'
 import { syncBatchToRestaurantOutlet } from '@/lib/supply-chain/sync-restaurant-outlet'
 import { KITCHEN_BATCH_UNITS } from '@/lib/supply-chain/conversion-units'
+import {
+  batchMaterialLineMatches,
+  kitchenBatchLineInputKey,
+  recipeIngredientInputKey,
+} from '@/lib/supply-chain/kitchen-batch-line-keys'
 
 const BATCH_CREATOR_ROLES = new Set(['superadmin', 'admin', 'manager'])
 
@@ -125,7 +130,7 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
     setOptionalCart(draftOptionalCart)
     setOptionalIngredientsOpen(draftOptionalCart.length > 0)
     setQtyInputMap(
-      Object.fromEntries(draft.cart.map((c) => [c.storeItemId, String(c.quantity)])),
+      Object.fromEntries(draft.cart.map((c) => [kitchenBatchLineInputKey(c), String(c.quantity)])),
     )
     setOutletMenuSync('none')
     setDraftLoaded(true)
@@ -178,7 +183,7 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
     setOptionalIngredientsOpen(optionalIngredients.length > 0)
     setQtyInputMap(
       Object.fromEntries(
-        recipe.ingredients.map((ing) => [ing.stockItemId, numberInputValue(ing.quantity)]),
+        recipe.ingredients.map((ing) => [recipeIngredientInputKey(ing), numberInputValue(ing.quantity)]),
       ),
     )
     setDraftLoaded(true)
@@ -289,16 +294,18 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
     if (optional) setOptionalIngredientsOpen(true)
     const unit = defaultUnitForStoreItem(item.unit)
     const setter = optional ? setOptionalCart : setCart
+    const target = { storeItemId: item.id, source: item.source, optional }
+    const inputKey = kitchenBatchLineInputKey(target)
     setter((prev) => {
-      const ex = prev.find((c) => c.storeItemId === item.id && (c.source ?? 'raw') === item.source)
+      const ex = prev.find((c) => batchMaterialLineMatches(c, target))
       if (ex) {
         const nextQty = ex.quantity + 1
-        setQtyInputMap((m) => ({ ...m, [item.id]: String(nextQty) }))
+        setQtyInputMap((m) => ({ ...m, [inputKey]: String(nextQty) }))
         return prev.map((c) =>
-          c.storeItemId === item.id ? { ...c, quantity: nextQty, optional } : c,
+          batchMaterialLineMatches(c, target) ? { ...c, quantity: nextQty, optional } : c,
         )
       }
-      setQtyInputMap((m) => ({ ...m, [item.id]: '1' }))
+      setQtyInputMap((m) => ({ ...m, [inputKey]: '1' }))
       return [
         ...prev,
         {
@@ -317,31 +324,34 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
     setSearchOpen(false)
   }
 
-  const removeLine = (storeItemId: string, optional = false) => {
+  const removeLine = (storeItemId: string, source: 'raw' | 'kitchen_stock' = 'raw', optional = false) => {
     const setter = optional ? setOptionalCart : setCart
-    setter((prev) => prev.filter((c) => c.storeItemId !== storeItemId))
+    const target = { storeItemId, source, optional }
+    setter((prev) => prev.filter((c) => !batchMaterialLineMatches(c, target)))
     setQtyInputMap((m) => {
       const next = { ...m }
-      delete next[storeItemId]
+      delete next[kitchenBatchLineInputKey(target)]
       return next
     })
   }
 
   const updateLineQty = (
     storeItemId: string,
+    source: 'raw' | 'kitchen_stock',
     raw: string,
     unit: string,
     optional = false,
   ) => {
     const setter = optional ? setOptionalCart : setCart
+    const target = { storeItemId, source, optional }
     const parsed = parseQuantityInput(raw, normalizeMeasurementUnit(unit) as MeasurementUnit)
     if (!parsed || parsed.quantity <= 0) {
-      removeLine(storeItemId, optional)
+      removeLine(storeItemId, source, optional)
       return
     }
     setter((prev) =>
       prev.map((c) => {
-        if (c.storeItemId !== storeItemId) return c
+        if (!batchMaterialLineMatches(c, target)) return c
         const store = storeItems.find((s) => s.id === storeItemId)
         const stock = kitchenStock.find((s) => s.id === storeItemId)
         return {
@@ -353,28 +363,45 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
         }
       }),
     )
-    setQtyInputMap((m) => ({ ...m, [storeItemId]: raw.trim() || String(parsed.quantity) }))
+    setQtyInputMap((m) => ({
+      ...m,
+      [kitchenBatchLineInputKey(target)]: raw.trim() || String(parsed.quantity),
+    }))
   }
 
-  const setLineUnit = (storeItemId: string, unit: string, optional = false) => {
+  const setLineUnit = (
+    storeItemId: string,
+    source: 'raw' | 'kitchen_stock',
+    unit: string,
+    optional = false,
+  ) => {
     const setter = optional ? setOptionalCart : setCart
+    const target = { storeItemId, source, optional }
     setter((prev) =>
-      prev.map((c) => (c.storeItemId === storeItemId ? { ...c, unit } : c)),
+      prev.map((c) => (batchMaterialLineMatches(c, target) ? { ...c, unit } : c)),
     )
   }
 
-  const commitLineQty = (storeItemId: string, raw: string, unit: string, optional = false) => {
-    updateLineQty(storeItemId, raw, unit, optional)
+  const commitLineQty = (
+    storeItemId: string,
+    source: 'raw' | 'kitchen_stock',
+    raw: string,
+    unit: string,
+    optional = false,
+  ) => {
+    updateLineQty(storeItemId, source, raw, unit, optional)
   }
 
   const handleLineQtyChange = (
     storeItemId: string,
+    source: 'raw' | 'kitchen_stock',
     raw: string,
     unit: string,
     optional = false,
   ) => {
     const cleaned = sanitizeQuantityInput(raw)
-    setQtyInputMap((m) => ({ ...m, [storeItemId]: cleaned }))
+    const target = { storeItemId, source, optional }
+    setQtyInputMap((m) => ({ ...m, [kitchenBatchLineInputKey(target)]: cleaned }))
     const trimmed = cleaned.trim()
     if (!trimmed) return
     const parsed = parseQuantityInput(trimmed, normalizeMeasurementUnit(unit) as MeasurementUnit)
@@ -382,7 +409,7 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
     const setter = optional ? setOptionalCart : setCart
     setter((prev) =>
       prev.map((c) => {
-        if (c.storeItemId !== storeItemId) return c
+        if (!batchMaterialLineMatches(c, target)) return c
         const store = storeItems.find((s) => s.id === storeItemId)
         const stock = kitchenStock.find((s) => s.id === storeItemId)
         return {
@@ -575,6 +602,7 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
     <ul className="grid gap-2 grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
       {lines.map((line) => {
         const source = line.source ?? 'raw'
+        const inputKey = kitchenBatchLineInputKey(line)
         const onHand =
           source === 'kitchen_stock'
             ? kitchenStockOnHand(line.storeItemId)
@@ -582,7 +610,7 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
         const store = storeItems.find((s) => s.id === line.storeItemId)
         const stock = kitchenStock.find((s) => s.id === line.storeItemId)
         const baseUnit = source === 'kitchen_stock' ? stock?.unit || line.unit : store?.unit ?? line.unit
-        const inputVal = qtyInputMap[line.storeItemId] ?? numberInputValue(line.quantity)
+        const inputVal = qtyInputMap[inputKey] ?? numberInputValue(line.quantity)
         const factors =
           source === 'kitchen_stock'
             ? {}
@@ -592,7 +620,7 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
           source !== 'kitchen_stock' && store && needsUnitFactor(line.unit, store.unit, factors)
         return (
           <li
-            key={`${optional ? 'opt-' : 'req-'}${line.storeItemId}`}
+            key={inputKey}
             className="rounded-lg border p-2 text-xs bg-background space-y-1.5"
           >
             <div className="flex justify-between gap-1 items-start">
@@ -607,7 +635,7 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
                 variant="ghost"
                 size="icon"
                 className="h-6 w-6 text-destructive shrink-0"
-                onClick={() => removeLine(line.storeItemId, optional)}
+                onClick={() => removeLine(line.storeItemId, source, optional)}
               >
                 <Trash2 className="h-3 w-3" />
               </Button>
@@ -622,10 +650,10 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
                 placeholder="Qty"
                 value={inputVal}
                 onChange={(e) =>
-                  handleLineQtyChange(line.storeItemId, e.target.value, line.unit, optional)
+                  handleLineQtyChange(line.storeItemId, source, e.target.value, line.unit, optional)
                 }
                 onBlur={(e) =>
-                  commitLineQty(line.storeItemId, e.target.value, line.unit, optional)
+                  commitLineQty(line.storeItemId, source, e.target.value, line.unit, optional)
                 }
               />
               <UnitSelect
@@ -634,9 +662,9 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
                 value={line.unit}
                 units={[...KITCHEN_BATCH_UNITS]}
                 onChange={(u) => {
-                  setLineUnit(line.storeItemId, u, optional)
-                  const raw = qtyInputMap[line.storeItemId]
-                  if (raw?.trim()) commitLineQty(line.storeItemId, raw, u, optional)
+                  setLineUnit(line.storeItemId, source, u, optional)
+                  const raw = qtyInputMap[inputKey]
+                  if (raw?.trim()) commitLineQty(line.storeItemId, source, raw, u, optional)
                 }}
                 className="h-8 w-[76px] text-xs shrink-0"
               />

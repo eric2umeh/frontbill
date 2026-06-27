@@ -1,10 +1,15 @@
 import type { Recipe } from '@/lib/supply-chain/types'
+import {
+  resolveBatchMaterialStockUsage,
+  type BatchMaterialSource,
+  type BatchMaterialStockSnapshot,
+} from '@/lib/supply-chain/batch-material-usage'
 import type { StockShortageLine } from '@/lib/ui/stock-shortage-dialog'
 
 export function batchMaterialLines(
   recipe: Recipe | undefined,
   portions: number,
-): Array<{ storeItemId: string; name: string; unit: string; quantity: number; source: 'raw' | 'kitchen_stock' }> {
+): Array<{ storeItemId: string; name: string; unit: string; quantity: number; source: BatchMaterialSource }> {
   if (!recipe || !Number.isFinite(portions) || portions <= 0) return []
   const scale = recipe.yieldPortions > 0 ? portions / recipe.yieldPortions : 1
   return recipe.ingredients
@@ -21,18 +26,23 @@ export function batchMaterialLines(
 export function batchMaterialShortages(
   recipe: Recipe | undefined,
   portions: number,
-  getOnHand: (stockItemId: string, source: 'raw' | 'kitchen_stock') => number,
+  getStock: (stockItemId: string, source: BatchMaterialSource) => number | BatchMaterialStockSnapshot | undefined,
 ): StockShortageLine[] {
   const shortages: StockShortageLine[] = []
   for (const line of batchMaterialLines(recipe, portions)) {
     if (line.quantity <= 0) continue
-    const onHand = getOnHand(line.storeItemId, line.source)
-    if (onHand < line.quantity) {
+    const stockValue = getStock(line.storeItemId, line.source)
+    const stock =
+      typeof stockValue === 'number'
+        ? { quantityOnHand: stockValue, unit: line.unit }
+        : stockValue
+    const usage = resolveBatchMaterialStockUsage(line, stock)
+    if (!usage || usage.onHand < usage.quantity) {
       shortages.push({
         name: line.name,
-        need: line.quantity,
-        onHand,
-        unit: line.unit,
+        need: usage?.quantity ?? line.quantity,
+        onHand: usage?.onHand ?? stock?.quantityOnHand ?? 0,
+        unit: usage?.unit ?? line.unit,
       })
     }
   }
