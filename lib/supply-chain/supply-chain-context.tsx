@@ -88,6 +88,10 @@ import {
   updateSupplyCatalogItem,
 } from "./supply-db-client";
 import { resolveSupplySnapshot } from "./snapshot-merge";
+import {
+  convertMaterialQuantity,
+  materialLineQuantityInStockUnit,
+} from "./batch-material-shortages";
 
 function notifyKitchenRawStockChanged() {
   if (typeof window !== "undefined") {
@@ -2347,10 +2351,18 @@ function useSupplyChainImpl() {
       const shortages: StockShortageLine[] = [];
       for (const line of materialLines) {
         if (line.quantity <= 0) continue;
-        const onHand =
-          line.source === "kitchen_stock"
-            ? kitchenStock.find((k) => k.id === line.storeItemId)?.availablePortions ?? 0
-            : kitchenRawOnHand(line.storeItemId);
+        let stockQuantity = 0;
+        let stockUnit = line.unit;
+        if (line.source === "kitchen_stock") {
+          const stock = kitchenStock.find((k) => k.id === line.storeItemId);
+          stockQuantity = stock?.availablePortions ?? 0;
+          stockUnit = stock?.unit ?? line.unit;
+        } else {
+          const stock = kitchenRawStock.find((k) => k.storeItemId === line.storeItemId);
+          stockQuantity = stock?.quantityOnHand ?? kitchenRawOnHand(line.storeItemId);
+          stockUnit = stock?.unit ?? line.unit;
+        }
+        const onHand = convertMaterialQuantity(stockQuantity, stockUnit, line.unit);
         if (onHand < line.quantity) {
           shortages.push({
             name: line.name,
@@ -2377,12 +2389,21 @@ function useSupplyChainImpl() {
             .filter((l) => l.quantity > 0 && l.source !== "kitchen_stock")
             .map((l) => ({
               storeItemId: l.storeItemId,
-              quantity: l.quantity,
+              quantity: materialLineQuantityInStockUnit(
+                l,
+                kitchenRawStock.find((k) => k.storeItemId === l.storeItemId)?.unit ?? l.unit,
+              ),
             })),
         );
-        const kitchenStockLines = materialLines.filter(
-          (l) => l.quantity > 0 && l.source === "kitchen_stock",
-        );
+        const kitchenStockLines = materialLines
+          .filter((l) => l.quantity > 0 && l.source === "kitchen_stock")
+          .map((line) => ({
+            ...line,
+            quantityInStockUnit: materialLineQuantityInStockUnit(
+              line,
+              kitchenStock.find((k) => k.id === line.storeItemId)?.unit ?? line.unit,
+            ),
+          }));
         if (kitchenStockLines.length) {
           setKitchenStock((prev) =>
             prev.map((k) => {
@@ -2390,7 +2411,7 @@ function useSupplyChainImpl() {
               if (!line) return k;
               return {
                 ...k,
-                availablePortions: Math.max(0, k.availablePortions - line.quantity),
+                availablePortions: Math.max(0, k.availablePortions - line.quantityInStockUnit),
               };
             }),
           );
@@ -2441,13 +2462,19 @@ function useSupplyChainImpl() {
                   .filter((l) => l.quantity > 0 && l.source !== "kitchen_stock")
                   .map((l) => ({
                     storeItemId: l.storeItemId,
-                    quantity: l.quantity,
+                    quantity: materialLineQuantityInStockUnit(
+                      l,
+                      kitchenRawStock.find((k) => k.storeItemId === l.storeItemId)?.unit ?? l.unit,
+                    ),
                   })),
                 deductedKitchenStock: materialLines
                   .filter((l) => l.quantity > 0 && l.source === "kitchen_stock")
                   .map((l) => ({
                     kitchenStockId: l.storeItemId,
-                    quantity: l.quantity,
+                    quantity: materialLineQuantityInStockUnit(
+                      l,
+                      kitchenStock.find((k) => k.id === l.storeItemId)?.unit ?? l.unit,
+                    ),
                   })),
                 materialsUsed: materialLines.map(
                   (i) => `${i.quantity} ${i.unit} ${i.name}`,
@@ -2502,6 +2529,7 @@ function useSupplyChainImpl() {
       batches,
       recipes,
       kitchenStock,
+      kitchenRawStock,
       kitchenRawOnHand,
       deductKitchenRawMaterials,
       recipeTotalCostWithLivePrices,

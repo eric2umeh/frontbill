@@ -173,11 +173,14 @@ export function KitchenWorkspace() {
     : 0
   const openBatchShortages = useMemo(
     () =>
-      batchMaterialShortages(openBatchRecipe, openBatchPortions, (stockItemId, source) =>
-        source === 'kitchen_stock'
-          ? kitchenStock.find((k) => k.id === stockItemId)?.availablePortions ?? 0
-          : kitchenRawOnHand(stockItemId),
-      ),
+      batchMaterialShortages(openBatchRecipe, openBatchPortions, (stockItemId, source) => {
+        if (source === 'kitchen_stock') {
+          const stock = kitchenStock.find((k) => k.id === stockItemId)
+          return { quantity: stock?.availablePortions ?? 0, unit: stock?.unit ?? 'portion' }
+        }
+        const raw = kitchenRawStock.find((k) => k.storeItemId === stockItemId)
+        return { quantity: raw?.quantityOnHand ?? kitchenRawOnHand(stockItemId), unit: raw?.unit }
+      }),
     [openBatchRecipe, openBatchPortions, kitchenRawOnHand, kitchenRawStock, kitchenStock, stockTick],
   )
 
@@ -192,10 +195,14 @@ export function KitchenWorkspace() {
       batchMaterialShortages(
         closeBatchRecipe,
         closeBatchRecord?.plannedPortions ?? 0,
-        (stockItemId, source) =>
-          source === 'kitchen_stock'
-            ? kitchenStock.find((k) => k.id === stockItemId)?.availablePortions ?? 0
-            : kitchenRawOnHand(stockItemId),
+        (stockItemId, source) => {
+          if (source === 'kitchen_stock') {
+            const stock = kitchenStock.find((k) => k.id === stockItemId)
+            return { quantity: stock?.availablePortions ?? 0, unit: stock?.unit ?? 'portion' }
+          }
+          const raw = kitchenRawStock.find((k) => k.storeItemId === stockItemId)
+          return { quantity: raw?.quantityOnHand ?? kitchenRawOnHand(stockItemId), unit: raw?.unit }
+        },
       ),
     [closeBatchRecipe, closeBatchRecord?.plannedPortions, kitchenRawOnHand, kitchenRawStock, kitchenStock, stockTick],
   )

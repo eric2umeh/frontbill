@@ -17,5 +17,5 @@ export function resolveSupplySnapshot<T extends { id: string }>(
   const remoteArr = Array.isArray(remote) ? (remote as T[]) : []
   if (local.length === 0) return remoteArr
   if (remoteArr.length === 0) return local
-  return mergeSnapshotRowsById(remoteArr, local)
+  return mergeSnapshotRowsById(local, remoteArr)
 }
