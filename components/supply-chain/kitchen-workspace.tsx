@@ -48,6 +48,18 @@ function batchOutletsPortions(batch: {
   return Math.max(0, (batch.actualPortions || 0) - staff - waste - returned)
 }
 
+type RawStockTableRow = {
+  key: string
+  itemName: string
+  onHand: number | null
+  reorder: number | null
+  unit: string
+  issuedAt: string | null
+  qtyIssued: number | null
+  receivedBy: string | null
+  issuedBy: string | null
+}
+
 export function KitchenWorkspace() {
   const { name, role } = useAuth()
   const {
@@ -92,7 +104,7 @@ export function KitchenWorkspace() {
     const rawByName = new Map(rawStock.map((r) => [r.name.trim().toLowerCase(), r]))
     const seenRawIds = new Set<string>()
 
-    const rows = kitchenReceipts.map((receipt, index) => {
+    const rows: RawStockTableRow[] = kitchenReceipts.map((receipt, index) => {
       const raw =
         rawByStoreId.get(receipt.storeItemId) ??
         rawByName.get(receipt.itemName.trim().toLowerCase())
@@ -103,10 +115,10 @@ export function KitchenWorkspace() {
         onHand: raw?.quantityOnHand ?? null,
         reorder: raw?.reorderLevel ?? null,
         unit: receipt.unit,
-        issuedAt: receipt.issuedAt,
-        qtyIssued: receipt.quantity,
-        receivedBy: receipt.receivedBy,
-        issuedBy: receipt.issuedBy,
+        issuedAt: receipt.issuedAt ?? null,
+        qtyIssued: receipt.quantity ?? null,
+        receivedBy: receipt.receivedBy ?? null,
+        issuedBy: receipt.issuedBy ?? null,
       }
     })
 
@@ -118,10 +130,10 @@ export function KitchenWorkspace() {
         onHand: raw.quantityOnHand,
         reorder: raw.reorderLevel,
         unit: raw.unit,
-        issuedAt: undefined,
-        qtyIssued: undefined,
-        receivedBy: undefined,
-        issuedBy: undefined,
+        issuedAt: null,
+        qtyIssued: null,
+        receivedBy: null,
+        issuedBy: null,
       })
     }
 
@@ -772,7 +784,7 @@ export function KitchenWorkspace() {
               <>
                 <p className="text-sm text-muted-foreground">
                   Closes this production run and deducts raw materials from kitchen stock. Finished
-                  {recipe?.yieldUnit || 'portion'} are added to finished/prep stock when you close.
+                  {closeBatchRecipe?.yieldUnit || 'portion'} are added to finished/prep stock when you close.
                 </p>
                 <div className="space-y-3">
                   <div className="space-y-2">
