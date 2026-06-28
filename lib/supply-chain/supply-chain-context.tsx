@@ -29,6 +29,7 @@ import type {
   BasketLine,
   CreateKitchenBatchInput,
   FnbOrder,
+  FnbMenuItem,
   FnbRawStockItem,
   IssueOutCartLine,
   IssueOutRecord,
@@ -2236,7 +2237,7 @@ function useSupplyChainImpl() {
         ),
       );
       pushSupplyNotification({
-        audience: ["admin"],
+        audience: ["manager"],
         title: `Store item pending approval`,
         body: `${input.submittedByName} submitted "${name}" for central store.`,
         href: "/supply/store",
