@@ -15,7 +15,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { Flame, Pencil, Plus, Trash2 } from 'lucide-react'
+import { Download, Flame, Pencil, Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { RESPONSIVE_HIDE_MD, RESPONSIVE_HIDE_LG } from '@/lib/ui/responsive-table'
 import { PaginatedListShell } from '@/components/shared/paginated-list-shell'
@@ -38,6 +38,7 @@ import {
   stockLevelStatusLabel,
   stockLevelTextClass,
 } from '@/lib/supply-chain/stock-level-ui'
+import type { Recipe } from '@/lib/supply-chain/types'
 
 function batchOutletsPortions(batch: {
   actualPortions?: number
@@ -46,6 +47,66 @@ function batchOutletsPortions(batch: {
   if (!batch.disposition) return 0
   const { staff, waste, returned } = batch.disposition
   return Math.max(0, (batch.actualPortions || 0) - staff - waste - returned)
+}
+
+function csvCell(value: unknown): string {
+  const text = value == null ? '' : String(value)
+  if (/[",\n\r]/.test(text)) return `"${text.replace(/"/g, '""')}"`
+  return text
+}
+
+function downloadCsv(filename: string, rows: unknown[][]) {
+  const csv = rows.map((row) => row.map(csvCell).join(',')).join('\n')
+  const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+function downloadKitchenBatchCsv(recipes: Recipe[]) {
+  const header = [
+    'batch / menu name',
+    'store items',
+    'main category',
+    'planned portions',
+    'yield unit',
+    'selling price / portion',
+    'labour',
+    'gas',
+    'other',
+    'outlet',
+    'ingredient source',
+    'optional',
+    'line cost',
+  ]
+  const rows: unknown[][] = [header]
+
+  for (const recipe of recipes) {
+    const ingredients = recipe.ingredients.length ? recipe.ingredients : [null]
+    ingredients.forEach((ingredient, index) => {
+      rows.push([
+        index === 0 ? recipe.name : '',
+        ingredient ? `${ingredient.quantity} ${ingredient.unit} ${ingredient.name}` : '',
+        index === 0 ? recipe.category : '',
+        index === 0 ? recipe.yieldPortions : '',
+        index === 0 ? recipe.yieldUnit || 'portion' : '',
+        index === 0 ? recipe.sellingPricePerPortion : '',
+        index === 0 ? recipe.overheadLabour ?? 0 : '',
+        index === 0 ? recipe.overheadGas ?? 0 : '',
+        index === 0 ? recipe.overheadOther ?? recipe.overheadCost ?? 0 : '',
+        index === 0 ? normalizeBatchOutletMenuSync(recipe.outletMenuSync ?? recipe.fnbEligible) : '',
+        ingredient ? ingredient.source ?? 'raw' : '',
+        ingredient?.optional ? 'yes' : '',
+        ingredient ? ingredient.cost : '',
+      ])
+    })
+  }
+
+  const date = new Date().toISOString().slice(0, 10)
+  downloadCsv(`frontbill-kitchen-batches-${date}.csv`, rows)
 }
 
 export function KitchenWorkspace() {
@@ -492,13 +553,29 @@ export function KitchenWorkspace() {
 
         <TabsContent value="recipes" className="mt-4 space-y-4">
         <div className="space-y-4">
-          <p className="text-sm text-muted-foreground rounded-lg border bg-muted/30 px-3 py-2">
-            <strong className="text-foreground">All Batches</strong> holds batch standards and costing.
-            Default is not listed on outlet POS. Kitchen always supplies Restaurant — choose{' '}
-            <strong className="text-foreground">Restaurant outlet</strong> or{' '}
-            <strong className="text-foreground">Restaurant / F&amp;B outlet</strong> when creating
-            or editing a batch.
-          </p>
+          <div className="flex flex-col gap-3 rounded-lg border bg-muted/30 px-3 py-2 sm:flex-row sm:items-start sm:justify-between">
+            <p className="text-sm text-muted-foreground">
+              <strong className="text-foreground">All Batches</strong> holds batch standards and costing.
+              Default is not listed on outlet POS. Kitchen always supplies Restaurant — choose{' '}
+              <strong className="text-foreground">Restaurant outlet</strong> or{' '}
+              <strong className="text-foreground">Restaurant / F&amp;B outlet</strong> when creating
+              or editing a batch.
+            </p>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="shrink-0 gap-2"
+              disabled={recipes.length === 0}
+              onClick={() => {
+                downloadKitchenBatchCsv(recipes)
+                toast.success(`Downloaded ${recipes.length} kitchen batch standard(s)`)
+              }}
+            >
+              <Download className="h-4 w-4" />
+              Export CSV
+            </Button>
+          </div>
           <PaginatedListShell
             items={recipes}
             pageSize={6}
