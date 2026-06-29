@@ -1,5 +1,6 @@
 import type { BatchOutletMenuSync } from '@/lib/supply-chain/batch-outlet-sync'
-import type { BatchMaterialLine, StoreItem } from '@/lib/supply-chain/types'
+import type { BatchMaterialLine, KitchenStockItem, StoreItem } from '@/lib/supply-chain/types'
+import { parseRecipeQuantity } from '@/lib/supply-chain/recipe-units'
 
 /** Strip UTF-8 BOM Excel often adds to the first cell. */
 export function stripCsvBom(text: string): string {
@@ -82,6 +83,7 @@ export type BatchCsvRow = {
   name: string
   category: string
   portions: number
+  yieldUnit?: string
   sellingPrice: number
   overheadLabour: number
   overheadGas: number
@@ -89,6 +91,14 @@ export type BatchCsvRow = {
   outletMenuSync: BatchOutletMenuSync
   /** Raw ingredient lines from recipe-list CSV (name + store items columns). */
   ingredientLines?: string[]
+  ingredientRows?: BatchCsvIngredientRow[]
+}
+
+export type BatchCsvIngredientRow = {
+  text: string
+  source?: 'raw' | 'kitchen_stock'
+  optional?: boolean
+  lineCost?: number
 }
 
 function headerKey(s: string): string {
@@ -129,6 +139,19 @@ function parseOutletColumn(raw: string | undefined): BatchOutletMenuSync {
     return 'restaurant'
   }
   return 'none'
+}
+
+function parseBooleanCell(raw: string | undefined): boolean {
+  const v = normalizeCell(raw).toLowerCase()
+  return v === '1' || v === 'true' || v === 'yes' || v === 'y' || v === 'optional'
+}
+
+function parseIngredientSource(raw: string | undefined): 'raw' | 'kitchen_stock' {
+  const v = normalizeCell(raw).toLowerCase().replace(/[\s_-]+/g, '')
+  if (v === 'prep' || v === 'subrecipe' || v === 'kitchenstock' || v === 'produced') {
+    return 'kitchen_stock'
+  }
+  return 'raw'
 }
 
 function parsePortionsFromRecipeName(name: string): number {
@@ -178,6 +201,14 @@ function parseKitchenRecipeListCsvText(
   categoryIdx = -1,
   portionsIdx = -1,
   priceIdx = -1,
+  yieldUnitIdx = -1,
+  labourIdx = -1,
+  gasIdx = -1,
+  otherIdx = -1,
+  outletIdx = -1,
+  ingredientSourceIdx = -1,
+  optionalIdx = -1,
+  lineCostIdx = -1,
 ): { ok: true; rows: BatchCsvRow[] } | { ok: false; error: string } {
   const out: BatchCsvRow[] = []
   let active: BatchCsvRow | undefined
@@ -191,14 +222,30 @@ function parseKitchenRecipeListCsvText(
       name,
       category: category || inferCategoryFromRecipeName(name),
       portions: portions > 0 ? portions : parsePortionsFromRecipeName(name),
+      yieldUnit: yieldUnitIdx >= 0 ? normalizeCell(cells[yieldUnitIdx]) || 'portion' : 'portion',
       sellingPrice: priceIdx >= 0 ? parseNumberOrZero(cells[priceIdx]) : 0,
-      overheadLabour: 0,
-      overheadGas: 0,
-      overheadOther: 0,
-      outletMenuSync: 'none',
+      overheadLabour: labourIdx >= 0 ? parseNumberOrZero(cells[labourIdx]) : 0,
+      overheadGas: gasIdx >= 0 ? parseNumberOrZero(cells[gasIdx]) : 0,
+      overheadOther: otherIdx >= 0 ? parseNumberOrZero(cells[otherIdx]) : 0,
+      outletMenuSync: outletIdx >= 0 ? parseOutletColumn(cells[outletIdx]) : 'none',
       ingredientLines: [],
+      ingredientRows: [],
     }
     out.push(active)
+  }
+
+  const pushIngredient = (cells: string[], rawItem: string) => {
+    if (!active || !rawItem) return
+    const source = ingredientSourceIdx >= 0 ? parseIngredientSource(cells[ingredientSourceIdx]) : 'raw'
+    const optional = optionalIdx >= 0 ? parseBooleanCell(cells[optionalIdx]) : false
+    const lineCost = lineCostIdx >= 0 ? parseNumberOrZero(cells[lineCostIdx]) : 0
+    active.ingredientLines!.push(rawItem)
+    active.ingredientRows!.push({
+      text: rawItem,
+      source,
+      optional,
+      lineCost: lineCost > 0 ? lineCost : undefined,
+    })
   }
 
   for (let i = 0; i < dataRows.length; i++) {
@@ -210,7 +257,7 @@ function parseKitchenRecipeListCsvText(
     if (rawName) {
       startRecipe(rawName, cells)
       if (rawItem && !looksLikeRecipeTitle(rawItem) && active) {
-        active.ingredientLines!.push(rawItem)
+        pushIngredient(cells, rawItem)
       } else if (rawItem && looksLikeRecipeTitle(rawItem)) {
         startRecipe(rawItem, cells)
       }
@@ -230,7 +277,7 @@ function parseKitchenRecipeListCsvText(
         error: `Row ${rowNo}: ingredient line before any recipe name — add a name in the first column`,
       }
     }
-    active.ingredientLines!.push(rawItem)
+    pushIngredient(cells, rawItem)
   }
 
   if (!out.length) {
@@ -303,6 +350,14 @@ export function parseKitchenBatchCsvText(
   const gasIdx = indexOfHeader(header, ['gas', 'overheadgas'])
   const otherIdx = indexOfHeader(header, ['other', 'overheadother', 'overhead'])
   const outletIdx = indexOfHeader(header, ['outlet', 'outletmenusync', 'fnb', 'restaurant'])
+  const yieldUnitIdx = indexOfHeader(header, ['yieldunit', 'plannedunit', 'productionunit'])
+  const ingredientSourceIdx = indexOfHeader(header, [
+    'ingredientsource',
+    'source',
+    'stocksource',
+  ])
+  const optionalIdx = indexOfHeader(header, ['optional', 'isoptional'])
+  const lineCostIdx = indexOfHeader(header, ['linecost', 'cost', 'ingredientcost'])
 
   if (nameIdx < 0) {
     return {
@@ -325,6 +380,14 @@ export function parseKitchenBatchCsvText(
       categoryIdx,
       portionsIdx,
       priceIdx,
+      yieldUnitIdx,
+      labourIdx,
+      gasIdx,
+      otherIdx,
+      outletIdx,
+      ingredientSourceIdx,
+      optionalIdx,
+      lineCostIdx,
     )
   }
 
@@ -356,6 +419,7 @@ export function parseKitchenBatchCsvText(
       name,
       category,
       portions,
+      yieldUnit: yieldUnitIdx >= 0 ? normalizeCell(cells[yieldUnitIdx]) || 'portion' : 'portion',
       sellingPrice: priceIdx >= 0 ? parseNumberOrZero(cells[priceIdx]) : 0,
       overheadLabour: labourIdx >= 0 ? parseNumberOrZero(cells[labourIdx]) : 0,
       overheadGas: gasIdx >= 0 ? parseNumberOrZero(cells[gasIdx]) : 0,
@@ -466,4 +530,50 @@ export function mapIngredientLinesToMaterials(
     }
   })
   return out
+}
+
+function matchKitchenStockItem(
+  ingredientLine: string,
+  kitchenStockItems: Pick<KitchenStockItem, 'id' | 'name' | 'availablePortions' | 'unit'>[],
+): Pick<KitchenStockItem, 'id' | 'name' | 'availablePortions' | 'unit'> | undefined {
+  const lower = ingredientLine.toLowerCase()
+  return kitchenStockItems.find((item) => lower.includes(item.name.toLowerCase()))
+}
+
+export function mapIngredientRowsToMaterials(
+  rows: BatchCsvIngredientRow[],
+  storeItems: Pick<StoreItem, 'id' | 'name' | 'dept' | 'lastPrice' | 'unit'>[],
+  kitchenStockItems: Pick<KitchenStockItem, 'id' | 'name' | 'availablePortions' | 'unit'>[] = [],
+): BatchMaterialLine[] {
+  return rows.map((row, i) => {
+    const parsed = parseRecipeQuantity(row.text)
+    const quantity = parsed?.quantity ?? parseIngredientQuantity(row.text)
+    const parsedUnit = parsed?.unit && parsed.unit !== 'unit' ? parsed.unit : ''
+
+    if (row.source === 'kitchen_stock') {
+      const matched = matchKitchenStockItem(row.text, kitchenStockItems)
+      return {
+        storeItemId: matched?.id ?? `csv-prep-${i}`,
+        name: matched?.name ?? row.text.slice(0, 120),
+        unit: parsedUnit || matched?.unit || 'portion',
+        quantity,
+        unitCost: row.lineCost && quantity > 0 ? row.lineCost / quantity : 0,
+        source: 'kitchen_stock',
+        optional: row.optional,
+        lineCost: row.lineCost,
+      }
+    }
+
+    const matched = matchKitchenStoreItem(row.text, storeItems.filter((s) => s.dept === 'kitchen'))
+    return {
+      storeItemId: matched?.id ?? `csv-ing-${i}`,
+      name: matched?.name ?? row.text.slice(0, 120),
+      unit: parsedUnit || matched?.unit || 'unit',
+      quantity,
+      unitCost: matched?.lastPrice ?? (row.lineCost && quantity > 0 ? row.lineCost / quantity : 0),
+      source: 'raw',
+      optional: row.optional,
+      lineCost: row.lineCost,
+    }
+  })
 }
