@@ -15,6 +15,7 @@ import { useAuth } from '@/lib/auth-context'
 import { useSupplyChain } from '@/lib/supply-chain/supply-chain-context'
 import { canonicalRoleKey } from '@/lib/permissions'
 import {
+  mapIngredientRowsToMaterials,
   mapIngredientLinesToMaterials,
   parseKitchenBatchCsvText,
 } from '@/lib/supply-chain/parse-csv-row'
@@ -56,7 +57,7 @@ function downloadSampleCsv(filename: string, text: string) {
 
 export function KitchenBatchCsvUpload({ variant = 'default', onComplete }: Props) {
   const { name, role } = useAuth()
-  const { storeItems, openKitchenBatchFromMaterials } = useSupplyChain()
+  const { storeItems, kitchenStock, openKitchenBatchFromMaterials } = useSupplyChain()
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -82,19 +83,31 @@ export function KitchenBatchCsvUpload({ variant = 'default', onComplete }: Props
       let errCount = 0
       let matchedIngredients = 0
       let totalIngredients = 0
+      const importedPrepStock = new Map(
+        kitchenStock.map((item) => [item.name.trim().toLowerCase(), item]),
+      )
 
       for (const row of parsed.rows) {
-        const materials = row.ingredientLines?.length
-          ? mapIngredientLinesToMaterials(row.ingredientLines, storeItems)
-          : []
+        const materials = row.ingredientRows?.length
+          ? mapIngredientRowsToMaterials(
+              row.ingredientRows,
+              storeItems,
+              [...importedPrepStock.values()],
+            )
+          : row.ingredientLines?.length
+            ? mapIngredientLinesToMaterials(row.ingredientLines, storeItems)
+            : []
         totalIngredients += materials.length
-        matchedIngredients += materials.filter((m) => !m.storeItemId.startsWith('csv-ing-')).length
+        matchedIngredients += materials.filter(
+          (m) => !m.storeItemId.startsWith('csv-ing-') && !m.storeItemId.startsWith('csv-prep-'),
+        ).length
 
         const res = openKitchenBatchFromMaterials(
           {
             batchName: row.name,
             menuCategory: row.category,
             plannedPortions: row.portions,
+            yieldUnit: row.yieldUnit || 'portion',
             sellingPricePerPortion: row.sellingPrice,
             materials,
             overheadLabour: row.overheadLabour,
@@ -109,6 +122,15 @@ export function KitchenBatchCsvUpload({ variant = 'default', onComplete }: Props
           toast.error(`${row.name}: ${res.error}`)
           continue
         }
+        importedPrepStock.set(row.name.trim().toLowerCase(), {
+          id: res.kitchenStockId,
+          name: row.name,
+          source: 'produced',
+          availablePortions: 0,
+          unit: row.yieldUnit || 'portion',
+          reorderLevel: Math.max(2, Math.ceil(row.portions * 0.15)),
+          linkedRecipeId: res.recipeId,
+        })
         if (shouldSyncBatchToOutlet(row.outletMenuSync)) {
           const sync = await syncBatchToRestaurantOutlet({
             batchName: row.name,
