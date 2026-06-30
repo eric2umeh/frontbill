@@ -22,6 +22,7 @@ export const KITCHEN_BATCH_UNITS = [
   'ml',
   'mudu',
   'cup',
+  'cooking_spoon',
   'tbsp',
   'tsp',
   'pcs',
