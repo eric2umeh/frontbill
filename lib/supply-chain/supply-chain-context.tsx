@@ -23,6 +23,7 @@ import { toTitleCaseWords } from "./title-case";
 import {
   normalizeBatchOutletMenuSync,
 } from "./batch-outlet-sync";
+import { resolveKitchenBatchIdentity } from "./kitchen-batch-identity";
 import type {
   ActivityAction,
   ActivityEntry,
@@ -1677,13 +1678,18 @@ function useSupplyChainImpl() {
         revenue > 0 ? Math.round(((revenue - batchCost) / revenue) * 1000) / 10 : 0;
 
 
-      const kitchenStockId =
-        input.kitchenStockId?.trim() || `ks-${outletStockSlug(batchName)}`;
-      const recipeId = `rcp-${outletStockSlug(batchName)}`;
+      const { recipeId, kitchenStockId } = resolveKitchenBatchIdentity({
+        batchName,
+        requestedKitchenStockId: input.kitchenStockId,
+        recipes,
+        kitchenStock,
+      });
       const yieldUnit = input.yieldUnit || "portion";
 
       setKitchenStock((prev) => {
-        const idx = prev.findIndex((k) => k.id === kitchenStockId);
+        const idx = prev.findIndex(
+          (k) => k.id === kitchenStockId || k.linkedRecipeId === recipeId,
+        );
         if (idx >= 0) {
           return prev.map((k, i) =>
             i === idx
@@ -1756,7 +1762,7 @@ function useSupplyChainImpl() {
       schedulePersistSnapshots();
       return { ok: true, kitchenStockId, recipeId };
     },
-    [storeItems, schedulePersistSnapshots],
+    [storeItems, recipes, kitchenStock, schedulePersistSnapshots],
   );
 
   const updateRecipe = useCallback(
@@ -2461,7 +2467,8 @@ function useSupplyChainImpl() {
         batch.kitchenStockId ??
         (recipe
           ? kitchenStock.find((k) => k.linkedRecipeId === recipe.id)?.id
-          : undefined);
+          : undefined) ??
+        `ks-${outletStockSlug(batch.recipeName)}`;
       if (stockId && sellable > 0) {
         setKitchenStock((ks) => {
           const idx = ks.findIndex((k) => k.id === stockId);
@@ -2479,6 +2486,7 @@ function useSupplyChainImpl() {
               name: batch.recipeName,
               source: "produced" as const,
               availablePortions: sellable,
+              unit: recipe?.yieldUnit,
               reorderLevel: Math.max(2, Math.ceil(sellable * 0.15)),
               linkedRecipeId: recipe?.id,
             },
