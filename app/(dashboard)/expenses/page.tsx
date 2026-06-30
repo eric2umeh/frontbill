@@ -11,12 +11,14 @@ import { ExpenseLedger } from '@/components/expenses/expense-ledger'
 import { ExpenseCategoriesManager } from '@/components/expenses/expense-categories-manager'
 import { ExpenseImportDialog } from '@/components/expenses/expense-import-dialog'
 import { ExpenseBudgetsPanel } from '@/components/expenses/expense-budgets-panel'
-import { Upload, Receipt, Tags, Target, ShoppingCart } from 'lucide-react'
+import { Upload, Receipt, Tags, Target, ShoppingCart, ClipboardCheck } from 'lucide-react'
 import { PoApprovalPanel } from '@/components/supply-chain/po-approval-panel'
+import { PoRetirementPanel } from '@/components/supply-chain/po-retirement-panel'
 import {
   canAdminTestApproveSupplyPo,
   canSupplyPoAccountantReview,
   canSupplyPoManagerReview,
+  canSupplyRetirementReview,
 } from '@/lib/permissions'
 
 export default function ExpensesPage() {
@@ -39,12 +41,16 @@ export default function ExpensesPage() {
     canSupplyPoAccountantReview(role) ||
     canSupplyPoManagerReview(role) ||
     canAdminTestApproveSupplyPo(role)
+  const canRetirement = canSupplyRetirementReview(role)
 
   useEffect(() => {
     if (tabParam === 'purchase_orders' && canPurchaseOrders) {
       setActiveTab('purchase_orders')
     }
-  }, [tabParam, canPurchaseOrders])
+    if (tabParam === 'retirement' && canRetirement) {
+      setActiveTab('retirement')
+    }
+  }, [tabParam, canPurchaseOrders, canRetirement])
 
   if (!canView) {
     return (
@@ -82,6 +88,12 @@ export default function ExpensesPage() {
             <TabsTrigger value="purchase_orders" className="gap-1.5">
               <ShoppingCart className="h-4 w-4" />
               Purchase orders
+            </TabsTrigger>
+          )}
+          {canRetirement && (
+            <TabsTrigger value="retirement" className="gap-1.5">
+              <ClipboardCheck className="h-4 w-4" />
+              Retirement
             </TabsTrigger>
           )}
           <TabsTrigger value="categories" className="gap-1.5">
@@ -122,6 +134,23 @@ export default function ExpensesPage() {
               </CardHeader>
               <CardContent>
                 <PoApprovalPanel />
+              </CardContent>
+            </Card>
+          </TabsContent>
+        )}
+
+        {canRetirement && (
+          <TabsContent value="retirement" className="mt-4">
+            <Card>
+              <CardHeader>
+                <CardTitle>Market retirements</CardTitle>
+                <CardDescription>
+                  Review retirements submitted from Purchasing after market purchase. Rejected
+                  retirements return to the purchaser to edit and resubmit.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <PoRetirementPanel />
               </CardContent>
             </Card>
           </TabsContent>
