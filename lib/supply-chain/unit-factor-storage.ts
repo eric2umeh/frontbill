@@ -64,6 +64,7 @@ export function unitFactorDefinition(
     'mudu',
     'cup',
     'sachet',
+    'cooking_spoon',
   ])
   if (containerUnits.has(selected) && !containerUnits.has(store)) {
     return {
