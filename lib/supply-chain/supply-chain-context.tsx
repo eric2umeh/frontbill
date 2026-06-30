@@ -683,6 +683,47 @@ function useSupplyChainImpl() {
     basket,
   ]);
 
+  /** Refresh PO list from org snapshot so accountant / purchaser see each other's decisions. */
+  useEffect(() => {
+    if (!useDbPersistence || !dbHydrated) return;
+
+    let cancelled = false;
+
+    const refreshPurchaseOrders = async () => {
+      try {
+        const snapshots = await fetchSupplySnapshots(
+          userId,
+          organizationId || undefined,
+        );
+        if (cancelled) return;
+        const remote = snapshots.purchase_orders;
+        if (!Array.isArray(remote)) return;
+        setPurchaseOrders((prev) => {
+          const prevJson = JSON.stringify(prev);
+          const remoteJson = JSON.stringify(remote);
+          if (prevJson === remoteJson) return prev;
+          return remote as PurchaseOrder[];
+        });
+      } catch {
+        /* non-blocking — network may be slow */
+      }
+    };
+
+    const onVis = () => {
+      if (document.visibilityState === "visible") void refreshPurchaseOrders();
+    };
+
+    void refreshPurchaseOrders();
+    document.addEventListener("visibilitychange", onVis);
+    const interval = window.setInterval(refreshPurchaseOrders, 20_000);
+
+    return () => {
+      cancelled = true;
+      document.removeEventListener("visibilitychange", onVis);
+      window.clearInterval(interval);
+    };
+  }, [useDbPersistence, dbHydrated, userId, organizationId]);
+
   /** Drop legacy demo kitchen seed (Peppered Chicken / Jollof / Egusi) once per browser. */
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -1070,9 +1111,10 @@ function useSupplyChainImpl() {
         body: `${actor.name} sent ${submitted.poNumber} (₦${total.toLocaleString()}) for approval`,
         href: "/expenses?tab=purchase_orders",
       });
+      schedulePersistSnapshots();
       return { po: submitted };
     },
-    [basket, purchaseOrders],
+    [basket, purchaseOrders, schedulePersistSnapshots],
   );
 
   const submitBasketAsPo = useCallback(
@@ -1301,7 +1343,7 @@ function useSupplyChainImpl() {
           audience: ["accountant"],
           title: `Retirement submitted — ${po.poNumber}`,
           body: `${actor.name} submitted market retirement (₦${actualSpent.toLocaleString()} spent)`,
-          href: "/expenses?tab=purchase_orders",
+          href: "/expenses?tab=retirement",
         });
 
         return prev.map((p) =>
@@ -1322,8 +1364,9 @@ function useSupplyChainImpl() {
             : p,
         );
       });
+      schedulePersistSnapshots();
     },
-    [],
+    [schedulePersistSnapshots],
   );
 
   const accountantRetirementDecision = useCallback(
@@ -1372,6 +1415,7 @@ function useSupplyChainImpl() {
           body: comment || "Accountant rejected the retirement submission.",
           href: "/supply/purchasing",
         });
+        schedulePersistSnapshots();
         return { ok: true };
       }
 
@@ -1409,9 +1453,10 @@ function useSupplyChainImpl() {
         body: `Central store stock updated. Refund to cashier: ₦${(po.retirement?.refundToCashier ?? 0).toLocaleString()}.`,
         href: "/supply/purchasing",
       });
+      schedulePersistSnapshots();
       return { ok: true };
     },
-    [purchaseOrders, applyRetirementToStock],
+    [purchaseOrders, applyRetirementToStock, schedulePersistSnapshots],
   );
 
   const deleteActivePurchaseOrder = useCallback(
