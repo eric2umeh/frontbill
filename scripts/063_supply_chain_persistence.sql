@@ -1,6 +1,9 @@
 -- FrontBill: Supply chain persistence (Central Store, Kitchen, PO pipeline)
 -- Run in Supabase SQL Editor AFTER 029_store_inventory.sql (organizations must exist).
 -- Run on staging first, then production after deploy.
+--
+-- PROD REMINDER: After merging/deploying to Vercel production, run this script on
+-- PRODUCTION Supabase if supply_chain_snapshots / supply_catalog_items are missing.
 
 -- ── Central store catalogue (Supply → Central Store) ─────────────────
 
