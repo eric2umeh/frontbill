@@ -30,36 +30,22 @@ type Props = {
   onComplete?: () => void
 }
 
-const RECIPE_LIST_SAMPLE = `batch / menu name,store items,main category,Planned portions,Selling price / portion (_)
-Jollof Rice 1kg,Rice = 1kg,Rice,6,2500
-,Vegetable oil = 300ml,,,
-,Tomato paste = 200g,,,
-,Onion = 2 pcs,,,
-,Salt to taste,,,
-Fried Rice 1kg,Rice = 1kg,Rice,6,3000
-,Chicken stock = 1 litre,,,
-,Mixed vegetables = 500g,,,
-,Curry powder = 1 tbsp,,,`
+/** Served from public/templates — same file as docs/frontbill-kitchen-batches-template.csv */
+export const KITCHEN_BATCH_CSV_TEMPLATE_PATH = '/templates/frontbill-kitchen-batches-template.csv'
+export const KITCHEN_BATCH_CSV_TEMPLATE_FILENAME = 'frontbill-kitchen-batches-template.csv'
 
-const STANDARD_BATCH_SAMPLE = `name,category,portions,price,labour,gas,other,outlet
-Jollof Rice 1kg,Rice,6,2500,500,300,200,restaurant
-Fried Rice 1kg,Rice,6,3000,500,300,200,restaurant`
-
-function downloadSampleCsv(filename: string, text: string) {
-  const blob = new Blob([text], { type: 'text/csv;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  a.click()
-  URL.revokeObjectURL(url)
-}
+const TEMPLATE_PREVIEW = `batch / menu name,store items,main category,planned portions,yield unit,selling price / portion,labour,gas,other,outlet,ingredient source,optional,line cost
+Fruit Salad,0.5 pack Watermelon,Salad,10,portion,4000,0,0,0,restaurant,raw,,1000
+,0.5 pack Pineapple,,,,,,,,,raw,,750
+Bitter Leaf Soup,0.5 pack Bitter Leaf,African Soups,10,portion,5000,0,0,0,none,raw,,750
+… (full hotel recipe list in the downloaded template)`
 
 export function KitchenBatchCsvUpload({ variant = 'default', onComplete }: Props) {
   const { name, role } = useAuth()
   const { storeItems, kitchenStock, openKitchenBatchFromMaterials } = useSupplyChain()
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [templateDownloading, setTemplateDownloading] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
 
   const roleKey = canonicalRoleKey(role) ?? ''
@@ -67,6 +53,27 @@ export function KitchenBatchCsvUpload({ variant = 'default', onComplete }: Props
   if (!canUpload) return null
 
   const actor = { name: name ?? 'Kitchen', role: roleKey || 'staff' }
+
+  const downloadTemplate = async () => {
+    if (templateDownloading) return
+    setTemplateDownloading(true)
+    try {
+      const res = await fetch(KITCHEN_BATCH_CSV_TEMPLATE_PATH)
+      if (!res.ok) throw new Error('Template file not found')
+      const text = await res.text()
+      const blob = new Blob([`\uFEFF${text}`], { type: 'text/csv;charset=utf-8' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = KITCHEN_BATCH_CSV_TEMPLATE_FILENAME
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch {
+      toast.error('Could not download template. Use docs/frontbill-kitchen-batches-template.csv from the repo.')
+    } finally {
+      setTemplateDownloading(false)
+    }
+  }
 
   const handleFile = async (file: File) => {
     if (busy) return
@@ -188,6 +195,23 @@ export function KitchenBatchCsvUpload({ variant = 'default', onComplete }: Props
             <DialogTitle>Bulk upload batch standards (CSV)</DialogTitle>
           </DialogHeader>
           <div>
+            <div className="mb-4 flex flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                className="gap-1.5"
+                disabled={templateDownloading}
+                onClick={() => void downloadTemplate()}
+              >
+                <Download className="h-4 w-4" />
+                {templateDownloading ? 'Downloading…' : 'Download full template CSV'}
+              </Button>
+              <span className="text-[10px] text-muted-foreground">
+                Pre-filled hotel recipes — edit, delete, or add rows, then upload below.
+              </span>
+            </div>
+
             <Label className="text-xs">Choose CSV file</Label>
             <div className="mt-0.5">
               <input
@@ -216,52 +240,16 @@ export function KitchenBatchCsvUpload({ variant = 'default', onComplete }: Props
               </Button>
             </div>
             <p className="text-[10px] text-muted-foreground mt-2 break-words space-y-1">
-              <span className="block font-medium text-foreground/80">Recipe list (your format)</span>
+              <span className="block font-medium text-foreground/80">Required format</span>
               <span className="block">
-                Put the recipe name only on the first ingredient row. Leave the recipe-name cell blank for the
-                remaining ingredients under the same recipe.
+                Put the batch / menu name on the first ingredient row only. Leave that column blank for
+                additional ingredients under the same recipe.
               </span>
             </p>
             <div className="mt-3 space-y-2 rounded-md border bg-muted/30 p-3">
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-xs font-medium">Demo recipe-list CSV</p>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-7 gap-1.5 px-2 text-xs"
-                  onClick={() => downloadSampleCsv('kitchen-recipe-list-sample.csv', RECIPE_LIST_SAMPLE)}
-                >
-                  <Download className="h-3.5 w-3.5" />
-                  Download
-                </Button>
-              </div>
+              <p className="text-xs font-medium">Template preview (download for full list)</p>
               <pre className="max-h-44 overflow-auto whitespace-pre-wrap rounded bg-background p-2 text-[10px] leading-relaxed">
-                {RECIPE_LIST_SAMPLE}
-              </pre>
-            </div>
-            <p className="text-[10px] text-muted-foreground mt-3 break-words space-y-1">
-              <span className="block font-medium text-foreground/80">Or standard format</span>
-              <span className="block">
-                Use one row per menu/batch standard when you do not need ingredient lines.
-              </span>
-            </p>
-            <div className="mt-3 space-y-2 rounded-md border bg-muted/30 p-3">
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-xs font-medium">Demo standard CSV</p>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-7 gap-1.5 px-2 text-xs"
-                  onClick={() => downloadSampleCsv('kitchen-batch-standard-sample.csv', STANDARD_BATCH_SAMPLE)}
-                >
-                  <Download className="h-3.5 w-3.5" />
-                  Download
-                </Button>
-              </div>
-              <pre className="max-h-32 overflow-auto whitespace-pre-wrap rounded bg-background p-2 text-[10px] leading-relaxed">
-                {STANDARD_BATCH_SAMPLE}
+                {TEMPLATE_PREVIEW}
               </pre>
             </div>
           </div>
