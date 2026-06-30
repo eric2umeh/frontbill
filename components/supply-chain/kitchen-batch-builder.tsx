@@ -1,9 +1,9 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useAuth } from '@/lib/auth-context'
 import { useSupplyChain } from '@/lib/supply-chain/supply-chain-context'
-import type { BatchMaterialLine, StoreItem } from '@/lib/supply-chain/types'
+import type { BatchMaterialLine, KitchenBatchDraft, StoreItem } from '@/lib/supply-chain/types'
 import { canonicalRoleKey } from '@/lib/permissions'
 import { formatNaira } from '@/lib/utils/currency'
 import { Button } from '@/components/ui/button'
@@ -21,6 +21,7 @@ import {
 } from '@/components/ui/collapsible'
 import {
   clearKitchenBatchDraft,
+  EMPTY_KITCHEN_BATCH_DRAFT,
   KITCHEN_BATCH_DRAFT_VERSION,
   loadKitchenBatchDraft,
   persistKitchenBatchDraft,
@@ -61,6 +62,30 @@ type IngredientSearchItem =
 
 const numberInputValue = (value: number | null | undefined) =>
   value != null && Number(value) !== 0 ? String(value) : ''
+
+function applyKitchenBatchDraft(draft: KitchenBatchDraft) {
+  const optionalCart = draft.cart.filter((c) => c.optional)
+  return {
+    search: draft.search,
+    menuCategory: draft.menuCategory,
+    menuCategoryId: draft.menuCategoryId,
+    batchName: draft.batchName,
+    menuItemId: draft.menuItemId,
+    linkedKitchenStockId: draft.linkedKitchenStockId,
+    plannedPortions: draft.plannedPortions,
+    yieldUnit: draft.yieldUnit ?? 'portion',
+    sellingPrice: draft.sellingPrice,
+    overheadLabour: draft.overheadLabour,
+    overheadGas: draft.overheadGas,
+    overheadOther: draft.overheadOther,
+    outletMenuSync: draft.outletMenuSync ?? ('none' as BatchOutletMenuSync),
+    notes: draft.notes,
+    cart: draft.cart.filter((c) => !c.optional),
+    optionalCart,
+    optionalIngredientsOpen: optionalCart.length > 0,
+    qtyInputMap: Object.fromEntries(draft.cart.map((c) => [c.storeItemId, String(c.quantity)])),
+  }
+}
 
 type Props = {
   /** When set, builder edits an existing batch standard instead of creating new. */
@@ -103,35 +128,84 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
   const [optionalIngredientsOpen, setOptionalIngredientsOpen] = useState(false)
   const [qtyInputMap, setQtyInputMap] = useState<Record<string, string>>({})
   const [factorMap, setFactorMap] = useState<Record<string, Record<string, number>>>({})
+  const draftSnapshotRef = useRef<KitchenBatchDraft>({
+    ...loadKitchenBatchDraft(),
+    draftVersion: KITCHEN_BATCH_DRAFT_VERSION,
+  })
 
-  useEffect(() => {
+  const buildDraftSnapshot = useCallback((): KitchenBatchDraft => {
+    return {
+      draftVersion: KITCHEN_BATCH_DRAFT_VERSION,
+      search,
+      menuCategory,
+      menuCategoryId,
+      batchName,
+      menuItemId,
+      linkedKitchenStockId,
+      plannedPortions,
+      yieldUnit,
+      sellingPrice,
+      overheadLabour,
+      overheadGas,
+      overheadOther,
+      outletMenuSync,
+      notes,
+      cart: [...cart, ...optionalCart],
+    }
+  }, [
+    search,
+    menuCategory,
+    menuCategoryId,
+    batchName,
+    menuItemId,
+    linkedKitchenStockId,
+    plannedPortions,
+    yieldUnit,
+    sellingPrice,
+    overheadLabour,
+    overheadGas,
+    overheadOther,
+    outletMenuSync,
+    notes,
+    cart,
+    optionalCart,
+  ])
+
+  draftSnapshotRef.current = buildDraftSnapshot()
+
+  const flushDraft = useCallback(
+    (force?: boolean) => {
+      if (editing) return
+      persistKitchenBatchDraft(draftSnapshotRef.current, { force })
+    },
+    [editing],
+  )
+
+  useLayoutEffect(() => {
     if (editRecipeId) return
-    const draft = loadKitchenBatchDraft()
-    setSearch(draft.search)
-    setMenuCategory(draft.menuCategory)
-    setMenuCategoryId(draft.menuCategoryId)
-    setBatchName(draft.batchName)
-    setMenuItemId(draft.menuItemId)
-    setLinkedKitchenStockId(draft.linkedKitchenStockId)
-    setPlannedPortions(draft.plannedPortions)
-    setYieldUnit(draft.yieldUnit ?? 'portion')
-    setSellingPrice(draft.sellingPrice)
-    setOverheadLabour(draft.overheadLabour)
-    setOverheadGas(draft.overheadGas)
-    setOverheadOther(draft.overheadOther)
-    setNotes(draft.notes)
-    setCart(draft.cart.filter((c) => !c.optional))
-    const draftOptionalCart = draft.cart.filter((c) => c.optional)
-    setOptionalCart(draftOptionalCart)
-    setOptionalIngredientsOpen(draftOptionalCart.length > 0)
-    setQtyInputMap(
-      Object.fromEntries(draft.cart.map((c) => [c.storeItemId, String(c.quantity)])),
-    )
-    setOutletMenuSync('none')
+    const applied = applyKitchenBatchDraft(loadKitchenBatchDraft())
+    setSearch(applied.search)
+    setMenuCategory(applied.menuCategory)
+    setMenuCategoryId(applied.menuCategoryId)
+    setBatchName(applied.batchName)
+    setMenuItemId(applied.menuItemId)
+    setLinkedKitchenStockId(applied.linkedKitchenStockId)
+    setPlannedPortions(applied.plannedPortions)
+    setYieldUnit(applied.yieldUnit)
+    setSellingPrice(applied.sellingPrice)
+    setOverheadLabour(applied.overheadLabour)
+    setOverheadGas(applied.overheadGas)
+    setOverheadOther(applied.overheadOther)
+    setOutletMenuSync(applied.outletMenuSync)
+    setNotes(applied.notes)
+    setCart(applied.cart)
+    setOptionalCart(applied.optionalCart)
+    setOptionalIngredientsOpen(applied.optionalIngredientsOpen)
+    setQtyInputMap(applied.qtyInputMap)
     setDraftLoaded(true)
   }, [editRecipeId])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!editRecipeId) return
     const recipe = recipes.find((r) => r.id === editRecipeId)
     if (!recipe) return
@@ -171,7 +245,7 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
         unit: ing.unit,
         quantity: ing.quantity,
         unitCost: ing.quantity > 0 ? ing.cost / ing.quantity : 0,
-      source: ing.source ?? 'raw',
+        source: ing.source ?? 'raw',
         optional: true,
       }))
     setOptionalCart(optionalIngredients)
@@ -184,46 +258,20 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
     setDraftLoaded(true)
   }, [editRecipeId, recipes])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!draftLoaded || editing) return
-    persistKitchenBatchDraft({
-      draftVersion: KITCHEN_BATCH_DRAFT_VERSION,
-      search,
-      menuCategory,
-      menuCategoryId,
-      batchName,
-      menuItemId,
-      linkedKitchenStockId,
-      plannedPortions,
-      yieldUnit,
-      sellingPrice,
-      overheadLabour,
-      overheadGas,
-      overheadOther,
-      outletMenuSync,
-      notes,
-      cart: [...cart, ...optionalCart],
-    })
-  }, [
-    draftLoaded,
-    search,
-    menuCategory,
-    menuCategoryId,
-    batchName,
-    menuItemId,
-    linkedKitchenStockId,
-    plannedPortions,
-    yieldUnit,
-    sellingPrice,
-    overheadLabour,
-    overheadGas,
-    overheadOther,
-    outletMenuSync,
-    notes,
-    cart,
-    optionalCart,
-    editing,
-  ])
+    flushDraft()
+  }, [draftLoaded, editing, flushDraft, buildDraftSnapshot])
+
+  useEffect(() => {
+    if (editing) return
+    const onPageHide = () => flushDraft(true)
+    window.addEventListener('pagehide', onPageHide)
+    return () => {
+      window.removeEventListener('pagehide', onPageHide)
+      flushDraft(true)
+    }
+  }, [editing, flushDraft])
 
   const actor = { name: name ?? 'Kitchen', role: canonicalRoleKey(role) ?? 'staff' }
   const canCreateBatch = BATCH_CREATOR_ROLES.has(canonicalRoleKey(role) ?? '')
@@ -479,6 +527,10 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
     setNotes('')
     setSearch('')
     clearKitchenBatchDraft()
+    draftSnapshotRef.current = {
+      ...EMPTY_KITCHEN_BATCH_DRAFT,
+      draftVersion: KITCHEN_BATCH_DRAFT_VERSION,
+    }
   }
 
   const handleCreate = async () => {
