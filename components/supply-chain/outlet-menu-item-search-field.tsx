@@ -6,6 +6,7 @@ import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Loader2 } from 'lucide-react'
 import { formatNaira } from '@/lib/utils/currency'
+import { titleCaseWhileTyping } from '@/lib/utils/name-format'
 import { kitchenStockIdFromServiceCode } from '@/lib/supply-chain/kitchen-menu-link'
 
 export type RestaurantMenuItemSelection = {
@@ -109,7 +110,8 @@ export function OutletMenuItemSearchField({
   }
 
   const handleInputChange = (raw: string) => {
-    onChange({ name: raw, menuItemId: null, kitchenStockId: null })
+    const typed = titleCaseWhileTyping(raw)
+    onChange({ name: typed, menuItemId: null, kitchenStockId: null })
     setOpen(true)
     if (debounceRef.current) clearTimeout(debounceRef.current)
     debounceRef.current = setTimeout(() => void loadCatalog(), 150)
