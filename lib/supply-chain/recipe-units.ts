@@ -48,6 +48,9 @@ const UNIT_ALIASES: Record<string, string> = {
   rolls: 'roll',
   pac: 'pack',
   pack: 'pack',
+  cooking_spoon: 'cooking_spoon',
+  'cooking spoon': 'cooking_spoon',
+  'cooking spoons': 'cooking_spoon',
   spoon: 'spoon',
   spoons: 'spoon',
 }
@@ -71,13 +74,13 @@ export function convertQtyBetweenUnits(
 export function parseRecipeQuantity(text: string): ParsedRecipeQty | null {
   const raw = text.trim()
   const m = raw.match(
-    /^(\d+(?:\.\d+)?(?:\s*[-–]\s*\d+(?:\.\d+)?)?)\s*(kg|g|ml|l|ltr|litre|liter|mudu|cups?|tbsp|tsp|pcs?|pieces?|tin|tins|can|cans|bottle|bottles|sachet|sachets|ball|balls|head|heads|set|sets|basket|leather|portion|portions|pac|pack|spoon|spoons|rolls?|)?/i,
+    /^(\d+(?:\.\d+)?(?:\s*[-–]\s*\d+(?:\.\d+)?)?)\s*(kg|g|ml|l|ltr|litre|liter|mudu|cups?|cooking\s+spoons?|tbsp|tsp|pcs?|pieces?|tin|tins|can|cans|bottle|bottles|sachet|sachets|ball|balls|head|heads|set|sets|basket|leather|portion|portions|pac|pack|spoon|spoons|rolls?|)?/i,
   )
   if (!m) return null
   const numPart = m[1].replace(/\s*[-–]\s*\d+.*/, '')
   const quantity = Number(numPart)
   if (!Number.isFinite(quantity)) return null
-  const unitRaw = (m[2] ?? '').toLowerCase()
+  const unitRaw = (m[2] ?? '').toLowerCase().replace(/\s+/g, ' ').trim()
   const unit = UNIT_ALIASES[unitRaw] ?? (unitRaw || 'unit')
   return { quantity, unit, raw }
 }

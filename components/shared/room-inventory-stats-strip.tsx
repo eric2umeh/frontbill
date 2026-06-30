@@ -4,9 +4,10 @@ import { useCallback, useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/lib/auth-context'
 import {
-  computeRoomInventoryStats,
+  computeRoomInventoryStatsWithBookings,
   type RoomInventoryStats,
 } from '@/lib/rooms/compute-room-inventory-stats'
+import { OCCUPYING_BOOKING_STATUSES } from '@/lib/rooms/room-occupancy'
 import { reconcileRoomStatusesClient } from '@/lib/rooms/reconcile-room-status-client'
 import { Bed, DoorOpen, AlertTriangle, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -35,17 +36,24 @@ export function RoomInventoryStatsStrip({ className, refreshMs = 60_000 }: Props
     }
     await reconcileRoomStatusesClient()
 
-    const { data, error } = await supabase
-      .from('rooms')
-      .select('status')
-      .eq('organization_id', organizationId)
+    const [{ data: rooms, error: roomErr }, { data: bookings, error: bookErr }] = await Promise.all([
+      supabase.from('rooms').select('status').eq('organization_id', organizationId),
+      supabase
+        .from('bookings')
+        .select('id, room_id, status, check_in, check_out, folio_status')
+        .eq('organization_id', organizationId)
+        .in('status', [...OCCUPYING_BOOKING_STATUSES]),
+    ])
 
-    if (error) {
-      console.warn('[room-inventory-stats]', error.message)
+    if (roomErr) {
+      console.warn('[room-inventory-stats]', roomErr.message)
       setLoading(false)
       return
     }
-    setStats(computeRoomInventoryStats(data ?? []))
+    if (bookErr) {
+      console.warn('[room-inventory-stats] bookings', bookErr.message)
+    }
+    setStats(computeRoomInventoryStatsWithBookings(rooms ?? [], bookings ?? []))
     setLoading(false)
   }, [organizationId])
 
@@ -89,7 +97,7 @@ export function RoomInventoryStatsStrip({ className, refreshMs = 60_000 }: Props
       </div>
       <div
         className="inline-flex h-7 items-center gap-1 rounded-md border border-blue-200/80 bg-blue-50/50 px-1.5 text-[10px] font-medium leading-none shadow-sm dark:border-blue-900/50 dark:bg-blue-950/30"
-        title="Rooms marked Occupied (synced from in-house folios)"
+        title="In-house rooms today (active folios — same as Bookings)"
       >
         <Bed className="h-3 w-3 shrink-0 text-blue-700 dark:text-blue-400" aria-hidden />
         <span className="text-muted-foreground">Occ</span>

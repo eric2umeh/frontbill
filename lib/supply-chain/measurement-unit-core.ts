@@ -6,6 +6,7 @@ export const MEASUREMENT_UNITS = [
   'can',
   'carton',
   'crate',
+  'cooking_spoon',
   'cup',
   'g',
   'kg',
@@ -44,6 +45,9 @@ const UNIT_ALIASES: Record<string, string> = {
   mudu: 'mudu',
   cup: 'cup',
   cups: 'cup',
+  cooking_spoon: 'cooking_spoon',
+  'cooking spoon': 'cooking_spoon',
+  'cooking spoons': 'cooking_spoon',
   tbsp: 'tbsp',
   tsp: 'tsp',
   pcs: 'pcs',
@@ -96,6 +100,7 @@ export function formatUnitLabel(unit: string): string {
   if (normalized === 'bag') return 'bag'
   if (normalized === 'carton') return 'carton'
   if (normalized === 'roll') return 'roll'
+  if (normalized === 'cooking_spoon') return 'cooking spoon'
   return normalized
 }
 
@@ -115,10 +120,14 @@ export function unitOptionsForStoreItem(storeUnit: string, itemName?: string): s
     options.add('kg')
     options.add('g')
   }
-  if (['l', 'ml', 'cup'].includes(base)) {
+  if (['l', 'ml', 'cup', 'cooking_spoon', 'tbsp', 'tsp', 'spoon'].includes(base)) {
     options.add('l')
     options.add('ml')
     options.add('cup')
+    options.add('cooking_spoon')
+    options.add('tbsp')
+    options.add('tsp')
+    options.add('spoon')
   }
   const beverageHint =
     ['crate', 'bottle', 'can', 'pack', 'pcs', 'tin'].includes(base) ||

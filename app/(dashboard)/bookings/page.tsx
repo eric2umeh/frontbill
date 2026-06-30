@@ -158,6 +158,12 @@ export default function BookingsPage() {
   const [tableSearchQuery, setTableSearchQuery] = useState('')
   const [catalogScopeLoaded, setCatalogScopeLoaded] = useState<string | null>(null)
   const [catalogLoading, setCatalogLoading] = useState(false)
+  const handleBookingsDateFilterChange = useCallback((date: Date | undefined) => {
+    setTableFilters((prev) => ({
+      ...prev,
+      status: date ? 'all' : 'checked_in',
+    }))
+  }, [])
   const [roomStats, setRoomStats] = useState<{
     total: number
     occupied: number
@@ -978,6 +984,7 @@ export default function BookingsPage() {
         rowKey={(b) => (b.is_bulk && b.bulk_group_id ? `bulk-${b.bulk_group_id}` : String(b.id))}
         controlledActiveFilters={tableFilters}
         onControlledActiveFiltersChange={setTableFilters}
+        onDateFilterChange={handleBookingsDateFilterChange}
         onSearchQueryChange={setTableSearchQuery}
         filterKeysIgnoredWhileSearching={['status']}
         searchPlaceholder="Search all bookings by guest, room, folio…"
@@ -1040,7 +1047,7 @@ export default function BookingsPage() {
         emptyState={{
           title: 'No bookings match your filters',
           description:
-            'Uses the hotel calendar (Africa/Lagos by default). In-house includes folios still marked Confirmed. Try another status or clear the check-in date picker.',
+            'Uses the hotel calendar (Africa/Lagos by default). Picking a check-in date switches status to All Status so past arrivals show. Clear the date to return to in-house guests.',
         }}
         dateField="check_in"
         columns={[

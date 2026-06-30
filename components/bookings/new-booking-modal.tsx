@@ -33,7 +33,7 @@ import {
   searchCounterpartyOrganizations,
 } from '@/lib/utils/search-counterparty-organizations'
 import { syncLedgerOrgCounterpartiesToOrganizationsTable } from '@/lib/utils/sync-ledger-org-counterparties-to-organizations'
-import { formatPersonName, normalizeNameKey } from '@/lib/utils/name-format'
+import { formatPersonName, normalizeNameKey, titleCaseWhileTyping } from '@/lib/utils/name-format'
 import { guestOrOrganizationNameTaken } from '@/lib/utils/guest-org-name-uniqueness'
 import { StayDateRangeFields } from '@/components/shared/stay-date-range-fields'
 import { useAuth } from '@/lib/auth-context'
@@ -219,12 +219,13 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
 
   // Guest search
   const handleGuestSearch = (value: string) => {
-    setFullName(value)
+    const typed = titleCaseWhileTyping(value)
+    setFullName(typed)
     setGuestId('')
-    if (value.trim().length > 0) {
+    if (typed.trim().length > 0) {
       const filtered = guests.filter(g =>
-        g.name.toLowerCase().includes(value.toLowerCase()) ||
-        (g.phone || '').includes(value)
+        g.name.toLowerCase().includes(typed.toLowerCase()) ||
+        (g.phone || '').includes(typed)
       )
       setFilteredGuests(filtered)
       setGuestSearchOpen(filtered.length > 0)
@@ -1279,7 +1280,11 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
                 )}
                 <div className="space-y-2">
                   <Label>Full Name *</Label>
-                  <Input placeholder="Guest full name" value={newAccountName} onChange={(e) => setNewAccountName(e.target.value)} />
+                  <Input
+                    placeholder="Guest full name"
+                    value={newAccountName}
+                    onChange={(e) => setNewAccountName(titleCaseWhileTyping(e.target.value))}
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label>Phone Number *</Label>
@@ -1297,7 +1302,11 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
               <>
                 <div className="space-y-2">
                   <Label>Organization Name *</Label>
-                  <Input placeholder="e.g. Federal Ministry of Health" value={newAccountName} onChange={(e) => setNewAccountName(e.target.value)} />
+                  <Input
+                    placeholder="e.g. Federal Ministry of Health"
+                    value={newAccountName}
+                    onChange={(e) => setNewAccountName(titleCaseWhileTyping(e.target.value))}
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label>Email *</Label>

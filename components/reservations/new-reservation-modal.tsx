@@ -31,7 +31,7 @@ import {
   searchCounterpartyOrganizations,
 } from '@/lib/utils/search-counterparty-organizations'
 import { syncLedgerOrgCounterpartiesToOrganizationsTable } from '@/lib/utils/sync-ledger-org-counterparties-to-organizations'
-import { formatPersonName, normalizeNameKey } from '@/lib/utils/name-format'
+import { formatPersonName, normalizeNameKey, titleCaseWhileTyping } from '@/lib/utils/name-format'
 import { guestOrOrganizationNameTaken } from '@/lib/utils/guest-org-name-uniqueness'
 import { StayDateRangeFields } from '@/components/shared/stay-date-range-fields'
 import { BOOKING_MODAL_ROOMS_LIMIT, isRoomAssignable, normalizeRoomsForBookingPickers } from '@/lib/utils/room-bookability'
@@ -175,10 +175,11 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
 
   // Guest search in Step 1
   const handleGuestSearch = (value: string) => {
-    setFullName(value)
+    const typed = titleCaseWhileTyping(value)
+    setFullName(typed)
     setGuestId('')
-    if (value.trim()) {
-      const filtered = guests.filter(g => g.name.toLowerCase().includes(value.toLowerCase()) || (g.phone || '').includes(value))
+    if (typed.trim()) {
+      const filtered = guests.filter(g => g.name.toLowerCase().includes(typed.toLowerCase()) || (g.phone || '').includes(typed))
       setFilteredGuests(filtered)
       setGuestSearchOpen(filtered.length > 0)
     } else {

@@ -40,6 +40,18 @@ import {
 } from '@/lib/supply-chain/stock-level-ui'
 import type { Recipe } from '@/lib/supply-chain/types'
 
+type RawStockTableRow = {
+  key: string
+  itemName: string
+  onHand: number | null
+  reorder: number | null
+  unit: string
+  issuedAt?: string
+  qtyIssued?: number
+  receivedBy?: string
+  issuedBy?: string
+}
+
 function batchOutletsPortions(batch: {
   actualPortions?: number
   disposition?: { sold: number; staff: number; waste: number; returned: number }
@@ -147,13 +159,13 @@ export function KitchenWorkspace() {
     [issueOutLog],
   )
 
-  const rawStockTableRows = useMemo(() => {
+  const rawStockTableRows = useMemo<RawStockTableRow[]>(() => {
     const rawStock = kitchenRawStock ?? []
     const rawByStoreId = new Map(rawStock.map((r) => [r.storeItemId, r]))
     const rawByName = new Map(rawStock.map((r) => [r.name.trim().toLowerCase(), r]))
     const seenRawIds = new Set<string>()
 
-    const rows = kitchenReceipts.map((receipt, index) => {
+    const rows: RawStockTableRow[] = kitchenReceipts.map((receipt, index) => {
       const raw =
         rawByStoreId.get(receipt.storeItemId) ??
         rawByName.get(receipt.itemName.trim().toLowerCase())
@@ -295,66 +307,111 @@ export function KitchenWorkspace() {
         <div className="space-y-4">
           <p className="text-sm text-muted-foreground">
             Raw materials issued from Central Store → Kitchen: on-hand totals and each receipt in one
-            table.
+            table. Search and filters run locally — no extra API calls while you browse.
           </p>
-          <div className="rounded-xl border overflow-hidden">
-            {rawStockTableRows.length === 0 ? (
-              <p className="text-sm text-muted-foreground p-6 text-center">
-                No raw stock received yet. Ask store to issue kitchen items to the Kitchen destination.
-              </p>
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Item</TableHead>
-                    <TableHead className="text-right">On hand</TableHead>
-                    <TableHead className={`text-right ${RESPONSIVE_HIDE_MD}`}>Reorder at</TableHead>
-                    <TableHead className={RESPONSIVE_HIDE_LG}>Time received</TableHead>
-                    <TableHead className={RESPONSIVE_HIDE_MD}>Qty issued</TableHead>
-                    <TableHead className={RESPONSIVE_HIDE_LG}>Received by</TableHead>
-                    <TableHead className={RESPONSIVE_HIDE_LG}>Issued by</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {rawStockTableRows.map((row) => {
-                    const level =
-                      row.onHand != null && row.reorder != null
-                        ? getStockLevel(row.onHand, row.reorder)
-                        : 'ok'
-                    return (
-                      <TableRow key={row.key} className={stockLevelRowClass(level)}>
-                        <TableCell className="font-medium">{row.itemName}</TableCell>
-                        <TableCell className="text-right">
-                          {row.onHand != null ? (
-                            <span className={stockLevelTextClass(level)}>
-                              {row.onHand} {row.unit}
-                            </span>
-                          ) : (
-                            '—'
-                          )}
-                        </TableCell>
-                        <TableCell className={`text-right text-muted-foreground text-sm ${RESPONSIVE_HIDE_MD}`}>
-                          {row.reorder != null ? `${row.reorder} ${row.unit}` : '—'}
-                        </TableCell>
-                        <TableCell className={`text-xs whitespace-nowrap ${RESPONSIVE_HIDE_LG}`}>
-                          {row.issuedAt
-                            ? new Date(row.issuedAt).toLocaleString(undefined, {
-                                dateStyle: 'medium',
-                                timeStyle: 'short',
-                              })
-                            : '—'}
-                        </TableCell>
-                        <TableCell className={RESPONSIVE_HIDE_MD}>
-                          {row.qtyIssued != null ? `${row.qtyIssued} ${row.unit}` : '—'}
-                        </TableCell>
-                        <TableCell className={RESPONSIVE_HIDE_LG}>{row.receivedBy || '—'}</TableCell>
-                        <TableCell className={RESPONSIVE_HIDE_LG}>{row.issuedBy || '—'}</TableCell>
-                      </TableRow>
-                    )
-                  })}
-                </TableBody>
-              </Table>
-            )}
+          <div className="rounded-xl border overflow-hidden p-4">
+            <PaginatedListShell
+              items={rawStockTableRows}
+              pageSize={15}
+              searchPlaceholder="Search item, receiver, issuer…"
+              searchMatch={(row, query) => {
+                const q = query.trim().toLowerCase()
+                return (
+                  row.itemName.toLowerCase().includes(q) ||
+                  row.unit.toLowerCase().includes(q) ||
+                  (row.receivedBy?.toLowerCase().includes(q) ?? false) ||
+                  (row.issuedBy?.toLowerCase().includes(q) ?? false)
+                )
+              }}
+              filters={[
+                {
+                  key: 'stockLevel',
+                  label: 'Level',
+                  options: [
+                    { value: 'out', label: 'Out' },
+                    { value: 'low', label: 'Low' },
+                    { value: 'ok', label: 'OK' },
+                  ],
+                },
+                {
+                  key: 'recordType',
+                  label: 'Row',
+                  options: [
+                    { value: 'receipt', label: 'Issue receipt' },
+                    { value: 'balance', label: 'On-hand only' },
+                  ],
+                },
+              ]}
+              filterMatch={(row, key, value) => {
+                if (key === 'stockLevel') {
+                  if (row.onHand == null || row.reorder == null) return value === 'ok'
+                  const level = getStockLevel(row.onHand, row.reorder)
+                  if (value === 'out') return level === 'out'
+                  if (value === 'low') return level === 'low'
+                  return level === 'ok'
+                }
+                if (key === 'recordType') {
+                  if (value === 'receipt') return Boolean(row.issuedAt)
+                  if (value === 'balance') return !row.issuedAt
+                }
+                return undefined
+              }}
+              emptyMessage="No raw stock received yet. Ask store to issue kitchen items to the Kitchen destination."
+            >
+              {(pageRows) => (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Item</TableHead>
+                      <TableHead className="text-right">On hand</TableHead>
+                      <TableHead className={`text-right ${RESPONSIVE_HIDE_MD}`}>Reorder at</TableHead>
+                      <TableHead className={RESPONSIVE_HIDE_LG}>Time received</TableHead>
+                      <TableHead className={RESPONSIVE_HIDE_MD}>Qty issued</TableHead>
+                      <TableHead className={RESPONSIVE_HIDE_LG}>Received by</TableHead>
+                      <TableHead className={RESPONSIVE_HIDE_LG}>Issued by</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {pageRows.map((row) => {
+                      const level =
+                        row.onHand != null && row.reorder != null
+                          ? getStockLevel(row.onHand, row.reorder)
+                          : 'ok'
+                      return (
+                        <TableRow key={row.key} className={stockLevelRowClass(level)}>
+                          <TableCell className="font-medium">{row.itemName}</TableCell>
+                          <TableCell className="text-right">
+                            {row.onHand != null ? (
+                              <span className={stockLevelTextClass(level)}>
+                                {row.onHand} {row.unit}
+                              </span>
+                            ) : (
+                              '—'
+                            )}
+                          </TableCell>
+                          <TableCell className={`text-right text-muted-foreground text-sm ${RESPONSIVE_HIDE_MD}`}>
+                            {row.reorder != null ? `${row.reorder} ${row.unit}` : '—'}
+                          </TableCell>
+                          <TableCell className={`text-xs whitespace-nowrap ${RESPONSIVE_HIDE_LG}`}>
+                            {row.issuedAt
+                              ? new Date(row.issuedAt).toLocaleString(undefined, {
+                                  dateStyle: 'medium',
+                                  timeStyle: 'short',
+                                })
+                              : '—'}
+                          </TableCell>
+                          <TableCell className={RESPONSIVE_HIDE_MD}>
+                            {row.qtyIssued != null ? `${row.qtyIssued} ${row.unit}` : '—'}
+                          </TableCell>
+                          <TableCell className={RESPONSIVE_HIDE_LG}>{row.receivedBy || '—'}</TableCell>
+                          <TableCell className={RESPONSIVE_HIDE_LG}>{row.issuedBy || '—'}</TableCell>
+                        </TableRow>
+                      )
+                    })}
+                  </TableBody>
+                </Table>
+              )}
+            </PaginatedListShell>
           </div>
         </div>
         </TabsContent>
@@ -539,7 +596,8 @@ export function KitchenWorkspace() {
                       setCloseDialog(b.id)
                     }}
                   >
-                    Close Batch &amp; Record Disposition ({b.plannedPortions} {closeBatchRecipe?.yieldUnit || 'portion'})
+                    Close Batch &amp; Record Disposition ({b.plannedPortions}{' '}
+                    {(b.recipeId ? recipeById.get(b.recipeId) : undefined)?.yieldUnit || 'portion'})
                   </Button>
                 </div>
               )}
@@ -841,8 +899,8 @@ export function KitchenWorkspace() {
             return (
               <>
                 <p className="text-sm text-muted-foreground">
-                  Closes this production run and deducts raw materials from kitchen stock. Finished
-                  {recipe?.yieldUnit || 'portion'} are added to finished/prep stock when you close.
+                  Closes this production run and deducts raw materials from kitchen stock. {portions}{' '}
+                  {closeBatchRecipe?.yieldUnit || 'portion'} are added to finished/prep stock when you close.
                 </p>
                 <div className="space-y-3">
                   <div className="space-y-2">

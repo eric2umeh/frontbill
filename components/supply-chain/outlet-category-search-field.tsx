@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Loader2 } from 'lucide-react'
+import { titleCaseWhileTyping } from '@/lib/utils/name-format'
 import type { OutletDepartmentKey } from '@/lib/outlets/departments'
 
 type CategoryOption = { id: string; name: string }
@@ -90,7 +91,7 @@ export function OutletCategorySearchField({
           value={value}
           placeholder={placeholder}
           onChange={(e) => {
-            onChange(e.target.value, null)
+            onChange(titleCaseWhileTyping(e.target.value), null)
             setOpen(true)
           }}
           onFocus={() => setOpen(true)}
