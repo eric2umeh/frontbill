@@ -62,9 +62,27 @@ export function loadKitchenBatchDraft(): KitchenBatchDraft {
   }
 }
 
-export function persistKitchenBatchDraft(draft: KitchenBatchDraft) {
+export function kitchenBatchDraftHasContent(draft: KitchenBatchDraft): boolean {
+  return (
+    draft.cart.length > 0 ||
+    draft.batchName.trim().length > 0 ||
+    draft.menuCategory.trim().length > 0 ||
+    draft.plannedPortions.trim().length > 0 ||
+    draft.sellingPrice.trim().length > 0 ||
+    draft.notes.trim().length > 0
+  )
+}
+
+export function persistKitchenBatchDraft(
+  draft: KitchenBatchDraft,
+  opts?: { force?: boolean },
+) {
   if (typeof window === 'undefined') return
   try {
+    if (!opts?.force && !kitchenBatchDraftHasContent(draft)) {
+      const existing = loadKitchenBatchDraft()
+      if (kitchenBatchDraftHasContent(existing)) return
+    }
     const json = JSON.stringify(draft)
     window.localStorage.setItem(KITCHEN_BATCH_DRAFT_KEY, json)
     window.sessionStorage.setItem(KITCHEN_BATCH_DRAFT_KEY, json)
