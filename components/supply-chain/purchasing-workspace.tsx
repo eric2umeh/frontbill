@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useCallback } from "react";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { useSupplyChain } from "@/lib/supply-chain/supply-chain-context";
@@ -17,7 +18,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Info } from "lucide-react";
 import { toast } from "sonner";
 import {
-  PoApprovalPanel,
   poStatusBadge,
 } from "@/components/supply-chain/po-approval-panel";
 import { PoDetailPanel } from "@/components/supply-chain/po-detail-card";
@@ -26,9 +26,16 @@ import { PoHistoryPanel } from "@/components/supply-chain/po-history-panel";
 import {
   formatPoRaisedAt,
   isPurchasingRetireCandidate,
-  isPurchasingRetirementInReview,
 } from "@/lib/supply-chain/po-format";
+import {
+  parseQuantityValue,
+  sanitizeQuantityInput,
+} from "@/lib/supply-chain/measurement-units";
 import { useClientMounted } from "@/hooks/use-client-mounted";
+import { playNotificationBeep } from "@/lib/utils/play-notification-beep";
+
+const RETIRE_QTY_INPUT_CLASS =
+  "h-8 tabular-nums [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none";
 
 function lineNotBought(line: RetirementLine) {
   return line.notBought === true || line.removed === true;
@@ -76,6 +83,8 @@ export function PurchasingWorkspace() {
   const { purchaseOrders, submitRetirement } = useSupplyChain();
   const [selectedId, setSelectedId] = useState<string | null>(poParam);
   const [retireLines, setRetireLines] = useState<RetirementLine[]>([]);
+  const [retireQtyText, setRetireQtyText] = useState<Record<string, string>>({});
+  const [retirePriceText, setRetirePriceText] = useState<Record<string, string>>({});
   const [tab, setTab] = useState("active");
 
   const retireCandidates = useMemo(
@@ -83,8 +92,8 @@ export function PurchasingWorkspace() {
     [purchaseOrders],
   );
 
-  const inReview = useMemo(
-    () => purchaseOrders.filter((p) => isPurchasingRetirementInReview(p.status)),
+  const submittedForReview = useMemo(
+    () => purchaseOrders.filter((p) => p.status === "retirement_pending_accountant"),
     [purchaseOrders],
   );
 
@@ -95,16 +104,18 @@ export function PurchasingWorkspace() {
 
   const selected = purchaseOrders.find((p) => p.id === selectedId);
 
+  const formatQtyDisplay = (n: number) =>
+    Number.isFinite(n) && n > 0 ? String(n) : "";
+
   const initRetire = (poId: string) => {
     const po = purchaseOrders.find((p) => p.id === poId);
     if (!po) return;
     setSelectedId(poId);
+    let lines: RetirementLine[];
     if (po.retirement?.lines?.length && po.status === "retirement_rejected") {
-      setRetireLines(po.retirement.lines.map((l) => ({ ...l })));
-      return;
-    }
-    setRetireLines(
-      po.lines.map((l) => ({
+      lines = po.retirement.lines.map((l) => ({ ...l }));
+    } else {
+      lines = po.lines.map((l) => ({
         lineId: l.id,
         name: l.name,
         unit: l.unit,
@@ -118,9 +129,62 @@ export function PurchasingWorkspace() {
         actualStockUnitPrice: l.stockUnitPrice,
         totalPaid: l.quantityOrdered * l.unitPrice,
         notBought: false,
-      })),
-    );
+      }));
+    }
+    setRetireLines(lines);
+    const qty: Record<string, string> = {};
+    const price: Record<string, string> = {};
+    for (const l of lines) {
+      qty[l.lineId] = formatQtyDisplay(l.quantityBought);
+      price[l.lineId] = formatQtyDisplay(l.actualPrice);
+    }
+    setRetireQtyText(qty);
+    setRetirePriceText(price);
   };
+
+  const updateRetireQty = useCallback((lineId: string, raw: string) => {
+    const cleaned = sanitizeQuantityInput(raw);
+    setRetireQtyText((prev) => ({ ...prev, [lineId]: cleaned }));
+    const q = parseQuantityValue(cleaned);
+    setRetireLines((prev) =>
+      prev.map((l) => {
+        if (l.lineId !== lineId) return l;
+        const stockQty =
+          l.stockQuantityOrdered && l.quantityOrdered > 0
+            ? (q / l.quantityOrdered) * l.stockQuantityOrdered
+            : q;
+        return {
+          ...l,
+          quantityBought: q,
+          stockQuantityBought: stockQty,
+          actualStockUnitPrice:
+            stockQty > 0 ? (q * l.actualPrice) / stockQty : l.actualPrice,
+          totalPaid: q * l.actualPrice,
+        };
+      }),
+    );
+  }, []);
+
+  const updateRetirePrice = useCallback((lineId: string, raw: string) => {
+    const cleaned = sanitizeQuantityInput(raw);
+    setRetirePriceText((prev) => ({ ...prev, [lineId]: cleaned }));
+    const p = parseQuantityValue(cleaned);
+    setRetireLines((prev) =>
+      prev.map((l) =>
+        l.lineId === lineId
+          ? {
+              ...l,
+              actualPrice: p,
+              actualStockUnitPrice:
+                l.stockQuantityBought && l.stockQuantityBought > 0
+                  ? (l.quantityBought * p) / l.stockQuantityBought
+                  : p,
+              totalPaid: l.quantityBought * p,
+            }
+          : l,
+      ),
+    );
+  }, []);
 
   const actualSpent = useMemo(
     () =>
@@ -157,7 +221,6 @@ export function PurchasingWorkspace() {
           </p>
         </div>
         <PoDetailPanel po={selected} onBack={() => setSelectedId(null)} />
-        <PoApprovalPanel compact />
       </div>
     );
   }
@@ -248,55 +311,21 @@ export function PurchasingWorkspace() {
                     <div>
                       <p className="text-[10px] text-muted-foreground mb-0.5">Bought qty</p>
                       <Input
-                        type="number"
-                        className="h-8"
-                        value={line.quantityBought}
-                        onChange={(e) => {
-                          const q = Number(e.target.value);
-                          const stockQty =
-                            line.stockQuantityOrdered && line.quantityOrdered > 0
-                              ? (q / line.quantityOrdered) * line.stockQuantityOrdered
-                              : q;
-                          setRetireLines((prev) =>
-                            prev.map((l) =>
-                              l.lineId === line.lineId
-                                ? {
-                                    ...l,
-                                    quantityBought: q,
-                                    stockQuantityBought: stockQty,
-                                    actualStockUnitPrice: stockQty > 0 ? (q * l.actualPrice) / stockQty : l.actualPrice,
-                                    totalPaid: q * l.actualPrice,
-                                  }
-                                : l,
-                            ),
-                          );
-                        }}
+                        inputMode="decimal"
+                        className={RETIRE_QTY_INPUT_CLASS}
+                        placeholder="0"
+                        value={retireQtyText[line.lineId] ?? ""}
+                        onChange={(e) => updateRetireQty(line.lineId, e.target.value)}
                       />
                     </div>
                     <div>
                       <p className="text-[10px] text-muted-foreground mb-0.5">Actual price</p>
                       <Input
-                        type="number"
-                        className="h-8"
-                        value={line.actualPrice}
-                        onChange={(e) => {
-                          const p = Number(e.target.value);
-                          setRetireLines((prev) =>
-                            prev.map((l) =>
-                              l.lineId === line.lineId
-                                ? {
-                                    ...l,
-                                    actualPrice: p,
-                                    actualStockUnitPrice:
-                                      l.stockQuantityBought && l.stockQuantityBought > 0
-                                        ? (l.quantityBought * p) / l.stockQuantityBought
-                                        : p,
-                                    totalPaid: l.quantityBought * p,
-                                  }
-                                : l,
-                            ),
-                          );
-                        }}
+                        inputMode="decimal"
+                        className={RETIRE_QTY_INPUT_CLASS}
+                        placeholder="0"
+                        value={retirePriceText[line.lineId] ?? ""}
+                        onChange={(e) => updateRetirePrice(line.lineId, e.target.value)}
                       />
                     </div>
                     <div>
@@ -313,7 +342,8 @@ export function PurchasingWorkspace() {
         <Button
           onClick={() => {
             submitRetirement(selected.id, retireLines, actor);
-            toast.success("Retirement submitted — awaiting accountant review");
+            playNotificationBeep();
+            toast.success("Retirement submitted — accountant will review in Expenses → Retirement");
             setSelectedId(null);
             setTab("active");
           }}
@@ -332,8 +362,6 @@ export function PurchasingWorkspace() {
           Market purchase, retirement, and your PO history
         </p>
       </div>
-
-      <PoApprovalPanel />
 
       {!mounted ? (
         <div className="h-24 rounded-lg bg-muted/40 animate-pulse" />
@@ -370,6 +398,20 @@ export function PurchasingWorkspace() {
               </div>
             </div>
 
+            {submittedForReview.length > 0 && (
+              <div className="rounded-lg border border-violet-200 bg-violet-50/50 dark:bg-violet-950/20 p-3 text-sm text-muted-foreground">
+                {submittedForReview.length} retirement
+                {submittedForReview.length === 1 ? "" : "s"} submitted — awaiting accountant at{" "}
+                <Link
+                  href="/expenses?tab=retirement"
+                  className="underline font-medium text-foreground"
+                >
+                  Expenses → Retirement
+                </Link>
+                . You can edit again if the accountant rejects.
+              </div>
+            )}
+
             <section className="space-y-3">
               <div>
                 <h2 className="font-medium">Ready to retire at market</h2>
@@ -393,23 +435,6 @@ export function PurchasingWorkspace() {
                 </div>
               )}
             </section>
-
-            {inReview.length > 0 && (
-              <section className="space-y-3">
-                <div>
-                  <h2 className="font-medium">Awaiting accountant review</h2>
-                  <p className="text-xs text-muted-foreground">
-                    Retirement submitted — stock updates when the accountant accepts.
-                  </p>
-                </div>
-                <PoHistoryPanel
-                  purchaseOrders={inReview}
-                  includeStatuses={["retirement_pending_accountant"]}
-                  emptyMessage="No retirements awaiting review."
-                  searchPlaceholder="Search submitted retirement…"
-                />
-              </section>
-            )}
           </TabsContent>
 
           <TabsContent value="history" className="mt-4 space-y-3">

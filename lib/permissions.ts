@@ -968,6 +968,16 @@ export function canSupplyPoManagerReview(
   );
 }
 
+/** Market retirement review — accountant, administrator, superadmin. */
+export function canSupplyRetirementReview(
+  userRole: string | null | undefined,
+): boolean {
+  return (
+    hasPermission(userRole, "supply:approve_accountant") ||
+    canAdminTestApproveSupplyPo(userRole)
+  );
+}
+
 export function canKickstartOutletStock(
   userRole: string | null | undefined,
 ): boolean {
