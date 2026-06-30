@@ -1,3 +1,8 @@
+import {
+  countInHouseRoomsFromBookings,
+  type OccupyingBookingRow,
+} from '@/lib/rooms/room-occupancy'
+
 export type RoomInventoryStats = {
   total: number
   available: number
@@ -27,5 +32,20 @@ export function computeRoomInventoryStats(
     available,
     occupied,
     outOfOrder,
+  }
+}
+
+/**
+ * Room strip stats aligned with Bookings in-house list: Occ = active folios today,
+ * not only rooms.status (which may lag until reconcile runs).
+ */
+export function computeRoomInventoryStatsWithBookings(
+  rooms: { status?: string | null }[],
+  bookings: OccupyingBookingRow[],
+): RoomInventoryStats {
+  const base = computeRoomInventoryStats(rooms)
+  return {
+    ...base,
+    occupied: countInHouseRoomsFromBookings(bookings),
   }
 }
