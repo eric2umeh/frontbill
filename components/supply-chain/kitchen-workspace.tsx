@@ -596,7 +596,8 @@ export function KitchenWorkspace() {
                       setCloseDialog(b.id)
                     }}
                   >
-                    Close Batch &amp; Record Disposition ({b.plannedPortions} {closeBatchRecipe?.yieldUnit || 'portion'})
+                    Close Batch &amp; Record Disposition ({b.plannedPortions}{' '}
+                    {(b.recipeId ? recipeById.get(b.recipeId) : undefined)?.yieldUnit || 'portion'})
                   </Button>
                 </div>
               )}
@@ -898,8 +899,8 @@ export function KitchenWorkspace() {
             return (
               <>
                 <p className="text-sm text-muted-foreground">
-                  Closes this production run and deducts raw materials from kitchen stock. Finished
-                  {recipe?.yieldUnit || 'portion'} are added to finished/prep stock when you close.
+                  Closes this production run and deducts raw materials from kitchen stock. {portions}{' '}
+                  {closeBatchRecipe?.yieldUnit || 'portion'} are added to finished/prep stock when you close.
                 </p>
                 <div className="space-y-3">
                   <div className="space-y-2">
