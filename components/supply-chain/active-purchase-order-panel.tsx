@@ -17,6 +17,7 @@ import { toast } from 'sonner'
 import { Send, Trash2 } from 'lucide-react'
 import Link from 'next/link'
 import type { StoreItem } from '@/lib/supply-chain/types'
+import { playNotificationBeep } from '@/lib/utils/play-notification-beep'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -58,8 +59,9 @@ export function ActivePurchaseOrderPanel({ actor, storeItems }: Props) {
     const res = sendBasketForApproval(actor)
     if ('error' in res) toast.error(res.error)
     else {
+      playNotificationBeep()
       toast.success(
-        `${res.po.poNumber} sent — open Accounting → Purchase orders to approve`,
+        `${res.po.poNumber} sent — accountant reviews in Expenses → Purchase orders`,
       )
     }
   }
