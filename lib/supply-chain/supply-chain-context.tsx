@@ -57,6 +57,7 @@ import {
 import {
   formatPurchaseOrderNumber,
   formatPurchaseWeekLabel,
+  isPurchasingRetireCandidate,
 } from "./po-format";
 import {
   basketLineToPoLine,
@@ -88,6 +89,7 @@ import {
   updateSupplyCatalogItem,
 } from "./supply-db-client";
 import { resolveSupplySnapshot } from "./snapshot-merge";
+import { validateRetirementLines } from "./retirement-validation";
 
 function notifyKitchenRawStockChanged() {
   if (typeof window !== "undefined") {
@@ -1316,47 +1318,30 @@ function useSupplyChainImpl() {
   );
 
   const submitRetirement = useCallback(
-    (poId: string, lines: RetirementLine[], actor: Actor) => {
+    (poId: string, lines: RetirementLine[], actor: Actor): { ok: true } | { error: string } => {
+      const po = purchaseOrders.find((p) => p.id === poId);
+      if (!po) return { error: "Purchase order not found." };
+      if (!isPurchasingRetireCandidate(po.status)) {
+        return { error: "This purchase order is not ready for retirement." };
+      }
+
+      const validation = validateRetirementLines(po, lines);
+      if ("error" in validation) return validation;
+
       setPurchaseOrders((prev) => {
-        const po = prev.find((p) => p.id === poId);
-        if (!po) return prev;
-        const normalized = lines.map((l) => ({
-          ...l,
-          notBought: l.notBought ?? l.removed ?? false,
-        }));
-        const actualSpent = normalized
-          .filter((l) => !l.notBought)
-          .reduce((s, l) => s + l.totalPaid, 0);
-        const refund = po.cashDisbursed - actualSpent;
-
-        setActivityLog((a) =>
-          log(
-            a,
-            "retirement_submitted",
-            actor,
-            `Retirement submitted for accountant review — est. spend ₦${actualSpent.toLocaleString()}, refund ₦${refund.toLocaleString()}`,
-            poId,
-          ),
-        );
-
-        pushSupplyNotification({
-          audience: ["accountant"],
-          title: `Retirement submitted — ${po.poNumber}`,
-          body: `${actor.name} submitted market retirement (₦${actualSpent.toLocaleString()} spent)`,
-          href: "/expenses?tab=retirement",
-        });
-
+        if (!prev.some((p) => p.id === poId && isPurchasingRetireCandidate(p.status))) {
+          return prev;
+        }
         return prev.map((p) =>
           p.id === poId
             ? {
                 ...p,
                 status: "retirement_pending_accountant" as const,
                 retirement: {
-                  actualSpent,
-                  refundToCashier: refund,
-                  priceChanges: normalized.filter((l) => l.poPrice !== l.actualPrice)
-                    .length,
-                  lines: normalized,
+                  actualSpent: validation.actualSpent,
+                  refundToCashier: validation.refundToCashier,
+                  priceChanges: validation.priceChanges,
+                  lines: validation.lines,
                   submittedAt: new Date().toISOString(),
                   submittedBy: actor.name,
                 },
@@ -1364,9 +1349,27 @@ function useSupplyChainImpl() {
             : p,
         );
       });
+
+      setActivityLog((a) =>
+        log(
+          a,
+          "retirement_submitted",
+          actor,
+          `Retirement submitted for accountant review — est. spend ₦${validation.actualSpent.toLocaleString()}, refund ₦${validation.refundToCashier.toLocaleString()}`,
+          poId,
+        ),
+      );
+
+      pushSupplyNotification({
+        audience: ["accountant"],
+        title: `Retirement submitted — ${po.poNumber}`,
+        body: `${actor.name} submitted market retirement (₦${validation.actualSpent.toLocaleString()} spent)`,
+        href: "/expenses?tab=retirement",
+      });
       schedulePersistSnapshots();
+      return { ok: true };
     },
-    [schedulePersistSnapshots],
+    [purchaseOrders, schedulePersistSnapshots],
   );
 
   const accountantRetirementDecision = useCallback(
