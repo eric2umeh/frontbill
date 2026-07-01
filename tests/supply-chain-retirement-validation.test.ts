@@ -6,6 +6,10 @@ import {
 } from "../lib/supply-chain/retirement-validation";
 import type { PurchaseOrder } from "../lib/supply-chain/types";
 
+function errorMessage(result: ReturnType<typeof validateRetirementLines>): string {
+  return "error" in result ? result.error : "";
+}
+
 function purchaseOrder(): PurchaseOrder {
   return {
     id: "po-1",
@@ -60,15 +64,15 @@ test("rejects missing and invalid bought lines", () => {
   const lines = createRetirementLinesFromPo(po);
 
   assert.match(
-    validateRetirementLines(po, [{ ...lines[0], lineId: "unknown" }]).error ?? "",
+    errorMessage(validateRetirementLines(po, [{ ...lines[0], lineId: "unknown" }])),
     /every purchase-order line/,
   );
   assert.match(
-    validateRetirementLines(po, [{ ...lines[0], quantityBought: 0 }]).error ?? "",
+    errorMessage(validateRetirementLines(po, [{ ...lines[0], quantityBought: 0 }])),
     /greater than zero/,
   );
   assert.match(
-    validateRetirementLines(po, [{ ...lines[0], actualPrice: -1 }]).error ?? "",
+    errorMessage(validateRetirementLines(po, [{ ...lines[0], actualPrice: -1 }])),
     /non-negative actual price/,
   );
 });
@@ -81,8 +85,7 @@ test("accepts a valid initialized retirement and computes stock pricing", () => 
     { ...lines[0], quantityBought: 1, actualPrice: 6_000, stockQuantityBought: 50 },
   ]);
 
-  assert.equal(result.ok, true);
-  if (!("ok" in result)) return;
+  assert.ok("ok" in result);
   assert.equal(result.actualSpent, 6_000);
   assert.equal(result.refundToCashier, 4_000);
   assert.equal(result.priceChanges, 1);
