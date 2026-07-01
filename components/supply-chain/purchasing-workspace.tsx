@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useCallback } from "react";
+import { useMemo, useState, useCallback, useEffect } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
@@ -27,6 +27,7 @@ import {
   formatPoRaisedAt,
   isPurchasingRetireCandidate,
 } from "@/lib/supply-chain/po-format";
+import { createRetirementLinesFromPo } from "@/lib/supply-chain/retirement-validation";
 import {
   parseQuantityValue,
   sanitizeQuantityInput,
@@ -107,7 +108,7 @@ export function PurchasingWorkspace() {
   const formatQtyDisplay = (n: number) =>
     Number.isFinite(n) && n > 0 ? String(n) : "";
 
-  const initRetire = (poId: string) => {
+  const initRetire = useCallback((poId: string) => {
     const po = purchaseOrders.find((p) => p.id === poId);
     if (!po) return;
     setSelectedId(poId);
@@ -115,21 +116,7 @@ export function PurchasingWorkspace() {
     if (po.retirement?.lines?.length && po.status === "retirement_rejected") {
       lines = po.retirement.lines.map((l) => ({ ...l }));
     } else {
-      lines = po.lines.map((l) => ({
-        lineId: l.id,
-        name: l.name,
-        unit: l.unit,
-        storeUnit: l.storeUnit,
-        quantityOrdered: l.quantityOrdered,
-        stockQuantityOrdered: l.stockQuantityOrdered,
-        quantityBought: l.quantityOrdered,
-        stockQuantityBought: l.stockQuantityOrdered,
-        poPrice: l.unitPrice,
-        actualPrice: l.unitPrice,
-        actualStockUnitPrice: l.stockUnitPrice,
-        totalPaid: l.quantityOrdered * l.unitPrice,
-        notBought: false,
-      }));
+      lines = createRetirementLinesFromPo(po);
     }
     setRetireLines(lines);
     const qty: Record<string, string> = {};
@@ -140,7 +127,14 @@ export function PurchasingWorkspace() {
     }
     setRetireQtyText(qty);
     setRetirePriceText(price);
-  };
+  }, [purchaseOrders]);
+
+  useEffect(() => {
+    if (!poParam) return;
+    const po = purchaseOrders.find((p) => p.id === poParam);
+    if (!po || !isPurchasingRetireCandidate(po.status)) return;
+    initRetire(poParam);
+  }, [poParam, purchaseOrders, initRetire]);
 
   const updateRetireQty = useCallback((lineId: string, raw: string) => {
     const cleaned = sanitizeQuantityInput(raw);
@@ -341,7 +335,11 @@ export function PurchasingWorkspace() {
 
         <Button
           onClick={() => {
-            submitRetirement(selected.id, retireLines, actor);
+            const res = submitRetirement(selected.id, retireLines, actor);
+            if ("error" in res) {
+              toast.error(res.error);
+              return;
+            }
             playNotificationBeep();
             toast.success("Retirement submitted — accountant will review in Expenses → Retirement");
             setSelectedId(null);
