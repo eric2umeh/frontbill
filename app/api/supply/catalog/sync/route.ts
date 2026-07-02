@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { resolveSupplyAuthedUser } from '@/lib/supply-chain/supply-api-auth'
+import {
+  requireSupplyPermission,
+  resolveSupplyAuthedUser,
+} from '@/lib/supply-chain/supply-api-auth'
 import {
   catalogRowToStoreItem,
   storeItemToCatalogInsert,
@@ -31,6 +34,9 @@ export async function POST(request: Request) {
 
     const auth = await resolveSupplyAuthedUser(request, caller_id, body as Record<string, unknown>)
     if (auth instanceof NextResponse) return auth
+
+    const denied = requireSupplyPermission(auth, 'supply:store')
+    if (denied) return denied
 
     if (!Array.isArray(items)) {
       return NextResponse.json({ error: 'items must be an array' }, { status: 400 })
