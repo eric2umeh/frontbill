@@ -1,10 +1,11 @@
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import {
-  requireSupplyPermission,
+  isKitchenOnlySupplyRole,
+  requireSupplyKitchenOrStore,
   resolveSupplyAuthedUser,
 } from '@/lib/supply-chain/supply-api-auth'
-import { SUPPLY_SNAPSHOT_KEYS, type SupplySnapshotKey } from '@/lib/supply-chain/supply-db-mappers'
+import { SUPPLY_SNAPSHOT_KEYS, KITCHEN_WRITE_SNAPSHOT_KEYS, type SupplySnapshotKey } from '@/lib/supply-chain/supply-db-mappers'
 
 function missingTableResponse(message: string) {
   if (/supply_chain_snapshots|schema cache|does not exist/i.test(message)) {
@@ -27,7 +28,7 @@ export async function GET(request: Request) {
     const auth = await resolveSupplyAuthedUser(request, caller_id)
     if (auth instanceof NextResponse) return auth
 
-    const denied = requireSupplyPermission(auth, 'supply:store')
+    const denied = requireSupplyKitchenOrStore(auth)
     if (denied) return denied
 
     const admin = createAdminClient()
@@ -67,14 +68,19 @@ export async function PUT(request: Request) {
     const auth = await resolveSupplyAuthedUser(request, caller_id, body as Record<string, unknown>)
     if (auth instanceof NextResponse) return auth
 
-    const denied = requireSupplyPermission(auth, 'supply:store')
+    const denied = requireSupplyKitchenOrStore(auth)
     if (denied) return denied
+
+    const kitchenOnly = isKitchenOnlySupplyRole(auth.role)
+    const writableKeySet = new Set<string>(
+      kitchenOnly ? KITCHEN_WRITE_SNAPSHOT_KEYS : SUPPLY_SNAPSHOT_KEYS,
+    )
 
     const admin = createAdminClient()
     const now = new Date().toISOString()
 
     for (const key of Object.keys(snapshots) as SupplySnapshotKey[]) {
-      if (!SUPPLY_SNAPSHOT_KEYS.includes(key)) continue
+      if (!writableKeySet.has(key)) continue
       const data = snapshots[key]
       const { error } = await admin.from('supply_chain_snapshots').upsert(
         {
