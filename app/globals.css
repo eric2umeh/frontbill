@@ -91,4 +91,14 @@ body {
   body {
     @apply bg-background text-foreground;
   }
+  /* Hide browser steppers on number inputs — avoids accidental +/- clicks. */
+  input[type='number'] {
+    -moz-appearance: textfield;
+    appearance: textfield;
+  }
+  input[type='number']::-webkit-outer-spin-button,
+  input[type='number']::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
 }
