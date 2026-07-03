@@ -155,3 +155,18 @@ export function requireSupplyPermission(
   }
   return null
 }
+
+/** Kitchen staff (chef) and central store roles can read/write org supply snapshots. */
+export function requireSupplyKitchenOrStore(auth: SupplyAuthed): NextResponse | null {
+  if (
+    hasPermission(auth.role, 'supply:store') ||
+    hasPermission(auth.role, 'supply:kitchen')
+  ) {
+    return null
+  }
+  return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+}
+
+export function isKitchenOnlySupplyRole(role: string): boolean {
+  return hasPermission(role, 'supply:kitchen') && !hasPermission(role, 'supply:store')
+}

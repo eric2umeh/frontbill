@@ -7,7 +7,7 @@ import { useClientMounted } from '@/hooks/use-client-mounted'
 import { useAuth } from '@/lib/auth-context'
 import { useSupplyChain } from '@/lib/supply-chain/supply-chain-context'
 import { formatNaira } from '@/lib/utils/currency'
-import { canonicalRoleKey } from '@/lib/permissions'
+import { canonicalRoleKey, canManageKitchenBatchStandards } from '@/lib/permissions'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -213,9 +213,7 @@ export function KitchenWorkspace() {
   const [deleteRecipeId, setDeleteRecipeId] = useState<string | null>(null)
   const [plannedInput, setPlannedInput] = useState('')
   const actor = { name: name ?? 'Kitchen', role: canonicalRoleKey(role) ?? 'staff' }
-  const roleKey = canonicalRoleKey(role) ?? ''
-  const canManageBatchStandards =
-    roleKey === 'superadmin' || roleKey === 'admin' || roleKey === 'manager'
+  const canManageBatchStandards = canManageKitchenBatchStandards(role)
 
   const recipeCategoryFilterOptions = useMemo(() => {
     const cats = [...new Set(recipes.map((r) => r.category).filter(Boolean))].sort((a, b) =>
@@ -283,11 +281,13 @@ export function KitchenWorkspace() {
           trailing={<RoomInventoryStatsStrip className="shrink-0 scale-90 origin-right" />}
         />
         <div className="flex flex-wrap items-center gap-2 shrink-0">
-          <Button className="shrink-0" asChild>
-            <Link href="/supply/kitchen/new">
-              <Plus className="h-4 w-4 mr-2" /> Open New Batch
-            </Link>
-          </Button>
+          {canManageBatchStandards && (
+            <Button className="shrink-0" asChild>
+              <Link href="/supply/kitchen/new">
+                <Plus className="h-4 w-4 mr-2" /> Open New Batch
+              </Link>
+            </Button>
+          )}
         </div>
       </div>
 

@@ -21,8 +21,26 @@ import { fetchUserDisplayNameMap } from '@/lib/utils/fetch-user-display-names'
 import { getBulkGroupId, isLegacyBulkGroupId } from '@/lib/utils/bulk-booking'
 import { cancelBookingReservation, isCancellableReservationStatus } from '@/lib/reservations/cancel-reservation'
 import { formatReservationPaymentMethodLabel } from '@/lib/reservations/reservation-payment-methods'
+import { networkFetchHint, withFetchRetry } from '@/lib/utils/fetch-retry'
 import { toast } from 'sonner'
 import { useReservationsEventsHeader } from '@/components/reservations/reservations-events-header'
+
+const RESERVATIONS_LIST_LIMIT = 500
+
+function describeFetchError(err: unknown): string {
+  if (err instanceof Error) return err.message
+  if (err && typeof err === 'object') {
+    const row = err as { message?: string; code?: string; details?: string }
+    if (row.message) return row.message
+    if (row.code) return row.code
+    if (row.details) return row.details
+  }
+  try {
+    return JSON.stringify(err)
+  } catch {
+    return String(err)
+  }
+}
 
 interface Reservation {
   id: string
@@ -99,78 +117,109 @@ export default function ReservationsPage() {
       setReservations([])
       return
     }
+    const supabase = createClient()
+    if (!supabase) {
+      setReservations([])
+      return
+    }
+
     try {
       startFetch()
-      const supabase = createClient()
-      if (!supabase) {
-        setReservations([])
-        return
-      }
 
-      // Single query — no FK join on profiles (no FK exists), fetch user names separately
-      const { data, error } = await supabase
-        .from('bookings')
-        .select(`
+      const data = await Promise.race([
+        withFetchRetry(async () => {
+          const { data: rows, error } = await supabase
+            .from('bookings')
+            .select(
+              `
           id, organization_id, folio_id, guest_id, room_id, check_in, check_out, status, payment_status,
-          rate_per_night, total_amount, balance, deposit, notes, created_by, created_at, updated_by,
-          guests:guest_id(id, name, phone),
-          rooms:room_id(id, room_number, room_type)
-        `)
-        .eq('organization_id', organizationId)
-        .eq('status', 'reserved')
-        .order('created_at', { ascending: false })
+          rate_per_night, total_amount, balance, deposit, notes, created_by, created_at,
+          guests(name, phone),
+          rooms(id, room_number, room_type)
+        `,
+            )
+            .eq('organization_id', organizationId)
+            .eq('status', 'reserved')
+            .order('created_at', { ascending: false })
+            .limit(RESERVATIONS_LIST_LIMIT)
 
-      if (error) throw error
+          if (error) throw error
+          return rows ?? []
+        }),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Reservations request timed out')), 25_000),
+        ),
+      ])
 
-      // Batch-fetch creator / updater names to avoid N+1 and missing-FK errors
-      const userIds = [...new Set([
-        ...(data || []).map((r: any) => r.created_by).filter(Boolean),
-        ...(data || []).map((r: any) => r.updated_by).filter(Boolean),
-      ])]
+      // Batch-fetch creator names (bookings has no updated_by column in base schema)
+      const userIds = [
+        ...new Set((data || []).map((r: { created_by?: string | null }) => r.created_by).filter(Boolean)),
+      ]
       const profileMap = await fetchUserDisplayNameMap(userIds as string[], userId)
 
-      // Map data to match interface and calculate balance from folio_charges
-      const reservationsWithData = (data || []).map((reservation: any) => {
-        let balance = reservation.balance !== undefined ? reservation.balance : 0
+      const reservationsWithData = (data || []).map((reservation: Record<string, unknown>) => {
+        const guestsRaw = reservation.guests as { name?: string; phone?: string } | { name?: string; phone?: string }[] | null
+        const roomsRaw = reservation.rooms as { id?: string; room_number?: string; room_type?: string } | { id?: string; room_number?: string; room_type?: string }[] | null
+        const notes = typeof reservation.notes === 'string' ? reservation.notes : ''
+        let balance = reservation.balance !== undefined ? Number(reservation.balance) : 0
 
-        // Derive payment_method + ledger_account_name from notes (no payment_method column on bookings table)
         let payment_method = 'cash'
         let ledger_account_name = ''
-        if (reservation.notes) {
-          if (/^city_ledger:/i.test(reservation.notes)) {
+        if (notes) {
+          if (/^city_ledger:/i.test(notes)) {
             payment_method = 'city_ledger'
-            ledger_account_name = reservation.notes.replace(/^city_ledger:\s*/i, '')
-          } else if (reservation.notes.startsWith('City Ledger:')) {
+            ledger_account_name = notes.replace(/^city_ledger:\s*/i, '')
+          } else if (notes.startsWith('City Ledger:')) {
             payment_method = 'city_ledger'
-            ledger_account_name = reservation.notes.replace(/^City Ledger:\s*/, '')
-          } else if (reservation.notes.startsWith('payment_method:')) {
-            payment_method = reservation.notes.replace(/^payment_method:\s*/, '').split('|')[0].trim()
-            const match = reservation.notes.match(/\|ledger:(.+)/)
+            ledger_account_name = notes.replace(/^City Ledger:\s*/, '')
+          } else if (notes.startsWith('payment_method:')) {
+            payment_method = notes.replace(/^payment_method:\s*/, '').split('|')[0].trim()
+            const match = notes.match(/\|ledger:(.+)/)
             if (match) ledger_account_name = match[1].trim()
           }
         }
+
+        const guests = guestsRaw
+          ? Array.isArray(guestsRaw)
+            ? guestsRaw[0] ?? null
+            : guestsRaw
+          : null
+        const rooms = roomsRaw
+          ? Array.isArray(roomsRaw)
+            ? roomsRaw[0] ?? null
+            : roomsRaw
+          : null
+        const createdBy =
+          typeof reservation.created_by === 'string' ? reservation.created_by : undefined
 
         return {
           ...reservation,
           payment_method,
           ledger_account_name,
-          guestName: reservation.guests?.name || '',
-          guestPhone: reservation.guests?.phone || '',
-          guests: reservation.guests
-            ? (Array.isArray(reservation.guests) ? reservation.guests[0] : reservation.guests)
-            : null,
-          rooms: reservation.rooms
-            ? (Array.isArray(reservation.rooms) ? reservation.rooms[0] : reservation.rooms)
-            : null,
-          created_by_name: reservation.created_by ? (profileMap[reservation.created_by] || getUserDisplayName(null, reservation.created_by)) : 'System',
-          updated_by_name: reservation.updated_by ? (profileMap[reservation.updated_by] || getUserDisplayName(null, reservation.updated_by)) : null,
-          balance: balance
-        }
+          guestName: guests?.name || '',
+          guestPhone: guests?.phone || '',
+          guests,
+          rooms,
+          created_by_name: createdBy
+            ? profileMap[createdBy] || getUserDisplayName(null, createdBy)
+            : 'System',
+          updated_by_name: null,
+          balance,
+        } as Reservation
       })
-      
+
       setReservations(groupBulkRows(reservationsWithData))
-    } catch (error: any) {
-      console.error('Error fetching reservations:', error)
+    } catch (error: unknown) {
+      const detail = describeFetchError(error)
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('[reservations] fetch failed:', detail, error)
+      }
+      const msg =
+        detail === 'Reservations request timed out'
+          ? 'Reservations took too long — refresh the page or try again.'
+          : networkFetchHint(detail) ??
+            (detail ? `Failed to load reservations: ${detail}` : 'Failed to load reservations')
+      toast.error(msg)
       setReservations([])
     } finally {
       endFetch()

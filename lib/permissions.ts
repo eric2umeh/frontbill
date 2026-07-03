@@ -1021,6 +1021,14 @@ export function canManageStoreCatalog(
   return canAddStoreItemDirect(userRole);
 }
 
+/** Kitchen batch standards (recipe definitions) — admin / superadmin only. */
+export function canManageKitchenBatchStandards(
+  userRole: string | null | undefined,
+): boolean {
+  const roleKey = canonicalRoleKey(userRole);
+  return roleKey === "superadmin" || roleKey === "admin";
+}
+
 /** Central Store → Issue Out tab (transfer stock to kitchen, bar, etc.). */
 export function canIssueStockFromStore(
   userRole: string | null | undefined,

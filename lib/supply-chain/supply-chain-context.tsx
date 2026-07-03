@@ -78,6 +78,7 @@ import {
 } from "./unit-factor-storage";
 import type { StockShortageLine } from "@/lib/ui/stock-shortage-dialog";
 import { useAuth } from "@/lib/auth-context";
+import { hasPermission } from "@/lib/permissions";
 import {
   deleteSupplyCatalogItem,
   fetchSupplyCatalog,
@@ -88,6 +89,12 @@ import {
   updateSupplyCatalogItem,
 } from "./supply-db-client";
 import { resolveSupplySnapshot } from "./snapshot-merge";
+import { mergePurchaseOrdersFromRemote } from "./po-sync-merge";
+import {
+  mergeProductionBatchesFromRemote,
+  mergeRecipesFromRemote,
+} from "./kitchen-sync-merge";
+import { snapshotsPayloadForRole } from "./supply-snapshot-payload";
 
 function notifyKitchenRawStockChanged() {
   if (typeof window !== "undefined") {
@@ -342,7 +349,7 @@ const SupplyChainContext = createContext<ReturnType<
 export { SupplyChainContext };
 
 function useSupplyChainImpl() {
-  const { userId, organizationId } = useAuth();
+  const { userId, organizationId, role } = useAuth();
   /** Persist when logged in — org is resolved server-side from profile. */
   const useDbPersistence = Boolean(userId);
   const orgIdRef = useRef(organizationId);
@@ -458,25 +465,28 @@ function useSupplyChainImpl() {
     }
     void saveSupplySnapshots(
       userId,
-      {
-        recipes: recipesRef.current,
-        batches: batchesRef.current,
-        kitchen_stock: kitchenStockRef.current,
-        kitchen_raw_stock: kitchenRawStockRef.current,
-        bar_stock: barStockRef.current,
-        fnb_raw_stock: fnbRawStockRef.current,
-        purchase_orders: purchaseOrdersRef.current,
-        issue_out_log: issueOutLogRef.current,
-        activity_log: activityLogRef.current,
-        pending_items: pendingStoreItemsRef.current,
-        basket: basketRef.current,
-      },
+      snapshotsPayloadForRole(
+        {
+          recipes: recipesRef.current,
+          batches: batchesRef.current,
+          kitchen_stock: kitchenStockRef.current,
+          kitchen_raw_stock: kitchenRawStockRef.current,
+          bar_stock: barStockRef.current,
+          fnb_raw_stock: fnbRawStockRef.current,
+          purchase_orders: purchaseOrdersRef.current,
+          issue_out_log: issueOutLogRef.current,
+          activity_log: activityLogRef.current,
+          pending_items: pendingStoreItemsRef.current,
+          basket: basketRef.current,
+        },
+        role,
+      ),
       orgIdRef.current || undefined,
     ).catch((err) => {
       console.error("[supply-chain] immediate snapshot sync failed", err);
       toast.error("Failed to save kitchen data to cloud — refresh may lose changes");
     });
-  }, [useDbPersistence, userId]);
+  }, [useDbPersistence, userId, role]);
 
   /** Retry snapshot sync until DB hydration finishes (kitchen / outlet stock changes). */
   const schedulePersistSnapshots = useCallback(() => {
@@ -563,7 +573,7 @@ function useSupplyChainImpl() {
           setBasket(snapshots.basket as BasketLine[]);
         }
 
-        if (catalog.length === 0 && localCatalog.length > 0) {
+        if (catalog.length === 0 && localCatalog.length > 0 && hasPermission(role, "supply:store")) {
           await syncSupplyCatalog(userId, localCatalog, organizationId || undefined);
         }
 
@@ -595,7 +605,11 @@ function useSupplyChainImpl() {
           }
         }
         if (Object.keys(toUpload).length > 0) {
-          await saveSupplySnapshots(userId, toUpload, organizationId || undefined);
+          await saveSupplySnapshots(
+            userId,
+            snapshotsPayloadForRole(toUpload, role),
+            organizationId || undefined,
+          );
         }
 
         removeAllPersistedSupplyKeys();
@@ -625,11 +639,12 @@ function useSupplyChainImpl() {
     return () => {
       cancelled = true;
     };
-  }, [useDbPersistence, userId, organizationId]);
+  }, [useDbPersistence, userId, organizationId, role]);
 
   /** Debounced catalogue sync (qty changes from issue-out, PO receive, etc.). */
   useEffect(() => {
     if (!useDbPersistence || !dbHydrated || catalogSyncSkipRef.current) return;
+    if (!hasPermission(role, "supply:store")) return;
     const timer = window.setTimeout(() => {
       void syncSupplyCatalog(userId, storeItems.map(applyStoreItemDeptFields), orgIdRef.current || undefined).catch((err) => {
         const message =
@@ -639,7 +654,7 @@ function useSupplyChainImpl() {
       });
     }, 900);
     return () => window.clearTimeout(timer);
-  }, [useDbPersistence, dbHydrated, userId, storeItems]);
+  }, [useDbPersistence, dbHydrated, userId, storeItems, role]);
 
   /** Debounced JSON snapshot sync (kitchen, PO, bar, activity, etc.). */
   useEffect(() => {
@@ -647,19 +662,22 @@ function useSupplyChainImpl() {
     const timer = window.setTimeout(() => {
       void saveSupplySnapshots(
         userId,
-        {
-          recipes,
-          batches,
-          kitchen_stock: kitchenStock,
-          kitchen_raw_stock: kitchenRawStock,
-          bar_stock: barStock,
-          fnb_raw_stock: fnbRawStock,
-          purchase_orders: purchaseOrders,
-          issue_out_log: issueOutLog,
-          activity_log: activityLog,
-          pending_items: pendingStoreItems,
-          basket,
-        },
+        snapshotsPayloadForRole(
+          {
+            recipes,
+            batches,
+            kitchen_stock: kitchenStock,
+            kitchen_raw_stock: kitchenRawStock,
+            bar_stock: barStock,
+            fnb_raw_stock: fnbRawStock,
+            purchase_orders: purchaseOrders,
+            issue_out_log: issueOutLog,
+            activity_log: activityLog,
+            pending_items: pendingStoreItems,
+            basket,
+          },
+          role,
+        ),
         orgIdRef.current || undefined,
       ).catch((err) => {
         console.error("[supply-chain] snapshot sync failed", err);
@@ -681,7 +699,62 @@ function useSupplyChainImpl() {
     activityLog,
     pendingStoreItems,
     basket,
+    role,
   ]);
+
+  /** Refresh kitchen production runs + batch standards across staff (chef ↔ admin). */
+  useEffect(() => {
+    if (!useDbPersistence || !dbHydrated) return;
+
+    let cancelled = false;
+
+    const refreshKitchenSnapshots = async () => {
+      try {
+        const snapshots = await fetchSupplySnapshots(
+          userId,
+          organizationId || undefined,
+        );
+        if (cancelled) return;
+
+        const remoteBatches = snapshots.batches;
+        if (Array.isArray(remoteBatches)) {
+          setBatches((prev) => {
+            const merged = mergeProductionBatchesFromRemote(
+              prev,
+              remoteBatches as ProductionBatch[],
+            );
+            if (JSON.stringify(prev) === JSON.stringify(merged)) return prev;
+            return merged;
+          });
+        }
+
+        const remoteRecipes = snapshots.recipes;
+        if (Array.isArray(remoteRecipes)) {
+          setRecipes((prev) => {
+            const merged = mergeRecipesFromRemote(prev, remoteRecipes as Recipe[]);
+            if (JSON.stringify(prev) === JSON.stringify(merged)) return prev;
+            return merged;
+          });
+        }
+      } catch {
+        /* non-blocking */
+      }
+    };
+
+    const onVis = () => {
+      if (document.visibilityState === "visible") void refreshKitchenSnapshots();
+    };
+
+    void refreshKitchenSnapshots();
+    document.addEventListener("visibilitychange", onVis);
+    const interval = window.setInterval(refreshKitchenSnapshots, 30_000);
+
+    return () => {
+      cancelled = true;
+      document.removeEventListener("visibilitychange", onVis);
+      window.clearInterval(interval);
+    };
+  }, [useDbPersistence, dbHydrated, userId, organizationId]);
 
   /** Refresh PO list from org snapshot so accountant / purchaser see each other's decisions. */
   useEffect(() => {
@@ -699,10 +772,9 @@ function useSupplyChainImpl() {
         const remote = snapshots.purchase_orders;
         if (!Array.isArray(remote)) return;
         setPurchaseOrders((prev) => {
-          const prevJson = JSON.stringify(prev);
-          const remoteJson = JSON.stringify(remote);
-          if (prevJson === remoteJson) return prev;
-          return remote as PurchaseOrder[];
+          const merged = mergePurchaseOrdersFromRemote(prev, remote as PurchaseOrder[]);
+          if (JSON.stringify(prev) === JSON.stringify(merged)) return prev;
+          return merged;
         });
       } catch {
         /* non-blocking — network may be slow */
@@ -715,7 +787,7 @@ function useSupplyChainImpl() {
 
     void refreshPurchaseOrders();
     document.addEventListener("visibilitychange", onVis);
-    const interval = window.setInterval(refreshPurchaseOrders, 20_000);
+    const interval = window.setInterval(refreshPurchaseOrders, 45_000);
 
     return () => {
       cancelled = true;
@@ -1114,7 +1186,7 @@ function useSupplyChainImpl() {
       schedulePersistSnapshots();
       return { po: submitted };
     },
-    [basket, purchaseOrders, schedulePersistSnapshots],
+    [basket, purchaseOrders, schedulePersistSnapshots, persistSnapshotsNow],
   );
 
   const submitBasketAsPo = useCallback(
@@ -1364,9 +1436,9 @@ function useSupplyChainImpl() {
             : p,
         );
       });
-      schedulePersistSnapshots();
+      persistSnapshotsNow();
     },
-    [schedulePersistSnapshots],
+    [schedulePersistSnapshots, persistSnapshotsNow],
   );
 
   const accountantRetirementDecision = useCallback(
@@ -1415,7 +1487,7 @@ function useSupplyChainImpl() {
           body: comment || "Accountant rejected the retirement submission.",
           href: "/supply/purchasing",
         });
-        schedulePersistSnapshots();
+        persistSnapshotsNow();
         return { ok: true };
       }
 
@@ -1453,10 +1525,10 @@ function useSupplyChainImpl() {
         body: `Central store stock updated. Refund to cashier: ₦${(po.retirement?.refundToCashier ?? 0).toLocaleString()}.`,
         href: "/supply/purchasing",
       });
-      schedulePersistSnapshots();
+      persistSnapshotsNow();
       return { ok: true };
     },
-    [purchaseOrders, applyRetirementToStock, schedulePersistSnapshots],
+    [purchaseOrders, applyRetirementToStock, persistSnapshotsNow],
   );
 
   const deleteActivePurchaseOrder = useCallback(
@@ -1671,7 +1743,7 @@ function useSupplyChainImpl() {
           batch.id,
         ),
       );
-      schedulePersistSnapshots();
+      persistSnapshotsNow();
       return { ok: true, batch };
     },
     [
@@ -1680,7 +1752,7 @@ function useSupplyChainImpl() {
       batches,
       recipeTotalCostWithLivePrices,
       recipeGrossMarginPctWithLivePrices,
-      schedulePersistSnapshots,
+      persistSnapshotsNow,
     ],
   );
 
@@ -2540,7 +2612,7 @@ function useSupplyChainImpl() {
           batchId,
         ),
       );
-      schedulePersistSnapshots();
+      persistSnapshotsNow();
       return { ok: true };
     },
     [
@@ -2551,7 +2623,7 @@ function useSupplyChainImpl() {
       deductKitchenRawMaterials,
       recipeTotalCostWithLivePrices,
       recipeGrossMarginPctWithLivePrices,
-      schedulePersistSnapshots,
+      persistSnapshotsNow,
     ],
   );
 

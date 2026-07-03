@@ -2,13 +2,25 @@
 
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import { useEffect } from 'react'
 import { ArrowLeft } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { KitchenBatchBuilder } from '@/components/supply-chain/kitchen-batch-builder'
 import { KitchenBatchCsvUpload } from '@/components/supply-chain/kitchen-batch-csv-upload'
+import { useAuth } from '@/lib/auth-context'
+import { canManageKitchenBatchStandards } from '@/lib/permissions'
 
 export default function NewKitchenBatchPage() {
   const router = useRouter()
+  const { role } = useAuth()
+
+  useEffect(() => {
+    if (!canManageKitchenBatchStandards(role)) {
+      router.replace('/supply/kitchen')
+    }
+  }, [role, router])
+
+  if (!canManageKitchenBatchStandards(role)) return null
 
   return (
     <div className="space-y-4">

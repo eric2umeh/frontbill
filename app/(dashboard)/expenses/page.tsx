@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { Suspense, useState, useEffect } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { useAuth } from '@/lib/auth-context'
 import { canAccessExpenseMenu, hasPermission } from '@/lib/permissions'
@@ -22,6 +22,18 @@ import {
 } from '@/lib/permissions'
 
 export default function ExpensesPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="p-8 text-sm text-muted-foreground">Loading expenses…</div>
+      }
+    >
+      <ExpensesPageContent />
+    </Suspense>
+  )
+}
+
+function ExpensesPageContent() {
   const { userId, role } = useAuth()
   const searchParams = useSearchParams()
   const tabParam = searchParams.get('tab')

@@ -9,6 +9,7 @@ import { Calendar } from '@/components/ui/calendar'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Search, LayoutGrid, List, ChevronLeft, ChevronRight, CalendarIcon } from 'lucide-react'
 import { format, isSameDay } from 'date-fns'
+import { LoadingSpinner } from '@/components/loading-screen'
 
 /** `always`: all breakpoints (horizontal scroll). `md+` / `lg+`: hide below that breakpoint to prioritize key cols on phones. */
 export type ColumnResponsive = 'always' | 'md+' | 'lg+'
@@ -56,6 +57,8 @@ interface EnhancedDataTableProps<T> {
   /** Stable row keys (defaults to row index). */
   rowKey?: (item: T, index: number) => string
   emptyState?: { title: string; description?: string }
+  /** When true, empty results show a spinner instead of the empty-state copy (e.g. async catalog fetch). */
+  loading?: boolean
   /** When not `undefined`, overrides default equality for that filter key + value. */
   resolveFilterMatch?: (item: T, filterKey: string, filterValue: string) => boolean | undefined
   /** Tighter cell padding (e.g. Bookings table with many actions). */
@@ -81,6 +84,7 @@ export function EnhancedDataTable<T extends Record<string, any>>({
   onRowClick,
   rowKey,
   emptyState,
+  loading = false,
   resolveFilterMatch,
   compactTable = false,
 }: EnhancedDataTableProps<T>) {
@@ -265,7 +269,12 @@ export function EnhancedDataTable<T extends Record<string, any>>({
 
       {/* Results count */}
       <div className="text-sm text-muted-foreground">
-        {filteredData.length === 0 ? (
+        {loading ? (
+          <span className="inline-flex items-center gap-2">
+            <LoadingSpinner size="sm" />
+            Loading…
+          </span>
+        ) : filteredData.length === 0 ? (
           <span>No matching results</span>
         ) : (
           <span>
@@ -305,9 +314,23 @@ export function EnhancedDataTable<T extends Record<string, any>>({
                 {paginatedData.length === 0 ? (
                   <tr>
                     <td colSpan={columns.length} className={`${tdClass} text-center py-12 text-muted-foreground`}>
-                      <p className="font-medium text-foreground">{emptyState?.title ?? 'No rows to display'}</p>
-                      {emptyState?.description && (
-                        <p className="text-sm mt-2 max-w-md mx-auto">{emptyState.description}</p>
+                      {loading ? (
+                        <div
+                          className="flex flex-col items-center justify-center gap-3 py-4"
+                          role="status"
+                          aria-busy="true"
+                          aria-label="Loading"
+                        >
+                          <LoadingSpinner size="lg" />
+                          <p className="text-sm text-muted-foreground">Loading…</p>
+                        </div>
+                      ) : (
+                        <>
+                          <p className="font-medium text-foreground">{emptyState?.title ?? 'No rows to display'}</p>
+                          {emptyState?.description && (
+                            <p className="text-sm mt-2 max-w-md mx-auto">{emptyState.description}</p>
+                          )}
+                        </>
                       )}
                     </td>
                   </tr>
@@ -337,9 +360,23 @@ export function EnhancedDataTable<T extends Record<string, any>>({
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {paginatedData.length === 0 ? (
             <div className="col-span-full border rounded-lg p-10 text-center text-muted-foreground">
-              <p className="font-medium text-foreground">{emptyState?.title ?? 'No rows to display'}</p>
-              {emptyState?.description && (
-                <p className="text-sm mt-2 max-w-md mx-auto">{emptyState.description}</p>
+              {loading ? (
+                <div
+                  className="flex flex-col items-center justify-center gap-3"
+                  role="status"
+                  aria-busy="true"
+                  aria-label="Loading"
+                >
+                  <LoadingSpinner size="lg" />
+                  <p className="text-sm text-muted-foreground">Loading…</p>
+                </div>
+              ) : (
+                <>
+                  <p className="font-medium text-foreground">{emptyState?.title ?? 'No rows to display'}</p>
+                  {emptyState?.description && (
+                    <p className="text-sm mt-2 max-w-md mx-auto">{emptyState.description}</p>
+                  )}
+                </>
               )}
             </div>
           ) : (

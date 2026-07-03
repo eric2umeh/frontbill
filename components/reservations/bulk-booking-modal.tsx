@@ -768,6 +768,11 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
     }
 
     if (fillLater) {
+      const count = Number(totalRoomsCount)
+      if (!count || count < 1) {
+        toast.error('Enter total number of rooms to reserve')
+        return
+      }
       const c = Number(customRate)
       const nightlyFallback = customRate !== '' && !Number.isNaN(c) && c > 0 ? c : medianInventoryRate()
       if (nightlyFallback <= 0) {
@@ -867,28 +872,94 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
         const nightlyFallback = medianInventoryRate()
         const nightly = customRate !== '' && !Number.isNaN(c) && c > 0 ? c : nightlyFallback
 
+        let fillLaterGuestId: string | null = null
+        if (bookingType === 'individual' && selectedGroupGuest?.id) {
+          fillLaterGuestId = selectedGroupGuest.id
+        } else if (bookingType === 'organization' && selectedOrg?.name) {
+          fillLaterGuestId = await findOrCreateGuest(
+            `Bulk group — ${selectedOrg.name}`,
+            selectedOrg.phone || null,
+          )
+        }
+        if (!fillLaterGuestId) {
+          throw new Error(
+            'Could not resolve a guest for this bulk group. Select a group contact in Step 1.',
+          )
+        }
+
+        const cin = toLocalDateStr(checkIn)
+        const cout = toLocalDateStr(checkOut)
+        const bookedIds = new Set(
+          allActiveBookings
+            .filter((b) => b.check_in < cout && b.check_out > cin && b.room_id)
+            .map((b) => b.room_id),
+        )
+        const availablePool = sortRoomsByNumber(
+          allRooms.filter((r: { id: string }) => !bookedIds.has(r.id)),
+        )
+        if (availablePool.length < totalRooms) {
+          throw new Error(
+            `Only ${availablePool.length} room${availablePool.length === 1 ? '' : 's'} available for these dates; you requested ${totalRooms}.`,
+          )
+        }
+
         for (let i = 0; i < totalRooms; i++) {
+          const room = availablePool[i]
           const folioId = `BLK-${Date.now().toString(36).toUpperCase()}-${i}`
           const notes = appendBulkGroupNote(`payment_method: ${paymentMethod}`, bulkGroupId)
           const totalAmt = nightly * nights
 
-          await supabase.from('bookings').insert([{
-            organization_id: orgId,
-            guest_id: null,
-            room_id: null,
-            folio_id: folioId,
-            check_in: toLocalDateStr(checkIn),
-            check_out: toLocalDateStr(checkOut),
-            number_of_nights: nights,
-            rate_per_night: nightly,
-            total_amount: totalAmt,
-            deposit: 0,
-            balance: totalAmt,
-            payment_status: 'pending',
-            status: bulkInitialStatus,
-            created_by: currentUserId,
-            notes,
-          }])
+          const { data: booking, error: insertErr } = await supabase
+            .from('bookings')
+            .insert([
+              {
+                organization_id: orgId,
+                guest_id: fillLaterGuestId,
+                room_id: room.id,
+                folio_id: folioId,
+                check_in: cin,
+                check_out: cout,
+                number_of_nights: nights,
+                rate_per_night: nightly,
+                total_amount: totalAmt,
+                deposit: 0,
+                balance: totalAmt,
+                payment_status: 'pending',
+                status: bulkInitialStatus,
+                created_by: currentUserId,
+                notes,
+              },
+            ])
+            .select()
+            .single()
+          if (insertErr) throw insertErr
+
+          await supabase
+            .from('rooms')
+            .update({
+              status: bulkRoomStatus,
+              updated_by: currentUserId,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', room.id)
+
+          const { error: fcErr } = await insertFolioCharges(supabase, [
+            {
+              booking_id: booking.id,
+              organization_id: orgId,
+              description: `${
+                wording === 'booking' ? 'Bulk booking' : 'Bulk reservation'
+              } room charge - ${nights} night${nights !== 1 ? 's' : ''}`,
+              amount: totalAmt,
+              charge_type: 'room_charge',
+              payment_method: paymentMethod,
+              ledger_account_id: null,
+              ledger_account_type: null,
+              payment_status: 'unpaid',
+              created_by: currentUserId,
+            },
+          ])
+          if (fcErr) throw fcErr
           createdCount++
         }
       } else {
@@ -924,8 +995,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
               )
               room = pool[0]
               if (!room) {
-                toast.error(`No available ${entry.roomType} rooms`)
-                continue
+                throw new Error(`No available ${entry.roomType} rooms for these dates`)
               }
             }
 
@@ -1011,13 +1081,21 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
         }
       }
 
+      if (createdCount <= 0) {
+        throw new Error(
+          wording === 'booking'
+            ? 'No bookings were created — check room availability and try again'
+            : 'No reservations were created — check room availability and try again',
+        )
+      }
+
       toast.success(
         `${createdCount} ${wording === 'booking' ? 'booking' : 'reservation'}${createdCount === 1 ? '' : 's'} created`,
       )
       onSuccess?.()
       handleClose()
-    } catch (err: any) {
-      toast.error(err.message || (wording === 'booking' ? 'Failed to create bookings' : 'Failed to create reservations'))
+    } catch (err: unknown) {
+      toast.error(describeSupabaseError(err) || (wording === 'booking' ? 'Failed to create bookings' : 'Failed to create reservations'))
     } finally {
       setLoading(false)
     }
@@ -1463,8 +1541,12 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
 
               {fillLater ? (
                 <div className="border rounded-lg p-4 bg-amber-50 border-amber-200 space-y-2">
-                  <p className="text-sm text-amber-800 font-medium">Placeholder reservations will be created</p>
-                  <p className="text-xs text-amber-700">Guest and room assignments can be completed later from the Reservations menu.</p>
+                  <p className="text-sm text-amber-800 font-medium">Quick bulk block — group contact + auto room pick</p>
+                  <p className="text-xs text-amber-700">
+                    Creates one booking per room using the Step 1 group contact as guest and the next
+                    available rooms for your dates. Use &quot;Fill room details now&quot; to name each guest
+                    and pick room types yourself.
+                  </p>
                   <div className="space-y-1 pt-1">
                     <Label className="text-xs">Total Number of Rooms to Reserve</Label>
                     <Input

@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { guestOrOrganizationNameTaken } from '@/lib/utils/guest-org-name-uniqueness'
 import { formatPersonName } from '@/lib/utils/name-format'
+import { counterpartyOrganizationEmail } from '@/lib/utils/counterparty-organization'
 
 export type EventClientType = 'guest' | 'organization'
 
@@ -145,12 +146,14 @@ export async function resolveEventClientRecord(
     return { error: 'This name is already used by a guest or organization' }
   }
 
+  const orgEmail = counterpartyOrganizationEmail(name, email)
+
   const { data: created, error: orgErr } = await admin
     .from('organizations')
     .insert({
       name: name.trim(),
       org_type: String(input.orgType || 'other').trim() || 'other',
-      email: email,
+      email: orgEmail,
       phone,
       address,
       contact_person: String(input.contactPerson || '').trim() || null,
@@ -174,7 +177,7 @@ export async function resolveEventClientRecord(
       account_name: created.name,
       account_type: 'organization',
       contact_phone: phone,
-      contact_email: email,
+      contact_email: orgEmail,
       balance: 0,
     })
   }
