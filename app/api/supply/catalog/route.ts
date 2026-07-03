@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import {
-  requireSupplyPermission,
+  requireSupplyKitchenOrStore,
   resolveSupplyAuthedUser,
 } from '@/lib/supply-chain/supply-api-auth'
 import {
@@ -34,7 +34,7 @@ export async function GET(request: Request) {
     const auth = await resolveSupplyAuthedUser(request, caller_id)
     if (auth instanceof NextResponse) return auth
 
-    const denied = requireSupplyPermission(auth, 'supply:store')
+    const denied = requireSupplyKitchenOrStore(auth)
     if (denied) return denied
 
     const admin = createAdminClient()
