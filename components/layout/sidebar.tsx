@@ -46,6 +46,10 @@ import {
 import type { LucideIcon } from 'lucide-react'
 import { useNightAuditPendingCounts } from '@/hooks/use-night-audit-pending-counts'
 import { nightAuditHrefForPendingCounts } from '@/lib/night-audit/pending-approval-counts'
+import {
+  expensesHrefForPendingCounts,
+  useExpensesPendingCounts,
+} from '@/hooks/use-expenses-pending-counts'
 
 type NavChild = { label: string; href: string; permission?: Permission; permissionAny?: Permission[] }
 
@@ -262,6 +266,24 @@ function SidebarInner({ mobileOpen, onMobileClose, isMobile = false }: SidebarPr
     pendingNightAuditTotal > 0
       ? nightAuditHrefForPendingCounts(nightAuditPending)
       : '/night-audit'
+  const expensesPending = useExpensesPendingCounts(role)
+  const pendingExpensesTotal = expensesPending.total
+  const expensesHref =
+    pendingExpensesTotal > 0
+      ? expensesHrefForPendingCounts(expensesPending)
+      : '/expenses'
+
+  const navHref = (path: string) => {
+    if (path === '/night-audit') return nightAuditHref
+    if (path === '/expenses') return expensesHref
+    return path
+  }
+
+  const pendingNavCount = (path: string) => {
+    if (path === '/night-audit') return pendingNightAuditTotal
+    if (path === '/expenses') return pendingExpensesTotal
+    return 0
+  }
 
   const visibleSections = useMemo(() => buildSections(role), [role])
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({})
@@ -377,9 +399,9 @@ function SidebarInner({ mobileOpen, onMobileClose, isMobile = false }: SidebarPr
                             <span className="flex-1 text-left">{route.label}</span>
                           </div>
                           {route.children.map((child) => {
-                            const href =
-                              child.href === '/night-audit' ? nightAuditHref : child.href
+                            const href = navHref(child.href)
                             const childActive = routeIsActive(pathname, child.href, searchParams)
+                            const pending = pendingNavCount(child.href)
                             return (
                               <Link
                                 key={child.href}
@@ -388,6 +410,11 @@ function SidebarInner({ mobileOpen, onMobileClose, isMobile = false }: SidebarPr
                                 className={childLinkClass(childActive)}
                               >
                                 <span className="flex-1">{child.label}</span>
+                                {pending > 0 && (
+                                  <Badge variant="destructive" className="tabular-nums text-[10px]">
+                                    {pending > 99 ? '99+' : pending}
+                                  </Badge>
+                                )}
                               </Link>
                             )
                           })}
@@ -421,9 +448,9 @@ function SidebarInner({ mobileOpen, onMobileClose, isMobile = false }: SidebarPr
                         </CollapsibleTrigger>
                         <CollapsibleContent className="space-y-0.5 pt-0.5 pb-1">
                           {route.children.map((child) => {
-                            const href =
-                              child.href === '/night-audit' ? nightAuditHref : child.href
+                            const href = navHref(child.href)
                             const childActive = routeIsActive(pathname, child.href, searchParams)
+                            const pending = pendingNavCount(child.href)
                             return (
                               <Link
                                 key={child.href}
@@ -432,9 +459,9 @@ function SidebarInner({ mobileOpen, onMobileClose, isMobile = false }: SidebarPr
                                 className={childLinkClass(childActive)}
                               >
                                 <span className="flex-1">{child.label}</span>
-                                {child.href === '/night-audit' && pendingNightAuditTotal > 0 && (
+                                {pending > 0 && (
                                   <Badge variant="destructive" className="tabular-nums text-[10px]">
-                                    {pendingNightAuditTotal > 99 ? '99+' : pendingNightAuditTotal}
+                                    {pending > 99 ? '99+' : pending}
                                   </Badge>
                                 )}
                               </Link>
@@ -445,9 +472,9 @@ function SidebarInner({ mobileOpen, onMobileClose, isMobile = false }: SidebarPr
                     )
                   }
 
-                  const href =
-                    route.href === '/night-audit' ? nightAuditHref : route.href!
+                  const href = navHref(route.href!)
                   const isActive = routeIsActive(pathname, route.href!, searchParams)
+                  const pending = pendingNavCount(route.href!)
 
                   return (
                     <Link
@@ -457,8 +484,8 @@ function SidebarInner({ mobileOpen, onMobileClose, isMobile = false }: SidebarPr
                       className={linkClass(isActive)}
                       title={
                         collapsed && !isMobile
-                          ? route.href === '/night-audit' && pendingNightAuditTotal > 0
-                            ? `${route.label} (${pendingNightAuditTotal} pending)`
+                          ? pending > 0
+                            ? `${route.label} (${pending} pending)`
                             : route.label
                           : undefined
                       }
@@ -467,7 +494,7 @@ function SidebarInner({ mobileOpen, onMobileClose, isMobile = false }: SidebarPr
                       {(!collapsed || isMobile) && (
                         <>
                           <span className="flex-1 text-left">{route.label}</span>
-                          {route.href === '/night-audit' && pendingNightAuditTotal > 0 && (
+                          {pending > 0 && (
                             <Badge
                               variant="destructive"
                               className={cn(
@@ -476,7 +503,7 @@ function SidebarInner({ mobileOpen, onMobileClose, isMobile = false }: SidebarPr
                                   'bg-primary-foreground/20 text-primary-foreground border-transparent',
                               )}
                             >
-                              {pendingNightAuditTotal > 99 ? '99+' : pendingNightAuditTotal}
+                              {pending > 99 ? '99+' : pending}
                             </Badge>
                           )}
                         </>
