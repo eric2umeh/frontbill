@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { resolveSupplyAuthedUser } from '@/lib/supply-chain/supply-api-auth'
+import {
+  requireSupplyPermission,
+  resolveSupplyAuthedUser,
+} from '@/lib/supply-chain/supply-api-auth'
 import {
   catalogRowToStoreItem,
   storeItemToCatalogInsert,
@@ -8,6 +11,7 @@ import {
 } from '@/lib/supply-chain/supply-db-mappers'
 import type { StoreItem } from '@/lib/supply-chain/types'
 import { toTitleCaseWords } from '@/lib/supply-chain/title-case'
+import type { SupplyAuthed } from '@/lib/supply-chain/supply-api-auth'
 
 function missingTableResponse(message: string) {
   if (/supply_catalog_items|schema cache|does not exist/i.test(message)) {
@@ -22,6 +26,10 @@ function missingTableResponse(message: string) {
   return null
 }
 
+export function authorizeCatalogSync(auth: SupplyAuthed) {
+  return requireSupplyPermission(auth, 'supply:store')
+}
+
 /** POST — upsert full catalogue snapshot (qty updates, bulk import). */
 export async function POST(request: Request) {
   try {
@@ -31,6 +39,9 @@ export async function POST(request: Request) {
 
     const auth = await resolveSupplyAuthedUser(request, caller_id, body as Record<string, unknown>)
     if (auth instanceof NextResponse) return auth
+
+    const denied = authorizeCatalogSync(auth)
+    if (denied) return denied
 
     if (!Array.isArray(items)) {
       return NextResponse.json({ error: 'items must be an array' }, { status: 400 })
