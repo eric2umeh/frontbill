@@ -34,6 +34,7 @@ import {
   type EventOtherServiceLine,
 } from '@/lib/events/event-other-services'
 import { formatNaira } from '@/lib/utils/currency'
+import { MobileTableSubdetail } from '@/lib/utils/table-mobile'
 import { EnhancedDataTable } from '@/components/shared/enhanced-data-table'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -452,13 +453,20 @@ export function EventsPanel() {
             label: 'Event',
             render: (ev) => (
               <div>
-                <div className="font-medium">{ev.title}</div>
-                {ev.venue && <div className="text-xs text-muted-foreground">{ev.venue}</div>}
+                <div className="font-medium max-md:text-[13px]">{ev.title}</div>
+                {ev.venue && <div className="text-xs text-muted-foreground max-md:hidden">{ev.venue}</div>}
                 {ev.other_services && ev.other_services.length > 0 && (
-                  <div className="text-xs text-muted-foreground">
+                  <div className="text-xs text-muted-foreground max-md:hidden">
                     + {ev.other_services.map((s) => eventOtherServiceLabel(s.type)).join(', ')}
                   </div>
                 )}
+                <MobileTableSubdetail>
+                  {ev.client_name && <div>{ev.client_name}</div>}
+                  {ev.venue && <div>{ev.venue}</div>}
+                  {ev.estimated_value != null && (
+                    <div>{formatNaira(Number(ev.estimated_value))}</div>
+                  )}
+                </MobileTableSubdetail>
               </div>
             ),
           },
@@ -479,6 +487,7 @@ export function EventsPanel() {
           {
             key: 'client_name',
             label: 'Client',
+            responsive: 'md+',
             render: (ev) => (
               <div className="text-sm">
                 <div>{ev.client_name || '—'}</div>
@@ -491,6 +500,7 @@ export function EventsPanel() {
           {
             key: 'expected_attendees',
             label: 'Guests',
+            responsive: 'md+',
             render: (ev) => (
               <span className="tabular-nums">{ev.expected_attendees ?? '—'}</span>
             ),
@@ -498,6 +508,7 @@ export function EventsPanel() {
           {
             key: 'estimated_value',
             label: 'Est. value',
+            responsive: 'md+',
             render: (ev) => (
               <span className="text-right block">
                 {ev.estimated_value != null ? formatNaira(Number(ev.estimated_value)) : '—'}
@@ -505,53 +516,46 @@ export function EventsPanel() {
             ),
           },
           {
-            key: 'receipt',
+            key: 'actions',
             label: '',
+            stickyOnMobile: true,
             render: (ev) => (
-              <div className="flex justify-end">
+              <div className="flex gap-1 justify-end shrink-0">
                 <EventPaymentReceiptButton
                   event={ev}
                   role={role}
                   userId={userId}
                   userName={userName}
                 />
-              </div>
-            ),
-          },
-          ...(canManage
-            ? [
-                {
-                  key: 'actions',
-                  label: '',
-                  render: (ev: HotelEventRow) => (
-                    <div className="flex gap-1 justify-end">
+                {canManage && (
+                  <>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8"
+                      onClick={() => openEdit(ev)}
+                      title="Edit event"
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                    {ev.status !== 'cancelled' && (
                       <Button
                         type="button"
                         variant="ghost"
                         size="icon"
-                        className="h-8 w-8"
-                        onClick={() => openEdit(ev)}
-                        title="Edit event"
+                        className="h-8 w-8 text-destructive"
+                        title="Cancel event"
+                        onClick={() => setCancelTarget(ev)}
                       >
-                        <Pencil className="h-4 w-4" />
+                        <Ban className="h-4 w-4" />
                       </Button>
-                      {ev.status !== 'cancelled' && (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 text-destructive"
-                          title="Cancel event"
-                          onClick={() => setCancelTarget(ev)}
-                        >
-                          <Ban className="h-4 w-4" />
-                        </Button>
-                      )}
-                    </div>
-                  ),
-                },
-              ]
-            : []),
+                    )}
+                  </>
+                )}
+              </div>
+            ),
+          },
         ]}
       />
 
