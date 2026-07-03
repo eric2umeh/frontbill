@@ -97,7 +97,7 @@ export function DataTable<T extends { id: string }>({
         />
       )}
 
-      <div className="rounded-lg border bg-card">
+      <div className="rounded-lg border bg-card overflow-x-auto [scrollbar-width:thin]">
         <Table>
           <TableHeader>
             <TableRow>
