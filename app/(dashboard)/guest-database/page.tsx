@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { CardContent } from '@/components/ui/card'
 import { calculateGuestBalancesBatch } from '@/lib/balance'
 import { formatNaira } from '@/lib/utils/currency'
+import { MobileTableSubdetail } from '@/lib/utils/table-mobile'
 import { usePageData } from '@/hooks/use-page-data'
 import { useAuth } from '@/lib/auth-context'
 import { PageLoadingState } from '@/components/loading-screen'
@@ -97,7 +98,11 @@ export default function GuestDatabasePage() {
             render: (guest) => (
               <div className="cursor-pointer hover:text-primary" onClick={() => goToGuest(guest)}>
                 <div className="font-semibold max-md:text-[13px]">{guest.name}</div>
-                <div className="text-xs text-muted-foreground">{guest.phone}</div>
+                <div className="text-xs text-muted-foreground max-md:hidden">{guest.phone}</div>
+                <MobileTableSubdetail>
+                  {guest.phone && <div>{guest.phone}</div>}
+                  {guest.email && <div className="truncate max-w-[200px]">{guest.email}</div>}
+                </MobileTableSubdetail>
               </div>
             ),
           },
@@ -166,6 +171,7 @@ export default function GuestDatabasePage() {
           {
             key: 'actions',
             label: '',
+            stickyOnMobile: true,
             render: (guest) => (
               <Button size="sm" variant="outline" className="h-8 px-2 text-xs" onClick={() => goToGuest(guest)}>
                 View

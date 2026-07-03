@@ -31,6 +31,7 @@ import { cancelBookingReservation } from '@/lib/reservations/cancel-reservation'
 import { countInHouseRoomsFromBookings } from '@/lib/rooms/room-occupancy'
 import { reconcileRoomStatusesClient } from '@/lib/rooms/reconcile-room-status-client'
 import { networkFetchHint, withFetchRetry } from '@/lib/utils/fetch-retry'
+import { formatShortStayDates, MobileTableSubdetail } from '@/lib/utils/table-mobile'
 
 const FOLIO_BOOKING_ID_CHUNK = 80
 const BOOKINGS_SCOPE_LIMIT = 500
@@ -1079,13 +1080,22 @@ export default function BookingsPage() {
                 onClick={() => router.push(booking.is_bulk ? `/bulk-bookings/${booking.bulk_group_id}` : `/bookings/${booking.id}`)}
               >
                 <div className="font-medium max-md:text-[13px]">{booking.guests?.name}</div>
-                <div className="text-xs text-muted-foreground">{booking.guests?.phone}</div>
+                <div className="text-xs text-muted-foreground max-md:hidden">{booking.guests?.phone}</div>
+                <MobileTableSubdetail>
+                  <div>
+                    {booking.is_bulk
+                      ? `${booking.room_count} rooms`
+                      : `Rm ${booking.rooms?.room_number ?? '—'} · ${booking.rooms?.room_type ?? ''}`}
+                  </div>
+                  <div>{formatShortStayDates(booking.check_in, booking.check_out)}</div>
+                </MobileTableSubdetail>
               </div>
             ),
           },
           {
             key: 'room',
             label: 'Room',
+            responsive: 'md+',
             render: (booking) => (
               <div>
                 <div className="font-medium max-md:text-[13px]">{booking.is_bulk ? `${booking.room_count} Rooms` : `Room ${booking.rooms?.room_number}`}</div>
@@ -1096,6 +1106,7 @@ export default function BookingsPage() {
           {
             key: 'check_in',
             label: 'Check-in',
+            responsive: 'md+',
             render: (booking) => (
               <div className="text-sm max-md:text-xs">
                 {new Date(booking.check_in).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}
@@ -1105,6 +1116,7 @@ export default function BookingsPage() {
           {
             key: 'check_out',
             label: 'Check-out',
+            responsive: 'md+',
             render: (booking) => {
               const today = new Date().toISOString().split('T')[0]
               const coYmd =
@@ -1179,6 +1191,7 @@ export default function BookingsPage() {
           {
             key: 'actions',
             label: 'Actions',
+            stickyOnMobile: true,
             render: (booking) => {
               const showReserveRow =
                 !booking.is_bulk &&

@@ -19,6 +19,8 @@ export interface Column<T> {
   label: string
   render?: (item: T) => React.ReactNode
   responsive?: ColumnResponsive
+  /** Keep visible when scrolling wide tables on phones (e.g. Actions). */
+  stickyOnMobile?: boolean
 }
 
 interface Filter {
@@ -100,6 +102,11 @@ export function EnhancedDataTable<T extends Record<string, any>>({
     }
   }
 
+  const columnStickyClass = (stickyOnMobile?: boolean): string =>
+    stickyOnMobile
+      ? 'max-md:sticky max-md:right-0 max-md:z-10 max-md:bg-background max-md:shadow-[-6px_0_10px_-6px_rgba(0,0,0,0.12)]'
+      : ''
+
   const [searchQuery, setSearchQuery] = useState('')
   const [internalFilters, setInternalFilters] = useState<Record<string, string>>({})
   const isControlled = controlledActiveFilters !== undefined && onControlledActiveFiltersChange !== undefined
@@ -171,8 +178,8 @@ export function EnhancedDataTable<T extends Record<string, any>>({
     ? 'px-2 py-1.5 text-left text-xs font-medium max-md:px-1.5 max-md:py-1 max-md:text-[11px]'
     : 'px-4 py-3 text-left text-sm font-medium max-md:px-2 max-md:py-1.5 max-md:text-xs'
   const tdClass = compactTable
-    ? 'px-2 py-1.5 text-sm max-md:px-1.5 max-md:py-1 max-md:text-[11px] align-top whitespace-nowrap'
-    : 'px-4 py-3 text-sm max-md:px-2 max-md:py-1.5 max-md:text-xs align-top whitespace-nowrap'
+    ? 'px-2 py-1.5 text-sm max-md:px-1.5 max-md:py-1 max-md:text-[11px] align-top max-md:whitespace-normal md:whitespace-nowrap'
+    : 'px-4 py-3 text-sm max-md:px-2 max-md:py-1.5 max-md:text-xs align-top max-md:whitespace-normal md:whitespace-nowrap'
 
   return (
     <div className="space-y-4">
@@ -200,7 +207,7 @@ export function EnhancedDataTable<T extends Record<string, any>>({
               value={activeFilters[filter.key] || 'all'}
               onValueChange={(value) => handleFilterChange(filter.key, value)}
             >
-              <SelectTrigger className="w-[150px]">
+              <SelectTrigger className="w-[150px] max-md:w-full max-md:min-w-0">
                 <SelectValue placeholder={filter.label} />
               </SelectTrigger>
               <SelectContent>
@@ -303,7 +310,7 @@ export function EnhancedDataTable<T extends Record<string, any>>({
                   {columns.map((column) => (
                     <th
                       key={column.key.toString()}
-                      className={`${thClass} ${columnResponsiveClass(column.responsive)}`}
+                      className={`${thClass} ${columnResponsiveClass(column.responsive)} ${columnStickyClass(column.stickyOnMobile)}`}
                     >
                       {column.label}
                     </th>
@@ -344,7 +351,7 @@ export function EnhancedDataTable<T extends Record<string, any>>({
                       {columns.map((column) => (
                         <td
                           key={column.key.toString()}
-                          className={`${tdClass} ${columnResponsiveClass(column.responsive)}`}
+                          className={`${tdClass} ${columnResponsiveClass(column.responsive)} ${columnStickyClass(column.stickyOnMobile)}`}
                         >
                           {column.render ? column.render(item) : item[column.key]}
                         </td>

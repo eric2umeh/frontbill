@@ -25,6 +25,7 @@ export function PaymentsTable({ payments }: PaymentsTableProps) {
     {
       header: 'Reference',
       accessor: (payment) => (payment as any).reference_number || (payment as any).payment_reference || payment.id,
+      className: 'hidden md:table-cell',
       cell: (value) => (
         <span className="font-mono text-sm">{value}</span>
       ),
@@ -43,19 +44,22 @@ export function PaymentsTable({ payments }: PaymentsTableProps) {
         <div>
           {(payment as any).organization ? (
             <>
-              <p className="font-medium">{(payment as any).organization.name}</p>
-              <p className="text-xs text-muted-foreground">Organization</p>
+              <p className="font-medium max-md:text-[13px]">{(payment as any).organization.name}</p>
+              <p className="text-xs text-muted-foreground max-md:hidden">Organization</p>
             </>
           ) : (payment as any).guests?.name || (payment as any).guest ? (
             <>
-              <p className="font-medium">
+              <p className="font-medium max-md:text-[13px]">
                 {(payment as any).guests?.name || (payment as any).guest?.name || `${(payment as any).guest?.first_name || ''} ${(payment as any).guest?.last_name || ''}`.trim()}
               </p>
-              <p className="text-xs text-muted-foreground">Individual</p>
+              <p className="text-xs text-muted-foreground max-md:hidden">Individual</p>
             </>
           ) : (
             <span className="text-muted-foreground">N/A</span>
           )}
+          <p className="text-[11px] text-muted-foreground mt-1 md:hidden capitalize">
+            {String((payment as any).payment_method || '').replace(/_/g, ' ')}
+          </p>
         </div>
       ),
     },
@@ -63,12 +67,13 @@ export function PaymentsTable({ payments }: PaymentsTableProps) {
       header: 'Amount',
       accessor: 'amount',
       cell: (value) => (
-        <span className="font-semibold text-green-600">{formatNaira(value)}</span>
+        <span className="font-semibold text-green-600 text-xs md:text-sm">{formatNaira(value)}</span>
       ),
     },
     {
       header: 'Method',
       accessor: 'payment_method',
+      className: 'hidden md:table-cell',
       cell: (value) => (
         <Badge className={methodBadgeClass(String(value))} variant="secondary">
           {String(value).toUpperCase()}

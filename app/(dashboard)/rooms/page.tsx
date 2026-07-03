@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { CardContent } from '@/components/ui/card'
 import { formatNaira } from '@/lib/utils/currency'
+import { MobileTableSubdetail } from '@/lib/utils/table-mobile'
 import { usePageData } from '@/hooks/use-page-data'
 import { useAuth } from '@/lib/auth-context'
 import { hasPermission } from '@/lib/permissions'
@@ -157,13 +158,20 @@ export default function RoomsPage() {
                 onClick={() => router.push(`/rooms/${room.id}`)}
               >
                 <div className="font-semibold text-base max-md:text-sm">Room {room.room_number}</div>
-                <div className="text-[10px] text-muted-foreground">{room.floor_number === 0 ? 'G' : `Fl ${room.floor_number}`}</div>
+                <div className="text-[10px] text-muted-foreground max-md:hidden">
+                  {room.floor_number === 0 ? 'G' : `Fl ${room.floor_number}`}
+                </div>
+                <MobileTableSubdetail>
+                  <div>{room.room_type}</div>
+                  <div className="capitalize">{room.status}</div>
+                </MobileTableSubdetail>
               </div>
             ),
           },
           {
             key: 'room_type',
             label: 'Type',
+            responsive: 'md+',
             render: (room) => (
               <div
                 className="cursor-pointer font-medium hover:text-primary max-md:text-[13px]"
@@ -176,6 +184,7 @@ export default function RoomsPage() {
           {
             key: 'status',
             label: 'Status',
+            responsive: 'md+',
             render: (room) => (
               <div className="cursor-pointer" onClick={() => router.push(`/rooms/${room.id}`)}>
                 <Badge variant="outline" className={`${statusColors[room.status]} max-md:text-[10px] px-1.5 py-0`}>

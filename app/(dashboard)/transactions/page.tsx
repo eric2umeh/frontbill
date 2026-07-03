@@ -11,6 +11,7 @@ import { Calendar } from '@/components/ui/calendar'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { formatNaira } from '@/lib/utils/currency'
+import { MobileTableSubdetail } from '@/lib/utils/table-mobile'
 import { usePageData } from '@/hooks/use-page-data'
 import { useAuth } from '@/lib/auth-context'
 import { toast } from 'sonner'
@@ -395,7 +396,12 @@ export default function TransactionsPage() {
             render: (p) => (
               <div>
                 <div className="font-medium max-md:text-[13px]">{p.guest_name}</div>
-                {p.room && <div className="text-[10px] text-muted-foreground">{p.room}</div>}
+                {p.room && <div className="text-[10px] text-muted-foreground max-md:hidden">{p.room}</div>}
+                <MobileTableSubdetail>
+                  {p.room && <div>{p.room}</div>}
+                  <div className="capitalize">{(p.payment_method || 'cash').replace(/_/g, ' ')}</div>
+                  <div>{format(new Date(p.payment_date), 'dd MMM yyyy · HH:mm')}</div>
+                </MobileTableSubdetail>
               </div>
             ),
           },
@@ -407,6 +413,7 @@ export default function TransactionsPage() {
           {
             key: 'payment_method',
             label: 'Method',
+            responsive: 'md+',
             render: (p) => {
               const cfg =
                 methodConfig[p.payment_method] || {
@@ -433,6 +440,7 @@ export default function TransactionsPage() {
           {
             key: 'received_by_name',
             label: 'Received By',
+            responsive: 'md+',
             render: (p) => <span className="text-xs md:text-sm text-muted-foreground max-w-[96px] inline-block truncate">{p.received_by_name}</span>,
           },
           {

@@ -24,6 +24,7 @@ import { formatReservationPaymentMethodLabel } from '@/lib/reservations/reservat
 import { networkFetchHint, withFetchRetry } from '@/lib/utils/fetch-retry'
 import { toast } from 'sonner'
 import { useReservationsEventsHeader } from '@/components/reservations/reservations-events-header'
+import { formatShortStayDates, MobileTableSubdetail } from '@/lib/utils/table-mobile'
 
 const RESERVATIONS_LIST_LIMIT = 500
 
@@ -432,13 +433,22 @@ export default function ReservationsPage() {
                 className="cursor-pointer hover:text-primary block"
               >
                 <div className="font-medium max-md:text-[13px]">{res.guests?.name}</div>
-                <div className="text-xs text-muted-foreground">{res.guests?.phone}</div>
+                <div className="text-xs text-muted-foreground max-md:hidden">{res.guests?.phone}</div>
+                <MobileTableSubdetail>
+                  <div>
+                    {res.is_bulk
+                      ? `${res.room_count} rooms`
+                      : `Rm ${res.rooms?.room_number ?? '—'} · ${res.rooms?.room_type ?? ''}`}
+                  </div>
+                  <div>{formatShortStayDates(res.check_in, res.check_out)}</div>
+                </MobileTableSubdetail>
               </Link>
             ),
           },
           {
             key: 'room',
             label: 'Room',
+            responsive: 'md+',
             render: (res) => (
               <Link href={res.is_bulk ? `/bulk-bookings/${res.bulk_group_id}` : `/reservations/${res.id}`} className="cursor-pointer block">
                 <div className="font-medium max-md:text-[13px]">{res.is_bulk ? `${res.room_count} Rooms` : `Room ${res.rooms?.room_number}`}</div>
@@ -449,6 +459,7 @@ export default function ReservationsPage() {
           {
             key: 'check_in',
             label: 'Check-in',
+            responsive: 'md+',
             render: (res) => (
               <div className="text-sm max-md:text-xs">
                 {new Date(res.check_in).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}
@@ -458,6 +469,7 @@ export default function ReservationsPage() {
           {
             key: 'check_out',
             label: 'Check-out',
+            responsive: 'md+',
             render: (res) => (
               <div className="text-sm max-md:text-xs">
                 {new Date(res.check_out).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}
@@ -508,6 +520,7 @@ export default function ReservationsPage() {
           {
             key: 'actions',
             label: 'Actions',
+            stickyOnMobile: true,
             render: (res) => (
               <div className="flex flex-wrap gap-1">
                 {!res.is_bulk && canCheckInReserved && (

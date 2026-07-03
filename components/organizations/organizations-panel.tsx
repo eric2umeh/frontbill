@@ -13,6 +13,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { toast } from 'sonner'
 import { createClient } from '@/lib/supabase/client'
 import { formatNaira } from '@/lib/utils/currency'
+import { MobileTableSubdetail } from '@/lib/utils/table-mobile'
 import { calculateOrganizationBalancesBatch } from '@/lib/balance'
 import { EnhancedDataTable } from '@/components/shared/enhanced-data-table'
 import { Badge } from '@/components/ui/badge'
@@ -380,12 +381,16 @@ export function OrganizationsPanel() {
                 onClick={() => router.push(`/organizations/${org.id}`)}
               >
                 {org.name}
+                <MobileTableSubdetail>
+                  <div>{getOrgTypeLabel(org.org_type)}</div>
+                </MobileTableSubdetail>
               </div>
             ),
           },
           {
             key: 'org_type',
             label: 'Type',
+            responsive: 'md+',
             render: (org) => (
               <Badge className={`${getOrgTypeColor(org.org_type)} max-md:text-[10px]`}>
                 {getOrgTypeLabel(org.org_type)}

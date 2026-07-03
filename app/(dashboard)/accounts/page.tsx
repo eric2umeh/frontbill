@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/client'
 import { EnhancedDataTable } from '@/components/shared/enhanced-data-table'
 import { calculateGuestBalancesBatch } from '@/lib/balance'
 import { formatNaira } from '@/lib/utils/currency'
+import { MobileTableSubdetail } from '@/lib/utils/table-mobile'
 import { usePageData } from '@/hooks/use-page-data'
 import { useAuth } from '@/lib/auth-context'
 import { Building2, User } from 'lucide-react'
@@ -370,6 +371,10 @@ export default function AccountsPage() {
                         )}
                       </div>
                       <p className="font-medium max-md:text-[13px]">{row.name}</p>
+                      <MobileTableSubdetail>
+                        {row.phone && <div>{row.phone}</div>}
+                        <div className="capitalize">{row.accountType}</div>
+                      </MobileTableSubdetail>
                     </div>
                   ),
                 },

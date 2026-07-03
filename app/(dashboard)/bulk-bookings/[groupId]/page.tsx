@@ -21,6 +21,7 @@ import { toast } from 'sonner'
 import { PageLoadingState } from '@/components/loading-screen'
 import { hasPermission } from '@/lib/permissions'
 import { cancelBookingReservation, isCancellableReservationStatus } from '@/lib/reservations/cancel-reservation'
+import { formatShortStayDates, MobileTableSubdetail } from '@/lib/utils/table-mobile'
 
 type BulkPageCheckoutDraft = { kind: 'row'; row: any } | { kind: 'all'; targets: any[] }
 
@@ -402,13 +403,17 @@ export default function BulkBookingDetailPage({ params }: { params: Promise<{ gr
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Folio</TableHead>
+                <TableHead className="hidden md:table-cell">Folio</TableHead>
                 <TableHead>Guest</TableHead>
-                <TableHead>Room</TableHead>
-                <TableHead>Dates</TableHead>
-                <TableHead>Status</TableHead>
+                <TableHead className="hidden md:table-cell">Room</TableHead>
+                <TableHead className="hidden md:table-cell">Dates</TableHead>
+                <TableHead className="hidden lg:table-cell">Status</TableHead>
                 <TableHead className="text-right">Amount</TableHead>
-                {canManageFolio && <TableHead className="text-right">Actions</TableHead>}
+                {canManageFolio && (
+                  <TableHead className="text-right max-md:sticky max-md:right-0 max-md:z-10 max-md:bg-muted/50">
+                    Actions
+                  </TableHead>
+                )}
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -429,24 +434,32 @@ export default function BulkBookingDetailPage({ params }: { params: Promise<{ gr
                     router.push(row.status === 'reserved' ? `/reservations/${row.id}` : `/bookings/${row.id}`)
                   }
                 >
-                  <TableCell className="font-mono text-xs">{row.folio_id}</TableCell>
+                  <TableCell className="font-mono text-xs hidden md:table-cell">{row.folio_id}</TableCell>
                   <TableCell>
-                    <div className="font-medium">{row.guests?.name || 'Unassigned'}</div>
-                    <div className="text-xs text-muted-foreground">{row.guests?.phone}</div>
+                    <div className="font-medium max-md:text-[13px]">{row.guests?.name || 'Unassigned'}</div>
+                    <div className="text-xs text-muted-foreground max-md:hidden">{row.guests?.phone}</div>
+                    <MobileTableSubdetail>
+                      <div>
+                        {row.rooms?.room_number ? `Rm ${row.rooms.room_number}` : 'Unassigned'}
+                        {row.rooms?.room_type ? ` · ${row.rooms.room_type}` : ''}
+                      </div>
+                      <div>{formatShortStayDates(row.check_in, row.check_out)}</div>
+                      <div className="capitalize">{row.status}</div>
+                    </MobileTableSubdetail>
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="hidden md:table-cell">
                     {row.rooms?.room_number ? `Room ${row.rooms.room_number}` : 'Unassigned'}
                     <div className="text-xs text-muted-foreground">{row.rooms?.room_type}</div>
                   </TableCell>
-                  <TableCell className="text-sm">
+                  <TableCell className="text-sm hidden md:table-cell">
                     {row.check_in} to {row.check_out}
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="hidden lg:table-cell">
                     <Badge variant="outline">{row.status}</Badge>
                   </TableCell>
-                  <TableCell className="text-right">{formatNaira(row.total_amount || 0)}</TableCell>
+                  <TableCell className="text-right text-xs md:text-sm">{formatNaira(row.total_amount || 0)}</TableCell>
                   {canManageFolio && (
-                    <TableCell className="text-right">
+                    <TableCell className="text-right max-md:sticky max-md:right-0 max-md:z-10 max-md:bg-background max-md:shadow-[-6px_0_10px_-6px_rgba(0,0,0,0.12)]">
                       <div
                         className="flex flex-wrap justify-end gap-1"
                         onClick={(e) => e.stopPropagation()}
