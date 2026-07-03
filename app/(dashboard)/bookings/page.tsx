@@ -840,6 +840,13 @@ export default function BookingsPage() {
     )
   }
 
+  const statusKey = tableFilters.status || 'checked_in'
+  const searchingCatalog = tableSearchQuery.trim().length > 0
+  const needsCatalog = searchingCatalog || statusKey !== 'checked_in'
+  const catalogScopeKey = searchingCatalog ? 'all' : statusKey
+  const catalogFetchPending =
+    needsCatalog && (catalogLoading || catalogScopeLoaded !== catalogScopeKey)
+
   return (
     <div className="space-y-6">
       <CheckoutConfirmDialog
@@ -988,6 +995,7 @@ export default function BookingsPage() {
 
       <EnhancedDataTable
         data={allBookingsCatalog}
+        loading={catalogFetchPending}
         listWhenSearchEmpty={
           tableFilters.status === 'checked_in' ? inHouseBookings : undefined
         }
