@@ -21,6 +21,7 @@ import { fetchUserDisplayNameMap } from '@/lib/utils/fetch-user-display-names'
 import { getBulkGroupId, isLegacyBulkGroupId } from '@/lib/utils/bulk-booking'
 import { cancelBookingReservation, isCancellableReservationStatus } from '@/lib/reservations/cancel-reservation'
 import { formatReservationPaymentMethodLabel } from '@/lib/reservations/reservation-payment-methods'
+import { networkFetchHint, withFetchRetry } from '@/lib/utils/fetch-retry'
 import { toast } from 'sonner'
 import { useReservationsEventsHeader } from '@/components/reservations/reservations-events-header'
 
@@ -108,17 +109,19 @@ export default function ReservationsPage() {
       }
 
       // Single query — no FK join on profiles (no FK exists), fetch user names separately
-      const { data, error } = await supabase
-        .from('bookings')
-        .select(`
+      const { data, error } = await withFetchRetry(() =>
+        supabase
+          .from('bookings')
+          .select(`
           id, organization_id, folio_id, guest_id, room_id, check_in, check_out, status, payment_status,
           rate_per_night, total_amount, balance, deposit, notes, created_by, created_at, updated_by,
           guests:guest_id(id, name, phone),
           rooms:room_id(id, room_number, room_type)
         `)
-        .eq('organization_id', organizationId)
-        .eq('status', 'reserved')
-        .order('created_at', { ascending: false })
+          .eq('organization_id', organizationId)
+          .eq('status', 'reserved')
+          .order('created_at', { ascending: false }),
+      )
 
       if (error) throw error
 
@@ -169,8 +172,15 @@ export default function ReservationsPage() {
       })
       
       setReservations(groupBulkRows(reservationsWithData))
-    } catch (error: any) {
-      console.error('Error fetching reservations:', error)
+    } catch (error: unknown) {
+      const detail = error instanceof Error ? error.message : String(error ?? '')
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('[reservations] fetch failed:', detail, error)
+      }
+      toast.error(
+        networkFetchHint(detail) ??
+          (detail ? `Failed to load reservations: ${detail}` : 'Failed to load reservations'),
+      )
       setReservations([])
     } finally {
       endFetch()
