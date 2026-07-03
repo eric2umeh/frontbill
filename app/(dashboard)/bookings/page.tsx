@@ -30,6 +30,7 @@ import { resolveHotelTimeZone } from '@/lib/hotel-date'
 import { cancelBookingReservation } from '@/lib/reservations/cancel-reservation'
 import { countInHouseRoomsFromBookings } from '@/lib/rooms/room-occupancy'
 import { reconcileRoomStatusesClient } from '@/lib/rooms/reconcile-room-status-client'
+import { networkFetchHint, withFetchRetry } from '@/lib/utils/fetch-retry'
 
 const FOLIO_BOOKING_ID_CHUNK = 80
 const BOOKINGS_SCOPE_LIMIT = 500
@@ -434,25 +435,26 @@ export default function BookingsPage() {
       }
 
       const inHouse = await Promise.race([
-        loadScope('checked_in'),
+        withFetchRetry(() => loadScope('checked_in')),
         new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('Bookings request timed out')), 20_000),
+          setTimeout(() => reject(new Error('Bookings request timed out')), 25_000),
         ),
       ])
       setInHouseBookings(groupBulkRows(inHouse))
     } catch (error: unknown) {
       const detail = describeFetchError(error)
-      console.error('Error fetching bookings:', detail, error)
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('[bookings] fetch failed:', detail, error)
+      }
       const msg =
         detail === 'Bookings request timed out'
-          ? 'Bookings took too long — showing empty list. Try Refresh or a narrower status filter.'
-          : detail
-            ? `Failed to load bookings: ${detail}`
-            : 'Failed to load bookings'
+          ? 'Bookings took too long — try Refresh or a narrower status filter.'
+          : networkFetchHint(detail) ??
+            (detail ? `Failed to load bookings: ${detail}` : 'Failed to load bookings')
       toast.error(msg)
       setInHouseBookings([])
     } finally {
-      void refreshRoomStats()
+      window.setTimeout(() => void refreshRoomStats(), 400)
       endFetch()
     }
   }, [organizationId, userId, refreshRoomStats, startFetch, endFetch])
@@ -465,6 +467,7 @@ export default function BookingsPage() {
 
       setCatalogLoading(true)
       try {
+        await withFetchRetry(async () => {
         const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
         const fortyFiveDaysAgo = new Date(Date.now() - 45 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
         const sixtyDaysAgo = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
@@ -485,9 +488,11 @@ export default function BookingsPage() {
           query = query.eq('status', scopeKey).gte('check_in', fortyFiveDaysAgo)
         }
 
-        const { data, error } = await query
-          .order('check_in', { ascending: false })
-          .order('created_at', { ascending: false })
+        const { data, error } = await withFetchRetry(() =>
+          query
+            .order('check_in', { ascending: false })
+            .order('created_at', { ascending: false }),
+        )
 
         if (error) throw error
 
@@ -546,10 +551,16 @@ export default function BookingsPage() {
 
         setAllBookingsCatalog(groupBulkRows(bookingsWithUsers))
         setCatalogScopeLoaded(scopeKey)
+        })
       } catch (error: unknown) {
         const detail = describeFetchError(error)
-        console.error('Error fetching bookings catalog:', detail, error)
-        toast.error(detail ? `Search catalog failed: ${detail}` : 'Search catalog failed')
+        if (process.env.NODE_ENV === 'development') {
+          console.warn('[bookings] catalog fetch failed:', detail, error)
+        }
+        toast.error(
+          networkFetchHint(detail) ??
+            (detail ? `Search catalog failed: ${detail}` : 'Search catalog failed'),
+        )
       } finally {
         setCatalogLoading(false)
       }
