@@ -872,7 +872,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
           const notes = appendBulkGroupNote(`payment_method: ${paymentMethod}`, bulkGroupId)
           const totalAmt = nightly * nights
 
-          await supabase.from('bookings').insert([{
+          const { error: insertErr } = await supabase.from('bookings').insert([{
             organization_id: orgId,
             guest_id: null,
             room_id: null,
@@ -889,6 +889,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
             created_by: currentUserId,
             notes,
           }])
+          if (insertErr) throw insertErr
           createdCount++
         }
       } else {
@@ -924,8 +925,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
               )
               room = pool[0]
               if (!room) {
-                toast.error(`No available ${entry.roomType} rooms`)
-                continue
+                throw new Error(`No available ${entry.roomType} rooms for these dates`)
               }
             }
 
@@ -1011,13 +1011,21 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
         }
       }
 
+      if (createdCount <= 0) {
+        throw new Error(
+          wording === 'booking'
+            ? 'No bookings were created — check room availability and try again'
+            : 'No reservations were created — check room availability and try again',
+        )
+      }
+
       toast.success(
         `${createdCount} ${wording === 'booking' ? 'booking' : 'reservation'}${createdCount === 1 ? '' : 's'} created`,
       )
       onSuccess?.()
       handleClose()
-    } catch (err: any) {
-      toast.error(err.message || (wording === 'booking' ? 'Failed to create bookings' : 'Failed to create reservations'))
+    } catch (err: unknown) {
+      toast.error(describeSupabaseError(err) || (wording === 'booking' ? 'Failed to create bookings' : 'Failed to create reservations'))
     } finally {
       setLoading(false)
     }
