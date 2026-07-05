@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { guestOrOrganizationNameTaken } from '@/lib/utils/guest-org-name-uniqueness'
 import { formatPersonName } from '@/lib/utils/name-format'
 import { counterpartyOrganizationEmail } from '@/lib/utils/counterparty-organization'
+import { isOrganizationMenuRecord } from '@/lib/utils/ledger-organization'
 
 export type EventClientType = 'guest' | 'organization'
 
@@ -120,10 +121,27 @@ export async function resolveEventClientRecord(
   if (orgId) {
     const { data: o, error } = await admin
       .from('organizations')
-      .select('id, name, phone, email, org_type')
+      .select('id, name, phone, email, org_type, created_by')
       .eq('id', orgId)
       .single()
-    if (error || !o || !o.org_type) {
+    if (error || !o || !isOrganizationMenuRecord(o, input.hotelOrganizationId)) {
+      return { error: 'Organization not found' }
+    }
+
+    const creatorId = String(o.created_by || '').trim()
+    if (!creatorId) {
+      return { error: 'Organization not found' }
+    }
+    const { data: creatorProfile, error: creatorProfileError } = await admin
+      .from('profiles')
+      .select('organization_id')
+      .eq('id', creatorId)
+      .maybeSingle()
+    if (
+      creatorProfileError ||
+      !creatorProfile ||
+      creatorProfile.organization_id !== input.hotelOrganizationId
+    ) {
       return { error: 'Organization not found' }
     }
     return {
