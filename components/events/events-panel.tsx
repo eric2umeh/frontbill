@@ -520,7 +520,7 @@ export function EventsPanel() {
             label: '',
             stickyOnMobile: true,
             render: (ev) => (
-              <div className="flex gap-1 justify-end shrink-0">
+              <div className="flex gap-1 justify-end shrink-0" onClick={(e) => e.stopPropagation()}>
                 <EventPaymentReceiptButton
                   event={ev}
                   role={role}

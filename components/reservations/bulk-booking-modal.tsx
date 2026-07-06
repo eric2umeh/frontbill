@@ -56,6 +56,7 @@ import {
 } from '@/lib/reservations/reservation-payment-methods'
 import { applyPaymentToGuestCityLedger } from '@/lib/utils/guest-city-ledger'
 import { buildBackdateDedupeKey } from '@/lib/backdate/dedupe-key'
+import { resolveBulkBookingPayment } from '@/lib/reservations/bulk-booking-payment'
 
 const ROOM_TYPES_FALLBACK = ['Deluxe', 'Royal', 'Kings', 'Mini Suite', 'Executive Suite', 'Diplomatic Suite']
 
@@ -908,6 +909,13 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
           const folioId = `BLK-${Date.now().toString(36).toUpperCase()}-${i}`
           const notes = appendBulkGroupNote(`payment_method: ${paymentMethod}`, bulkGroupId)
           const totalAmt = nightly * nights
+          const payment = resolveBulkBookingPayment({
+            totalAmount: totalAmt,
+            paymentStatus,
+            partialAmount,
+            payAboveRoomTotal: payAboveBulkRoomTotal,
+            pendingHold,
+          })
 
           const { data: booking, error: insertErr } = await supabase
             .from('bookings')
@@ -922,9 +930,9 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
                 number_of_nights: nights,
                 rate_per_night: nightly,
                 total_amount: totalAmt,
-                deposit: 0,
-                balance: totalAmt,
-                payment_status: 'pending',
+                deposit: payment.depositAmount,
+                balance: payment.balanceAmount,
+                payment_status: payment.bookingPaymentStatus,
                 status: bulkInitialStatus,
                 created_by: currentUserId,
                 notes,
@@ -955,11 +963,41 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
               payment_method: paymentMethod,
               ledger_account_id: null,
               ledger_account_type: null,
-              payment_status: 'unpaid',
+              payment_status: payment.folioChargePaymentStatus,
               created_by: currentUserId,
             },
           ])
           if (fcErr) throw fcErr
+
+          if (payment.prepayExcess > 0 && fillLaterGuestId) {
+            const { data: gRow } = await supabase.from('guests').select('name').eq('id', fillLaterGuestId).maybeSingle()
+            const ledgerGuestName = (gRow?.name || selectedGroupGuest?.name || selectedOrg?.name || '').trim()
+            if (ledgerGuestName) {
+              await applyPaymentToGuestCityLedger(supabase, {
+                organizationId: orgId,
+                guestName: ledgerGuestName,
+                paymentAmount: payment.prepayExcess,
+                createIfMissingExcess: payment.prepayExcess,
+              })
+            }
+          }
+
+          if (!pendingHold) {
+            await supabase.from('transactions').insert([{
+              organization_id: orgId,
+              booking_id: booking.id,
+              transaction_id: `TXN-${Date.now().toString(36).toUpperCase()}-${i}`,
+              guest_name: selectedOrg?.name || selectedGroupGuest?.name || 'Bulk Guest',
+              room: room.room_number,
+              amount: totalAmt,
+              payment_method: paymentMethod,
+              status: payment.transactionStatus,
+              description: `${
+                wording === 'booking' ? 'Bulk booking' : 'Bulk reservation'
+              } — ${bookingType === 'organization' ? selectedOrg?.name : selectedGroupGuest?.name} — ${folioId}`,
+              received_by: currentUserId,
+            }])
+          }
           createdCount++
         }
       } else {
@@ -1008,26 +1046,22 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
 
             const total = ratePn * nights
 
-            const depositAmt = pendingHold
-              ? 0
-              : paymentStatus === 'paid'
-                ? payAboveBulkRoomTotal
-                  ? Math.max(total, Number(partialAmount) || total)
-                  : total
-                : paymentStatus === 'partial'
-                  ? Number(partialAmount) || 0
-                  : 0
-            const balanceAmt = Math.max(0, total - depositAmt)
+            const payment = resolveBulkBookingPayment({
+              totalAmount: total,
+              paymentStatus,
+              partialAmount,
+              payAboveRoomTotal: payAboveBulkRoomTotal,
+              pendingHold,
+            })
             const folioId = `BLK-${Date.now().toString(36).toUpperCase()}`
-            const bookingBalance = balanceAmt
             const notes = appendBulkGroupNote(`payment_method: ${paymentMethod}`, bulkGroupId)
 
             const { data: booking, error: be } = await supabase.from('bookings').insert([{
               organization_id: orgId, guest_id: finalGuestId, room_id: room.id, folio_id: folioId,
               check_in: toLocalDateStr(checkIn), check_out: toLocalDateStr(checkOut),
               number_of_nights: nights, rate_per_night: ratePn,
-              total_amount: total, deposit: depositAmt, balance: bookingBalance,
-              payment_status: paymentStatus === 'paid' ? 'paid' : paymentStatus === 'partial' ? 'partial' : 'pending',
+              total_amount: total, deposit: payment.depositAmount, balance: payment.balanceAmount,
+              payment_status: payment.bookingPaymentStatus,
               status: bulkInitialStatus, created_by: currentUserId,
               notes,
             }]).select().single()
@@ -1045,12 +1079,11 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
               payment_method: paymentMethod,
               ledger_account_id: null,
               ledger_account_type: null,
-              payment_status: balanceAmt > 0 ? 'unpaid' : 'paid',
+              payment_status: payment.folioChargePaymentStatus,
               created_by: currentUserId,
             }])
             if (fcErr) throw fcErr
-            const prepayExcess = Math.max(0, depositAmt - total)
-            if (prepayExcess > 0 && finalGuestId) {
+            if (payment.prepayExcess > 0 && finalGuestId) {
               const gn = formatPersonName(entry.guestName) || ''
               const { data: gRow } = await supabase.from('guests').select('name').eq('id', finalGuestId).maybeSingle()
               const ledgerGuestName = (gRow?.name || gn || selectedGroupGuest?.name || '').trim()
@@ -1058,8 +1091,8 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
                 await applyPaymentToGuestCityLedger(supabase, {
                   organizationId: orgId,
                   guestName: ledgerGuestName,
-                  paymentAmount: prepayExcess,
-                  createIfMissingExcess: prepayExcess,
+                  paymentAmount: payment.prepayExcess,
+                  createIfMissingExcess: payment.prepayExcess,
                 })
               }
             }
@@ -1069,7 +1102,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
               transaction_id: `TXN-${Date.now().toString(36).toUpperCase()}`,
                 guest_name: entryGuestName || selectedOrg?.name || selectedGroupGuest?.name || 'Bulk Guest', room: room.room_number, amount: total,
                 payment_method: paymentMethod,
-              status: paymentStatus === 'paid' ? 'paid' : paymentStatus === 'partial' ? 'partial' : 'pending',
+              status: payment.transactionStatus,
                 description: `${
                   wording === 'booking' ? 'Bulk booking' : 'Bulk reservation'
                 } — ${bookingType === 'organization' ? selectedOrg?.name : selectedGroupGuest?.name} — ${folioId}`,
