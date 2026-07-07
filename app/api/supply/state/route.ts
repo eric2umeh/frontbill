@@ -1,11 +1,11 @@
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import {
-  isKitchenOnlySupplyRole,
   requireSupplyKitchenOrStore,
   resolveSupplyAuthedUser,
 } from '@/lib/supply-chain/supply-api-auth'
-import { SUPPLY_SNAPSHOT_KEYS, KITCHEN_WRITE_SNAPSHOT_KEYS, type SupplySnapshotKey } from '@/lib/supply-chain/supply-db-mappers'
+import { SUPPLY_SNAPSHOT_KEYS, type SupplySnapshotKey } from '@/lib/supply-chain/supply-db-mappers'
+import { writableSupplySnapshotKeysForRole } from '@/lib/supply-chain/supply-snapshot-permissions'
 
 function missingTableResponse(message: string) {
   if (/supply_chain_snapshots|schema cache|does not exist/i.test(message)) {
@@ -71,16 +71,15 @@ export async function PUT(request: Request) {
     const denied = requireSupplyKitchenOrStore(auth)
     if (denied) return denied
 
-    const kitchenOnly = isKitchenOnlySupplyRole(auth.role)
-    const writableKeySet = new Set<string>(
-      kitchenOnly ? KITCHEN_WRITE_SNAPSHOT_KEYS : SUPPLY_SNAPSHOT_KEYS,
-    )
+    const writableKeySet = writableSupplySnapshotKeysForRole(auth.role)
 
     const admin = createAdminClient()
     const now = new Date().toISOString()
 
     for (const key of Object.keys(snapshots) as SupplySnapshotKey[]) {
-      if (!writableKeySet.has(key)) continue
+      if (!writableKeySet.has(key)) {
+        return NextResponse.json({ error: `Forbidden snapshot key: ${key}` }, { status: 403 })
+      }
       const data = snapshots[key]
       const { error } = await admin.from('supply_chain_snapshots').upsert(
         {

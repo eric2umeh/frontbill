@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { createClient } from '@/lib/supabase/server'
-import { hasPermission } from '@/lib/permissions'
 import { outletSlugify } from '@/lib/outlets/slug'
 import type { BatchOutletMenuSync } from '@/lib/supply-chain/batch-outlet-sync'
+import { canSyncRestaurantBatchToOutlet } from '@/lib/supply-chain/outlet-sync-permissions'
 
 async function upsertKitchenMenuItem(
   admin: ReturnType<typeof createAdminClient>,
@@ -120,11 +120,7 @@ export async function POST(request: Request) {
   }
 
   const role = String(profile.role || '')
-  if (
-    !hasPermission(role, 'supply:kitchen') &&
-    !hasPermission(role, 'outlet:menu') &&
-    !hasPermission(role, 'roles:manage')
-  ) {
+  if (!canSyncRestaurantBatchToOutlet(role)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 

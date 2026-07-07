@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { guestOrOrganizationNameTaken } from '@/lib/utils/guest-org-name-uniqueness'
 import { formatPersonName } from '@/lib/utils/name-format'
 import { counterpartyOrganizationEmail } from '@/lib/utils/counterparty-organization'
+import { isOrganizationMenuRecord } from '@/lib/utils/ledger-organization'
 
 export type EventClientType = 'guest' | 'organization'
 
@@ -26,6 +27,49 @@ export type ResolvedEventClient = {
   client_email: string | null
   guest_id: string | null
   client_organization_id: string | null
+}
+
+type EventOrganizationCandidate = {
+  id?: string | null
+  name?: string | null
+  org_type?: string | null
+  created_by?: string | null
+}
+
+export function eventOrganizationBelongsToHotel(
+  candidate: EventOrganizationCandidate | null | undefined,
+  creatorOrganizationId: string | null | undefined,
+  hotelOrganizationId: string,
+): boolean {
+  if (!String(candidate?.org_type ?? '').trim()) return false
+  if (!isOrganizationMenuRecord(candidate, hotelOrganizationId)) return false
+  const createdBy = String(candidate?.created_by ?? '').trim()
+  if (!createdBy) return false
+  return String(creatorOrganizationId ?? '').trim() === hotelOrganizationId
+}
+
+async function verifyExistingEventOrganization(
+  admin: SupabaseClient,
+  organization: EventOrganizationCandidate,
+  hotelOrganizationId: string,
+): Promise<boolean> {
+  const createdBy = String(organization.created_by ?? '').trim()
+  if (!createdBy) {
+    return eventOrganizationBelongsToHotel(organization, null, hotelOrganizationId)
+  }
+
+  const { data: creatorProfile, error } = await admin
+    .from('profiles')
+    .select('organization_id')
+    .eq('id', createdBy)
+    .maybeSingle()
+
+  if (error || !creatorProfile?.organization_id) return false
+  return eventOrganizationBelongsToHotel(
+    organization,
+    String(creatorProfile.organization_id),
+    hotelOrganizationId,
+  )
 }
 
 export async function resolveEventClientRecord(
@@ -120,10 +164,14 @@ export async function resolveEventClientRecord(
   if (orgId) {
     const { data: o, error } = await admin
       .from('organizations')
-      .select('id, name, phone, email, org_type')
+      .select('id, name, phone, email, org_type, created_by')
       .eq('id', orgId)
       .single()
-    if (error || !o || !o.org_type) {
+    if (
+      error ||
+      !o ||
+      !(await verifyExistingEventOrganization(admin, o, input.hotelOrganizationId))
+    ) {
       return { error: 'Organization not found' }
     }
     return {

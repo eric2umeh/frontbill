@@ -477,6 +477,26 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
     return raw[Math.floor(raw.length / 2)]
   }
 
+  const loadActiveRoomHolds = async (supabase: any, tenantId: string) => {
+    const { data, error } = await supabase
+      .from('bookings')
+      .select('room_id, check_in, check_out')
+      .eq('organization_id', tenantId)
+      .in('status', ['confirmed', 'reserved', 'checked_in'])
+      .limit(BOOKING_MODAL_ROOMS_LIMIT)
+    if (error) throw error
+    const rows = data || []
+    setAllActiveBookings(rows)
+    return rows
+  }
+
+  const overlappingRoomIds = (holds: any[], cin: string, cout: string) =>
+    new Set(
+      holds
+        .filter((b) => b.check_in < cout && b.check_out > cin && b.room_id)
+        .map((b) => b.room_id),
+    )
+
   const checkRoomAvailability = () => {
     if (!checkIn || !checkOut || nights <= 0) { toast.error('Select valid check-in and check-out dates'); return }
     const cin = toLocalDateStr(checkIn)
@@ -784,6 +804,42 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
     setLoading(true)
     try {
       const supabase = createClient()
+      const submitCin = toLocalDateStr(checkIn)
+      const submitCout = toLocalDateStr(checkOut)
+      const activeRoomHolds = await loadActiveRoomHolds(supabase, orgId)
+      const liveBookedRoomIds = overlappingRoomIds(activeRoomHolds, submitCin, submitCout)
+
+      if (!fillLater && pickedRoomIds.length > 0) {
+        for (const id of pickedRoomIds) {
+          if (liveBookedRoomIds.has(id)) {
+            throw new Error('One or more picked rooms overlap another booking — run availability again.')
+          }
+        }
+      }
+
+      if (!fillLater && pickedRoomIds.length === 0) {
+        const requestedByType: Record<string, number> = {}
+        entries.forEach((entry) => {
+          requestedByType[entry.roomType] = (requestedByType[entry.roomType] || 0) + entry.numberOfRooms
+        })
+        const shortages = Object.entries(requestedByType)
+          .map(([roomType, requested]) => {
+            const available = allRooms.filter(
+              (r) => r.room_type === roomType && !liveBookedRoomIds.has(r.id),
+            ).length
+            return { roomType, requested, available }
+          })
+          .filter((item) => item.available < item.requested)
+
+        if (shortages.length > 0) {
+          throw new Error(
+            shortages
+              .map((item) => `${item.roomType}: requested ${item.requested}, available ${item.available}`)
+              .join(' | '),
+          )
+        }
+      }
+
       let createdCount = 0
 
       /** When Step 1 rooms are locked, dequeue by type in numeric room-number order */
@@ -887,15 +943,8 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
           )
         }
 
-        const cin = toLocalDateStr(checkIn)
-        const cout = toLocalDateStr(checkOut)
-        const bookedIds = new Set(
-          allActiveBookings
-            .filter((b) => b.check_in < cout && b.check_out > cin && b.room_id)
-            .map((b) => b.room_id),
-        )
         const availablePool = sortRoomsByNumber(
-          allRooms.filter((r: { id: string }) => !bookedIds.has(r.id)),
+          allRooms.filter((r: { id: string }) => !liveBookedRoomIds.has(r.id)),
         )
         if (availablePool.length < totalRooms) {
           throw new Error(
@@ -917,8 +966,8 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
                 guest_id: fillLaterGuestId,
                 room_id: room.id,
                 folio_id: folioId,
-                check_in: cin,
-                check_out: cout,
+                check_in: submitCin,
+                check_out: submitCout,
                 number_of_nights: nights,
                 rate_per_night: nightly,
                 total_amount: totalAmt,
@@ -965,13 +1014,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
       } else {
         for (const entry of entries) {
           const totalRoomSlots = entry.numberOfRooms
-          const cin = toLocalDateStr(checkIn)
-          const cout = toLocalDateStr(checkOut)
-          const bookedIds = new Set(
-            allActiveBookings
-              .filter(b => b.check_in < cout && b.check_out > cin && b.room_id)
-              .map(b => b.room_id),
-          )
+          const bookedIds = liveBookedRoomIds
 
           let finalGuestId = entry.guestId
           const entryGuestName = formatPersonName(entry.guestName)
@@ -984,8 +1027,9 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
               const q = pickedQueues[entry.roomType] || []
               room = q.shift()
               if (!room) {
-                toast.error(`Not enough picked ${entry.roomType} rooms — adjust Step 2 or room selection in Step 1.`)
-                return
+                throw new Error(
+                  `Not enough picked ${entry.roomType} rooms — adjust Step 2 or room selection in Step 1.`,
+                )
               }
             } else {
               const pool = sortRoomsByNumber(
@@ -1002,8 +1046,9 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
             usedRoomIds.add(room.id)
             const ratePn = resolveRatePerNight(room)
             if (ratePn <= 0) {
-              toast.error(`Missing nightly price for room ${room.room_number}. Set it under Rooms or enter a custom rate in Step 2.`)
-              return
+              throw new Error(
+                `Missing nightly price for room ${room.room_number}. Set it under Rooms or enter a custom rate in Step 2.`,
+              )
             }
 
             const total = ratePn * nights
