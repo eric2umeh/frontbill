@@ -7,12 +7,17 @@ function batchTieBreaker(b: ProductionBatch): number {
   return Math.max(closed, opened)
 }
 
-function batchRank(b: ProductionBatch | undefined): number {
-  if (!b) return -1
-  return b.status === 'in_progress' ? 10 : 5
+const BATCH_STATUS_RANK: Record<ProductionBatch['status'], number> = {
+  in_progress: 10,
+  completed: 20,
 }
 
-/** Merge org production runs with in-memory state — never drop an in-progress run. */
+function batchRank(b: ProductionBatch | undefined): number {
+  if (!b) return -1
+  return BATCH_STATUS_RANK[b.status] ?? 0
+}
+
+/** Merge org production runs with in-memory state without rolling completed runs back open. */
 export function mergeProductionBatchesFromRemote(
   local: ProductionBatch[],
   remote: ProductionBatch[],

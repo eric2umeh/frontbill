@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
@@ -33,6 +33,7 @@ import {
 } from "@/lib/supply-chain/measurement-units";
 import { useClientMounted } from "@/hooks/use-client-mounted";
 import { playNotificationBeep } from "@/lib/utils/play-notification-beep";
+import { validateRetirementSubmission } from "@/lib/supply-chain/retirement-validation";
 
 const RETIRE_QTY_INPUT_CLASS =
   "h-8 tabular-nums [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none";
@@ -107,7 +108,7 @@ export function PurchasingWorkspace() {
   const formatQtyDisplay = (n: number) =>
     Number.isFinite(n) && n > 0 ? String(n) : "";
 
-  const initRetire = (poId: string) => {
+  const initRetire = useCallback((poId: string) => {
     const po = purchaseOrders.find((p) => p.id === poId);
     if (!po) return;
     setSelectedId(poId);
@@ -140,7 +141,7 @@ export function PurchasingWorkspace() {
     }
     setRetireQtyText(qty);
     setRetirePriceText(price);
-  };
+  }, [purchaseOrders]);
 
   const updateRetireQty = useCallback((lineId: string, raw: string) => {
     const cleaned = sanitizeQuantityInput(raw);
@@ -206,6 +207,17 @@ export function PurchasingWorkspace() {
     role: canonicalRoleKey(role) ?? "staff",
   };
   const canClearHistory = canAddStoreItemDirect(role);
+  const retirementSubmitError =
+    selected && isPurchasingRetireCandidate(selected.status)
+      ? validateRetirementSubmission(selected, retireLines)
+      : null;
+
+  useEffect(() => {
+    if (!selected || !isPurchasingRetireCandidate(selected.status) || retireLines.length > 0) {
+      return;
+    }
+    initRetire(selected.id);
+  }, [selected, retireLines.length, initRetire]);
 
   if (
     selectedId &&
@@ -340,8 +352,13 @@ export function PurchasingWorkspace() {
         </div>
 
         <Button
+          disabled={Boolean(retirementSubmitError)}
           onClick={() => {
-            submitRetirement(selected.id, retireLines, actor);
+            const res = submitRetirement(selected.id, retireLines, actor);
+            if ("error" in res) {
+              toast.error(res.error);
+              return;
+            }
             playNotificationBeep();
             toast.success("Retirement submitted — accountant will review in Expenses → Retirement");
             setSelectedId(null);
@@ -350,6 +367,9 @@ export function PurchasingWorkspace() {
         >
           Submit retirement for accountant review
         </Button>
+        {retirementSubmitError ? (
+          <p className="text-sm text-destructive">{retirementSubmitError}</p>
+        ) : null}
       </div>
     );
   }

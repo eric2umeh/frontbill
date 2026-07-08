@@ -78,7 +78,7 @@ import {
 } from "./unit-factor-storage";
 import type { StockShortageLine } from "@/lib/ui/stock-shortage-dialog";
 import { useAuth } from "@/lib/auth-context";
-import { hasPermission } from "@/lib/permissions";
+import { canSupplyRetirementReview, hasPermission } from "@/lib/permissions";
 import {
   deleteSupplyCatalogItem,
   fetchSupplyCatalog,
@@ -95,6 +95,7 @@ import {
   mergeRecipesFromRemote,
 } from "./kitchen-sync-merge";
 import { snapshotsPayloadForRole } from "./supply-snapshot-payload";
+import { validateRetirementSubmission } from "./retirement-validation";
 
 function notifyKitchenRawStockChanged() {
   if (typeof window !== "undefined") {
@@ -174,6 +175,20 @@ const EMPTY_KITCHEN_RAW_STOCK: KitchenRawStockItem[] = [];
 const EMPTY_BAR_STOCK: BarStockItem[] = [];
 const EMPTY_BATCHES: ProductionBatch[] = [];
 const EMPTY_PURCHASE_ORDERS: PurchaseOrder[] = [];
+
+type SnapshotPersistOverrides = Partial<{
+  recipes: Recipe[];
+  batches: ProductionBatch[];
+  kitchen_stock: KitchenStockItem[];
+  kitchen_raw_stock: KitchenRawStockItem[];
+  bar_stock: BarStockItem[];
+  fnb_raw_stock: FnbRawStockItem[];
+  purchase_orders: PurchaseOrder[];
+  issue_out_log: IssueOutRecord[];
+  activity_log: ActivityEntry[];
+  pending_items: PendingStoreItem[];
+  basket: BasketLine[];
+}>;
 
 const SUPPLY_STORAGE_VERSION = 2;
 const SUPPLY_STORAGE_VERSION_KEY = "frontbill_supply_storage_version";
@@ -435,6 +450,7 @@ function useSupplyChainImpl() {
   const issueOutLogRef = useRef(issueOutLog);
   const activityLogRef = useRef(activityLog);
   const pendingStoreItemsRef = useRef(pendingStoreItems);
+  const retirementDecisionInFlightRef = useRef(new Set<string>());
   useEffect(() => {
     recipesRef.current = recipes;
     kitchenStockRef.current = kitchenStock;
@@ -459,7 +475,16 @@ function useSupplyChainImpl() {
     pendingStoreItems,
   ]);
 
-  const persistSnapshotsNow = useCallback(() => {
+  useEffect(() => {
+    for (const poId of Array.from(retirementDecisionInFlightRef.current)) {
+      const po = purchaseOrders.find((p) => p.id === poId);
+      if (po?.status !== "retirement_pending_accountant") {
+        retirementDecisionInFlightRef.current.delete(poId);
+      }
+    }
+  }, [purchaseOrders]);
+
+  const persistSnapshotsNow = useCallback((overrides: SnapshotPersistOverrides = {}) => {
     if (!useDbPersistence || !dbHydratedRef.current || snapshotSyncSkipRef.current) {
       return;
     }
@@ -467,17 +492,17 @@ function useSupplyChainImpl() {
       userId,
       snapshotsPayloadForRole(
         {
-          recipes: recipesRef.current,
-          batches: batchesRef.current,
-          kitchen_stock: kitchenStockRef.current,
-          kitchen_raw_stock: kitchenRawStockRef.current,
-          bar_stock: barStockRef.current,
-          fnb_raw_stock: fnbRawStockRef.current,
-          purchase_orders: purchaseOrdersRef.current,
-          issue_out_log: issueOutLogRef.current,
-          activity_log: activityLogRef.current,
-          pending_items: pendingStoreItemsRef.current,
-          basket: basketRef.current,
+          recipes: overrides.recipes ?? recipesRef.current,
+          batches: overrides.batches ?? batchesRef.current,
+          kitchen_stock: overrides.kitchen_stock ?? kitchenStockRef.current,
+          kitchen_raw_stock: overrides.kitchen_raw_stock ?? kitchenRawStockRef.current,
+          bar_stock: overrides.bar_stock ?? barStockRef.current,
+          fnb_raw_stock: overrides.fnb_raw_stock ?? fnbRawStockRef.current,
+          purchase_orders: overrides.purchase_orders ?? purchaseOrdersRef.current,
+          issue_out_log: overrides.issue_out_log ?? issueOutLogRef.current,
+          activity_log: overrides.activity_log ?? activityLogRef.current,
+          pending_items: overrides.pending_items ?? pendingStoreItemsRef.current,
+          basket: overrides.basket ?? basketRef.current,
         },
         role,
       ),
@@ -1388,57 +1413,62 @@ function useSupplyChainImpl() {
   );
 
   const submitRetirement = useCallback(
-    (poId: string, lines: RetirementLine[], actor: Actor) => {
-      setPurchaseOrders((prev) => {
-        const po = prev.find((p) => p.id === poId);
-        if (!po) return prev;
-        const normalized = lines.map((l) => ({
-          ...l,
-          notBought: l.notBought ?? l.removed ?? false,
-        }));
-        const actualSpent = normalized
-          .filter((l) => !l.notBought)
-          .reduce((s, l) => s + l.totalPaid, 0);
-        const refund = po.cashDisbursed - actualSpent;
+    (poId: string, lines: RetirementLine[], actor: Actor): { ok: true } | { error: string } => {
+      const po = purchaseOrders.find((p) => p.id === poId);
+      if (!po) return { error: "Purchase order not found" };
 
-        setActivityLog((a) =>
-          log(
-            a,
-            "retirement_submitted",
-            actor,
-            `Retirement submitted for accountant review — est. spend ₦${actualSpent.toLocaleString()}, refund ₦${refund.toLocaleString()}`,
-            poId,
-          ),
-        );
+      const validationError = validateRetirementSubmission(po, lines);
+      if (validationError) return { error: validationError };
 
-        pushSupplyNotification({
-          audience: ["accountant"],
-          title: `Retirement submitted — ${po.poNumber}`,
-          body: `${actor.name} submitted market retirement (₦${actualSpent.toLocaleString()} spent)`,
-          href: "/expenses?tab=retirement",
-        });
+      const normalized = lines.map((l) => ({
+        ...l,
+        notBought: l.notBought ?? l.removed ?? false,
+      }));
+      const actualSpent = normalized
+        .filter((l) => !l.notBought)
+        .reduce((s, l) => s + l.totalPaid, 0);
+      const refund = po.cashDisbursed - actualSpent;
+      const nextPurchaseOrders = purchaseOrders.map((p) =>
+        p.id === poId
+          ? {
+              ...p,
+              status: "retirement_pending_accountant" as const,
+              retirement: {
+                actualSpent,
+                refundToCashier: refund,
+                priceChanges: normalized.filter((l) => l.poPrice !== l.actualPrice)
+                  .length,
+                lines: normalized,
+                submittedAt: new Date().toISOString(),
+                submittedBy: actor.name,
+              },
+            }
+          : p,
+      );
 
-        return prev.map((p) =>
-          p.id === poId
-            ? {
-                ...p,
-                status: "retirement_pending_accountant" as const,
-                retirement: {
-                  actualSpent,
-                  refundToCashier: refund,
-                  priceChanges: normalized.filter((l) => l.poPrice !== l.actualPrice)
-                    .length,
-                  lines: normalized,
-                  submittedAt: new Date().toISOString(),
-                  submittedBy: actor.name,
-                },
-              }
-            : p,
-        );
+      setActivityLog((a) =>
+        log(
+          a,
+          "retirement_submitted",
+          actor,
+          `Retirement submitted for accountant review — est. spend ₦${actualSpent.toLocaleString()}, refund ₦${refund.toLocaleString()}`,
+          poId,
+        ),
+      );
+
+      pushSupplyNotification({
+        audience: ["accountant"],
+        title: `Retirement submitted — ${po.poNumber}`,
+        body: `${actor.name} submitted market retirement (₦${actualSpent.toLocaleString()} spent)`,
+        href: "/expenses?tab=retirement",
       });
-      persistSnapshotsNow();
+
+      purchaseOrdersRef.current = nextPurchaseOrders;
+      setPurchaseOrders(nextPurchaseOrders);
+      persistSnapshotsNow({ purchase_orders: nextPurchaseOrders });
+      return { ok: true };
     },
-    [schedulePersistSnapshots, persistSnapshotsNow],
+    [purchaseOrders, persistSnapshotsNow],
   );
 
   const accountantRetirementDecision = useCallback(
@@ -1448,15 +1478,30 @@ function useSupplyChainImpl() {
       comment: string,
       actor: Actor,
     ): { ok: true } | { error: string } => {
+      if (!canSupplyRetirementReview(actor.role)) {
+        return { error: "You do not have permission to review market retirement" };
+      }
+      if (retirementDecisionInFlightRef.current.has(poId)) {
+        return { error: "This retirement is already being reviewed" };
+      }
+
       const po = purchaseOrders.find((p) => p.id === poId);
       if (!po?.retirement) return { error: "Retirement not found" };
       if (po.status !== "retirement_pending_accountant") {
         return { error: "This PO is not awaiting retirement review" };
       }
+      if (approved) {
+        const validationError = validateRetirementSubmission(
+          { ...po, status: "disbursed" },
+          po.retirement.lines,
+        );
+        if (validationError) return { error: validationError };
+      }
+
+      retirementDecisionInFlightRef.current.add(poId);
 
       if (!approved) {
-        setPurchaseOrders((prev) =>
-          prev.map((p) =>
+        const nextPurchaseOrders = purchaseOrders.map((p) =>
             p.id === poId
               ? {
                   ...p,
@@ -1470,8 +1515,9 @@ function useSupplyChainImpl() {
                   },
                 }
               : p,
-          ),
         );
+        purchaseOrdersRef.current = nextPurchaseOrders;
+        setPurchaseOrders(nextPurchaseOrders);
         setActivityLog((a) =>
           log(
             a,
@@ -1487,13 +1533,12 @@ function useSupplyChainImpl() {
           body: comment || "Accountant rejected the retirement submission.",
           href: "/supply/purchasing",
         });
-        persistSnapshotsNow();
+        persistSnapshotsNow({ purchase_orders: nextPurchaseOrders });
         return { ok: true };
       }
 
       applyRetirementToStock(po, po.retirement.lines);
-      setPurchaseOrders((prev) =>
-        prev.map((p) =>
+      const nextPurchaseOrders = purchaseOrders.map((p) =>
           p.id === poId
             ? {
                 ...p,
@@ -1507,8 +1552,9 @@ function useSupplyChainImpl() {
                 },
               }
             : p,
-        ),
       );
+      purchaseOrdersRef.current = nextPurchaseOrders;
+      setPurchaseOrders(nextPurchaseOrders);
       setBasket([]);
       setActivityLog((a) =>
         log(
@@ -1525,7 +1571,7 @@ function useSupplyChainImpl() {
         body: `Central store stock updated. Refund to cashier: ₦${(po.retirement?.refundToCashier ?? 0).toLocaleString()}.`,
         href: "/supply/purchasing",
       });
-      persistSnapshotsNow();
+      persistSnapshotsNow({ purchase_orders: nextPurchaseOrders });
       return { ok: true };
     },
     [purchaseOrders, applyRetirementToStock, persistSnapshotsNow],
