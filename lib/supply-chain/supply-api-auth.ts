@@ -20,6 +20,15 @@ function clientOrgIdFromRequest(
   return fromBody || null
 }
 
+export function resolveProfileOrganizationScope(
+  profileOrgId: string | null | undefined,
+  clientOrgId: string | null,
+): string | null {
+  const orgId = profileOrgId ?? null
+  if (orgId && clientOrgId && clientOrgId !== orgId) return null
+  return orgId
+}
+
 async function resolveAuthedUserId(
   request: Request,
   callerId: string,
@@ -64,39 +73,7 @@ async function resolveOrgId(
   }
 
   const role = canonicalRoleKey(profile.role) ?? String(profile.role ?? '')
-  let orgId = profile.organization_id ?? null
-
-  if (!orgId && clientOrgId) {
-    const { data: org } = await admin
-      .from('organizations')
-      .select('id')
-      .eq('id', clientOrgId)
-      .maybeSingle()
-    if (org?.id) {
-      orgId = org.id
-      await admin
-        .from('profiles')
-        .update({ organization_id: orgId })
-        .eq('id', callerId)
-        .is('organization_id', null)
-    }
-  }
-
-  if (!orgId) {
-    const { data: orgs } = await admin.from('organizations').select('id').limit(2)
-    if (orgs?.length === 1) {
-      orgId = orgs[0].id
-      await admin
-        .from('profiles')
-        .update({ organization_id: orgId })
-        .eq('id', callerId)
-        .is('organization_id', null)
-    }
-  }
-
-  if (orgId && clientOrgId && profile.organization_id && clientOrgId !== profile.organization_id) {
-    return { orgId: null, role, profileMissing: false }
-  }
+  const orgId = resolveProfileOrganizationScope(profile.organization_id, clientOrgId)
 
   return { orgId, role, profileMissing: false }
 }

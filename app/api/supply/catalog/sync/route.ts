@@ -8,6 +8,10 @@ import {
 } from '@/lib/supply-chain/supply-db-mappers'
 import type { StoreItem } from '@/lib/supply-chain/types'
 import { toTitleCaseWords } from '@/lib/supply-chain/title-case'
+import {
+  canSyncSupplyCatalog,
+  hasForeignCatalogOwnership,
+} from '@/lib/supply-chain/supply-catalog-sync-security'
 
 function missingTableResponse(message: string) {
   if (/supply_catalog_items|schema cache|does not exist/i.test(message)) {
@@ -32,6 +36,10 @@ export async function POST(request: Request) {
     const auth = await resolveSupplyAuthedUser(request, caller_id, body as Record<string, unknown>)
     if (auth instanceof NextResponse) return auth
 
+    if (!canSyncSupplyCatalog(auth.role)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+
     if (!Array.isArray(items)) {
       return NextResponse.json({ error: 'items must be an array' }, { status: 400 })
     }
@@ -53,6 +61,24 @@ export async function POST(request: Request) {
 
     if (rows.length === 0) {
       return NextResponse.json({ items: [] })
+    }
+
+    const rowIds = [...new Set(rows.map((row) => row.id))]
+    const { data: foreignRows, error: ownershipError } = await admin
+      .from('supply_catalog_items')
+      .select('id, organization_id')
+      .in('id', rowIds)
+      .neq('organization_id', auth.orgId)
+      .limit(1)
+
+    if (ownershipError) {
+      const missing = missingTableResponse(ownershipError.message)
+      if (missing) return missing
+      return NextResponse.json({ error: ownershipError.message }, { status: 400 })
+    }
+
+    if (hasForeignCatalogOwnership(foreignRows, auth.orgId)) {
+      return NextResponse.json({ error: 'Cannot sync catalog items from another hotel' }, { status: 403 })
     }
 
     const { data, error } = await admin
