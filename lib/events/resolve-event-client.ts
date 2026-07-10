@@ -120,10 +120,26 @@ export async function resolveEventClientRecord(
   if (orgId) {
     const { data: o, error } = await admin
       .from('organizations')
-      .select('id, name, phone, email, org_type')
+      .select('id, name, phone, email, org_type, created_by')
       .eq('id', orgId)
       .single()
-    if (error || !o || !o.org_type) {
+    if (error || !o || !o.org_type || o.id === input.hotelOrganizationId) {
+      return { error: 'Organization not found' }
+    }
+    const createdBy = String(o.created_by || '').trim()
+    if (!createdBy) {
+      return { error: 'Organization not found' }
+    }
+    const { data: creatorProfile, error: creatorErr } = await admin
+      .from('profiles')
+      .select('organization_id')
+      .eq('id', createdBy)
+      .single()
+    if (
+      creatorErr ||
+      !creatorProfile ||
+      creatorProfile.organization_id !== input.hotelOrganizationId
+    ) {
       return { error: 'Organization not found' }
     }
     return {
