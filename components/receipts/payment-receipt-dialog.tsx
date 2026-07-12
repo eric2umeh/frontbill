@@ -76,7 +76,8 @@ function buildPayload(
     ctype === "room_charge" ||
     ctype === "reservation" ||
     ctype === "additional_charge" ||
-    ctype === "late_checkout";
+    ctype === "late_checkout" ||
+    ctype === "no_show_fee";
   const ctx =
     ctype === "payment" && folioContextLines && folioContextLines.length > 0
       ? folioContextLines
