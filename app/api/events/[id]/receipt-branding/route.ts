@@ -49,7 +49,7 @@ export async function GET(request: Request, ctx: { params: Promise<{ id: string 
 
     const { data: org, error: orgErr } = await admin
       .from('organizations')
-      .select('name, address, phone, email')
+      .select('name, address, phone, email, logo_url')
       .eq('id', eventOrgId)
       .single()
 
@@ -63,6 +63,7 @@ export async function GET(request: Request, ctx: { params: Promise<{ id: string 
       address: org?.address ?? '',
       phone: org?.phone ?? '',
       email: org?.email ?? '',
+      logoUrl: org?.logo_url ?? null,
     })
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'Server error'
