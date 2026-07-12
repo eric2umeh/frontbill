@@ -28,6 +28,7 @@ import CityLedgerPaymentModal from '@/components/city-ledger/city-ledger-payment
 import { useAuth } from '@/lib/auth-context'
 import { hasPermission } from '@/lib/permissions'
 import { toast } from 'sonner'
+import { bookingDisplayBillBalance } from '@/lib/utils/booking-bill-balance'
 import { PageLoadingState } from '@/components/loading-screen'
 
 interface GuestAccount {
@@ -175,32 +176,35 @@ export default function AccountDetailPage() {
         const rawBookings = bookingData || []
         const bookingIds = rawBookings.map((b: any) => b.id)
         let folioPaymentsTotal = 0
-        let folioPendingByBooking: { [id: string]: number } = {}
+        const chargesByBooking: Record<string, any[]> = {}
 
         if (bookingIds.length > 0) {
           const { data: folioCharges } = await supabase
             .from('folio_charges')
-            .select('booking_id, amount, payment_status, charge_type')
+            .select('booking_id, amount, payment_status, charge_type, payment_method')
             .in('booking_id', bookingIds)
           if (folioCharges) {
-            folioCharges.forEach((c: any) => {
-              // city_ledger charges are billed to an account — still outstanding debt owed to the hotel
-              if (['pending', 'unpaid', 'city_ledger'].includes(c.payment_status) && Number(c.amount) > 0) {
-                folioPendingByBooking[c.booking_id] = (folioPendingByBooking[c.booking_id] || 0) + Number(c.amount)
-              }
+            for (const c of folioCharges) {
+              const bid = c.booking_id
+              if (!chargesByBooking[bid]) chargesByBooking[bid] = []
+              chargesByBooking[bid].push(c)
               if (c.charge_type === 'payment' && Number(c.amount) < 0) {
                 folioPaymentsTotal += Math.abs(Number(c.amount))
               }
-            })
+            }
           }
         }
 
         const enrichedBookings = rawBookings.map((b: any) => {
-          const fallbackOwed = Math.max(0, Number(b.total_amount || 0) - Number(b.deposit || 0))
-          const outstanding = Math.max(
-            Number(folioPendingByBooking[b.id] || 0),
-            Number(b.balance || 0),
-            fallbackOwed
+          const ch = chargesByBooking[b.id] ?? []
+          const outstanding = bookingDisplayBillBalance(
+            {
+              balance: b.balance,
+              deposit: b.deposit,
+              total_amount: b.total_amount,
+              payment_status: b.payment_status,
+            },
+            ch,
           )
           return { ...b, balance: outstanding }
         })
