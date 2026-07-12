@@ -8,11 +8,19 @@ import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { Badge } from '@/components/ui/badge'
 import { toast } from 'sonner'
-import { Loader2, Building2, Shield, Eye, EyeOff, Clock, ImageIcon, Trash2 } from 'lucide-react'
+import { Loader2, Building2, Shield, Eye, EyeOff, Clock, ImageIcon, Trash2, Gift, UserX } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
 import { createClient } from '@/lib/supabase/client'
 import { canonicalRoleKey, hasPermission } from '@/lib/permissions'
 import { isOrgCheckoutPolicyColumnError } from '@/lib/utils/org-checkout-policy'
+import { isNoShowPolicyColumnError } from '@/lib/reservations/no-show-policy'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 
 export default function SettingsPage() {
   const { userId, email, name, role, organizationId, organizationLogoUrl, setOrganizationLogoUrl } = useAuth()
@@ -41,6 +49,14 @@ export default function SettingsPage() {
   const hotelLogoInputRef = useRef<HTMLInputElement>(null)
   /** False when DB has no `checkout_time` / `late_checkout_fee_per_hour` (run add-checkout-policy SQL) */
   const [checkoutPolicyDbAvailable, setCheckoutPolicyDbAvailable] = useState(true)
+  const [billingPolicyDbAvailable, setBillingPolicyDbAvailable] = useState(true)
+
+  const [noShowFeeMode, setNoShowFeeMode] = useState<'percent' | 'flat_night' | 'flat_stay'>('percent')
+  const [noShowFeePercent, setNoShowFeePercent] = useState('100')
+  const [noShowFeeFlat, setNoShowFeeFlat] = useState('')
+  const [cashbackEnabled, setCashbackEnabled] = useState(true)
+  const [cashbackPercent, setCashbackPercent] = useState('2')
+  const [billingPolicySaving, setBillingPolicySaving] = useState(false)
   /** Administrator + Superadmin (canonical); not strict string match on role label */
   const canManageHotelSettings = hasPermission(role, 'settings:manage')
   const canUpdateHotelLogo = canonicalRoleKey(role) === 'superadmin'
@@ -113,6 +129,40 @@ export default function SettingsPage() {
       }
     }
     fetchHotelInfo()
+  }, [organizationId])
+
+  useEffect(() => {
+    async function fetchBillingPolicy() {
+      if (!organizationId || !supabase) return
+      const { data, error } = await supabase
+        .from('organizations')
+        .select(
+          'no_show_fee_mode, no_show_fee_percent, no_show_fee_flat_amount, cashback_enabled, cashback_percent',
+        )
+        .eq('id', organizationId)
+        .maybeSingle()
+
+      if (error) {
+        if (isNoShowPolicyColumnError(error)) {
+          setBillingPolicyDbAvailable(false)
+        }
+        return
+      }
+      setBillingPolicyDbAvailable(true)
+      const mode = String(data?.no_show_fee_mode || 'percent')
+      setNoShowFeeMode(
+        mode === 'flat_night' || mode === 'flat_stay' ? mode : 'percent',
+      )
+      setNoShowFeePercent(String(data?.no_show_fee_percent ?? 100))
+      setNoShowFeeFlat(
+        data?.no_show_fee_flat_amount != null
+          ? String(data.no_show_fee_flat_amount)
+          : '',
+      )
+      setCashbackEnabled(data?.cashback_enabled !== false)
+      setCashbackPercent(String(data?.cashback_percent ?? 2))
+    }
+    fetchBillingPolicy()
   }, [organizationId])
 
   async function handleUpdatePassword() {
@@ -258,6 +308,35 @@ export default function SettingsPage() {
       toast.error(err.message || 'Failed to save checkout policy')
     } finally {
       setCheckoutPolicySaving(false)
+    }
+  }
+
+  async function handleSaveBillingPolicy() {
+    if (!organizationId || !canManageHotelSettings) return
+    if (!billingPolicyDbAvailable) {
+      toast.error(
+        'Run scripts/073_no_show_cashback_policy.sql in Supabase SQL editor first.',
+      )
+      return
+    }
+    setBillingPolicySaving(true)
+    try {
+      const { error } = await supabase
+        .from('organizations')
+        .update({
+          no_show_fee_mode: noShowFeeMode,
+          no_show_fee_percent: parseFloat(noShowFeePercent) || 100,
+          no_show_fee_flat_amount: noShowFeeFlat ? parseFloat(noShowFeeFlat) : null,
+          cashback_enabled: cashbackEnabled,
+          cashback_percent: parseFloat(cashbackPercent) || 2,
+        })
+        .eq('id', organizationId)
+      if (error) throw error
+      toast.success('No-show and cashback policies saved')
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to save billing policies')
+    } finally {
+      setBillingPolicySaving(false)
     }
   }
 
@@ -590,6 +669,124 @@ export default function SettingsPage() {
             <Button onClick={handleSaveCheckoutPolicy} disabled={checkoutPolicySaving || !checkoutPolicyDbAvailable}>
               {checkoutPolicySaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Save Policy
+            </Button>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <UserX className="h-5 w-5" />
+            <CardTitle>No-Show Billing</CardTitle>
+            {!canManageHotelSettings && <Badge variant="outline" className="ml-auto">View Only</Badge>}
+          </div>
+          <CardDescription>
+            Charge guests who do not arrive after a reservation. Each no-show gets an individual folio for accounts to collect.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {!billingPolicyDbAvailable && (
+            <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              Run <code className="rounded bg-amber-100 px-1">scripts/073_no_show_cashback_policy.sql</code> in Supabase.
+            </div>
+          )}
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label>Fee calculation</Label>
+              <Select
+                value={noShowFeeMode}
+                onValueChange={(v) =>
+                  setNoShowFeeMode(v as 'percent' | 'flat_night' | 'flat_stay')
+                }
+                disabled={!canManageHotelSettings || !billingPolicyDbAvailable}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="percent">Percentage of room rate</SelectItem>
+                  <SelectItem value="flat_night">Flat amount per night</SelectItem>
+                  <SelectItem value="flat_stay">Flat amount per stay / person</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {noShowFeeMode === 'percent' ? (
+              <div className="space-y-2">
+                <Label>Percentage (%)</Label>
+                <Input
+                  type="number"
+                  min="0"
+                  max="100"
+                  value={noShowFeePercent}
+                  onChange={(e) => setNoShowFeePercent(e.target.value)}
+                  disabled={!canManageHotelSettings || !billingPolicyDbAvailable}
+                />
+                <p className="text-xs text-muted-foreground">e.g. 100 = full rate, 50 = half</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <Label>Flat amount (₦)</Label>
+                <Input
+                  type="number"
+                  min="0"
+                  value={noShowFeeFlat}
+                  onChange={(e) => setNoShowFeeFlat(e.target.value)}
+                  disabled={!canManageHotelSettings || !billingPolicyDbAvailable}
+                />
+              </div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <Gift className="h-5 w-5" />
+            <CardTitle>Cashback Program</CardTitle>
+          </div>
+          <CardDescription>
+            Guests earn cashback on cash, POS, and transfer payments at any outlet. Redeem as a payment method at checkout.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label>Program</Label>
+              <Select
+                value={cashbackEnabled ? 'on' : 'off'}
+                onValueChange={(v) => setCashbackEnabled(v === 'on')}
+                disabled={!canManageHotelSettings || !billingPolicyDbAvailable}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="on">Enabled</SelectItem>
+                  <SelectItem value="off">Disabled</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Earn rate (%)</Label>
+              <Input
+                type="number"
+                min="0"
+                step="0.1"
+                value={cashbackPercent}
+                onChange={(e) => setCashbackPercent(e.target.value)}
+                disabled={!canManageHotelSettings || !billingPolicyDbAvailable}
+              />
+            </div>
+          </div>
+          {canManageHotelSettings && (
+            <Button
+              onClick={handleSaveBillingPolicy}
+              disabled={billingPolicySaving || !billingPolicyDbAvailable}
+            >
+              {billingPolicySaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Save No-Show &amp; Cashback Policies
             </Button>
           )}
         </CardContent>
