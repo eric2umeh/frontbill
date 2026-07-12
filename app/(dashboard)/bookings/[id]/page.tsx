@@ -63,6 +63,12 @@ import {
   type PaymentLedgerReceiptRow,
 } from "@/lib/receipts/booking-receipt-utils";
 import { canAdministerBookingRecord } from "@/lib/booking/can-administer-booking-record";
+import {
+  earnCashbackClient,
+  fetchGuestCashbackBalanceClient,
+  redeemCashbackClient,
+} from "@/lib/cashback/cashback-client";
+import { paymentMethodEarnsCashback } from "@/lib/cashback/cashback-config";
 import { createClient } from "@/lib/supabase/client";
 import { reconcileRoomStatusesClient } from "@/lib/rooms/reconcile-room-status-client";
 import { useAuth } from "@/lib/auth-context";
@@ -152,6 +158,7 @@ export default function BookingDetailPage({
     id: null,
     balance: 0,
   });
+  const [guestCashbackBalance, setGuestCashbackBalance] = useState(0);
   const [creditAmount, setCreditAmount] = useState("");
   const [creditPaymentMethod, setCreditPaymentMethod] = useState("");
   const [creditNotes, setCreditNotes] = useState("");
@@ -227,7 +234,7 @@ export default function BookingDetailPage({
         .select(
           `
           *,
-          guests(name, phone, email, address, balance),
+          guests(name, phone, email, address),
           rooms(id, room_number, room_type, price_per_night),
           organizations(name, address, phone, email)
         `,
@@ -303,6 +310,7 @@ export default function BookingDetailPage({
               address?: string;
               phone?: string;
               email?: string;
+              logoUrl?: string | null;
             };
             const hn = String(j.hotelName ?? "").trim();
             setReceiptOrg({
@@ -310,6 +318,7 @@ export default function BookingDetailPage({
               address: String(j.address ?? ""),
               phone: String(j.phone ?? ""),
               email: String(j.email ?? ""),
+              logoUrl: j.logoUrl ?? null,
             });
           }
         } catch {
@@ -562,20 +571,34 @@ export default function BookingDetailPage({
   useEffect(() => {
     if (!paymentCreditModalOpen || !booking?.organization_id) return;
     const guestName = (booking.guests?.name || "").trim();
-    if (!guestName) return;
+    const guestId = booking.guest_id || booking.guests?.id;
     (async () => {
       const supabase = createClient();
-      const row = await fetchGuestCityLedgerAccount(
-        supabase,
-        booking.organization_id,
-        guestName,
-      );
-      setBookingLedgerSnapshot({
-        id: row?.id ?? null,
-        balance: Number(row?.balance) || 0,
-      });
+      if (guestName) {
+        const row = await fetchGuestCityLedgerAccount(
+          supabase,
+          booking.organization_id,
+          guestName,
+        );
+        setBookingLedgerSnapshot({
+          id: row?.id ?? null,
+          balance: Number(row?.balance) || 0,
+        });
+      }
+      if (guestId) {
+        const cb = await fetchGuestCashbackBalanceClient(supabase, guestId);
+        setGuestCashbackBalance(cb.balance);
+      } else {
+        setGuestCashbackBalance(0);
+      }
     })();
-  }, [paymentCreditModalOpen, booking?.organization_id, booking?.guests?.name]);
+  }, [
+    paymentCreditModalOpen,
+    booking?.organization_id,
+    booking?.guests?.name,
+    booking?.guest_id,
+    booking?.guests?.id,
+  ]);
 
   const assertFolioEditable = () => {
     if (!booking) return false;
@@ -781,6 +804,31 @@ export default function BookingDetailPage({
     setAddChargeLoading(true);
     try {
       const supabase = createClient();
+      const guestId = booking.guest_id || booking.guests?.id;
+
+      if (paymentMethod === "cashback") {
+        if (!guestId) {
+          toast.error("Guest profile required to redeem cashback");
+          setAddChargeLoading(false);
+          return;
+        }
+        if (P > guestCashbackBalance + 0.001) {
+          toast.error(
+            `Insufficient cashback (available ${formatNaira(guestCashbackBalance)})`,
+          );
+          setAddChargeLoading(false);
+          return;
+        }
+        await redeemCashbackClient(supabase, {
+          guestId,
+          amount: P,
+          sourceType: "folio_payment",
+          sourceId: bookingId,
+          description: `Redeemed on folio ${booking.folio_id || bookingId}`,
+        });
+        setGuestCashbackBalance(Math.max(0, guestCashbackBalance - P));
+      }
+
       const { data: freshBk2 } = await supabase
         .from("bookings")
         .select("balance, deposit, total_amount")
@@ -864,7 +912,6 @@ export default function BookingDetailPage({
           .not("charge_type", "eq", "payment");
       }
 
-      const guestId = booking.guest_id || booking.guests?.id;
       const guestName = (booking.guests?.name || "").trim();
         if (guestId) {
           const { data: guestRow } = await supabase
@@ -907,6 +954,23 @@ export default function BookingDetailPage({
         ]);
       } catch (_) {
         /* non-fatal */
+      }
+
+      if (
+        guestId &&
+        paymentMethodEarnsCashback(paymentMethod) &&
+        paymentMethod !== "cashback"
+      ) {
+        const earned = await earnCashbackClient(supabase, {
+          guestId,
+          amount: P,
+          paymentMethod,
+          sourceType: "folio_payment",
+          sourceId: bookingId,
+        });
+        if (earned > 0) {
+          setGuestCashbackBalance((b) => b + earned);
+        }
       }
 
       await fetchBookingDetails(bookingId);
@@ -1767,8 +1831,22 @@ export default function BookingDetailPage({
                       <SelectItem value="cash">Cash</SelectItem>
                       <SelectItem value="pos">POS</SelectItem>
                       <SelectItem value="transfer">Transfer</SelectItem>
+                      {(booking?.guest_id || booking?.guests?.id) && (
+                        <SelectItem value="cashback">
+                          Cashback
+                          {guestCashbackBalance > 0
+                            ? ` (${formatNaira(guestCashbackBalance)} available)`
+                            : ""}
+                        </SelectItem>
+                      )}
                     </SelectContent>
                   </Select>
+                  {paymentMethod === "cashback" && (
+                    <p className="text-xs text-muted-foreground">
+                      Redeems from guest cashback balance — not counted as cash
+                      revenue.
+                    </p>
+                  )}
                 </div>
                 <Button
                   onClick={handleRecordPayment}
