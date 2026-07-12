@@ -21,6 +21,8 @@ import { toast } from 'sonner'
 import { PageLoadingState } from '@/components/loading-screen'
 import { hasPermission } from '@/lib/permissions'
 import { cancelBookingReservation, isCancellableReservationStatus } from '@/lib/reservations/cancel-reservation'
+import { isNoShowEligibleStatus } from '@/lib/reservations/mark-no-show'
+import { MarkNoShowDialog } from '@/components/reservations/mark-no-show-dialog'
 import { formatShortStayDates, MobileTableSubdetail } from '@/lib/utils/table-mobile'
 
 type BulkPageCheckoutDraft = { kind: 'row'; row: any } | { kind: 'all'; targets: any[] }
@@ -30,6 +32,18 @@ export default function BulkBookingDetailPage({ params }: { params: Promise<{ gr
   const { organizationId, userId, role } = useAuth()
   const canManageFolio = role === 'superadmin' || role === 'admin' || role === 'front_desk'
   const canCancelReservation = hasPermission(role, 'reservations:delete')
+  const canMarkNoShow =
+    hasPermission(role, 'reservations:edit') || hasPermission(role, 'bookings:edit')
+  const [noShowDialogOpen, setNoShowDialogOpen] = useState(false)
+  const [noShowBooking, setNoShowBooking] = useState<{
+    id: string
+    guestName?: string
+    folio_id?: string
+    rate_per_night?: number
+    total_amount?: number
+    check_in?: string
+    check_out?: string
+  } | null>(null)
   const [cancelGroupLoading, setCancelGroupLoading] = useState(false)
   const [groupId, setGroupId] = useState('')
   const [rows, setRows] = useState<any[]>([])
@@ -492,6 +506,27 @@ export default function BulkBookingDetailPage({ params }: { params: Promise<{ gr
                             </Button>
                           </>
                         )}
+                        {canMarkNoShow && isNoShowEligibleStatus(row.status) && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 px-2 text-[11px] text-orange-700 border-orange-200 hover:bg-orange-50"
+                            onClick={() => {
+                              setNoShowBooking({
+                                id: row.id,
+                                guestName: row.guests?.name,
+                                folio_id: row.folio_id,
+                                rate_per_night: row.rate_per_night,
+                                total_amount: row.total_amount,
+                                check_in: row.check_in,
+                                check_out: row.check_out,
+                              })
+                              setNoShowDialogOpen(true)
+                            }}
+                          >
+                            No-show
+                          </Button>
+                        )}
                         {checkoutRowEligible(row) ? (
                           <Button
                             size="sm"
@@ -521,6 +556,12 @@ export default function BulkBookingDetailPage({ params }: { params: Promise<{ gr
           </Table>
         </CardContent>
       </Card>
+      <MarkNoShowDialog
+        open={noShowDialogOpen}
+        onOpenChange={setNoShowDialogOpen}
+        booking={noShowBooking}
+        onSuccess={() => fetchBulkRows(groupId)}
+      />
     </div>
   )
 }
