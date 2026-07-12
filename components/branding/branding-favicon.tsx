@@ -3,30 +3,15 @@
 import { useEffect } from 'react'
 
 /**
- * Sets document favicon to the hotel logo when a URL is available.
- * Removes the injected link when cleared so the default app icon applies again.
+ * @deprecated Do not use for browser tab favicon — tab stays FrontBill (`app/layout.tsx` icons).
+ * Hotel logos belong on receipts and in-app shell only.
  */
-export function BrandingFavicon({ href }: { href: string | null | undefined }) {
+export function BrandingFavicon({ href: _href }: { href: string | null | undefined }) {
   useEffect(() => {
     if (typeof document === 'undefined') return
-
-    const existing = document.querySelector<HTMLLinkElement>('link[data-frontbill-brand-icon="1"]')
-    const safe = typeof href === 'string' && (href.startsWith('https://') || href.startsWith('http://'))
-
-    if (!safe) {
-      existing?.remove()
-      return
-    }
-
-    let link = existing
-    if (!link) {
-      link = document.createElement('link')
-      link.rel = 'icon'
-      link.setAttribute('data-frontbill-brand-icon', '1')
-      document.head.appendChild(link)
-    }
-    link.href = href
-  }, [href])
+    // Clear any legacy hotel favicon override from older builds.
+    document.querySelector<HTMLLinkElement>('link[data-frontbill-brand-icon="1"]')?.remove()
+  }, [])
 
   return null
 }
