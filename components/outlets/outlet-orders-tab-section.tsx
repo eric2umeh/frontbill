@@ -76,6 +76,7 @@ export function OutletOrdersTabSection({
   const [printing, setPrinting] = useState(false)
   const [reportPrintKind, setReportPrintKind] = useState<'summary' | 'full'>('summary')
   const [hotelName, setHotelName] = useState('Hotel')
+  const [hotelLogoUrl, setHotelLogoUrl] = useState<string | null>(null)
   const [orderSearch, setOrderSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [paymentFilter, setPaymentFilter] = useState<string>('all')
@@ -87,11 +88,12 @@ export function OutletOrdersTabSection({
     if (!supabase) return
     void supabase
       .from('organizations')
-      .select('name')
+      .select('name, logo_url')
       .eq('id', organizationId)
       .maybeSingle()
       .then(({ data }) => {
         if (data?.name) setHotelName(String(data.name).trim())
+        setHotelLogoUrl(data?.logo_url ? String(data.logo_url) : null)
       })
   }, [organizationId])
 
@@ -206,22 +208,24 @@ export function OutletOrdersTabSection({
           department,
         )
         if (summary.settledOrderCount === 0 && summary.openBillCount === 0) {
-          toast.error('No orders in this date range')
+          toast.error(`No purchases for ${dateFrom === dateTo ? dateFrom : `${dateFrom} – ${dateTo}`}`)
           return
         }
         printOutletSalesSummaryReport({
           hotelName,
+          logoUrl: hotelLogoUrl,
           printedBy: staffName.trim() || 'Staff',
           report: summary,
         })
       } else {
         const report = buildOutletSalesReport(rangeFilteredForPrint, dateFrom, dateTo)
         if (report.settledOrderCount === 0 && report.openOrders.length === 0) {
-          toast.error('No orders in this date range')
+          toast.error(`No purchases for ${dateFrom === dateTo ? dateFrom : `${dateFrom} – ${dateTo}`}`)
           return
         }
         printOutletSalesReport({
           hotelName,
+          logoUrl: hotelLogoUrl,
           departmentLabel,
           report,
         })
@@ -416,6 +420,12 @@ export function OutletOrdersTabSection({
         <p className="text-sm text-muted-foreground flex items-center gap-2 py-8 justify-center">
           <Loader2 className="h-4 w-4 animate-spin" />
           Searching all orders…
+        </p>
+      ) : !searching && rangeOrders.length === 0 ? (
+        <p className="text-sm text-muted-foreground py-10 text-center border rounded-lg bg-muted/30">
+          No purchases for{' '}
+          <strong>{dateFrom === dateTo ? format(parseISO(dateFrom), 'dd MMM yyyy') : `${format(parseISO(dateFrom), 'dd MMM yyyy')} – ${format(parseISO(dateTo), 'dd MMM yyyy')}`}</strong>
+          {' '}at this outlet.
         </p>
       ) : (
         <OutletOrdersPanel
