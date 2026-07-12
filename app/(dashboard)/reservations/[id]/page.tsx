@@ -30,7 +30,10 @@ import { FolioAttachmentsPanel } from '@/components/folio/folio-attachments-pane
 import { BookingPaymentReceiptPanel } from '@/components/receipts/booking-payment-receipt-panel'
 import { hasPermission } from '@/lib/permissions'
 import { cancelBookingReservation, isCancellableReservationStatus } from '@/lib/reservations/cancel-reservation'
+import { isNoShowEligibleStatus } from '@/lib/reservations/mark-no-show'
+import { MarkNoShowDialog } from '@/components/reservations/mark-no-show-dialog'
 import { formatReservationPaymentMethodLabel } from '@/lib/reservations/reservation-payment-methods'
+import { formatRoomLabel } from '@/lib/utils/room-display'
 import { PAYMENT_METHOD_SELECT_OPTIONS } from '@/lib/payments/payment-methods'
 
 export default function ReservationDetailPage({
@@ -42,6 +45,9 @@ export default function ReservationDetailPage({
   const { role, userId, organizationId, name: userName } = useAuth()
   const canManageFolio = role === 'superadmin' || role === 'admin' || role === 'front_desk'
   const canCancelReservation = hasPermission(role, 'reservations:delete')
+  const canMarkNoShow =
+    hasPermission(role, 'reservations:edit') || hasPermission(role, 'bookings:edit')
+  const [noShowDialogOpen, setNoShowDialogOpen] = useState(false)
   const [extendModalOpen, setExtendModalOpen] = useState(false)
   const [addChargeModalOpen, setAddChargeModalOpen] = useState(false)
   const [orgCheckoutTime, setOrgCheckoutTime] = useState(DEFAULT_ORG_CHECKOUT_TIME)
@@ -99,7 +105,7 @@ export default function ReservationDetailPage({
            rate_per_night, total_amount, deposit, balance, number_of_nights,
            notes, created_at,
            guests:guest_id(id, name, phone, email, address),
-           rooms:room_id(id, room_number, room_type, price_per_night)`
+           rooms:room_id(id, room_number, room_type, price_per_night, amenities)`
         )
         .eq('id', bookingId)
         .single()
@@ -406,7 +412,7 @@ export default function ReservationDetailPage({
     folioId: reservation.folio_id,
     guestName: guest?.name || 'Guest',
     guestId: guest?.id || '',
-    room: room?.room_number ? `Room ${room.room_number}` : 'Unassigned',
+    room: formatRoomLabel(room),
     currentCheckOut: reservation.check_out,
     ratePerNight: Number(reservation.rate_per_night || 0),
     organization_id: organizationId,
@@ -420,6 +426,7 @@ export default function ReservationDetailPage({
     reserved: 'bg-blue-500/10 text-blue-700',
     confirmed: 'bg-green-500/10 text-green-700',
     cancelled: 'bg-red-500/10 text-red-700',
+    no_show: 'bg-orange-500/10 text-orange-700',
   }
 
   return (
@@ -574,6 +581,16 @@ export default function ReservationDetailPage({
               ? `Check-in on ${format(new Date(reservation!.check_in), 'dd MMM')}`
               : 'Check-in Guest'}
           </Button>
+          {canMarkNoShow && isNoShowEligibleStatus(reservation?.status) && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-orange-700 border-orange-200 hover:bg-orange-50"
+              onClick={() => setNoShowDialogOpen(true)}
+            >
+              Mark No-Show
+            </Button>
+          )}
           {canCancelCurrentReservation && (
             <Button
               variant="destructive"
@@ -587,6 +604,25 @@ export default function ReservationDetailPage({
           )}
         </div>
       </div>
+
+      <MarkNoShowDialog
+        open={noShowDialogOpen}
+        onOpenChange={setNoShowDialogOpen}
+        booking={
+          reservation
+            ? {
+                id: reservation.id,
+                guestName: reservation.guests?.name,
+                folio_id: reservation.folio_id,
+                rate_per_night: reservation.rate_per_night,
+                total_amount: reservation.total_amount,
+                check_in: reservation.check_in,
+                check_out: reservation.check_out,
+              }
+            : null
+        }
+        onSuccess={() => router.push(`/bookings/${rid}`)}
+      />
 
       <div className="grid gap-6 lg:grid-cols-3">
         <Card className="lg:col-span-2">
@@ -637,9 +673,7 @@ export default function ReservationDetailPage({
               <div>
                 <div className="text-sm text-muted-foreground">Room</div>
                 <div className="font-semibold">
-                  {room
-                    ? 'Room ' + room.room_number + ' - ' + room.room_type
-                    : '-'}
+                  {room ? formatRoomLabel(room) : '—'}
                 </div>
               </div>
               <div>
