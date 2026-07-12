@@ -585,7 +585,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
       }])
       if (fcErr) throw fcErr
 
-      if (!pendingHold && depositAmount > 0 && balanceAmount > 0) {
+      if (!pendingHold && depositAmount > 0) {
         const { error: payFcErr } = await insertFolioCharges(supabase, [{
           booking_id: booking.id,
           organization_id: orgId,
