@@ -1,5 +1,6 @@
 import { escapeHtml } from '@/lib/utils/html-escape'
 import { formatNaira } from '@/lib/utils/currency'
+import { receiptLogoBlock } from '@/lib/receipts/receipt-logo'
 import type { OutletSalesReportBundle, OutletSalesReportRow } from '@/lib/outlets/outlet-sales-report'
 import { outletReportThermalStyles } from '@/lib/receipts/outlet-report-thermal-styles'
 import { printHtmlDocument } from '@/lib/receipts/receipt-pdf-print'
@@ -31,11 +32,12 @@ function sectionBlocks(rows: OutletSalesReportRow[]): string {
 
 export function buildOutletSalesReportHtml(input: {
   hotelName: string
+  logoUrl?: string | null
   departmentLabel: string
   printedAt: string
   report: OutletSalesReportBundle
 }): string {
-  const { hotelName, departmentLabel, printedAt, report } = input
+  const { hotelName, logoUrl, departmentLabel, printedAt, report } = input
   const sectionsHtml = report.sections
     .map(
       (s) => `<h2 class="sec">${escapeHtml(s.label)}
@@ -53,6 +55,7 @@ export function buildOutletSalesReportHtml(input: {
   return `<!DOCTYPE html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width"/><title>${escapeHtml(departmentLabel)} sales</title>
     <style>${outletReportThermalStyles()}</style></head><body>
     <div class="wrap">
+      ${receiptLogoBlock(logoUrl, hotelName, { maxHeightPx: 48, maxWidthPx: 160 })}
       <p class="hotel">${escapeHtml(hotelName)}</p>
       <p class="title">Full Sales Report</p>
       <div class="sub">
@@ -74,6 +77,7 @@ export function buildOutletSalesReportHtml(input: {
 
 export function printOutletSalesReport(input: {
   hotelName: string
+  logoUrl?: string | null
   departmentLabel: string
   report: OutletSalesReportBundle
 }): void {
