@@ -91,6 +91,7 @@ export function BookingPaymentReceiptPanel({
               address: String(j.address ?? ''),
               phone: String(j.phone ?? ''),
               email: String(j.email ?? ''),
+              logoUrl: j.logoUrl ?? null,
             })
           }
         } catch {
