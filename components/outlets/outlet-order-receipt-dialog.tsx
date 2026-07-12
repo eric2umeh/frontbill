@@ -25,6 +25,7 @@ type OrgBranding = {
   hotelName: string
   address?: string | null
   phone?: string | null
+  logoUrl?: string | null
 }
 
 export type OutletBillPrintKind = 'unsettled' | 'settled' | 'auto'
@@ -66,7 +67,7 @@ export function OutletOrderReceiptDialog({
       if (!supabase) return
       const { data } = await supabase
         .from('organizations')
-        .select('name, address, phone')
+        .select('name, address, phone, logo_url')
         .eq('id', organizationId)
         .maybeSingle()
       if (!cancelled && data) {
@@ -74,6 +75,7 @@ export function OutletOrderReceiptDialog({
           hotelName: String(data.name || '').trim() || 'Hotel',
           address: data.address,
           phone: data.phone,
+          logoUrl: data.logo_url,
         })
       }
     })()
@@ -98,6 +100,7 @@ export function OutletOrderReceiptDialog({
     const lines = orderLinesToThermalLines(order.outlet_order_lines ?? [])
     return buildOutletThermalBillPayload({
       hotelName: org?.hotelName ?? 'Hotel',
+      logoUrl: org?.logoUrl,
       outletLabel: departmentLabel,
       orderNumber: order.order_number,
       printedAtIso: order.settled_at ?? order.created_at,
