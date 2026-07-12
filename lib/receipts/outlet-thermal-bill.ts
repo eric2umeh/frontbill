@@ -1,5 +1,6 @@
 import { escapeHtml } from '@/lib/utils/html-escape'
 import { formatReceiptDateTime } from '@/lib/receipts/receipt-format'
+import { receiptLogoBlock } from '@/lib/receipts/receipt-logo'
 import { OUTLET_FEE_LINE_NAMES } from '@/lib/outlets/order-extra-fees'
 import { outletReceiptPaymentLabel } from '@/lib/receipts/outlet-order-receipt'
 import type { OutletOrderLineRow } from '@/lib/outlets/types'
@@ -16,6 +17,7 @@ export type OutletThermalLine = {
 
 export type OutletThermalBillPayload = {
   hotelName: string
+  logoUrl?: string | null
   outletLabel: string
   receiptNumber: string
   printedAtIso: string
@@ -105,6 +107,7 @@ export function orderLinesToThermalLines(
 
 export function buildOutletThermalBillPayload(input: {
   hotelName: string
+  logoUrl?: string | null
   outletLabel: string
   orderNumber: string
   printedAtIso: string
@@ -125,6 +128,7 @@ export function buildOutletThermalBillPayload(input: {
   const { billAmount, vatAmount, grandTotal } = splitOutletBillVat(chargeTotal)
   return {
     hotelName: input.hotelName,
+    logoUrl: input.logoUrl ?? null,
     outletLabel: input.outletLabel,
     receiptNumber: input.orderNumber,
     printedAtIso: input.printedAtIso,
@@ -171,6 +175,7 @@ export function buildOutletThermalBillHtml(p: OutletThermalBillPayload): string 
 
   return `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>${statusLabel} ${escapeHtml(p.receiptNumber)}</title><style>${thermalStyles()}</style></head><body>
   <div class="wrap">
+    ${receiptLogoBlock(p.logoUrl, p.hotelName, { maxHeightPx: 48, maxWidthPx: 140 })}
     <div class="center outlet">${outlet}</div>
     <div class="stars">******************************************</div>
     <div class="meta-row"><span>Receipt #: ${escapeHtml(p.receiptNumber)}</span><span>Date: ${escapeHtml(datePart)}</span></div>
