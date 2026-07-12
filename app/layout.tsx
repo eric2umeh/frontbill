@@ -19,13 +19,16 @@ export const metadata: Metadata = {
   },
   /** FrontBill product icon only — never the per-hotel logo (see BrandingFavicon; not used for tab). */
   icons: {
-    icon: '/logo-gb.jpeg',
-    apple: '/logo-gb.jpeg',
+    icon: [
+      { url: '/frontbill-icon.svg', type: 'image/svg+xml' },
+      { url: '/frontbill-favicon.png', sizes: '128x128', type: 'image/png' },
+    ],
+    apple: '/frontbill-favicon.png',
   },
 }
 
 export const viewport: Viewport = {
-  themeColor: '#0f172a',
+  themeColor: '#2563eb',
   width: 'device-width',
   initialScale: 1,
   maximumScale: 1,
