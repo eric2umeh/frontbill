@@ -1,6 +1,7 @@
 import { escapeHtml } from '@/lib/utils/html-escape'
 import type { OutletSalesSummaryBundle } from '@/lib/outlets/outlet-sales-summary-report'
 import { outletReportThermalStyles } from '@/lib/receipts/outlet-report-thermal-styles'
+import { receiptLogoBlock } from '@/lib/receipts/receipt-logo'
 import { printHtmlDocument } from '@/lib/receipts/receipt-pdf-print'
 
 function formatReportAmount(n: number): string {
@@ -24,11 +25,12 @@ function amountRows(lines: { label: string; amount: number }[]): string {
 
 export function buildOutletSalesSummaryHtml(input: {
   hotelName: string
+  logoUrl?: string | null
   printedBy: string
   printedAt: string
   report: OutletSalesSummaryBundle
 }): string {
-  const { hotelName, printedBy, printedAt, report: r } = input
+  const { hotelName, logoUrl, printedBy, printedAt, report: r } = input
 
   const paymentBody =
     amountRows(r.paymentLines) +
@@ -47,6 +49,7 @@ export function buildOutletSalesSummaryHtml(input: {
   return `<!DOCTYPE html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width"/><title>Sales Report Summary</title>
     <style>${outletReportThermalStyles()}</style></head><body>
     <div class="wrap">
+      ${receiptLogoBlock(logoUrl, hotelName, { maxHeightPx: 48, maxWidthPx: 160 })}
       <p class="hotel">${escapeHtml(hotelName)}</p>
       <p class="title">Sales Report</p>
       <div class="meta">
@@ -83,6 +86,7 @@ export function buildOutletSalesSummaryHtml(input: {
 
 export function printOutletSalesSummaryReport(input: {
   hotelName: string
+  logoUrl?: string | null
   printedBy: string
   report: OutletSalesSummaryBundle
 }): void {
