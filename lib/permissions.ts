@@ -44,6 +44,8 @@ export type Permission =
   | "payments:view"
   | "payments:create"
   | "payments:refund"
+  | "cashback:view"
+  | "cashback:manage"
   | "reports:view"
   | "reports:export"
   | "expenses:view"
@@ -262,6 +264,12 @@ export const ALL_PERMISSIONS: {
   {
     key: "payments:refund",
     label: "Process Refunds/Credits",
+    group: "Payments",
+  },
+  { key: "cashback:view", label: "View Cashback Program", group: "Payments" },
+  {
+    key: "cashback:manage",
+    label: "Adjust Cashback Balances",
     group: "Payments",
   },
 
@@ -614,6 +622,7 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
       "payments:view",
       "payments:create",
       "payments:refund",
+      "cashback:view",
       "reports:view",
       "reports:export",
       "expenses:view",
@@ -643,6 +652,8 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
       "payments:view",
       "payments:create",
       "payments:refund",
+      "cashback:view",
+      "cashback:manage",
       "reports:view",
       "reports:export",
       "expenses:view",
@@ -701,6 +712,7 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
       "transactions:create",
       "payments:view",
       "payments:create",
+      "cashback:view",
       "organizations:view",
       "organizations:create",
       "ledger:view",
