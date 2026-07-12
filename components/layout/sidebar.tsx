@@ -42,6 +42,7 @@ import {
   RotateCcw,
   Building2,
   Package,
+  Gift,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useNightAuditPendingCounts } from '@/hooks/use-night-audit-pending-counts'
@@ -116,6 +117,7 @@ const NAV_SECTIONS: NavSection[] = [
         permissionAny: ['transactions:view', 'analytics:view'],
       },
       { label: 'Refunds', icon: RotateCcw, href: '/refunds', permission: 'payments:refund' },
+      { label: 'Cashback', icon: Gift, href: '/cashback', permission: 'cashback:view' },
     ],
   },
   {
