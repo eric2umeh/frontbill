@@ -1,4 +1,5 @@
 import { escapeHtml } from "@/lib/utils/html-escape";
+import { receiptLogoBlock } from "@/lib/receipts/receipt-logo";
 
 /** Stable 5–8 digit display number from folio payment / charge id */
 export function receiptNumberFromId(id: string): string {
@@ -51,6 +52,7 @@ export type PaymentReceiptBranding = {
   address?: string | null;
   phone?: string | null;
   email?: string | null;
+  logoUrl?: string | null;
 };
 
 export type PaymentReceiptPayload = PaymentReceiptBranding & {
@@ -94,6 +96,7 @@ export function remarkFromChargeType(
     return d || "FOLIO CHARGE";
   }
   if (t === "late_checkout") return "LATE CHECKOUT";
+  if (t === "no_show_fee") return "NO-SHOW CHARGE";
   if (t === "payment") return "ACCOMMODATION";
   return "ACCOMMODATION";
 }
@@ -148,6 +151,7 @@ function oneReceiptBlock(p: PaymentReceiptPayload): string {
 
   return `
     <div class="block">
+      ${receiptLogoBlock(p.logoUrl, p.hotelName)}
       <div class="hotel">${hotel}</div>
       <div class="sub">${addr ? `${addr}<br/>` : ""}${phone ? `# ${phone}<br/>` : ""}${email ? `${email}` : ""}</div>
       <div class="title">${title}</div>
