@@ -3,6 +3,18 @@ export const STANDARD_PAYMENT_METHODS = ['pos', 'cash', 'transfer'] as const
 
 export type StandardPaymentMethod = (typeof STANDARD_PAYMENT_METHODS)[number]
 
+/** Folio / outlet settlement — includes cashback redemption and city ledger. */
+export const GUEST_SETTLEMENT_PAYMENT_METHODS = [
+  'cash',
+  'pos',
+  'transfer',
+  'city_ledger',
+  'cashback',
+] as const
+
+export type GuestSettlementPaymentMethod =
+  (typeof GUEST_SETTLEMENT_PAYMENT_METHODS)[number]
+
 /** Default across POS, bookings, expenses, and payment forms. */
 export const DEFAULT_PAYMENT_METHOD: StandardPaymentMethod = 'pos'
 
@@ -10,6 +22,17 @@ export const PAYMENT_METHOD_SELECT_OPTIONS: { value: StandardPaymentMethod; labe
   { value: 'pos', label: 'POS' },
   { value: 'cash', label: 'Cash' },
   { value: 'transfer', label: 'Transfer' },
+]
+
+export const GUEST_SETTLEMENT_PAYMENT_OPTIONS: {
+  value: GuestSettlementPaymentMethod
+  label: string
+}[] = [
+  { value: 'cash', label: 'Cash' },
+  { value: 'pos', label: 'POS' },
+  { value: 'transfer', label: 'Transfer' },
+  { value: 'city_ledger', label: 'City Ledger' },
+  { value: 'cashback', label: 'Cashback' },
 ]
 
 /** Operating expense API + forms (same set as standard). */
@@ -27,6 +50,7 @@ export function formatPaymentMethodLabel(method: string | null | undefined): str
   if (m === 'pending') return 'Pending (hold date, no payment)'
   if (m === 'complimentary') return 'Complimentary'
   if (m === 'city_ledger' || m === 'room_charge') return 'City ledger'
+  if (m === 'cashback') return 'Cashback'
   if (!m) return '—'
   return m
     .split(/[\s_]+/)
