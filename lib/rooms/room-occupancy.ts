@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { resolveHotelTimeZone } from '@/lib/hotel-date'
-import { isInHouseOnCalendarDay, todayYmdHotel } from '@/lib/utils/booking-in-house-dates'
+import { isInHouseOnCalendarDay, todayYmdHotel, bookingYmdHotel } from '@/lib/utils/booking-in-house-dates'
 
 export const OCCUPYING_BOOKING_STATUSES = ['checked_in', 'confirmed', 'reserved'] as const
 
@@ -29,7 +29,6 @@ export function pickOccupyingBooking<T extends OccupyingBookingRow>(rows: T[]): 
     if (!OCCUPYING_BOOKING_STATUSES.includes(b.status as (typeof OCCUPYING_BOOKING_STATUSES)[number])) {
       return false
     }
-    if (b.status === 'checked_in') return true
     return isInHouseOnCalendarDay(b.check_in, b.check_out, today, tz)
   })
 
@@ -38,9 +37,20 @@ export function pickOccupyingBooking<T extends OccupyingBookingRow>(rows: T[]): 
   return open[0] ?? null
 }
 
+/** Occupied = in-house today (or checked in). Reserved = future arrival only. */
+export function roomStatusFromOccupyingBooking(
+  occupying: Pick<OccupyingBookingRow, 'status' | 'check_in'>,
+): 'occupied' | 'reserved' {
+  if (occupying.status === 'checked_in') return 'occupied'
+  const today = todayYmdHotel()
+  const ci = bookingYmdHotel(occupying.check_in)
+  if (ci && ci > today) return 'reserved'
+  return 'occupied'
+}
+
 /** PMS room status from the active folio on that room. Returns null if housekeeping block should stay. */
 export function deriveRoomStatusFromOccupying(
-  occupying: Pick<OccupyingBookingRow, 'status'> | null,
+  occupying: Pick<OccupyingBookingRow, 'status' | 'check_in'> | null,
   currentStatus: string | null | undefined,
 ): string | null {
   const cur = normStatus(currentStatus)
@@ -52,8 +62,21 @@ export function deriveRoomStatusFromOccupying(
     return null
   }
 
-  if (occupying.status === 'checked_in') return 'occupied'
-  return 'reserved'
+  return roomStatusFromOccupyingBooking(occupying)
+}
+
+/** Status to show in Rooms menu / pickers — always derived from today's active folios. */
+export function computeEffectiveRoomStatus(
+  currentStatus: string | null | undefined,
+  occupying: Pick<OccupyingBookingRow, 'status' | 'check_in'> | null,
+): string {
+  const cur = normStatus(currentStatus)
+  if (cur === 'maintenance' || cur === 'out_of_order') return cur
+  if (!occupying) {
+    if (cur === 'occupied' || cur === 'reserved' || cur === 'cleaning') return 'available'
+    return cur || 'available'
+  }
+  return roomStatusFromOccupyingBooking(occupying)
 }
 
 /** Distinct rooms with an in-house folio today (aligns with Bookings → Checked in filter). */
@@ -139,7 +162,14 @@ export async function reconcileRoomStatusesForOrganization(
   return result
 }
 
-/** Room row status to apply after creating/updating a booking. */
-export function roomStatusForBookingStatus(bookingStatus: string): 'occupied' | 'reserved' {
-  return bookingStatus === 'checked_in' ? 'occupied' : 'reserved'
+/** Room row status after creating/updating a booking. */
+export function roomStatusForBookingStatus(
+  bookingStatus: string,
+  checkIn?: string | null,
+): 'occupied' | 'reserved' {
+  if (bookingStatus === 'checked_in') return 'occupied'
+  const today = todayYmdHotel()
+  const ci = checkIn ? bookingYmdHotel(checkIn) : ''
+  if (ci && ci > today) return 'reserved'
+  return 'occupied'
 }
