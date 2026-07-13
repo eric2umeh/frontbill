@@ -1,6 +1,6 @@
 import { escapeHtml } from '@/lib/utils/html-escape'
 import { formatReceiptDateTime } from '@/lib/receipts/receipt-format'
-import { receiptLogoBlock } from '@/lib/receipts/receipt-logo'
+import { receiptHotelHeaderRow } from '@/lib/receipts/receipt-logo'
 import { OUTLET_FEE_LINE_NAMES } from '@/lib/outlets/order-extra-fees'
 import { outletReceiptPaymentLabel } from '@/lib/receipts/outlet-order-receipt'
 import type { OutletOrderLineRow } from '@/lib/outlets/types'
@@ -175,7 +175,7 @@ export function buildOutletThermalBillHtml(p: OutletThermalBillPayload): string 
 
   return `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>${statusLabel} ${escapeHtml(p.receiptNumber)}</title><style>${thermalStyles()}</style></head><body>
   <div class="wrap">
-    ${receiptLogoBlock(p.logoUrl, p.hotelName, { maxHeightPx: 48, maxWidthPx: 140 })}
+    ${receiptHotelHeaderRow(p.logoUrl, p.hotelName, { maxHeightPx: 32, maxWidthPx: 80, hotelFontSizePx: 14 })}
     <div class="center outlet">${outlet}</div>
     <div class="stars">******************************************</div>
     <div class="meta-row"><span>Receipt #: ${escapeHtml(p.receiptNumber)}</span><span>Date: ${escapeHtml(datePart)}</span></div>
