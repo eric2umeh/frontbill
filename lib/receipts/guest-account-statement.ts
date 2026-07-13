@@ -1,6 +1,6 @@
 import { escapeHtml } from '@/lib/utils/html-escape'
 import { formatNaira } from '@/lib/utils/currency'
-import { receiptLogoBlock } from '@/lib/receipts/receipt-logo'
+import { receiptHotelHeaderRow } from '@/lib/receipts/receipt-logo'
 import { formatPaymentMethodLabel } from '@/lib/payments/payment-methods'
 export type GuestStatementLine = {
   date: string
@@ -62,8 +62,7 @@ export function buildGuestAccountStatementHtml(p: GuestStatementPayload): string
   return `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Account Statement — ${escapeHtml(p.guestName)}</title>
     <style>${statementStyles()}</style></head><body>
     <div class="wrap">
-      ${receiptLogoBlock(p.logoUrl, p.hotelName)}
-      <h1>${escapeHtml(p.hotelName)}</h1>
+      ${receiptHotelHeaderRow(p.logoUrl, p.hotelName, { maxHeightPx: 36, maxWidthPx: 100 })}
       <div class="sub">
         ${p.address ? `${escapeHtml(p.address)}<br/>` : ''}
         ${p.phone ? `Tel: ${escapeHtml(p.phone)}<br/>` : ''}
