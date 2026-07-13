@@ -255,7 +255,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
   const [newGuestAddress, setNewGuestAddress] = useState('')
   const [creatingGuest, setCreatingGuest] = useState(false)
   const [guestCashbackBalance, setGuestCashbackBalance] = useState(0)
-  const [applyCashback, setApplyCashback] = useState(true)
+  const [applyCashback, setApplyCashback] = useState(false)
 
   // Step 2: Dates
   const [checkIn, setCheckIn] = useState<Date>()
@@ -720,30 +720,84 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
     return raw[Math.floor(raw.length / 2)]
   }
 
-  const bulkSampleRoomTotal = useMemo(() => {
-    if (nights <= 0) return 0
-    const custom = Number(customRate)
-    if (customRate !== '' && !Number.isNaN(custom) && custom > 0) return custom * nights
-    return medianInventoryRate() * nights
-  }, [nights, customRate, allRooms])
+  const bulkRoomNightRates = useMemo((): number[] => {
+    if (pickedRoomIds.length > 0) {
+      return pickedRoomIds
+        .map((id) => allRooms.find((r: { id: string }) => r.id === id))
+        .filter(Boolean)
+        .map((room) => resolveRatePerNight(room as { price_per_night?: number | null }))
+        .filter((r) => r > 0)
+    }
+
+    if (!fillLater) {
+      const rates: number[] = []
+      for (const entry of entries) {
+        const qty = Number(entry.numberOfRooms) || 0
+        if (!entry.roomType || qty <= 0) continue
+        const pool = sortRoomsByNumber(
+          allRooms.filter(
+            (r: { room_type?: string }) => r.room_type === entry.roomType,
+          ),
+        )
+        if (!pool.length) continue
+        const nightly = resolveRatePerNight(pool[0] as { price_per_night?: number | null })
+        if (nightly > 0) {
+          for (let i = 0; i < qty; i++) rates.push(nightly)
+        }
+      }
+      if (rates.length) return rates
+    }
+
+    const quickCount = fillLater ? Number(totalRoomsCount) || 0 : 0
+    if (quickCount > 0) {
+      const custom = Number(customRate)
+      const nightly =
+        customRate !== '' && !Number.isNaN(custom) && custom > 0
+          ? custom
+          : medianInventoryRate()
+      if (nightly > 0) return Array.from({ length: quickCount }, () => nightly)
+    }
+
+    return []
+  }, [pickedRoomIds, allRooms, fillLater, entries, totalRoomsCount, customRate])
+
+  const bulkRoomSlotCount = bulkRoomNightRates.length
+
+  const bulkBlockStayTotal = useMemo(
+    () =>
+      nights > 0
+        ? bulkRoomNightRates.reduce((sum, nightly) => sum + nightly * nights, 0)
+        : 0,
+    [bulkRoomNightRates, nights],
+  )
+
+  const bulkPerRoomStayTotal = useMemo(() => {
+    if (!bulkRoomSlotCount || bulkBlockStayTotal <= 0) return 0
+    return bulkBlockStayTotal / bulkRoomSlotCount
+  }, [bulkBlockStayTotal, bulkRoomSlotCount])
 
   const bulkCashPayingPerRoom = useMemo(() => {
-    if (pendingHold || bulkSampleRoomTotal <= 0) return 0
+    if (pendingHold || bulkPerRoomStayTotal <= 0) return 0
     const raw = Number(partialAmount) || 0
     if (paymentStatus === 'paid') {
       return payAboveBulkRoomTotal
-        ? Math.max(bulkSampleRoomTotal, raw || bulkSampleRoomTotal)
-        : bulkSampleRoomTotal
+        ? Math.max(bulkPerRoomStayTotal, raw || bulkPerRoomStayTotal)
+        : bulkPerRoomStayTotal
     }
     if (paymentStatus === 'partial') return raw
     return 0
   }, [
     pendingHold,
-    bulkSampleRoomTotal,
+    bulkPerRoomStayTotal,
     paymentStatus,
     payAboveBulkRoomTotal,
     partialAmount,
   ])
+
+  const bulkCashPayingBlock = useMemo(
+    () => bulkCashPayingPerRoom * bulkRoomSlotCount,
+    [bulkCashPayingPerRoom, bulkRoomSlotCount],
+  )
 
   const checkRoomAvailability = () => {
     if (!checkIn || !checkOut || nights <= 0) { toast.error('Select valid check-in and check-out dates'); return }
@@ -1056,9 +1110,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
           return
         }
       }
-      const c = Number(customRate)
-      const nightlyFallback = customRate !== '' && !Number.isNaN(c) && c > 0 ? c : medianInventoryRate()
-      if (nightlyFallback <= 0) {
+      if (bulkBlockStayTotal <= 0 || bulkRoomSlotCount === 0) {
         toast.error('Set nightly prices on your room list or enter an optional custom rate above.')
         return
       }
@@ -1255,10 +1307,6 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
       const usedRoomIds = new Set<string>()
 
       if (fillLater) {
-        const c = Number(customRate)
-        const nightlyFallback = medianInventoryRate()
-        const nightly = customRate !== '' && !Number.isNaN(c) && c > 0 ? c : nightlyFallback
-
         let fillLaterGuestId: string | null = null
         if (bookingType === 'individual' && selectedGroupGuest?.id) {
           fillLaterGuestId = selectedGroupGuest.id
@@ -1303,7 +1351,13 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
           const room = roomsForBlock[i]
           const folioId = `BLK-${Date.now().toString(36).toUpperCase()}-${i}`
           const notes = appendBulkGroupNote(`payment_method: ${paymentMethod}`, bulkGroupId)
-          const totalAmt = nightly * nights
+          const ratePn = resolveRatePerNight(room as { price_per_night?: number | null })
+          if (ratePn <= 0) {
+            throw new Error(
+              `Missing nightly price for room ${room.room_number ?? room.id}. Set it under Rooms or enter a custom rate in Step 2.`,
+            )
+          }
+          const totalAmt = ratePn * nights
           const pay = bulkCashbackEligible
             ? resolveBulkRoomPayment(totalAmt, bulkPaymentOpts, {
                 balance: runningCashbackBalance,
@@ -1331,7 +1385,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
                 check_in: cin,
                 check_out: cout,
                 number_of_nights: nights,
-                rate_per_night: nightly,
+                rate_per_night: ratePn,
                 total_amount: totalAmt,
                 deposit: pay.depositAmt,
                 balance: pay.balanceAmt,
@@ -1540,7 +1594,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
     setShowNewLedgerOrgForm(false); setNewLedgerOrgName(''); setNewLedgerOrgEmail(''); setNewLedgerOrgPhone('')
     setEntries([makeEntry()]); setQuickRoomCount(''); setQuickRoomType(''); setFillLater(true); setTotalRoomsCount('')
     setPickedRoomIds([])
-    setGuestCashbackBalance(0); setApplyCashback(true)
+    setGuestCashbackBalance(0); setApplyCashback(false)
     onClose()
   }
 
@@ -2030,14 +2084,17 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
                 selectedGroupGuest?.id &&
                 !pendingHold &&
                 bulkCashbackEligible &&
-                bulkSampleRoomTotal > 0 && (
+                bulkPerRoomStayTotal > 0 &&
+                bulkRoomSlotCount > 0 && (
                   <CashbackPaymentPanel
                     guestId={selectedGroupGuest.id}
-                    totalAmount={bulkSampleRoomTotal}
-                    cashPaying={bulkCashPayingPerRoom}
+                    totalAmount={bulkBlockStayTotal}
+                    cashPaying={bulkCashPayingBlock}
                     paymentMethod={paymentMethod}
                     applyCashback={applyCashback}
                     onApplyCashbackChange={setApplyCashback}
+                    roomCount={bulkRoomSlotCount}
+                    perRoomStayTotal={bulkPerRoomStayTotal}
                   />
                 )}
             </div>
