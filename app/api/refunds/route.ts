@@ -74,7 +74,7 @@ export async function POST(request: Request) {
 
     const { data: guest, error: ge } = await admin
       .from('guests')
-      .select('id, organization_id, balance, name')
+      .select('id, organization_id, name')
       .eq('id', guest_id)
       .single()
     if (ge || !guest || guest.organization_id !== orgId) {
@@ -118,10 +118,6 @@ export async function POST(request: Request) {
       }
       return NextResponse.json({ error: insE.message }, { status: 500 })
     }
-
-    const prevBal = Number(guest.balance) || 0
-    const nextBal = Math.max(0, prevBal - amt)
-    await admin.from('guests').update({ balance: nextBal }).eq('id', guest_id)
 
     if (booking_id) {
       const { data: bk } = await admin.from('bookings').select('deposit, balance').eq('id', booking_id).single()
