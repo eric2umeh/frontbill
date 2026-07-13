@@ -1,11 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/admin'
-import { canonicalRoleKey } from '@/lib/permissions'
+import { isBackdateDeciderRole } from '@/lib/night-audit/pending-approval-counts'
 import { NextResponse } from 'next/server'
-
-function isBackdateDeciderRole(role: string | null | undefined): boolean {
-  const k = canonicalRoleKey(role)
-  return k === 'admin' || k === 'superadmin'
-}
 
 /** Pending backdate queue size for admins; 0 for other roles or errors. */
 export async function GET(request: Request) {
