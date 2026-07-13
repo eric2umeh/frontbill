@@ -19,30 +19,58 @@ function isFolioPaymentLine(ctype: string, amt: number): boolean {
   return amt < 0
 }
 
-export function folioPositiveOutstandingSum(charges: FolioLineForBalance[]): number {
-  return charges.reduce((sum, raw) => {
+function isPositiveChargeUnpaid(
+  status: string,
+  method: string,
+  amt: number,
+): boolean {
+  if (amt <= 0) return false
+  if (status === 'posted_to_ledger') return false
+  return (
+    ['pending', 'unpaid', 'city_ledger', 'partial'].includes(status) ||
+    (method === 'city_ledger' && status !== 'paid') ||
+    (status === '' && amt > 0)
+  )
+}
+
+type FolioBalanceParts = {
+  totalPositiveCharges: number
+  unpaidPositiveCharges: number
+  totalPayments: number
+}
+
+function summarizeFolioBalance(charges: FolioLineForBalance[]): FolioBalanceParts {
+  let totalPositiveCharges = 0
+  let unpaidPositiveCharges = 0
+  let totalPayments = 0
+
+  for (const raw of charges) {
     const ctype = String(raw.type ?? raw.charge_type ?? '').trim()
     const amt = Number(raw.amount ?? 0)
     const status = String(raw.paymentStatus ?? raw.payment_status ?? '').toLowerCase()
     const method = String(raw.paymentMethod ?? raw.payment_method ?? '').toLowerCase()
 
-    // Payments (usually negative amounts) reduce net outstanding bill balance.
     if (isFolioPaymentLine(ctype, amt)) {
-      if (status !== 'paid' && status !== 'posted_to_ledger') return sum
-      const credit = amt < 0 ? amt : -Math.abs(amt)
-      return sum + credit
+      if (status === 'paid' || status === 'posted_to_ledger') {
+        totalPayments += Math.abs(amt)
+      }
+      continue
     }
 
-    if (amt <= 0) return sum
-    if (status === 'posted_to_ledger') return sum
+    if (amt <= 0) continue
+    totalPositiveCharges += amt
+    if (isPositiveChargeUnpaid(status, method, amt)) {
+      unpaidPositiveCharges += amt
+    }
+  }
 
-    const isUnpaid =
-      ['pending', 'unpaid', 'city_ledger', 'partial'].includes(status) ||
-      (method === 'city_ledger' && status !== 'paid') ||
-      (status === '' && amt > 0)
+  return { totalPositiveCharges, unpaidPositiveCharges, totalPayments }
+}
 
-    return isUnpaid ? sum + amt : sum
-  }, 0)
+/** Amount the guest still owes on this folio (never negative). */
+export function folioPositiveOutstandingSum(charges: FolioLineForBalance[]): number {
+  const { unpaidPositiveCharges, totalPayments } = summarizeFolioBalance(charges)
+  return Math.max(0, unpaidPositiveCharges - totalPayments)
 }
 
 /** Bill Balance (Unpaid) for the payment summary card — never below folio-vs-booking max (accounts/[id]). */
@@ -58,11 +86,13 @@ export function bookingDisplayBillBalance(
     | undefined,
   folioCharges: FolioLineForBalance[],
 ): number {
-  const fromFolioNet = folioPositiveOutstandingSum(folioCharges ?? [])
-  const fromFolio = Math.max(0, fromFolioNet)
+  const fromFolio = folioPositiveOutstandingSum(folioCharges ?? [])
   if (!booking) return fromFolio
-  const bookingBal = Number(booking.balance ?? 0)
-  const fallbackOwed = Math.max(0, Number(booking.total_amount ?? 0) - Number(booking.deposit ?? 0))
+  const bookingBal = Math.max(0, Number(booking.balance ?? 0))
+  const fallbackOwed = Math.max(
+    0,
+    Number(booking.total_amount ?? 0) - Number(booking.deposit ?? 0),
+  )
   return Math.max(fromFolio, bookingBal, fallbackOwed)
 }
 
@@ -71,14 +101,13 @@ export function billIsFullySettled(
   booking: Parameters<typeof bookingDisplayBillBalance>[0],
   charges: FolioLineForBalance[],
 ): boolean {
-  const folioOwedNet = folioPositiveOutstandingSum(charges ?? [])
-  return Math.max(0, folioOwedNet) <= 0
+  return folioPositiveOutstandingSum(charges ?? []) <= 0
 }
 
-/** Positive when folio nets to money in favour of guest (overage / credit within this folio). */
+/** True overpayment on folio (guest prepaid more than total charges). */
 export function folioGuestCreditAmount(charges: FolioLineForBalance[]): number {
-  const net = folioPositiveOutstandingSum(charges ?? [])
-  return net < 0 ? -net : 0
+  const { totalPositiveCharges, totalPayments } = summarizeFolioBalance(charges)
+  return Math.max(0, totalPayments - totalPositiveCharges)
 }
 
 /**
@@ -90,6 +119,5 @@ export function shouldReconcileBookingPaymentPaid(
   folioCharges: FolioLineForBalance[],
 ): boolean {
   if (String(booking?.payment_status ?? '').toLowerCase() === 'paid') return false
-  const folioOwedNet = folioPositiveOutstandingSum(folioCharges ?? [])
-  return Math.max(0, folioOwedNet) <= 0
+  return folioPositiveOutstandingSum(folioCharges ?? []) <= 0
 }
