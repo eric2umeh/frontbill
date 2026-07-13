@@ -1,5 +1,6 @@
 import { ensureHotelOwnerFromAuthUser } from '@/lib/auth/ensure-hotel-owner-profile'
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { reconcileRoomStatusesForOrganization } from '@/lib/rooms/room-occupancy'
 import { NextResponse } from 'next/server'
 
@@ -31,7 +32,8 @@ export async function POST() {
       return NextResponse.json({ ok: true, skipped: true, reason: 'no_organization' })
     }
 
-    const result = await reconcileRoomStatusesForOrganization(supabase, organizationId)
+    const admin = createAdminClient()
+    const result = await reconcileRoomStatusesForOrganization(admin, organizationId)
     return NextResponse.json({ ok: true, ...result })
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Reconcile failed'
