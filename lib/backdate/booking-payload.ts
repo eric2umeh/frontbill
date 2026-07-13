@@ -163,15 +163,7 @@ export async function createBookingFromPayload(
       .eq('id', ledger_account)
 
     const acctType = acc?.account_type || (ledger_tab === 'individual' ? 'individual' : 'organization')
-    if (acctType === 'individual' || acctType === 'guest') {
-      if (finalGuestId) {
-        const { data: guestRow } = await admin.from('guests').select('balance').eq('id', finalGuestId).single()
-        await admin
-          .from('guests')
-          .update({ balance: (Number(guestRow?.balance) || 0) + total })
-          .eq('id', finalGuestId)
-      }
-    } else {
+    if (acctType !== 'individual' && acctType !== 'guest') {
       const { data: orgRow } = await admin.from('organizations').select('current_balance').eq('id', ledger_account).single()
       if (orgRow) {
         await admin
