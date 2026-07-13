@@ -1,4 +1,12 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
+import type { CashbackEarnByRateRow } from '@/lib/cashback/cashback-earn-breakdown'
+
+export type GuestCashbackDetail = {
+  earnedTotal: number
+  redeemedTotal: number
+  balance: number
+  earnByRate: CashbackEarnByRateRow[]
+}
 
 export async function cashbackApiHeaders(
   supabase: SupabaseClient | null,
@@ -14,22 +22,41 @@ export async function cashbackApiHeaders(
   return headers
 }
 
-export async function fetchGuestCashbackBalanceClient(
+export async function fetchGuestCashbackDetailClient(
   supabase: SupabaseClient | null,
   guestId: string,
-): Promise<{ earnedTotal: number; redeemedTotal: number; balance: number }> {
+): Promise<GuestCashbackDetail> {
+  const empty: GuestCashbackDetail = {
+    earnedTotal: 0,
+    redeemedTotal: 0,
+    balance: 0,
+    earnByRate: [],
+  }
   const headers = await cashbackApiHeaders(supabase)
   const res = await fetch(`/api/guests/${guestId}/cashback`, {
     headers,
     credentials: 'include',
   })
   const json = await res.json().catch(() => ({}))
-  if (!res.ok) return { earnedTotal: 0, redeemedTotal: 0, balance: 0 }
+  if (!res.ok) return empty
   const b = json.balance ?? {}
   return {
     earnedTotal: Number(b.earnedTotal ?? 0),
     redeemedTotal: Number(b.redeemedTotal ?? 0),
     balance: Number(b.balance ?? 0),
+    earnByRate: Array.isArray(json.earnByRate) ? json.earnByRate : [],
+  }
+}
+
+export async function fetchGuestCashbackBalanceClient(
+  supabase: SupabaseClient | null,
+  guestId: string,
+): Promise<{ earnedTotal: number; redeemedTotal: number; balance: number }> {
+  const detail = await fetchGuestCashbackDetailClient(supabase, guestId)
+  return {
+    earnedTotal: detail.earnedTotal,
+    redeemedTotal: detail.redeemedTotal,
+    balance: detail.balance,
   }
 }
 
