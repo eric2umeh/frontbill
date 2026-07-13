@@ -111,7 +111,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
   const [folioExtras, setFolioExtras] = useState<FolioRemarksAttachmentsValue>({ remarks: '', files: [] })
 
   const [guestCashbackBalance, setGuestCashbackBalance] = useState(0)
-  const [applyCashback, setApplyCashback] = useState(true)
+  const [applyCashback, setApplyCashback] = useState(false)
 
   useEffect(() => {
     if (!guestId || !open) {
