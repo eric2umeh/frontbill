@@ -198,7 +198,6 @@ export function ReserveCheckInModal({ open, onClose, onSuccess, booking, userId 
         status: 'checked_in',
         room_id: selectedRoomId,
         updated_at: new Date().toISOString(),
-        updated_by: userId,
       }
       if (finalGuestId) patch.guest_id = finalGuestId
 
