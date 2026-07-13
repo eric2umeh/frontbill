@@ -23,6 +23,7 @@ export function formatReservationPaymentMethodLabel(method: string | null | unde
   if (m === 'card') return 'POS'
   const found = RESERVATION_PAYMENT_METHOD_OPTIONS.find((o) => o.value === m)
   if (found) return found.label
+  if (m === 'cashback') return 'Cashback'
   if (!m) return '—'
   return m.replace(/_/g, ' ')
 }
