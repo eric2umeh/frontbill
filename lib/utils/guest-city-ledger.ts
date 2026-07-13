@@ -578,15 +578,6 @@ export async function recordGuestLedgerCashMovement(
     })
   }
 
-  if (syncGuestProfile && guestId) {
-    const guestBalance =
-      folioRemaining != null ? folioRemaining : Math.max(0, finalLedgerBalance)
-    const { error: gErr } = await supabase
-      .from('guests')
-      .update({ balance: guestBalance })
-      .eq('id', guestId)
-    if (gErr) throw new Error(`Guest balance update failed: ${gErr.message}`)
-  }
 
   const txId = `CLG-${Date.now()}`
   const { error: txError } = await supabase.from('transactions').insert([
@@ -686,12 +677,6 @@ export async function repairStaleGuestDebt(
     guestName,
     balance: targetLedger,
   })
-
-  const { error: gErr } = await supabase
-    .from('guests')
-    .update({ balance: targetLedger })
-    .eq('id', guestId)
-  if (gErr) throw new Error(`Guest balance repair failed: ${gErr.message}`)
 
   return {
     folio_before: folioBefore,
