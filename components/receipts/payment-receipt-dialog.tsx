@@ -43,12 +43,15 @@ type BookingLike = {
   guests?: { name?: string | null };
   guestName?: string | null;
   rooms?: { room_number?: string | null } | null;
+  /** Outstanding folio balance (when known). */
+  balance?: number | null;
   /** Supabase embed: bookings.organization_id → organizations */
   organizations?: {
     name?: string | null;
     address?: string | null;
     phone?: string | null;
     email?: string | null;
+    logo_url?: string | null;
   } | null;
 };
 
@@ -87,6 +90,7 @@ function buildPayload(
     address: org?.address ?? embeddedOrg?.address ?? "",
     phone: org?.phone ?? embeddedOrg?.phone ?? "",
     email: org?.email ?? embeddedOrg?.email ?? "",
+    logoUrl: org?.logoUrl ?? embeddedOrg?.logo_url ?? null,
     guestName:
       String(booking.guests?.name || booking.guestName || "Guest").trim() ||
       "Guest",
@@ -105,6 +109,10 @@ function buildPayload(
     receiptTitle:
       ctype === "payment" ? "Payment receipt" : "Folio service receipt",
     folioContextLines: ctx,
+    balanceRemaining:
+      booking.balance != null && Number.isFinite(Number(booking.balance))
+        ? Math.max(0, Number(booking.balance))
+        : null,
   };
 }
 
