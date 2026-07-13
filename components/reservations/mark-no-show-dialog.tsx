@@ -16,12 +16,12 @@ import { Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatNaira } from '@/lib/utils/currency'
 import { createClient } from '@/lib/supabase/client'
+import { useAuth } from '@/lib/auth-context'
 import {
   calculateNoShowFee,
   describeNoShowPolicy,
-  fetchNoShowPolicy,
+  type NoShowPolicy,
 } from '@/lib/reservations/no-show-policy'
-import { useAuth } from '@/lib/auth-context'
 
 type BookingLike = {
   id: string
@@ -42,31 +42,68 @@ type Props = {
 }
 
 export function MarkNoShowDialog({ open, onOpenChange, booking, onSuccess }: Props) {
-  const { organizationId, userId } = useAuth()
+  const { userId } = useAuth()
   const [loading, setLoading] = useState(false)
+  const [policyLoading, setPolicyLoading] = useState(false)
   const [policyLabel, setPolicyLabel] = useState('')
   const [suggestedFee, setSuggestedFee] = useState(0)
+  const [usingDefaultPolicy, setUsingDefaultPolicy] = useState(false)
   const [feeOverride, setFeeOverride] = useState('')
   const [notes, setNotes] = useState('')
 
   useEffect(() => {
-    if (!open || !booking || !organizationId) return
+    if (!open || !booking || !userId) return
     let cancelled = false
     ;(async () => {
-      const supabase = createClient()
-      if (!supabase) return
-      const policy = await fetchNoShowPolicy(supabase, organizationId)
-      if (cancelled) return
-      setPolicyLabel(describeNoShowPolicy(policy))
-      const fee = calculateNoShowFee(policy, booking)
-      setSuggestedFee(fee)
-      setFeeOverride(String(fee))
-      setNotes('')
+      setPolicyLoading(true)
+      try {
+        const supabase = createClient()
+        const headers: Record<string, string> = {}
+        if (supabase) {
+          const {
+            data: { session },
+          } = await supabase.auth.getSession()
+          if (session?.access_token) {
+            headers.Authorization = `Bearer ${session.access_token}`
+          }
+        }
+        const res = await fetch('/api/organizations/billing-policy', {
+          credentials: 'include',
+          headers,
+        })
+        const json = await res.json().catch(() => ({}))
+        if (cancelled) return
+        if (!res.ok) {
+          setPolicyLabel('100% of room rate')
+          setSuggestedFee(0)
+          setUsingDefaultPolicy(true)
+          return
+        }
+
+        const policy: NoShowPolicy = {
+          feeMode: json.policy?.feeMode || json.no_show_fee_mode || 'percent',
+          feePercent: Number(json.policy?.feePercent ?? json.no_show_fee_percent ?? 100),
+          feeFlatAmount: Number(json.policy?.feeFlatAmount ?? json.no_show_fee_flat_amount ?? 0),
+        }
+        const fee = calculateNoShowFee(policy, booking)
+        setPolicyLabel(describeNoShowPolicy(policy))
+        setSuggestedFee(fee)
+        setFeeOverride(String(fee))
+        setUsingDefaultPolicy(Boolean(json.usingDefaultPolicy) || json.dbAvailable === false)
+        setNotes('')
+      } catch {
+        if (!cancelled) {
+          setPolicyLabel('100% of room rate')
+          setUsingDefaultPolicy(true)
+        }
+      } finally {
+        if (!cancelled) setPolicyLoading(false)
+      }
     })()
     return () => {
       cancelled = true
     }
-  }, [open, booking, organizationId])
+  }, [open, booking, userId])
 
   const handleConfirm = async () => {
     if (!booking || !userId) return
@@ -120,10 +157,17 @@ export function MarkNoShowDialog({ open, onOpenChange, booking, onSuccess }: Pro
         <div className="space-y-4 py-2">
           <div className="rounded-md border bg-muted/40 px-3 py-2 text-sm">
             <p className="text-muted-foreground">Hotel policy</p>
-            <p className="font-medium">{policyLabel || 'Loading…'}</p>
+            <p className="font-medium">{policyLoading ? 'Loading…' : policyLabel || '100% of room rate'}</p>
             <p className="text-xs text-muted-foreground mt-1">
               Suggested fee: {formatNaira(suggestedFee)}
             </p>
+            {usingDefaultPolicy && (
+              <p className="text-xs text-amber-700 mt-2">
+                Policy could not be loaded from Settings — run{' '}
+                <code className="rounded bg-amber-100 px-1">scripts/073_no_show_cashback_policy.sql</code>{' '}
+                in Supabase, save under Settings → No-Show Billing, then reopen this dialog.
+              </p>
+            )}
           </div>
           <div className="space-y-2">
             <Label htmlFor="no_show_fee">Charge amount (₦)</Label>
@@ -152,7 +196,7 @@ export function MarkNoShowDialog({ open, onOpenChange, booking, onSuccess }: Pro
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={loading}>
             Cancel
           </Button>
-          <Button onClick={handleConfirm} disabled={loading || !booking}>
+          <Button onClick={handleConfirm} disabled={loading || !booking || policyLoading}>
             {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             Confirm No-Show
           </Button>
