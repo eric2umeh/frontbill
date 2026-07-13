@@ -18,6 +18,12 @@ import { toast } from 'sonner'
 import { getUserDisplayName } from '@/lib/utils/user-display'
 import { fetchUserDisplayNameMap } from '@/lib/utils/fetch-user-display-names'
 import { reconcileRoomStatusesClient } from '@/lib/rooms/reconcile-room-status-client'
+import {
+  computeEffectiveRoomStatus,
+  OCCUPYING_BOOKING_STATUSES,
+  pickOccupyingBooking,
+  type OccupyingBookingRow,
+} from '@/lib/rooms/room-occupancy'
 
 interface Room {
   id: string
@@ -61,13 +67,27 @@ export default function RoomsPage() {
 
       await reconcileRoomStatusesClient()
 
-      const { data, error } = await supabase
-        .from('rooms')
-        .select('*, created_by, updated_by, updated_at')
-        .eq('organization_id', organizationId)
-        .order('room_number', { ascending: true })
+      const [{ data, error }, { data: bookingRows }] = await Promise.all([
+        supabase
+          .from('rooms')
+          .select('*, created_by, updated_by, updated_at')
+          .eq('organization_id', organizationId)
+          .order('room_number', { ascending: true }),
+        supabase
+          .from('bookings')
+          .select('id, room_id, status, check_in, check_out, folio_status')
+          .eq('organization_id', organizationId)
+          .in('status', [...OCCUPYING_BOOKING_STATUSES]),
+      ])
 
       if (error) throw error
+
+      const byRoom = new Map<string, OccupyingBookingRow[]>()
+      for (const b of bookingRows ?? []) {
+        if (!b.room_id) continue
+        if (!byRoom.has(b.room_id)) byRoom.set(b.room_id, [])
+        byRoom.get(b.room_id)!.push(b as OccupyingBookingRow)
+      }
       
       // Fetch creator and updater profiles for all rooms
       const userIds = Array.from(new Set(
@@ -76,11 +96,17 @@ export default function RoomsPage() {
       const userMap = await fetchUserDisplayNameMap(userIds as string[], userId)
       
       // Add created_by_name and updated_by_name to each room
-      const roomsWithUsers = (data || []).map((room: any) => ({
-        ...room,
-        created_by_name: room.created_by ? userMap[room.created_by] || getUserDisplayName(null, room.created_by) : 'System',
-        updated_by_name: room.updated_by ? userMap[room.updated_by] || getUserDisplayName(null, room.updated_by) : null
-      }))
+      const roomsWithUsers = (data || []).map((room: any) => {
+        const occupying = pickOccupyingBooking(byRoom.get(room.id) ?? [])
+        const effectiveStatus = computeEffectiveRoomStatus(room.status, occupying)
+        return {
+          ...room,
+          status: effectiveStatus,
+          status_source: occupying ? 'booking' : 'inventory',
+          created_by_name: room.created_by ? userMap[room.created_by] || getUserDisplayName(null, room.created_by) : 'System',
+          updated_by_name: room.updated_by ? userMap[room.updated_by] || getUserDisplayName(null, room.updated_by) : null,
+        }
+      })
       
       setRooms(roomsWithUsers)
     } catch (error: any) {
