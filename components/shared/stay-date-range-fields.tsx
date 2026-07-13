@@ -2,7 +2,7 @@
 
 import * as React from 'react'
 import type { Matcher } from 'react-day-picker'
-import { format, addDays, differenceInCalendarDays } from 'date-fns'
+import { format, addDays, differenceInCalendarDays, startOfDay } from 'date-fns'
 import { Calendar } from '@/components/ui/calendar'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
@@ -25,6 +25,8 @@ export interface StayDateRangeFieldsProps {
   layout?: 'card' | 'inline'
   title?: string
   className?: string
+  /** Earliest selectable check-in (e.g. yesterday during late-night grace). */
+  minCheckIn?: Date
 }
 
 /** One calendar picker: choose check-in then check-out in a single interaction. */
@@ -39,6 +41,7 @@ export function StayDateRangeFields({
   layout = 'card',
   title = 'Stay Dates',
   className,
+  minCheckIn,
 }: StayDateRangeFieldsProps) {
   const [open, setOpen] = React.useState(false)
   const [nightsDraft, setNightsDraft] = React.useState(() => (nights < 1 ? '' : String(nights)))
@@ -97,7 +100,10 @@ export function StayDateRangeFields({
                 onDatesChange(from, undefined)
               }
             }}
-            disabled={disableCalendar}
+            disabled={[
+              disableCalendar,
+              minCheckIn ? { before: startOfDay(minCheckIn) } : undefined,
+            ].filter(Boolean) as Matcher[]}
             initialFocus
           />
         </PopoverContent>
