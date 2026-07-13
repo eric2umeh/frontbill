@@ -138,10 +138,32 @@ export async function recordCashbackEarn(
       input.description ||
       `Cashback ${config.percent}% on ${input.paymentMethod.replace(/_/g, ' ')} payment`,
     payment_method: input.paymentMethod,
+    earn_rate_percent: config.percent,
     created_by: input.userId || null,
   })
 
-  if (txnErr) throw new Error(txnErr.message)
+  if (txnErr) {
+    const m = (txnErr.message || '').toLowerCase()
+    if (m.includes('earn_rate_percent')) {
+      const { error: retryErr } = await admin.from('cashback_transactions').insert({
+        organization_id: input.organizationId,
+        guest_id: input.guestId,
+        txn_type: 'earn',
+        amount: earnAmount,
+        balance_after: newBalance,
+        source_type: input.sourceType || 'payment',
+        source_id: input.sourceId || null,
+        description:
+          input.description ||
+          `Cashback ${config.percent}% on ${input.paymentMethod.replace(/_/g, ' ')} payment`,
+        payment_method: input.paymentMethod,
+        created_by: input.userId || null,
+      })
+      if (retryErr) throw new Error(retryErr.message)
+    } else {
+      throw new Error(txnErr.message)
+    }
+  }
 
   return { earned: earnAmount }
 }
