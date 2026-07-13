@@ -165,7 +165,7 @@ export default function BookingDetailPage({
     balance: 0,
   });
   const [guestCashbackBalance, setGuestCashbackBalance] = useState(0);
-  const [applyCashback, setApplyCashback] = useState(true);
+  const [applyCashback, setApplyCashback] = useState(false);
   const [creditAmount, setCreditAmount] = useState("");
   const [creditPaymentMethod, setCreditPaymentMethod] = useState("");
   const [creditNotes, setCreditNotes] = useState("");
@@ -996,7 +996,7 @@ export default function BookingDetailPage({
       setChargeAmount("");
       setPaymentMethod("");
       setApplyOverpaymentAsCredit(false);
-      setApplyCashback(true);
+      setApplyCashback(false);
     } catch (error: any) {
       toast.error(error.message || "Failed to save");
     } finally {
