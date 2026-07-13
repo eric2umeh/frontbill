@@ -1,28 +1,28 @@
-'use client'
+"use client";
 
-import { useEffect, useState } from 'react'
-import { createClient } from '@/lib/supabase/client'
-import { formatNaira } from '@/lib/utils/currency'
+import { useEffect, useState } from "react";
+import { createClient } from "@/lib/supabase/client";
+import { formatNaira } from "@/lib/utils/currency";
 import {
   fetchGuestCashbackDetailClient,
   type GuestCashbackDetail,
-} from '@/lib/cashback/cashback-client'
-import { computeCashbackDiscount } from '@/lib/cashback/cashback-payment-math'
-import { paymentMethodEarnsCashback } from '@/lib/cashback/cashback-config'
-import { Checkbox } from '@/components/ui/checkbox'
-import { Label } from '@/components/ui/label'
-import { Loader2 } from 'lucide-react'
+} from "@/lib/cashback/cashback-client";
+import { computeCashbackDiscount } from "@/lib/cashback/cashback-payment-math";
+import { paymentMethodEarnsCashback } from "@/lib/cashback/cashback-config";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
+import { Loader2 } from "lucide-react";
 
 type Props = {
-  guestId: string | null | undefined
-  totalAmount: number
+  guestId: string | null | undefined;
+  totalAmount: number;
   /** Cash/POS/transfer amount staff entered (before auto-discount display). */
-  cashPaying: number
-  paymentMethod: string
-  applyCashback?: boolean
-  onApplyCashbackChange?: (apply: boolean) => void
-  showPaymentSummary?: boolean
-}
+  cashPaying: number;
+  paymentMethod: string;
+  applyCashback?: boolean;
+  onApplyCashbackChange?: (apply: boolean) => void;
+  showPaymentSummary?: boolean;
+};
 
 export function CashbackPaymentPanel({
   guestId,
@@ -33,44 +33,44 @@ export function CashbackPaymentPanel({
   onApplyCashbackChange,
   showPaymentSummary = true,
 }: Props) {
-  const [loading, setLoading] = useState(false)
-  const [detail, setDetail] = useState<GuestCashbackDetail | null>(null)
+  const [loading, setLoading] = useState(false);
+  const [detail, setDetail] = useState<GuestCashbackDetail | null>(null);
 
   useEffect(() => {
     if (!guestId) {
-      setDetail(null)
-      return
+      setDetail(null);
+      return;
     }
-    let cancelled = false
-    ;(async () => {
-      setLoading(true)
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
       try {
-        const supabase = createClient()
-        const d = await fetchGuestCashbackDetailClient(supabase, guestId)
-        if (!cancelled) setDetail(d)
+        const supabase = createClient();
+        const d = await fetchGuestCashbackDetailClient(supabase, guestId);
+        if (!cancelled) setDetail(d);
       } finally {
-        if (!cancelled) setLoading(false)
+        if (!cancelled) setLoading(false);
       }
-    })()
+    })();
     return () => {
-      cancelled = true
-    }
-  }, [guestId])
+      cancelled = true;
+    };
+  }, [guestId]);
 
-  if (!guestId) return null
+  if (!guestId) return null;
 
-  const method = String(paymentMethod || '').toLowerCase()
+  const method = String(paymentMethod || "").toLowerCase();
   const discount = computeCashbackDiscount({
     totalDue: totalAmount,
     cashbackBalance: detail?.balance ?? 0,
     cashPaying,
     applyCashback,
-  })
+  });
 
   const willEarn =
-    paymentMethodEarnsCashback(method) && discount.cashToCollect > 0
+    paymentMethodEarnsCashback(method) && discount.cashToCollect > 0;
 
-  const canApply = (detail?.balance ?? 0) > 0 && totalAmount > 0
+  const canApply = (detail?.balance ?? 0) > 0 && totalAmount > 0;
 
   return (
     <div className="rounded-lg border border-primary/20 bg-primary/5 p-3 space-y-2 text-sm">
@@ -84,7 +84,9 @@ export function CashbackPaymentPanel({
         <>
           <div className="flex justify-between">
             <span className="text-muted-foreground">Available balance</span>
-            <span className="font-semibold">{formatNaira(detail?.balance ?? 0)}</span>
+            <span className="font-semibold">
+              {formatNaira(detail?.balance ?? 0)}
+            </span>
           </div>
           <div className="flex justify-between text-xs">
             <span className="text-muted-foreground">Lifetime earned</span>
@@ -92,7 +94,9 @@ export function CashbackPaymentPanel({
           </div>
           {(detail?.earnByRate?.length ?? 0) > 0 && (
             <div className="pt-1 border-t border-primary/10 space-y-1">
-              <p className="text-xs font-medium text-muted-foreground">Earned by program rate</p>
+              <p className="text-xs font-medium text-muted-foreground">
+                Earned by program rate
+              </p>
               {detail!.earnByRate.map((row) => (
                 <div key={row.id} className="flex justify-between text-xs">
                   <span>{row.label}</span>
@@ -108,8 +112,13 @@ export function CashbackPaymentPanel({
                 checked={applyCashback}
                 onCheckedChange={(c) => onApplyCashbackChange(Boolean(c))}
               />
-              <Label htmlFor="apply-cashback-discount" className="text-xs font-normal leading-snug cursor-pointer">
-                Apply cashback discount ({formatNaira(Math.min(detail?.balance ?? 0, totalAmount))} off this stay)
+              <Label
+                htmlFor="apply-cashback-discount"
+                className="text-xs font-normal leading-snug cursor-pointer"
+              >
+                Apply cashback discount (
+                {formatNaira(Math.min(detail?.balance ?? 0, totalAmount))} off
+                this stay)
               </Label>
             </div>
           )}
@@ -137,8 +146,9 @@ export function CashbackPaymentPanel({
               )}
               {willEarn && (
                 <p className="text-xs text-muted-foreground">
-                  Guest will earn cashback on the {formatNaira(discount.cashToCollect)} cash payment
-                  (per your Settings rate).
+                  Guest will earn cashback on the{" "}
+                  {formatNaira(discount.cashToCollect)} cash payment (per your
+                  Settings rate).
                 </p>
               )}
             </div>
@@ -146,5 +156,5 @@ export function CashbackPaymentPanel({
         </>
       )}
     </div>
-  )
+  );
 }

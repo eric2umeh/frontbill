@@ -1,14 +1,14 @@
-'use client'
+"use client";
 
-import { useMemo, useState } from 'react'
-import { format, parseISO } from 'date-fns'
-import { formatNaira } from '@/lib/utils/currency'
-import { formatPaymentMethodLabel } from '@/lib/payments/payment-methods'
-import type { OutletDepartmentKey } from '@/lib/outlets/departments'
-import type { OutletOrderRow } from '@/lib/outlets/types'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
+import { useMemo, useState } from "react";
+import { format, parseISO } from "date-fns";
+import { formatNaira } from "@/lib/utils/currency";
+import { formatPaymentMethodLabel } from "@/lib/payments/payment-methods";
+import type { OutletDepartmentKey } from "@/lib/outlets/departments";
+import type { OutletOrderRow } from "@/lib/outlets/types";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -19,32 +19,32 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
   AlertDialogTrigger,
-} from '@/components/ui/alert-dialog'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { FileText, Pencil, Printer, Loader2, Trash2 } from 'lucide-react'
-import { OutletSettleOrderDialog } from '@/components/outlets/outlet-settle-order-dialog'
-import { OutletEditOrderDialog } from '@/components/outlets/outlet-edit-order-dialog'
-import { outletApiHeaders } from '@/lib/outlets/outlet-api-headers'
-import { toast } from 'sonner'
-import { usePaginatedList } from '@/lib/hooks/use-paginated-list'
-import { TableListControls } from '@/components/shared/table-list-controls'
+} from "@/components/ui/alert-dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { FileText, Pencil, Printer, Loader2, Trash2 } from "lucide-react";
+import { OutletSettleOrderDialog } from "@/components/outlets/outlet-settle-order-dialog";
+import { OutletEditOrderDialog } from "@/components/outlets/outlet-edit-order-dialog";
+import { outletApiHeaders } from "@/lib/outlets/outlet-api-headers";
+import { toast } from "sonner";
+import { usePaginatedList } from "@/lib/hooks/use-paginated-list";
+import { TableListControls } from "@/components/shared/table-list-controls";
 
 type Props = {
-  orders: OutletOrderRow[]
-  organizationId: string
-  department: OutletDepartmentKey
-  departmentLabel: string
-  canPrintReceipt?: boolean
-  canSell?: boolean
-  canManageOrders?: boolean
-  canClearAllOrders?: boolean
-  showTodaySummary?: boolean
-  onPrintUnsettled?: (order: OutletOrderRow) => void
-  onPrintSettled?: (order: OutletOrderRow) => void
-  onSettled?: () => void
-  onOrdersChanged?: () => void
-}
+  orders: OutletOrderRow[];
+  organizationId: string;
+  department: OutletDepartmentKey;
+  departmentLabel: string;
+  canPrintReceipt?: boolean;
+  canSell?: boolean;
+  canManageOrders?: boolean;
+  canClearAllOrders?: boolean;
+  showTodaySummary?: boolean;
+  onPrintUnsettled?: (order: OutletOrderRow) => void;
+  onPrintSettled?: (order: OutletOrderRow) => void;
+  onSettled?: () => void;
+  onOrdersChanged?: () => void;
+};
 
 export function OutletOrdersPanel({
   orders,
@@ -61,14 +61,14 @@ export function OutletOrdersPanel({
   onSettled,
   onOrdersChanged,
 }: Props) {
-  const [settleTarget, setSettleTarget] = useState<OutletOrderRow | null>(null)
-  const [editTarget, setEditTarget] = useState<OutletOrderRow | null>(null)
-  const [deleteTarget, setDeleteTarget] = useState<OutletOrderRow | null>(null)
-  const [voidReason, setVoidReason] = useState('')
-  const [deleting, setDeleting] = useState(false)
-  const [clearingAll, setClearingAll] = useState(false)
-  const [search, setSearch] = useState('')
-  const [statusFilter, setStatusFilter] = useState('all')
+  const [settleTarget, setSettleTarget] = useState<OutletOrderRow | null>(null);
+  const [editTarget, setEditTarget] = useState<OutletOrderRow | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<OutletOrderRow | null>(null);
+  const [voidReason, setVoidReason] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const [clearingAll, setClearingAll] = useState(false);
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
 
   const {
     paginatedItems: visibleOrders,
@@ -83,113 +83,119 @@ export function OutletOrdersPanel({
     pageSize: 20,
     search,
     searchMatch: (o, query) => {
-      const q = query.trim().toLowerCase()
+      const q = query.trim().toLowerCase();
       const itemNames = (o.outlet_order_lines ?? [])
         .map((l) => l.item_name)
-        .join(' ')
-        .toLowerCase()
+        .join(" ")
+        .toLowerCase();
       return (
         o.order_number.toLowerCase().includes(q) ||
-        (o.guest_name ?? '').toLowerCase().includes(q) ||
-        (o.room_number ?? '').toLowerCase().includes(q) ||
-        (o.table_label ?? '').toLowerCase().includes(q) ||
+        (o.guest_name ?? "").toLowerCase().includes(q) ||
+        (o.room_number ?? "").toLowerCase().includes(q) ||
+        (o.table_label ?? "").toLowerCase().includes(q) ||
         itemNames.includes(q)
-      )
+      );
     },
     activeFilters: { status: statusFilter },
     filterMatch: (o, key, value) => {
-      if (key !== 'status') return undefined
-      if (value === 'open') return o.status === 'open'
-      if (value === 'settled') return o.status === 'settled'
-      if (value === 'void') return o.status === 'void'
-      return true
+      if (key !== "status") return undefined;
+      if (value === "open") return o.status === "open";
+      if (value === "settled") return o.status === "settled";
+      if (value === "void") return o.status === "void";
+      return true;
     },
-  })
+  });
 
   const todayTotal = useMemo(() => {
-    const today = format(new Date(), 'yyyy-MM-dd')
+    const today = format(new Date(), "yyyy-MM-dd");
     return orders
-      .filter((o) => o.status === 'settled' && o.created_at.startsWith(today))
-      .reduce((s, o) => s + Number(o.subtotal), 0)
-  }, [orders])
+      .filter((o) => o.status === "settled" && o.created_at.startsWith(today))
+      .reduce((s, o) => s + Number(o.subtotal), 0);
+  }, [orders]);
 
   const handleSettled = (order: OutletOrderRow) => {
-    onSettled?.()
+    onSettled?.();
     if (canPrintReceipt && onPrintSettled) {
-      onPrintSettled(order)
+      onPrintSettled(order);
     }
-  }
+  };
 
   const confirmDelete = async () => {
-    if (!deleteTarget) return
-    const needsReason = deleteTarget.status === 'settled'
+    if (!deleteTarget) return;
+    const needsReason = deleteTarget.status === "settled";
     if (needsReason && !voidReason.trim()) {
-      toast.error('Enter a reason to void this settled order')
-      return
+      toast.error("Enter a reason to void this settled order");
+      return;
     }
-    setDeleting(true)
+    setDeleting(true);
     try {
       const res = await fetch(`/api/outlets/orders/${deleteTarget.id}`, {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json', ...(await outletApiHeaders()) },
-        credentials: 'include',
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+          ...(await outletApiHeaders()),
+        },
+        credentials: "include",
         body: JSON.stringify({ reason: voidReason.trim() || undefined }),
-      })
-      const json = await res.json().catch(() => ({}))
+      });
+      const json = await res.json().catch(() => ({}));
       if (!res.ok) {
-        toast.error(json.error || 'Could not remove order')
-        return
+        toast.error(json.error || "Could not remove order");
+        return;
       }
-      toast.success(
-        json.deleted ? 'Open bill deleted' : 'Order voided',
-      )
-      setDeleteTarget(null)
-      setVoidReason('')
-      onOrdersChanged?.()
+      toast.success(json.deleted ? "Open bill deleted" : "Order voided");
+      setDeleteTarget(null);
+      setVoidReason("");
+      onOrdersChanged?.();
     } catch {
-      toast.error('Network error')
+      toast.error("Network error");
     } finally {
-      setDeleting(false)
+      setDeleting(false);
     }
-  }
+  };
 
   const confirmClearAll = async () => {
-    setClearingAll(true)
+    setClearingAll(true);
     try {
-      const res = await fetch('/api/outlets/orders/clear-all', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(await outletApiHeaders()) },
-        credentials: 'include',
+      const res = await fetch("/api/outlets/orders/clear-all", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(await outletApiHeaders()),
+        },
+        credentials: "include",
         body: JSON.stringify({ department }),
-      })
-      const json = await res.json().catch(() => ({}))
+      });
+      const json = await res.json().catch(() => ({}));
       if (!res.ok) {
-        toast.error(json.error || 'Could not clear orders')
-        return
+        toast.error(json.error || "Could not clear orders");
+        return;
       }
-      toast.success(`Cleared ${Number(json.deleted) || 0} order(s)`)
-      onOrdersChanged?.()
+      toast.success(`Cleared ${Number(json.deleted) || 0} order(s)`);
+      onOrdersChanged?.();
     } catch {
-      toast.error('Network error')
+      toast.error("Network error");
     } finally {
-      setClearingAll(false)
+      setClearingAll(false);
     }
-  }
+  };
 
-  const showActionsCol = canManageOrders || canSell || canPrintReceipt
+  const showActionsCol = canManageOrders || canSell || canPrintReceipt;
 
   return (
     <div className="space-y-3">
       {showTodaySummary && (
         <Card>
           <CardHeader className="py-2 px-3">
-            <CardTitle className="text-sm">Today&apos;s settled sales</CardTitle>
+            <CardTitle className="text-sm">
+              Today&apos;s settled sales
+            </CardTitle>
           </CardHeader>
           <CardContent className="px-3 pb-3 pt-0">
             <p className="text-xl font-bold">{formatNaira(todayTotal)}</p>
             <p className="text-[10px] text-muted-foreground">
-              {orders.filter((o) => o.status === 'settled').length} settled ·{' '}
-              {orders.filter((o) => o.status === 'open').length} open bills
+              {orders.filter((o) => o.status === "settled").length} settled ·{" "}
+              {orders.filter((o) => o.status === "open").length} open bills
             </p>
           </CardContent>
         </Card>
@@ -203,12 +209,12 @@ export function OutletOrdersPanel({
           searchPlaceholder="Search receipt #, guest, room, items…"
           filters={[
             {
-              key: 'status',
-              label: 'Status',
+              key: "status",
+              label: "Status",
               options: [
-                { value: 'open', label: 'Unsettled' },
-                { value: 'settled', label: 'Settled' },
-                { value: 'void', label: 'Void' },
+                { value: "open", label: "Unsettled" },
+                { value: "settled", label: "Settled" },
+                { value: "void", label: "Void" },
               ],
             },
           ]}
@@ -233,16 +239,18 @@ export function OutletOrdersPanel({
                 {clearingAll ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
-                  'Clear all orders'
+                  "Clear all orders"
                 )}
               </Button>
             </AlertDialogTrigger>
             <AlertDialogContent>
               <AlertDialogHeader>
-                <AlertDialogTitle>Clear all {departmentLabel} orders?</AlertDialogTitle>
+                <AlertDialogTitle>
+                  Clear all {departmentLabel} orders?
+                </AlertDialogTitle>
                 <AlertDialogDescription>
-                  Permanently deletes every order and line for this outlet on the server. This
-                  cannot be undone.
+                  Permanently deletes every order and line for this outlet on
+                  the server. This cannot be undone.
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
@@ -276,78 +284,96 @@ export function OutletOrdersPanel({
               <tr key={o.id} className="border-t">
                 <td className="p-2 font-mono">{o.order_number}</td>
                 <td className="p-2 text-muted-foreground">
-                  {format(parseISO(o.created_at), 'dd MMM · HH:mm')}
+                  {format(parseISO(o.created_at), "dd MMM · HH:mm")}
                 </td>
-                <td className="p-2">{o.guest_name || o.room_number || '—'}</td>
+                <td className="p-2">{o.guest_name || o.room_number || "—"}</td>
                 <td className="p-2 text-muted-foreground max-w-[220px]">
                   <span className="line-clamp-2">
                     {(o.outlet_order_lines ?? [])
                       .map((l) => `${l.item_name} ×${Number(l.qty) || 0}`)
-                      .join(', ') || '—'}
+                      .join(", ") || "—"}
                   </span>
                 </td>
                 <td className="p-2 text-right text-muted-foreground tabular-nums">
-                  {(o.outlet_order_lines ?? []).reduce((s, l) => s + (Number(l.qty) || 0), 0)}
+                  {(o.outlet_order_lines ?? []).reduce(
+                    (s, l) => s + (Number(l.qty) || 0),
+                    0,
+                  )}
                 </td>
-                <td className="p-2 text-right font-medium">{formatNaira(o.subtotal)}</td>
+                <td className="p-2 text-right font-medium">
+                  {formatNaira(o.subtotal)}
+                </td>
                 <td className="p-2">
                   {o.is_complimentary
-                    ? 'Complimentary'
-                    : o.status === 'settled'
+                    ? "Complimentary"
+                    : o.status === "settled"
                       ? formatPaymentMethodLabel(o.payment_method)
-                      : '—'}
+                      : "—"}
                 </td>
                 <td className="p-2">
                   <Badge
-                    variant={o.status === 'settled' ? 'default' : o.status === 'open' ? 'outline' : 'secondary'}
+                    variant={
+                      o.status === "settled"
+                        ? "default"
+                        : o.status === "open"
+                          ? "outline"
+                          : "secondary"
+                    }
                     className="text-[10px]"
                   >
-                    {o.status === 'open' ? 'unsettled' : o.status}
+                    {o.status === "open" ? "unsettled" : o.status}
                   </Badge>
                 </td>
                 {showActionsCol && (
                   <td className="p-2">
                     <div className="flex justify-end gap-0.5 flex-wrap">
-                      {canManageOrders && (o.status === 'open' || o.status === 'settled') && (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7"
-                          title="Edit order"
-                          onClick={() => setEditTarget(o)}
-                        >
-                          <Pencil className="h-3.5 w-3.5" />
-                        </Button>
-                      )}
-                      {canManageOrders && (o.status === 'open' || o.status === 'settled') && (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7 text-destructive hover:text-destructive"
-                          title={o.status === 'open' ? 'Delete open bill' : 'Void settled order'}
-                          onClick={() => {
-                            setVoidReason('')
-                            setDeleteTarget(o)
-                          }}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      )}
-                      {canPrintReceipt && (o.status === 'open' || o.status === 'settled') && (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7"
-                          title="Print unsettled bill"
-                          onClick={() => onPrintUnsettled?.(o)}
-                        >
-                          <FileText className="h-3.5 w-3.5" />
-                        </Button>
-                      )}
-                      {canPrintReceipt && o.status === 'settled' && (
+                      {canManageOrders &&
+                        (o.status === "open" || o.status === "settled") && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7"
+                            title="Edit order"
+                            onClick={() => setEditTarget(o)}
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+                      {canManageOrders &&
+                        (o.status === "open" || o.status === "settled") && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-destructive hover:text-destructive"
+                            title={
+                              o.status === "open"
+                                ? "Delete open bill"
+                                : "Void settled order"
+                            }
+                            onClick={() => {
+                              setVoidReason("");
+                              setDeleteTarget(o);
+                            }}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+                      {canPrintReceipt &&
+                        (o.status === "open" || o.status === "settled") && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7"
+                            title="Print unsettled bill"
+                            onClick={() => onPrintUnsettled?.(o)}
+                          >
+                            <FileText className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+                      {canPrintReceipt && o.status === "settled" && (
                         <Button
                           type="button"
                           variant="ghost"
@@ -359,7 +385,7 @@ export function OutletOrdersPanel({
                           <Printer className="h-3.5 w-3.5" />
                         </Button>
                       )}
-                      {canSell && o.status === 'open' && (
+                      {canSell && o.status === "open" && (
                         <Button
                           type="button"
                           variant="secondary"
@@ -379,7 +405,9 @@ export function OutletOrdersPanel({
         </table>
         {totalCount === 0 && (
           <p className="p-6 text-center text-muted-foreground text-sm">
-            {orders.length === 0 ? 'No orders yet' : 'No orders match your search or filters'}
+            {orders.length === 0
+              ? "No orders yet"
+              : "No orders match your search or filters"}
           </p>
         )}
       </div>
@@ -410,7 +438,7 @@ export function OutletOrdersPanel({
         open={!!editTarget}
         onOpenChange={(open) => !open && setEditTarget(null)}
         onSaved={() => {
-          onOrdersChanged?.()
+          onOrdersChanged?.();
         }}
       />
 
@@ -418,23 +446,25 @@ export function OutletOrdersPanel({
         open={!!deleteTarget}
         onOpenChange={(open) => {
           if (!open) {
-            setDeleteTarget(null)
-            setVoidReason('')
+            setDeleteTarget(null);
+            setVoidReason("");
           }
         }}
       >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {deleteTarget?.status === 'open' ? 'Delete open bill?' : 'Void settled order?'}
+              {deleteTarget?.status === "open"
+                ? "Delete open bill?"
+                : "Void settled order?"}
             </AlertDialogTitle>
             <AlertDialogDescription>
-              {deleteTarget?.status === 'open'
+              {deleteTarget?.status === "open"
                 ? `Permanently remove receipt ${deleteTarget?.order_number}. Any open folio charge on the booking will be removed.`
                 : `Void receipt ${deleteTarget?.order_number} and reverse its payment, transaction, folio, and city ledger entries across reports and analytics.`}
             </AlertDialogDescription>
           </AlertDialogHeader>
-          {deleteTarget?.status === 'settled' && (
+          {deleteTarget?.status === "settled" && (
             <div className="space-y-1 py-1">
               <Label htmlFor="void-reason" className="text-xs">
                 Reason (required)
@@ -453,15 +483,21 @@ export function OutletOrdersPanel({
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               disabled={deleting}
               onClick={(e) => {
-                e.preventDefault()
-                void confirmDelete()
+                e.preventDefault();
+                void confirmDelete();
               }}
             >
-              {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : deleteTarget?.status === 'open' ? 'Delete' : 'Void'}
+              {deleting ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : deleteTarget?.status === "open" ? (
+                "Delete"
+              ) : (
+                "Void"
+              )}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
     </div>
-  )
+  );
 }

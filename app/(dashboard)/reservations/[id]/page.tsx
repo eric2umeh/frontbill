@@ -35,6 +35,16 @@ import { MarkNoShowDialog } from '@/components/reservations/mark-no-show-dialog'
 import { formatReservationPaymentMethodLabel } from '@/lib/reservations/reservation-payment-methods'
 import { formatRoomLabel } from '@/lib/utils/room-display'
 import { PAYMENT_METHOD_SELECT_OPTIONS } from '@/lib/payments/payment-methods'
+import { CashbackPaymentPanel } from '@/components/cashback/cashback-payment-panel'
+import {
+  earnCashbackClient,
+  fetchGuestCashbackBalanceClient,
+} from '@/lib/cashback/cashback-client'
+import { computeCashbackDiscount } from '@/lib/cashback/cashback-payment-math'
+import { applyCashbackDiscountAndFolioPayments } from '@/lib/cashback/apply-cashback-folio-payment'
+import { paymentMethodEarnsCashback } from '@/lib/cashback/cashback-config'
+import { isGuestBookingCashbackEligible } from '@/lib/cashback/cashback-eligibility'
+import { insertFolioCharges } from '@/lib/utils/insert-folio-charges'
 
 export default function ReservationDetailPage({
   params,
@@ -62,6 +72,8 @@ export default function ReservationDetailPage({
   const [paymentAmount, setPaymentAmount] = useState('')
   const [paymentMethod, setPaymentMethod] = useState('')
   const [paymentLoading, setPaymentLoading] = useState(false)
+  const [guestCashbackBalance, setGuestCashbackBalance] = useState(0)
+  const [applyCashback, setApplyCashback] = useState(true)
 
   useEffect(() => {
     let cancelled = false
@@ -125,6 +137,21 @@ export default function ReservationDetailPage({
         }
       }
       setReservation({ ...data, payment_method })
+
+      const guestIdForCb = Array.isArray(data.guests)
+        ? data.guests[0]?.id
+        : data.guests?.id
+      if (guestIdForCb) {
+        try {
+          const supabaseCb = createClient()
+          const cb = await fetchGuestCashbackBalanceClient(supabaseCb, guestIdForCb)
+          setGuestCashbackBalance(cb.balance)
+        } catch {
+          setGuestCashbackBalance(0)
+        }
+      } else {
+        setGuestCashbackBalance(0)
+      }
 
       if (userId) {
         try {
@@ -224,8 +251,32 @@ export default function ReservationDetailPage({
     try {
       setPaymentLoading(true)
       const supabase = createClient()
-      const amount = Number(paymentAmount)
-      const newDeposit = (reservation?.deposit || 0) + amount
+      const cashEntered = Number(paymentAmount)
+      const guestId =
+        reservation?.guests?.id ||
+        (Array.isArray(reservation?.guests) ? reservation.guests[0]?.id : null)
+      const balanceBefore = Math.max(
+        0,
+        Number(reservation?.balance ?? 0) ||
+          Number(reservation?.total_amount ?? 0) - Number(reservation?.deposit ?? 0),
+      )
+      const guestName =
+        reservation?.guests?.name ||
+        (Array.isArray(reservation?.guests) ? reservation.guests[0]?.name : null)
+      const cashbackOk = isGuestBookingCashbackEligible({
+        guestName,
+        paymentMethod: reservation?.payment_method,
+      })
+      const breakdown = computeCashbackDiscount({
+        totalDue: balanceBefore,
+        cashbackBalance: guestCashbackBalance,
+        cashPaying: cashEntered,
+        applyCashback: applyCashback && Boolean(guestId) && cashbackOk,
+      })
+      const totalApplied =
+        breakdown.cashbackDiscount + breakdown.cashToCollect
+
+      const newDeposit = (reservation?.deposit || 0) + totalApplied
       const newBalance = Math.max(
         0,
         (reservation?.total_amount || 0) - newDeposit
@@ -256,6 +307,51 @@ export default function ReservationDetailPage({
         .eq('id', rid)
 
       try {
+        if (guestId && cashbackOk) {
+          await applyCashbackDiscountAndFolioPayments(supabase, {
+            guestId,
+            bookingId: rid,
+            organizationId: orgId || '',
+            cashbackDiscount: breakdown.cashbackDiscount,
+            cashAmount: breakdown.cashToCollect,
+            cashPaymentMethod: paymentMethod,
+            createdBy: userId || null,
+            sourceType: 'reservation_payment',
+            sourceId: rid,
+            cashDescription: `Reservation payment - ${paymentMethod}`,
+          })
+        } else {
+          await insertFolioCharges(supabase, [{
+            booking_id: rid,
+            organization_id: orgId,
+            description: `Reservation payment - ${paymentMethod}`,
+            amount: -breakdown.cashToCollect,
+            charge_type: 'payment',
+            payment_method: paymentMethod,
+            payment_status: 'paid',
+            created_by: userId || null,
+          }])
+        }
+      } catch {
+        /* non-fatal */
+      }
+
+      if (
+        guestId &&
+        cashbackOk &&
+        paymentMethodEarnsCashback(paymentMethod) &&
+        breakdown.cashToCollect > 0
+      ) {
+        await earnCashbackClient(supabase, {
+          guestId,
+          amount: breakdown.cashToCollect,
+          paymentMethod,
+          sourceType: 'reservation_payment',
+          sourceId: rid,
+        })
+      }
+
+      try {
         const gName = Array.isArray(reservation?.guests)
           ? reservation.guests[0]?.name
           : reservation?.guests?.name
@@ -269,10 +365,13 @@ export default function ReservationDetailPage({
             transaction_id: 'PAY-' + rid + '-' + Date.now(),
             guest_name: gName || 'Guest',
             room: rNum || null,
-            amount,
+            amount: breakdown.cashToCollect,
             payment_method: paymentMethod,
             status: 'paid',
-            description: 'Reservation payment',
+            description:
+              breakdown.cashbackDiscount > 0
+                ? `Reservation payment (incl. ${formatNaira(breakdown.cashbackDiscount)} cashback discount)`
+                : 'Reservation payment',
             received_by: userId,
           },
         ])
@@ -280,10 +379,15 @@ export default function ReservationDetailPage({
         // non-fatal
       }
 
-      toast.success('Payment of ' + formatNaira(amount) + ' recorded')
+      const discountNote =
+        breakdown.cashbackDiscount > 0
+          ? ` (${formatNaira(breakdown.cashbackDiscount)} cashback discount applied)`
+          : ''
+      toast.success(`Payment of ${formatNaira(totalApplied)} recorded${discountNote}`)
       setPaymentModalOpen(false)
       setPaymentAmount('')
       setPaymentMethod('')
+      setApplyCashback(true)
       loadReservation(rid)
     } catch (err: any) {
       toast.error(err.message || 'Failed to record payment')
@@ -407,6 +511,11 @@ export default function ReservationDetailPage({
       reservation.status === 'confirmed' ||
       (reservation.status === 'reserved' && !checkInNotReached))
 
+  const reservationCashbackEligible = isGuestBookingCashbackEligible({
+    guestName: guest?.name,
+    paymentMethod: reservation.payment_method,
+  })
+
   const actionBooking = {
     id: reservation.id,
     folioId: reservation.folio_id,
@@ -464,6 +573,24 @@ export default function ReservationDetailPage({
                 </SelectContent>
               </Select>
             </div>
+            {reservation?.guests?.id && reservationCashbackEligible && Number(paymentAmount) > 0 && (
+              <CashbackPaymentPanel
+                guestId={
+                  reservation.guests.id ||
+                  (Array.isArray(reservation.guests) ? reservation.guests[0]?.id : null)
+                }
+                totalAmount={Math.max(
+                  0,
+                  Number(reservation?.balance ?? 0) ||
+                    Number(reservation?.total_amount ?? 0) -
+                      Number(reservation?.deposit ?? 0),
+                )}
+                cashPaying={Number(paymentAmount) || 0}
+                paymentMethod={paymentMethod}
+                applyCashback={applyCashback}
+                onApplyCashbackChange={setApplyCashback}
+              />
+            )}
             <Button
               onClick={handlePaymentUpdate}
               className="w-full"

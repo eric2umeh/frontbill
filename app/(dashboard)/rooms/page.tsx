@@ -1,191 +1,212 @@
-'use client'
+"use client";
 
-import { useEffect, useState } from 'react'
-import { createClient } from '@/lib/supabase/client'
-import { useRouter } from 'next/navigation'
-import { EnhancedDataTable } from '@/components/shared/enhanced-data-table'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { CardContent } from '@/components/ui/card'
-import { formatNaira } from '@/lib/utils/currency'
-import { MobileTableSubdetail } from '@/lib/utils/table-mobile'
-import { usePageData } from '@/hooks/use-page-data'
-import { useAuth } from '@/lib/auth-context'
-import { hasPermission } from '@/lib/permissions'
-import { Plus, Users, Loader2 } from 'lucide-react'
-import { AddRoomModal } from '@/components/rooms/add-room-modal'
-import { toast } from 'sonner'
-import { getUserDisplayName } from '@/lib/utils/user-display'
-import { fetchUserDisplayNameMap } from '@/lib/utils/fetch-user-display-names'
-import { reconcileRoomStatusesClient } from '@/lib/rooms/reconcile-room-status-client'
+import { useEffect, useState } from "react";
+import { createClient } from "@/lib/supabase/client";
+import { useRouter } from "next/navigation";
+import { EnhancedDataTable } from "@/components/shared/enhanced-data-table";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { CardContent } from "@/components/ui/card";
+import { formatNaira } from "@/lib/utils/currency";
+import { MobileTableSubdetail } from "@/lib/utils/table-mobile";
+import { usePageData } from "@/hooks/use-page-data";
+import { useAuth } from "@/lib/auth-context";
+import { hasPermission } from "@/lib/permissions";
+import { Plus, Users, Loader2 } from "lucide-react";
+import { AddRoomModal } from "@/components/rooms/add-room-modal";
+import { toast } from "sonner";
+import { getUserDisplayName } from "@/lib/utils/user-display";
+import { fetchUserDisplayNameMap } from "@/lib/utils/fetch-user-display-names";
+import { reconcileRoomStatusesClient } from "@/lib/rooms/reconcile-room-status-client";
 import {
   computeEffectiveRoomStatus,
   OCCUPYING_BOOKING_STATUSES,
   pickOccupyingBooking,
   type OccupyingBookingRow,
-} from '@/lib/rooms/room-occupancy'
+} from "@/lib/rooms/room-occupancy";
 
 interface Room {
-  id: string
-  room_number: string
-  room_type: string
-  floor_number: number
-  max_occupancy: number
-  price_per_night: number
-  status: string
-  amenities: string[]
-  created_by?: string
-  created_by_name?: string
-  updated_by?: string
-  updated_by_name?: string
-  updated_at?: string
+  id: string;
+  room_number: string;
+  room_type: string;
+  floor_number: number;
+  max_occupancy: number;
+  price_per_night: number;
+  status: string;
+  amenities: string[];
+  created_by?: string;
+  created_by_name?: string;
+  updated_by?: string;
+  updated_by_name?: string;
+  updated_at?: string;
 }
 
 export default function RoomsPage() {
-  const [rooms, setRooms] = useState<Room[]>([])
-  const [addRoomModalOpen, setAddRoomModalOpen] = useState(false)
-  const { initialLoading, startFetch, endFetch } = usePageData()
-  const { organizationId, role, userId } = useAuth()
-  const router = useRouter()
+  const [rooms, setRooms] = useState<Room[]>([]);
+  const [addRoomModalOpen, setAddRoomModalOpen] = useState(false);
+  const { initialLoading, startFetch, endFetch } = usePageData();
+  const { organizationId, role, userId } = useAuth();
+  const router = useRouter();
 
-  const canAddRoom = hasPermission(role, 'rooms:create')
+  const canAddRoom = hasPermission(role, "rooms:create");
 
   useEffect(() => {
-    fetchRooms()
-  }, [])
+    fetchRooms();
+  }, []);
 
   const fetchRooms = async () => {
     try {
-      startFetch()
-      const supabase = createClient()
-      
+      startFetch();
+      const supabase = createClient();
+
       if (!supabase) {
-        setRooms([])
-        endFetch()
-        return
+        setRooms([]);
+        endFetch();
+        return;
       }
 
-      await reconcileRoomStatusesClient()
+      await reconcileRoomStatusesClient();
 
       const [{ data, error }, { data: bookingRows }] = await Promise.all([
         supabase
-          .from('rooms')
-          .select('*, created_by, updated_by, updated_at')
-          .eq('organization_id', organizationId)
-          .order('room_number', { ascending: true }),
+          .from("rooms")
+          .select("*, created_by, updated_by, updated_at")
+          .eq("organization_id", organizationId)
+          .order("room_number", { ascending: true }),
         supabase
-          .from('bookings')
-          .select('id, room_id, status, check_in, check_out, folio_status')
-          .eq('organization_id', organizationId)
-          .in('status', [...OCCUPYING_BOOKING_STATUSES]),
-      ])
+          .from("bookings")
+          .select("id, room_id, status, check_in, check_out, folio_status")
+          .eq("organization_id", organizationId)
+          .in("status", [...OCCUPYING_BOOKING_STATUSES]),
+      ]);
 
-      if (error) throw error
+      if (error) throw error;
 
-      const byRoom = new Map<string, OccupyingBookingRow[]>()
+      const byRoom = new Map<string, OccupyingBookingRow[]>();
       for (const b of bookingRows ?? []) {
-        if (!b.room_id) continue
-        if (!byRoom.has(b.room_id)) byRoom.set(b.room_id, [])
-        byRoom.get(b.room_id)!.push(b as OccupyingBookingRow)
+        if (!b.room_id) continue;
+        if (!byRoom.has(b.room_id)) byRoom.set(b.room_id, []);
+        byRoom.get(b.room_id)!.push(b as OccupyingBookingRow);
       }
-      
+
       // Fetch creator and updater profiles for all rooms
-      const userIds = Array.from(new Set(
-        [...(data || []).map((r: any) => r.created_by), ...(data || []).map((r: any) => r.updated_by)].filter(Boolean)
-      ))
-      const userMap = await fetchUserDisplayNameMap(userIds as string[], userId)
-      
+      const userIds = Array.from(
+        new Set(
+          [
+            ...(data || []).map((r: any) => r.created_by),
+            ...(data || []).map((r: any) => r.updated_by),
+          ].filter(Boolean),
+        ),
+      );
+      const userMap = await fetchUserDisplayNameMap(
+        userIds as string[],
+        userId,
+      );
+
       // Add created_by_name and updated_by_name to each room
       const roomsWithUsers = (data || []).map((room: any) => {
-        const occupying = pickOccupyingBooking(byRoom.get(room.id) ?? [])
-        const effectiveStatus = computeEffectiveRoomStatus(room.status, occupying)
+        const occupying = pickOccupyingBooking(byRoom.get(room.id) ?? []);
+        const effectiveStatus = computeEffectiveRoomStatus(
+          room.status,
+          occupying,
+        );
         return {
           ...room,
           status: effectiveStatus,
-          status_source: occupying ? 'booking' : 'inventory',
-          created_by_name: room.created_by ? userMap[room.created_by] || getUserDisplayName(null, room.created_by) : 'System',
-          updated_by_name: room.updated_by ? userMap[room.updated_by] || getUserDisplayName(null, room.updated_by) : null,
-        }
-      })
-      
-      setRooms(roomsWithUsers)
+          status_source: occupying ? "booking" : "inventory",
+          created_by_name: room.created_by
+            ? userMap[room.created_by] ||
+              getUserDisplayName(null, room.created_by)
+            : "System",
+          updated_by_name: room.updated_by
+            ? userMap[room.updated_by] ||
+              getUserDisplayName(null, room.updated_by)
+            : null,
+        };
+      });
+
+      setRooms(roomsWithUsers);
     } catch (error: any) {
-      console.error('Error fetching rooms:', error)
-      toast.error('Failed to load rooms')
+      console.error("Error fetching rooms:", error);
+      toast.error("Failed to load rooms");
     } finally {
-      endFetch()
+      endFetch();
     }
-  }
+  };
 
   const statusColors: Record<string, string> = {
-    available: 'bg-green-500/10 text-green-700 border-green-200',
-    occupied: 'bg-red-500/10 text-red-700 border-red-200',
-    cleaning: 'bg-yellow-500/10 text-yellow-700 border-yellow-200',
-    maintenance: 'bg-orange-500/10 text-orange-700 border-orange-200',
-    reserved: 'bg-blue-500/10 text-blue-700 border-blue-200',
-  }
+    available: "bg-green-500/10 text-green-700 border-green-200",
+    occupied: "bg-red-500/10 text-red-700 border-red-200",
+    cleaning: "bg-yellow-500/10 text-yellow-700 border-yellow-200",
+    maintenance: "bg-orange-500/10 text-orange-700 border-orange-200",
+    reserved: "bg-blue-500/10 text-blue-700 border-blue-200",
+  };
 
   if (initialLoading) {
     return (
       <div className="flex items-center justify-center h-96">
         <Loader2 className="h-8 w-8 animate-spin" />
       </div>
-    )
+    );
   }
 
   return (
     <div className="space-y-6">
-      <AddRoomModal 
-        open={addRoomModalOpen} 
-        onClose={() => { 
-          setAddRoomModalOpen(false)
+      <AddRoomModal
+        open={addRoomModalOpen}
+        onClose={() => {
+          setAddRoomModalOpen(false);
           // Small delay to ensure database is updated
-          setTimeout(() => fetchRooms(), 500)
+          setTimeout(() => fetchRooms(), 500);
         }}
       />
-      
+
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Rooms</h1>
-          <p className="text-muted-foreground">Manage room inventory and status</p>
+          <p className="text-muted-foreground">
+            Manage room inventory and status
+          </p>
         </div>
         {canAddRoom && (
           <Button onClick={() => setAddRoomModalOpen(true)}>
             <Plus className="mr-2 h-4 w-4" />
-          Add Room
-        </Button>
+            Add Room
+          </Button>
         )}
       </div>
 
       <EnhancedDataTable
         compactTable
         data={rooms}
-        searchKeys={['room_number', 'room_type']}
+        searchKeys={["room_number", "room_type"]}
         filters={[
           {
-            key: 'status',
-            label: 'Status',
+            key: "status",
+            label: "Status",
             options: [
-              { value: 'available', label: 'Available' },
-              { value: 'occupied', label: 'Occupied' },
-              { value: 'reserved', label: 'Reserved' },
-              { value: 'cleaning', label: 'Cleaning' },
-              { value: 'maintenance', label: 'Maintenance' },
+              { value: "available", label: "Available" },
+              { value: "occupied", label: "Occupied" },
+              { value: "reserved", label: "Reserved" },
+              { value: "cleaning", label: "Cleaning" },
+              { value: "maintenance", label: "Maintenance" },
             ],
           },
         ]}
         columns={[
           {
-            key: 'room_number',
-            label: 'Room',
+            key: "room_number",
+            label: "Room",
             render: (room) => (
               <div
                 className="cursor-pointer hover:text-primary"
                 onClick={() => router.push(`/rooms/${room.id}`)}
               >
-                <div className="font-semibold text-base max-md:text-sm">Room {room.room_number}</div>
+                <div className="font-semibold text-base max-md:text-sm">
+                  Room {room.room_number}
+                </div>
                 <div className="text-[10px] text-muted-foreground max-md:hidden">
-                  {room.floor_number === 0 ? 'G' : `Fl ${room.floor_number}`}
+                  {room.floor_number === 0 ? "G" : `Fl ${room.floor_number}`}
                 </div>
                 <MobileTableSubdetail>
                   <div>{room.room_type}</div>
@@ -195,9 +216,9 @@ export default function RoomsPage() {
             ),
           },
           {
-            key: 'room_type',
-            label: 'Type',
-            responsive: 'md+',
+            key: "room_type",
+            label: "Type",
+            responsive: "md+",
             render: (room) => (
               <div
                 className="cursor-pointer font-medium hover:text-primary max-md:text-[13px]"
@@ -208,30 +229,39 @@ export default function RoomsPage() {
             ),
           },
           {
-            key: 'status',
-            label: 'Status',
-            responsive: 'md+',
+            key: "status",
+            label: "Status",
+            responsive: "md+",
             render: (room) => (
-              <div className="cursor-pointer" onClick={() => router.push(`/rooms/${room.id}`)}>
-                <Badge variant="outline" className={`${statusColors[room.status]} max-md:text-[10px] px-1.5 py-0`}>
+              <div
+                className="cursor-pointer"
+                onClick={() => router.push(`/rooms/${room.id}`)}
+              >
+                <Badge
+                  variant="outline"
+                  className={`${statusColors[room.status]} max-md:text-[10px] px-1.5 py-0`}
+                >
                   {room.status}
                 </Badge>
               </div>
             ),
           },
           {
-            key: 'price_per_night',
-            label: 'Amount',
+            key: "price_per_night",
+            label: "Amount",
             render: (room) => (
-              <div className="cursor-pointer font-semibold text-xs md:text-sm whitespace-nowrap" onClick={() => router.push(`/rooms/${room.id}`)}>
+              <div
+                className="cursor-pointer font-semibold text-xs md:text-sm whitespace-nowrap"
+                onClick={() => router.push(`/rooms/${room.id}`)}
+              >
                 {formatNaira(room.price_per_night)}
               </div>
             ),
           },
           {
-            key: 'max_occupancy',
-            label: 'Capacity',
-            responsive: 'lg+',
+            key: "max_occupancy",
+            label: "Capacity",
+            responsive: "lg+",
             render: (room) => (
               <div
                 className="cursor-pointer flex items-center gap-1 hover:text-primary"
@@ -243,36 +273,50 @@ export default function RoomsPage() {
             ),
           },
           {
-            key: 'amenities',
-            label: 'Amenities',
-            responsive: 'lg+',
+            key: "amenities",
+            label: "Amenities",
+            responsive: "lg+",
             render: (room) => (
-              <div className="flex flex-wrap gap-1 cursor-pointer" onClick={() => router.push(`/rooms/${room.id}`)}>
+              <div
+                className="flex flex-wrap gap-1 cursor-pointer"
+                onClick={() => router.push(`/rooms/${room.id}`)}
+              >
                 {room.amenities && room.amenities.length > 0 ? (
                   room.amenities.slice(0, 3).map((a: string) => (
-                    <Badge key={a} variant="secondary" className="text-xs py-0">{a}</Badge>
+                    <Badge key={a} variant="secondary" className="text-xs py-0">
+                      {a}
+                    </Badge>
                   ))
-                ) : <span className="text-muted-foreground text-sm">—</span>}
+                ) : (
+                  <span className="text-muted-foreground text-sm">—</span>
+                )}
                 {room.amenities && room.amenities.length > 3 && (
-                  <Badge variant="secondary" className="text-xs py-0">+{room.amenities.length - 3}</Badge>
+                  <Badge variant="secondary" className="text-xs py-0">
+                    +{room.amenities.length - 3}
+                  </Badge>
                 )}
               </div>
             ),
           },
           {
-            key: 'updated_at',
-            label: 'Updated',
-            responsive: 'lg+',
+            key: "updated_at",
+            label: "Updated",
+            responsive: "lg+",
             render: (room) => (
-              <div className="text-sm text-muted-foreground cursor-pointer" onClick={() => router.push(`/rooms/${room.id}`)}>
-                {room.updated_at ? new Date(room.updated_at).toLocaleDateString('en-GB') : '—'}
+              <div
+                className="text-sm text-muted-foreground cursor-pointer"
+                onClick={() => router.push(`/rooms/${room.id}`)}
+              >
+                {room.updated_at
+                  ? new Date(room.updated_at).toLocaleDateString("en-GB")
+                  : "—"}
               </div>
             ),
           },
           {
-            key: 'created_by_name',
-            label: 'Created By',
-            responsive: 'lg+',
+            key: "created_by_name",
+            label: "Created By",
+            responsive: "lg+",
             render: (room) => (
               <div className="text-sm text-muted-foreground">
                 {room.created_by_name}
@@ -280,9 +324,9 @@ export default function RoomsPage() {
             ),
           },
           {
-            key: 'updated_by_name',
-            label: 'Last Updated',
-            responsive: 'lg+',
+            key: "updated_by_name",
+            label: "Last Updated",
+            responsive: "lg+",
             render: (room) => (
               <div className="text-sm">
                 {room.updated_by_name ? (
@@ -297,15 +341,19 @@ export default function RoomsPage() {
           },
         ]}
         renderCard={(room) => (
-          <CardContent 
+          <CardContent
             className="p-4 cursor-pointer hover:bg-accent"
             onClick={() => router.push(`/rooms/${room.id}`)}
           >
             <div className="space-y-3">
               <div className="flex items-start justify-between">
                 <div>
-                  <div className="text-2xl font-bold">Room {room.room_number}</div>
-                  <div className="text-sm text-muted-foreground">{room.room_type}</div>
+                  <div className="text-2xl font-bold">
+                    Room {room.room_number}
+                  </div>
+                  <div className="text-sm text-muted-foreground">
+                    {room.room_type}
+                  </div>
                 </div>
                 <Badge variant="outline" className={statusColors[room.status]}>
                   {room.status}
@@ -314,7 +362,11 @@ export default function RoomsPage() {
               <div className="space-y-2">
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-muted-foreground">Floor</span>
-                  <span className="font-medium">{room.floor_number === 0 ? 'Ground Floor' : `Floor ${room.floor_number}`}</span>
+                  <span className="font-medium">
+                    {room.floor_number === 0
+                      ? "Ground Floor"
+                      : `Floor ${room.floor_number}`}
+                  </span>
                 </div>
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-muted-foreground">Capacity</span>
@@ -325,7 +377,9 @@ export default function RoomsPage() {
                 </div>
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-muted-foreground">Rate/Night</span>
-                  <span className="font-semibold">{formatNaira(room.price_per_night)}</span>
+                  <span className="font-semibold">
+                    {formatNaira(room.price_per_night)}
+                  </span>
                 </div>
               </div>
             </div>
@@ -334,5 +388,5 @@ export default function RoomsPage() {
         itemsPerPage={12}
       />
     </div>
-  )
+  );
 }

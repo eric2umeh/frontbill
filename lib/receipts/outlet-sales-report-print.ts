@@ -1,18 +1,23 @@
-import { escapeHtml } from '@/lib/utils/html-escape'
-import { formatNaira } from '@/lib/utils/currency'
-import { receiptHotelHeaderRow } from '@/lib/receipts/receipt-logo'
-import type { OutletSalesReportBundle, OutletSalesReportRow } from '@/lib/outlets/outlet-sales-report'
-import { outletReportThermalStyles } from '@/lib/receipts/outlet-report-thermal-styles'
-import { printHtmlDocument } from '@/lib/receipts/receipt-pdf-print'
+import { escapeHtml } from "@/lib/utils/html-escape";
+import { formatNaira } from "@/lib/utils/currency";
+import { receiptHotelHeaderRow } from "@/lib/receipts/receipt-logo";
+import type {
+  OutletSalesReportBundle,
+  OutletSalesReportRow,
+} from "@/lib/outlets/outlet-sales-report";
+import { outletReportThermalStyles } from "@/lib/receipts/outlet-report-thermal-styles";
+import { printHtmlDocument } from "@/lib/receipts/receipt-pdf-print";
 
 function orderBlock(r: OutletSalesReportRow): string {
-  const guestLine = r.guest ? `<div class="row"><span>Guest</span><span>${escapeHtml(r.guest)}</span></div>` : ''
+  const guestLine = r.guest
+    ? `<div class="row"><span>Guest</span><span>${escapeHtml(r.guest)}</span></div>`
+    : "";
   const roomLine = r.room
     ? `<div class="row"><span>Room</span><span>${escapeHtml(r.room)}</span></div>`
-    : ''
+    : "";
   const tableLine = r.table
     ? `<div class="row"><span>Table</span><span>${escapeHtml(r.table)}</span></div>`
-    : ''
+    : "";
   return `<div class="order">
     <div class="row"><span><strong>${escapeHtml(r.orderNumber)}</strong></span><span>${escapeHtml(r.timeLabel)}</span></div>
     ${guestLine}
@@ -22,35 +27,35 @@ function orderBlock(r: OutletSalesReportRow): string {
     <div class="row"><span>Pay</span><span>${escapeHtml(r.paymentMethod)}</span></div>
     <div class="items">${r.itemCount} item(s): ${escapeHtml(r.itemsSummary)}</div>
     <div class="row"><span>Total</span><span><strong>${escapeHtml(formatNaira(r.total))}</strong></span></div>
-  </div>`
+  </div>`;
 }
 
 function sectionBlocks(rows: OutletSalesReportRow[]): string {
-  if (!rows.length) return '<p class="sub">No orders</p>'
-  return rows.map(orderBlock).join('')
+  if (!rows.length) return '<p class="sub">No orders</p>';
+  return rows.map(orderBlock).join("");
 }
 
 export function buildOutletSalesReportHtml(input: {
-  hotelName: string
-  logoUrl?: string | null
-  departmentLabel: string
-  printedAt: string
-  report: OutletSalesReportBundle
+  hotelName: string;
+  logoUrl?: string | null;
+  departmentLabel: string;
+  printedAt: string;
+  report: OutletSalesReportBundle;
 }): string {
-  const { hotelName, logoUrl, departmentLabel, printedAt, report } = input
+  const { hotelName, logoUrl, departmentLabel, printedAt, report } = input;
   const sectionsHtml = report.sections
     .map(
       (s) => `<h2 class="sec">${escapeHtml(s.label)}
         <span class="amt">${escapeHtml(formatNaira(s.subtotal))} · ${s.rows.length} order(s)</span></h2>
       ${sectionBlocks(s.rows)}`,
     )
-    .join('')
+    .join("");
 
   const openHtml =
     report.openOrders.length > 0
       ? `<h2 class="sec">Open / unsettled
         <span class="amt">${report.openOrders.length} order(s)</span></h2>${sectionBlocks(report.openOrders)}`
-      : ''
+      : "";
 
   return `<!DOCTYPE html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width"/><title>${escapeHtml(departmentLabel)} sales</title>
     <style>${outletReportThermalStyles()}</style></head><body>
@@ -71,19 +76,19 @@ export function buildOutletSalesReportHtml(input: {
       </div>
       <p class="footnote">Voided: ${report.voidCount}. Open bills excluded from settled total.</p>
     </div>
-    </body></html>`
+    </body></html>`;
 }
 
 export function printOutletSalesReport(input: {
-  hotelName: string
-  logoUrl?: string | null
-  departmentLabel: string
-  report: OutletSalesReportBundle
+  hotelName: string;
+  logoUrl?: string | null;
+  departmentLabel: string;
+  report: OutletSalesReportBundle;
 }): void {
-  const printedAt = new Date().toLocaleString('en-NG', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  })
-  const html = buildOutletSalesReportHtml({ ...input, printedAt })
-  printHtmlDocument(html)
+  const printedAt = new Date().toLocaleString("en-NG", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
+  const html = buildOutletSalesReportHtml({ ...input, printedAt });
+  printHtmlDocument(html);
 }

@@ -8,6 +8,7 @@ import {
   recordCashbackEarn,
   recordCashbackRedeem,
 } from '@/lib/cashback/cashback-service'
+import { groupEarnTransactionsByRate } from '@/lib/cashback/cashback-earn-breakdown'
 
 type RouteCtx = { params: Promise<{ id: string }> }
 
@@ -76,6 +77,7 @@ export async function GET(request: Request, ctx: RouteCtx) {
       guest,
       balance: balance ?? { guestId, earnedTotal: 0, redeemedTotal: 0, balance: 0 },
       transactions: txns ?? [],
+      earnByRate: groupEarnTransactionsByRate(txns ?? []),
     })
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Failed to load cashback'
