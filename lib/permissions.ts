@@ -536,7 +536,6 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
           "rooms:create",
           "rooms:edit",
           "rooms:delete",
-          "backdate:approve",
           "bookings:edit",
           "bookings:delete",
           "reservations:edit",
