@@ -131,36 +131,49 @@ export default function SettingsPage() {
     fetchHotelInfo()
   }, [organizationId])
 
+  async function billingPolicyHeaders(): Promise<Record<string, string>> {
+    if (!supabase) return { 'Content-Type': 'application/json' }
+    const { data: { session } } = await supabase.auth.getSession()
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+    if (session?.access_token) headers.Authorization = `Bearer ${session.access_token}`
+    return headers
+  }
+
   useEffect(() => {
     async function fetchBillingPolicy() {
-      if (!organizationId || !supabase) return
-      const { data, error } = await supabase
-        .from('organizations')
-        .select(
-          'no_show_fee_mode, no_show_fee_percent, no_show_fee_flat_amount, cashback_enabled, cashback_percent',
-        )
-        .eq('id', organizationId)
-        .maybeSingle()
-
-      if (error) {
-        if (isNoShowPolicyColumnError(error)) {
-          setBillingPolicyDbAvailable(false)
+      if (!organizationId) return
+      try {
+        const res = await fetch('/api/organizations/billing-policy', {
+          credentials: 'include',
+          headers: await billingPolicyHeaders(),
+        })
+        const data = await res.json().catch(() => ({}))
+        if (!res.ok) {
+          if (data?.error && String(data.error).includes('073')) {
+            setBillingPolicyDbAvailable(false)
+          }
+          return
         }
-        return
+        setBillingPolicyDbAvailable(data.dbAvailable !== false)
+        const mode = String(data.no_show_fee_mode || data.policy?.feeMode || 'percent')
+        setNoShowFeeMode(
+          mode === 'flat_night' || mode === 'flat_stay' ? mode : 'percent',
+        )
+        setNoShowFeePercent(String(data.no_show_fee_percent ?? data.policy?.feePercent ?? 100))
+        setNoShowFeeFlat(
+          data.no_show_fee_flat_amount != null || data.policy?.feeFlatAmount != null
+            ? String(data.no_show_fee_flat_amount ?? data.policy?.feeFlatAmount ?? '')
+            : '',
+        )
+        if (data.cashback_enabled !== undefined) {
+          setCashbackEnabled(data.cashback_enabled !== false)
+        }
+        if (data.cashback_percent != null) {
+          setCashbackPercent(String(data.cashback_percent))
+        }
+      } catch {
+        /* keep defaults */
       }
-      setBillingPolicyDbAvailable(true)
-      const mode = String(data?.no_show_fee_mode || 'percent')
-      setNoShowFeeMode(
-        mode === 'flat_night' || mode === 'flat_stay' ? mode : 'percent',
-      )
-      setNoShowFeePercent(String(data?.no_show_fee_percent ?? 100))
-      setNoShowFeeFlat(
-        data?.no_show_fee_flat_amount != null
-          ? String(data.no_show_fee_flat_amount)
-          : '',
-      )
-      setCashbackEnabled(data?.cashback_enabled !== false)
-      setCashbackPercent(String(data?.cashback_percent ?? 2))
     }
     fetchBillingPolicy()
   }, [organizationId])
@@ -313,25 +326,24 @@ export default function SettingsPage() {
 
   async function handleSaveBillingPolicy() {
     if (!organizationId || !canManageHotelSettings) return
-    if (!billingPolicyDbAvailable) {
-      toast.error(
-        'Run scripts/073_no_show_cashback_policy.sql in Supabase SQL editor first.',
-      )
-      return
-    }
     setBillingPolicySaving(true)
     try {
-      const { error } = await supabase
-        .from('organizations')
-        .update({
+      const res = await fetch('/api/organizations/billing-policy', {
+        method: 'PUT',
+        credentials: 'include',
+        headers: await billingPolicyHeaders(),
+        body: JSON.stringify({
           no_show_fee_mode: noShowFeeMode,
           no_show_fee_percent: parseFloat(noShowFeePercent) || 100,
           no_show_fee_flat_amount: noShowFeeFlat ? parseFloat(noShowFeeFlat) : null,
           cashback_enabled: cashbackEnabled,
           cashback_percent: parseFloat(cashbackPercent) || 2,
-        })
-        .eq('id', organizationId)
-      if (error) throw error
+        }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(json.error || 'Failed to save billing policies')
+      setBillingPolicyDbAvailable(true)
+      setNoShowFeePercent(String(json.no_show_fee_percent ?? noShowFeePercent))
       toast.success('No-show and cashback policies saved')
     } catch (err: any) {
       toast.error(err.message || 'Failed to save billing policies')
@@ -737,6 +749,17 @@ export default function SettingsPage() {
               </div>
             )}
           </div>
+          {canManageHotelSettings && (
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => void handleSaveBillingPolicy()}
+              disabled={billingPolicySaving || !billingPolicyDbAvailable}
+            >
+              {billingPolicySaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Save No-Show Policy
+            </Button>
+          )}
         </CardContent>
       </Card>
 
@@ -747,7 +770,7 @@ export default function SettingsPage() {
             <CardTitle>Cashback Program</CardTitle>
           </div>
           <CardDescription>
-            Guests earn cashback on cash, POS, and transfer payments at any outlet. Redeem as a payment method at checkout.
+            Guests earn cashback on cash, POS, and transfer payments. Cashback is applied automatically as a discount on stays — guests still pay the remainder via cash, POS, or transfer.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
