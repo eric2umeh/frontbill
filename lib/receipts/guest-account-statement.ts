@@ -1,32 +1,32 @@
-import { escapeHtml } from '@/lib/utils/html-escape'
-import { formatNaira } from '@/lib/utils/currency'
-import { receiptHotelHeaderRow } from '@/lib/receipts/receipt-logo'
-import { formatPaymentMethodLabel } from '@/lib/payments/payment-methods'
+import { escapeHtml } from "@/lib/utils/html-escape";
+import { formatNaira } from "@/lib/utils/currency";
+import { receiptHotelHeaderRow } from "@/lib/receipts/receipt-logo";
+import { formatPaymentMethodLabel } from "@/lib/payments/payment-methods";
 export type GuestStatementLine = {
-  date: string
-  folioId: string
-  description: string
-  charge: number
-  payment: number
-  balance: number
-}
+  date: string;
+  folioId: string;
+  description: string;
+  charge: number;
+  payment: number;
+  balance: number;
+};
 
 export type GuestStatementPayload = {
-  hotelName: string
-  logoUrl?: string | null
-  address?: string | null
-  phone?: string | null
-  guestName: string
-  guestPhone?: string | null
-  periodLabel: string
-  printedAt: string
-  printedBy: string
-  openingBalance: number
-  lines: GuestStatementLine[]
-  totalCharges: number
-  totalPayments: number
-  closingBalance: number
-}
+  hotelName: string;
+  logoUrl?: string | null;
+  address?: string | null;
+  phone?: string | null;
+  guestName: string;
+  guestPhone?: string | null;
+  periodLabel: string;
+  printedAt: string;
+  printedBy: string;
+  openingBalance: number;
+  lines: GuestStatementLine[];
+  totalCharges: number;
+  totalPayments: number;
+  closingBalance: number;
+};
 
 function statementStyles(): string {
   return `
@@ -42,32 +42,34 @@ function statementStyles(): string {
     .totals { margin-top: 16px; max-width: 320px; margin-left: auto; }
     .totals div { display: flex; justify-content: space-between; padding: 4px 0; }
     .totals .grand { font-weight: 700; font-size: 14px; border-top: 2px solid #111; margin-top: 6px; padding-top: 8px; }
-  `
+  `;
 }
 
-export function buildGuestAccountStatementHtml(p: GuestStatementPayload): string {
+export function buildGuestAccountStatementHtml(
+  p: GuestStatementPayload,
+): string {
   const rows = p.lines
     .map(
       (l) => `<tr>
         <td>${escapeHtml(l.date)}</td>
         <td>${escapeHtml(l.folioId)}</td>
         <td>${escapeHtml(l.description)}</td>
-        <td class="r">${l.charge > 0 ? escapeHtml(formatNaira(l.charge)) : '—'}</td>
-        <td class="r">${l.payment > 0 ? escapeHtml(formatNaira(l.payment)) : '—'}</td>
+        <td class="r">${l.charge > 0 ? escapeHtml(formatNaira(l.charge)) : "—"}</td>
+        <td class="r">${l.payment > 0 ? escapeHtml(formatNaira(l.payment)) : "—"}</td>
         <td class="r">${escapeHtml(formatNaira(l.balance))}</td>
       </tr>`,
     )
-    .join('')
+    .join("");
 
   return `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Account Statement — ${escapeHtml(p.guestName)}</title>
     <style>${statementStyles()}</style></head><body>
     <div class="wrap">
       ${receiptHotelHeaderRow(p.logoUrl, p.hotelName, { maxHeightPx: 36, maxWidthPx: 100 })}
       <div class="sub">
-        ${p.address ? `${escapeHtml(p.address)}<br/>` : ''}
-        ${p.phone ? `Tel: ${escapeHtml(p.phone)}<br/>` : ''}
+        ${p.address ? `${escapeHtml(p.address)}<br/>` : ""}
+        ${p.phone ? `Tel: ${escapeHtml(p.phone)}<br/>` : ""}
         <strong>Guest Account Statement</strong><br/>
-        Guest: ${escapeHtml(p.guestName)}${p.guestPhone ? ` · ${escapeHtml(p.guestPhone)}` : ''}<br/>
+        Guest: ${escapeHtml(p.guestName)}${p.guestPhone ? ` · ${escapeHtml(p.guestPhone)}` : ""}<br/>
         Period: ${escapeHtml(p.periodLabel)}<br/>
         Printed: ${escapeHtml(p.printedAt)} by ${escapeHtml(p.printedBy)}
       </div>
@@ -83,5 +85,5 @@ export function buildGuestAccountStatementHtml(p: GuestStatementPayload): string
         <div><span>Total payments</span><span>${escapeHtml(formatNaira(p.totalPayments))}</span></div>
         <div class="grand"><span>Closing balance</span><span>${escapeHtml(formatNaira(p.closingBalance))}</span></div>
       </div>
-    </div></body></html>`
+    </div></body></html>`;
 }
