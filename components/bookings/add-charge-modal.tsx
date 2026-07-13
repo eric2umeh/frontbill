@@ -223,19 +223,13 @@ export function AddChargeModal({ open, onClose, booking }: AddChargeModalProps) 
 
       // If city ledger: bump guest/org balance AND city_ledger_accounts balance
       if (paymentMethod === 'city_ledger') {
-        // Always bump guests.balance for the booking's guest
         if (booking.guestId) {
           const { data: guestRow } = await supabase
             .from('guests')
-            .select('balance, name')
+            .select('name')
             .eq('id', booking.guestId)
             .single()
           if (guestRow) {
-            await supabase
-              .from('guests')
-              .update({ balance: ((guestRow.balance as number) || 0) + chargeAmount })
-              .eq('id', booking.guestId)
-
             // If no city_ledger_account was selected, create one for this guest
             if (!selectedLedger?.id && guestRow.name) {
               // Check if account already exists
