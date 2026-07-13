@@ -209,19 +209,6 @@ export async function postOutletCityLedgerCharge(
     }
   }
 
-  if (guestId) {
-    const { data: guestRow } = await supabase
-      .from('guests')
-      .select('balance')
-      .eq('id', guestId)
-      .maybeSingle()
-    if (guestRow) {
-      await supabase
-        .from('guests')
-        .update({ balance: (Number(guestRow.balance) || 0) + amount })
-        .eq('id', guestId)
-    }
-  }
 
   await supabase.from('transactions').insert([
     {
