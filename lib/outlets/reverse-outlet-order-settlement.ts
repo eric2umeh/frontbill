@@ -95,30 +95,6 @@ async function reverseCityLedgerBalances(
       }
     }
   }
-
-  if (input.bookingId) {
-    const { data: bk } = await admin
-      .from('bookings')
-      .select('guest_id')
-      .eq('id', input.bookingId)
-      .maybeSingle()
-    const guestId = bk?.guest_id
-    if (guestId) {
-      const { data: guestRow } = await admin
-        .from('guests')
-        .select('balance')
-        .eq('id', guestId)
-        .maybeSingle()
-      if (guestRow) {
-        await admin
-          .from('guests')
-          .update({
-            balance: Math.max(0, roundMoney((Number(guestRow.balance) || 0) - input.amount)),
-          })
-          .eq('id', guestId)
-      }
-    }
-  }
 }
 
 /**
