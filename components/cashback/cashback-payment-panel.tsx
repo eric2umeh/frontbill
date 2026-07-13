@@ -22,6 +22,10 @@ type Props = {
   applyCashback?: boolean;
   onApplyCashbackChange?: (apply: boolean) => void;
   showPaymentSummary?: boolean;
+  /** Bulk: number of rooms in the block. */
+  roomCount?: number;
+  /** Bulk: average per-room stay total (for breakdown line only). */
+  perRoomStayTotal?: number;
 };
 
 export function CashbackPaymentPanel({
@@ -29,9 +33,11 @@ export function CashbackPaymentPanel({
   totalAmount,
   cashPaying,
   paymentMethod,
-  applyCashback = true,
+  applyCashback = false,
   onApplyCashbackChange,
   showPaymentSummary = true,
+  roomCount,
+  perRoomStayTotal,
 }: Props) {
   const [loading, setLoading] = useState(false);
   const [detail, setDetail] = useState<GuestCashbackDetail | null>(null);
@@ -71,6 +77,9 @@ export function CashbackPaymentPanel({
     paymentMethodEarnsCashback(method) && discount.cashToCollect > 0;
 
   const canApply = (detail?.balance ?? 0) > 0 && totalAmount > 0;
+
+  const isBulkBlock = Boolean(roomCount && roomCount > 1);
+  const discountLabel = isBulkBlock ? "this block" : "this stay";
 
   return (
     <div className="rounded-lg border border-primary/20 bg-primary/5 p-3 space-y-2 text-sm">
@@ -117,27 +126,44 @@ export function CashbackPaymentPanel({
                 className="text-xs font-normal leading-snug cursor-pointer"
               >
                 Apply cashback discount (
-                {formatNaira(Math.min(detail?.balance ?? 0, totalAmount))} off
-                this stay)
+                {formatNaira(Math.min(detail?.balance ?? 0, totalAmount))} off{" "}
+                {discountLabel})
               </Label>
             </div>
           )}
           {showPaymentSummary && totalAmount > 0 && (
             <div className="pt-2 border-t border-primary/10 space-y-1">
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Room / stay total</span>
-                <span>{formatNaira(totalAmount)}</span>
-              </div>
+              {isBulkBlock ? (
+                <>
+                  <div className="flex justify-between font-medium">
+                    <span className="text-muted-foreground">Block total</span>
+                    <span>{formatNaira(totalAmount)}</span>
+                  </div>
+                  {perRoomStayTotal != null && perRoomStayTotal > 0 && (
+                    <div className="text-xs text-muted-foreground">
+                      {roomCount} room{roomCount === 1 ? "" : "s"} ×{" "}
+                      {formatNaira(perRoomStayTotal)} per room
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Room / stay total</span>
+                  <span>{formatNaira(totalAmount)}</span>
+                </div>
+              )}
               {discount.cashbackDiscount > 0 && (
                 <div className="flex justify-between text-green-700">
                   <span>Cashback discount</span>
                   <span>−{formatNaira(discount.cashbackDiscount)}</span>
                 </div>
               )}
-              <div className="flex justify-between font-medium">
-                <span>Guest pays (cash / POS / transfer)</span>
-                <span>{formatNaira(discount.cashToCollect)}</span>
-              </div>
+              {discount.cashToCollect > 0 && (
+                <div className="flex justify-between font-medium">
+                  <span>Guest pays (cash / POS / transfer)</span>
+                  <span>{formatNaira(discount.cashToCollect)}</span>
+                </div>
+              )}
               {discount.balanceRemaining > 0 && (
                 <div className="flex justify-between text-orange-700 font-medium">
                   <span>Balance still due</span>

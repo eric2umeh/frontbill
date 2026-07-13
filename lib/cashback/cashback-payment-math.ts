@@ -16,7 +16,7 @@ export function computeCashbackDiscount(input: {
 } {
   const totalDue = Math.max(0, Number(input.totalDue) || 0);
   const balance = Math.max(0, Number(input.cashbackBalance) || 0);
-  const apply = input.applyCashback !== false;
+  const apply = input.applyCashback === true;
 
   const cashbackDiscount =
     apply && balance > 0 ? Math.min(balance, totalDue) : 0;

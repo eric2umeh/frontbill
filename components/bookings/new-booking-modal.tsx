@@ -134,7 +134,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
   const [amountPaid, setAmountPaid] = useState<number | ''>('')
   const [payAboveRoomTotal, setPayAboveRoomTotal] = useState(false)
   const [guestCashbackBalance, setGuestCashbackBalance] = useState(0)
-  const [applyCashback, setApplyCashback] = useState(true)
+  const [applyCashback, setApplyCashback] = useState(false)
 
   useEffect(() => {
     if (!guestId || !open) {

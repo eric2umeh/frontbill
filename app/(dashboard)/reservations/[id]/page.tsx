@@ -73,7 +73,7 @@ export default function ReservationDetailPage({
   const [paymentMethod, setPaymentMethod] = useState('')
   const [paymentLoading, setPaymentLoading] = useState(false)
   const [guestCashbackBalance, setGuestCashbackBalance] = useState(0)
-  const [applyCashback, setApplyCashback] = useState(true)
+  const [applyCashback, setApplyCashback] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -387,7 +387,7 @@ export default function ReservationDetailPage({
       setPaymentModalOpen(false)
       setPaymentAmount('')
       setPaymentMethod('')
-      setApplyCashback(true)
+      setApplyCashback(false)
       loadReservation(rid)
     } catch (err: any) {
       toast.error(err.message || 'Failed to record payment')
