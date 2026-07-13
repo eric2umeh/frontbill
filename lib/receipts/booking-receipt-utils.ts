@@ -46,6 +46,8 @@ export function buildFolioContextLinesForReceipt(
     description?: string
     amount?: number
     paymentStatus?: string
+    paymentMethod?: string
+    payment_method?: string
   }>,
 ): string[] {
   const types = new Set([
@@ -69,6 +71,15 @@ export function buildFolioContextLinesForReceipt(
     else if (ps === 'city_ledger') tag = ' · City ledger'
     else if (['pending', 'unpaid', 'partial'].includes(ps)) tag = ' · On folio / unpaid'
     lines.push(`${desc}: +${formatNaira(amt)}${tag}`)
+  }
+  for (const c of charges) {
+    const t = String(c.type || '').toLowerCase()
+    if (t !== 'payment') continue
+    const method = String(c.paymentMethod ?? c.payment_method ?? '').toLowerCase()
+    if (method !== 'cashback') continue
+    const amt = Math.abs(Number(c.amount) || 0)
+    if (amt <= 0) continue
+    lines.push(`Cashback discount applied: −${formatNaira(amt)}`)
   }
   return lines.slice(-24)
 }
