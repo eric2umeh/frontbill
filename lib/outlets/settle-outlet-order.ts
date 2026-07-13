@@ -14,10 +14,8 @@ import {
   updateOutletFolioOnSettlement,
 } from '@/lib/outlets/booking-folio'
 import { postOutletCityLedgerCharge } from '@/lib/outlets/post-outlet-city-ledger'
-import {
-  OUTLET_FEE_LINE_NAMES,
-  parseOutletOrderExtraFees,
-} from '@/lib/outlets/order-extra-fees'
+import { recordCashbackEarn } from '@/lib/cashback/cashback-service'
+import { paymentMethodEarnsCashback } from '@/lib/cashback/cashback-config'
 
 function isCityLedgerPayment(method: string) {
   return method === 'city_ledger' || method === 'room_charge'
@@ -196,6 +194,48 @@ export async function settleOutletOrderRecord(
     .single()
 
   if (upErr || !updated) throw new Error(upErr?.message || 'Could not settle order')
+
+  if (
+    !complimentary &&
+    paymentMethodEarnsCashback(paymentMethod) &&
+    subtotal > 0
+  ) {
+    let guestId: string | null = null
+    if (bookingId) {
+      const { data: bk } = await admin
+        .from('bookings')
+        .select('guest_id')
+        .eq('id', bookingId)
+        .maybeSingle()
+      guestId = bk?.guest_id ?? null
+    }
+    if (!guestId && guestName) {
+      const { data: g } = await admin
+        .from('guests')
+        .select('id')
+        .eq('organization_id', input.organizationId)
+        .ilike('name', guestName.trim())
+        .limit(1)
+        .maybeSingle()
+      guestId = g?.id ?? null
+    }
+    if (guestId) {
+      try {
+        await recordCashbackEarn(admin, {
+          organizationId: input.organizationId,
+          guestId,
+          paymentAmount: subtotal,
+          paymentMethod,
+          userId: input.userId,
+          sourceType: 'outlet_settlement',
+          sourceId: order.id,
+          description: `Cashback on ${deptDef?.label ?? department} — ${orderNumber}`,
+        })
+      } catch (earnErr) {
+        console.warn('[settleOutletOrderRecord] cashback earn', earnErr)
+      }
+    }
+  }
 
   const lineRows = (updated.outlet_order_lines ?? []) as SettleOutletOrderResult['lines']
   return { order: updated as Record<string, unknown>, lines: lineRows }

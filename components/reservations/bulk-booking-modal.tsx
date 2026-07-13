@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import {
   Dialog,
@@ -26,7 +26,7 @@ import { format, differenceInDays, addDays } from 'date-fns'
 import { toast } from 'sonner'
 import { formatNaira } from '@/lib/utils/currency'
 import { resolveOrganizationLedgerAccount } from '@/lib/utils/resolve-ledger-account'
-import { formatPersonName, normalizeName, normalizeNameKey } from '@/lib/utils/name-format'
+import { formatPersonName, normalizeName, normalizeNameKey, titleCaseWhileTyping } from '@/lib/utils/name-format'
 import { guestOrOrganizationNameTaken } from '@/lib/utils/guest-org-name-uniqueness'
 import {
   buildCounterpartyOrganizationRow,
@@ -35,7 +35,8 @@ import {
 } from '@/lib/utils/counterparty-organization'
 import { hasPermission } from '@/lib/permissions'
 import { useAuth } from '@/lib/auth-context'
-import { isStayCheckInConsideredBackdated, formatYMDInTimeZone, resolveHotelTimeZone } from '@/lib/hotel-date'
+import { isStayCheckInConsideredBackdated, formatYMDInTimeZone, resolveHotelTimeZone, minSelectableCheckInYmdHotel, isLateNightCheckInGraceWindow, lateCheckInGraceWindowLabel } from '@/lib/hotel-date'
+import { useNightAuditClosedDates } from '@/hooks/use-night-audit-closed-dates'
 import type { CounterpartyOrganizationOption } from '@/lib/utils/search-counterparty-organizations'
 import {
   filterCounterpartyOrganizationsClient,
@@ -56,6 +57,117 @@ import {
 } from '@/lib/reservations/reservation-payment-methods'
 import { applyPaymentToGuestCityLedger } from '@/lib/utils/guest-city-ledger'
 import { buildBackdateDedupeKey } from '@/lib/backdate/dedupe-key'
+import { SelectedRoomsStickyBar } from '@/components/shared/selected-rooms-sticky-bar'
+import { CashbackPaymentPanel } from '@/components/cashback/cashback-payment-panel'
+import { computeCashbackDiscount } from '@/lib/cashback/cashback-payment-math'
+import { applyCashbackDiscountAndFolioPayments } from '@/lib/cashback/apply-cashback-folio-payment'
+import {
+  earnCashbackClient,
+  fetchGuestCashbackBalanceClient,
+} from '@/lib/cashback/cashback-client'
+import { paymentMethodEarnsCashback } from '@/lib/cashback/cashback-config'
+import { isGuestBookingCashbackEligible } from '@/lib/cashback/cashback-eligibility'
+
+function sortRoomsByNumber<T extends { room_number?: string | number | null }>(rows: T[]) {
+  return [...rows].sort((a, b) =>
+    String(a.room_number ?? '').localeCompare(String(b.room_number ?? ''), undefined, {
+      numeric: true,
+    }),
+  )
+}
+
+function computeBulkRoomPaymentAmounts(
+  total: number,
+  opts: {
+    pendingHold: boolean
+    paymentStatus: 'paid' | 'partial' | 'unpaid'
+    payAboveBulkRoomTotal: boolean
+    partialAmount: number | ''
+  },
+): {
+  depositAmt: number
+  balanceAmt: number
+  bookingPaymentStatus: string
+  folioChargePaid: boolean
+} {
+  if (opts.pendingHold) {
+    return {
+      depositAmt: 0,
+      balanceAmt: total,
+      bookingPaymentStatus: 'pending',
+      folioChargePaid: false,
+    }
+  }
+  let depositAmt = 0
+  if (opts.paymentStatus === 'paid') {
+    depositAmt = opts.payAboveBulkRoomTotal
+      ? Math.max(total, Number(opts.partialAmount) || total)
+      : total
+  } else if (opts.paymentStatus === 'partial') {
+    depositAmt = Number(opts.partialAmount) || 0
+  }
+  const balanceAmt = Math.max(0, total - depositAmt)
+  const bookingPaymentStatus =
+    balanceAmt <= 0 ? 'paid' : depositAmt > 0 ? 'partial' : 'pending'
+  return {
+    depositAmt,
+    balanceAmt,
+    bookingPaymentStatus,
+    folioChargePaid: balanceAmt <= 0,
+  }
+}
+
+function resolveBulkRoomPayment(
+  total: number,
+  opts: {
+    pendingHold: boolean
+    paymentStatus: 'paid' | 'partial' | 'unpaid'
+    payAboveBulkRoomTotal: boolean
+    partialAmount: number | ''
+  },
+  cashback?: { balance: number; apply: boolean } | null,
+) {
+  if (!cashback?.apply || cashback.balance <= 0 || opts.pendingHold) {
+    const base = computeBulkRoomPaymentAmounts(total, opts)
+    return {
+      ...base,
+      cashbackDiscount: 0,
+      cashToCollect: base.depositAmt,
+      cashbackBalanceAfter: cashback?.balance ?? 0,
+    }
+  }
+
+  let cashPaying = 0
+  if (opts.paymentStatus === 'paid') {
+    cashPaying = opts.payAboveBulkRoomTotal
+      ? Math.max(total, Number(opts.partialAmount) || total)
+      : total
+  } else if (opts.paymentStatus === 'partial') {
+    cashPaying = Number(opts.partialAmount) || 0
+  }
+
+  const d = computeCashbackDiscount({
+    totalDue: total,
+    cashbackBalance: cashback.balance,
+    cashPaying,
+    applyCashback: true,
+  })
+
+  const depositAmt = d.cashbackDiscount + d.cashToCollect
+  const balanceAmt = d.balanceRemaining
+  const bookingPaymentStatus =
+    balanceAmt <= 0 ? 'paid' : depositAmt > 0 ? 'partial' : 'pending'
+
+  return {
+    depositAmt,
+    balanceAmt,
+    bookingPaymentStatus,
+    folioChargePaid: balanceAmt <= 0,
+    cashbackDiscount: d.cashbackDiscount,
+    cashToCollect: d.cashToCollect,
+    cashbackBalanceAfter: Math.max(0, cashback.balance - d.cashbackDiscount),
+  }
+}
 
 const ROOM_TYPES_FALLBACK = ['Deluxe', 'Royal', 'Kings', 'Mini Suite', 'Executive Suite', 'Diplomatic Suite']
 
@@ -136,6 +248,14 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
   const [groupGuestResults, setGroupGuestResults] = useState<any[]>([])
   const [groupGuestSearchOpen, setGroupGuestSearchOpen] = useState(false)
   const [selectedGroupGuest, setSelectedGroupGuest] = useState<any>(null)
+  const [showNewGuestForm, setShowNewGuestForm] = useState(false)
+  const [newGuestName, setNewGuestName] = useState('')
+  const [newGuestPhone, setNewGuestPhone] = useState('')
+  const [newGuestEmail, setNewGuestEmail] = useState('')
+  const [newGuestAddress, setNewGuestAddress] = useState('')
+  const [creatingGuest, setCreatingGuest] = useState(false)
+  const [guestCashbackBalance, setGuestCashbackBalance] = useState(0)
+  const [applyCashback, setApplyCashback] = useState(true)
 
   // Step 2: Dates
   const [checkIn, setCheckIn] = useState<Date>()
@@ -170,6 +290,49 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
   const nights = checkIn && checkOut ? differenceInDays(checkOut, checkIn) : 0
   const pendingHold = isReservationPendingHold(paymentMethod)
   const effectiveBulkPaymentStatus = pendingHold ? 'unpaid' : paymentStatus
+
+  const pickedRoomNumbers = useMemo(() => {
+    const rows = pickedRoomIds
+      .map((id) => allRooms.find((r: { id: string }) => r.id === id))
+      .filter(Boolean) as Array<{ room_number?: string | number }>
+    return sortRoomsByNumber(rows).map((r) => r.room_number ?? '')
+  }, [pickedRoomIds, allRooms])
+
+  const bulkPaymentOpts = {
+    pendingHold,
+    paymentStatus,
+    payAboveBulkRoomTotal,
+    partialAmount,
+  }
+
+  const bulkCashbackEligible = isGuestBookingCashbackEligible({
+    bulkBookingType: bookingType,
+    guestName: selectedGroupGuest?.name,
+    paymentMethod,
+  })
+
+  useEffect(() => {
+    if (!open || bookingType !== 'individual' || !selectedGroupGuest?.id) {
+      setGuestCashbackBalance(0)
+      return
+    }
+    let cancelled = false
+    ;(async () => {
+      try {
+        const supabase = createClient()
+        const b = await fetchGuestCashbackBalanceClient(
+          supabase,
+          selectedGroupGuest.id,
+        )
+        if (!cancelled) setGuestCashbackBalance(b.balance)
+      } catch {
+        if (!cancelled) setGuestCashbackBalance(0)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [open, bookingType, selectedGroupGuest?.id])
 
   useEffect(() => { if (open) fetchBootstrap(); else handleClose() }, [open])
 
@@ -387,6 +550,92 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
     const filtered = allGuests.filter(g => g.name.toLowerCase().includes(term.toLowerCase()) || (g.phone || '').includes(term))
     setGroupGuestResults(filtered.slice(0, 8))
     setGroupGuestSearchOpen(filtered.length > 0)
+    if (filtered.length === 0) setShowNewGuestForm(false)
+  }
+
+  const createNewGuest = async () => {
+    if (!newGuestName.trim()) { toast.error('Guest name required'); return }
+    if (!newGuestPhone.trim() && !newGuestEmail.trim()) {
+      toast.error('Phone or email required')
+      return
+    }
+    setCreatingGuest(true)
+    try {
+      const supabase = createClient()
+      const tenantId = orgId || authTenantOrgId
+      if (!tenantId) {
+        toast.error('Missing hotel organization — sign in again')
+        return
+      }
+      const formattedName = formatPersonName(newGuestName.trim())
+      const normalizedName = normalizeNameKey(formattedName)
+      const nameTaken = await guestOrOrganizationNameTaken(supabase, {
+        hotelTenantOrganizationId: tenantId,
+        candidateName: formattedName,
+      })
+      if (nameTaken || allGuests.some((g: any) => normalizeNameKey(g.name) === normalizedName)) {
+        toast.error('This name already exists as a guest or organization')
+        return
+      }
+
+      const { data, error } = await supabase
+        .from('guests')
+        .insert([{
+          organization_id: tenantId,
+          name: formattedName,
+          phone: newGuestPhone.trim() || null,
+          email: newGuestEmail.trim() || null,
+          address: newGuestAddress.trim() || null,
+        }])
+        .select('id, name, phone, email')
+        .single()
+      if (error) throw error
+
+      const { data: existingLedger } = await supabase
+        .from('city_ledger_accounts')
+        .select('id')
+        .eq('organization_id', tenantId)
+        .ilike('account_name', formattedName)
+        .in('account_type', ['individual', 'guest'])
+        .maybeSingle()
+
+      if (!existingLedger) {
+        const { error: ledgerErr } = await supabase.from('city_ledger_accounts').insert({
+          organization_id: tenantId,
+          account_name: formattedName,
+          account_type: 'individual',
+          contact_phone: newGuestPhone.trim() || null,
+          contact_email: newGuestEmail.trim() || null,
+          balance: 0,
+        })
+        if (ledgerErr) {
+          console.warn('[bulk-booking] city ledger for new guest:', ledgerErr.message)
+        }
+      }
+
+      const guestRow = {
+        id: data.id,
+        name: data.name,
+        phone: data.phone,
+        email: data.email,
+      }
+      setAllGuests((prev) => {
+        const rest = prev.filter((g) => g.id !== data.id)
+        return [...rest, guestRow].sort((a, b) => a.name.localeCompare(b.name))
+      })
+      setSelectedGroupGuest(guestRow)
+      setGroupGuestSearch(data.name)
+      setShowNewGuestForm(false)
+      setNewGuestName('')
+      setNewGuestPhone('')
+      setNewGuestEmail('')
+      setNewGuestAddress('')
+      toast.success(`Guest "${data.name}" created`)
+    } catch (err: unknown) {
+      toast.error(describeSupabaseError(err) || 'Failed to create guest')
+    } finally {
+      setCreatingGuest(false)
+    }
   }
 
   // City ledger search: individual → guests table, organization → organizations table
@@ -429,12 +678,6 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
     setPickedRoomIds((prev) => (prev.includes(roomId) ? prev.filter((id) => id !== roomId) : [...prev, roomId]))
   }
 
-  /** Sort rows by numeric-friendly room_number. */
-  const sortRoomsByNumber = <T extends { room_number?: string | number | null }>(rows: T[]) =>
-    [...rows].sort((a, b) =>
-      String(a.room_number ?? '').localeCompare(String(b.room_number ?? ''), undefined, { numeric: true }),
-    )
-
   /** Validates picked-room counts cover each requested room type. */
   const pickedRoomsValidationError = (pickIds: string[]): string | null => {
     if (!pickIds.length || fillLater) return null
@@ -476,6 +719,31 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
     if (!raw.length) return 0
     return raw[Math.floor(raw.length / 2)]
   }
+
+  const bulkSampleRoomTotal = useMemo(() => {
+    if (nights <= 0) return 0
+    const custom = Number(customRate)
+    if (customRate !== '' && !Number.isNaN(custom) && custom > 0) return custom * nights
+    return medianInventoryRate() * nights
+  }, [nights, customRate, allRooms])
+
+  const bulkCashPayingPerRoom = useMemo(() => {
+    if (pendingHold || bulkSampleRoomTotal <= 0) return 0
+    const raw = Number(partialAmount) || 0
+    if (paymentStatus === 'paid') {
+      return payAboveBulkRoomTotal
+        ? Math.max(bulkSampleRoomTotal, raw || bulkSampleRoomTotal)
+        : bulkSampleRoomTotal
+    }
+    if (paymentStatus === 'partial') return raw
+    return 0
+  }, [
+    pendingHold,
+    bulkSampleRoomTotal,
+    paymentStatus,
+    payAboveBulkRoomTotal,
+    partialAmount,
+  ])
 
   const checkRoomAvailability = () => {
     if (!checkIn || !checkOut || nights <= 0) { toast.error('Select valid check-in and check-out dates'); return }
@@ -558,7 +826,20 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
   }
 
   const canApproveBackdates = hasPermission(currentUserRole, 'backdate:approve')
-  const isBackdated = checkIn ? isStayCheckInConsideredBackdated(toLocalDateStr(checkIn)) : false
+  const { closedDates: nightAuditClosedDates } = useNightAuditClosedDates(currentUserId, open)
+  const isBackdated = checkIn
+    ? isStayCheckInConsideredBackdated(toLocalDateStr(checkIn), new Date(), undefined, {
+        auditedDates: nightAuditClosedDates,
+      })
+    : false
+  const minCheckInYmd = minSelectableCheckInYmdHotel()
+  const minCheckInDate = (() => {
+    const [y, m, d] = minCheckInYmd.split('-').map(Number)
+    const dt = new Date(y, m - 1, d)
+    dt.setHours(0, 0, 0, 0)
+    return dt
+  })()
+  const inLateCheckInGrace = isLateNightCheckInGraceWindow()
 
   const copy =
     wording === 'booking'
@@ -567,7 +848,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
           typeLabel: 'Booking type',
           backdateBlocked: 'Backdated bulk bookings require Night Audit approval. Send a request first.',
           backdatePlaceholder: 'Explain why this bulk booking must be backdated (for Night Audit approval)',
-          backdateHelp: 'A Superadmin or Administrator can approve or allow an approved backdated bulk booking.',
+          backdateHelp: 'A Superadmin, Administrator, or Manager can approve or allow an approved backdated bulk booking.',
           confirm: 'Confirm bulk booking',
         }
       : {
@@ -575,7 +856,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
           typeLabel: 'Reservation type',
           backdateBlocked: 'Backdated bulk reservations require Night Audit approval. Send a request first.',
           backdatePlaceholder: 'Explain why this bulk reservation must be backdated (for Night Audit approval)',
-          backdateHelp: 'A Superadmin or Administrator can approve or allow an approved backdated bulk reservation.',
+          backdateHelp: 'A Superadmin, Administrator, or Manager can approve or allow an approved backdated bulk reservation.',
           confirm: 'Confirm bulk reservation',
         }
 
@@ -768,10 +1049,12 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
     }
 
     if (fillLater) {
-      const count = Number(totalRoomsCount)
-      if (!count || count < 1) {
-        toast.error('Enter total number of rooms to reserve')
-        return
+      if (pickedRoomIds.length === 0) {
+        const count = Number(totalRoomsCount)
+        if (!count || count < 1) {
+          toast.error('Enter total number of rooms to reserve')
+          return
+        }
       }
       const c = Number(customRate)
       const nightlyFallback = customRate !== '' && !Number.isNaN(c) && c > 0 ? c : medianInventoryRate()
@@ -802,13 +1085,117 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
         }
       }
 
-      const totalRooms = fillLater ? (Number(totalRoomsCount) || 1) : entries.reduce((s, e) => s + e.numberOfRooms, 0)
+      const totalRooms = fillLater
+        ? pickedRoomIds.length > 0
+          ? pickedRoomIds.length
+          : Number(totalRoomsCount) || 1
+        : entries.reduce((s, e) => s + e.numberOfRooms, 0)
       const guestCache = new Map<string, string | null>()
       const orgNameKey = normalizeNameKey(selectedOrg?.name || '')
       const bulkGroupId = createBulkGroupId()
       /** Bulk booking = same-day check-in; bulk reservation = future arrival, stays reserved. */
       const bulkInitialStatus = wording === 'booking' ? 'checked_in' : 'reserved'
       const bulkRoomStatus = bulkInitialStatus === 'checked_in' ? 'occupied' : 'reserved'
+      let runningCashbackBalance = bulkCashbackEligible ? guestCashbackBalance : 0
+
+      const postBulkPaymentLines = async (args: {
+        bookingId: string
+        guestId: string | null
+        folioId: string
+        roomNumber: string | number
+        totalAmt: number
+        pay: ReturnType<typeof resolveBulkRoomPayment>
+        slotIndex: number
+      }) => {
+        const { bookingId, guestId, folioId, roomNumber, totalAmt, pay, slotIndex } = args
+        if (pendingHold || pay.depositAmt <= 0) return
+
+        if (bulkCashbackEligible && guestId) {
+          await applyCashbackDiscountAndFolioPayments(supabase, {
+            guestId,
+            bookingId,
+            organizationId: orgId,
+            cashbackDiscount: pay.cashbackDiscount,
+            cashAmount: pay.cashToCollect,
+            cashPaymentMethod: paymentMethod,
+            createdBy: currentUserId,
+            sourceType: 'bulk_booking_payment',
+            sourceId: bookingId,
+            cashDescription: `${
+              wording === 'booking' ? 'Bulk booking' : 'Bulk reservation'
+            } payment - ${paymentMethod}`,
+          })
+          if (
+            paymentMethodEarnsCashback(paymentMethod) &&
+            pay.cashToCollect > 0
+          ) {
+            await earnCashbackClient(supabase, {
+              guestId,
+              amount: pay.cashToCollect,
+              paymentMethod,
+              sourceType: 'bulk_booking_payment',
+              sourceId: bookingId,
+            })
+          }
+        } else {
+          const { error: payFcErr } = await insertFolioCharges(supabase, [
+            {
+              booking_id: bookingId,
+              organization_id: orgId,
+              description: `${
+                wording === 'booking' ? 'Bulk booking' : 'Bulk reservation'
+              } payment - ${paymentMethod}`,
+              amount: -pay.depositAmt,
+              charge_type: 'payment',
+              payment_method: paymentMethod,
+              payment_status: 'paid',
+              created_by: currentUserId,
+            },
+          ])
+          if (payFcErr) throw payFcErr
+        }
+
+        if (guestId) {
+          await supabase.from('payments').insert([
+            {
+              organization_id: orgId,
+              booking_id: bookingId,
+              guest_id: guestId,
+              amount: Math.min(pay.cashToCollect || pay.depositAmt, totalAmt),
+              payment_method: paymentMethod,
+              payment_date: new Date().toISOString(),
+              notes:
+                pay.cashbackDiscount > 0
+                  ? `Bulk ${wording} payment — ${folioId} (incl. ${formatNaira(pay.cashbackDiscount)} cashback discount)`
+                  : `Bulk ${wording} payment — ${folioId}`,
+              received_by: currentUserId,
+            },
+          ])
+        }
+
+        await supabase.from('transactions').insert([
+          {
+            organization_id: orgId,
+            booking_id: bookingId,
+            transaction_id: `TXN-${Date.now().toString(36).toUpperCase()}-${slotIndex}`,
+            guest_name:
+              selectedGroupGuest?.name || selectedOrg?.name || 'Bulk Guest',
+            room: roomNumber,
+            amount: Math.min(pay.cashToCollect || pay.depositAmt, totalAmt),
+            payment_method: paymentMethod,
+            status:
+              pay.bookingPaymentStatus === 'paid'
+                ? 'paid'
+                : pay.bookingPaymentStatus === 'partial'
+                  ? 'partial'
+                  : 'pending',
+            description: `${
+              wording === 'booking' ? 'Bulk booking' : 'Bulk reservation'
+            } payment — ${folioId}`,
+            received_by: currentUserId,
+          },
+        ])
+      }
 
       const findOrCreateGuest = async (name: string, phone?: string | null) => {
         const formattedName = formatPersonName(name)
@@ -897,17 +1284,41 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
         const availablePool = sortRoomsByNumber(
           allRooms.filter((r: { id: string }) => !bookedIds.has(r.id)),
         )
-        if (availablePool.length < totalRooms) {
+        const roomsForBlock =
+          pickedRoomIds.length > 0
+            ? sortRoomsByNumber(
+                pickedRoomIds
+                  .map((id) => allRooms.find((r: { id: string }) => r.id === id))
+                  .filter(Boolean) as Array<{ id: string; room_number?: string | number }>,
+              )
+            : availablePool.slice(0, totalRooms)
+
+        if (roomsForBlock.length < totalRooms) {
           throw new Error(
-            `Only ${availablePool.length} room${availablePool.length === 1 ? '' : 's'} available for these dates; you requested ${totalRooms}.`,
+            `Only ${roomsForBlock.length} room${roomsForBlock.length === 1 ? '' : 's'} available for these dates; you requested ${totalRooms}.`,
           )
         }
 
-        for (let i = 0; i < totalRooms; i++) {
-          const room = availablePool[i]
+        for (let i = 0; i < roomsForBlock.length; i++) {
+          const room = roomsForBlock[i]
           const folioId = `BLK-${Date.now().toString(36).toUpperCase()}-${i}`
           const notes = appendBulkGroupNote(`payment_method: ${paymentMethod}`, bulkGroupId)
           const totalAmt = nightly * nights
+          const pay = bulkCashbackEligible
+            ? resolveBulkRoomPayment(totalAmt, bulkPaymentOpts, {
+                balance: runningCashbackBalance,
+                apply: applyCashback,
+              })
+            : {
+                ...computeBulkRoomPaymentAmounts(totalAmt, bulkPaymentOpts),
+                cashbackDiscount: 0,
+                cashToCollect: computeBulkRoomPaymentAmounts(totalAmt, bulkPaymentOpts)
+                  .depositAmt,
+                cashbackBalanceAfter: runningCashbackBalance,
+              }
+          if (bulkCashbackEligible) {
+            runningCashbackBalance = pay.cashbackBalanceAfter
+          }
 
           const { data: booking, error: insertErr } = await supabase
             .from('bookings')
@@ -922,9 +1333,9 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
                 number_of_nights: nights,
                 rate_per_night: nightly,
                 total_amount: totalAmt,
-                deposit: 0,
-                balance: totalAmt,
-                payment_status: 'pending',
+                deposit: pay.depositAmt,
+                balance: pay.balanceAmt,
+                payment_status: pay.bookingPaymentStatus,
                 status: bulkInitialStatus,
                 created_by: currentUserId,
                 notes,
@@ -955,11 +1366,22 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
               payment_method: paymentMethod,
               ledger_account_id: null,
               ledger_account_type: null,
-              payment_status: 'unpaid',
+              payment_status: pay.folioChargePaid ? 'paid' : 'unpaid',
               created_by: currentUserId,
             },
           ])
           if (fcErr) throw fcErr
+
+          await postBulkPaymentLines({
+            bookingId: booking.id,
+            guestId: fillLaterGuestId,
+            folioId,
+            roomNumber: room.room_number,
+            totalAmt,
+            pay,
+            slotIndex: i,
+          })
+
           createdCount++
         }
       } else {
@@ -1007,17 +1429,23 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
             }
 
             const total = ratePn * nights
-
-            const depositAmt = pendingHold
-              ? 0
-              : paymentStatus === 'paid'
-                ? payAboveBulkRoomTotal
-                  ? Math.max(total, Number(partialAmount) || total)
-                  : total
-                : paymentStatus === 'partial'
-                  ? Number(partialAmount) || 0
-                  : 0
-            const balanceAmt = Math.max(0, total - depositAmt)
+            const pay = bulkCashbackEligible
+              ? resolveBulkRoomPayment(total, bulkPaymentOpts, {
+                  balance: runningCashbackBalance,
+                  apply: applyCashback,
+                })
+              : {
+                  ...computeBulkRoomPaymentAmounts(total, bulkPaymentOpts),
+                  cashbackDiscount: 0,
+                  cashToCollect: computeBulkRoomPaymentAmounts(total, bulkPaymentOpts)
+                    .depositAmt,
+                  cashbackBalanceAfter: runningCashbackBalance,
+                }
+            if (bulkCashbackEligible) {
+              runningCashbackBalance = pay.cashbackBalanceAfter
+            }
+            const depositAmt = pay.depositAmt
+            const balanceAmt = pay.balanceAmt
             const folioId = `BLK-${Date.now().toString(36).toUpperCase()}`
             const bookingBalance = balanceAmt
             const notes = appendBulkGroupNote(`payment_method: ${paymentMethod}`, bulkGroupId)
@@ -1027,7 +1455,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
               check_in: toLocalDateStr(checkIn), check_out: toLocalDateStr(checkOut),
               number_of_nights: nights, rate_per_night: ratePn,
               total_amount: total, deposit: depositAmt, balance: bookingBalance,
-              payment_status: paymentStatus === 'paid' ? 'paid' : paymentStatus === 'partial' ? 'partial' : 'pending',
+              payment_status: pay.bookingPaymentStatus,
               status: bulkInitialStatus, created_by: currentUserId,
               notes,
             }]).select().single()
@@ -1045,10 +1473,21 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
               payment_method: paymentMethod,
               ledger_account_id: null,
               ledger_account_type: null,
-              payment_status: balanceAmt > 0 ? 'unpaid' : 'paid',
+              payment_status: pay.folioChargePaid ? 'paid' : 'unpaid',
               created_by: currentUserId,
             }])
             if (fcErr) throw fcErr
+
+            await postBulkPaymentLines({
+              bookingId: booking.id,
+              guestId: finalGuestId,
+              folioId,
+              roomNumber: room.room_number,
+              totalAmt: total,
+              pay,
+              slotIndex: createdCount,
+            })
+
             const prepayExcess = Math.max(0, depositAmt - total)
             if (prepayExcess > 0 && finalGuestId) {
               const gn = formatPersonName(entry.guestName) || ''
@@ -1062,19 +1501,6 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
                   createIfMissingExcess: prepayExcess,
                 })
               }
-            }
-            if (!pendingHold) {
-            await supabase.from('transactions').insert([{
-              organization_id: orgId, booking_id: booking.id,
-              transaction_id: `TXN-${Date.now().toString(36).toUpperCase()}`,
-                guest_name: entryGuestName || selectedOrg?.name || selectedGroupGuest?.name || 'Bulk Guest', room: room.room_number, amount: total,
-                payment_method: paymentMethod,
-              status: paymentStatus === 'paid' ? 'paid' : paymentStatus === 'partial' ? 'partial' : 'pending',
-                description: `${
-                  wording === 'booking' ? 'Bulk booking' : 'Bulk reservation'
-                } — ${bookingType === 'organization' ? selectedOrg?.name : selectedGroupGuest?.name} — ${folioId}`,
-              received_by: currentUserId,
-            }])
             }
             createdCount++
           }
@@ -1106,6 +1532,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
     setOrgSearch(''); setOrgResults([]); setAllCounterpartyOrgs([]); setSelectedOrg(null); setOrgSearchOpen(false); setShowNewOrgForm(false)
     setNewOrgName(''); setNewOrgType(''); setNewOrgContact(''); setNewOrgPhone(''); setNewOrgEmail(''); setNewOrgAddress('')
     setGroupGuestSearch(''); setGroupGuestResults([]); setSelectedGroupGuest(null); setGroupGuestSearchOpen(false)
+    setShowNewGuestForm(false); setNewGuestName(''); setNewGuestPhone(''); setNewGuestEmail(''); setNewGuestAddress('')
     setCheckIn(undefined); setCheckOut(undefined); setBackdateReason(''); setRoomAvailabilityChecked(false); setAvailableRooms([])
     setCustomRate(''); setPaymentMethod('pos'); setPaymentStatus('unpaid'); setPartialAmount('')
     setPayAboveBulkRoomTotal(false)
@@ -1113,6 +1540,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
     setShowNewLedgerOrgForm(false); setNewLedgerOrgName(''); setNewLedgerOrgEmail(''); setNewLedgerOrgPhone('')
     setEntries([makeEntry()]); setQuickRoomCount(''); setQuickRoomType(''); setFillLater(true); setTotalRoomsCount('')
     setPickedRoomIds([])
+    setGuestCashbackBalance(0); setApplyCashback(true)
     onClose()
   }
 
@@ -1125,6 +1553,8 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
           <DialogTitle>{copy.title(step)}</DialogTitle>
           <DialogDescription>{stepLabel}</DialogDescription>
         </DialogScrollableHeader>
+
+        <SelectedRoomsStickyBar roomNumbers={pickedRoomNumbers} />
 
         <DialogScrollableBody className="space-y-4">
         <div className="flex items-center gap-2 pb-1">
@@ -1139,7 +1569,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
             <div className="space-y-2">
               <Label>{copy.typeLabel}</Label>
               <Select value={bookingType} onValueChange={(v: any) => {
-                setBookingType(v); setSelectedOrg(null); setOrgSearch(''); setSelectedGroupGuest(null); setGroupGuestSearch(''); setShowNewOrgForm(false)
+                setBookingType(v); setSelectedOrg(null); setOrgSearch(''); setSelectedGroupGuest(null); setGroupGuestSearch(''); setShowNewOrgForm(false); setShowNewGuestForm(false)
               }}>
                 <SelectTrigger>
                   <SelectValue />
@@ -1257,33 +1687,102 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
 
             {/* Individual group contact */}
             {bookingType === 'individual' && (
-              <div className="space-y-2">
-                <Label>Group Contact (Guest) *</Label>
-                <div className="relative">
-                  <Input
-                    placeholder="Search guest from database..."
-                    value={groupGuestSearch}
-                    onChange={(e) => searchGroupGuest(e.target.value)}
-                    onBlur={() => setTimeout(() => setGroupGuestSearchOpen(false), 150)}
-                  />
-                  {groupGuestSearchOpen && groupGuestResults.length > 0 && (
-                    <div className="absolute top-full left-0 right-0 mt-1 bg-background border rounded-md shadow-lg z-50 max-h-48 overflow-y-auto">
-                      {groupGuestResults.map(g => (
-                        <button key={g.id} className="w-full text-left px-4 py-2 hover:bg-accent border-b last:border-b-0 text-sm"
-                          onMouseDown={(e) => { e.preventDefault(); setSelectedGroupGuest(g); setGroupGuestSearch(g.name); setGroupGuestSearchOpen(false) }}>
-                          <div className="font-medium">{g.name}</div>
-                          <div className="text-xs text-muted-foreground">{g.phone}</div>
-                        </button>
-                      ))}
-                    </div>
-                  )}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <Label>Group Contact (Guest) *</Label>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-xs gap-1"
+                    onClick={() => {
+                      setShowNewGuestForm((v) => !v)
+                      if (!showNewGuestForm) setNewGuestName(groupGuestSearch)
+                    }}
+                  >
+                    <Plus className="h-3 w-3" /> New Individual
+                  </Button>
                 </div>
+
+                {!showNewGuestForm && (
+                  <div className="relative">
+                    <Input
+                      placeholder="Search guest from database..."
+                      value={groupGuestSearch}
+                      onChange={(e) => searchGroupGuest(e.target.value)}
+                      onBlur={() => setTimeout(() => setGroupGuestSearchOpen(false), 150)}
+                    />
+                    {groupGuestSearchOpen && groupGuestResults.length > 0 && (
+                      <div className="absolute top-full left-0 right-0 mt-1 bg-background border rounded-md shadow-lg z-50 max-h-48 overflow-y-auto">
+                        {groupGuestResults.map(g => (
+                          <button key={g.id} className="w-full text-left px-4 py-2 hover:bg-accent border-b last:border-b-0 text-sm"
+                            onMouseDown={(e) => { e.preventDefault(); setSelectedGroupGuest(g); setGroupGuestSearch(g.name); setGroupGuestSearchOpen(false) }}>
+                            <div className="font-medium">{g.name}</div>
+                            <div className="text-xs text-muted-foreground">{g.phone}</div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {groupGuestSearch.trim() && groupGuestResults.length === 0 && !selectedGroupGuest && (
+                      <p className="text-xs text-muted-foreground mt-1">No guest found. Click &quot;New Individual&quot; to create one.</p>
+                    )}
+                  </div>
+                )}
+
+                {showNewGuestForm && (
+                  <div className="border rounded-lg p-4 space-y-3 bg-muted/20">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-medium">Create New Individual</p>
+                      <button type="button" onClick={() => setShowNewGuestForm(false)}>
+                        <X className="h-4 w-4 text-muted-foreground" />
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="col-span-2 space-y-1">
+                        <Label className="text-xs">Full Name *</Label>
+                        <Input
+                          value={newGuestName}
+                          onChange={(e) => setNewGuestName(titleCaseWhileTyping(e.target.value))}
+                          placeholder="e.g. Ada Okonkwo"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs">Phone Number</Label>
+                        <Input value={newGuestPhone} onChange={(e) => setNewGuestPhone(e.target.value)} placeholder="Phone" />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs">Email Address</Label>
+                        <Input type="email" value={newGuestEmail} onChange={(e) => setNewGuestEmail(e.target.value)} placeholder="Email" />
+                      </div>
+                      <div className="col-span-2 space-y-1">
+                        <Label className="text-xs">Address</Label>
+                        <Input value={newGuestAddress} onChange={(e) => setNewGuestAddress(e.target.value)} placeholder="Street address (optional)" />
+                      </div>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Phone or email is required. The guest is saved immediately and appears in booking and reservation search.
+                    </p>
+                    <Button size="sm" className="w-full" onClick={createNewGuest} disabled={creatingGuest}>
+                      {creatingGuest ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                      {creatingGuest ? 'Creating...' : 'Create Individual'}
+                    </Button>
+                  </div>
+                )}
+
                 {selectedGroupGuest && (
                   <div className="flex items-center gap-2 p-2 rounded border bg-muted/40 text-sm">
                     <Users className="h-4 w-4 text-muted-foreground" />
                     <span className="font-medium">{selectedGroupGuest.name}</span>
-                    <span className="text-muted-foreground">· {selectedGroupGuest.phone}</span>
-                    <button className="ml-auto text-xs text-destructive" onClick={() => { setSelectedGroupGuest(null); setGroupGuestSearch('') }}>Remove</button>
+                    {selectedGroupGuest.phone && (
+                      <span className="text-muted-foreground">· {selectedGroupGuest.phone}</span>
+                    )}
+                    <button
+                      type="button"
+                      className="ml-auto text-xs text-destructive hover:underline"
+                      onClick={() => { setSelectedGroupGuest(null); setGroupGuestSearch('') }}
+                    >
+                      Remove
+                    </button>
                   </div>
                 )}
               </div>
@@ -1310,12 +1809,20 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
                 setPickedRoomIds([])
               }}
               showNights
+              minCheckIn={minCheckInDate}
               disableCalendar={(d) => {
                 if (!checkIn) return false
                 if (!checkOut) return d <= checkIn
                 return false
               }}
             />
+
+            {inLateCheckInGrace && !isBackdated && checkIn && (
+              <p className="text-xs text-muted-foreground rounded-md border border-dashed px-3 py-2">
+                Late arrival window (until {lateCheckInGraceWindowLabel()} hotel time): check-in may be set to
+                yesterday without approval. After night audit closes that date, manager approval is required.
+              </p>
+            )}
 
             {checkIn && checkOut && nights > 0 && (
               <p className="text-sm text-muted-foreground">{nights} night(s) · {format(checkIn, 'dd MMM')} — {format(checkOut, 'dd MMM yyyy')}</p>
@@ -1453,7 +1960,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
                 <p className="text-xs text-muted-foreground">
                   {pendingHold
                     ? 'Dates are held without payment. Collect later or cancel if the group does not attend.'
-                    : 'Payment validates the block. Use unpaid or partial when they will pay later; Pending holds dates with no payment.'}
+                    : 'Payment validates the block. Choose Pay now for full payment per room, Part payment for a deposit, or Unpaid to collect at check-in. Pending holds dates with no payment.'}
                 </p>
               </div>
 
@@ -1480,8 +1987,8 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="unpaid">Unpaid — pay at check-in</SelectItem>
+                    <SelectItem value="paid">Pay now</SelectItem>
                     <SelectItem value="partial">Part payment now</SelectItem>
-                    <SelectItem value="paid">Fully paid in advance</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -1518,6 +2025,21 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
                   <Input type="number" min={1} placeholder="Amount paid now per room" value={partialAmount} onChange={(e) => setPartialAmount(e.target.value === '' ? '' : Number(e.target.value))} />
                 </div>
               )}
+
+              {bookingType === 'individual' &&
+                selectedGroupGuest?.id &&
+                !pendingHold &&
+                bulkCashbackEligible &&
+                bulkSampleRoomTotal > 0 && (
+                  <CashbackPaymentPanel
+                    guestId={selectedGroupGuest.id}
+                    totalAmount={bulkSampleRoomTotal}
+                    cashPaying={bulkCashPayingPerRoom}
+                    paymentMethod={paymentMethod}
+                    applyCashback={applyCashback}
+                    onApplyCashbackChange={setApplyCashback}
+                  />
+                )}
             </div>
 
             <Separator />

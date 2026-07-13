@@ -1,30 +1,37 @@
-'use client'
+"use client";
 
-import { useState, useEffect } from 'react'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
-import { ScrollArea } from '@/components/ui/scroll-area'
-import { Bed, Loader2 } from 'lucide-react'
-import { cn } from '@/lib/utils'
-import { createClient } from '@/lib/supabase/client'
-import { useAuth } from '@/lib/auth-context'
+import { useState, useEffect } from "react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Bed, Loader2 } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { createClient } from "@/lib/supabase/client";
+import { useAuth } from "@/lib/auth-context";
+import { reconcileRoomStatusesClient } from "@/lib/rooms/reconcile-room-status-client";
+import {
+  computeEffectiveRoomStatus,
+  OCCUPYING_BOOKING_STATUSES,
+  pickOccupyingBooking,
+  type OccupyingBookingRow,
+} from "@/lib/rooms/room-occupancy";
 
 interface Room {
-  id: string
-  number: string
-  type: string
-  floor: number
-  status: string
+  id: string;
+  number: string;
+  type: string;
+  floor: number;
+  status: string;
 }
 
 const statusConfig = {
-  available: { label: 'Available', color: 'bg-green-500' },
-  occupied: { label: 'Occupied', color: 'bg-blue-500' },
-  reserved: { label: 'Reserved', color: 'bg-yellow-500' },
-  maintenance: { label: 'Maintenance', color: 'bg-red-500' },
-  cleaning: { label: 'Cleaning', color: 'bg-purple-500' },
-  out_of_order: { label: 'Out of Order', color: 'bg-red-700' },
-}
+  available: { label: "Available", color: "bg-green-500" },
+  occupied: { label: "Occupied", color: "bg-blue-500" },
+  reserved: { label: "Reserved", color: "bg-yellow-500" },
+  maintenance: { label: "Maintenance", color: "bg-red-500" },
+  cleaning: { label: "Cleaning", color: "bg-purple-500" },
+  out_of_order: { label: "Out of Order", color: "bg-red-700" },
+};
 
 const statusPriority: Record<string, number> = {
   occupied: 1,
@@ -33,54 +40,85 @@ const statusPriority: Record<string, number> = {
   cleaning: 4,
   reserved: 5,
   available: 6,
-}
+};
 
 export function RoomStatusGrid() {
-  const { organizationId } = useAuth()
-  const [rooms, setRooms] = useState<Room[]>([])
-  const [loading, setLoading] = useState(true)
+  const { organizationId } = useAuth();
+  const [rooms, setRooms] = useState<Room[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!organizationId) return
-    let isMounted = true
+    if (!organizationId) return;
+    let isMounted = true;
 
     const fetchRooms = async () => {
       try {
-        setLoading(true)
-        const supabase = createClient()
+        setLoading(true);
+        const supabase = createClient();
 
         if (!supabase) {
-          if (isMounted) setRooms([])
-          return
+          if (isMounted) setRooms([]);
+          return;
         }
 
-        const { data, error } = await supabase
-          .from('rooms')
-          .select('id, room_number, room_type, status, organization_id')
-          .eq('organization_id', organizationId)
-          .order('room_number', { ascending: true })
+        await reconcileRoomStatusesClient();
 
-        if (error) throw error
-        const sortedRooms = (data || []).sort((a: any, b: any) => {
-          const priorityDiff = (statusPriority[a.status] || 99) - (statusPriority[b.status] || 99)
-          if (priorityDiff !== 0) return priorityDiff
-          return String(a.room_number).localeCompare(String(b.room_number), undefined, { numeric: true })
-        })
-        if (isMounted) setRooms(sortedRooms)
+        const [{ data, error }, { data: bookingRows }] = await Promise.all([
+          supabase
+            .from("rooms")
+            .select("id, room_number, room_type, status, organization_id")
+            .eq("organization_id", organizationId)
+            .order("room_number", { ascending: true }),
+          supabase
+            .from("bookings")
+            .select("id, room_id, status, check_in, check_out, folio_status")
+            .eq("organization_id", organizationId)
+            .in("status", [...OCCUPYING_BOOKING_STATUSES]),
+        ]);
+
+        if (error) throw error;
+
+        const byRoom = new Map<string, OccupyingBookingRow[]>();
+        for (const b of bookingRows ?? []) {
+          if (!b.room_id) continue;
+          if (!byRoom.has(b.room_id)) byRoom.set(b.room_id, []);
+          byRoom.get(b.room_id)!.push(b as OccupyingBookingRow);
+        }
+
+        const sortedRooms = (data || [])
+          .map((room: any) => {
+            const occupying = pickOccupyingBooking(byRoom.get(room.id) ?? []);
+            return {
+              ...room,
+              status: computeEffectiveRoomStatus(room.status, occupying),
+            };
+          })
+          .sort((a: any, b: any) => {
+            const priorityDiff =
+              (statusPriority[a.status] || 99) -
+              (statusPriority[b.status] || 99);
+            if (priorityDiff !== 0) return priorityDiff;
+            return String(a.room_number).localeCompare(
+              String(b.room_number),
+              undefined,
+              { numeric: true },
+            );
+          });
+        if (isMounted) setRooms(sortedRooms);
       } catch (error: any) {
-        console.error('Error fetching rooms:', error)
-        if (isMounted) setRooms([])
+        console.error("Error fetching rooms:", error);
+        if (isMounted) setRooms([]);
       } finally {
-        if (isMounted) setLoading(false)
+        if (isMounted) setLoading(false);
       }
-    }
+    };
 
-    void fetchRooms()
+    void fetchRooms();
 
     return () => {
-      isMounted = false
-    }
-  }, [organizationId])
+      isMounted = false;
+    };
+  }, [organizationId]);
 
   return (
     <Card>
@@ -103,43 +141,47 @@ export function RoomStatusGrid() {
           <ScrollArea className="h-[300px]">
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
               {rooms.map((room) => {
-                const config = statusConfig[room.status as keyof typeof statusConfig]
+                const config =
+                  statusConfig[room.status as keyof typeof statusConfig];
                 return (
                   <div
                     key={room.id}
                     className={cn(
-                      'relative rounded-md border p-2 transition-all hover:shadow-sm',
-                      room.status === 'available' ? 'border-green-200 bg-green-50' :
-                      room.status === 'occupied' ? 'border-blue-200 bg-blue-50' :
-                      room.status === 'reserved' ? 'border-yellow-200 bg-yellow-50' :
-                      room.status === 'maintenance' ? 'border-red-200 bg-red-50' :
-                      'border-purple-200 bg-purple-50'
+                      "relative rounded-md border p-2 transition-all hover:shadow-sm",
+                      room.status === "available"
+                        ? "border-green-200 bg-green-50"
+                        : room.status === "occupied"
+                          ? "border-blue-200 bg-blue-50"
+                          : room.status === "reserved"
+                            ? "border-yellow-200 bg-yellow-50"
+                            : room.status === "maintenance"
+                              ? "border-red-200 bg-red-50"
+                              : "border-purple-200 bg-purple-50",
                     )}
                   >
                     <div className="flex items-start justify-between">
                       <div>
-                        <p className="text-xs font-semibold leading-tight">{room.room_number}</p>
+                        <p className="text-xs font-semibold leading-tight">
+                          {room.room_number}
+                        </p>
                         <p className="truncate text-[10px] capitalize leading-tight text-muted-foreground">
-                          {room.room_type?.replace('_', ' ') || 'Standard'}
+                          {room.room_type?.replace("_", " ") || "Standard"}
                         </p>
                       </div>
                       <div
-                        className={cn(
-                          'h-2 w-2 rounded-full',
-                          config?.color
-                        )}
+                        className={cn("h-2 w-2 rounded-full", config?.color)}
                       />
                     </div>
                     <p className="mt-1 text-[10px] font-medium capitalize leading-tight">
                       {config?.label}
                     </p>
                   </div>
-                )
+                );
               })}
             </div>
           </ScrollArea>
         )}
       </CardContent>
     </Card>
-  )
+  );
 }

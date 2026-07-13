@@ -32,7 +32,6 @@ export async function cancelBookingReservation(
     .from('bookings')
     .update({
       status: 'cancelled',
-      updated_by: input.userId || null,
       updated_at: new Date().toISOString(),
     })
     .eq('id', input.bookingId)

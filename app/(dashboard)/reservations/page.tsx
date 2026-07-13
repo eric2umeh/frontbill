@@ -20,6 +20,8 @@ import { getUserDisplayName } from '@/lib/utils/user-display'
 import { fetchUserDisplayNameMap } from '@/lib/utils/fetch-user-display-names'
 import { getBulkGroupId, isLegacyBulkGroupId } from '@/lib/utils/bulk-booking'
 import { cancelBookingReservation, isCancellableReservationStatus } from '@/lib/reservations/cancel-reservation'
+import { isNoShowEligibleStatus } from '@/lib/reservations/mark-no-show'
+import { MarkNoShowDialog } from '@/components/reservations/mark-no-show-dialog'
 import { formatReservationPaymentMethodLabel } from '@/lib/reservations/reservation-payment-methods'
 import { networkFetchHint, withFetchRetry } from '@/lib/utils/fetch-retry'
 import { toast } from 'sonner'
@@ -81,6 +83,16 @@ export default function ReservationsPage() {
   const [reserveCheckInOpen, setReserveCheckInOpen] = useState(false)
   const [reserveCheckInBooking, setReserveCheckInBooking] = useState<ReserveCheckInBooking | null>(null)
   const [cancelReserveLoadingId, setCancelReserveLoadingId] = useState<string | null>(null)
+  const [noShowDialogOpen, setNoShowDialogOpen] = useState(false)
+  const [noShowBooking, setNoShowBooking] = useState<{
+    id: string
+    guestName?: string
+    folio_id?: string
+    rate_per_night?: number
+    total_amount?: number
+    check_in?: string
+    check_out?: string
+  } | null>(null)
   const { initialLoading, startFetch, endFetch } = usePageData()
   const { organizationId, role, userId } = useAuth()
   const { setHeaderActions } = useReservationsEventsHeader()
@@ -283,6 +295,21 @@ export default function ReservationsPage() {
 
   const canCheckInReserved = hasPermission(role, 'bookings:checkin')
   const canCancelReservation = hasPermission(role, 'reservations:delete')
+  const canMarkNoShow =
+    hasPermission(role, 'reservations:edit') || hasPermission(role, 'bookings:edit')
+
+  const openMarkNoShow = (res: Reservation) => {
+    setNoShowBooking({
+      id: res.id,
+      guestName: res.guestName || res.guests?.name,
+      folio_id: res.folio_id,
+      rate_per_night: res.rate_per_night,
+      total_amount: res.total_amount,
+      check_in: res.check_in,
+      check_out: res.check_out,
+    })
+    setNoShowDialogOpen(true)
+  }
 
   const openReserveCheckIn = (res: Reservation) => {
     setReserveCheckInBooking({
@@ -405,6 +432,12 @@ export default function ReservationsPage() {
         onSuccess={fetchReservations}
         booking={reserveCheckInBooking}
         userId={userId || ''}
+      />
+      <MarkNoShowDialog
+        open={noShowDialogOpen}
+        onOpenChange={setNoShowDialogOpen}
+        booking={noShowBooking}
+        onSuccess={fetchReservations}
       />
       
       <EnhancedDataTable
@@ -535,7 +568,18 @@ export default function ReservationsPage() {
                     Check in
                   </Button>
                 )}
-                {canCancelReservation && res.status !== 'cancelled' && (
+                {canMarkNoShow && !res.is_bulk && isNoShowEligibleStatus(res.status) && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    title="Mark no-show"
+                    className="h-7 px-2 text-[11px] text-orange-700 border-orange-200 hover:bg-orange-50"
+                    onClick={() => openMarkNoShow(res)}
+                  >
+                    No-show
+                  </Button>
+                )}
+                {canCancelReservation && res.status !== 'cancelled' && isCancellableReservationStatus(res.status) && (
                   <Button
                     size="sm"
                     variant="outline"

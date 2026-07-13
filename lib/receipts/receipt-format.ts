@@ -1,23 +1,32 @@
 import { escapeHtml } from "@/lib/utils/html-escape";
+import { receiptHotelHeaderRow } from "@/lib/receipts/receipt-logo";
 
 /** Stable 5–8 digit display number from folio payment / charge id */
 export function receiptNumberFromId(id: string): string {
-  const hex = id.replace(/-/g, "").slice(0, 16);
-  if (hex.length < 8) return "1000";
-  try {
-    const slice = hex.slice(0, 12);
-    let n = 0;
-    for (let i = 0; i < slice.length; i += 1) {
-      n = (n * 16 + parseInt(slice[i]!, 16)) % 99_000_000;
+  const raw = String(id || "").trim();
+  if (!raw) return "1000";
+  const hex = raw.replace(/-/g, "").replace(/^pay/i, "");
+  if (/^[0-9a-f]+$/i.test(hex) && hex.length >= 8) {
+    try {
+      const slice = hex.slice(0, 12);
+      let n = 0;
+      for (let i = 0; i < slice.length; i += 1) {
+        const digit = parseInt(slice[i]!, 16);
+        if (!Number.isFinite(digit)) break;
+        n = (n * 16 + digit) % 99_000_000;
+      }
+      if (Number.isFinite(n)) {
+        return String(Math.max(1000, n + 1_000_000));
+      }
+    } catch {
+      /* fall through */
     }
-    return String(Math.max(1000, n + 1_000_000));
-  } catch {
-    return String(
-      Math.abs(
-        id.split("").reduce((a, c) => a + c.charCodeAt(0), 0) % 99_000_000,
-      ) + 1000,
-    );
   }
+  return String(
+    Math.abs(
+      raw.split("").reduce((a, c) => a + c.charCodeAt(0), 0) % 99_000_000,
+    ) + 1000,
+  );
 }
 
 export function formatReceiptPaymentMethod(
@@ -35,7 +44,7 @@ export function formatReceiptPaymentMethod(
     pending: "Pending (hold)",
     city_ledger: "City Ledger",
     deferred: "Deferred",
-    pending: "Pending",
+    cashback: "Cashback discount",
   };
   if (map[m]) return map[m];
   if (!m) return "—";
@@ -51,6 +60,7 @@ export type PaymentReceiptBranding = {
   address?: string | null;
   phone?: string | null;
   email?: string | null;
+  logoUrl?: string | null;
 };
 
 export type PaymentReceiptPayload = PaymentReceiptBranding & {
@@ -71,6 +81,8 @@ export type PaymentReceiptPayload = PaymentReceiptBranding & {
   receiptTitle?: string;
   /** Room / add-on / extension lines listed on payment receipts for guest context. */
   folioContextLines?: string[] | null;
+  /** Outstanding folio balance after this payment (when known). */
+  balanceRemaining?: number | null;
 };
 
 export function defaultPaymentRemark(): string {
@@ -94,6 +106,7 @@ export function remarkFromChargeType(
     return d || "FOLIO CHARGE";
   }
   if (t === "late_checkout") return "LATE CHECKOUT";
+  if (t === "no_show_fee") return "NO-SHOW CHARGE";
   if (t === "payment") return "ACCOMMODATION";
   return "ACCOMMODATION";
 }
@@ -103,7 +116,7 @@ function receiptBlockStyles(): string {
     * { box-sizing: border-box; }
     body { margin: 0; font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif; color: #111; }
     .block { padding: 12px 16px 20px; max-width: 720px; margin: 0 auto; }
-    .hotel { font-size: 18px; font-weight: 700; letter-spacing: 0.02em; margin-bottom: 6px; }
+    .hotel { font-size: 18px; font-weight: 700; letter-spacing: 0.02em; }
     .sub { font-size: 12px; line-height: 1.45; color: #222; }
     .title { text-align: center; font-size: 15px; font-weight: 700; margin: 14px 0 12px; }
     .row { display: flex; justify-content: space-between; gap: 16px; font-size: 12px; }
@@ -120,7 +133,6 @@ function receiptBlockStyles(): string {
 }
 
 function oneReceiptBlock(p: PaymentReceiptPayload): string {
-  const hotel = escapeHtml(String(p.hotelName ?? "").trim() || "\u2014");
   const addr = p.address ? escapeHtml(p.address) : "";
   const phone = p.phone ? escapeHtml(p.phone) : "";
   const email = p.email ? escapeHtml(p.email) : "";
@@ -148,7 +160,7 @@ function oneReceiptBlock(p: PaymentReceiptPayload): string {
 
   return `
     <div class="block">
-      <div class="hotel">${hotel}</div>
+      ${receiptHotelHeaderRow(p.logoUrl, p.hotelName, { maxHeightPx: 36, maxWidthPx: 100 })}
       <div class="sub">${addr ? `${addr}<br/>` : ""}${phone ? `# ${phone}<br/>` : ""}${email ? `${email}` : ""}</div>
       <div class="title">${title}</div>
       <div class="row">
@@ -173,6 +185,13 @@ function oneReceiptBlock(p: PaymentReceiptPayload): string {
         <span class="label">Amount:</span>
         <span class="amt">${escapeHtml(amountStr)}</span>
       </div>
+      ${
+        p.balanceRemaining != null &&
+        Number.isFinite(p.balanceRemaining) &&
+        p.balanceRemaining > 0
+          ? `<div class="pay-row"><span class="label">Balance:</span><span class="amt">${escapeHtml(formatAmountReceipt(p.balanceRemaining))}</span></div>`
+          : ""
+      }
       <div class="hr"></div>
       <div class="words"><span class="label">Amount In Words:</span> ${words}</div>
       <div class="words" style="margin-top:6px;"><span class="label">Remark:</span> ${remark}</div>

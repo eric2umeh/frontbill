@@ -26,15 +26,20 @@ import {
   ArrowLeft, User, Phone, Mail, MapPin,
   Calendar, CreditCard, TrendingUp, FileText, Building2, Hash,
   Wallet, ArrowDownCircle, ArrowUpCircle, Clock, RefreshCw,
-  Trash2,
+  Trash2, Gift, Printer,
 } from 'lucide-react'
-import { format } from 'date-fns'
+import { format, isWithinInterval, parseISO, startOfDay, endOfDay, subYears } from 'date-fns'
 import CityLedgerPaymentModal from '@/components/city-ledger/city-ledger-payment-modal'
 import { useAuth } from '@/lib/auth-context'
 import { hasPermission } from '@/lib/permissions'
 import { toast } from 'sonner'
-import { folioGuestCreditAmount, folioPositiveOutstandingSum } from '@/lib/utils/booking-bill-balance'
+import { folioGuestCreditAmount, folioPositiveOutstandingSum, bookingDisplayBillBalance } from '@/lib/utils/booking-bill-balance'
 import { PageLoadingState } from '@/components/loading-screen'
+import { fetchGuestCashbackBalanceClient } from '@/lib/cashback/cashback-client'
+import Link from 'next/link'
+import { Input } from '@/components/ui/input'
+import { buildGuestAccountStatementHtml } from '@/lib/receipts/guest-account-statement'
+import { printHtmlDocument } from '@/lib/receipts/receipt-pdf-print'
 
 interface Guest {
   id: string
@@ -86,7 +91,7 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
   const router = useRouter()
   // Prefer DB profile.role (source of truth) once loaded; matches layout AuthProvider but fixes any drift.
   const [resolvedRole, setResolvedRole] = useState<string | null>(null)
-  const { role, userId: currentUserId } = useAuth()
+  const { role, userId: currentUserId, name } = useAuth()
   /** Product rule: Manager, Administrator, or Superadmin may edit/delete guest profiles (see hasPermission). */
   const canEditGuest = hasPermission(resolvedRole ?? role, 'guests:edit')
   const canDeleteGuest = hasPermission(resolvedRole ?? role, 'guests:delete')
@@ -105,6 +110,17 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
   const [repairingBalance, setRepairingBalance] = useState(false)
   const [guestPendingBalance, setGuestPendingBalance] = useState(0)
   const [guestFolioCreditTotal, setGuestFolioCreditTotal] = useState(0)
+  const [cashbackEarned, setCashbackEarned] = useState(0)
+  const [cashbackAvailable, setCashbackAvailable] = useState(0)
+  const [statementFrom, setStatementFrom] = useState(() => format(subYears(new Date(), 1), 'yyyy-MM-dd'))
+  const [statementTo, setStatementTo] = useState(() => format(new Date(), 'yyyy-MM-dd'))
+  const [hotelBranding, setHotelBranding] = useState<{
+    name: string
+    logoUrl?: string | null
+    address?: string | null
+    phone?: string | null
+  }>({ name: 'Hotel' })
+  const [printingStatement, setPrintingStatement] = useState(false)
   const [selectedFolioId, setSelectedFolioId] = useState<string>('')
   const [isCheckingOut, setIsCheckingOut] = useState(false)
   const [isEditingGuest, setIsEditingGuest] = useState(false)
@@ -147,6 +163,20 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
       setOrgId(profile.organization_id)
       setResolvedRole(profile.role ?? null)
 
+      const { data: orgRow } = await supabase
+        .from('organizations')
+        .select('name, logo_url, address, phone')
+        .eq('id', profile.organization_id)
+        .maybeSingle()
+      if (orgRow) {
+        setHotelBranding({
+          name: String(orgRow.name || 'Hotel'),
+          logoUrl: orgRow.logo_url,
+          address: orgRow.address,
+          phone: orgRow.phone,
+        })
+      }
+
       const [{ data: guestData }, { data: bookingData }] = await Promise.all([
         supabase.from('guests').select('*').eq('id', id).eq('organization_id', profile.organization_id).single(),
         supabase.from('bookings')
@@ -157,6 +187,10 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
 
       if (!guestData) { router.push('/guest-database'); return }
       setGuest(guestData)
+
+      const cb = await fetchGuestCashbackBalanceClient(supabase, id)
+      setCashbackEarned(cb.earnedTotal)
+      setCashbackAvailable(cb.balance)
       setGuestForm({
         name: guestData.name || '',
         phone: guestData.phone || '',
@@ -205,7 +239,15 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
       let creditTotal = 0
       const enrichedBookings = rawBookings.map((b: any) => {
         const ch = chargesByBooking[b.id] ?? []
-        const net = folioPositiveOutstandingSum(ch)
+        const net = bookingDisplayBillBalance(
+          {
+            balance: b.balance,
+            deposit: b.deposit,
+            total_amount: b.total_amount,
+            payment_status: b.payment_status,
+          },
+          ch,
+        )
         pendingTotal += Math.max(0, net)
         creditTotal += folioGuestCreditAmount(ch)
         return { ...b, balance: net }
@@ -251,8 +293,6 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
       } else {
         setLedgerAccount(null)
       }
-
-      // Fetch city ledger transaction history for this guest
       const { data: txData } = await supabase
         .from('transactions')
         .select('id, transaction_id, amount, payment_method, status, description, created_at')
@@ -400,6 +440,97 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
     })
   }
 
+  const handlePrintStatement = async () => {
+    if (!guest || !orgId) return
+    if (statementFrom > statementTo) {
+      toast.error('Start date must be on or before end date')
+      return
+    }
+    setPrintingStatement(true)
+    try {
+      const supabase = createClient()
+      const from = startOfDay(parseISO(statementFrom))
+      const to = endOfDay(parseISO(statementTo))
+      const bookingIds = bookings.map((b) => b.id)
+      if (!bookingIds.length) {
+        toast.message('No bookings to print for this guest')
+        return
+      }
+      const { data: charges } = await supabase
+        .from('folio_charges')
+        .select('booking_id, amount, charge_type, description, created_at, bookings(folio_id)')
+        .in('booking_id', bookingIds)
+        .gte('created_at', from.toISOString())
+        .lte('created_at', to.toISOString())
+        .order('created_at', { ascending: true })
+
+      let running = 0
+      let totalCharges = 0
+      let totalPayments = 0
+      const lines = (charges || []).map((c: any) => {
+        const amt = Number(c.amount || 0)
+        const isPayment = String(c.charge_type || '').toLowerCase() === 'payment' || amt < 0
+        const charge = isPayment ? 0 : Math.max(0, amt)
+        const payment = isPayment ? Math.abs(amt) : 0
+        totalCharges += charge
+        totalPayments += payment
+        running += charge - payment
+        const folioId =
+          (c.bookings as { folio_id?: string } | null)?.folio_id ||
+          bookings.find((b) => b.id === c.booking_id)?.folio_id ||
+          '—'
+        return {
+          date: format(new Date(c.created_at), 'dd MMM yyyy HH:mm'),
+          folioId,
+          description: String(c.description || c.charge_type || 'Folio line'),
+          charge,
+          payment,
+          balance: running,
+        }
+      })
+
+      const periodLabel =
+        statementFrom === statementTo
+          ? format(parseISO(statementFrom), 'dd MMM yyyy')
+          : `${format(parseISO(statementFrom), 'dd MMM yyyy')} – ${format(parseISO(statementTo), 'dd MMM yyyy')}`
+
+      const html = buildGuestAccountStatementHtml({
+        hotelName: hotelBranding.name,
+        logoUrl: hotelBranding.logoUrl,
+        address: hotelBranding.address,
+        phone: hotelBranding.phone,
+        guestName: guest.name,
+        guestPhone: guest.phone,
+        periodLabel,
+        printedAt: format(new Date(), 'dd MMM yyyy HH:mm'),
+        printedBy: name || 'Staff',
+        openingBalance: 0,
+        lines,
+        totalCharges,
+        totalPayments,
+        closingBalance: running,
+      })
+      printHtmlDocument(html)
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Could not print statement')
+    } finally {
+      setPrintingStatement(false)
+    }
+  }
+
+  const statementFilteredBookings = bookings.filter((b) => {
+    if (!statementFrom || !statementTo) return true
+    try {
+      const d = parseISO(b.check_in)
+      return isWithinInterval(d, {
+        start: startOfDay(parseISO(statementFrom)),
+        end: endOfDay(parseISO(statementTo)),
+      })
+    } catch {
+      return true
+    }
+  })
+
   if (loading) {
     return <PageLoadingState />
   }
@@ -411,12 +542,14 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
   const totalBookingBalance = guestPendingBalance
   const lastVisit = bookings.length > 0 ? bookings[0].check_in : null
   const guestOutstandingBalance = guestPendingBalance
-  /** Synthetic ledger (no DB row) tracks folio outstanding; real account uses city_ledger_accounts.balance */
-  const ledgerDisplayBalance = ledgerAccount
-    ? ledgerAccount.id == null
-      ? guestOutstandingBalance
-      : Number(ledgerAccount.balance ?? 0)
-    : 0
+  /** Folio-derived outstanding is source of truth for debit; ledger DB may lag after partial pay. */
+  const ledgerDisplayBalance = (() => {
+    if (!ledgerAccount) return 0
+    const dbBal = Number(ledgerAccount.balance ?? 0)
+    if (dbBal < 0) return dbBal
+    if (guestOutstandingBalance > 0) return guestOutstandingBalance
+    return Math.max(0, dbBal)
+  })()
 
   /** Real city ledger only: negative DB balance = prepaid credit not always visible on folio totals. */
   const ledgerAccountCreditAmount =
@@ -547,8 +680,49 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
         </div>
       </div>
 
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Account statement (past dates)</CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-wrap items-end gap-3">
+          <div className="space-y-1">
+            <Label htmlFor="stmt-from" className="text-xs">From</Label>
+            <Input
+              id="stmt-from"
+              type="date"
+              className="h-9 w-[140px]"
+              value={statementFrom}
+              onChange={(e) => setStatementFrom(e.target.value)}
+            />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="stmt-to" className="text-xs">To</Label>
+            <Input
+              id="stmt-to"
+              type="date"
+              className="h-9 w-[140px]"
+              value={statementTo}
+              onChange={(e) => setStatementTo(e.target.value)}
+            />
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-2"
+            disabled={printingStatement}
+            onClick={() => void handlePrintStatement()}
+          >
+            <Printer className="h-4 w-4" />
+            {printingStatement ? 'Preparing…' : 'Print statement'}
+          </Button>
+          <p className="text-xs text-muted-foreground w-full">
+            Filters booking history below and prints folio charges/payments for the selected period.
+          </p>
+        </CardContent>
+      </Card>
+
       {/* Summary cards */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
         <Card>
           <CardContent className="p-5 flex flex-col gap-1">
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -616,6 +790,24 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
               </>
             ) : (
               <p className="text-3xl font-bold text-muted-foreground">Settled</p>
+            )}
+          </CardContent>
+        </Card>
+        <Card className="border-violet-200 bg-violet-500/5">
+          <CardContent className="p-5 flex flex-col gap-1">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Gift className="h-4 w-4" /> Cashback
+            </div>
+            <p className="text-3xl font-bold text-violet-700 tabular-nums">
+              {formatNaira(cashbackAvailable)}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Earned: {formatNaira(cashbackEarned)}
+            </p>
+            {hasPermission(resolvedRole ?? role, 'cashback:view') && (
+              <Link href="/cashback" className="text-xs text-primary hover:underline mt-1">
+                View program
+              </Link>
             )}
           </CardContent>
         </Card>
@@ -790,7 +982,7 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
         {/* Booking History */}
         <Card className="lg:col-span-2">
           <CardHeader>
-            <CardTitle className="text-base">Booking History ({bookings.length})</CardTitle>
+            <CardTitle className="text-base">Booking History ({statementFilteredBookings.length})</CardTitle>
           </CardHeader>
           <CardContent>
             {bookings.length === 0 ? (
@@ -800,7 +992,7 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
               </div>
             ) : (
               <div className="space-y-3">
-                {bookings.map((b) => (
+                {statementFilteredBookings.map((b) => (
                   <div
                     key={b.id}
                     className="flex items-center justify-between rounded-lg border p-4 text-sm cursor-pointer hover:bg-accent transition-colors"

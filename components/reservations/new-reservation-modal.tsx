@@ -45,8 +45,19 @@ import {
   RESERVATION_PAYMENT_METHOD_PENDING,
   type ReservationPaymentMethod,
 } from '@/lib/reservations/reservation-payment-methods'
+import { CashbackPaymentPanel } from '@/components/cashback/cashback-payment-panel'
+import { computeCashbackDiscount } from '@/lib/cashback/cashback-payment-math'
+import { applyCashbackDiscountAndFolioPayments } from '@/lib/cashback/apply-cashback-folio-payment'
+import {
+  earnCashbackClient,
+  fetchGuestCashbackBalanceClient,
+} from '@/lib/cashback/cashback-client'
+import { paymentMethodEarnsCashback } from '@/lib/cashback/cashback-config'
+import { isGuestBookingCashbackEligible } from '@/lib/cashback/cashback-eligibility'
+import { roomStatusForBookingStatus } from '@/lib/rooms/room-occupancy'
 import { buildBackdateDedupeKey } from '@/lib/backdate/dedupe-key'
-import { isStayCheckInConsideredBackdated } from '@/lib/hotel-date'
+import { isStayCheckInConsideredBackdated, minSelectableCheckInYmdHotel, isLateNightCheckInGraceWindow, lateCheckInGraceWindowLabel } from '@/lib/hotel-date'
+import { useNightAuditClosedDates } from '@/hooks/use-night-audit-closed-dates'
 import { hasPermission } from '@/lib/permissions'
 import { useAuth } from '@/lib/auth-context'
 import {
@@ -54,6 +65,7 @@ import {
   type FolioRemarksAttachmentsValue,
 } from '@/components/folio/folio-remarks-attachments-field'
 import { persistFolioAttachments } from '@/lib/folio/persist-folio-attachments'
+import { SelectedRoomsStickyBar } from '@/components/shared/selected-rooms-sticky-bar'
 
 const toLocalDateStr = (date: Date) => {
   const y = date.getFullYear()
@@ -97,6 +109,25 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
   const [nights, setNights] = useState(0)
   const [backdateReason, setBackdateReason] = useState('')
   const [folioExtras, setFolioExtras] = useState<FolioRemarksAttachmentsValue>({ remarks: '', files: [] })
+
+  const [guestCashbackBalance, setGuestCashbackBalance] = useState(0)
+  const [applyCashback, setApplyCashback] = useState(true)
+
+  useEffect(() => {
+    if (!guestId || !open) {
+      setGuestCashbackBalance(0)
+      return
+    }
+    let cancelled = false
+    ;(async () => {
+      const supabase = createClient()
+      const b = await fetchGuestCashbackBalanceClient(supabase, guestId)
+      if (!cancelled) setGuestCashbackBalance(b.balance)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [guestId, open])
 
   // Step 3: Room & Payment
   const [rooms, setRooms] = useState<any[]>([])
@@ -408,10 +439,33 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
   } else if (!pendingHold && effectivePaymentStatus === 'partial') {
     depositCalc = payAboveRoomTotal ? Math.max(0, rawPaid) : Math.min(rawPaid, totalAmount)
   }
-  const depositAmount = depositCalc
-  const balanceAmount = Math.max(0, totalAmount - depositAmount)
+  const depositCalcRaw = depositCalc
+  const reservationCashbackEligible = isGuestBookingCashbackEligible({
+    paymentMethod,
+  })
+  const cashbackBreakdown = computeCashbackDiscount({
+    totalDue: totalAmount,
+    cashbackBalance: guestCashbackBalance,
+    cashPaying: depositCalcRaw,
+    applyCashback: applyCashback && Boolean(guestId) && reservationCashbackEligible,
+  })
+  const depositAmount = cashbackBreakdown.cashbackDiscount + cashbackBreakdown.cashToCollect
+  const balanceAmount = cashbackBreakdown.balanceRemaining
   const canApproveBackdates = hasPermission(currentUserRole, 'backdate:approve')
-  const isBackdated = checkInDate ? isStayCheckInConsideredBackdated(toLocalDateStr(checkInDate)) : false
+  const { closedDates: nightAuditClosedDates } = useNightAuditClosedDates(currentUserId, open)
+  const isBackdated = checkInDate
+    ? isStayCheckInConsideredBackdated(toLocalDateStr(checkInDate), new Date(), undefined, {
+        auditedDates: nightAuditClosedDates,
+      })
+    : false
+  const minCheckInYmd = minSelectableCheckInYmdHotel()
+  const minCheckInDate = (() => {
+    const [y, m, d] = minCheckInYmd.split('-').map(Number)
+    const dt = new Date(y, m - 1, d)
+    dt.setHours(0, 0, 0, 0)
+    return dt
+  })()
+  const inLateCheckInGrace = isLateNightCheckInGraceWindow()
 
   const hasApprovedBackdateRequest = async () => {
     if (!checkInDate || !orgId || !selectedRoom?.id || !currentUserId) return false
@@ -568,7 +622,11 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
         .select().single()
       if (be) throw be
 
-      await supabase.from('rooms').update({ status: 'reserved', updated_by: currentUserId, updated_at: new Date().toISOString() }).eq('id', selectedRoom.id)
+      await supabase.from('rooms').update({
+        status: roomStatusForBookingStatus('reserved', toLocalDateStr(checkInDate)),
+        updated_by: currentUserId,
+        updated_at: new Date().toISOString(),
+      }).eq('id', selectedRoom.id)
 
       // Insert folio charge (this is what the Transactions page reads from)
       const { error: fcErr } = await insertFolioCharges(supabase, [{
@@ -585,7 +643,34 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
       }])
       if (fcErr) throw fcErr
 
-      if (!pendingHold && depositAmount > 0 && balanceAmount > 0) {
+      if (!pendingHold && depositAmount > 0 && finalGuestId && reservationCashbackEligible) {
+        await applyCashbackDiscountAndFolioPayments(supabase, {
+          guestId: finalGuestId,
+          bookingId: booking.id,
+          organizationId: orgId,
+          cashbackDiscount: cashbackBreakdown.cashbackDiscount,
+          cashAmount: cashbackBreakdown.cashToCollect,
+          cashPaymentMethod: paymentMethod,
+          createdBy: currentUserId,
+          sourceType: 'reservation_payment',
+          sourceId: booking.id,
+          cashDescription: `Reservation payment - ${paymentMethod}`,
+        })
+
+        if (
+          paymentMethodEarnsCashback(paymentMethod) &&
+          cashbackBreakdown.cashToCollect > 0
+        ) {
+          await earnCashbackClient(supabase, {
+            guestId: finalGuestId,
+            amount: cashbackBreakdown.cashToCollect,
+            paymentMethod,
+            sourceType: 'reservation_payment',
+            sourceId: booking.id,
+            description: `Reservation payment ${folioId}`,
+          })
+        }
+      } else if (!pendingHold && depositAmount > 0) {
         const { error: payFcErr } = await insertFolioCharges(supabase, [{
           booking_id: booking.id,
           organization_id: orgId,
@@ -615,15 +700,18 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
       }
 
       const paidAmount = pendingHold ? 0 : depositAmount
+      const cashRecorded = pendingHold ? 0 : cashbackBreakdown.cashToCollect
       if (paidAmount > 0) {
         await supabase.from('payments').insert([{
           organization_id: orgId,
           booking_id: booking.id,
           guest_id: finalGuestId,
-          amount: paidAmount,
+          amount: cashRecorded > 0 ? cashRecorded : paidAmount,
           payment_method: paymentMethod,
           payment_date: new Date().toISOString(),
-          notes: `Reservation payment — Folio ${folioId}`,
+          notes: cashbackBreakdown.cashbackDiscount > 0
+            ? `Reservation payment — Folio ${folioId} (incl. ${formatNaira(cashbackBreakdown.cashbackDiscount)} cashback discount)`
+            : `Reservation payment — Folio ${folioId}`,
           received_by: currentUserId || null,
         }])
       }
@@ -694,6 +782,10 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
           <DialogDescription>Fill in guest details, dates, room and payment</DialogDescription>
         </DialogScrollableHeader>
 
+        <SelectedRoomsStickyBar
+          roomNumbers={selectedRoom?.room_number != null ? [selectedRoom.room_number] : []}
+        />
+
         <DialogScrollableBody className="space-y-5">
 
           {/* Guest Information */}
@@ -749,8 +841,15 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
               onDatesChange={handleStayDatesChange}
               onNightsChange={handleNightsChange}
               showNights
+              minCheckIn={minCheckInDate}
               disableCalendar={(d) => !!(checkInDate && !checkOutDate && d <= checkInDate)}
             />
+            {inLateCheckInGrace && !isBackdated && checkInDate && (
+              <p className="text-xs text-muted-foreground rounded-md border border-dashed px-3 py-2">
+                Late arrival window (until {lateCheckInGraceWindowLabel()} hotel time): check-in may be set to
+                yesterday without approval. After night audit closes that date, manager approval is required.
+              </p>
+            )}
             {checkInDate && checkOutDate && nights > 0 && (
               <div className="p-3 rounded-lg bg-muted text-sm">
                 <span className="text-muted-foreground">Duration: </span><span className="font-semibold">{nights} night(s) · {format(checkInDate, 'dd MMM')} — {format(checkOutDate, 'dd MMM yyyy')}</span>
@@ -764,7 +863,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
                   onChange={(e) => setBackdateReason(e.target.value)}
                   placeholder="Explain why this reservation must be backdated (for Night Audit approval)"
                 />
-                <p className="text-xs text-amber-700">A Superadmin or Administrator can approve or directly create an approved backdated reservation.</p>
+                <p className="text-xs text-amber-700">A Superadmin, Administrator, or Manager can approve or directly create an approved backdated reservation.</p>
               </div>
             )}
           </div>
@@ -811,6 +910,16 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
                 </div>
                 <p className="text-xs text-muted-foreground">{nights} night(s) × {formatNaira(effectiveRate)}/night</p>
               </div>
+            )}
+            {guestId && selectedRoom && nights > 0 && !pendingHold && reservationCashbackEligible && (
+              <CashbackPaymentPanel
+                guestId={guestId}
+                totalAmount={totalAmount}
+                cashPaying={depositCalcRaw}
+                paymentMethod={paymentMethod}
+                applyCashback={applyCashback}
+                onApplyCashbackChange={setApplyCashback}
+              />
             )}
           </div>
 

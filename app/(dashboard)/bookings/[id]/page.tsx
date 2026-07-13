@@ -63,6 +63,18 @@ import {
   type PaymentLedgerReceiptRow,
 } from "@/lib/receipts/booking-receipt-utils";
 import { canAdministerBookingRecord } from "@/lib/booking/can-administer-booking-record";
+import {
+  earnCashbackClient,
+  fetchGuestCashbackBalanceClient,
+} from "@/lib/cashback/cashback-client";
+import { computeCashbackDiscount } from "@/lib/cashback/cashback-payment-math";
+import { applyCashbackDiscountAndFolioPayments } from "@/lib/cashback/apply-cashback-folio-payment";
+import { CashbackPaymentPanel } from "@/components/cashback/cashback-payment-panel";
+import { paymentMethodEarnsCashback } from "@/lib/cashback/cashback-config";
+import {
+  isGuestBookingCashbackEligible,
+  paymentMethodFromBookingNotes,
+} from "@/lib/cashback/cashback-eligibility";
 import { createClient } from "@/lib/supabase/client";
 import { reconcileRoomStatusesClient } from "@/lib/rooms/reconcile-room-status-client";
 import { useAuth } from "@/lib/auth-context";
@@ -152,6 +164,8 @@ export default function BookingDetailPage({
     id: null,
     balance: 0,
   });
+  const [guestCashbackBalance, setGuestCashbackBalance] = useState(0);
+  const [applyCashback, setApplyCashback] = useState(true);
   const [creditAmount, setCreditAmount] = useState("");
   const [creditPaymentMethod, setCreditPaymentMethod] = useState("");
   const [creditNotes, setCreditNotes] = useState("");
@@ -227,7 +241,7 @@ export default function BookingDetailPage({
         .select(
           `
           *,
-          guests(name, phone, email, address, balance),
+          guests(name, phone, email, address),
           rooms(id, room_number, room_type, price_per_night),
           organizations(name, address, phone, email)
         `,
@@ -303,6 +317,7 @@ export default function BookingDetailPage({
               address?: string;
               phone?: string;
               email?: string;
+              logoUrl?: string | null;
             };
             const hn = String(j.hotelName ?? "").trim();
             setReceiptOrg({
@@ -310,6 +325,7 @@ export default function BookingDetailPage({
               address: String(j.address ?? ""),
               phone: String(j.phone ?? ""),
               email: String(j.email ?? ""),
+              logoUrl: j.logoUrl ?? null,
             });
           }
         } catch {
@@ -562,20 +578,34 @@ export default function BookingDetailPage({
   useEffect(() => {
     if (!paymentCreditModalOpen || !booking?.organization_id) return;
     const guestName = (booking.guests?.name || "").trim();
-    if (!guestName) return;
+    const guestId = booking.guest_id || booking.guests?.id;
     (async () => {
       const supabase = createClient();
-      const row = await fetchGuestCityLedgerAccount(
-        supabase,
-        booking.organization_id,
-        guestName,
-      );
-      setBookingLedgerSnapshot({
-        id: row?.id ?? null,
-        balance: Number(row?.balance) || 0,
-      });
+      if (guestName) {
+        const row = await fetchGuestCityLedgerAccount(
+          supabase,
+          booking.organization_id,
+          guestName,
+        );
+        setBookingLedgerSnapshot({
+          id: row?.id ?? null,
+          balance: Number(row?.balance) || 0,
+        });
+      }
+      if (guestId) {
+        const cb = await fetchGuestCashbackBalanceClient(supabase, guestId);
+        setGuestCashbackBalance(cb.balance);
+      } else {
+        setGuestCashbackBalance(0);
+      }
     })();
-  }, [paymentCreditModalOpen, booking?.organization_id, booking?.guests?.name]);
+  }, [
+    paymentCreditModalOpen,
+    booking?.organization_id,
+    booking?.guests?.name,
+    booking?.guest_id,
+    booking?.guests?.id,
+  ]);
 
   const assertFolioEditable = () => {
     if (!booking) return false;
@@ -676,16 +706,10 @@ export default function BookingDetailPage({
           const chargeAmt = Number(chargeAmount);
             const { data: guestRow } = await supabase
             .from("guests")
-            .select("balance, name")
+            .select("name")
             .eq("id", booking!.guest_id)
             .single();
             if (guestRow) {
-              await supabase
-              .from("guests")
-              .update({
-                balance: ((guestRow.balance as number) || 0) + chargeAmt,
-              })
-              .eq("id", booking!.guest_id);
               if (guestRow.name) {
                 const { data: existingAcct } = await supabase
                 .from("city_ledger_accounts")
@@ -777,10 +801,12 @@ export default function BookingDetailPage({
     }
     if (!canManageFolio || !booking) return;
 
-    const P = Number(chargeAmount);
+    const cashEntered = Number(chargeAmount);
     setAddChargeLoading(true);
     try {
       const supabase = createClient();
+      const guestId = booking.guest_id || booking.guests?.id;
+
       const { data: freshBk2 } = await supabase
         .from("bookings")
         .select("balance, deposit, total_amount")
@@ -818,32 +844,71 @@ export default function BookingDetailPage({
         ),
       );
 
-      if (P > billBefore && !applyOverpaymentAsCredit) {
+      const cashbackOk = isGuestBookingCashbackEligible({
+        guestName: booking.guests?.name,
+        paymentMethod: paymentMethodFromBookingNotes(booking.notes),
+      });
+
+      const breakdown = computeCashbackDiscount({
+        totalDue: billBefore,
+        cashbackBalance: guestCashbackBalance,
+        cashPaying: cashEntered,
+        applyCashback: applyCashback && Boolean(guestId) && cashbackOk,
+      });
+      const totalApplied =
+        breakdown.cashbackDiscount + breakdown.cashToCollect;
+
+      if (
+        cashEntered > breakdown.dueAfterDiscount + 0.001 &&
+        !applyOverpaymentAsCredit
+      ) {
         toast.error(
-          "This amount is more than the current bill balance. Enable “Paying above bill — apply excess as account credit” or reduce the amount.",
+          breakdown.cashbackDiscount > 0
+            ? `After ${formatNaira(breakdown.cashbackDiscount)} cashback discount, collect up to ${formatNaira(breakdown.dueAfterDiscount)}. Enable “Paying above bill” for excess credit, or reduce the amount.`
+            : "This amount is more than the current bill balance. Enable “Paying above bill — apply excess as account credit” or reduce the amount.",
         );
         setAddChargeLoading(false);
         return;
       }
 
-      const paymentEntry: Record<string, unknown> = {
+      if (guestId && cashbackOk) {
+        await applyCashbackDiscountAndFolioPayments(supabase, {
+          guestId,
+          bookingId,
+          organizationId: booking.organization_id || "",
+          cashbackDiscount: breakdown.cashbackDiscount,
+          cashAmount: breakdown.cashToCollect,
+          cashPaymentMethod: paymentMethod,
+          createdBy: userId,
+          sourceType: "folio_payment",
+          sourceId: bookingId,
+          cashDescription: `Payment Received - ${paymentMethod.replace("_", " ")}`,
+        });
+        if (breakdown.cashbackDiscount > 0) {
+          setGuestCashbackBalance((b) =>
+            Math.max(0, b - breakdown.cashbackDiscount),
+          );
+        }
+      } else {
+        const paymentEntry: Record<string, unknown> = {
           booking_id: bookingId,
-        description: `Payment Received - ${paymentMethod.replace("_", " ")}`,
-        amount: -P,
-        charge_type: "payment",
+          description: `Payment Received - ${paymentMethod.replace("_", " ")}`,
+          amount: -breakdown.cashToCollect,
+          charge_type: "payment",
           payment_method: paymentMethod,
-        payment_status: "paid",
-      };
-      if (booking.organization_id) {
-        paymentEntry.organization_id = booking.organization_id;
+          payment_status: "paid",
+        };
+        if (booking.organization_id) {
+          paymentEntry.organization_id = booking.organization_id;
+        }
+        if (userId) {
+          paymentEntry.created_by = userId;
+        }
+        await supabase.from("folio_charges").insert([paymentEntry]);
       }
-      if (userId) {
-        paymentEntry.created_by = userId;
-      }
-      await supabase.from("folio_charges").insert([paymentEntry]);
 
-      const newBalance = Math.max(0, billBefore - P);
-      const newDeposit = Number(freshBk2?.deposit || 0) + P;
+      const newBalance = Math.max(0, billBefore - totalApplied);
+      const newDeposit = Number(freshBk2?.deposit || 0) + totalApplied;
 
         await supabase
         .from("bookings")
@@ -864,29 +929,13 @@ export default function BookingDetailPage({
           .not("charge_type", "eq", "payment");
       }
 
-      const guestId = booking.guest_id || booking.guests?.id;
       const guestName = (booking.guests?.name || "").trim();
-        if (guestId) {
-          const { data: guestRow } = await supabase
-          .from("guests")
-          .select("balance")
-          .eq("id", guestId)
-          .single();
-        if (guestRow && (guestRow.balance || 0) > 0) {
-          const newGuestBalance = Math.max(0, (guestRow.balance || 0) - P);
-            await supabase
-            .from("guests")
-            .update({ balance: newGuestBalance })
-            .eq("id", guestId);
-        }
-      }
-
       if (guestName && booking.organization_id) {
         await applyBookingPaymentToGuestLedger(supabase, {
           organizationId: booking.organization_id,
           guestName,
           bookingBillBefore: billBefore,
-          paymentAmount: P,
+          paymentAmount: totalApplied,
         });
       }
 
@@ -898,10 +947,13 @@ export default function BookingDetailPage({
             transaction_id: `PAY-${bookingId}-${Date.now()}`,
             guest_name: booking.guests?.name || "Guest",
             room: booking.rooms?.room_number || null,
-            amount: P,
+            amount: breakdown.cashToCollect,
             payment_method: paymentMethod,
             status: "paid",
-            description: `Payment received - ${paymentMethod.replace(/_/g, " ")}`,
+            description:
+              breakdown.cashbackDiscount > 0
+                ? `Payment received - ${paymentMethod.replace(/_/g, " ")} (incl. ${formatNaira(breakdown.cashbackDiscount)} cashback discount)`
+                : `Payment received - ${paymentMethod.replace(/_/g, " ")}`,
             received_by: userId,
           },
         ]);
@@ -909,20 +961,42 @@ export default function BookingDetailPage({
         /* non-fatal */
       }
 
+      if (
+        guestId &&
+        paymentMethodEarnsCashback(paymentMethod) &&
+        breakdown.cashToCollect > 0
+      ) {
+        const earned = await earnCashbackClient(supabase, {
+          guestId,
+          amount: breakdown.cashToCollect,
+          paymentMethod,
+          sourceType: "folio_payment",
+          sourceId: bookingId,
+        });
+        if (earned > 0) {
+          setGuestCashbackBalance((b) => b + earned);
+        }
+      }
+
       await fetchBookingDetails(bookingId);
 
-      const excess = Math.max(0, P - billBefore);
+      const excess = Math.max(0, cashEntered - breakdown.dueAfterDiscount);
       const method = paymentMethod;
+      const discountNote =
+        breakdown.cashbackDiscount > 0
+          ? ` (${formatNaira(breakdown.cashbackDiscount)} cashback discount applied)`
+          : "";
       toast.success(
         excess > 0
-          ? `Payment of ${formatNaira(P)} recorded (${formatNaira(excess)} stored as account credit)`
-          : `Payment of ${formatNaira(P)} recorded`,
+          ? `Payment of ${formatNaira(totalApplied)} recorded${discountNote} (${formatNaira(excess)} stored as account credit)`
+          : `Payment of ${formatNaira(totalApplied)} recorded${discountNote}`,
       );
 
       setPaymentCreditModalOpen(false);
       setChargeAmount("");
       setPaymentMethod("");
       setApplyOverpaymentAsCredit(false);
+      setApplyCashback(true);
     } catch (error: any) {
       toast.error(error.message || "Failed to save");
     } finally {
@@ -1043,19 +1117,6 @@ export default function BookingDetailPage({
             .gt("amount", 0)
             .not("charge_type", "eq", "payment");
         }
-      }
-
-      if (guestId) {
-        const rowLedgerSync = await fetchGuestCityLedgerAccount(
-          supabase,
-          booking.organization_id,
-          guestName,
-        );
-        const nbSync = Number(rowLedgerSync?.balance ?? 0);
-        await supabase
-          .from("guests")
-          .update({ balance: Math.max(0, nbSync) })
-          .eq("id", guestId);
       }
 
       const row = await fetchGuestCityLedgerAccount(
@@ -1337,6 +1398,11 @@ export default function BookingDetailPage({
   );
 
   const totalBillBalance = bookingDisplayBillBalance(booking, folioCharges);
+
+  const bookingCashbackEligible = isGuestBookingCashbackEligible({
+    guestName: booking.guests?.name,
+    paymentMethod: paymentMethodFromBookingNotes(booking.notes),
+  });
 
   const paymentStatusLower = String(booking.payment_status || "").toLowerCase();
   const owesOrPending =
@@ -1770,6 +1836,33 @@ export default function BookingDetailPage({
                     </SelectContent>
                   </Select>
                 </div>
+                {(booking?.guest_id || booking?.guests?.id) &&
+                  bookingCashbackEligible &&
+                  Number(chargeAmount) > 0 && (
+                    <CashbackPaymentPanel
+                      guestId={booking.guest_id || booking.guests?.id}
+                      totalAmount={Math.max(
+                        0,
+                        bookingDisplayBillBalance(
+                          {
+                            balance: booking.balance,
+                            deposit: booking.deposit,
+                            total_amount: booking.total_amount,
+                          },
+                          folioCharges.map((c: any) => ({
+                            amount: c.amount,
+                            charge_type: c.type ?? c.charge_type,
+                            payment_status: c.paymentStatus ?? c.payment_status,
+                            payment_method: c.paymentMethod ?? c.payment_method,
+                          })),
+                        ),
+                      )}
+                      cashPaying={Number(chargeAmount) || 0}
+                      paymentMethod={paymentMethod}
+                      applyCashback={applyCashback}
+                      onApplyCashbackChange={setApplyCashback}
+                    />
+                  )}
                 <Button
                   onClick={handleRecordPayment}
                   className="w-full"

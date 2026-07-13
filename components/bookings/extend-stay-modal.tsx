@@ -31,9 +31,7 @@ import { useAuth } from "@/lib/auth-context";
 import { insertFolioCharges } from "@/lib/utils/insert-folio-charges";
 import { guestOrOrganizationNameTaken } from "@/lib/utils/guest-org-name-uniqueness";
 import { isSelectableLedgerName } from "@/lib/utils/ledger-organization";
-import {
-  mergeCounterpartyOrganizationRows,
-} from "@/lib/utils/search-counterparty-organizations";
+import { mergeCounterpartyOrganizationRows } from "@/lib/utils/search-counterparty-organizations";
 import { resolveOrganizationLedgerAccount } from "@/lib/utils/resolve-ledger-account";
 import { canRequestExtendStayDiscount } from "@/lib/utils/booking-checkout-ui";
 import {
@@ -317,15 +315,16 @@ export function ExtendStayModal({
           createdBy: userId,
         });
         if (!attachResult.ok) {
-          toast.warning(`Request sent but attachment failed: ${attachResult.error}`);
+          toast.warning(
+            `Request sent but attachment failed: ${attachResult.error}`,
+          );
         }
       }
       toast.success(
         "Discount request sent — check Night Audit → Extend discounts",
       );
-      const { dispatchNightAuditPendingChanged } = await import(
-        "@/lib/utils/dispatch-night-audit-pending-changed"
-      );
+      const { dispatchNightAuditPendingChanged } =
+        await import("@/lib/utils/dispatch-night-audit-pending-changed");
       dispatchNightAuditPendingChanged();
       onClose();
       resetForm();
@@ -365,7 +364,7 @@ export function ExtendStayModal({
       const supabase = createClient();
       const { data: authData } = await supabase.auth.getUser();
       const currentUserId = authData.user?.id || booking.created_by || null;
-      
+
       // Add charge to folio_charges
       // For immediate payments (cash/pos/transfer): status = 'paid'
       // For deferred payments (city_ledger): status = 'pending'
@@ -431,13 +430,13 @@ export function ExtendStayModal({
       try {
         await supabase.from("transactions").insert([
           {
-          organization_id: booking.organization_id || null,
-          booking_id: booking.id,
-          transaction_id: `EXT-${booking.id}-${Date.now()}`,
+            organization_id: booking.organization_id || null,
+            booking_id: booking.id,
+            transaction_id: `EXT-${booking.id}-${Date.now()}`,
             guest_name: booking.guestName || "Guest",
-          room: booking.room || null,
-          amount: additionalAmount,
-          payment_method: paymentMethod,
+            room: booking.room || null,
+            amount: additionalAmount,
+            payment_method: paymentMethod,
             status: isPaidNow ? "paid" : "pending",
             description: `Extended Stay — ${additionalNights} night${additionalNights !== 1 ? "s" : ""}`,
             received_by: currentUserId,
@@ -449,21 +448,13 @@ export function ExtendStayModal({
 
       // City ledger: update guest balance + city_ledger_accounts balance
       if (paymentMethod === "city_ledger") {
-        // Always bump guests.balance for the booking's guest
         if (booking.guestId) {
           const { data: guestRow } = await supabase
             .from("guests")
-            .select("balance, name")
+            .select("name")
             .eq("id", booking.guestId)
             .single();
           if (guestRow) {
-            await supabase
-              .from("guests")
-              .update({
-                balance: ((guestRow.balance as number) || 0) + additionalAmount,
-              })
-              .eq("id", booking.guestId);
-
             // If no city_ledger_account was selected, create/update one for this guest
             if (!selectedLedger?.id && guestRow.name) {
               const { data: existingAcct } = await supabase
@@ -483,10 +474,10 @@ export function ExtendStayModal({
               } else {
                 await supabase.from("city_ledger_accounts").insert([
                   {
-                  organization_id: booking.organization_id,
-                  account_name: guestRow.name,
+                    organization_id: booking.organization_id,
+                    account_name: guestRow.name,
                     account_type: "individual",
-                  balance: additionalAmount,
+                    balance: additionalAmount,
                   },
                 ]);
               }
@@ -529,7 +520,7 @@ export function ExtendStayModal({
 
       const accountInfo =
         paymentMethod === "city_ledger" && selectedLedger
-        ? ` to ${selectedLedger.name}`
+          ? ` to ${selectedLedger.name}`
           : "";
 
       if (booking.organization_id) {
@@ -542,7 +533,9 @@ export function ExtendStayModal({
           createdBy: currentUserId,
         });
         if (!attachResult.ok) {
-          toast.warning(`Stay extended but attachment failed: ${attachResult.error}`);
+          toast.warning(
+            `Stay extended but attachment failed: ${attachResult.error}`,
+          );
         }
       }
 
@@ -579,7 +572,7 @@ export function ExtendStayModal({
     <Dialog
       open={open}
       onOpenChange={(open) => {
-      if (!open) {
+        if (!open) {
           onClose();
           resetForm();
         }
@@ -628,22 +621,22 @@ export function ExtendStayModal({
           </div>
 
           <div className="space-y-3 sm:space-y-4">
-              <div className="space-y-2">
+            <div className="space-y-2">
               <Label className="text-xs font-medium sm:text-sm">
                 New checkout date *
               </Label>
-                <div className="flex justify-center">
-                  <Calendar
-                    mode="single"
-                    selected={newCheckOutDate}
-                    onSelect={setNewCheckOutDate}
-                    disabled={(date) => date < currentCheckOut}
+              <div className="flex justify-center">
+                <Calendar
+                  mode="single"
+                  selected={newCheckOutDate}
+                  onSelect={setNewCheckOutDate}
+                  disabled={(date) => date < currentCheckOut}
                   className="origin-top scale-[0.92] rounded-md border p-2 sm:scale-100 sm:p-3"
-                  />
-                </div>
+                />
               </div>
+            </div>
 
-              {newCheckOutDate && additionalNights > 0 && (
+            {newCheckOutDate && additionalNights > 0 && (
               <div className="space-y-2 rounded-lg bg-muted p-3 text-xs sm:p-4 sm:text-sm">
                 <div className="flex justify-between gap-2">
                   <span className="text-muted-foreground">New checkout</span>
@@ -666,27 +659,27 @@ export function ExtendStayModal({
 
             {paymentMethod === "city_ledger" && (
               <div className="space-y-3 border-t pt-3">
-              <div className="space-y-2">
+                <div className="space-y-2">
                   <Label className="text-xs font-medium sm:text-sm">
                     Bill to account type *
                   </Label>
-                    <Select value={ledgerType} onValueChange={setLedgerType}>
+                  <Select value={ledgerType} onValueChange={setLedgerType}>
                     <SelectTrigger className="h-9 text-xs sm:h-10 sm:text-sm">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
                       <SelectItem value="individual">
                         Individual (guest)
                       </SelectItem>
-                        <SelectItem value="organization">Organization</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
+                      <SelectItem value="organization">Organization</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
 
                 {ledgerType === "individual" && (
-                    <Card className="bg-muted">
-                      <CardContent className="p-3">
-                        <button
+                  <Card className="bg-muted">
+                    <CardContent className="p-3">
+                      <button
                         type="button"
                         onClick={() =>
                           setSelectedLedger({
@@ -698,12 +691,12 @@ export function ExtendStayModal({
                         className="w-full text-left transition-opacity hover:opacity-80"
                       >
                         <div className="flex items-center justify-between gap-2">
-                            <div>
+                          <div>
                             <div className="text-sm font-medium">
                               {booking.guestName}
                             </div>
                             <div className="text-xs text-muted-foreground sm:text-sm">
-                                Balance: {formatNaira(booking.guestBalance || 0)}
+                              Balance: {formatNaira(booking.guestBalance || 0)}
                             </div>
                           </div>
                           {selectedLedger?.id === booking.guestId ? (
@@ -723,11 +716,11 @@ export function ExtendStayModal({
                               </Badge>
                             )
                           )}
-                          </div>
-                        </button>
-                      </CardContent>
-                    </Card>
-                  )}
+                        </div>
+                      </button>
+                    </CardContent>
+                  </Card>
+                )}
 
                 {ledgerType === "organization" && (
                   <div className="space-y-2">
@@ -745,21 +738,21 @@ export function ExtendStayModal({
                         + New account
                       </Button>
                     </div>
-                      <div className="space-y-2">
-                        <div className="relative">
-                          <Input
+                    <div className="space-y-2">
+                      <div className="relative">
+                        <Input
                           placeholder="Search by name…"
                           value={orgSearchTerm || ""}
-                            onChange={(e) => handleOrgSearch(e.target.value)}
+                          onChange={(e) => handleOrgSearch(e.target.value)}
                           className="h-9 rounded-md px-3 text-sm"
-                          />
-                        </div>
+                        />
+                      </div>
 
-                        {orgSearchTerm && filteredOrganizations.length > 0 && (
+                      {orgSearchTerm && filteredOrganizations.length > 0 && (
                         <div className="max-h-40 overflow-y-auto rounded-md border sm:max-h-48">
-                            {filteredOrganizations.map((org) => (
-                              <button
-                                key={org.id}
+                          {filteredOrganizations.map((org) => (
+                            <button
+                              key={org.id}
                               type="button"
                               onClick={async () => {
                                 try {
@@ -786,24 +779,24 @@ export function ExtendStayModal({
                                 <div className="truncate text-sm font-medium">
                                   {org.name}
                                 </div>
-                                  <div className="text-xs text-muted-foreground">
+                                <div className="text-xs text-muted-foreground">
                                   Balance:{" "}
                                   {formatNaira(org.current_balance || 0)}
                                 </div>
-                                </div>
-                                {selectedLedger?.id === org.id && (
+                              </div>
+                              {selectedLedger?.id === org.id && (
                                 <Check className="h-4 w-4 shrink-0 text-green-600" />
-                                )}
-                              </button>
-                            ))}
-                          </div>
-                        )}
+                              )}
+                            </button>
+                          ))}
+                        </div>
+                      )}
 
-                        {orgSearchTerm && filteredOrganizations.length === 0 && (
+                      {orgSearchTerm && filteredOrganizations.length === 0 && (
                         <div className="rounded-md border p-3 text-center text-xs text-muted-foreground">
-                            No organizations found
-                          </div>
-                        )}
+                          No organizations found
+                        </div>
+                      )}
                       {showNewOrgForm && (
                         <div className="space-y-2 rounded-md border bg-muted/30 p-3">
                           <Input
@@ -840,18 +833,18 @@ export function ExtendStayModal({
                           </div>
                         </div>
                       )}
-                      </div>
                     </div>
-                  )}
+                  </div>
+                )}
 
                 {selectedLedger && ledgerType === "organization" && (
                   <Card className="mt-1 border-primary bg-primary/10">
-                      <CardContent className="p-3">
+                    <CardContent className="p-3">
                       <div className="flex items-center justify-between gap-2">
                         <div className="min-w-0">
                           <div className="truncate text-sm font-medium">
                             {selectedLedger.name}
-                            </div>
+                          </div>
                           <div className="text-xs text-muted-foreground">
                             Balance:{" "}
                             {formatNaira(selectedLedger.current_balance || 0)}
@@ -860,12 +853,12 @@ export function ExtendStayModal({
                         <Badge variant="default" className="shrink-0 text-xs">
                           Selected
                         </Badge>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  )}
-                </div>
-              )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+              </div>
+            )}
           </div>
 
           {newCheckOutDate && additionalNights > 0 && (
@@ -927,7 +920,7 @@ export function ExtendStayModal({
             </Label>
             <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4 sm:gap-2">
               {["cash", "pos", "transfer", "city_ledger"].map((method) => (
-                <Button 
+                <Button
                   key={method}
                   type="button"
                   variant={paymentMethod === method ? "default" : "outline"}

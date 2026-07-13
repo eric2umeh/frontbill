@@ -107,6 +107,7 @@ export function EventPaymentReceiptButton({
           guestName: event.client_name,
           guests: event.client_name ? { name: event.client_name } : null,
           rooms: event.venue ? { room_number: event.venue } : null,
+          balance: Math.max(0, Number(event.balance) || 0),
         }}
         charge={charge}
         currentUserName={userName}

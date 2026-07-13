@@ -1,4 +1,4 @@
-import type { Metadata } from 'next'
+import type { Metadata, Viewport } from 'next'
 import { Geist, Geist_Mono } from 'next/font/google'
 import { Toaster } from 'sonner'
 import { LoginSuccessToast } from '@/components/auth/login-success-toast'
@@ -11,6 +11,27 @@ const _geistMono = Geist_Mono({ subsets: ['latin'] })
 export const metadata: Metadata = {
   title: 'FrontBill - Hotel Management System',
   description: 'Modern hotel management and operations platform',
+  manifest: '/manifest.webmanifest',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'default',
+    title: 'FrontBill',
+  },
+  /** FrontBill product icon only — never the per-hotel logo (see BrandingFavicon; not used for tab). */
+  icons: {
+    icon: [
+      { url: '/frontbill-icon.svg', type: 'image/svg+xml' },
+      { url: '/frontbill-favicon.png', sizes: '128x128', type: 'image/png' },
+    ],
+    apple: '/frontbill-favicon.png',
+  },
+}
+
+export const viewport: Viewport = {
+  themeColor: '#2563eb',
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 1,
 }
 
 export default function RootLayout({

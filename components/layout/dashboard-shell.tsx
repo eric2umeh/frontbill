@@ -13,12 +13,12 @@ import {
   canonicalRoleKey,
 } from '@/lib/permissions'
 import { NightAuditPendingProvider } from '@/components/providers/night-audit-pending-provider'
-import { BrandingFavicon } from '@/components/branding/branding-favicon'
 import { BRAND_LOGO_SESSION_KEY } from '@/lib/branding/constants'
 import { getPostLoginPath } from '@/lib/utils/post-login-path'
 import { SupplyChainProvider } from '@/lib/supply-chain/supply-chain-context'
 import { SupplyPendingAlerts } from '@/components/supply-chain/supply-pending-alerts'
 import { StockShortageDialogHost } from '@/components/shared/stock-shortage-dialog-host'
+import { InstallAppBanner } from '@/components/pwa/install-app-banner'
 
 const ROUTE_PERMISSIONS: Array<{ path: string; permission: Permission }> = [
   { path: '/dashboard', permission: 'dashboard:view' },
@@ -33,6 +33,7 @@ const ROUTE_PERMISSIONS: Array<{ path: string; permission: Permission }> = [
   { path: '/transactions/analytics', permission: 'analytics:view' },
   { path: '/transactions', permission: 'transactions:view' },
   { path: '/payments', permission: 'payments:view' },
+  { path: '/cashback', permission: 'cashback:view' },
   { path: '/reports', permission: 'reports:view' },
   { path: '/expenses', permission: 'expenses:view' },
   { path: '/analytics', permission: 'analytics:view' },
@@ -208,7 +209,6 @@ export function DashboardShell({
         setOrganizationLogoUrl,
       }}
     >
-      <BrandingFavicon href={user.organizationLogoUrl} />
       <SupplyChainProvider>
         <SupplyPendingAlerts />
         <NightAuditPendingProvider>
@@ -221,6 +221,7 @@ export function DashboardShell({
               {allowed && (
                 <Header user={user} onMenuClick={() => setMobileMenuOpen(true)} />
               )}
+              {allowed && <InstallAppBanner />}
               {!allowed && (
                 <div className="flex flex-1 items-center justify-center">
                   <p className="text-sm text-muted-foreground">Checking access…</p>

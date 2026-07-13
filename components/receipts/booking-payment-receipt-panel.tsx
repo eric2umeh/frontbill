@@ -24,6 +24,7 @@ import {
   collectOutletPaidTransactionOrderNumbers,
   shouldHideOutletPaymentDuplicate,
 } from '@/lib/outlets/outlet-financial-integration'
+import { bookingDisplayBillBalance } from '@/lib/utils/booking-bill-balance'
 
 type FolioChargeRow = {
   id: string
@@ -66,6 +67,7 @@ export function BookingPaymentReceiptPanel({
   const [receiptOrg, setReceiptOrg] = useState<PaymentReceiptBranding | null>(null)
   const [receiptCharge, setReceiptCharge] = useState<PaymentReceiptChargeRow | null>(null)
   const [receiptFolioContextLines, setReceiptFolioContextLines] = useState<string[] | null>(null)
+  const [folioBalance, setFolioBalance] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
 
   const load = useCallback(async () => {
@@ -77,6 +79,12 @@ export function BookingPaymentReceiptPanel({
     try {
       const supabase = createClient()
       if (!supabase) return
+
+      const { data: bookingRow } = await supabase
+        .from('bookings')
+        .select('balance, deposit, total_amount')
+        .eq('id', bookingId)
+        .maybeSingle()
 
       if (userId && userId !== 'placeholder') {
         try {
@@ -91,6 +99,7 @@ export function BookingPaymentReceiptPanel({
               address: String(j.address ?? ''),
               phone: String(j.phone ?? ''),
               email: String(j.email ?? ''),
+              logoUrl: j.logoUrl ?? null,
             })
           }
         } catch {
@@ -125,6 +134,19 @@ export function BookingPaymentReceiptPanel({
             paymentMethod: charge.payment_method ? String(charge.payment_method) : null,
           })),
         )
+
+        const computed = bookingDisplayBillBalance(
+          bookingRow,
+          (chargesData || []).map((c: Record<string, unknown>) => ({
+            amount: c.amount,
+            charge_type: c.charge_type,
+            payment_status: c.payment_status,
+            payment_method: c.payment_method,
+          })),
+        )
+        setFolioBalance(computed)
+      } else {
+        setFolioBalance(Math.max(0, Number(bookingRow?.balance ?? 0)))
       }
 
       const [{ data: txRows }, { data: payRows }] = await Promise.all([
@@ -206,6 +228,7 @@ export function BookingPaymentReceiptPanel({
     guestName,
     guests: guestName ? { name: guestName } : null,
     rooms: roomNumber ? { room_number: roomNumber } : null,
+    balance: folioBalance,
   }
 
   const hasLedger = paymentLedgerRows.length > 0

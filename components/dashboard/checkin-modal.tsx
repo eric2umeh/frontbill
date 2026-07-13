@@ -32,6 +32,7 @@ import {
 } from '@/lib/utils/counterparty-organization'
 import { insertFolioCharges } from '@/lib/utils/insert-folio-charges'
 import { StayDateRangeFields } from '@/components/shared/stay-date-range-fields'
+import { minSelectableCheckInYmdHotel, isLateNightCheckInGraceWindow, lateCheckInGraceWindowLabel } from '@/lib/hotel-date'
 import { useAuth } from '@/lib/auth-context'
 import { BOOKING_MODAL_ROOMS_LIMIT, normalizeRoomsForBookingPickers } from '@/lib/utils/room-bookability'
 
@@ -196,6 +197,15 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
       setDriverVerifying(false)
     }
   }
+
+  const minCheckInYmd = minSelectableCheckInYmdHotel()
+  const minCheckInDate = (() => {
+    const [y, m, d] = minCheckInYmd.split('-').map(Number)
+    const dt = new Date(y, m - 1, d)
+    dt.setHours(0, 0, 0, 0)
+    return dt
+  })()
+  const inLateCheckInGrace = isLateNightCheckInGraceWindow()
 
   const canSubmit = () => !!(fullName.trim() && selectedRoom && checkInDate && checkOutDate && nights > 0)
 
@@ -481,8 +491,15 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
               nights={nights}
               onDatesChange={handleStayDatesChange}
               showNights={false}
-              disableCalendar={(d) => d < new Date(new Date().setHours(0, 0, 0, 0))}
+              minCheckIn={minCheckInDate}
+              disableCalendar={(d) => d < minCheckInDate}
             />
+            {inLateCheckInGrace && (
+              <p className="text-xs text-muted-foreground rounded-md border border-dashed px-3 py-2">
+                Late arrival (until {lateCheckInGraceWindowLabel()} hotel time): you may set check-in to yesterday for
+                guests who arrived just after midnight.
+              </p>
+            )}
             <div className="space-y-2">
               <Label>Room Number *</Label>
               <Select

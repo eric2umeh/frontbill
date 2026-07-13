@@ -44,12 +44,25 @@ import { insertFolioCharges } from '@/lib/utils/insert-folio-charges'
 import { applyPaymentToGuestCityLedger } from '@/lib/utils/guest-city-ledger'
 import { buildBackdateDedupeKey } from '@/lib/backdate/dedupe-key'
 import type { SerializedBookingPayload } from '@/lib/backdate/booking-payload'
-import { isStayCheckInConsideredBackdated } from '@/lib/hotel-date'
+import { isStayCheckInConsideredBackdated, minSelectableCheckInYmdHotel, isLateNightCheckInGraceWindow, lateCheckInGraceWindowLabel } from '@/lib/hotel-date'
+import { useNightAuditClosedDates } from '@/hooks/use-night-audit-closed-dates'
+import { todayYmdHotel } from '@/lib/utils/booking-in-house-dates'
 import {
   FolioRemarksAttachmentsField,
   type FolioRemarksAttachmentsValue,
 } from '@/components/folio/folio-remarks-attachments-field'
 import { persistFolioAttachments } from '@/lib/folio/persist-folio-attachments'
+import { SelectedRoomsStickyBar } from '@/components/shared/selected-rooms-sticky-bar'
+import { CashbackPaymentPanel } from '@/components/cashback/cashback-payment-panel'
+import { computeCashbackDiscount } from '@/lib/cashback/cashback-payment-math'
+import { applyCashbackDiscountAndFolioPayments } from '@/lib/cashback/apply-cashback-folio-payment'
+import {
+  earnCashbackClient,
+  fetchGuestCashbackBalanceClient,
+} from '@/lib/cashback/cashback-client'
+import { paymentMethodEarnsCashback } from '@/lib/cashback/cashback-config'
+import { isGuestBookingCashbackEligible } from '@/lib/cashback/cashback-eligibility'
+import { roomStatusForBookingStatus } from '@/lib/rooms/room-occupancy'
 
 interface NewBookingModalProps {
   open: boolean
@@ -120,6 +133,24 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
   const [paymentStatus, setPaymentStatus] = useState<'paid' | 'partial'>('paid')
   const [amountPaid, setAmountPaid] = useState<number | ''>('')
   const [payAboveRoomTotal, setPayAboveRoomTotal] = useState(false)
+  const [guestCashbackBalance, setGuestCashbackBalance] = useState(0)
+  const [applyCashback, setApplyCashback] = useState(true)
+
+  useEffect(() => {
+    if (!guestId || !open) {
+      setGuestCashbackBalance(0)
+      return
+    }
+    let cancelled = false
+    ;(async () => {
+      const supabase = createClient()
+      const b = await fetchGuestCashbackBalanceClient(supabase, guestId)
+      if (!cancelled) setGuestCashbackBalance(b.balance)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [guestId, open])
 
   // City Ledger — split into individual and organization tabs
   const [ledgerTab, setLedgerTab] = useState<'individual' | 'organization'>('individual')
@@ -548,6 +579,31 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
     }
   }
 
+  const bookingTotal = (customPrice || pricePerNight) * nights
+  const isCityLedgerMethod = paymentMethod === 'city_ledger'
+  const cashbackEligible = isGuestBookingCashbackEligible({
+    paymentMethod,
+    ledgerAccountType: isCityLedgerMethod ? ledgerTab : null,
+  })
+  const rawPaidAmount = Number(amountPaid) || 0
+  let paidCalc = 0
+  if (!isCityLedgerMethod) {
+    if (paymentStatus === 'paid') {
+      paidCalc = payAboveRoomTotal ? Math.max(bookingTotal, rawPaidAmount || bookingTotal) : bookingTotal
+    } else {
+      paidCalc = payAboveRoomTotal ? Math.max(0, rawPaidAmount) : Math.min(rawPaidAmount, bookingTotal)
+    }
+  }
+  const bookingCashback = computeCashbackDiscount({
+    totalDue: bookingTotal,
+    cashbackBalance: guestCashbackBalance,
+    cashPaying: paidCalc,
+    applyCashback: applyCashback && Boolean(guestId) && cashbackEligible,
+  })
+  const displayPaidAmount = bookingCashback.cashbackDiscount + bookingCashback.cashToCollect
+  const displayBalanceAmount = bookingCashback.balanceRemaining
+  const cashToCollect = bookingCashback.cashToCollect
+
   const canSubmitForm = () => {
     if (!(guestId || fullName.trim())) return false
     if (!(checkInDate && checkOutDate && nights > 0)) return false
@@ -557,7 +613,20 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
   }
 
   const canApproveBackdates = hasPermission(role, 'backdate:approve')
-  const isBackdated = checkInDate ? isStayCheckInConsideredBackdated(toLocalDateStr(checkInDate)) : false
+  const { closedDates: nightAuditClosedDates } = useNightAuditClosedDates(userId, open)
+  const isBackdated = checkInDate
+    ? isStayCheckInConsideredBackdated(toLocalDateStr(checkInDate), new Date(), undefined, {
+        auditedDates: nightAuditClosedDates,
+      })
+    : false
+  const minCheckInYmd = minSelectableCheckInYmdHotel()
+  const minCheckInDate = (() => {
+    const [y, m, d] = minCheckInYmd.split('-').map(Number)
+    const dt = new Date(y, m - 1, d)
+    dt.setHours(0, 0, 0, 0)
+    return dt
+  })()
+  const inLateCheckInGrace = isLateNightCheckInGraceWindow()
 
   const hasApprovedBackdateRequest = async () => {
     if (!checkInDate) return false
@@ -725,21 +794,14 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
       const effectiveRate = customPrice > 0 ? customPrice : pricePerNight
       const total = effectiveRate * nights
       const isCityLedger = paymentMethod === 'city_ledger'
-      const rawPaid = Number(amountPaid) || 0
-      let paidAmount = 0
-      if (!isCityLedger) {
-        if (paymentStatus === 'paid') {
-          paidAmount = payAboveRoomTotal ? Math.max(total, rawPaid || total) : total
-        } else {
-          paidAmount = payAboveRoomTotal ? Math.max(0, rawPaid) : Math.min(rawPaid, total)
-        }
-      }
-      const balanceAmount = Math.max(0, total - paidAmount)
+      const paidAmount = displayPaidAmount
+      const balanceAmount = displayBalanceAmount
       if (!isCityLedger && paymentStatus === 'partial' && paidAmount <= 0) {
         toast.error('Please enter the amount paid')
         return
       }
       const folioId = `FOL-${Date.now().toString(36).toUpperCase()}`
+      const checkInYmd = toLocalDateStr(checkInDate)
 
       const { data: booking, error: be } = await supabase
         .from('bookings')
@@ -757,7 +819,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
           balance: balanceAmount,
           payment_status: isCityLedger ? 'pending' : balanceAmount <= 0 ? 'paid' : 'partial',
           // Future check-in dates are reservations, today/past are confirmed bookings
-          status: toLocalDateStr(checkInDate) > new Date().toISOString().split('T')[0] ? 'reserved' : 'confirmed',
+          status: checkInYmd > todayYmdHotel() ? 'reserved' : 'confirmed',
           created_by: user?.id,
           // Store payment method in notes (no payment_method column on bookings table)
           notes: paymentMethod === 'city_ledger'
@@ -780,20 +842,8 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
           .update({ balance: (acc?.balance || 0) + total })
           .eq('id', ledgerAccount)
 
-        // Also bump the guest or org profile's outstanding balance
         const acctType = acc?.account_type || (ledgerTab === 'individual' ? 'individual' : 'organization')
-        if (acctType === 'individual' || acctType === 'guest') {
-          // Bump guests.balance so guest profile shows outstanding debt
-          if (finalGuestId) {
-            const { data: guestRow } = await supabase
-              .from('guests').select('balance').eq('id', finalGuestId).single()
-            await supabase
-              .from('guests')
-              .update({ balance: ((guestRow?.balance as number) || 0) + total })
-              .eq('id', finalGuestId)
-          }
-        } else {
-          // Org account — bump organizations.current_balance
+        if (acctType !== 'individual' && acctType !== 'guest') {
           const { data: orgRow } = await supabase
             .from('organizations').select('current_balance').eq('id', ledgerAccount).single()
           if (orgRow) {
@@ -805,12 +855,10 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
         }
       }
 
-      const roomStatus =
-        booking.status === 'checked_in' ? 'occupied' : 'reserved'
       await supabase
         .from('rooms')
         .update({
-          status: roomStatus,
+          status: roomStatusForBookingStatus(booking.status, checkInYmd),
           updated_by: user?.id,
           updated_at: new Date().toISOString(),
         })
@@ -836,7 +884,34 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
       }])
       if (folioInsertError) throw folioInsertError
 
-      if (paidAmount > 0 && balanceAmount > 0) {
+      if (paidAmount > 0 && finalGuestId && cashbackEligible) {
+        await applyCashbackDiscountAndFolioPayments(supabase, {
+          guestId: finalGuestId,
+          bookingId: booking.id,
+          organizationId,
+          cashbackDiscount: bookingCashback.cashbackDiscount,
+          cashAmount: bookingCashback.cashToCollect,
+          cashPaymentMethod: paymentMethod,
+          createdBy: user?.id,
+          sourceType: 'booking_payment',
+          sourceId: booking.id,
+          cashDescription: `Initial payment - ${paymentMethod}`,
+        })
+
+        if (
+          paymentMethodEarnsCashback(paymentMethod) &&
+          bookingCashback.cashToCollect > 0
+        ) {
+          await earnCashbackClient(supabase, {
+            guestId: finalGuestId,
+            amount: bookingCashback.cashToCollect,
+            paymentMethod,
+            sourceType: 'booking_payment',
+            sourceId: booking.id,
+            description: `Booking payment ${folioId}`,
+          })
+        }
+      } else if (paidAmount > 0) {
         const { error: payFolioErr } = await insertFolioCharges(supabase, [{
           booking_id: booking.id,
           organization_id: organizationId,
@@ -857,10 +932,12 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
         transaction_id: `TXN-${Date.now().toString(36).toUpperCase()}`,
         guest_name: formattedGuestName,
         room: selectedRoom.room_number,
-        amount: paidAmount || total,
+        amount: cashToCollect > 0 ? cashToCollect : paidAmount || total,
         payment_method: paymentMethod,
         status: balanceAmount <= 0 ? 'completed' : 'pending',
-        description: `Booking created - Folio ${folioId}`,
+        description: bookingCashback.cashbackDiscount > 0
+          ? `Booking created - Folio ${folioId} (incl. ${formatNaira(bookingCashback.cashbackDiscount)} cashback discount)`
+          : `Booking created - Folio ${folioId}`,
         received_by: user?.id || null,
       }])
 
@@ -869,10 +946,12 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
           organization_id: organizationId,
           booking_id: booking.id,
           guest_id: finalGuestId,
-          amount: paidAmount,
+          amount: cashToCollect > 0 ? cashToCollect : paidAmount,
           payment_method: paymentMethod,
           payment_date: new Date().toISOString(),
-          notes: `Booking payment — Folio ${folioId}`,
+          notes: bookingCashback.cashbackDiscount > 0
+            ? `Booking payment — Folio ${folioId} (incl. ${formatNaira(bookingCashback.cashbackDiscount)} cashback discount)`
+            : `Booking payment — Folio ${folioId}`,
         }])
       }
 
@@ -940,6 +1019,10 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
             <DialogDescription>Fill in guest details, dates, room and payment</DialogDescription>
           </DialogScrollableHeader>
 
+          <SelectedRoomsStickyBar
+            roomNumbers={selectedRoom ? [selectedRoom.room_number] : []}
+          />
+
           <DialogScrollableBody className="space-y-5">
 
             {/* Guest Information */}
@@ -1006,8 +1089,15 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
               onDatesChange={handleStayDatesChange}
               onNightsChange={handleNightsChange}
               showNights
+              minCheckIn={minCheckInDate}
               disableCalendar={(d) => !!(checkInDate && !checkOutDate && d <= checkInDate)}
             />
+            {inLateCheckInGrace && !isBackdated && checkInDate && (
+              <p className="text-xs text-muted-foreground rounded-md border border-dashed px-3 py-2">
+                Late arrival window (until {lateCheckInGraceWindowLabel()} hotel time): you may set check-in to
+                yesterday without Night Audit approval. After night audit closes that date, manager approval is required.
+              </p>
+            )}
             {isBackdated && !canApproveBackdates && (
               <div className="space-y-2 rounded-md border border-amber-200 bg-amber-50 p-3">
                 <Label>Reason for Backdate Request *</Label>
@@ -1016,7 +1106,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
                   onChange={(e) => setBackdateReason(e.target.value)}
                   placeholder="Explain why this booking must be backdated (for Night Audit approval)"
                 />
-                <p className="text-xs text-amber-700">A Superadmin or Administrator can approve or directly create an approved backdated booking.</p>
+                <p className="text-xs text-amber-700">A Superadmin, Administrator, or Manager can approve or directly create an approved backdated booking.</p>
               </div>
             )}
 
@@ -1074,11 +1164,21 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
                     </div>
                   </div>
                   <div className="bg-blue-50 border border-blue-200 p-3 rounded-lg">
-                    <p className="text-sm font-medium text-blue-900">Total: {formatNaira((customPrice || pricePerNight) * nights)}</p>
+                    <p className="text-sm font-medium text-blue-900">Total: {formatNaira(bookingTotal)}</p>
                     <p className="text-xs text-blue-700 mt-1">
                       {nights} night{nights !== 1 ? 's' : ''} × {formatNaira(customPrice || pricePerNight)}{customPrice ? ' (custom rate)' : ''}
                     </p>
                   </div>
+                  {guestId && cashbackEligible && (
+                    <CashbackPaymentPanel
+                      guestId={guestId}
+                      totalAmount={bookingTotal}
+                      cashPaying={paidCalc}
+                      paymentMethod={paymentMethod}
+                      applyCashback={applyCashback}
+                      onApplyCashbackChange={setApplyCashback}
+                    />
+                  )}
                 </>
               )}
             </div>
@@ -1105,12 +1205,12 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
                       min="0"
                       max={
                         paymentStatus === 'partial' && !payAboveRoomTotal
-                          ? (customPrice || pricePerNight) * nights
+                          ? bookingTotal
                           : undefined
                       }
                       value={
                         paymentStatus === 'paid' && !payAboveRoomTotal
-                          ? ((customPrice || pricePerNight) * nights) || ''
+                          ? bookingTotal || ''
                           : amountPaid
                       }
                       onChange={(e) => setAmountPaid(e.target.value === '' ? '' : Number(e.target.value))}
