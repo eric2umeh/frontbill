@@ -21,9 +21,11 @@ export const metadata: Metadata = {
   icons: {
     icon: [
       { url: '/frontbill-icon.svg', type: 'image/svg+xml' },
-      { url: '/frontbill-favicon.png', sizes: '128x128', type: 'image/png' },
+      { url: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' },
     ],
-    apple: '/frontbill-favicon.png',
+    apple: [
+      { url: '/icons/icon-180.png', sizes: '180x180', type: 'image/png' },
+    ],
   },
 }
 
