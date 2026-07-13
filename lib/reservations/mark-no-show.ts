@@ -70,7 +70,6 @@ export async function markBookingNoShow(
       no_show_at: now,
       no_show_fee_amount: feeAmount,
       folio_status: 'active',
-      updated_by: input.userId || null,
       updated_at: now,
     })
     .eq('id', input.bookingId)
