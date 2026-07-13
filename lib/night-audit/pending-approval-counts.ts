@@ -19,7 +19,7 @@ export const EMPTY_NIGHT_AUDIT_PENDING_COUNTS: NightAuditPendingCounts = {
 
 export function isBackdateDeciderRole(role: string | null | undefined): boolean {
   const k = canonicalRoleKey(role)
-  return k === 'admin' || k === 'superadmin'
+  return k === 'admin' || k === 'superadmin' || k === 'manager'
 }
 
 async function countPending(
