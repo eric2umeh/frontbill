@@ -62,28 +62,41 @@ export function calendarDateMinusOneDay(ymd: string): string {
 
 /**
  * End hour (exclusive) for the "still yesterday" grace window after midnight.
- * e.g. 2 → 00:00–01:59 hotel local can treat yesterday's check-in as non-backdated.
+ * e.g. 3 → 00:00–02:59 hotel local can treat yesterday's check-in as non-backdated.
  */
 export function backdateGraceEndHourExclusive(): number {
   const raw =
     (typeof process !== 'undefined' && (process.env.NEXT_PUBLIC_BACKDATE_GRACE_END_HOUR || process.env.BACKDATE_GRACE_END_HOUR)) ||
-    '2'
+    '3'
   const n = parseInt(String(raw), 10)
-  if (Number.isNaN(n) || n < 0 || n > 23) return 2
+  if (Number.isNaN(n) || n < 0 || n > 23) return 3
   return n
+}
+
+export type StayBackdateOptions = {
+  /** YYYY-MM-DD dates where night audit has already been run. */
+  auditedDates?: ReadonlySet<string> | readonly string[]
+}
+
+function auditedDateSet(opts?: StayBackdateOptions): Set<string> {
+  if (!opts?.auditedDates) return new Set()
+  return opts.auditedDates instanceof Set
+    ? opts.auditedDates
+    : new Set(opts.auditedDates)
 }
 
 /**
  * Whether a check-in calendar date (YYYY-MM-DD from the date picker, typically staff local)
  * counts as "backdated" for approval / Night Audit rules.
  *
- * When within the grace window on the hotel clock, **yesterday** (relative to hotel date) is
- * treated as a normal same-night booking, not a backdate.
+ * During the post-midnight grace window, **yesterday** (hotel calendar) is a normal
+ * late check-in — unless night audit has already closed that date.
  */
 export function isStayCheckInConsideredBackdated(
   checkInYmd: string,
   now: Date = new Date(),
   timeZone: string = resolveHotelTimeZone(),
+  options?: StayBackdateOptions,
 ): boolean {
   const tz = resolveHotelTimeZone(timeZone)
   const todayHotel = formatYMDInTimeZone(now, tz)
@@ -92,9 +105,32 @@ export function isStayCheckInConsideredBackdated(
   const graceEnd = backdateGraceEndHourExclusive()
   const hour = getHourInTimeZone(now, tz)
   const yesterdayHotel = calendarDateMinusOneDay(todayHotel)
-  if (hour < graceEnd && checkInYmd === yesterdayHotel) return false
+  if (hour < graceEnd && checkInYmd === yesterdayHotel) {
+    const audited = auditedDateSet(options)
+    if (audited.has(checkInYmd)) return true
+    return false
+  }
 
   return true
+}
+
+/** True when staff are in the post-midnight grace window (late arrival / previous-day check-in). */
+export function isLateNightCheckInGraceWindow(
+  now: Date = new Date(),
+  timeZone: string = resolveHotelTimeZone(),
+): boolean {
+  const tz = resolveHotelTimeZone(timeZone)
+  return getHourInTimeZone(now, tz) < backdateGraceEndHourExclusive()
+}
+
+/** Human-readable grace window for UI hints. */
+export function lateCheckInGraceWindowLabel(): string {
+  const end = backdateGraceEndHourExclusive()
+  if (end <= 1) return '12:00 AM'
+  if (end === 2) return '1:59 AM'
+  const h = end - 1
+  const suffix = h === 0 ? '12' : String(h)
+  return `${suffix}:59 AM`
 }
 
 /**
