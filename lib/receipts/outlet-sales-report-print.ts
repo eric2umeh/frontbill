@@ -1,6 +1,6 @@
 import { escapeHtml } from '@/lib/utils/html-escape'
 import { formatNaira } from '@/lib/utils/currency'
-import { receiptLogoBlock } from '@/lib/receipts/receipt-logo'
+import { receiptHotelHeaderRow } from '@/lib/receipts/receipt-logo'
 import type { OutletSalesReportBundle, OutletSalesReportRow } from '@/lib/outlets/outlet-sales-report'
 import { outletReportThermalStyles } from '@/lib/receipts/outlet-report-thermal-styles'
 import { printHtmlDocument } from '@/lib/receipts/receipt-pdf-print'
@@ -55,8 +55,7 @@ export function buildOutletSalesReportHtml(input: {
   return `<!DOCTYPE html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width"/><title>${escapeHtml(departmentLabel)} sales</title>
     <style>${outletReportThermalStyles()}</style></head><body>
     <div class="wrap">
-      ${receiptLogoBlock(logoUrl, hotelName, { maxHeightPx: 48, maxWidthPx: 160 })}
-      <p class="hotel">${escapeHtml(hotelName)}</p>
+      ${receiptHotelHeaderRow(logoUrl, hotelName, { maxHeightPx: 32, maxWidthPx: 90, hotelFontSizePx: 14 })}
       <p class="title">Full Sales Report</p>
       <div class="sub">
         <div><span>Outlet:</span><span>${escapeHtml(departmentLabel)}</span></div>
