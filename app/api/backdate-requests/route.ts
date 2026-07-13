@@ -1,20 +1,15 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { buildBackdateDedupeKey } from '@/lib/backdate/dedupe-key'
 import { createBookingFromPayload, type SerializedBookingPayload } from '@/lib/backdate/booking-payload'
-import { canonicalRoleKey } from '@/lib/permissions'
 import { fetchOrganizationHotelTimeZone } from '@/lib/hotel-date-server'
 import { isCalendarDateBeforeHotelToday } from '@/lib/hotel-date'
 import { notifyApproversNewBackdateRequest } from '@/lib/email/backdate-request-notify'
+import { isBackdateDeciderRole } from '@/lib/night-audit/pending-approval-counts'
 import {
   buildBackdateRequestSummary,
   collectRoomIdsFromRequests,
 } from '@/lib/backdate/request-summary'
 import { NextResponse } from 'next/server'
-
-function isBackdateDeciderRole(role: string | null | undefined): boolean {
-  const k = canonicalRoleKey(role)
-  return k === 'admin' || k === 'superadmin'
-}
 
 const DECISION_STATUSES = ['approved', 'rejected']
 
