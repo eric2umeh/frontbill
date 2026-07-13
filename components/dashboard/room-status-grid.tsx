@@ -8,6 +8,13 @@ import { Bed, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/lib/auth-context'
+import { reconcileRoomStatusesClient } from '@/lib/rooms/reconcile-room-status-client'
+import {
+  computeEffectiveRoomStatus,
+  OCCUPYING_BOOKING_STATUSES,
+  pickOccupyingBooking,
+  type OccupyingBookingRow,
+} from '@/lib/rooms/room-occupancy'
 
 interface Room {
   id: string
@@ -54,14 +61,37 @@ export function RoomStatusGrid() {
           return
         }
 
-        const { data, error } = await supabase
-          .from('rooms')
-          .select('id, room_number, room_type, status, organization_id')
-          .eq('organization_id', organizationId)
-          .order('room_number', { ascending: true })
+        await reconcileRoomStatusesClient()
+
+        const [{ data, error }, { data: bookingRows }] = await Promise.all([
+          supabase
+            .from('rooms')
+            .select('id, room_number, room_type, status, organization_id')
+            .eq('organization_id', organizationId)
+            .order('room_number', { ascending: true }),
+          supabase
+            .from('bookings')
+            .select('id, room_id, status, check_in, check_out, folio_status')
+            .eq('organization_id', organizationId)
+            .in('status', [...OCCUPYING_BOOKING_STATUSES]),
+        ])
 
         if (error) throw error
-        const sortedRooms = (data || []).sort((a: any, b: any) => {
+
+        const byRoom = new Map<string, OccupyingBookingRow[]>()
+        for (const b of bookingRows ?? []) {
+          if (!b.room_id) continue
+          if (!byRoom.has(b.room_id)) byRoom.set(b.room_id, [])
+          byRoom.get(b.room_id)!.push(b as OccupyingBookingRow)
+        }
+
+        const sortedRooms = (data || []).map((room: any) => {
+          const occupying = pickOccupyingBooking(byRoom.get(room.id) ?? [])
+          return {
+            ...room,
+            status: computeEffectiveRoomStatus(room.status, occupying),
+          }
+        }).sort((a: any, b: any) => {
           const priorityDiff = (statusPriority[a.status] || 99) - (statusPriority[b.status] || 99)
           if (priorityDiff !== 0) return priorityDiff
           return String(a.room_number).localeCompare(String(b.room_number), undefined, { numeric: true })
