@@ -9,6 +9,10 @@ import {
   recordCashbackRedeem,
 } from '@/lib/cashback/cashback-service'
 import { groupEarnTransactionsByRate } from '@/lib/cashback/cashback-earn-breakdown'
+import {
+  isSupportedCashbackEarnSourceType,
+  remainingCashbackEarnPaymentBase,
+} from '@/lib/cashback/earn-source-verification'
 
 type RouteCtx = { params: Promise<{ id: string }> }
 
@@ -42,6 +46,57 @@ async function resolveCaller(request: Request) {
     .single()
   if (!profile?.organization_id) return null
   return { userId: authed, role: profile.role ?? '', organizationId: profile.organization_id }
+}
+
+async function resolveVerifiedEarnablePaymentAmount(
+  admin: ReturnType<typeof createAdminClient>,
+  input: {
+    organizationId: string
+    guestId: string
+    sourceType: string
+    sourceId: string
+    paymentMethod: string
+  },
+) {
+  const sourceType = input.sourceType.trim()
+  const sourceId = input.sourceId.trim()
+  if (!isSupportedCashbackEarnSourceType(sourceType) || !sourceId) {
+    throw new Error('Verified payment source required')
+  }
+
+  const { data: booking, error: bookingError } = await admin
+    .from('bookings')
+    .select('id')
+    .eq('id', sourceId)
+    .eq('organization_id', input.organizationId)
+    .eq('guest_id', input.guestId)
+    .maybeSingle()
+
+  if (bookingError) throw new Error(bookingError.message)
+  if (!booking) throw new Error('Verified payment source not found')
+
+  const { data: folioRows, error: folioError } = await admin
+    .from('folio_charges')
+    .select('amount, charge_type, payment_method')
+    .eq('booking_id', sourceId)
+
+  if (folioError) throw new Error(folioError.message)
+
+  const { data: earnedRows, error: earnedError } = await admin
+    .from('cashback_transactions')
+    .select('amount, earn_rate_percent')
+    .eq('organization_id', input.organizationId)
+    .eq('guest_id', input.guestId)
+    .eq('txn_type', 'earn')
+    .eq('source_id', sourceId)
+
+  if (earnedError) throw new Error(earnedError.message)
+
+  return remainingCashbackEarnPaymentBase({
+    folioRows: folioRows ?? [],
+    cashbackTransactions: earnedRows ?? [],
+    paymentMethod: input.paymentMethod,
+  })
 }
 
 /** GET — guest cashback balance + recent transactions. */
@@ -113,14 +168,29 @@ export async function POST(request: Request, ctx: RouteCtx) {
       if (!Number.isFinite(amount) || amount <= 0 || !paymentMethod) {
         return NextResponse.json({ error: 'amount and payment_method required' }, { status: 400 })
       }
+      const sourceType = String(body?.source_type || '').trim()
+      const sourceId = String(body?.source_id || '').trim()
+      const remainingVerifiedPaymentAmount = await resolveVerifiedEarnablePaymentAmount(admin, {
+        organizationId: caller.organizationId,
+        guestId,
+        sourceType,
+        sourceId,
+        paymentMethod,
+      })
+      if (amount > remainingVerifiedPaymentAmount + 0.01) {
+        return NextResponse.json(
+          { error: 'Cashback earn amount exceeds verified payment amount' },
+          { status: 400 },
+        )
+      }
       const result = await recordCashbackEarn(admin, {
         organizationId: caller.organizationId,
         guestId,
         paymentAmount: amount,
         paymentMethod,
         userId: caller.userId,
-        sourceType: body?.source_type,
-        sourceId: body?.source_id,
+        sourceType,
+        sourceId,
         description: body?.description,
       })
       return NextResponse.json({ ok: true, ...result })
