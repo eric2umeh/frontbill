@@ -449,21 +449,13 @@ export function ExtendStayModal({
 
       // City ledger: update guest balance + city_ledger_accounts balance
       if (paymentMethod === "city_ledger") {
-        // Always bump guests.balance for the booking's guest
         if (booking.guestId) {
           const { data: guestRow } = await supabase
             .from("guests")
-            .select("balance, name")
+            .select("name")
             .eq("id", booking.guestId)
             .single();
           if (guestRow) {
-            await supabase
-              .from("guests")
-              .update({
-                balance: ((guestRow.balance as number) || 0) + additionalAmount,
-              })
-              .eq("id", booking.guestId);
-
             // If no city_ledger_account was selected, create/update one for this guest
             if (!selectedLedger?.id && guestRow.name) {
               const { data: existingAcct } = await supabase
