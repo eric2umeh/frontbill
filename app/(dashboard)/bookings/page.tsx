@@ -24,7 +24,11 @@ import { fetchUserDisplayNameMap } from '@/lib/utils/fetch-user-display-names'
 import { getBulkGroupId } from '@/lib/utils/bulk-booking'
 import { manualCheckoutEligible, resolvedCheckoutDateForClosing, hideChargeExtendInBookingsTable, DEFAULT_ORG_CHECKOUT_TIME, isPastCheckoutCutoff } from '@/lib/utils/booking-checkout-ui'
 import { fetchOrgCheckoutTime } from '@/lib/utils/org-checkout-policy'
-import { folioPositiveOutstandingSum, shouldReconcileBookingPaymentPaid } from '@/lib/utils/booking-bill-balance'
+import {
+  folioGuestCreditAmount,
+  folioPositiveOutstandingSum,
+  shouldReconcileBookingPaymentPaid,
+} from '@/lib/utils/booking-bill-balance'
 import { bookingYmdHotel, isInHouseOnCalendarDay, todayYmdHotel } from '@/lib/utils/booking-in-house-dates'
 import { resolveHotelTimeZone } from '@/lib/hotel-date'
 import { cancelBookingReservation } from '@/lib/reservations/cancel-reservation'
@@ -106,6 +110,7 @@ interface Booking {
   rate_per_night: number
   total_amount: number
   balance: number
+  folio_credit?: number
   deposit: number
   created_by?: string
   created_by_name?: string
@@ -400,6 +405,7 @@ export default function BookingsPage() {
         bookingsWithUsers.forEach((b: any) => {
           const ch = chargesByBooking[b.id] ?? []
           b.balance = folioPositiveOutstandingSum(ch)
+          b.folio_credit = folioGuestCreditAmount(ch)
         })
 
         const healIds = bookingsWithUsers
@@ -542,7 +548,9 @@ export default function BookingsPage() {
         if (bookingIds.length > 0) {
           const chargesByBooking = await fetchFolioChargesByBookingIds(supabase, bookingIds)
           bookingsWithUsers.forEach((b: any) => {
-            b.balance = folioPositiveOutstandingSum(chargesByBooking[b.id] ?? [])
+            const ch = chargesByBooking[b.id] ?? []
+            b.balance = folioPositiveOutstandingSum(ch)
+            b.folio_credit = folioGuestCreditAmount(ch)
           })
         }
 
@@ -627,9 +635,8 @@ export default function BookingsPage() {
   }
 
   const paymentCellForBooking = (booking: Booking) => {
-    const bal = Number(booking.balance ?? 0)
-    const owed = Math.max(0, bal)
-    const creditAmt = bal < 0 ? -bal : 0
+    const owed = Math.max(0, Number(booking.balance ?? 0))
+    const creditAmt = Math.max(0, Number(booking.folio_credit ?? 0))
     const isCancelledLike = booking.status === 'cancelled'
 
     if (creditAmt > 0) {
