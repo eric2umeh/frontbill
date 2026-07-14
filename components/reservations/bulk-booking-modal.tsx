@@ -35,7 +35,7 @@ import {
 } from '@/lib/utils/counterparty-organization'
 import { hasPermission } from '@/lib/permissions'
 import { useAuth } from '@/lib/auth-context'
-import { isStayCheckInConsideredBackdated, formatYMDInTimeZone, resolveHotelTimeZone, minSelectableCheckInYmdHotel, isLateNightCheckInGraceWindow, lateCheckInGraceWindowLabel } from '@/lib/hotel-date'
+import { isStayCheckInConsideredBackdated, formatYMDInTimeZone, resolveHotelTimeZone, minSelectableCheckInYmdHotel, isLateNightCheckInGraceWindow, lateCheckInGraceWindowLabel, defaultStayCheckInYmdHotel, parseHotelYmdToLocalDate } from '@/lib/hotel-date'
 import { useNightAuditClosedDates } from '@/hooks/use-night-audit-closed-dates'
 import type { CounterpartyOrganizationOption } from '@/lib/utils/search-counterparty-organizations'
 import {
@@ -887,13 +887,19 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
       })
     : false
   const minCheckInYmd = minSelectableCheckInYmdHotel()
-  const minCheckInDate = (() => {
-    const [y, m, d] = minCheckInYmd.split('-').map(Number)
-    const dt = new Date(y, m - 1, d)
-    dt.setHours(0, 0, 0, 0)
-    return dt
-  })()
+  const minCheckInDate = parseHotelYmdToLocalDate(minCheckInYmd)
   const inLateCheckInGrace = isLateNightCheckInGraceWindow()
+
+  useEffect(() => {
+    if (!open) return
+    const ymd = defaultStayCheckInYmdHotel(new Date(), undefined, {
+      auditedDates: nightAuditClosedDates,
+    })
+    const ci = parseHotelYmdToLocalDate(ymd)
+    setCheckIn(ci)
+    setCheckOut(addDays(ci, 1))
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- apply once per open
+  }, [open])
 
   const copy =
     wording === 'booking'
@@ -1871,10 +1877,14 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
               }}
             />
 
-            {inLateCheckInGrace && !isBackdated && checkIn && (
+            {!isBackdated &&
+              (inLateCheckInGrace || (checkIn && toLocalDateStr(checkIn) === minCheckInYmd)) && (
               <p className="text-xs text-muted-foreground rounded-md border border-dashed px-3 py-2">
-                Late arrival window (until {lateCheckInGraceWindowLabel()} hotel time): check-in may be set to
-                yesterday without approval. After night audit closes that date, manager approval is required.
+                {inLateCheckInGrace
+                  ? `Late arrival window (until ${lateCheckInGraceWindowLabel()} hotel time): check-in defaults to yesterday.`
+                  : 'Previous-day check-in is allowed.'}{' '}
+                No Night Audit approval is needed until that date is closed with Run Night Audit — then manager
+                approval is required.
               </p>
             )}
 
