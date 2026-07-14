@@ -132,12 +132,6 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
       const sanitized = normalizeRoomsForBookingPickers(roomData) as any[]
       setAllRooms(sanitized)
       setAllBookings(bookingData || [])
-      const ci = parseHotelYmdToLocalDate(defaultStayCheckInYmdHotel())
-      const co = addDays(ci, 1)
-      setCheckInDate(ci)
-      setCheckOutDate(co)
-      setNights(1)
-      filterRooms(ci, co, bookingData || [], sanitized)
     } catch {
       toast.error('Failed to load data')
     }
@@ -151,6 +145,13 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
     setRooms(available)
     setSelectedRoom((prev: any) => prev && bookedIds.has(prev.id) ? null : prev)
   }
+
+  useEffect(() => {
+    if (!open) return
+    filterRooms(checkInDate, checkOutDate, allBookings, allRooms)
+    // filterRooms only writes derived room-picker state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, checkInDate, checkOutDate, allBookings, allRooms])
 
   const handleGuestSearch = (value: string) => {
     setFullName(value)
@@ -228,7 +229,7 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
     : false
 
   useEffect(() => {
-    if (!open) return
+    if (!open || !nightAuditClosedDates) return
     const ymd = defaultStayCheckInYmdHotel(new Date(), undefined, {
       auditedDates: nightAuditClosedDates,
     })
@@ -236,8 +237,7 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
     setCheckInDate(ci)
     setCheckOutDate(addDays(ci, 1))
     setNights(1)
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- apply once per open
-  }, [open])
+  }, [open, nightAuditClosedDates])
 
   const canSubmit = () => !!(fullName.trim() && selectedRoom && checkInDate && checkOutDate && nights > 0)
 

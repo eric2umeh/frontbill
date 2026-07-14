@@ -463,7 +463,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
   const inLateCheckInGrace = isLateNightCheckInGraceWindow()
 
   useEffect(() => {
-    if (!open) return
+    if (!open || !nightAuditClosedDates) return
     const ymd = defaultStayCheckInYmdHotel(new Date(), undefined, {
       auditedDates: nightAuditClosedDates,
     })
@@ -471,8 +471,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
     setCheckInDate(ci)
     setCheckOutDate(addDays(ci, 1))
     setNights(1)
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- apply once per open
-  }, [open])
+  }, [open, nightAuditClosedDates])
 
   const hasApprovedBackdateRequest = async () => {
     if (!checkInDate || !orgId || !selectedRoom?.id || !currentUserId) return false

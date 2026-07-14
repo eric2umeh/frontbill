@@ -627,7 +627,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
   // When the modal opens, default check-in to yesterday during the late-arrival window
   // (before night audit closes that date) so staff do not capture "today" by accident.
   useEffect(() => {
-    if (!open) return
+    if (!open || !nightAuditClosedDates) return
     const ymd = defaultStayCheckInYmdHotel(new Date(), undefined, {
       auditedDates: nightAuditClosedDates,
     })
@@ -635,9 +635,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
     setCheckInDate(ci)
     setCheckOutDate(addDays(ci, 1))
     setNights(1)
-    // intentionally only when open toggles — closed dates refresh after fetch is OK once
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- apply once per open
-  }, [open])
+  }, [open, nightAuditClosedDates])
 
   const hasApprovedBackdateRequest = async () => {
     if (!checkInDate) return false

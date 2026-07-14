@@ -891,15 +891,14 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
   const inLateCheckInGrace = isLateNightCheckInGraceWindow()
 
   useEffect(() => {
-    if (!open) return
+    if (!open || !nightAuditClosedDates) return
     const ymd = defaultStayCheckInYmdHotel(new Date(), undefined, {
       auditedDates: nightAuditClosedDates,
     })
     const ci = parseHotelYmdToLocalDate(ymd)
     setCheckIn(ci)
     setCheckOut(addDays(ci, 1))
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- apply once per open
-  }, [open])
+  }, [open, nightAuditClosedDates])
 
   const copy =
     wording === 'booking'

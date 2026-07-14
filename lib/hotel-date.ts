@@ -85,12 +85,15 @@ export function backdateGraceEndHourExclusive(): number {
 }
 
 export type StayBackdateOptions = {
-  /** YYYY-MM-DD dates where night audit has already been run. */
-  auditedDates?: ReadonlySet<string> | readonly string[]
+  /**
+   * YYYY-MM-DD dates where night audit has already been run.
+   * null/undefined means the audit state is unknown and must fail closed.
+   */
+  auditedDates?: ReadonlySet<string> | readonly string[] | null
 }
 
-function auditedDateSet(opts?: StayBackdateOptions): Set<string> {
-  if (!opts?.auditedDates) return new Set()
+function auditedDateSet(opts?: StayBackdateOptions): Set<string> | null {
+  if (!opts?.auditedDates) return null
   return opts.auditedDates instanceof Set
     ? opts.auditedDates
     : new Set(opts.auditedDates)
@@ -115,7 +118,8 @@ export function isStayCheckInConsideredBackdated(
 
   const yesterdayHotel = calendarDateMinusOneDay(todayHotel)
   if (checkInYmd === yesterdayHotel) {
-    return auditedDateSet(options).has(checkInYmd)
+    const audited = auditedDateSet(options)
+    return audited === null || audited.has(checkInYmd)
   }
 
   return true
@@ -177,9 +181,11 @@ export function defaultStayCheckInYmdHotel(
   const tz = resolveHotelTimeZone(timeZone)
   const todayHotel = formatYMDInTimeZone(now, tz)
   const yesterdayHotel = calendarDateMinusOneDay(todayHotel)
+  const audited = auditedDateSet(options)
   if (
+    audited !== null &&
     getHourInTimeZone(now, tz) < backdateGraceEndHourExclusive() &&
-    !auditedDateSet(options).has(yesterdayHotel)
+    !audited.has(yesterdayHotel)
   ) {
     return yesterdayHotel
   }
