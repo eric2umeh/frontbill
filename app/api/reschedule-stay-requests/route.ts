@@ -165,8 +165,19 @@ export async function POST(request: Request) {
       )
     }
 
+    const { data: auditRows } = await admin
+      .from('night_audits')
+      .select('audit_date')
+      .eq('organization_id', orgId)
+      .gte('audit_date', check_in)
+      .lte('audit_date', check_in)
+    const auditedDates = (auditRows || [])
+      .map((r) => String(r.audit_date || '').slice(0, 10))
+      .filter(Boolean)
+
     const is_backdate =
-      isStayCheckInConsideredBackdated(check_in) && check_in !== prevCi
+      isStayCheckInConsideredBackdated(check_in, new Date(), undefined, { auditedDates }) &&
+      check_in !== prevCi
 
     let guest_label: string | null = null
     let room_label: string | null = null
