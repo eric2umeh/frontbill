@@ -32,8 +32,17 @@ import {
 } from '@/lib/utils/counterparty-organization'
 import { insertFolioCharges } from '@/lib/utils/insert-folio-charges'
 import { StayDateRangeFields } from '@/components/shared/stay-date-range-fields'
-import { minSelectableCheckInYmdHotel, isLateNightCheckInGraceWindow, lateCheckInGraceWindowLabel } from '@/lib/hotel-date'
+import {
+  minSelectableCheckInYmdHotel,
+  isLateNightCheckInGraceWindow,
+  lateCheckInGraceWindowLabel,
+  defaultStayCheckInYmdHotel,
+  parseHotelYmdToLocalDate,
+  isStayCheckInConsideredBackdated,
+} from '@/lib/hotel-date'
+import { useNightAuditClosedDates } from '@/hooks/use-night-audit-closed-dates'
 import { useAuth } from '@/lib/auth-context'
+import { hasPermission } from '@/lib/permissions'
 import { BOOKING_MODAL_ROOMS_LIMIT, normalizeRoomsForBookingPickers } from '@/lib/utils/room-bookability'
 
 interface CheckinModalProps {
@@ -50,7 +59,7 @@ const toLocalDateStr = (date: Date) => {
 }
 
 export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
-  const { organizationId: authTenantOrgId, userId: authUserId } = useAuth()
+  const { organizationId: authTenantOrgId, userId: authUserId, role: authRole } = useAuth()
   const [loading, setLoading] = useState(false)
   const [orgId, setOrgId] = useState('')
 
@@ -63,8 +72,12 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
   const [guestSearchOpen, setGuestSearchOpen] = useState(false)
 
   // Dates
-  const [checkInDate, setCheckInDate] = useState<Date>(() => { const d = new Date(); d.setHours(0,0,0,0); return d })
-  const [checkOutDate, setCheckOutDate] = useState<Date>(() => { const d = new Date(); d.setHours(0,0,0,0); return addDays(d, 1) })
+  const [checkInDate, setCheckInDate] = useState<Date>(() =>
+    parseHotelYmdToLocalDate(defaultStayCheckInYmdHotel()),
+  )
+  const [checkOutDate, setCheckOutDate] = useState<Date>(() =>
+    addDays(parseHotelYmdToLocalDate(defaultStayCheckInYmdHotel()), 1),
+  )
   const [nights, setNights] = useState(1)
 
   // Room
@@ -119,7 +132,12 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
       const sanitized = normalizeRoomsForBookingPickers(roomData) as any[]
       setAllRooms(sanitized)
       setAllBookings(bookingData || [])
-      filterRooms(checkInDate, checkOutDate, bookingData || [], sanitized)
+      const ci = parseHotelYmdToLocalDate(defaultStayCheckInYmdHotel())
+      const co = addDays(ci, 1)
+      setCheckInDate(ci)
+      setCheckOutDate(co)
+      setNights(1)
+      filterRooms(ci, co, bookingData || [], sanitized)
     } catch {
       toast.error('Failed to load data')
     }
@@ -199,13 +217,27 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
   }
 
   const minCheckInYmd = minSelectableCheckInYmdHotel()
-  const minCheckInDate = (() => {
-    const [y, m, d] = minCheckInYmd.split('-').map(Number)
-    const dt = new Date(y, m - 1, d)
-    dt.setHours(0, 0, 0, 0)
-    return dt
-  })()
+  const minCheckInDate = parseHotelYmdToLocalDate(minCheckInYmd)
   const inLateCheckInGrace = isLateNightCheckInGraceWindow()
+  const { closedDates: nightAuditClosedDates } = useNightAuditClosedDates(authUserId, open)
+  const canApproveBackdates = hasPermission(authRole, 'backdate:approve')
+  const isBackdated = checkInDate
+    ? isStayCheckInConsideredBackdated(toLocalDateStr(checkInDate), new Date(), undefined, {
+        auditedDates: nightAuditClosedDates,
+      })
+    : false
+
+  useEffect(() => {
+    if (!open) return
+    const ymd = defaultStayCheckInYmdHotel(new Date(), undefined, {
+      auditedDates: nightAuditClosedDates,
+    })
+    const ci = parseHotelYmdToLocalDate(ymd)
+    setCheckInDate(ci)
+    setCheckOutDate(addDays(ci, 1))
+    setNights(1)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- apply once per open
+  }, [open])
 
   const canSubmit = () => !!(fullName.trim() && selectedRoom && checkInDate && checkOutDate && nights > 0)
 
@@ -300,6 +332,12 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
 
   const handleSubmit = async () => {
     if (!canSubmit()) { toast.error('Please fill in all required fields'); return }
+    if (isBackdated && !canApproveBackdates) {
+      toast.error(
+        'That check-in date was already closed by Night Audit. Ask a Manager, Administrator, or Superadmin to approve the backdate.',
+      )
+      return
+    }
     if (paymentMethod === 'city_ledger' && !selectedLedger) {
       toast.error('Please select a city ledger organization account')
       return
@@ -423,8 +461,10 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
   const resetForm = () => {
     setFullName(''); setPhone(''); setGuestId('')
     setFilteredGuests([]); setGuestSearchOpen(false)
-    const d = new Date(); d.setHours(0,0,0,0)
-    setCheckInDate(d); setCheckOutDate(addDays(d, 1)); setNights(1)
+    const ci = parseHotelYmdToLocalDate(
+      defaultStayCheckInYmdHotel(new Date(), undefined, { auditedDates: nightAuditClosedDates }),
+    )
+    setCheckInDate(ci); setCheckOutDate(addDays(ci, 1)); setNights(1)
     setSelectedRoom(null); setPaymentMethod('pos'); setCustomPrice('')
     setLedgerSearch(''); setLedgerResults([]); setSelectedLedger(null); setLedgerSearchOpen(false)
     setShowNewLedgerOrgForm(false); setNewLedgerOrgName(''); setNewLedgerOrgPhone('')
@@ -494,10 +534,20 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
               minCheckIn={minCheckInDate}
               disableCalendar={(d) => d < minCheckInDate}
             />
-            {inLateCheckInGrace && (
+            {!isBackdated &&
+              (inLateCheckInGrace ||
+                (checkInDate && toLocalDateStr(checkInDate) === minCheckInYmd)) && (
               <p className="text-xs text-muted-foreground rounded-md border border-dashed px-3 py-2">
-                Late arrival (until {lateCheckInGraceWindowLabel()} hotel time): you may set check-in to yesterday for
-                guests who arrived just after midnight.
+                {inLateCheckInGrace
+                  ? `Late arrival window (until ${lateCheckInGraceWindowLabel()} hotel time): check-in defaults to yesterday.`
+                  : 'Previous-day check-in is allowed.'}{' '}
+                No approval is needed until that date is closed with Run Night Audit — then manager approval is required.
+              </p>
+            )}
+            {isBackdated && !canApproveBackdates && (
+              <p className="text-xs text-amber-800 rounded-md border border-amber-200 bg-amber-50 px-3 py-2">
+                This check-in date was already closed by Night Audit. Ask a Manager, Administrator, or Superadmin
+                to process a backdated check-in.
               </p>
             )}
             <div className="space-y-2">
