@@ -42,10 +42,21 @@ export function getHourInTimeZone(instant: Date, timeZone: string): number {
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone,
     hour: '2-digit',
-    hour12: false,
+    hourCycle: 'h23',
   }).formatToParts(instant)
   const h = parts.find((p) => p.type === 'hour')?.value
-  return parseInt(h || '0', 10)
+  const n = parseInt(h || '0', 10)
+  // Some engines still emit 24 for midnight — normalize to 0.
+  if (n === 24) return 0
+  return Number.isFinite(n) ? n : 0
+}
+
+/** Parse YYYY-MM-DD into a local calendar Date at 00:00 (for date pickers). */
+export function parseHotelYmdToLocalDate(ymd: string): Date {
+  const [y, m, d] = ymd.split('-').map(Number)
+  const dt = new Date(y || 1970, (m || 1) - 1, d || 1)
+  dt.setHours(0, 0, 0, 0)
+  return dt
 }
 
 /** Previous calendar day as YYYY-MM-DD (pure date math on components). */
@@ -89,8 +100,8 @@ function auditedDateSet(opts?: StayBackdateOptions): Set<string> {
  * Whether a check-in calendar date (YYYY-MM-DD from the date picker, typically staff local)
  * counts as "backdated" for approval / Night Audit rules.
  *
- * During the post-midnight grace window, **yesterday** (hotel calendar) is a normal
- * late check-in — unless night audit has already closed that date.
+ * **Yesterday** (hotel calendar) is a normal late check-in until night audit closes that
+ * date — after that, manager/admin approval is required. Older dates always need approval.
  */
 export function isStayCheckInConsideredBackdated(
   checkInYmd: string,
@@ -102,13 +113,9 @@ export function isStayCheckInConsideredBackdated(
   const todayHotel = formatYMDInTimeZone(now, tz)
   if (checkInYmd >= todayHotel) return false
 
-  const graceEnd = backdateGraceEndHourExclusive()
-  const hour = getHourInTimeZone(now, tz)
   const yesterdayHotel = calendarDateMinusOneDay(todayHotel)
-  if (hour < graceEnd && checkInYmd === yesterdayHotel) {
-    const audited = auditedDateSet(options)
-    if (audited.has(checkInYmd)) return true
-    return false
+  if (checkInYmd === yesterdayHotel) {
+    return auditedDateSet(options).has(checkInYmd)
   }
 
   return true
@@ -145,14 +152,36 @@ export function isCalendarDateBeforeHotelToday(requestedYmd: string, now: Date, 
 
 /**
  * Earliest selectable check-in (YYYY-MM-DD) for date pickers tied to the hotel clock.
- * During the post-midnight grace window, yesterday remains enabled.
+ * Always allows **yesterday** so late arrivals can be dated correctly; Night Audit closure
+ * of that date is enforced via `isStayCheckInConsideredBackdated` (approval UI).
  */
-export function minSelectableCheckInYmdHotel(now: Date = new Date(), timeZone: string = resolveHotelTimeZone()): string {
+export function minSelectableCheckInYmdHotel(
+  now: Date = new Date(),
+  timeZone: string = resolveHotelTimeZone(),
+): string {
+  const tz = resolveHotelTimeZone(timeZone)
+  return calendarDateMinusOneDay(formatYMDInTimeZone(now, tz))
+}
+
+/**
+ * Default check-in date for new stays.
+ * During the post-midnight late-arrival window (e.g. 12–2:59 AM), prefer **yesterday**
+ * when that day has not been night-audited yet — so front desk does not accidentally
+ * capture "today" for a guest who arrived just after midnight.
+ */
+export function defaultStayCheckInYmdHotel(
+  now: Date = new Date(),
+  timeZone: string = resolveHotelTimeZone(),
+  options?: StayBackdateOptions,
+): string {
   const tz = resolveHotelTimeZone(timeZone)
   const todayHotel = formatYMDInTimeZone(now, tz)
-  const hour = getHourInTimeZone(now, tz)
-  if (hour < backdateGraceEndHourExclusive()) {
-    return calendarDateMinusOneDay(todayHotel)
+  const yesterdayHotel = calendarDateMinusOneDay(todayHotel)
+  if (
+    getHourInTimeZone(now, tz) < backdateGraceEndHourExclusive() &&
+    !auditedDateSet(options).has(yesterdayHotel)
+  ) {
+    return yesterdayHotel
   }
   return todayHotel
 }
