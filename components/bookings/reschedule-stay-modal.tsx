@@ -22,7 +22,8 @@ import { toast } from 'sonner'
 import { Loader2 } from 'lucide-react'
 import { parseISO } from 'date-fns'
 import { calendarNightsBetween } from '@/lib/booking/edit-booking-patch'
-import { isStayCheckInConsideredBackdated } from '@/lib/hotel-date'
+import { isStayCheckInConsideredBackdated, minSelectableCheckInYmdHotel, parseHotelYmdToLocalDate } from '@/lib/hotel-date'
+import { useNightAuditClosedDates } from '@/hooks/use-night-audit-closed-dates'
 import {
   FolioRemarksAttachmentsField,
   type FolioRemarksAttachmentsValue,
@@ -73,6 +74,7 @@ export function RescheduleStayModal({
   const [reason, setReason] = useState('')
   const [folioExtras, setFolioExtras] = useState<FolioRemarksAttachmentsValue>({ remarks: '', files: [] })
   const [submitting, setSubmitting] = useState(false)
+  const { closedDates: nightAuditClosedDates } = useNightAuditClosedDates(userId, open)
 
   useEffect(() => {
     if (!open || !booking) return
@@ -103,9 +105,13 @@ export function RescheduleStayModal({
     const check_in = toYmd(checkIn)
     const prevCi = booking.check_in.slice(0, 10)
     const isBackdate =
-      isStayCheckInConsideredBackdated(check_in) && check_in !== prevCi
+      isStayCheckInConsideredBackdated(check_in, new Date(), undefined, {
+        auditedDates: nightAuditClosedDates,
+      }) && check_in !== prevCi
     return { total, balance, deposit, isBackdate }
-  }, [booking, nights, checkIn])
+  }, [booking, nights, checkIn, nightAuditClosedDates])
+
+  const minCheckInDate = parseHotelYmdToLocalDate(minSelectableCheckInYmdHotel())
 
   const datesUnchanged =
     booking &&
@@ -199,6 +205,7 @@ export function RescheduleStayModal({
             checkIn={checkIn}
             checkOut={checkOut}
             nights={nights}
+            minCheckIn={minCheckInDate}
             onDatesChange={(ci, co) => {
               setCheckIn(ci)
               setCheckOut(co)
