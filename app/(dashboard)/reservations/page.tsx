@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { EnhancedDataTable } from '@/components/shared/enhanced-data-table'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -77,6 +78,7 @@ interface Reservation {
 }
 
 export default function ReservationsPage() {
+  const router = useRouter()
   const [reservations, setReservations] = useState<Reservation[]>([])
   const [bulkModalOpen, setBulkModalOpen] = useState(false)
   const [newReservationOpen, setNewReservationOpen] = useState(false)
@@ -445,6 +447,13 @@ export default function ReservationsPage() {
         data={reservations}
         searchKeys={['folio_id', 'guestName', 'guestPhone', 'ledger_account_name', 'rooms.room_number'] as any}
         dateField="check_in"
+        onRowClick={(res) => {
+          router.push(
+            res.is_bulk
+              ? `/bulk-bookings/${res.bulk_group_id}`
+              : `/reservations/${res.id}`,
+          )
+        }}
         filters={[
           {
             key: 'payment_status',
@@ -555,7 +564,7 @@ export default function ReservationsPage() {
             label: 'Actions',
             stickyOnMobile: true,
             render: (res) => (
-              <div className="flex flex-wrap gap-1">
+              <div className="flex flex-wrap gap-1" onClick={(e) => e.stopPropagation()}>
                 {!res.is_bulk && canCheckInReserved && (
                   <Button
                     size="sm"
@@ -636,10 +645,13 @@ export default function ReservationsPage() {
         renderCard={(res) => (
           <CardContent className="p-4">
             <div className="space-y-3">
-              <div className="flex items-start justify-between">
-                <div>
-                  <div className="font-semibold">{res.guests?.name}</div>
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="font-semibold truncate">{res.guests?.name}</div>
                   <div className="text-sm text-muted-foreground">{res.guests?.phone}</div>
+                  <div className="text-xs font-mono text-primary mt-1">
+                    {res.is_bulk ? `Bulk · ${res.room_count} rooms` : res.folio_id}
+                  </div>
                 </div>
                 <Badge variant="outline" className={(paymentColors as Record<string, string>)[res.payment_status]}>
                   {res.payment_status}
@@ -654,6 +666,9 @@ export default function ReservationsPage() {
                   <div className="text-muted-foreground">Check-in</div>
                   <div className="font-medium">{new Date(res.check_in).toLocaleDateString('en-GB')}</div>
                 </div>
+              </div>
+              <div className="pt-1 text-xs font-medium text-primary">
+                Open reservation details →
               </div>
             </div>
           </CardContent>
