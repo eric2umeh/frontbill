@@ -388,7 +388,22 @@ export function EnhancedDataTable<T extends Record<string, any>>({
             </div>
           ) : (
             paginatedData.map((item, index) => (
-              <Card key={rowId(item, index)}>{renderCard(item)}</Card>
+              <Card
+                key={rowId(item, index)}
+                className={onRowClick ? 'cursor-pointer transition-colors hover:bg-muted/40 hover:border-primary/30' : undefined}
+                onClick={() => onRowClick?.(item)}
+                role={onRowClick ? 'link' : undefined}
+                tabIndex={onRowClick ? 0 : undefined}
+                onKeyDown={(e) => {
+                  if (!onRowClick) return
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    onRowClick(item)
+                  }
+                }}
+              >
+                {renderCard(item)}
+              </Card>
             ))
           )}
         </div>
