@@ -44,7 +44,7 @@ import { insertFolioCharges } from '@/lib/utils/insert-folio-charges'
 import { applyPaymentToGuestCityLedger } from '@/lib/utils/guest-city-ledger'
 import { buildBackdateDedupeKey } from '@/lib/backdate/dedupe-key'
 import type { SerializedBookingPayload } from '@/lib/backdate/booking-payload'
-import { isStayCheckInConsideredBackdated, minSelectableCheckInYmdHotel, isLateNightCheckInGraceWindow, lateCheckInGraceWindowLabel, defaultStayCheckInYmdHotel, parseHotelYmdToLocalDate } from '@/lib/hotel-date'
+import { isStayCheckInConsideredBackdated, minSelectableCheckInYmdHotel, isLateNightCheckInGraceWindow, lateCheckInGraceWindowLabel, defaultStayCheckInYmdHotel, parseHotelYmdToLocalDate, verifyStayCheckInBackdate } from '@/lib/hotel-date'
 import { useNightAuditClosedDates } from '@/hooks/use-night-audit-closed-dates'
 import { todayYmdHotel } from '@/lib/utils/booking-in-house-dates'
 import {
@@ -614,7 +614,10 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
   }
 
   const canApproveBackdates = hasPermission(role, 'backdate:approve')
-  const { closedDates: nightAuditClosedDates } = useNightAuditClosedDates(userId, open)
+  const {
+    closedDates: nightAuditClosedDates,
+    refresh: refreshNightAuditClosedDates,
+  } = useNightAuditClosedDates(userId, open)
   const isBackdated = checkInDate
     ? isStayCheckInConsideredBackdated(toLocalDateStr(checkInDate), new Date(), undefined, {
         auditedDates: nightAuditClosedDates,
@@ -752,7 +755,15 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
     try {
       setLoading(true)
       if (!checkInDate || !checkOutDate) { toast.error('Dates required'); return }
-      if (isBackdated && !canApproveBackdates && !(await hasApprovedBackdateRequest())) {
+      const verifiedIsBackdated = await verifyStayCheckInBackdate(
+        toLocalDateStr(checkInDate),
+        refreshNightAuditClosedDates,
+      )
+      if (verifiedIsBackdated === null) {
+        toast.error('Unable to verify Night Audit status. Try again.')
+        return
+      }
+      if (verifiedIsBackdated && !canApproveBackdates && !(await hasApprovedBackdateRequest())) {
         toast.error('Backdated bookings require approval in Night Audit. Send a request first.')
         return
       }
