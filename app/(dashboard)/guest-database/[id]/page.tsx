@@ -36,7 +36,8 @@ import { toast } from 'sonner'
 import { folioGuestCreditAmount, folioPositiveOutstandingSum, bookingDisplayBillBalance } from '@/lib/utils/booking-bill-balance'
 import { PageLoadingState } from '@/components/loading-screen'
 import { fetchGuestCashbackBalanceClient } from '@/lib/cashback/cashback-client'
-import Link from 'next/link'
+import { GuestCashbackPanel } from '@/components/cashback/guest-cashback-panel'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Input } from '@/components/ui/input'
 import { buildGuestAccountStatementHtml } from '@/lib/receipts/guest-account-statement'
 import { printHtmlDocument } from '@/lib/receipts/receipt-pdf-print'
@@ -112,6 +113,7 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
   const [guestFolioCreditTotal, setGuestFolioCreditTotal] = useState(0)
   const [cashbackEarned, setCashbackEarned] = useState(0)
   const [cashbackAvailable, setCashbackAvailable] = useState(0)
+  const [guestTab, setGuestTab] = useState('overview')
   const [statementFrom, setStatementFrom] = useState(() => format(subYears(new Date(), 1), 'yyyy-MM-dd'))
   const [statementTo, setStatementTo] = useState(() => format(new Date(), 'yyyy-MM-dd'))
   const [hotelBranding, setHotelBranding] = useState<{
@@ -671,6 +673,16 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
               <RefreshCw className="h-4 w-4" />
               Refresh
             </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-2 border-violet-200 text-violet-800 hover:bg-violet-50"
+              onClick={() => setGuestTab('cashback')}
+            >
+              <Gift className="h-4 w-4" />
+              Cashback
+              {cashbackAvailable > 0 ? ` · ${formatNaira(cashbackAvailable)}` : ''}
+            </Button>
           </div>
           {canViewGuests && !canEditGuest && (
             <p className="text-xs text-muted-foreground max-w-sm text-right">
@@ -680,6 +692,30 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
         </div>
       </div>
 
+      <Tabs value={guestTab} onValueChange={setGuestTab} className="w-full">
+        <TabsList>
+          <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="cashback" className="gap-1.5">
+            <Gift className="h-3.5 w-3.5" />
+            Cashback
+            {cashbackAvailable > 0 && (
+              <Badge variant="secondary" className="ml-1 h-5 px-1.5 text-[10px] tabular-nums">
+                {formatNaira(cashbackAvailable)}
+              </Badge>
+            )}
+          </TabsTrigger>
+        </TabsList>
+      </Tabs>
+
+      {guestTab === 'cashback' ? (
+        <GuestCashbackPanel
+          guestId={guest.id}
+          guestName={guest.name}
+          stays={bookings}
+          enabled
+        />
+      ) : (
+        <>
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-base">Account statement (past dates)</CardTitle>
@@ -793,7 +829,18 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
             )}
           </CardContent>
         </Card>
-        <Card className="border-violet-200 bg-violet-500/5">
+        <Card
+          className="border-violet-200 bg-violet-500/5 cursor-pointer transition-colors hover:bg-violet-500/10"
+          onClick={() => setGuestTab('cashback')}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault()
+              setGuestTab('cashback')
+            }
+          }}
+        >
           <CardContent className="p-5 flex flex-col gap-1">
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Gift className="h-4 w-4" /> Cashback
@@ -804,11 +851,7 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
             <p className="text-xs text-muted-foreground">
               Earned: {formatNaira(cashbackEarned)}
             </p>
-            {hasPermission(resolvedRole ?? role, 'cashback:view') && (
-              <Link href="/cashback" className="text-xs text-primary hover:underline mt-1">
-                View program
-              </Link>
-            )}
+            <p className="text-xs text-primary mt-1">View earnings & stays →</p>
           </CardContent>
         </Card>
         <Card>
@@ -1072,6 +1115,8 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
             </div>
           </CardContent>
         </Card>
+      )}
+        </>
       )}
 
       {canEditGuest && (
