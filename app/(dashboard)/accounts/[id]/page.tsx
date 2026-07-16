@@ -21,7 +21,7 @@ import {
   ArrowLeft, User, Phone, Mail, MapPin,
   Calendar, CreditCard, TrendingUp, FileText, Building2, Hash,
   Wallet, ArrowDownCircle, ArrowUpCircle, Clock, RefreshCw,
-  Trash2,
+  Trash2, Gift,
 } from 'lucide-react'
 import { format } from 'date-fns'
 import CityLedgerPaymentModal from '@/components/city-ledger/city-ledger-payment-modal'
@@ -30,6 +30,9 @@ import { hasPermission } from '@/lib/permissions'
 import { toast } from 'sonner'
 import { bookingDisplayBillBalance } from '@/lib/utils/booking-bill-balance'
 import { PageLoadingState } from '@/components/loading-screen'
+import { fetchGuestCashbackBalanceClient } from '@/lib/cashback/cashback-client'
+import { GuestCashbackPanel } from '@/components/cashback/guest-cashback-panel'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 interface GuestAccount {
   id: string
@@ -110,6 +113,9 @@ export default function AccountDetailPage() {
   const [savingGuest, setSavingGuest] = useState(false)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [deletingGuest, setDeletingGuest] = useState(false)
+  const [cashbackEarned, setCashbackEarned] = useState(0)
+  const [cashbackAvailable, setCashbackAvailable] = useState(0)
+  const [guestTab, setGuestTab] = useState('overview')
   const [guestForm, setGuestForm] = useState({
     name: '',
     phone: '',
@@ -215,6 +221,10 @@ export default function AccountDetailPage() {
         const pendingTotal = enrichedBookings.reduce((sum: number, booking: any) => sum + Number(booking.balance || 0), 0)
         setGuestPendingBalance(pendingTotal)
 
+        const cb = await fetchGuestCashbackBalanceClient(supabase, actualId)
+        setCashbackEarned(cb.earnedTotal)
+        setCashbackAvailable(cb.balance)
+
         const { data: ledger } = await supabase
           .from('city_ledger_accounts')
           .select('id, balance, account_name, account_type')
@@ -249,6 +259,9 @@ export default function AccountDetailPage() {
         setLedgerData(ledger)
         setLedgerAccount({ id: ledger.id, balance: ledger.balance, account_name: ledger.account_name, account_type: ledger.account_type })
         setGuestPendingBalance(ledger.balance || 0)
+        setCashbackEarned(0)
+        setCashbackAvailable(0)
+        setGuestTab('overview')
 
         // Fetch bookings linked via notes field (city_ledger:<account_name>)
         const { data: linkedBookings } = await supabase
@@ -487,6 +500,18 @@ export default function AccountDetailPage() {
               <RefreshCw className="h-4 w-4" />
               Refresh
             </Button>
+            {isGuest && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-2 border-violet-200 text-violet-800 hover:bg-violet-50"
+                onClick={() => setGuestTab('cashback')}
+              >
+                <Gift className="h-4 w-4" />
+                Cashback
+                {cashbackAvailable > 0 ? ` · ${formatNaira(cashbackAvailable)}` : ''}
+              </Button>
+            )}
           </div>
           {isGuest && canViewGuests && !canEditGuest && (
             <p className="text-xs text-muted-foreground max-w-sm text-right">
@@ -497,7 +522,7 @@ export default function AccountDetailPage() {
       </div>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className={`grid grid-cols-1 gap-4 sm:grid-cols-2 ${isGuest ? 'lg:grid-cols-5' : 'lg:grid-cols-4'}`}>
         <Card>
           <CardContent className="p-5 flex flex-col gap-1">
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -525,6 +550,33 @@ export default function AccountDetailPage() {
             </p>
           </CardContent>
         </Card>
+        {isGuest && (
+          <Card
+            className="border-violet-200 bg-violet-500/5 cursor-pointer transition-colors hover:bg-violet-500/10"
+            onClick={() => setGuestTab('cashback')}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                setGuestTab('cashback')
+              }
+            }}
+          >
+            <CardContent className="p-5 flex flex-col gap-1">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Gift className="h-4 w-4" /> Cashback
+              </div>
+              <p className="text-3xl font-bold text-violet-700 tabular-nums">
+                {formatNaira(cashbackAvailable)}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Earned: {formatNaira(cashbackEarned)}
+              </p>
+              <p className="text-xs text-primary mt-1">View earnings & stays →</p>
+            </CardContent>
+          </Card>
+        )}
         <Card>
           <CardContent className="p-5 flex flex-col gap-1">
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -537,6 +589,34 @@ export default function AccountDetailPage() {
         </Card>
       </div>
 
+      {isGuest && (
+        <Tabs value={guestTab} onValueChange={setGuestTab} className="w-full">
+          <TabsList>
+            <TabsTrigger value="overview">Overview</TabsTrigger>
+            <TabsTrigger value="cashback" className="gap-1.5">
+              <Gift className="h-3.5 w-3.5" />
+              Cashback
+              {cashbackAvailable > 0 && (
+                <Badge variant="secondary" className="ml-1 h-5 px-1.5 text-[10px] tabular-nums">
+                  {formatNaira(cashbackAvailable)}
+                </Badge>
+              )}
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
+      )}
+
+      {isGuest && guestTab === 'cashback' && guestData && (
+        <GuestCashbackPanel
+          guestId={actualId}
+          guestName={guestData.name}
+          stays={bookings}
+          enabled
+        />
+      )}
+
+      {(!isGuest || guestTab === 'overview') && (
+        <div className="space-y-6">
       {/* Folio Selector — guests only */}
       {isGuest && bookings.length > 0 && (
         <Card>
@@ -832,6 +912,8 @@ export default function AccountDetailPage() {
             </div>
           </CardContent>
         </Card>
+      )}
+        </div>
       )}
 
       {/* City Ledger Payment Modal */}

@@ -71,7 +71,7 @@ export async function GET(request: Request, ctx: RouteCtx) {
       .eq('organization_id', caller.organizationId)
       .eq('guest_id', guestId)
       .order('created_at', { ascending: false })
-      .limit(50)
+      .limit(100)
 
     return NextResponse.json({
       guest,
