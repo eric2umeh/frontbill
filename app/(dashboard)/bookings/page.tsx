@@ -1318,6 +1318,13 @@ export default function BookingsPage() {
             "Uses the hotel calendar (Africa/Lagos by default). Picking a check-in date switches status to All Status so past arrivals show. Clear the date to return to in-house guests.",
         }}
         dateField="check_in"
+        onRowClick={(booking) => {
+          router.push(
+            booking.is_bulk
+              ? `/bulk-bookings/${booking.bulk_group_id}`
+              : `/bookings/${booking.id}`,
+          )
+        }}
         columns={[
           {
             key: "guest",
@@ -1538,7 +1545,10 @@ export default function BookingsPage() {
                   );
                 }
                 return (
-                  <div className="flex shrink-0 flex-wrap gap-0.5">
+                  <div
+                    className="flex shrink-0 flex-wrap gap-0.5"
+                    onClick={(e) => e.stopPropagation()}
+                  >
                     {actionableMember && (
                       <>
                         <Button
@@ -1638,7 +1648,10 @@ export default function BookingsPage() {
               );
 
               return (
-                <div className="flex shrink-0 flex-wrap gap-0.5">
+                <div
+                  className="flex shrink-0 flex-wrap gap-0.5"
+                  onClick={(e) => e.stopPropagation()}
+                >
                   {showReserveRow && canCheckInReserved && (
                     <Button
                       size="sm"
@@ -1796,11 +1809,16 @@ export default function BookingsPage() {
         renderCard={(booking) => (
           <CardContent className="p-4">
             <div className="space-y-3">
-              <div className="flex items-start justify-between">
-                <div>
-                  <div className="font-semibold">{booking.guests?.name}</div>
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="font-semibold truncate">{booking.guests?.name}</div>
                   <div className="text-sm text-muted-foreground">
                     {booking.guests?.phone}
+                  </div>
+                  <div className="text-xs font-mono text-primary mt-1">
+                    {booking.is_bulk
+                      ? `Bulk · ${booking.room_count} rooms`
+                      : booking.folio_id}
                   </div>
                 </div>
                 <Badge
@@ -1814,7 +1832,9 @@ export default function BookingsPage() {
                 <div>
                   <div className="text-muted-foreground">Room</div>
                   <div className="font-medium">
-                    {booking.rooms?.room_number} - {booking.rooms?.room_type}
+                    {booking.is_bulk
+                      ? `${booking.room_count} Rooms`
+                      : `${booking.rooms?.room_number ?? "—"} - ${booking.rooms?.room_type ?? ""}`}
                   </div>
                 </div>
                 <div>
@@ -1871,6 +1891,9 @@ export default function BookingsPage() {
                   </>
                 );
               })()}
+              <div className="pt-1 text-xs font-medium text-primary">
+                Open booking details →
+              </div>
             </div>
           </CardContent>
         )}
