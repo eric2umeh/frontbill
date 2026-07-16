@@ -56,7 +56,7 @@ import { paymentMethodEarnsCashback } from '@/lib/cashback/cashback-config'
 import { isGuestBookingCashbackEligible } from '@/lib/cashback/cashback-eligibility'
 import { roomStatusForBookingStatus } from '@/lib/rooms/room-occupancy'
 import { buildBackdateDedupeKey } from '@/lib/backdate/dedupe-key'
-import { isStayCheckInConsideredBackdated, minSelectableCheckInYmdHotel, isLateNightCheckInGraceWindow, lateCheckInGraceWindowLabel, defaultStayCheckInYmdHotel, parseHotelYmdToLocalDate } from '@/lib/hotel-date'
+import { isStayCheckInConsideredBackdated, minSelectableCheckInYmdHotel, isLateNightCheckInGraceWindow, lateCheckInGraceWindowLabel, defaultStayCheckInYmdHotel, parseHotelYmdToLocalDate, verifyStayCheckInBackdate } from '@/lib/hotel-date'
 import { useNightAuditClosedDates } from '@/hooks/use-night-audit-closed-dates'
 import { hasPermission } from '@/lib/permissions'
 import { useAuth } from '@/lib/auth-context'
@@ -452,7 +452,10 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
   const depositAmount = cashbackBreakdown.cashbackDiscount + cashbackBreakdown.cashToCollect
   const balanceAmount = cashbackBreakdown.balanceRemaining
   const canApproveBackdates = hasPermission(currentUserRole, 'backdate:approve')
-  const { closedDates: nightAuditClosedDates } = useNightAuditClosedDates(currentUserId, open)
+  const {
+    closedDates: nightAuditClosedDates,
+    refresh: refreshNightAuditClosedDates,
+  } = useNightAuditClosedDates(currentUserId, open)
   const isBackdated = checkInDate
     ? isStayCheckInConsideredBackdated(toLocalDateStr(checkInDate), new Date(), undefined, {
         auditedDates: nightAuditClosedDates,
@@ -555,7 +558,15 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
 
   const handleSubmit = async () => {
     if (!checkInDate || !checkOutDate) { toast.error('Dates required'); return }
-    if (isBackdated && !canApproveBackdates && !(await hasApprovedBackdateRequest())) {
+    const verifiedIsBackdated = await verifyStayCheckInBackdate(
+      toLocalDateStr(checkInDate),
+      refreshNightAuditClosedDates,
+    )
+    if (verifiedIsBackdated === null) {
+      toast.error('Unable to verify Night Audit status. Try again.')
+      return
+    }
+    if (verifiedIsBackdated && !canApproveBackdates && !(await hasApprovedBackdateRequest())) {
       toast.error('Backdated reservations require approval in Night Audit. Send a request first.')
       return
     }

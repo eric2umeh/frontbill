@@ -7,10 +7,10 @@ export function useNightAuditClosedDates(userId: string | null | undefined, enab
   const [closedDates, setClosedDates] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(false)
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (): Promise<ReadonlySet<string> | null> => {
     if (!enabled || !userId || userId === 'placeholder') {
       setClosedDates(new Set())
-      return
+      return null
     }
     setLoading(true)
     try {
@@ -30,10 +30,13 @@ export function useNightAuditClosedDates(userId: string | null | undefined, enab
       )
       const json = await res.json().catch(() => ({}))
       if (!res.ok) {
-        setClosedDates(new Set())
-        return
+        return null
       }
-      setClosedDates(new Set((json.dates as string[]) || []))
+      const nextClosedDates = new Set((json.dates as string[]) || [])
+      setClosedDates(nextClosedDates)
+      return nextClosedDates
+    } catch {
+      return null
     } finally {
       setLoading(false)
     }

@@ -121,6 +121,21 @@ export function isStayCheckInConsideredBackdated(
   return true
 }
 
+/**
+ * Re-check Night Audit immediately before a stay write.
+ * `null` means the closed-date state could not be verified and callers must fail closed.
+ */
+export async function verifyStayCheckInBackdate(
+  checkInYmd: string,
+  loadAuditedDates: () => Promise<ReadonlySet<string> | null>,
+  now: Date = new Date(),
+  timeZone: string = resolveHotelTimeZone(),
+): Promise<boolean | null> {
+  const auditedDates = await loadAuditedDates()
+  if (auditedDates === null) return null
+  return isStayCheckInConsideredBackdated(checkInYmd, now, timeZone, { auditedDates })
+}
+
 /** True when staff are in the post-midnight grace window (late arrival / previous-day check-in). */
 export function isLateNightCheckInGraceWindow(
   now: Date = new Date(),

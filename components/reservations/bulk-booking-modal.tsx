@@ -35,7 +35,7 @@ import {
 } from '@/lib/utils/counterparty-organization'
 import { hasPermission } from '@/lib/permissions'
 import { useAuth } from '@/lib/auth-context'
-import { isStayCheckInConsideredBackdated, formatYMDInTimeZone, resolveHotelTimeZone, minSelectableCheckInYmdHotel, isLateNightCheckInGraceWindow, lateCheckInGraceWindowLabel, defaultStayCheckInYmdHotel, parseHotelYmdToLocalDate } from '@/lib/hotel-date'
+import { isStayCheckInConsideredBackdated, formatYMDInTimeZone, resolveHotelTimeZone, minSelectableCheckInYmdHotel, isLateNightCheckInGraceWindow, lateCheckInGraceWindowLabel, defaultStayCheckInYmdHotel, parseHotelYmdToLocalDate, verifyStayCheckInBackdate } from '@/lib/hotel-date'
 import { useNightAuditClosedDates } from '@/hooks/use-night-audit-closed-dates'
 import type { CounterpartyOrganizationOption } from '@/lib/utils/search-counterparty-organizations'
 import {
@@ -880,7 +880,10 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
   }
 
   const canApproveBackdates = hasPermission(currentUserRole, 'backdate:approve')
-  const { closedDates: nightAuditClosedDates } = useNightAuditClosedDates(currentUserId, open)
+  const {
+    closedDates: nightAuditClosedDates,
+    refresh: refreshNightAuditClosedDates,
+  } = useNightAuditClosedDates(currentUserId, open)
   const isBackdated = checkIn
     ? isStayCheckInConsideredBackdated(toLocalDateStr(checkIn), new Date(), undefined, {
         auditedDates: nightAuditClosedDates,
@@ -1018,7 +1021,15 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
   const handleSubmit = async () => {
     if (!checkIn || !checkOut) { toast.error('Dates required'); return }
     if (!canSubmit()) { toast.error('Complete payment details'); return }
-    if (isBackdated && !canApproveBackdates && !(await hasApprovedBackdateRequest())) {
+    const verifiedIsBackdated = await verifyStayCheckInBackdate(
+      toLocalDateStr(checkIn),
+      refreshNightAuditClosedDates,
+    )
+    if (verifiedIsBackdated === null) {
+      toast.error('Unable to verify Night Audit status. Try again.')
+      return
+    }
+    if (verifiedIsBackdated && !canApproveBackdates && !(await hasApprovedBackdateRequest())) {
       toast.error(copy.backdateBlocked)
       return
     }
@@ -1026,7 +1037,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
     const hotelTz = resolveHotelTimeZone()
     const todayYmd = formatYMDInTimeZone(new Date(), hotelTz)
     const checkInYmd = toLocalDateStr(checkIn)
-    if (!isBackdated) {
+    if (!verifiedIsBackdated) {
       if (wording === 'booking' && checkInYmd > todayYmd) {
         toast.error('Bulk booking is for guests checking in today. Use Bulk reservation for future dates.')
         return
