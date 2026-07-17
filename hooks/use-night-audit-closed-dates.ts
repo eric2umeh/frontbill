@@ -4,14 +4,18 @@ import { useCallback, useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 
 export function useNightAuditClosedDates(userId: string | null | undefined, enabled = true) {
-  const [closedDates, setClosedDates] = useState<Set<string>>(new Set())
+  // `undefined` means the server has not verified the audit state. Consumers
+  // deliberately treat that state as closed for yesterday-only backdate rules.
+  const [closedDates, setClosedDates] = useState<Set<string> | undefined>(undefined)
   const [loading, setLoading] = useState(false)
 
   const refresh = useCallback(async () => {
     if (!enabled || !userId || userId === 'placeholder') {
-      setClosedDates(new Set())
+      setClosedDates(undefined)
+      setLoading(false)
       return
     }
+    setClosedDates(undefined)
     setLoading(true)
     try {
       const supabase = createClient()
@@ -30,10 +34,12 @@ export function useNightAuditClosedDates(userId: string | null | undefined, enab
       )
       const json = await res.json().catch(() => ({}))
       if (!res.ok) {
-        setClosedDates(new Set())
+        setClosedDates(undefined)
         return
       }
       setClosedDates(new Set((json.dates as string[]) || []))
+    } catch {
+      setClosedDates(undefined)
     } finally {
       setLoading(false)
     }

@@ -115,6 +115,11 @@ export function isStayCheckInConsideredBackdated(
 
   const yesterdayHotel = calendarDateMinusOneDay(todayHotel)
   if (checkInYmd === yesterdayHotel) {
+    // Closed-date data is fetched asynchronously in booking forms. Treat an
+    // unknown audit state as closed so a slow/failed request cannot bypass
+    // Night Audit approval. A successfully loaded empty collection still
+    // means yesterday is open.
+    if (!options?.auditedDates) return true
     return auditedDateSet(options).has(checkInYmd)
   }
 
