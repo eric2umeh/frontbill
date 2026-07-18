@@ -29,10 +29,14 @@ export function useNightAuditClosedDates(userId: string | null | undefined, enab
         { credentials: 'include', headers },
       )
       const json = await res.json().catch(() => ({}))
-      if (!res.ok) {
+      if (
+        !res.ok ||
+        !Array.isArray(json.dates) ||
+        json.dates.some((date: unknown) => typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date))
+      ) {
         return null
       }
-      const nextClosedDates = new Set((json.dates as string[]) || [])
+      const nextClosedDates = new Set<string>(json.dates)
       setClosedDates(nextClosedDates)
       return nextClosedDates
     } catch {

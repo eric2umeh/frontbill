@@ -131,9 +131,16 @@ export async function verifyStayCheckInBackdate(
   now: Date = new Date(),
   timeZone: string = resolveHotelTimeZone(),
 ): Promise<boolean | null> {
+  const tz = resolveHotelTimeZone(timeZone)
+  const todayHotel = formatYMDInTimeZone(now, tz)
+  if (checkInYmd >= todayHotel) return false
+
+  const yesterdayHotel = calendarDateMinusOneDay(todayHotel)
+  if (checkInYmd !== yesterdayHotel) return true
+
   const auditedDates = await loadAuditedDates()
   if (auditedDates === null) return null
-  return isStayCheckInConsideredBackdated(checkInYmd, now, timeZone, { auditedDates })
+  return isStayCheckInConsideredBackdated(checkInYmd, now, tz, { auditedDates })
 }
 
 /** True when staff are in the post-midnight grace window (late arrival / previous-day check-in). */
