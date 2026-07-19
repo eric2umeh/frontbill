@@ -880,10 +880,14 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
   }
 
   const canApproveBackdates = hasPermission(currentUserRole, 'backdate:approve')
-  const { closedDates: nightAuditClosedDates } = useNightAuditClosedDates(currentUserId, open)
+  const {
+    closedDates: nightAuditClosedDates,
+    ready: nightAuditClosedDatesReady,
+  } = useNightAuditClosedDates(currentUserId, open)
   const isBackdated = checkIn
     ? isStayCheckInConsideredBackdated(toLocalDateStr(checkIn), new Date(), undefined, {
         auditedDates: nightAuditClosedDates,
+        auditedDatesReady: nightAuditClosedDatesReady,
       })
     : false
   const minCheckInYmd = minSelectableCheckInYmdHotel()
@@ -894,12 +898,13 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
     if (!open) return
     const ymd = defaultStayCheckInYmdHotel(new Date(), undefined, {
       auditedDates: nightAuditClosedDates,
+      auditedDatesReady: nightAuditClosedDatesReady,
     })
     const ci = parseHotelYmdToLocalDate(ymd)
     setCheckIn(ci)
     setCheckOut(addDays(ci, 1))
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- apply once per open
-  }, [open])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-default only when audit state resolves
+  }, [open, nightAuditClosedDatesReady])
 
   const copy =
     wording === 'booking'

@@ -614,10 +614,14 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
   }
 
   const canApproveBackdates = hasPermission(role, 'backdate:approve')
-  const { closedDates: nightAuditClosedDates } = useNightAuditClosedDates(userId, open)
+  const {
+    closedDates: nightAuditClosedDates,
+    ready: nightAuditClosedDatesReady,
+  } = useNightAuditClosedDates(userId, open)
   const isBackdated = checkInDate
     ? isStayCheckInConsideredBackdated(toLocalDateStr(checkInDate), new Date(), undefined, {
         auditedDates: nightAuditClosedDates,
+        auditedDatesReady: nightAuditClosedDatesReady,
       })
     : false
   const minCheckInYmd = minSelectableCheckInYmdHotel()
@@ -630,14 +634,14 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
     if (!open) return
     const ymd = defaultStayCheckInYmdHotel(new Date(), undefined, {
       auditedDates: nightAuditClosedDates,
+      auditedDatesReady: nightAuditClosedDatesReady,
     })
     const ci = parseHotelYmdToLocalDate(ymd)
     setCheckInDate(ci)
     setCheckOutDate(addDays(ci, 1))
     setNights(1)
-    // intentionally only when open toggles — closed dates refresh after fetch is OK once
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- apply once per open
-  }, [open])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-default only when audit state resolves
+  }, [open, nightAuditClosedDatesReady])
 
   const hasApprovedBackdateRequest = async () => {
     if (!checkInDate) return false
@@ -1006,7 +1010,10 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
   const resetForm = () => {
     setFullName(''); setPhone(''); setEmail(''); setAddress(''); setGuestId('')
     const ci = parseHotelYmdToLocalDate(
-      defaultStayCheckInYmdHotel(new Date(), undefined, { auditedDates: nightAuditClosedDates }),
+      defaultStayCheckInYmdHotel(new Date(), undefined, {
+        auditedDates: nightAuditClosedDates,
+        auditedDatesReady: nightAuditClosedDatesReady,
+      }),
     )
     setCheckInDate(ci)
     setCheckOutDate(addDays(ci, 1))

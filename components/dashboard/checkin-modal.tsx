@@ -132,12 +132,6 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
       const sanitized = normalizeRoomsForBookingPickers(roomData) as any[]
       setAllRooms(sanitized)
       setAllBookings(bookingData || [])
-      const ci = parseHotelYmdToLocalDate(defaultStayCheckInYmdHotel())
-      const co = addDays(ci, 1)
-      setCheckInDate(ci)
-      setCheckOutDate(co)
-      setNights(1)
-      filterRooms(ci, co, bookingData || [], sanitized)
     } catch {
       toast.error('Failed to load data')
     }
@@ -151,6 +145,12 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
     setRooms(available)
     setSelectedRoom((prev: any) => prev && bookedIds.has(prev.id) ? null : prev)
   }
+
+  useEffect(() => {
+    if (!open) return
+    filterRooms(checkInDate, checkOutDate, allBookings, allRooms)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refresh availability when data or dates change
+  }, [open, checkInDate, checkOutDate, allBookings, allRooms])
 
   const handleGuestSearch = (value: string) => {
     setFullName(value)
@@ -219,11 +219,15 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
   const minCheckInYmd = minSelectableCheckInYmdHotel()
   const minCheckInDate = parseHotelYmdToLocalDate(minCheckInYmd)
   const inLateCheckInGrace = isLateNightCheckInGraceWindow()
-  const { closedDates: nightAuditClosedDates } = useNightAuditClosedDates(authUserId, open)
+  const {
+    closedDates: nightAuditClosedDates,
+    ready: nightAuditClosedDatesReady,
+  } = useNightAuditClosedDates(authUserId, open)
   const canApproveBackdates = hasPermission(authRole, 'backdate:approve')
   const isBackdated = checkInDate
     ? isStayCheckInConsideredBackdated(toLocalDateStr(checkInDate), new Date(), undefined, {
         auditedDates: nightAuditClosedDates,
+        auditedDatesReady: nightAuditClosedDatesReady,
       })
     : false
 
@@ -231,13 +235,14 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
     if (!open) return
     const ymd = defaultStayCheckInYmdHotel(new Date(), undefined, {
       auditedDates: nightAuditClosedDates,
+      auditedDatesReady: nightAuditClosedDatesReady,
     })
     const ci = parseHotelYmdToLocalDate(ymd)
     setCheckInDate(ci)
     setCheckOutDate(addDays(ci, 1))
     setNights(1)
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- apply once per open
-  }, [open])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-default only when audit state resolves
+  }, [open, nightAuditClosedDatesReady])
 
   const canSubmit = () => !!(fullName.trim() && selectedRoom && checkInDate && checkOutDate && nights > 0)
 
@@ -462,7 +467,10 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
     setFullName(''); setPhone(''); setGuestId('')
     setFilteredGuests([]); setGuestSearchOpen(false)
     const ci = parseHotelYmdToLocalDate(
-      defaultStayCheckInYmdHotel(new Date(), undefined, { auditedDates: nightAuditClosedDates }),
+      defaultStayCheckInYmdHotel(new Date(), undefined, {
+        auditedDates: nightAuditClosedDates,
+        auditedDatesReady: nightAuditClosedDatesReady,
+      }),
     )
     setCheckInDate(ci); setCheckOutDate(addDays(ci, 1)); setNights(1)
     setSelectedRoom(null); setPaymentMethod('pos'); setCustomPrice('')

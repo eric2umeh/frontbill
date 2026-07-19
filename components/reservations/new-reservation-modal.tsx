@@ -452,10 +452,14 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
   const depositAmount = cashbackBreakdown.cashbackDiscount + cashbackBreakdown.cashToCollect
   const balanceAmount = cashbackBreakdown.balanceRemaining
   const canApproveBackdates = hasPermission(currentUserRole, 'backdate:approve')
-  const { closedDates: nightAuditClosedDates } = useNightAuditClosedDates(currentUserId, open)
+  const {
+    closedDates: nightAuditClosedDates,
+    ready: nightAuditClosedDatesReady,
+  } = useNightAuditClosedDates(currentUserId, open)
   const isBackdated = checkInDate
     ? isStayCheckInConsideredBackdated(toLocalDateStr(checkInDate), new Date(), undefined, {
         auditedDates: nightAuditClosedDates,
+        auditedDatesReady: nightAuditClosedDatesReady,
       })
     : false
   const minCheckInYmd = minSelectableCheckInYmdHotel()
@@ -466,13 +470,14 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
     if (!open) return
     const ymd = defaultStayCheckInYmdHotel(new Date(), undefined, {
       auditedDates: nightAuditClosedDates,
+      auditedDatesReady: nightAuditClosedDatesReady,
     })
     const ci = parseHotelYmdToLocalDate(ymd)
     setCheckInDate(ci)
     setCheckOutDate(addDays(ci, 1))
     setNights(1)
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- apply once per open
-  }, [open])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-default only when audit state resolves
+  }, [open, nightAuditClosedDatesReady])
 
   const hasApprovedBackdateRequest = async () => {
     if (!checkInDate || !orgId || !selectedRoom?.id || !currentUserId) return false
@@ -763,7 +768,10 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
   const resetForm = () => {
     setFullName(''); setPhone(''); setEmail(''); setAddress(''); setGuestId('')
     const ci = parseHotelYmdToLocalDate(
-      defaultStayCheckInYmdHotel(new Date(), undefined, { auditedDates: nightAuditClosedDates }),
+      defaultStayCheckInYmdHotel(new Date(), undefined, {
+        auditedDates: nightAuditClosedDates,
+        auditedDatesReady: nightAuditClosedDatesReady,
+      }),
     )
     setCheckInDate(ci); setCheckOutDate(addDays(ci, 1)); setNights(1); setBackdateReason('')
     setSelectedRoomType(''); setSelectedRoom(null); setPricePerNight(0); setCustomPrice('')

@@ -6,13 +6,17 @@ import { createClient } from '@/lib/supabase/client'
 export function useNightAuditClosedDates(userId: string | null | undefined, enabled = true) {
   const [closedDates, setClosedDates] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(false)
+  const [ready, setReady] = useState(false)
 
   const refresh = useCallback(async () => {
     if (!enabled || !userId || userId === 'placeholder') {
       setClosedDates(new Set())
+      setLoading(false)
+      setReady(false)
       return
     }
     setLoading(true)
+    setReady(false)
     try {
       const supabase = createClient()
       const headers: Record<string, string> = {}
@@ -34,6 +38,9 @@ export function useNightAuditClosedDates(userId: string | null | undefined, enab
         return
       }
       setClosedDates(new Set((json.dates as string[]) || []))
+      setReady(true)
+    } catch {
+      setClosedDates(new Set())
     } finally {
       setLoading(false)
     }
@@ -43,5 +50,5 @@ export function useNightAuditClosedDates(userId: string | null | undefined, enab
     void refresh()
   }, [refresh])
 
-  return { closedDates, loading, refresh }
+  return { closedDates, loading, ready, refresh }
 }
