@@ -36,7 +36,7 @@ export function useNightAuditClosedDates(userId: string | null | undefined, enab
         setStatus('error')
         return null
       }
-      const dates = new Set(
+      const dates = new Set<string>(
         Array.isArray(json.dates)
           ? json.dates.filter((date: unknown): date is string => (
               typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date)
