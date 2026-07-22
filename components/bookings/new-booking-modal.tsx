@@ -1,7 +1,7 @@
 'use client'
 
 // Cache bust marker: 2025-02-25-final-fix
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import {
   Dialog,
@@ -44,8 +44,9 @@ import { insertFolioCharges } from '@/lib/utils/insert-folio-charges'
 import { applyPaymentToGuestCityLedger } from '@/lib/utils/guest-city-ledger'
 import { buildBackdateDedupeKey } from '@/lib/backdate/dedupe-key'
 import type { SerializedBookingPayload } from '@/lib/backdate/booking-payload'
-import { isStayCheckInConsideredBackdated, minSelectableCheckInYmdHotel, isLateNightCheckInGraceWindow, lateCheckInGraceWindowLabel, defaultStayCheckInYmdHotel, parseHotelYmdToLocalDate } from '@/lib/hotel-date'
+import { isStayCheckInConsideredBackdated, minSelectableCheckInYmdHotel, isLateNightCheckInGraceWindow, lateCheckInGraceWindowLabel, defaultStayCheckInYmdHotel, hotelCalendarTodayYmd, parseHotelYmdToLocalDate } from '@/lib/hotel-date'
 import { useNightAuditClosedDates } from '@/hooks/use-night-audit-closed-dates'
+import { verifyStayDateWithNightAudit } from '@/lib/night-audit/verify-stay-date'
 import { todayYmdHotel } from '@/lib/utils/booking-in-house-dates'
 import {
   FolioRemarksAttachmentsField,
@@ -112,13 +113,14 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
 
   // Dates
   const [checkInDate, setCheckInDate] = useState<Date>(() =>
-    parseHotelYmdToLocalDate(defaultStayCheckInYmdHotel()),
+    parseHotelYmdToLocalDate(hotelCalendarTodayYmd()),
   )
   const [checkOutDate, setCheckOutDate] = useState<Date | undefined>(() => {
-    const ci = parseHotelYmdToLocalDate(defaultStayCheckInYmdHotel())
+    const ci = parseHotelYmdToLocalDate(hotelCalendarTodayYmd())
     return addDays(ci, 1)
   })
   const [nights, setNights] = useState(1)
+  const datesEditedRef = useRef(false)
   const [backdateReason, setBackdateReason] = useState('')
   const [folioExtras, setFolioExtras] = useState<FolioRemarksAttachmentsValue>({ remarks: '', files: [] })
 
@@ -545,6 +547,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
   }, [open, checkInDate, checkOutDate, allRooms, allBookingsForRooms, filterRoomsForDates])
 
   const handleStayDatesChange = (from: Date, to: Date | undefined) => {
+    datesEditedRef.current = true
     setCheckInDate(from)
     if (to) {
       setCheckOutDate(to)
@@ -614,7 +617,11 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
   }
 
   const canApproveBackdates = hasPermission(role, 'backdate:approve')
-  const { closedDates: nightAuditClosedDates } = useNightAuditClosedDates(userId, open)
+  const {
+    closedDates: nightAuditClosedDates,
+    ready: nightAuditReady,
+    refresh: refreshNightAuditClosedDates,
+  } = useNightAuditClosedDates(userId, open)
   const isBackdated = checkInDate
     ? isStayCheckInConsideredBackdated(toLocalDateStr(checkInDate), new Date(), undefined, {
         auditedDates: nightAuditClosedDates,
@@ -627,7 +634,11 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
   // When the modal opens, default check-in to yesterday during the late-arrival window
   // (before night audit closes that date) so staff do not capture "today" by accident.
   useEffect(() => {
-    if (!open) return
+    if (!open) {
+      datesEditedRef.current = false
+      return
+    }
+    if (!nightAuditReady || datesEditedRef.current) return
     const ymd = defaultStayCheckInYmdHotel(new Date(), undefined, {
       auditedDates: nightAuditClosedDates,
     })
@@ -635,9 +646,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
     setCheckInDate(ci)
     setCheckOutDate(addDays(ci, 1))
     setNights(1)
-    // intentionally only when open toggles — closed dates refresh after fetch is OK once
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- apply once per open
-  }, [open])
+  }, [open, nightAuditReady, nightAuditClosedDates])
 
   const hasApprovedBackdateRequest = async () => {
     if (!checkInDate) return false
@@ -752,7 +761,15 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
     try {
       setLoading(true)
       if (!checkInDate || !checkOutDate) { toast.error('Dates required'); return }
-      if (isBackdated && !canApproveBackdates && !(await hasApprovedBackdateRequest())) {
+      const auditVerification = await verifyStayDateWithNightAudit(
+        toLocalDateStr(checkInDate),
+        refreshNightAuditClosedDates,
+      )
+      if (!auditVerification.ok) {
+        toast.error('Could not verify Night Audit status. Please try again.')
+        return
+      }
+      if (auditVerification.isBackdated && !canApproveBackdates && !(await hasApprovedBackdateRequest())) {
         toast.error('Backdated bookings require approval in Night Audit. Send a request first.')
         return
       }
@@ -1005,9 +1022,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
 
   const resetForm = () => {
     setFullName(''); setPhone(''); setEmail(''); setAddress(''); setGuestId('')
-    const ci = parseHotelYmdToLocalDate(
-      defaultStayCheckInYmdHotel(new Date(), undefined, { auditedDates: nightAuditClosedDates }),
-    )
+    const ci = parseHotelYmdToLocalDate(hotelCalendarTodayYmd())
     setCheckInDate(ci)
     setCheckOutDate(addDays(ci, 1))
     setNights(1)
