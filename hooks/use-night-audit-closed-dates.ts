@@ -3,16 +3,19 @@
 import { useCallback, useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 
+type ClosedDatesStatus = 'idle' | 'loading' | 'ready' | 'error'
+
 export function useNightAuditClosedDates(userId: string | null | undefined, enabled = true) {
   const [closedDates, setClosedDates] = useState<Set<string>>(new Set())
-  const [loading, setLoading] = useState(false)
+  const [status, setStatus] = useState<ClosedDatesStatus>('idle')
 
   const refresh = useCallback(async () => {
     if (!enabled || !userId || userId === 'placeholder') {
       setClosedDates(new Set())
-      return
+      setStatus('idle')
+      return null
     }
-    setLoading(true)
+    setStatus('loading')
     try {
       const supabase = createClient()
       const headers: Record<string, string> = {}
@@ -30,12 +33,22 @@ export function useNightAuditClosedDates(userId: string | null | undefined, enab
       )
       const json = await res.json().catch(() => ({}))
       if (!res.ok) {
-        setClosedDates(new Set())
-        return
+        setStatus('error')
+        return null
       }
-      setClosedDates(new Set((json.dates as string[]) || []))
-    } finally {
-      setLoading(false)
+      const dates = new Set(
+        Array.isArray(json.dates)
+          ? json.dates.filter((date: unknown): date is string => (
+              typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date)
+            ))
+          : [],
+      )
+      setClosedDates(dates)
+      setStatus('ready')
+      return dates
+    } catch {
+      setStatus('error')
+      return null
     }
   }, [enabled, userId])
 
@@ -43,5 +56,11 @@ export function useNightAuditClosedDates(userId: string | null | undefined, enab
     void refresh()
   }, [refresh])
 
-  return { closedDates, loading, refresh }
+  return {
+    closedDates,
+    loading: status === 'loading',
+    ready: status === 'ready',
+    error: status === 'error',
+    refresh,
+  }
 }

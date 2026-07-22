@@ -57,6 +57,7 @@ import {
 } from '@/lib/reservations/reservation-payment-methods'
 import { applyPaymentToGuestCityLedger } from '@/lib/utils/guest-city-ledger'
 import { buildBackdateDedupeKey } from '@/lib/backdate/dedupe-key'
+import { verifyStayDateWithNightAudit } from '@/lib/night-audit/verify-stay-date'
 import { SelectedRoomsStickyBar } from '@/components/shared/selected-rooms-sticky-bar'
 import { CashbackPaymentPanel } from '@/components/cashback/cashback-payment-panel'
 import { computeCashbackDiscount } from '@/lib/cashback/cashback-payment-math'
@@ -260,6 +261,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
   // Step 2: Dates
   const [checkIn, setCheckIn] = useState<Date>()
   const [checkOut, setCheckOut] = useState<Date>()
+  const datesEditedRef = useRef(false)
   const [backdateReason, setBackdateReason] = useState('')
 
   // Step 3: Payment
@@ -880,7 +882,11 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
   }
 
   const canApproveBackdates = hasPermission(currentUserRole, 'backdate:approve')
-  const { closedDates: nightAuditClosedDates } = useNightAuditClosedDates(currentUserId, open)
+  const {
+    closedDates: nightAuditClosedDates,
+    ready: nightAuditReady,
+    refresh: refreshNightAuditClosedDates,
+  } = useNightAuditClosedDates(currentUserId, open)
   const isBackdated = checkIn
     ? isStayCheckInConsideredBackdated(toLocalDateStr(checkIn), new Date(), undefined, {
         auditedDates: nightAuditClosedDates,
@@ -891,15 +897,18 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
   const inLateCheckInGrace = isLateNightCheckInGraceWindow()
 
   useEffect(() => {
-    if (!open) return
+    if (!open) {
+      datesEditedRef.current = false
+      return
+    }
+    if (!nightAuditReady || datesEditedRef.current) return
     const ymd = defaultStayCheckInYmdHotel(new Date(), undefined, {
       auditedDates: nightAuditClosedDates,
     })
     const ci = parseHotelYmdToLocalDate(ymd)
     setCheckIn(ci)
     setCheckOut(addDays(ci, 1))
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- apply once per open
-  }, [open])
+  }, [open, nightAuditReady, nightAuditClosedDates])
 
   const copy =
     wording === 'booking'
@@ -1018,7 +1027,16 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
   const handleSubmit = async () => {
     if (!checkIn || !checkOut) { toast.error('Dates required'); return }
     if (!canSubmit()) { toast.error('Complete payment details'); return }
-    if (isBackdated && !canApproveBackdates && !(await hasApprovedBackdateRequest())) {
+    const auditVerification = await verifyStayDateWithNightAudit(
+      toLocalDateStr(checkIn),
+      refreshNightAuditClosedDates,
+    )
+    if (!auditVerification.ok) {
+      toast.error('Could not verify Night Audit status. Please try again.')
+      return
+    }
+    const latestIsBackdated = auditVerification.isBackdated
+    if (latestIsBackdated && !canApproveBackdates && !(await hasApprovedBackdateRequest())) {
       toast.error(copy.backdateBlocked)
       return
     }
@@ -1026,7 +1044,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
     const hotelTz = resolveHotelTimeZone()
     const todayYmd = formatYMDInTimeZone(new Date(), hotelTz)
     const checkInYmd = toLocalDateStr(checkIn)
-    if (!isBackdated) {
+    if (!latestIsBackdated) {
       if (wording === 'booking' && checkInYmd > todayYmd) {
         toast.error('Bulk booking is for guests checking in today. Use Bulk reservation for future dates.')
         return
@@ -1855,6 +1873,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
               checkOut={checkOut}
               nights={checkIn && checkOut ? Math.max(differenceInDays(checkOut, checkIn), 0) : 0}
               onDatesChange={(from, to) => {
+                datesEditedRef.current = true
                 setCheckIn(from)
                 setCheckOut(to)
                 setRoomAvailabilityChecked(false)
@@ -1863,6 +1882,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
               }}
               onNightsChange={(n) => {
                 if (!checkIn) return
+                datesEditedRef.current = true
                 setCheckOut(addDays(checkIn, n))
                 setRoomAvailabilityChecked(false)
                 setAvailableRooms([])
