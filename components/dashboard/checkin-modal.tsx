@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import {
   Dialog,
@@ -37,10 +37,12 @@ import {
   isLateNightCheckInGraceWindow,
   lateCheckInGraceWindowLabel,
   defaultStayCheckInYmdHotel,
+  hotelCalendarTodayYmd,
   parseHotelYmdToLocalDate,
   isStayCheckInConsideredBackdated,
 } from '@/lib/hotel-date'
 import { useNightAuditClosedDates } from '@/hooks/use-night-audit-closed-dates'
+import { verifyStayDateWithNightAudit } from '@/lib/night-audit/verify-stay-date'
 import { useAuth } from '@/lib/auth-context'
 import { hasPermission } from '@/lib/permissions'
 import { BOOKING_MODAL_ROOMS_LIMIT, normalizeRoomsForBookingPickers } from '@/lib/utils/room-bookability'
@@ -73,12 +75,17 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
 
   // Dates
   const [checkInDate, setCheckInDate] = useState<Date>(() =>
-    parseHotelYmdToLocalDate(defaultStayCheckInYmdHotel()),
+    parseHotelYmdToLocalDate(hotelCalendarTodayYmd()),
   )
   const [checkOutDate, setCheckOutDate] = useState<Date>(() =>
-    addDays(parseHotelYmdToLocalDate(defaultStayCheckInYmdHotel()), 1),
+    addDays(parseHotelYmdToLocalDate(hotelCalendarTodayYmd()), 1),
   )
   const [nights, setNights] = useState(1)
+  const datesEditedRef = useRef(false)
+  const checkInDateRef = useRef(checkInDate)
+  const checkOutDateRef = useRef(checkOutDate)
+  checkInDateRef.current = checkInDate
+  checkOutDateRef.current = checkOutDate
 
   // Room
   const [rooms, setRooms] = useState<any[]>([])
@@ -132,12 +139,7 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
       const sanitized = normalizeRoomsForBookingPickers(roomData) as any[]
       setAllRooms(sanitized)
       setAllBookings(bookingData || [])
-      const ci = parseHotelYmdToLocalDate(defaultStayCheckInYmdHotel())
-      const co = addDays(ci, 1)
-      setCheckInDate(ci)
-      setCheckOutDate(co)
-      setNights(1)
-      filterRooms(ci, co, bookingData || [], sanitized)
+      filterRooms(checkInDateRef.current, checkOutDateRef.current, bookingData || [], sanitized)
     } catch {
       toast.error('Failed to load data')
     }
@@ -173,6 +175,7 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
   }
 
   const handleStayDatesChange = (from: Date, to: Date | undefined) => {
+    datesEditedRef.current = true
     setCheckInDate(from)
     if (to) {
       setCheckOutDate(to)
@@ -219,7 +222,11 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
   const minCheckInYmd = minSelectableCheckInYmdHotel()
   const minCheckInDate = parseHotelYmdToLocalDate(minCheckInYmd)
   const inLateCheckInGrace = isLateNightCheckInGraceWindow()
-  const { closedDates: nightAuditClosedDates } = useNightAuditClosedDates(authUserId, open)
+  const {
+    closedDates: nightAuditClosedDates,
+    ready: nightAuditReady,
+    refresh: refreshNightAuditClosedDates,
+  } = useNightAuditClosedDates(authUserId, open)
   const canApproveBackdates = hasPermission(authRole, 'backdate:approve')
   const isBackdated = checkInDate
     ? isStayCheckInConsideredBackdated(toLocalDateStr(checkInDate), new Date(), undefined, {
@@ -228,16 +235,21 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
     : false
 
   useEffect(() => {
-    if (!open) return
+    if (!open) {
+      datesEditedRef.current = false
+      return
+    }
+    if (!nightAuditReady || datesEditedRef.current) return
     const ymd = defaultStayCheckInYmdHotel(new Date(), undefined, {
       auditedDates: nightAuditClosedDates,
     })
     const ci = parseHotelYmdToLocalDate(ymd)
+    const co = addDays(ci, 1)
     setCheckInDate(ci)
-    setCheckOutDate(addDays(ci, 1))
+    setCheckOutDate(co)
     setNights(1)
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- apply once per open
-  }, [open])
+    filterRooms(ci, co, allBookings, allRooms)
+  }, [open, nightAuditReady, nightAuditClosedDates])
 
   const canSubmit = () => !!(fullName.trim() && selectedRoom && checkInDate && checkOutDate && nights > 0)
 
@@ -332,18 +344,26 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
 
   const handleSubmit = async () => {
     if (!canSubmit()) { toast.error('Please fill in all required fields'); return }
-    if (isBackdated && !canApproveBackdates) {
-      toast.error(
-        'That check-in date was already closed by Night Audit. Ask a Manager, Administrator, or Superadmin to approve the backdate.',
-      )
-      return
-    }
     if (paymentMethod === 'city_ledger' && !selectedLedger) {
       toast.error('Please select a city ledger organization account')
       return
     }
     try {
       setLoading(true)
+      const auditVerification = await verifyStayDateWithNightAudit(
+        toLocalDateStr(checkInDate),
+        refreshNightAuditClosedDates,
+      )
+      if (!auditVerification.ok) {
+        toast.error('Could not verify Night Audit status. Please try again.')
+        return
+      }
+      if (auditVerification.isBackdated && !canApproveBackdates) {
+        toast.error(
+          'That check-in date was already closed by Night Audit. Ask a Manager, Administrator, or Superadmin to approve the backdate.',
+        )
+        return
+      }
       const supabase = createClient()
       const { data: { user } } = await supabase.auth.getUser()
 
@@ -461,9 +481,7 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
   const resetForm = () => {
     setFullName(''); setPhone(''); setGuestId('')
     setFilteredGuests([]); setGuestSearchOpen(false)
-    const ci = parseHotelYmdToLocalDate(
-      defaultStayCheckInYmdHotel(new Date(), undefined, { auditedDates: nightAuditClosedDates }),
-    )
+    const ci = parseHotelYmdToLocalDate(hotelCalendarTodayYmd())
     setCheckInDate(ci); setCheckOutDate(addDays(ci, 1)); setNights(1)
     setSelectedRoom(null); setPaymentMethod('pos'); setCustomPrice('')
     setLedgerSearch(''); setLedgerResults([]); setSelectedLedger(null); setLedgerSearchOpen(false)
