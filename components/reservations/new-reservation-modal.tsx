@@ -409,6 +409,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
   }
 
   const handleNightsChange = (value: number) => {
+    datesEditedRef.current = true
     const n = Math.max(1, value || 1)
     setNights(n)
     if (checkInDate) {
