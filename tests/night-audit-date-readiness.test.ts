@@ -82,3 +82,24 @@ test('dashboard data loading cannot overwrite a staff date selection', async () 
     /filterRooms\(checkInDateRef\.current, checkOutDateRef\.current/,
   )
 })
+
+test('night-count edits prevent asynchronous audit defaults from replacing dates', async () => {
+  const root = fileURLToPath(new URL('..', import.meta.url))
+  const dateWriters = [
+    'components/dashboard/checkin-modal.tsx',
+    'components/bookings/new-booking-modal.tsx',
+    'components/reservations/new-reservation-modal.tsx',
+  ]
+
+  for (const relativePath of dateWriters) {
+    const source = await readFile(`${root}/${relativePath}`, 'utf8')
+    const handlerStart = source.indexOf('const handleNightsChange')
+    assert.notEqual(handlerStart, -1, `${relativePath} must define a night-count handler`)
+    const handler = source.slice(handlerStart, handlerStart + 400)
+    assert.match(
+      handler,
+      /datesEditedRef\.current = true/,
+      `${relativePath} must preserve night-count edits when audit state resolves`,
+    )
+  }
+})

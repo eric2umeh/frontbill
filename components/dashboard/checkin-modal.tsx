@@ -190,6 +190,7 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
   }
 
   const handleNightsChange = (n: number) => {
+    datesEditedRef.current = true
     const val = Math.max(1, n || 1)
     setNights(val)
     const co = addDays(checkInDate, val)
