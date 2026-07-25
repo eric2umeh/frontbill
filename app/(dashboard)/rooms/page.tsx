@@ -21,7 +21,7 @@ import { reconcileRoomStatusesClient } from "@/lib/rooms/reconcile-room-status-c
 import {
   computeEffectiveRoomStatus,
   OCCUPYING_BOOKING_STATUSES,
-  pickOccupyingBooking,
+  pickRoomStatusBooking,
   type OccupyingBookingRow,
 } from "@/lib/rooms/room-occupancy";
 
@@ -105,7 +105,7 @@ export default function RoomsPage() {
 
       // Add created_by_name and updated_by_name to each room
       const roomsWithUsers = (data || []).map((room: any) => {
-        const occupying = pickOccupyingBooking(byRoom.get(room.id) ?? []);
+        const occupying = pickRoomStatusBooking(byRoom.get(room.id) ?? []);
         const effectiveStatus = computeEffectiveRoomStatus(
           room.status,
           occupying,
