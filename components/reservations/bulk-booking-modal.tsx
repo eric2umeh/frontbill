@@ -67,6 +67,7 @@ import {
 } from '@/lib/cashback/cashback-client'
 import { paymentMethodEarnsCashback } from '@/lib/cashback/cashback-config'
 import { isGuestBookingCashbackEligible } from '@/lib/cashback/cashback-eligibility'
+import { bulkRoomUsesStep1Cashback } from '@/lib/cashback/bulk-cashback-guest'
 
 function sortRoomsByNumber<T extends { room_number?: string | number | null }>(rows: T[]) {
   return [...rows].sort((a, b) =>
@@ -1168,7 +1169,13 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
         const { bookingId, guestId, folioId, roomNumber, totalAmt, pay, slotIndex } = args
         if (pendingHold || pay.depositAmt <= 0) return
 
-        if (bulkCashbackEligible && guestId) {
+        const roomCashback = bulkRoomUsesStep1Cashback({
+          cashbackEligible: bulkCashbackEligible,
+          step1GuestId: selectedGroupGuest?.id,
+          roomGuestId: guestId,
+        })
+
+        if (roomCashback && guestId) {
           await applyCashbackDiscountAndFolioPayments(supabase, {
             guestId,
             bookingId,
@@ -1489,7 +1496,12 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
             }
 
             const total = ratePn * nights
-            const pay = bulkCashbackEligible
+            const roomCashback = bulkRoomUsesStep1Cashback({
+              cashbackEligible: bulkCashbackEligible,
+              step1GuestId: selectedGroupGuest?.id,
+              roomGuestId: finalGuestId,
+            })
+            const pay = roomCashback
               ? resolveBulkRoomPayment(total, bulkPaymentOpts, {
                   balance: runningCashbackBalance,
                   apply: applyCashback,
@@ -1501,7 +1513,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
                     .depositAmt,
                   cashbackBalanceAfter: runningCashbackBalance,
                 }
-            if (bulkCashbackEligible) {
+            if (roomCashback) {
               runningCashbackBalance = pay.cashbackBalanceAfter
             }
             const depositAmt = pay.depositAmt
