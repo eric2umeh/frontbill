@@ -121,7 +121,8 @@ export async function recordCashbackEarn(
   const newEarned = current.earned + earnAmount;
   const newBalance = current.balance + earnAmount;
 
-  const { error: upErr } = await admin
+  // Optimistic lock on balance so concurrent earns cannot overwrite each other.
+  const { data: updated, error: upErr } = await admin
     .from("guest_cashback_balances")
     .update({
       earned_total: newEarned,
@@ -129,9 +130,17 @@ export async function recordCashbackEarn(
       updated_at: new Date().toISOString(),
     })
     .eq("organization_id", input.organizationId)
-    .eq("guest_id", input.guestId);
+    .eq("guest_id", input.guestId)
+    .eq("balance", current.balance)
+    .select("balance")
+    .maybeSingle();
 
   if (upErr) throw new Error(upErr.message);
+  if (!updated) {
+    throw new Error(
+      "Cashback balance changed during earn — refresh and try again",
+    );
+  }
 
   const { error: txnErr } = await admin.from("cashback_transactions").insert({
     organization_id: input.organizationId,
@@ -211,7 +220,9 @@ export async function recordCashbackRedeem(
   const newRedeemed = current.redeemed + redeemAmount;
   const newBalance = Math.max(0, current.balance - redeemAmount);
 
-  const { error: upErr } = await admin
+  // Optimistic lock: concurrent redeems that both read the same balance must not
+  // both succeed (would over-discount / leave redeemed_total inconsistent).
+  const { data: updated, error: upErr } = await admin
     .from("guest_cashback_balances")
     .update({
       redeemed_total: newRedeemed,
@@ -219,9 +230,17 @@ export async function recordCashbackRedeem(
       updated_at: new Date().toISOString(),
     })
     .eq("organization_id", input.organizationId)
-    .eq("guest_id", input.guestId);
+    .eq("guest_id", input.guestId)
+    .eq("balance", current.balance)
+    .select("balance")
+    .maybeSingle();
 
   if (upErr) throw new Error(upErr.message);
+  if (!updated) {
+    throw new Error(
+      "Cashback balance changed during redemption — refresh and try again",
+    );
+  }
 
   const { error: txnErr } = await admin.from("cashback_transactions").insert({
     organization_id: input.organizationId,
@@ -269,7 +288,7 @@ export async function recordCashbackAdjust(
   const earnedDelta = delta > 0 ? delta : 0;
   const redeemedDelta = delta < 0 ? Math.abs(delta) : 0;
 
-  const { error: upErr } = await admin
+  const { data: updated, error: upErr } = await admin
     .from("guest_cashback_balances")
     .update({
       earned_total: current.earned + earnedDelta,
@@ -278,9 +297,17 @@ export async function recordCashbackAdjust(
       updated_at: new Date().toISOString(),
     })
     .eq("organization_id", input.organizationId)
-    .eq("guest_id", input.guestId);
+    .eq("guest_id", input.guestId)
+    .eq("balance", current.balance)
+    .select("balance")
+    .maybeSingle();
 
   if (upErr) throw new Error(upErr.message);
+  if (!updated) {
+    throw new Error(
+      "Cashback balance changed during adjustment — refresh and try again",
+    );
+  }
 
   const { error: txnErr } = await admin.from("cashback_transactions").insert({
     organization_id: input.organizationId,
