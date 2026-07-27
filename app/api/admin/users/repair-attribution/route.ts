@@ -1,17 +1,27 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
 import { canonicalRoleKey } from '@/lib/permissions'
+import {
+  callerMatchesSession,
+  resolveAuthedUserId,
+} from '@/lib/api/resolve-authed-user-id'
 
 /**
  * POST /api/admin/users/repair-attribution
  * Administrator or Superadmin: sets `profiles.added_by` to the caller for every profile in the same org
  * that still has `added_by` NULL (e.g. legacy rows created before attribution was fixed).
+ * caller_id must match the authenticated session (cookie or Bearer).
  */
 export async function POST(request: Request) {
   try {
     const { caller_id } = await request.json().catch(() => ({}))
     if (!caller_id || typeof caller_id !== 'string') {
       return NextResponse.json({ error: 'caller_id is required' }, { status: 400 })
+    }
+
+    const authed = await resolveAuthedUserId(request)
+    if (!callerMatchesSession(caller_id, authed)) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     const admin = createAdminClient()

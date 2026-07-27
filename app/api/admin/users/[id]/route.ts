@@ -2,11 +2,15 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
 import { formatPersonName } from '@/lib/utils/name-format'
 import { canonicalRoleKey } from '@/lib/permissions'
+import {
+  callerMatchesSession,
+  resolveAuthedUserId,
+} from '@/lib/api/resolve-authed-user-id'
 
 type Params = { params: Promise<{ id: string }> }
 
 // PATCH /api/admin/users/[id] — update role, full_name, or password
-// caller_id is passed from the client and validated server-side via admin client
+// caller_id must match the authenticated session (cookie or Bearer).
 export async function PATCH(request: Request, { params }: Params) {
   try {
     const { id } = await params
@@ -14,6 +18,11 @@ export async function PATCH(request: Request, { params }: Params) {
     const { caller_id, ...updates } = body
 
     if (!caller_id) return NextResponse.json({ error: 'caller_id is required' }, { status: 400 })
+
+    const authed = await resolveAuthedUserId(request)
+    if (!callerMatchesSession(caller_id, authed)) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
 
     const admin = createAdminClient()
 
@@ -88,7 +97,7 @@ export async function PATCH(request: Request, { params }: Params) {
 }
 
 // DELETE /api/admin/users/[id] — permanently remove user
-// caller_id is passed from the client and validated server-side via admin client
+// caller_id must match the authenticated session (cookie or Bearer).
 export async function DELETE(request: Request, { params }: Params) {
   try {
     const { id } = await params
@@ -98,6 +107,11 @@ export async function DELETE(request: Request, { params }: Params) {
 
     if (caller_id === id) {
       return NextResponse.json({ error: 'You cannot delete your own account' }, { status: 400 })
+    }
+
+    const authed = await resolveAuthedUserId(request)
+    if (!callerMatchesSession(caller_id, authed)) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     const admin = createAdminClient()

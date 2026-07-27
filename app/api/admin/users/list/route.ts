@@ -2,11 +2,16 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
 import { canonicalRoleKey } from '@/lib/permissions'
 import { resolveStaffDisplayName } from '@/lib/utils/resolve-staff-display-name'
+import {
+  callerMatchesSession,
+  resolveAuthedUserId,
+} from '@/lib/api/resolve-authed-user-id'
 
 // GET /api/admin/users/list?caller_id=xxx
 // Returns all profiles in the same organization as the caller.
 // Uses the admin client to bypass the restrictive RLS policy on profiles
 // (which only allows users to see their own row by default).
+// caller_id must match the authenticated session (cookie or Bearer).
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url)
@@ -14,6 +19,11 @@ export async function GET(request: Request) {
 
     if (!caller_id) {
       return NextResponse.json({ error: 'caller_id is required' }, { status: 400 })
+    }
+
+    const authed = await resolveAuthedUserId(request)
+    if (!callerMatchesSession(caller_id, authed)) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     const admin = createAdminClient()
