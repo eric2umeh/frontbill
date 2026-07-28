@@ -3,10 +3,13 @@ import { roomHousekeepingAfterEdit } from '@/lib/booking/edit-booking-patch'
 import { hasRoomDateConflict } from '@/lib/booking/room-date-conflict'
 import {
   appendRescheduleStayNote,
+  buildRescheduleRoomChargeFolioUpdates,
   buildRescheduleStayFields,
+  folioRoomChargeStatusAfterReschedule,
 } from '@/lib/booking/reschedule-stay'
 import { canRescheduleStayBooking } from '@/lib/booking/can-reschedule-stay'
 import { isBookingCheckedOut } from '@/lib/utils/booking-checkout-ui'
+import { insertFolioCharges } from '@/lib/utils/insert-folio-charges'
 
 export type ApplyRescheduleStayResult =
   | { ok: true; booking: Record<string, unknown> }
@@ -104,6 +107,56 @@ export async function applyRescheduleStay(
 
   if (upErr) {
     return { ok: false, status: 500, error: upErr.message }
+  }
+
+  const { data: roomChargeRows, error: folioLoadErr } = await admin
+    .from('folio_charges')
+    .select('id, amount, description, charge_type, created_at')
+    .eq('booking_id', bookingId)
+    .in('charge_type', ['room_charge', 'reservation'])
+    .order('created_at', { ascending: true })
+
+  if (folioLoadErr) {
+    return { ok: false, status: 500, error: folioLoadErr.message }
+  }
+
+  const folioUpdates = buildRescheduleRoomChargeFolioUpdates(roomChargeRows || [], fields)
+  if (folioUpdates.length === 0) {
+    const { error: folioInsErr } = await insertFolioCharges(admin, [
+      {
+        booking_id: bookingId,
+        organization_id: organizationId,
+        description: `Initial booking charge - ${fields.number_of_nights} night${
+          fields.number_of_nights !== 1 ? 's' : ''
+        }`,
+        amount: fields.total_amount,
+        charge_type: 'room_charge',
+        payment_status:
+          fields.payment_status === 'city_ledger'
+            ? 'city_ledger'
+            : fields.payment_status === 'paid'
+              ? 'paid'
+              : 'unpaid',
+        created_by: callerId,
+      },
+    ])
+    if (folioInsErr) {
+      return { ok: false, status: 500, error: folioInsErr.message }
+    }
+  } else {
+    for (const patch of folioUpdates) {
+      const { error: folioUpErr } = await admin
+        .from('folio_charges')
+        .update({
+          amount: patch.amount,
+          description: patch.description,
+          payment_status: patch.payment_status,
+        })
+        .eq('id', patch.id)
+      if (folioUpErr) {
+        return { ok: false, status: 500, error: folioUpErr.message }
+      }
+    }
   }
 
   const nextHousekeeping = roomHousekeepingAfterEdit(String((existing as { status?: string }).status ?? 'reserved'))
