@@ -131,12 +131,7 @@ export async function applyRescheduleStay(
         }`,
         amount: fields.total_amount,
         charge_type: 'room_charge',
-        payment_status:
-          fields.payment_status === 'city_ledger'
-            ? 'city_ledger'
-            : fields.payment_status === 'paid'
-              ? 'paid'
-              : 'unpaid',
+        payment_status: folioRoomChargeStatusAfterReschedule(fields.payment_status),
         created_by: callerId,
       },
     ])
