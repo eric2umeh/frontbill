@@ -12,6 +12,43 @@ export function derivePaymentStatusAfterReschedule(
   return 'pending'
 }
 
+/** Folio room_charge payment_status aligned with post-reschedule booking payment_status. */
+export function folioRoomChargeStatusAfterReschedule(
+  bookingPaymentStatus: string,
+): 'paid' | 'unpaid' | 'city_ledger' {
+  const ps = String(bookingPaymentStatus || '').toLowerCase()
+  if (ps === 'city_ledger') return 'city_ledger'
+  if (ps === 'paid') return 'paid'
+  return 'unpaid'
+}
+
+export type FolioRoomChargeLine = {
+  id: string
+  amount?: unknown
+  description?: string | null
+}
+
+/**
+ * Keep the primary stay room_charge in sync with the rescheduled total.
+ * Extra room_charge/reservation lines are zeroed so night-count changes cannot leave
+ * stale accommodation amounts on the folio (which drives checkout / bill balance).
+ */
+export function buildRescheduleRoomChargeFolioUpdates(
+  roomChargeLines: FolioRoomChargeLine[],
+  fields: { total_amount: number; number_of_nights: number; payment_status: string },
+): { id: string; amount: number; description: string; payment_status: string }[] {
+  if (!roomChargeLines.length) return []
+  const nights = fields.number_of_nights
+  const payment_status = folioRoomChargeStatusAfterReschedule(fields.payment_status)
+  const description = `Initial booking charge - ${nights} night${nights !== 1 ? 's' : ''}`
+  return roomChargeLines.map((line, index) => ({
+    id: line.id,
+    amount: index === 0 ? fields.total_amount : 0,
+    description: index === 0 ? description : String(line.description || 'Superseded room charge'),
+    payment_status: index === 0 ? payment_status : 'unpaid',
+  }))
+}
+
 export function buildRescheduleStayFields(
   current: Record<string, unknown>,
   check_in: string,
