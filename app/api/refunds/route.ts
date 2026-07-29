@@ -170,25 +170,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: insE.message }, { status: 500 });
     }
 
-    if (booking_id) {
-      const { data: bk } = await admin
-        .from("bookings")
-        .select("deposit, balance")
-        .eq("id", booking_id)
-        .single();
-      if (bk) {
-        const dep = Number(bk.deposit) || 0;
-        const bal = Number(bk.balance) || 0;
-        const depNext = Math.max(0, dep - amt);
-        const remainder = Math.max(0, amt - dep);
-        const balNext = Math.max(0, bal - remainder);
-        await admin
-          .from("bookings")
-          .update({ deposit: depNext, balance: balNext })
-          .eq("id", booking_id);
-      }
-    }
-
+    // Do not mutate bookings.deposit / bookings.balance. Refunds are
+    // sales-collection reporting rows only; cutting deposit invents false
+    // folio outstanding via bookingDisplayBillBalance (total - deposit).
     return NextResponse.json({ refund: inserted });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
