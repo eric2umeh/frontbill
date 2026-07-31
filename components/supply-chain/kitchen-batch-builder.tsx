@@ -54,7 +54,7 @@ import {
 import { syncBatchToRestaurantOutlet } from '@/lib/supply-chain/sync-restaurant-outlet'
 import { KITCHEN_BATCH_UNITS } from '@/lib/supply-chain/conversion-units'
 
-const BATCH_CREATOR_ROLES = new Set(['superadmin', 'admin', 'manager'])
+const BATCH_CREATOR_ROLES = new Set(['superadmin', 'admin', 'manager', 'store'])
 
 type IngredientSearchItem =
   | { source: 'raw'; id: string; name: string; unit: string; lastPrice: number; stockOnHand: number }

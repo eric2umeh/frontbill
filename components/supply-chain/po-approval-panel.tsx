@@ -86,9 +86,9 @@ export function PoApprovalWorkflowBanner() {
         <p className="font-medium">Purchase order approval chain</p>
         <p className="text-muted-foreground">
           A raised PO cannot go to market until the accountant and then the
-          manager each review it with a comment. During testing, an
-          Administrator may accept or reject a raised PO directly from the queue
-          below.
+          manager each review it with a comment. Store staff, Administrators,
+          and Superadmins may accept or reject a raised PO directly from the
+          queue below.
         </p>
         <ol className="list-decimal list-inside text-xs text-muted-foreground space-y-0.5">
           {WORKFLOW_STEPS.map((step) => (
@@ -115,7 +115,7 @@ function PoDecisionCard({
 
   const title =
     stage === "admin_test"
-      ? "Administrator (testing) — accept or reject with comment"
+      ? "Store / Admin — accept or reject with comment"
       : stage === "accountant"
         ? "Accountant review — accept or reject with comment"
         : "Manager review — accept or reject with comment";
