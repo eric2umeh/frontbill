@@ -547,7 +547,7 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
     key: "store",
     label: "Store",
     description:
-      "General store and inventory only: catalogue, stock counts, and movements — no dashboard or front-office menus. Profile/settings only.",
+      "Full supply chain for central store: catalogue (add items without approval), stock, issue-out, kitchen/F&B views, purchasing, PO approvals, and activity — plus profile/settings. No front-office menus.",
     color:
       "bg-amber-100 text-amber-950 dark:bg-amber-950/30 dark:text-amber-100",
     permissions: [
@@ -559,7 +559,13 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
       "store:adjust",
       "store:issue",
       "store:reports",
+      "store:audit",
       "supply:store",
+      "supply:kitchen",
+      "supply:fnb",
+      "supply:purchasing",
+      "supply:approve_accountant",
+      "supply:approve_manager",
       "supply:activity",
       "settings:view",
     ],
@@ -953,12 +959,14 @@ export function canAccessExpenseMenu(
   return roleKey != null && EXPENSE_MENU_ROLE_KEYS.includes(roleKey);
 }
 
-/** Testing override: Administrator / Superadmin may review POs without a dedicated accountant/manager login. */
+/** Testing override: Administrator / Superadmin / Store may review POs without a dedicated accountant/manager login. */
 export function canAdminTestApproveSupplyPo(
   userRole: string | null | undefined,
 ): boolean {
   const roleKey = canonicalRoleKey(userRole);
-  return roleKey === "admin" || roleKey === "superadmin";
+  return (
+    roleKey === "admin" || roleKey === "superadmin" || roleKey === "store"
+  );
 }
 
 export function canSupplyPoAccountantReview(
@@ -994,7 +1002,10 @@ export function canKickstartOutletStock(
 ): boolean {
   const roleKey = canonicalRoleKey(userRole);
   return (
-    roleKey === "admin" || roleKey === "superadmin" || roleKey === "manager"
+    roleKey === "admin" ||
+    roleKey === "superadmin" ||
+    roleKey === "manager" ||
+    roleKey === "store"
   );
 }
 
@@ -1003,7 +1014,11 @@ export function canAddStoreItemDirect(
   userRole: string | null | undefined,
 ): boolean {
   const roleKey = canonicalRoleKey(userRole);
-  return roleKey === "admin" || roleKey === "superadmin";
+  return (
+    roleKey === "admin" ||
+    roleKey === "superadmin" ||
+    roleKey === "store"
+  );
 }
 
 /** Submit new store catalogue items for admin approval. */
@@ -1032,12 +1047,16 @@ export function canManageStoreCatalog(
   return canAddStoreItemDirect(userRole);
 }
 
-/** Kitchen batch standards (recipe definitions) — admin / superadmin only. */
+/** Kitchen batch standards (recipe definitions) — admin / superadmin / store. */
 export function canManageKitchenBatchStandards(
   userRole: string | null | undefined,
 ): boolean {
   const roleKey = canonicalRoleKey(userRole);
-  return roleKey === "superadmin" || roleKey === "admin";
+  return (
+    roleKey === "superadmin" ||
+    roleKey === "admin" ||
+    roleKey === "store"
+  );
 }
 
 /** Central Store → Issue Out tab (transfer stock to kitchen, bar, etc.). */
