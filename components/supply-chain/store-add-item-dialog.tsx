@@ -632,7 +632,7 @@ export function StoreAddItemDialog({
         </DialogFooter>
         {!canAddDirect && (
           <p className="text-xs text-muted-foreground">
-            Submissions require Admin or Superadmin approval before appearing in stock.
+            Submissions require Admin, Superadmin, or Store approval before appearing in stock.
           </p>
         )}
       </DialogContent>
