@@ -9,6 +9,7 @@ import {
   buildBackdateRequestSummary,
   collectRoomIdsFromRequests,
 } from '@/lib/backdate/request-summary'
+import { unauthorizedUnlessCallerMatches } from '@/lib/api/resolve-authed-user-id'
 import { NextResponse } from 'next/server'
 
 const DECISION_STATUSES = ['approved', 'rejected']
@@ -28,6 +29,9 @@ export async function GET(request: Request) {
     if (!callerId) {
       return NextResponse.json({ error: 'caller_id is required' }, { status: 400 })
     }
+
+    const unauthorized = await unauthorizedUnlessCallerMatches(request, callerId)
+    if (unauthorized) return unauthorized
 
     const admin = createAdminClient()
     const { data: callerProfile, error: callerError } = await admin
@@ -105,6 +109,9 @@ export async function POST(request: Request) {
     if (!caller_id || !request_type || !requested_check_in || !reason?.trim()) {
       return NextResponse.json({ error: 'caller_id, request_type, requested_check_in and reason are required' }, { status: 400 })
     }
+
+    const unauthorized = await unauthorizedUnlessCallerMatches(request, caller_id)
+    if (unauthorized) return unauthorized
 
     const admin = createAdminClient()
     const { data: callerProfile, error: callerError } = await admin
@@ -219,6 +226,9 @@ export async function PATCH(request: Request) {
     if (!caller_id || !request_id || !DECISION_STATUSES.includes(status)) {
       return NextResponse.json({ error: 'caller_id, request_id and a valid status are required' }, { status: 400 })
     }
+
+    const unauthorized = await unauthorizedUnlessCallerMatches(request, caller_id)
+    if (unauthorized) return unauthorized
 
     const admin = createAdminClient()
     const { data: callerProfile, error: callerError } = await admin

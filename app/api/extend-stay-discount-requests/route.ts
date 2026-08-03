@@ -4,6 +4,7 @@ import { canonicalRoleKey, hasPermission } from '@/lib/permissions'
 import { canRequestExtendStayDiscount } from '@/lib/utils/booking-checkout-ui'
 import { insertFolioCharges } from '@/lib/utils/insert-folio-charges'
 import { notifyNightAuditRequestCreated } from '@/lib/night-audit/notify-request-created'
+import { unauthorizedUnlessCallerMatches } from '@/lib/api/resolve-authed-user-id'
 
 const DECISION = ['approved', 'rejected'] as const
 
@@ -17,6 +18,9 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url)
     const callerId = searchParams.get('caller_id')
     if (!callerId) return NextResponse.json({ error: 'caller_id is required' }, { status: 400 })
+
+    const unauthorized = await unauthorizedUnlessCallerMatches(request, callerId)
+    if (unauthorized) return unauthorized
 
     const admin = createAdminClient()
     const { data: prof, error: pe } = await admin.from('profiles').select('organization_id, role').eq('id', callerId).single()
@@ -79,6 +83,9 @@ export async function POST(request: Request) {
     if (!caller_id || !booking_id || !new_check_out || !reason?.trim()) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
     }
+
+    const unauthorized = await unauthorizedUnlessCallerMatches(request, caller_id)
+    if (unauthorized) return unauthorized
 
     const admin = createAdminClient()
     const { data: prof } = await admin.from('profiles').select('organization_id, role').eq('id', caller_id).single()
@@ -176,6 +183,9 @@ export async function PATCH(request: Request) {
     if (!caller_id || !request_id || !DECISION.includes(status)) {
       return NextResponse.json({ error: 'caller_id, request_id and status required' }, { status: 400 })
     }
+
+    const unauthorized = await unauthorizedUnlessCallerMatches(request, caller_id)
+    if (unauthorized) return unauthorized
 
     const admin = createAdminClient()
     const { data: prof } = await admin.from('profiles').select('organization_id, role').eq('id', caller_id).single()

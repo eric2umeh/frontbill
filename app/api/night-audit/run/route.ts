@@ -1,6 +1,7 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
 import { hasPermission } from '@/lib/permissions'
+import { unauthorizedUnlessCallerMatches } from '@/lib/api/resolve-authed-user-id'
 import {
   formatYMDInTimeZone,
   nightAuditClosingDateYmd,
@@ -16,6 +17,9 @@ export async function POST(request: Request) {
     if (!caller_id) {
       return NextResponse.json({ error: 'caller_id is required' }, { status: 400 })
     }
+
+    const unauthorized = await unauthorizedUnlessCallerMatches(request, caller_id)
+    if (unauthorized) return unauthorized
 
     const admin = createAdminClient()
     const { data: prof } = await admin

@@ -2,6 +2,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
 import { canonicalRoleKey, hasPermission } from '@/lib/permissions'
 import { notifyNightAuditRequestCreated } from '@/lib/night-audit/notify-request-created'
+import { unauthorizedUnlessCallerMatches } from '@/lib/api/resolve-authed-user-id'
 
 const DECISION = ['approved', 'rejected'] as const
 
@@ -29,6 +30,9 @@ export async function GET(request: Request) {
     if (!callerId) {
       return NextResponse.json({ error: 'caller_id is required' }, { status: 400 })
     }
+
+    const unauthorized = await unauthorizedUnlessCallerMatches(request, callerId)
+    if (unauthorized) return unauthorized
 
     const admin = createAdminClient()
     const { data: callerProfile, error: callerError } = await admin
@@ -97,6 +101,9 @@ export async function POST(request: Request) {
         { status: 400 },
       )
     }
+
+    const unauthorized = await unauthorizedUnlessCallerMatches(request, caller_id)
+    if (unauthorized) return unauthorized
 
     const admin = createAdminClient()
     const { data: callerProfile, error: callerError } = await admin
@@ -261,6 +268,9 @@ export async function PATCH(request: Request) {
     if (!caller_id || !request_id || !DECISION.includes(status)) {
       return NextResponse.json({ error: 'caller_id, request_id and status (approved|rejected) are required' }, { status: 400 })
     }
+
+    const unauthorized = await unauthorizedUnlessCallerMatches(request, caller_id)
+    if (unauthorized) return unauthorized
 
     const admin = createAdminClient()
     const { data: callerProfile, error: callerError } = await admin
