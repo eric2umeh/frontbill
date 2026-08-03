@@ -4,9 +4,10 @@ import { NextResponse } from 'next/server'
 import { formatPersonName } from '@/lib/utils/name-format'
 import { canonicalRoleKey } from '@/lib/permissions'
 import { resolveStaffDisplayName } from '@/lib/utils/resolve-staff-display-name'
+import { unauthorizedUnlessCallerMatches } from '@/lib/api/resolve-authed-user-id'
 
 // POST /api/admin/users — create a new user in the same organization
-// caller_id is passed from the client (already authenticated in browser) and validated server-side
+// caller_id must match the authenticated session (cookie or Bearer).
 export async function POST(request: Request) {
   try {
     const { full_name, email, password, role, caller_id } = await request.json()
@@ -15,6 +16,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'full_name, email, password, role and caller_id are required' }, { status: 400 })
     }
     const formattedFullName = formatPersonName(full_name)
+
+    const unauthorized = await unauthorizedUnlessCallerMatches(request, caller_id)
+    if (unauthorized) return unauthorized
 
     const admin = createAdminClient()
 

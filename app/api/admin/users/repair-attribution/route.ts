@@ -1,6 +1,7 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
 import { canonicalRoleKey } from '@/lib/permissions'
+import { unauthorizedUnlessCallerMatches } from '@/lib/api/resolve-authed-user-id'
 
 /**
  * POST /api/admin/users/repair-attribution
@@ -13,6 +14,9 @@ export async function POST(request: Request) {
     if (!caller_id || typeof caller_id !== 'string') {
       return NextResponse.json({ error: 'caller_id is required' }, { status: 400 })
     }
+
+    const unauthorized = await unauthorizedUnlessCallerMatches(request, caller_id)
+    if (unauthorized) return unauthorized
 
     const admin = createAdminClient()
     const { data: callerProfile, error: callerError } = await admin
