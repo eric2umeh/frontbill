@@ -1,6 +1,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { NextResponse } from "next/server";
 import { hasPermission } from "@/lib/permissions";
+import { unauthorizedUnlessCallerMatches } from "@/lib/api/resolve-authed-user-id";
 
 function canProcessRefunds(role: string | null | undefined): boolean {
   return hasPermission(role, "payments:refund");
@@ -18,6 +19,9 @@ export async function GET(request: Request) {
         { error: "caller_id is required" },
         { status: 400 },
       );
+
+    const unauthorized = await unauthorizedUnlessCallerMatches(request, callerId);
+    if (unauthorized) return unauthorized;
 
     const admin = createAdminClient();
     const { data: prof, error: pe } = await admin
@@ -84,6 +88,10 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
+
+    const unauthorized = await unauthorizedUnlessCallerMatches(request, caller_id);
+    if (unauthorized) return unauthorized;
+
     const amt = Number(amount);
     if (!Number.isFinite(amt) || amt <= 0) {
       return NextResponse.json(
@@ -124,7 +132,7 @@ export async function POST(request: Request) {
     if (booking_id) {
       const { data: bk, error: be } = await admin
         .from("bookings")
-        .select("id, organization_id, deposit, balance")
+        .select("id, organization_id")
         .eq("id", booking_id)
         .single();
       if (be || !bk || bk.organization_id !== orgId) {
@@ -170,25 +178,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: insE.message }, { status: 500 });
     }
 
-    if (booking_id) {
-      const { data: bk } = await admin
-        .from("bookings")
-        .select("deposit, balance")
-        .eq("id", booking_id)
-        .single();
-      if (bk) {
-        const dep = Number(bk.deposit) || 0;
-        const bal = Number(bk.balance) || 0;
-        const depNext = Math.max(0, dep - amt);
-        const remainder = Math.max(0, amt - dep);
-        const balNext = Math.max(0, bal - remainder);
-        await admin
-          .from("bookings")
-          .update({ deposit: depNext, balance: balNext })
-          .eq("id", booking_id);
-      }
-    }
-
+    // Do not mutate bookings.deposit / bookings.balance. Refunds are
+    // sales-collection reporting rows only; cutting deposit invents false
+    // folio outstanding via bookingDisplayBillBalance (total - deposit).
     return NextResponse.json({ refund: inserted });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
