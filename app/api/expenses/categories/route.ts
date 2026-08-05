@@ -4,6 +4,7 @@ import { canAccessExpenseMenu, hasPermission } from '@/lib/permissions'
 import { ensureExpenseCategories } from '@/lib/expenses/seed-categories'
 import { slugifyExpenseCode } from '@/lib/expenses/default-categories'
 import { resolveProfileNames } from '@/lib/expenses/resolve-profile-names'
+import { unauthorizedUnlessCallerMatches } from '@/lib/api/resolve-authed-user-id'
 
 export async function GET(request: Request) {
   try {
@@ -12,6 +13,9 @@ export async function GET(request: Request) {
     if (!callerId) {
       return NextResponse.json({ error: 'caller_id is required' }, { status: 400 })
     }
+
+    const unauthorized = await unauthorizedUnlessCallerMatches(request, callerId)
+    if (unauthorized) return unauthorized
 
     const admin = createAdminClient()
     const { data: prof, error: pe } = await admin
@@ -58,6 +62,9 @@ export async function POST(request: Request) {
     if (!caller_id || !String(name || '').trim()) {
       return NextResponse.json({ error: 'caller_id and name are required' }, { status: 400 })
     }
+
+    const unauthorized = await unauthorizedUnlessCallerMatches(request, caller_id)
+    if (unauthorized) return unauthorized
 
     const admin = createAdminClient()
     const { data: prof } = await admin
@@ -109,6 +116,9 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: 'caller_id and category_id required' }, { status: 400 })
     }
 
+    const unauthorized = await unauthorizedUnlessCallerMatches(request, caller_id)
+    if (unauthorized) return unauthorized
+
     const admin = createAdminClient()
     const { data: prof } = await admin
       .from('profiles')
@@ -153,6 +163,9 @@ export async function DELETE(request: Request) {
     if (!callerId || !categoryId) {
       return NextResponse.json({ error: 'caller_id and category_id required' }, { status: 400 })
     }
+
+    const unauthorized = await unauthorizedUnlessCallerMatches(request, callerId)
+    if (unauthorized) return unauthorized
 
     const admin = createAdminClient()
     const { data: prof } = await admin

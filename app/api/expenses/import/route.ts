@@ -4,6 +4,7 @@ import { canAccessExpenseMenu, hasPermission } from '@/lib/permissions'
 import { parseExpenditureGrid } from '@/lib/expenses/parse-expenditure-import'
 import { ensureExpenseCategories } from '@/lib/expenses/seed-categories'
 import { slugifyExpenseCode } from '@/lib/expenses/default-categories'
+import { unauthorizedUnlessCallerMatches } from '@/lib/api/resolve-authed-user-id'
 
 export async function POST(request: Request) {
   try {
@@ -13,6 +14,9 @@ export async function POST(request: Request) {
     if (!caller_id || !Array.isArray(rows)) {
       return NextResponse.json({ error: 'caller_id and rows[][] required' }, { status: 400 })
     }
+
+    const unauthorized = await unauthorizedUnlessCallerMatches(request, caller_id)
+    if (unauthorized) return unauthorized
 
     const admin = createAdminClient()
     const { data: prof } = await admin

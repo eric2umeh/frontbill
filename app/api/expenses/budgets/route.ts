@@ -1,6 +1,7 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
 import { canAccessExpenseMenu, hasPermission } from '@/lib/permissions'
+import { unauthorizedUnlessCallerMatches } from '@/lib/api/resolve-authed-user-id'
 
 export async function GET(request: Request) {
   try {
@@ -12,6 +13,9 @@ export async function GET(request: Request) {
     if (!callerId || !year || !month) {
       return NextResponse.json({ error: 'caller_id, year, month required' }, { status: 400 })
     }
+
+    const unauthorized = await unauthorizedUnlessCallerMatches(request, callerId)
+    if (unauthorized) return unauthorized
 
     const admin = createAdminClient()
     const { data: prof } = await admin
@@ -50,6 +54,9 @@ export async function POST(request: Request) {
     if (!caller_id || !year || !month || !Array.isArray(items)) {
       return NextResponse.json({ error: 'caller_id, year, month, items[] required' }, { status: 400 })
     }
+
+    const unauthorized = await unauthorizedUnlessCallerMatches(request, caller_id)
+    if (unauthorized) return unauthorized
 
     const admin = createAdminClient()
     const { data: prof } = await admin

@@ -4,6 +4,7 @@ import { canAccessExpenseMenu, hasPermission } from '@/lib/permissions'
 import { ensureExpenseCategories } from '@/lib/expenses/seed-categories'
 import { resolveProfileNames } from '@/lib/expenses/resolve-profile-names'
 import { EXPENSE_PAYMENT_METHODS } from '@/lib/payments/payment-methods'
+import { unauthorizedUnlessCallerMatches } from '@/lib/api/resolve-authed-user-id'
 
 const PAYMENT_METHODS = EXPENSE_PAYMENT_METHODS
 
@@ -40,6 +41,9 @@ export async function GET(request: Request) {
     if (!callerId) {
       return NextResponse.json({ error: 'caller_id is required' }, { status: 400 })
     }
+
+    const unauthorized = await unauthorizedUnlessCallerMatches(request, callerId)
+    if (unauthorized) return unauthorized
 
     const admin = createAdminClient()
     const { data: prof } = await admin
@@ -109,6 +113,9 @@ export async function POST(request: Request) {
     if (!caller_id) {
       return NextResponse.json({ error: 'caller_id is required' }, { status: 400 })
     }
+
+    const unauthorized = await unauthorizedUnlessCallerMatches(request, caller_id)
+    if (unauthorized) return unauthorized
 
     const admin = createAdminClient()
     const { data: prof } = await admin
