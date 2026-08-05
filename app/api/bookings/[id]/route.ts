@@ -1,4 +1,5 @@
 import { createAdminClient } from '@/lib/supabase/admin'
+import { unauthorizedUnlessCallerMatches } from '@/lib/api/resolve-authed-user-id'
 import {
   editBookingPatchSchema,
   mergeBookingPatch,
@@ -26,6 +27,9 @@ export async function PATCH(request: Request, ctx: { params: Promise<{ id: strin
     if (!caller_id || !rawPatch || typeof rawPatch !== 'object') {
       return NextResponse.json({ error: 'caller_id and patch object are required' }, { status: 400 })
     }
+
+    const unauthorized = await unauthorizedUnlessCallerMatches(request, caller_id)
+    if (unauthorized) return unauthorized
 
     const parsed = editBookingPatchSchema.safeParse(rawPatch)
     if (!parsed.success) {
@@ -171,6 +175,9 @@ export async function DELETE(request: Request, ctx: { params: Promise<{ id: stri
     if (!caller_id) {
       return NextResponse.json({ error: 'caller_id is required' }, { status: 400 })
     }
+
+    const unauthorized = await unauthorizedUnlessCallerMatches(request, caller_id)
+    if (unauthorized) return unauthorized
 
     const admin = createAdminClient()
     const caller = await loadCaller(admin, caller_id)
