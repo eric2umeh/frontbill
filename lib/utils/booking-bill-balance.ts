@@ -19,12 +19,18 @@ function isFolioPaymentLine(ctype: string, amt: number): boolean {
   return amt < 0;
 }
 
+/** Voided / superseded folio lines must not affect AR or payment credit math. */
+export function isFolioChargeInactive(status: string): boolean {
+  return ["voided", "superseded", "cancelled"].includes(status.toLowerCase());
+}
+
 function isPositiveChargeUnpaid(
   status: string,
   method: string,
   amt: number,
 ): boolean {
   if (amt <= 0) return false;
+  if (isFolioChargeInactive(status)) return false;
   if (status === "posted_to_ledger") return false;
   return (
     ["pending", "unpaid", "city_ledger", "partial"].includes(status) ||
@@ -55,6 +61,8 @@ function summarizeFolioBalance(
     const method = String(
       raw.paymentMethod ?? raw.payment_method ?? "",
     ).toLowerCase();
+
+    if (isFolioChargeInactive(status)) continue;
 
     if (isFolioPaymentLine(ctype, amt)) {
       if (status === "paid" || status === "posted_to_ledger") {
