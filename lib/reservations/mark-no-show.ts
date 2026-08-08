@@ -1,10 +1,11 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { insertFolioCharges } from '@/lib/utils/insert-folio-charges'
-import { bookingDisplayBillBalance } from '@/lib/utils/booking-bill-balance'
+import { folioPositiveOutstandingSum } from '@/lib/utils/booking-bill-balance'
 import {
   calculateNoShowFee,
   fetchNoShowPolicy,
 } from '@/lib/reservations/no-show-policy'
+import { stayChargeIdsToSupersedeOnNoShow } from '@/lib/reservations/no-show-folio'
 
 const NO_SHOW_ELIGIBLE_STATUSES = ['reserved', 'confirmed']
 
@@ -88,6 +89,24 @@ export async function markBookingNoShow(
       .in('status', ['reserved', 'occupied'])
   }
 
+  const { data: existingCharges, error: fcReadErr } = await supabase
+    .from('folio_charges')
+    .select('id, amount, charge_type, payment_status, payment_method, description')
+    .eq('booking_id', input.bookingId)
+
+  if (fcReadErr) return { data: null, error: fcReadErr.message }
+
+  const supersedeIds = stayChargeIdsToSupersedeOnNoShow(existingCharges || [])
+  if (supersedeIds.length) {
+    const { error: voidErr } = await supabase
+      .from('folio_charges')
+      .update({ payment_status: 'voided' })
+      .in('id', supersedeIds)
+      .eq('booking_id', input.bookingId)
+
+    if (voidErr) return { data: null, error: voidErr.message }
+  }
+
   if (feeAmount > 0) {
     const chargeRow: Record<string, unknown> = {
       booking_id: input.bookingId,
@@ -103,35 +122,44 @@ export async function markBookingNoShow(
 
     const { error: fcErr } = await insertFolioCharges(supabase, [chargeRow])
     if (fcErr) return { data: null, error: fcErr.message }
-
-    const { data: fcRows } = await supabase
-      .from('folio_charges')
-      .select('amount, charge_type, payment_status, payment_method')
-      .eq('booking_id', input.bookingId)
-
-    const billBalance = bookingDisplayBillBalance(
-      {
-        balance: booking.balance,
-        deposit: booking.deposit,
-        total_amount: booking.total_amount,
-      },
-      (fcRows || []).map((r) => ({
-        amount: r.amount,
-        charge_type: r.charge_type,
-        payment_status: r.payment_status,
-        payment_method: r.payment_method,
-      })),
-    )
-
-    await supabase
-      .from('bookings')
-      .update({
-        balance: billBalance,
-        total_amount: Math.max(Number(booking.total_amount || 0), billBalance),
-        payment_status: billBalance > 0 ? 'pending' : 'paid',
-      })
-      .eq('id', input.bookingId)
   }
+
+  const { data: fcRows, error: fcFinalErr } = await supabase
+    .from('folio_charges')
+    .select('amount, charge_type, payment_status, payment_method')
+    .eq('booking_id', input.bookingId)
+
+  if (fcFinalErr) return { data: null, error: fcFinalErr.message }
+
+  const billBalance = folioPositiveOutstandingSum(
+    (fcRows || []).map((r) => ({
+      amount: r.amount,
+      charge_type: r.charge_type,
+      payment_status: r.payment_status,
+      payment_method: r.payment_method,
+    })),
+  )
+
+  const activeStayTotal = (fcRows || []).reduce((sum, r) => {
+    const status = String(r.payment_status || '').toLowerCase()
+    if (status === 'voided' || status === 'superseded' || status === 'cancelled') {
+      return sum
+    }
+    const ctype = String(r.charge_type || '').toLowerCase()
+    const amt = Number(r.amount || 0)
+    if (ctype === 'payment' || amt <= 0) return sum
+    return sum + amt
+  }, 0)
+
+  await supabase
+    .from('bookings')
+    .update({
+      balance: billBalance,
+      // Replace stay total with the post-no-show active charges (fee), not max(old, fee).
+      total_amount: activeStayTotal > 0 ? activeStayTotal : feeAmount,
+      payment_status: billBalance > 0 ? 'pending' : 'paid',
+    })
+    .eq('id', input.bookingId)
 
   return { data: { feeAmount, bookingId: input.bookingId }, error: null }
 }
