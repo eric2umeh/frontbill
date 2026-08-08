@@ -35,6 +35,7 @@ import {
   RefreshCw,
   Calculator,
 } from 'lucide-react'
+import { PageLoadingState } from '@/components/loading-screen'
 
 type PeriodKey = 'today' | 'day' | 'range' | '7d' | '30d' | 'this_month'
 
@@ -115,11 +116,7 @@ export function ProfitabilityPanel() {
   }
 
   if (loading && !analysis) {
-    return (
-      <div className="flex justify-center py-24">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-      </div>
-    )
+    return <PageLoadingState label="Loading profitability…" />
   }
 
   const status = analysis?.summary.status
