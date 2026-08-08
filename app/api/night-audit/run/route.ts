@@ -3,10 +3,12 @@ import { NextResponse } from 'next/server'
 import { hasPermission } from '@/lib/permissions'
 import {
   formatYMDInTimeZone,
+  hotelCalendarDayUtcBounds,
   nightAuditClosingDateYmd,
   nightAuditNextBusinessDateYmd,
   resolveHotelTimeZone,
 } from '@/lib/hotel-date'
+import { summarizeDayLedgerCollections } from '@/lib/payments/day-ledger-collections'
 
 export async function POST(request: Request) {
   try {
@@ -53,6 +55,7 @@ export async function POST(request: Request) {
     }
 
     const nextBusinessDate = nightAuditNextBusinessDateYmd(closingDate)
+    const dayBounds = hotelCalendarDayUtcBounds(closingDate, tz)
 
     const { data: existing } = await admin
       .from('night_audits')
@@ -71,6 +74,7 @@ export async function POST(request: Request) {
     const [
       { data: checkedInBookings },
       { data: payments },
+      { data: dayTransactions },
       { data: allRooms },
       { data: arrivals },
       { data: overdueBookings },
@@ -85,8 +89,15 @@ export async function POST(request: Request) {
         .from('payments')
         .select('*')
         .eq('organization_id', orgId)
-        .gte('payment_date', `${closingDate}T00:00:00.000Z`)
-        .lte('payment_date', `${closingDate}T23:59:59.999Z`),
+        .gte('payment_date', dayBounds.startIso)
+        .lte('payment_date', dayBounds.endInclusiveIso),
+      admin
+        .from('transactions')
+        .select('id, amount, payment_method, status, booking_id, created_at, transaction_id, guest_name, description')
+        .eq('organization_id', orgId)
+        .gte('created_at', dayBounds.startIso)
+        .lte('created_at', dayBounds.endInclusiveIso)
+        .limit(5000),
       admin
         .from('rooms')
         .select('id, room_number, status')
@@ -147,7 +158,8 @@ export async function POST(request: Request) {
 
     const totalRooms = allRooms?.length || 0
     const occupiedCount = checkedInBookings?.length || 0
-    const totalRevenue = payments?.reduce((sum, p) => sum + (Number(p.amount) || 0), 0) || 0
+    const collections = summarizeDayLedgerCollections(dayTransactions || [], payments || [])
+    const totalRevenue = collections.totalRevenue
     const occupancyRate = totalRooms > 0 ? Math.round((occupiedCount / totalRooms) * 100) : 0
 
     const pendingCheckouts =
@@ -197,19 +209,7 @@ export async function POST(request: Request) {
         totalRooms,
         occupiedRooms: occupiedCount,
         totalRevenue,
-        revenues: {
-          cash:
-            payments?.filter((p) => p.payment_method === 'cash').reduce((s, p) => s + Number(p.amount), 0) || 0,
-          pos:
-            payments?.filter((p) => p.payment_method === 'pos').reduce((s, p) => s + Number(p.amount), 0) || 0,
-          transfer:
-            payments
-              ?.filter((p) => ['transfer', 'bank_transfer'].includes(String(p.payment_method)))
-              .reduce((s, p) => s + Number(p.amount), 0) || 0,
-          cityLedger:
-            payments?.filter((p) => p.payment_method === 'city_ledger').reduce((s, p) => s + Number(p.amount), 0) ||
-            0,
-        },
+        revenues: collections.revenues,
         pendingCheckouts,
         expectedArrivals: arrivals || [],
         anomalies,
