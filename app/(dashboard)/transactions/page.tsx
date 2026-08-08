@@ -20,11 +20,18 @@ import {
   Calendar as CalendarIcon, TrendingUp, CreditCard, Loader2,
   Banknote, Smartphone, ArrowRightLeft, Building2, Clock
 } from 'lucide-react'
-import { format, startOfDay, endOfDay, startOfMonth, endOfMonth, startOfWeek, endOfWeek, subDays } from 'date-fns'
+import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek } from 'date-fns'
 import {
   collectOutletPaidTransactionOrderNumbers,
   shouldHideOutletPaymentDuplicate,
 } from '@/lib/outlets/outlet-financial-integration'
+import { filterDuplicatePaymentRows } from '@/lib/payments/dedupe-ledger-rows'
+import {
+  calendarDateMinusOneDay,
+  hotelCalendarDayUtcBounds,
+  hotelCalendarTodayYmd,
+  resolveHotelTimeZone,
+} from '@/lib/hotel-date'
 
 interface Payment {
   id: string
@@ -59,12 +66,29 @@ export default function TransactionsPage() {
 
   const dateFilter = useMemo(() => {
     const now = new Date()
+    const tz = resolveHotelTimeZone()
     switch (dateRange) {
-      case 'today':     return { from: startOfDay(now),           to: endOfDay(now) }
-      case 'yesterday': return { from: startOfDay(subDays(now,1)), to: endOfDay(subDays(now,1)) }
-      case 'this_week': return { from: startOfWeek(now,{weekStartsOn:1}), to: endOfWeek(now,{weekStartsOn:1}) }
-      case 'this_month':return { from: startOfMonth(now),         to: endOfMonth(now) }
-      case 'custom':    return { from: startOfDay(customDate),    to: endOfDay(customDate) }
+      case 'today': {
+        const b = hotelCalendarDayUtcBounds(hotelCalendarTodayYmd(now, tz), tz)
+        return { fromIso: b.startIso, toIso: b.endInclusiveIso }
+      }
+      case 'yesterday': {
+        const ymd = calendarDateMinusOneDay(hotelCalendarTodayYmd(now, tz))
+        const b = hotelCalendarDayUtcBounds(ymd, tz)
+        return { fromIso: b.startIso, toIso: b.endInclusiveIso }
+      }
+      case 'this_week':
+        return {
+          fromIso: startOfWeek(now, { weekStartsOn: 1 }).toISOString(),
+          toIso: endOfWeek(now, { weekStartsOn: 1 }).toISOString(),
+        }
+      case 'this_month':
+        return { fromIso: startOfMonth(now).toISOString(), toIso: endOfMonth(now).toISOString() }
+      case 'custom': {
+        const ymd = format(customDate, 'yyyy-MM-dd')
+        const b = hotelCalendarDayUtcBounds(ymd, tz)
+        return { fromIso: b.startIso, toIso: b.endInclusiveIso }
+      }
     }
   }, [dateRange, customDate])
 
@@ -82,8 +106,8 @@ export default function TransactionsPage() {
         return
       }
 
-      const fromIso = dateFilter.from.toISOString()
-      const toIso = dateFilter.to.toISOString()
+      const fromIso = dateFilter.fromIso
+      const toIso = dateFilter.toIso
 
       let txQuery = supabase
         .from('transactions')
@@ -129,8 +153,11 @@ export default function TransactionsPage() {
       })
       const outletTxOrderNumbers = collectOutletPaidTransactionOrderNumbers(visibleTxData)
 
-      const payRows = (payData || []).filter((p: { notes?: string | null }) =>
-        !shouldHideOutletPaymentDuplicate(p.notes, outletTxOrderNumbers),
+      const payRows = filterDuplicatePaymentRows(
+        (payData || []).filter((p: { notes?: string | null }) =>
+          !shouldHideOutletPaymentDuplicate(p.notes, outletTxOrderNumbers),
+        ),
+        visibleTxData,
       )
 
       const bookingIds = Array.from(

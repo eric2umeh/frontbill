@@ -256,3 +256,66 @@ export function formatHotelDateDisplayGB(ymd: string): string {
     year: 'numeric',
   }).format(new Date(Date.UTC(y, m - 1, d)))
 }
+
+/** Offset of `timeZone` wall time vs the same numeric fields interpreted as UTC (ms). */
+function getTimeZoneOffsetMs(date: Date, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hourCycle: 'h23',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).formatToParts(date)
+  const map: Record<string, string> = {}
+  for (const p of parts) {
+    if (p.type !== 'literal') map[p.type] = p.value
+  }
+  const asUtc = Date.UTC(
+    Number(map.year),
+    Number(map.month) - 1,
+    Number(map.day),
+    Number(map.hour),
+    Number(map.minute),
+    Number(map.second),
+  )
+  return asUtc - date.getTime()
+}
+
+/** UTC instant for `ymd` 00:00:00 in the hotel timezone. */
+export function hotelYmdStartUtc(
+  ymd: string,
+  timeZone: string = resolveHotelTimeZone(),
+): Date {
+  const tz = resolveHotelTimeZone(timeZone)
+  const [y, m, d] = ymd.split('-').map(Number)
+  if (!y || !m || !d) return new Date(NaN)
+  const targetWallAsUtc = Date.UTC(y, m - 1, d, 0, 0, 0)
+  let guess = targetWallAsUtc
+  for (let i = 0; i < 3; i++) {
+    const offset = getTimeZoneOffsetMs(new Date(guess), tz)
+    guess = targetWallAsUtc - offset
+  }
+  return new Date(guess)
+}
+
+/**
+ * Inclusive UTC ISO bounds for a hotel calendar day (Africa/Lagos by default).
+ * Prefer `endExclusiveIso` with `<` queries; `endInclusiveIso` for `.lte()`.
+ */
+export function hotelCalendarDayUtcBounds(
+  ymd: string,
+  timeZone: string = resolveHotelTimeZone(),
+): { startIso: string; endExclusiveIso: string; endInclusiveIso: string } {
+  const tz = resolveHotelTimeZone(timeZone)
+  const start = hotelYmdStartUtc(ymd, tz)
+  const endExclusive = hotelYmdStartUtc(calendarDatePlusOneDay(ymd), tz)
+  const endInclusive = new Date(endExclusive.getTime() - 1)
+  return {
+    startIso: start.toISOString(),
+    endExclusiveIso: endExclusive.toISOString(),
+    endInclusiveIso: endInclusive.toISOString(),
+  }
+}

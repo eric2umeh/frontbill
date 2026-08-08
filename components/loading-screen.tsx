@@ -12,16 +12,17 @@ export function LoadingScreen() {
   )
 }
 
-/** In-page route loading: same primary spinner as the shell, no redundant status line. */
-export function PageLoadingState() {
+/** In-page route loading: same primary spinner as the shell. */
+export function PageLoadingState({ label }: { label?: string } = {}) {
   return (
     <div
       className="flex min-h-[50vh] w-full flex-col items-center justify-center gap-3 bg-background"
       role="status"
       aria-busy="true"
-      aria-label="Loading"
+      aria-label={label || 'Loading'}
     >
       <Loader2 className="h-12 w-12 animate-spin text-primary" aria-hidden />
+      {label ? <p className="text-sm text-muted-foreground">{label}</p> : null}
     </div>
   )
 }

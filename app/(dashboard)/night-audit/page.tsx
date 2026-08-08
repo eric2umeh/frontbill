@@ -32,9 +32,12 @@ import { LoadingSpinner } from '@/components/loading-screen'
 import { PaginatedListShell } from '@/components/shared/paginated-list-shell'
 import {
   formatHotelDateDisplayGB,
+  hotelCalendarDayUtcBounds,
   nightAuditClosingDateYmd,
   nightAuditNextBusinessDateYmd,
+  resolveHotelTimeZone,
 } from '@/lib/hotel-date'
+import { summarizeDayLedgerCollections } from '@/lib/payments/day-ledger-collections'
 
 interface AuditTrailLog {
   id: string
@@ -126,45 +129,50 @@ export default function NightAuditPage() {
       }
       if (!supabase) { setAuditData(emptyData); endFetch(); return }
 
-      const [{ data: bookings }, { data: payments }, { data: allRooms }, { data: arrivals }] = await Promise.all([
-        supabase
-          .from('bookings')
-          .select('*, rooms(id, room_number), guests:guest_id(name)')
-          .eq('organization_id', organizationId)
-          .eq('status', 'checked_in'),
-        supabase
-          .from('payments')
-          .select('*')
-          .eq('organization_id', organizationId)
-          .gte('payment_date', `${closingDate}T00:00:00.000Z`)
-          .lte('payment_date', `${closingDate}T23:59:59.999Z`),
-        supabase
-          .from('rooms')
-          .select('id, room_number, status')
-          .eq('organization_id', organizationId)
-          .neq('status', 'maintenance'),
-        supabase
-          .from('bookings')
-          .select('id, folio_id, guests:guest_id(name), rooms:room_id(room_number), check_in')
-          .eq('organization_id', organizationId)
-          .eq('status', 'reserved')
-          .eq('check_in', arrivalsDate),
-      ])
+      const dayBounds = hotelCalendarDayUtcBounds(closingDate, resolveHotelTimeZone())
+      const [{ data: bookings }, { data: payments }, { data: dayTransactions }, { data: allRooms }, { data: arrivals }] =
+        await Promise.all([
+          supabase
+            .from('bookings')
+            .select('*, rooms(id, room_number), guests:guest_id(name)')
+            .eq('organization_id', organizationId)
+            .eq('status', 'checked_in'),
+          supabase
+            .from('payments')
+            .select('*')
+            .eq('organization_id', organizationId)
+            .gte('payment_date', dayBounds.startIso)
+            .lte('payment_date', dayBounds.endInclusiveIso),
+          supabase
+            .from('transactions')
+            .select('id, amount, payment_method, status, booking_id, created_at, transaction_id, guest_name, description')
+            .eq('organization_id', organizationId)
+            .gte('created_at', dayBounds.startIso)
+            .lte('created_at', dayBounds.endInclusiveIso)
+            .limit(5000),
+          supabase
+            .from('rooms')
+            .select('id, room_number, status')
+            .eq('organization_id', organizationId)
+            .neq('status', 'maintenance'),
+          supabase
+            .from('bookings')
+            .select('id, folio_id, guests:guest_id(name), rooms:room_id(room_number), check_in')
+            .eq('organization_id', organizationId)
+            .eq('status', 'reserved')
+            .eq('check_in', arrivalsDate),
+        ])
 
       const totalRooms = allRooms?.length || 0
       const occupiedRooms = bookings?.length || 0
+      const collections = summarizeDayLedgerCollections(dayTransactions || [], payments || [])
 
       setAuditData({
         occupancyRate: totalRooms > 0 ? Math.round((occupiedRooms / totalRooms) * 100) : 0,
         totalRooms,
         occupiedRooms,
-        totalRevenue: payments?.reduce((sum: number, p: any) => sum + p.amount, 0) || 0,
-        revenues: {
-          cash: payments?.filter((p: any) => p.payment_method === 'cash').reduce((sum: number, p: any) => sum + p.amount, 0) || 0,
-          pos: payments?.filter((p: any) => p.payment_method === 'pos').reduce((sum: number, p: any) => sum + p.amount, 0) || 0,
-          transfer: payments?.filter((p: any) => ['transfer', 'bank_transfer'].includes(p.payment_method)).reduce((sum: number, p: any) => sum + p.amount, 0) || 0,
-          cityLedger: payments?.filter((p: any) => p.payment_method === 'city_ledger').reduce((sum: number, p: any) => sum + p.amount, 0) || 0,
-        },
+        totalRevenue: collections.totalRevenue,
+        revenues: collections.revenues,
         pendingCheckouts: bookings?.filter((b: any) => String(b.check_out).slice(0, 10) === closingDate) || [],
         expectedArrivals: arrivals || [],
         anomalies: []
