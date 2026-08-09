@@ -21,6 +21,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { PaymentAccountsSettingsCard } from '@/components/settings/payment-accounts-settings-card'
 
 export default function SettingsPage() {
   const { userId, email, name, role, organizationId, organizationLogoUrl, setOrganizationLogoUrl } = useAuth()
@@ -615,6 +616,8 @@ export default function SettingsPage() {
           </div>
         </CardContent>
       </Card>
+
+      <PaymentAccountsSettingsCard canManage={canManageHotelSettings} />
 
       {/* Checkout Policy */}
       <Card>
