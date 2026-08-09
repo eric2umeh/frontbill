@@ -12,6 +12,7 @@ When you finish a task that changed multiple files, and the user may commit (or 
 3. Order files logically: new libs first, then APIs, then UI that depends on them.
 4. Do not run `git commit` unless the user explicitly asks to commit.
 5. If the user says "commit each file" or similar, commit one file per commit using those messages (HEREDOC format).
+6. **Always** after the per-file commit messages, output a full **PR summary** in the format from `pr-summary-format.mdc` (title in a `text` fence, body in a `markdown` fence with Summary / Test plan). Do this even if the user did not ask for a PR — so they can copy both commits and the PR body in one place.
 
 Example format:
 
@@ -22,3 +23,5 @@ Centralizes payment grouping used by print and API.
 app/api/.../route.ts — Raise order query limit when date range is set.
 Supports reports tab loading up to 1000 orders in a range.
 ```
+
+Then immediately the PR title + PR body blocks (see pull-request summary rule).

@@ -5,7 +5,7 @@ alwaysApply: true
 
 # Pull request summaries
 
-When the user asks for a PR summary, title, or copy-paste PR body:
+When the user asks for a PR summary, title, or copy-paste PR body — **and also whenever you output per-file commit summaries** (always append the PR blocks after those messages):
 
 1. Put the **PR title** in its own fenced `text` block (one line).
 2. Put the **full description** in a single fenced `markdown` block so they can copy everything inside it.
@@ -15,6 +15,7 @@ When the user asks for a PR summary, title, or copy-paste PR body:
    - List items: hyphen bullets (`- item`) only — do not use numbered lists (`1.`).
 4. Do not include file paths in the PR body unless the user explicitly asks for them.
 5. Keep prose clear; no engagement bait at the end.
+6. Order: per-file commit messages first (if any), then PR title, then PR body.
 
 Example structure:
 
