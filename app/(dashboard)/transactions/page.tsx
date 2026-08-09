@@ -291,12 +291,27 @@ export default function TransactionsPage() {
   useEffect(() => { fetchPayments() }, [fetchPayments])
 
   const summary = useMemo(() => {
-    const cash     = payments.filter((p: any) => p.payment_method === 'cash').reduce((s: number, p: any) => s + p.amount, 0)
-    const pos      = payments.filter((p: any) => p.payment_method === 'pos').reduce((s: number, p: any) => s + p.amount, 0)
-    const transfer = payments.filter((p: any) => ['transfer','bank_transfer'].includes(p.payment_method)).reduce((s: number, p: any) => s + p.amount, 0)
-    const ledger   = payments.filter((p: any) => p.payment_method === 'city_ledger').reduce((s: number, p: any) => s + p.amount, 0)
-    const total    = payments.reduce((s,p) => s + p.amount, 0)
-    return { cash, pos, transfer, ledger, total, count: payments.length }
+    const isOpen = (p: Payment) =>
+      ['pending', 'unpaid', 'void', 'cancelled'].includes(String(p.status || '').toLowerCase())
+    const cashLike = payments.filter(
+      (p) =>
+        ['cash', 'pos', 'transfer', 'bank_transfer'].includes(p.payment_method) && !isOpen(p),
+    )
+    const cash = cashLike
+      .filter((p) => p.payment_method === 'cash')
+      .reduce((s, p) => s + p.amount, 0)
+    const pos = cashLike
+      .filter((p) => p.payment_method === 'pos')
+      .reduce((s, p) => s + p.amount, 0)
+    const transfer = cashLike
+      .filter((p) => ['transfer', 'bank_transfer'].includes(p.payment_method))
+      .reduce((s, p) => s + p.amount, 0)
+    const ledger = payments
+      .filter((p) => p.payment_method === 'city_ledger')
+      .reduce((s, p) => s + p.amount, 0)
+    // Sales collection for the day — exclude city ledger / unpaid (matches hotel manual book)
+    const total = cash + pos + transfer
+    return { cash, pos, transfer, ledger, total, count: cashLike.length, rowCount: payments.length }
   }, [payments])
 
   const methodConfig: Record<string, { label: string; color: string; bg: string; icon: React.ReactNode }> = {
@@ -328,7 +343,10 @@ export default function TransactionsPage() {
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <p className="text-muted-foreground">Full payment history with guest and folio details</p>
+        <p className="text-muted-foreground">
+          Cash/POS receipts for the period. For the full in-house guest list + room revenue vs sales
+          collection, use the Daily book tab.
+        </p>
         <div className="flex items-center gap-2">
           <Select value={dateRange} onValueChange={(v) => setDateRange(v as DateRange)}>
             <SelectTrigger className="w-40">
@@ -368,10 +386,13 @@ export default function TransactionsPage() {
           <CardContent className="p-5">
             <div className="flex items-start justify-between">
               <div>
-                <p className="text-sm opacity-80">{rangeLabel()} Total</p>
+                <p className="text-sm opacity-80">{rangeLabel()} sales collection</p>
                 <p className="text-3xl font-bold mt-1">{formatNaira(summary.total)}</p>
                 <p className="text-xs opacity-70 mt-1 flex items-center gap-1">
-                  <TrendingUp className="h-3 w-3" /> {summary.count} transaction{summary.count !== 1 ? 's' : ''}
+                  <TrendingUp className="h-3 w-3" /> {summary.count} cash receipt{summary.count !== 1 ? 's' : ''}
+                  {summary.rowCount !== summary.count
+                    ? ` · ${summary.rowCount} rows listed`
+                    : ''}
                 </p>
               </div>
               <CreditCard className="h-7 w-7 opacity-60" />
