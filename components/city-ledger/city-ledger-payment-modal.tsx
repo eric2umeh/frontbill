@@ -17,6 +17,13 @@ import { formatNaira } from '@/lib/utils/currency'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
 import { TrendingDown, TrendingUp, Loader2 } from 'lucide-react'
+import { PaymentAccountSelect } from '@/components/payments/payment-account-select'
+import {
+  appendAccountToNotes,
+  paymentAccountInsertFields,
+  paymentMethodRequiresAccount,
+  type PaymentAccount,
+} from '@/lib/payments/payment-accounts'
 
 interface CityLedgerPaymentModalProps {
   open: boolean
@@ -53,6 +60,8 @@ export default function CityLedgerPaymentModal({
   const [tab, setTab] = useState<'settle' | 'topup'>('settle')
   const [amount, setAmount] = useState('')
   const [paymentMethod, setPaymentMethod] = useState('')
+  const [paymentAccountId, setPaymentAccountId] = useState('')
+  const [paymentAccount, setPaymentAccount] = useState<PaymentAccount | null>(null)
   const [notes, setNotes] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -69,6 +78,10 @@ export default function CityLedgerPaymentModal({
       toast.error('Please select a payment method')
       return
     }
+    if (paymentMethodRequiresAccount(paymentMethod) && !paymentAccountId) {
+      toast.error('Select the POS / bank account where this payment was received')
+      return
+    }
 
     try {
       setLoading(true)
@@ -80,6 +93,9 @@ export default function CityLedgerPaymentModal({
       const isTopUp = tab === 'topup'
       const newBalance = currentBalance - amountNum
       const transactionType = isTopUp ? 'City Ledger Top-Up' : 'City Ledger Settlement'
+      const accountFields = paymentMethodRequiresAccount(paymentMethod)
+        ? paymentAccountInsertFields(paymentAccount)
+        : { payment_account_id: null, payment_account_label: null }
 
       if (accountType === 'guest') {
         if (!guestId) {
@@ -97,6 +113,7 @@ export default function CityLedgerPaymentModal({
             transaction_type: transactionType,
             ledger_account_id: ledgerAccountId,
             current_ledger_balance: currentBalance,
+            ...accountFields,
           }),
         })
         const payload = await res.json().catch(() => ({}))
@@ -142,8 +159,12 @@ export default function CityLedgerPaymentModal({
           amount: amountNum,
           payment_method: paymentMethod,
           status: 'paid',
-          description: `${transactionType} — ${accountName}${notes ? ` | ${notes}` : ''}`,
+          description: appendAccountToNotes(
+            `${transactionType} — ${accountName}${notes ? ` | ${notes}` : ''}`,
+            accountFields.payment_account_label,
+          ),
           received_by: user.id,
+          ...accountFields,
         }])
         if (txError) console.warn('Transaction insert:', txError.message)
       }
@@ -155,6 +176,8 @@ export default function CityLedgerPaymentModal({
       )
       setAmount('')
       setPaymentMethod('')
+      setPaymentAccountId('')
+      setPaymentAccount(null)
       setNotes('')
       onSuccess()
       onClose()
@@ -227,7 +250,14 @@ export default function CityLedgerPaymentModal({
 
             <div className="space-y-1">
               <Label>Payment Method</Label>
-              <Select value={paymentMethod} onValueChange={setPaymentMethod}>
+              <Select
+                value={paymentMethod}
+                onValueChange={(v) => {
+                  setPaymentMethod(v)
+                  setPaymentAccountId('')
+                  setPaymentAccount(null)
+                }}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="Select method" />
                 </SelectTrigger>
@@ -238,6 +268,15 @@ export default function CityLedgerPaymentModal({
                 </SelectContent>
               </Select>
             </div>
+
+            <PaymentAccountSelect
+              paymentMethod={paymentMethod}
+              value={paymentAccountId}
+              onChange={(id, acc) => {
+                setPaymentAccountId(id)
+                setPaymentAccount(acc)
+              }}
+            />
 
             <div className="space-y-1">
               <Label>Notes (optional)</Label>
@@ -282,7 +321,14 @@ export default function CityLedgerPaymentModal({
 
             <div className="space-y-1">
               <Label>Payment Method</Label>
-              <Select value={paymentMethod} onValueChange={setPaymentMethod}>
+              <Select
+                value={paymentMethod}
+                onValueChange={(v) => {
+                  setPaymentMethod(v)
+                  setPaymentAccountId('')
+                  setPaymentAccount(null)
+                }}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="Select method" />
                 </SelectTrigger>
@@ -293,6 +339,15 @@ export default function CityLedgerPaymentModal({
                 </SelectContent>
               </Select>
             </div>
+
+            <PaymentAccountSelect
+              paymentMethod={paymentMethod}
+              value={paymentAccountId}
+              onChange={(id, acc) => {
+                setPaymentAccountId(id)
+                setPaymentAccount(acc)
+              }}
+            />
 
             <div className="space-y-1">
               <Label>Notes (optional)</Label>
