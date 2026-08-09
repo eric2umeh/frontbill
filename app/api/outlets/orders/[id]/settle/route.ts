@@ -28,6 +28,8 @@ export async function POST(
       cityLedgerAccountId: body?.city_ledger_account_id ?? null,
       guestName: body?.guest_name ?? null,
       roomNumber: body?.room_number ?? null,
+      payment_account_id: body?.payment_account_id ?? null,
+      payment_account_label: body?.payment_account_label ?? null,
     })
     return NextResponse.json({ ok: true, order: result.order })
   } catch (err) {
