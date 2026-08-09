@@ -10,6 +10,10 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Search, LayoutGrid, List, ChevronLeft, ChevronRight, CalendarIcon } from 'lucide-react'
 import { format, isSameDay } from 'date-fns'
 import { LoadingSpinner } from '@/components/loading-screen'
+import {
+  calendarPickerYmd,
+  isOccupyingHotelNight,
+} from '@/lib/utils/booking-in-house-dates'
 
 /** `always`: all breakpoints (horizontal scroll). `md+` / `lg+`: hide below that breakpoint to prioritize key cols on phones. */
 export type ColumnResponsive = 'always' | 'md+' | 'lg+'
@@ -54,6 +58,15 @@ interface EnhancedDataTableProps<T> {
   renderCard?: (item: T) => React.ReactNode
   itemsPerPage?: number
   dateField?: keyof T
+  /**
+   * `field` (default): row[dateField] same calendar day as picker.
+   * `stay_overlap`: in-house hotel night — check_in ≤ day < check_out (stayovers included).
+   */
+  dateMatchMode?: 'field' | 'stay_overlap'
+  /** Required when dateMatchMode is stay_overlap (usually `check_out`). */
+  checkOutField?: keyof T
+  /** Label on the date picker button when no date selected. */
+  datePickerPlaceholder?: string
   onDateFilterChange?: (date: Date | undefined) => void
   onRowClick?: (item: T) => void
   /** Stable row keys (defaults to row index). */
@@ -82,6 +95,9 @@ export function EnhancedDataTable<T extends Record<string, any>>({
   renderCard,
   itemsPerPage = 15,
   dateField,
+  dateMatchMode = 'field',
+  checkOutField,
+  datePickerPlaceholder = 'Select Date',
   onDateFilterChange,
   onRowClick,
   rowKey,
@@ -146,9 +162,30 @@ export function EnhancedDataTable<T extends Record<string, any>>({
     })
 
     // Date filter
-    const matchesDate = !dateField || !selectedDate 
-      ? true 
-      : isSameDay(new Date(item[dateField]), selectedDate)
+    let matchesDate = true
+    if (dateField && selectedDate) {
+      if (dateMatchMode === 'stay_overlap' && checkOutField) {
+        const dayYmd = calendarPickerYmd(selectedDate)
+        const members = Array.isArray(item.bulk_members) ? item.bulk_members : null
+        if (members?.length) {
+          matchesDate = members.some((m: Record<string, unknown>) =>
+            isOccupyingHotelNight(
+              m[String(dateField)] as string,
+              m[String(checkOutField)] as string,
+              dayYmd,
+            ),
+          )
+        } else {
+          matchesDate = isOccupyingHotelNight(
+            item[dateField],
+            item[checkOutField],
+            dayYmd,
+          )
+        }
+      } else {
+        matchesDate = isSameDay(new Date(item[dateField]), selectedDate)
+      }
+    }
 
     return matchesSearch && matchesFilters && matchesDate
   })
@@ -226,7 +263,7 @@ export function EnhancedDataTable<T extends Record<string, any>>({
               <PopoverTrigger asChild>
                 <Button variant="outline" className="gap-2 w-[180px]">
                   <CalendarIcon className="h-4 w-4" />
-                  {selectedDate ? format(selectedDate, 'MMM dd') : 'Select Date'}
+                  {selectedDate ? format(selectedDate, 'MMM dd') : datePickerPlaceholder}
                 </Button>
               </PopoverTrigger>
               <PopoverContent className="w-auto p-0" align="start">
