@@ -303,11 +303,12 @@ export default function TransactionsPage() {
   useEffect(() => { fetchPayments() }, [fetchPayments])
 
   const summary = useMemo(() => {
-    const isOpen = (p: Payment) =>
-      ['pending', 'unpaid', 'void', 'cancelled'].includes(String(p.status || '').toLowerCase())
+    // Align with Daily book: only drop voided rows (many paid TXNs use status completed/pending).
+    const isVoided = (p: Payment) =>
+      ['void', 'cancelled', 'failed', 'refunded'].includes(String(p.status || '').toLowerCase())
     const cashLike = payments.filter(
       (p) =>
-        ['cash', 'pos', 'transfer', 'bank_transfer'].includes(p.payment_method) && !isOpen(p),
+        ['cash', 'pos', 'transfer', 'bank_transfer'].includes(p.payment_method) && !isVoided(p),
     )
     const cash = cashLike
       .filter((p) => p.payment_method === 'cash')
