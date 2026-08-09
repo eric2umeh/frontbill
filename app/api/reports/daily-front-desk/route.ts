@@ -58,37 +58,65 @@ export async function GET(request: Request) {
     const tz = resolveHotelTimeZone(org?.timezone)
     const bounds = hotelCalendarDayUtcBounds(date, tz)
 
-    const [{ data: bookings }, { data: transactions }, { data: payments }] =
-      await Promise.all([
-        admin
-          .from('bookings')
-          .select(
-            'id, check_in, check_out, status, rate_per_night, folio_id, payment_status, guest_id, guests:guest_id(name), rooms:room_id(room_number, room_type)',
-          )
-          .eq('organization_id', orgId)
-          .in('status', ['confirmed', 'checked_in', 'reserved', 'checked_out'])
-          .lte('check_in', date)
-          .gt('check_out', date)
-          .limit(500),
-        admin
-          .from('transactions')
-          .select(
-            'id, amount, payment_method, status, booking_id, created_at, transaction_id, guest_name, description, room',
-          )
-          .eq('organization_id', orgId)
-          .gte('created_at', bounds.startIso)
-          .lte('created_at', bounds.endInclusiveIso)
-          .limit(5000),
-        admin
-          .from('payments')
-          .select(
-            'id, amount, payment_method, booking_id, payment_date, reference_number, notes, guest_id',
-          )
-          .eq('organization_id', orgId)
-          .gte('payment_date', bounds.startIso)
-          .lte('payment_date', bounds.endInclusiveIso)
-          .limit(5000),
-      ])
+    const [{ data: bookings }, txRes, payRes] = await Promise.all([
+      admin
+        .from('bookings')
+        .select(
+          'id, check_in, check_out, status, rate_per_night, folio_id, payment_status, guest_id, guests:guest_id(name), rooms:room_id(room_number, room_type)',
+        )
+        .eq('organization_id', orgId)
+        .in('status', ['confirmed', 'checked_in', 'reserved', 'checked_out'])
+        .lte('check_in', date)
+        .gt('check_out', date)
+        .limit(500),
+      admin
+        .from('transactions')
+        .select(
+          'id, amount, payment_method, status, booking_id, created_at, transaction_id, guest_name, description, room, payment_account_label',
+        )
+        .eq('organization_id', orgId)
+        .gte('created_at', bounds.startIso)
+        .lte('created_at', bounds.endInclusiveIso)
+        .limit(5000),
+      admin
+        .from('payments')
+        .select(
+          'id, amount, payment_method, booking_id, payment_date, reference_number, notes, guest_id, payment_account_label',
+        )
+        .eq('organization_id', orgId)
+        .gte('payment_date', bounds.startIso)
+        .lte('payment_date', bounds.endInclusiveIso)
+        .limit(5000),
+    ])
+
+    // Before SQL 076: payment_account_label column may be missing — retry without it.
+    let transactions = txRes.data
+    if (txRes.error && String(txRes.error.message || '').includes('payment_account_label')) {
+      const retry = await admin
+        .from('transactions')
+        .select(
+          'id, amount, payment_method, status, booking_id, created_at, transaction_id, guest_name, description, room',
+        )
+        .eq('organization_id', orgId)
+        .gte('created_at', bounds.startIso)
+        .lte('created_at', bounds.endInclusiveIso)
+        .limit(5000)
+      transactions = retry.data
+    }
+
+    let payments = payRes.data
+    if (payRes.error && String(payRes.error.message || '').includes('payment_account_label')) {
+      const retry = await admin
+        .from('payments')
+        .select(
+          'id, amount, payment_method, booking_id, payment_date, reference_number, notes, guest_id',
+        )
+        .eq('organization_id', orgId)
+        .gte('payment_date', bounds.startIso)
+        .lte('payment_date', bounds.endInclusiveIso)
+        .limit(5000)
+      payments = retry.data
+    }
 
     const guestIds = Array.from(
       new Set((payments || []).map((p: any) => p.guest_id).filter(Boolean)),
