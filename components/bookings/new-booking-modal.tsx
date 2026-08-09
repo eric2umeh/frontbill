@@ -54,6 +54,13 @@ import {
 import { persistFolioAttachments } from '@/lib/folio/persist-folio-attachments'
 import { SelectedRoomsStickyBar } from '@/components/shared/selected-rooms-sticky-bar'
 import { CashbackPaymentPanel } from '@/components/cashback/cashback-payment-panel'
+import { PaymentAccountSelect } from '@/components/payments/payment-account-select'
+import {
+  appendAccountToNotes,
+  paymentAccountInsertFields,
+  paymentMethodRequiresAccount,
+  type PaymentAccount,
+} from '@/lib/payments/payment-accounts'
 import { computeCashbackDiscount } from '@/lib/cashback/cashback-payment-math'
 import { applyCashbackDiscountAndFolioPayments } from '@/lib/cashback/apply-cashback-folio-payment'
 import {
@@ -131,6 +138,8 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
   const [pricePerNight, setPricePerNight] = useState(0)
   const [customPrice, setCustomPrice] = useState(0)
   const [paymentMethod, setPaymentMethod] = useState('pos')
+  const [paymentAccountId, setPaymentAccountId] = useState('')
+  const [paymentAccount, setPaymentAccount] = useState<PaymentAccount | null>(null)
   const [paymentStatus, setPaymentStatus] = useState<'paid' | 'partial'>('paid')
   const [amountPaid, setAmountPaid] = useState<number | ''>('')
   const [payAboveRoomTotal, setPayAboveRoomTotal] = useState(false)
@@ -762,6 +771,10 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
         return
       }
       if (paymentMethod === 'city_ledger' && !ledgerAccount) { toast.error('Select a ledger account'); return }
+      if (paymentMethodRequiresAccount(paymentMethod) && !paymentAccountId) {
+        toast.error('Select the POS / bank account where this payment was received')
+        return
+      }
 
       // Check for date conflicts one final time before submit
       const toStr = (d: Date) => {
@@ -936,6 +949,16 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
         if (payFolioErr) throw payFolioErr
       }
 
+      const accountFields = paymentMethodRequiresAccount(paymentMethod)
+        ? paymentAccountInsertFields(paymentAccount)
+        : { payment_account_id: null, payment_account_label: null }
+      const txDescBase = bookingCashback.cashbackDiscount > 0
+        ? `Booking created - Folio ${folioId} (incl. ${formatNaira(bookingCashback.cashbackDiscount)} cashback discount)`
+        : `Booking created - Folio ${folioId}`
+      const payNotesBase = bookingCashback.cashbackDiscount > 0
+        ? `Booking payment — Folio ${folioId} (incl. ${formatNaira(bookingCashback.cashbackDiscount)} cashback discount)`
+        : `Booking payment — Folio ${folioId}`
+
       // Record in transactions table (legacy)
       await supabase.from('transactions').insert([{
         organization_id: organizationId,
@@ -946,10 +969,9 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
         amount: cashToCollect > 0 ? cashToCollect : paidAmount || total,
         payment_method: paymentMethod,
         status: balanceAmount <= 0 ? 'completed' : 'pending',
-        description: bookingCashback.cashbackDiscount > 0
-          ? `Booking created - Folio ${folioId} (incl. ${formatNaira(bookingCashback.cashbackDiscount)} cashback discount)`
-          : `Booking created - Folio ${folioId}`,
+        description: appendAccountToNotes(txDescBase, accountFields.payment_account_label),
         received_by: user?.id || null,
+        ...accountFields,
       }])
 
       if (paidAmount > 0) {
@@ -960,9 +982,8 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
           amount: cashToCollect > 0 ? cashToCollect : paidAmount,
           payment_method: paymentMethod,
           payment_date: new Date().toISOString(),
-          notes: bookingCashback.cashbackDiscount > 0
-            ? `Booking payment — Folio ${folioId} (incl. ${formatNaira(bookingCashback.cashbackDiscount)} cashback discount)`
-            : `Booking payment — Folio ${folioId}`,
+          notes: appendAccountToNotes(payNotesBase, accountFields.payment_account_label),
+          ...accountFields,
         }])
       }
 
@@ -1013,7 +1034,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
     setNights(1)
     setBackdateReason('')
     setSelectedRoomType(''); setSelectedRoom(null); setPricePerNight(0); setCustomPrice(0)
-    setPaymentMethod('pos'); setPaymentStatus('paid'); setAmountPaid(''); setPayAboveRoomTotal(false)
+    setPaymentMethod('pos'); setPaymentAccountId(''); setPaymentAccount(null); setPaymentStatus('paid'); setAmountPaid(''); setPayAboveRoomTotal(false)
     setLedgerSearch(''); setLedgerAccount(''); setLedgerAccountName('')
     setLedgerTab('individual')
     setNewAccountName(''); setNewAccountPhone(''); setNewAccountEmail('')
@@ -1265,7 +1286,15 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
               )}
               <div className="space-y-2">
                 <Label>Payment Method</Label>
-                <Select value={paymentMethod} onValueChange={(v) => { setPaymentMethod(v); setLedgerAccount(''); setLedgerSearch(''); setLedgerAccountName(''); setPayAboveRoomTotal(false) }}>
+                <Select value={paymentMethod} onValueChange={(v) => {
+                  setPaymentMethod(v)
+                  setLedgerAccount('')
+                  setLedgerSearch('')
+                  setLedgerAccountName('')
+                  setPayAboveRoomTotal(false)
+                  setPaymentAccountId('')
+                  setPaymentAccount(null)
+                }}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="pos">POS</SelectItem>
@@ -1275,6 +1304,15 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
                   </SelectContent>
                 </Select>
               </div>
+
+              <PaymentAccountSelect
+                paymentMethod={paymentMethod}
+                value={paymentAccountId}
+                onChange={(id, acc) => {
+                  setPaymentAccountId(id)
+                  setPaymentAccount(acc)
+                }}
+              />
 
               {paymentMethod === 'city_ledger' && (
                 <div className="space-y-3 rounded-lg border border-input p-3">
