@@ -39,6 +39,13 @@ import {
   type FolioRemarksAttachmentsValue,
 } from "@/components/folio/folio-remarks-attachments-field";
 import { persistFolioAttachments } from "@/lib/folio/persist-folio-attachments";
+import { PaymentAccountSelect } from "@/components/payments/payment-account-select";
+import {
+  appendAccountToNotes,
+  paymentAccountInsertFields,
+  paymentMethodRequiresAccount,
+  type PaymentAccount,
+} from "@/lib/payments/payment-accounts";
 
 interface ExtendStayModalProps {
   open: boolean;
@@ -71,6 +78,10 @@ export function ExtendStayModal({
   const { userId } = useAuth();
   const [newCheckOutDate, setNewCheckOutDate] = useState<Date | undefined>();
   const [paymentMethod, setPaymentMethod] = useState("");
+  const [paymentAccountId, setPaymentAccountId] = useState("");
+  const [paymentAccount, setPaymentAccount] = useState<PaymentAccount | null>(
+    null,
+  );
   const [loading, setLoading] = useState(false);
   const [ledgerType, setLedgerType] = useState("individual");
   const [showOrgSearch, setShowOrgSearch] = useState(false);
@@ -352,6 +363,12 @@ export function ExtendStayModal({
       toast.error("Please select an account for City Ledger");
       return;
     }
+    if (paymentMethodRequiresAccount(paymentMethod) && !paymentAccountId) {
+      toast.error(
+        "Select the POS / bank account where this payment was received",
+      );
+      return;
+    }
 
     // Prevent extending checked-out folios
     if ((booking?.folio_status || "active") === "checked_out") {
@@ -426,6 +443,10 @@ export function ExtendStayModal({
           .eq("id", booking.id);
       }
 
+      const accountFields = paymentMethodRequiresAccount(paymentMethod)
+        ? paymentAccountInsertFields(paymentAccount)
+        : { payment_account_id: null, payment_account_label: null };
+
       // Write to transactions table (non-fatal)
       try {
         await supabase.from("transactions").insert([
@@ -438,8 +459,12 @@ export function ExtendStayModal({
             amount: additionalAmount,
             payment_method: paymentMethod,
             status: isPaidNow ? "paid" : "pending",
-            description: `Extended Stay — ${additionalNights} night${additionalNights !== 1 ? "s" : ""}`,
+            description: appendAccountToNotes(
+              `Extended Stay — ${additionalNights} night${additionalNights !== 1 ? "s" : ""}`,
+              accountFields.payment_account_label,
+            ),
             received_by: currentUserId,
+            ...accountFields,
           },
         ]);
       } catch (_) {
@@ -558,6 +583,8 @@ export function ExtendStayModal({
     setDiscountReason("");
     setNewCheckOutDate(undefined);
     setPaymentMethod("");
+    setPaymentAccountId("");
+    setPaymentAccount(null);
     setLedgerType("individual");
     setShowOrgSearch(false);
     setSelectedLedger(null);
@@ -928,6 +955,8 @@ export function ExtendStayModal({
                   className="h-9 text-[10px] font-medium uppercase tracking-wide sm:h-10 sm:text-xs"
                   onClick={() => {
                     setPaymentMethod(method);
+                    setPaymentAccountId("");
+                    setPaymentAccount(null);
                     if (method !== "city_ledger") {
                       setShowOrgSearch(false);
                       setSelectedLedger(null);
@@ -938,6 +967,14 @@ export function ExtendStayModal({
                 </Button>
               ))}
             </div>
+            <PaymentAccountSelect
+              paymentMethod={paymentMethod}
+              value={paymentAccountId}
+              onChange={(id, acc) => {
+                setPaymentAccountId(id);
+                setPaymentAccount(acc);
+              }}
+            />
           </div>
 
           {wantDiscountRequest ? (
