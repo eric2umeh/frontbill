@@ -1,6 +1,11 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { computeEventPayment, type EventPaymentStatus } from '@/lib/events/compute-event-payment'
 import { isEventPendingHold } from '@/lib/events/event-payment-methods'
+import {
+  appendAccountToNotes,
+  paymentAccountInsertFields,
+  paymentMethodRequiresAccount,
+} from '@/lib/payments/payment-accounts'
 import { applyPaymentToGuestCityLedger } from '@/lib/utils/guest-city-ledger'
 
 export function parseEventPaymentFromBody(
@@ -60,11 +65,19 @@ export async function recordEventPaymentSideEffects(
     storedPaymentStatus: string
     depositAmount: number
     balanceAmount: number
+    paymentAccountId?: string | null
+    paymentAccountLabel?: string | null
   },
 ): Promise<{ error: string | null }> {
   const total = Math.max(0, Number(input.estimatedValue) || 0)
   const { depositAmount, balanceAmount, paymentMethod, storedPaymentStatus } = input
   const clientName = (input.clientName || 'Event client').trim()
+  const accountFields = paymentMethodRequiresAccount(paymentMethod)
+    ? paymentAccountInsertFields({
+        id: String(input.paymentAccountId || ''),
+        label: input.paymentAccountLabel,
+      })
+    : { payment_account_id: null, payment_account_label: null }
 
   if (isEventPendingHold(paymentMethod) || storedPaymentStatus === 'pending') {
     return { error: null }
@@ -78,8 +91,12 @@ export async function recordEventPaymentSideEffects(
       amount: depositAmount,
       payment_method: paymentMethod,
       payment_date: new Date().toISOString(),
-      notes: `Event payment — ${input.title} (${input.eventId})`,
+      notes: appendAccountToNotes(
+        `Event payment — ${input.title} (${input.eventId})`,
+        accountFields.payment_account_label,
+      ),
       received_by: input.userId,
+      ...accountFields,
     })
     if (payErr) return { error: payErr.message }
   }
@@ -94,8 +111,12 @@ export async function recordEventPaymentSideEffects(
       amount: depositAmount > 0 ? depositAmount : total,
       payment_method: paymentMethod,
       status: storedPaymentStatus,
-      description: `Event — ${input.title}`,
+      description: appendAccountToNotes(
+        `Event — ${input.title}`,
+        accountFields.payment_account_label,
+      ),
       received_by: input.userId,
+      ...accountFields,
     })
     if (txnErr) return { error: txnErr.message }
   }
