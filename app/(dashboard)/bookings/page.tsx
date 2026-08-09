@@ -1156,8 +1156,14 @@ export default function BookingsPage() {
 
   const statusKey = tableFilters.status || "checked_in";
   const searchingCatalog = tableSearchQuery.trim().length > 0;
-  const needsCatalog = searchingCatalog || statusKey !== "checked_in";
-  const catalogScopeKey = searchingCatalog ? "all" : statusKey;
+  const needsCatalog =
+    searchingCatalog || statusKey !== "checked_in" || Boolean(stayDateYmd);
+  // Stay-date fetch stores scope as `stay:YYYY-MM-DD` — must match or the table spinner never stops.
+  const catalogScopeKey = searchingCatalog
+    ? "all"
+    : stayDateYmd
+      ? `stay:${stayDateYmd}`
+      : statusKey;
   const catalogFetchPending =
     needsCatalog && (catalogLoading || catalogScopeLoaded !== catalogScopeKey);
 
