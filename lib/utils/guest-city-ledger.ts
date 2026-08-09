@@ -5,6 +5,7 @@ import {
   type FolioLineForBalance,
 } from "@/lib/utils/booking-bill-balance";
 import { insertFolioCharges } from "@/lib/utils/insert-folio-charges";
+import { appendAccountToNotes } from "@/lib/payments/payment-accounts";
 
 export async function fetchGuestCityLedgerAccount(
   supabase: SupabaseClient,
@@ -465,6 +466,8 @@ export async function recordGuestLedgerCashMovement(
     ledgerAccountId: string | null;
     currentLedgerBalance: number;
     syncGuestProfile: boolean;
+    payment_account_id?: string | null;
+    payment_account_label?: string | null;
   },
 ): Promise<void> {
   const {
@@ -479,6 +482,8 @@ export async function recordGuestLedgerCashMovement(
     ledgerAccountId,
     currentLedgerBalance,
     syncGuestProfile,
+    payment_account_id = null,
+    payment_account_label = null,
   } = p;
   if (amount <= 0) return;
 
@@ -596,6 +601,10 @@ export async function recordGuestLedgerCashMovement(
   }
 
   const txId = `CLG-${Date.now()}`;
+  const accountFields = {
+    payment_account_id: payment_account_id || null,
+    payment_account_label: payment_account_label || null,
+  };
   const { error: txError } = await supabase.from("transactions").insert([
     {
       organization_id: organizationId,
@@ -606,8 +615,12 @@ export async function recordGuestLedgerCashMovement(
       amount,
       payment_method: paymentMethod,
       status: "paid",
-      description: `${transactionType} — ${accountName}${notes ? ` | ${notes}` : ""}`,
+      description: appendAccountToNotes(
+        `${transactionType} — ${accountName}${notes ? ` | ${notes}` : ""}`,
+        accountFields.payment_account_label,
+      ),
       received_by: userId,
+      ...accountFields,
     },
   ]);
   if (txError) throw new Error(`Transaction insert failed: ${txError.message}`);
