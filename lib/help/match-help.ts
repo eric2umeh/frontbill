@@ -49,7 +49,180 @@ const STOP = new Set([
   'as',
   'so',
   'if',
+  'made',
+  'make',
+  'get',
+  'got',
+  'use',
+  'using',
 ])
+
+const MONTHS = new Set([
+  'january',
+  'february',
+  'march',
+  'april',
+  'may',
+  'june',
+  'july',
+  'august',
+  'september',
+  'october',
+  'november',
+  'december',
+  'jan',
+  'feb',
+  'mar',
+  'apr',
+  'jun',
+  'jul',
+  'aug',
+  'sep',
+  'sept',
+  'oct',
+  'nov',
+  'dec',
+])
+
+/** Intent topics inferred from the user question. */
+type Intent =
+  | 'view_payments'
+  | 'daily_book'
+  | 'transactions'
+  | 'create_booking'
+  | 'checkout'
+  | 'reservation'
+  | 'extend'
+  | 'night_audit'
+  | 'outlet'
+  | 'payment_account'
+  | 'city_ledger'
+  | 'expense'
+  | 'report'
+  | 'refund'
+  | 'cashback'
+  | 'room'
+  | 'housekeeping'
+  | 'maintenance'
+  | 'supply'
+  | 'users'
+  | 'settings'
+  | 'guest'
+  | 'bulk'
+  | 'event'
+  | 'dashboard'
+  | 'folio_payment'
+
+const INTENT_RULES: { intent: Intent; re: RegExp }[] = [
+  {
+    intent: 'view_payments',
+    re: /\b(check|see|view|find|look\s*up|list|show)\b.{0,40}\bpayments?\b|\bpayments?\b.{0,40}\b(made|received|taken|collected|for|on|by|date|yesterday|today|history)\b|\bpayment\s+history\b|\bmoney\s+(collected|received)\b/i,
+  },
+  {
+    intent: 'daily_book',
+    re: /\bdaily\s*book\b|\bsales\s*collection\b|\broom\s+revenue\b|\bfront\s*desk\s*pack\b/i,
+  },
+  {
+    intent: 'transactions',
+    re: /\btransactions?\b|\bledger\b|\ball\s+payments\b|\bpayment\s+list\b/i,
+  },
+  {
+    intent: 'create_booking',
+    re: /\b(make|create|new|add)\b.{0,20}\bbookings?\b|\bcheck[\s-]?in\b|\bbook\s+(a\s+)?(guest|room|stay)\b|\bwalk[\s-]?in\b/i,
+  },
+  { intent: 'checkout', re: /\bcheck[\s-]?out\b|\bleave\b.{0,15}\bguest\b/i },
+  {
+    intent: 'reservation',
+    re: /\breservations?\b|\breserve\b|\badvance\b|\bdeposit\b|\bno[\s-]?show\b/i,
+  },
+  { intent: 'extend', re: /\bextend\b|\bextra\s+night|\bstay\s+longer\b/i },
+  { intent: 'night_audit', re: /\bnight\s*audit\b|\bbackdate\b|\baudit\s*trail/i },
+  { intent: 'outlet', re: /\boutlets?\b|\bpos\b|\brestaurant\b|\bbar\b|\blaundry\b|\bgym\b/i },
+  {
+    intent: 'payment_account',
+    re: /\bpayment\s+accounts?\b|\bbank\s+account\b|\bpos\s+terminal\b|\bdestination\b/i,
+  },
+  { intent: 'city_ledger', re: /\bcity\s*ledger\b|\bcharge\s+to\s+(company|org)/i },
+  { intent: 'expense', re: /\bexpenses?\b|\bbudget\b|\bexpenditure\b|\bmarket\s+retirement/i },
+  { intent: 'report', re: /\breports?\b|\bp&l\b|\boccupancy\s+report\b/i },
+  { intent: 'refund', re: /\brefunds?\b/i },
+  { intent: 'cashback', re: /\bcashbacks?\b/i },
+  { intent: 'room', re: /\brooms?\b|\broom\s+status\b|\booo\b/i },
+  { intent: 'housekeeping', re: /\bhousekeeping\b|\bcleaning\b|\btask\s+board\b/i },
+  { intent: 'maintenance', re: /\bmaintenance\b|\bwork\s*order\b/i },
+  {
+    intent: 'supply',
+    re: /\bcentral\s*store\b|\bpurchasing\b|\bissue\s*out\b|\bkitchen\b|\bf&b\b|\bsupply\b/i,
+  },
+  { intent: 'users', re: /\busers?\b|\broles?\b|\bstaff\b|\bpermissions?\b/i },
+  { intent: 'settings', re: /\bsettings?\b|\bcheckout\s+time\b|\bhotel\s+info\b|\blogo\b/i },
+  { intent: 'guest', re: /\bguests?\b|\borgani[sz]ations?\b|\bguest\s*\/?\s*org\b/i },
+  { intent: 'bulk', re: /\bbulk\b|\bgroup\s+booking\b/i },
+  { intent: 'event', re: /\bevents?\b|\bhall\b|\bballroom\b/i },
+  { intent: 'dashboard', re: /\bdashboard\b|\bquick\s+actions?\b/i },
+  {
+    intent: 'folio_payment',
+    re: /\b(add|record|take)\b.{0,20}\b(payment|credit)\b|\bpay\s+(on\s+)?(folio|booking)\b/i,
+  },
+]
+
+/** FAQ ids preferred for each intent (boost). */
+const INTENT_FAQ_BOOST: Partial<Record<Intent, string[]>> = {
+  view_payments: [
+    'how-check-payments-by-date',
+    'how-pick-date-daily-book',
+    'what-is-daily-book',
+    'daily-book-vs-transactions',
+    'see-payments',
+  ],
+  daily_book: [
+    'what-is-daily-book',
+    'daily-book-vs-transactions',
+    'how-pick-date-daily-book',
+    'how-check-payments-by-date',
+    'daily-book-zero',
+    'room-vs-sales-collection',
+  ],
+  transactions: ['see-payments', 'daily-book-vs-transactions', 'how-check-payments-by-date'],
+  create_booking: ['how-make-booking', 'reservations-vs-bookings', 'bulk-booking'],
+  checkout: ['checkout-guest'],
+  reservation: [
+    'how-make-reservation',
+    'reservations-vs-bookings',
+    'reservation-checkin',
+    'cancel-reservation',
+    'advance-payment',
+  ],
+  extend: ['extend-stay-how', 'extend-stay-where'],
+  night_audit: ['night-audit-what', 'backdate', 'night-audit-approvals'],
+  outlet: ['outlet-pos', 'outlet-menu', 'room-charge-outlet'],
+  payment_account: ['payment-accounts-why', 'add-payment-account'],
+  city_ledger: ['city-ledger', 'settle-city-ledger'],
+  expense: ['expenses', 'expense-categories'],
+  report: ['reports'],
+  refund: ['refunds'],
+  cashback: ['cashback'],
+  room: ['rooms'],
+  housekeeping: ['housekeeping'],
+  maintenance: ['maintenance'],
+  supply: ['supply-chain', 'central-store', 'purchasing', 'kitchen'],
+  users: ['users-roles'],
+  settings: ['settings-hotel', 'who-settings', 'add-payment-account'],
+  guest: ['guest-database', 'organizations'],
+  bulk: ['bulk-booking'],
+  event: ['events'],
+  dashboard: ['what-is-dashboard', 'how-make-booking', 'getting-started'],
+  folio_payment: ['add-payment-folio', 'add-charge', 'payment-methods', 'payment-accounts-why'],
+}
+
+/** FAQ ids to penalize hard when an intent is active. */
+const INTENT_FAQ_PENALTY: Partial<Record<Intent, string[]>> = {
+  view_payments: ['how-make-booking', 'how-make-reservation', 'bulk-booking', 'reservation-checkin'],
+  daily_book: ['how-make-booking', 'how-make-reservation'],
+  transactions: ['how-make-booking', 'how-make-reservation'],
+  create_booking: ['refunds', 'extend-stay-how', 'how-check-payments-by-date'],
+  reservation: ['refunds', 'extend-stay-how'],
+}
 
 function normalize(raw: string): string {
   return raw
@@ -69,12 +242,47 @@ function tokensOf(q: string): string[] {
 }
 
 function stemish(t: string): string {
-  // Light stemming for plurals / common suffixes
-  if (t.endsWith('ings') && t.length > 6) return t.slice(0, -1) // bookings → booking
+  if (t.endsWith('ings') && t.length > 6) return t.slice(0, -1)
   if (t.endsWith('ies') && t.length > 5) return `${t.slice(0, -3)}y`
   if (t.endsWith('ses') && t.length > 5) return t.slice(0, -2)
   if (t.endsWith('s') && !t.endsWith('ss') && t.length > 3) return t.slice(0, -1)
   return t
+}
+
+function detectIntents(q: string): Set<Intent> {
+  const found = new Set<Intent>()
+  for (const rule of INTENT_RULES) {
+    if (rule.re.test(q)) found.add(rule.intent)
+  }
+
+  // Date mention + "payment(s)" ⇒ view payments even if phrasing is odd
+  const hasMonth = [...MONTHS].some((m) => q.includes(m))
+  const hasDayOrdinal = /\b\d{1,2}(st|nd|rd|th)\b/.test(q) || /\b\d{1,2}[\/\-]\d{1,2}/.test(q)
+  const hasPaymentWord = /\bpayments?\b/.test(q)
+  if (hasPaymentWord && (hasMonth || hasDayOrdinal || /\b(yesterday|today|date)\b/.test(q))) {
+    found.add('view_payments')
+    found.add('daily_book')
+  }
+
+  return found
+}
+
+function phraseOverlapScore(query: string, phrase: string): number {
+  const p = normalize(phrase)
+  if (!p) return 0
+  if (query === p) return 120
+  // Only count substring if phrase is reasonably long (avoid "on", "pay")
+  if (p.length >= 10 && (query.includes(p) || (p.length <= query.length + 8 && p.includes(query)))) {
+    return 90
+  }
+  const aliasTokens = tokensOf(p).map(stemish)
+  const qTokens = new Set(tokensOf(query).map(stemish))
+  if (aliasTokens.length === 0) return 0
+  const overlap = aliasTokens.filter((t) => qTokens.has(t)).length
+  if (overlap === aliasTokens.length && aliasTokens.length >= 2) return 70
+  if (overlap >= 3) return 18 * overlap
+  if (overlap === 2 && aliasTokens.length <= 4) return 28
+  return 0
 }
 
 /** Score a user question against built-in FAQ (keyword match — no AI). */
@@ -85,67 +293,59 @@ export function matchHelpQuestion(raw: string): HelpFaqItem | null {
   const tokens = tokensOf(q).map(stemish)
   if (tokens.length === 0) return null
 
+  const intents = detectIntents(q)
+  const tokenSet = new Set(tokens)
+
   let best: HelpFaqItem | null = null
   let bestScore = 0
 
   for (const item of HELP_FAQ) {
-    const aliases = (item.aliases || []).map(normalize)
-    const keywords = (item.keywords || []).map((k) => normalize(k))
+    const aliases = item.aliases || []
+    const keywords = item.keywords || []
     const question = normalize(item.question)
 
     let score = 0
 
-    // Exact / near-exact alias match wins strongly
     for (const alias of aliases) {
-      if (!alias) continue
-      if (q === alias || q.includes(alias) || alias.includes(q)) {
-        score += 100
-      } else {
-        const aliasTokens = tokensOf(alias).map(stemish)
-        const overlap = aliasTokens.filter((t) => tokens.includes(t)).length
-        if (aliasTokens.length > 0 && overlap === aliasTokens.length) score += 80
-        else if (overlap >= 2) score += 20 * overlap
-      }
+      score += phraseOverlapScore(q, alias)
     }
 
-    // Keyword hits (high weight)
     for (const kw of keywords) {
-      const kwTokens = tokensOf(kw).map(stemish)
+      const kwTokens = tokensOf(normalize(kw)).map(stemish)
       if (kwTokens.length === 0) continue
-      if (kwTokens.every((t) => tokens.includes(t) || q.includes(t))) {
-        score += 25 * kwTokens.length
+      if (kwTokens.every((t) => tokenSet.has(t) || q.includes(t))) {
+        score += 22 * kwTokens.length
       } else {
         for (const t of kwTokens) {
-          if (tokens.includes(t)) score += 12
+          if (tokenSet.has(t)) score += 10
         }
       }
     }
 
-    // Question title token overlap
     const qTokens = tokensOf(question).map(stemish)
     for (const t of tokens) {
-      if (qTokens.includes(t)) score += 8
+      if (qTokens.includes(t)) score += 6
     }
 
-    // Weak body match only if we already have some signal (avoid "how/do/make" noise)
-    if (score >= 12) {
-      const body = normalize(`${item.answer} ${item.category}`)
-      for (const t of tokens) {
-        if (body.includes(t)) score += 1
+    // Intent boosts / penalties (fixes “payments on 6 Aug” → booking)
+    for (const intent of intents) {
+      const boostIds = INTENT_FAQ_BOOST[intent] || []
+      if (boostIds.includes(item.id)) score += 55
+      const penIds = INTENT_FAQ_PENALTY[intent] || []
+      if (penIds.includes(item.id)) score -= 80
+    }
+
+    // Soft topic tags on FAQ items
+    if (item.topics?.length) {
+      for (const topic of item.topics) {
+        if (intents.has(topic as Intent)) score += 25
       }
     }
 
-    // Intent boosts for common verbs + topic
-    if (tokens.includes('booking') || tokens.includes('book')) {
-      if (item.id.startsWith('how-make-booking') || item.id.includes('booking')) score += 15
-      if (item.id.includes('extend') || item.id.includes('refund')) score -= 20
-    }
-    if (tokens.includes('reservation') || tokens.includes('reserve')) {
-      if (item.category === 'Reservations' || item.id.includes('reservation')) score += 20
-      if (item.id.includes('refund') || item.id.includes('extend')) score -= 25
-    }
-    if (tokens.includes('refund')) {
-      if (item.id.includes('refund')) score += 30
+    // "make bookings/reservations" → create how-tos, not "difference between"
+    if (/\b(make|create|new|add)\b/.test(q) && (tokenSet.has('booking') || tokenSet.has('reservation'))) {
+      if (item.id === 'reservations-vs-bookings') score -= 50
+      if (item.id === 'how-make-booking' || item.id === 'how-make-reservation') score += 25
     }
 
     if (score > bestScore) {
@@ -154,17 +354,16 @@ export function matchHelpQuestion(raw: string): HelpFaqItem | null {
     }
   }
 
-  // Require a real topical hit (alias/keyword), not stop-word noise
-  return bestScore >= 20 ? best : null
+  return bestScore >= 28 ? best : null
 }
 
 export const HELP_SUGGESTION_CHIPS = [
+  'How do I check payments for a date?',
+  'What is the Daily book?',
   'How do I make a booking?',
   'How do I make a reservation?',
-  'What is the Daily book?',
-  'Why must I choose an account for POS or Transfer?',
+  'Why must I choose an account for POS?',
   'How do I extend a guest’s stay?',
   'What does Run Night Audit do?',
   'How do I check a guest out?',
-  'How do I add a bank or POS account?',
 ] as const
