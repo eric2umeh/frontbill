@@ -3,13 +3,16 @@
 import { useCallback, useEffect, useState } from 'react'
 import { format } from 'date-fns'
 import { useAuth } from '@/lib/auth-context'
+import { createClient } from '@/lib/supabase/client'
 import { formatNaira } from '@/lib/utils/currency'
 import {
   calendarDateMinusOneDay,
+  hotelCalendarDayUtcBounds,
   hotelCalendarTodayYmd,
   resolveHotelTimeZone,
 } from '@/lib/hotel-date'
 import {
+  buildDailyFrontDeskPack,
   SALES_COLLECTION_LABELS,
   type DailyFrontDeskPack,
   type SalesCollectionCategory,
@@ -35,7 +38,7 @@ function categoryBadgeVariant(
 }
 
 export function DailyFrontDeskPanel() {
-  const { userId } = useAuth()
+  const { userId, organizationId, role } = useAuth()
   const [day, setDay] = useState(() =>
     calendarDateMinusOneDay(hotelCalendarTodayYmd(new Date(), resolveHotelTimeZone())),
   )
@@ -47,24 +50,106 @@ export function DailyFrontDeskPanel() {
     if (!userId) return
     setLoading(true)
     try {
-      const qs = new URLSearchParams({ caller_id: userId, date: day })
-      const res = await fetch(`/api/reports/daily-front-desk?${qs}`, {
-        credentials: 'include',
-      })
-      const json = await res.json()
-      if (!res.ok) {
-        toast.error(json.error || 'Failed to load daily book')
+      const supabase = createClient()
+      if (!supabase) {
+        toast.error('Could not connect')
         setPack(null)
         return
       }
-      setPack(json.pack)
-    } catch {
+
+      const orgId = (organizationId || '').trim()
+      if (!orgId && role !== 'superadmin') {
+        toast.error('Your profile has no organization')
+        setPack(null)
+        return
+      }
+
+      const tz = resolveHotelTimeZone()
+      const bounds = hotelCalendarDayUtcBounds(day, tz)
+
+      let bookQ = supabase
+        .from('bookings')
+        .select(
+          'id, check_in, check_out, status, rate_per_night, folio_id, payment_status, guest_id, guests:guest_id(name), rooms:room_id(room_number, room_type)',
+        )
+        .in('status', ['confirmed', 'checked_in', 'reserved', 'checked_out'])
+        .lte('check_in', day)
+        .gt('check_out', day)
+        .limit(500)
+
+      let txQ = supabase
+        .from('transactions')
+        .select('*')
+        .gte('created_at', bounds.startIso)
+        .lte('created_at', bounds.endInclusiveIso)
+        .limit(5000)
+
+      let payQ = supabase
+        .from('payments')
+        .select('*')
+        .gte('payment_date', bounds.startIso)
+        .lte('payment_date', bounds.endInclusiveIso)
+        .limit(5000)
+
+      if (role !== 'superadmin' && orgId) {
+        bookQ = bookQ.eq('organization_id', orgId)
+        txQ = txQ.eq('organization_id', orgId)
+        payQ = payQ.eq('organization_id', orgId)
+      }
+
+      const [bookRes, txRes, payRes] = await Promise.all([bookQ, txQ, payQ])
+
+      if (txRes.error) {
+        console.error('[daily-book] transactions', txRes.error.message)
+        toast.error(txRes.error.message || 'Could not load transactions for daily book')
+      }
+      if (payRes.error) {
+        console.error('[daily-book] payments', payRes.error.message)
+      }
+      if (bookRes.error) {
+        console.error('[daily-book] bookings', bookRes.error.message)
+      }
+
+      const payments = payRes.data || []
+      const guestIds = Array.from(
+        new Set(payments.map((p: { guest_id?: string | null }) => p.guest_id).filter(Boolean)),
+      ) as string[]
+      const guestNameById: Record<string, string> = {}
+      if (guestIds.length > 0) {
+        const { data: guests } = await supabase.from('guests').select('id, name').in('id', guestIds)
+        for (const g of guests || []) {
+          guestNameById[(g as { id: string }).id] = (g as { name: string }).name
+        }
+      }
+
+      const next = buildDailyFrontDeskPack({
+        dateYmd: day,
+        bookings: (bookRes.data || []) as any,
+        transactions: (txRes.data || []) as any,
+        payments: payments as any,
+        guestNameById,
+      })
+      setPack(next)
+
+      // If still empty, try API (service role) as backup
+      if (next.salesCollection.total === 0 && next.lines.length === 0) {
+        const qs = new URLSearchParams({ caller_id: userId, date: day })
+        const res = await fetch(`/api/reports/daily-front-desk?${qs}`, {
+          credentials: 'include',
+        })
+        const json = await res.json()
+        if (res.ok && json.pack && (json.pack.lines?.length || json.pack.salesCollection?.total)) {
+          setPack(json.pack)
+        }
+      }
+    } catch (e) {
+      console.error(e)
       toast.error('Network error loading daily book')
       setPack(null)
     } finally {
       setLoading(false)
     }
-  }, [userId, day])
+  }, [userId, organizationId, role, day])
 
   useEffect(() => {
     void load()
@@ -153,7 +238,7 @@ export function DailyFrontDeskPanel() {
               ['Cash', sc?.cash],
               ['Bank transfer', sc?.transfer],
               ['Advance payment', sc?.advancePayment],
-              ['Additional (extend)', sc?.additionalPayment],
+              ['Additional (Extend stay etc)', sc?.additionalPayment],
               ['Extra charges', sc?.extraCharges],
               ['Debt recovery', sc?.debtRecovery],
               ['Other', sc?.other],
