@@ -107,15 +107,15 @@ const NAV_SECTIONS: NavSection[] = [
   {
     title: 'Accounting',
     routes: [
-      { label: 'Expenses', icon: Wallet, href: '/expenses', permission: 'expenses:view' },
-      { label: 'Reports', icon: FileBarChart, href: '/reports', permission: 'reports:view' },
-      { label: 'Night Audit', icon: Moon, href: '/night-audit', permission: 'night_audit:view' },
       {
         label: 'Transactions / Analytics',
         icon: Receipt,
         href: '/transactions',
         permissionAny: ['transactions:view', 'analytics:view'],
       },
+      { label: 'Expenses', icon: Wallet, href: '/expenses', permission: 'expenses:view' },
+      { label: 'Reports', icon: FileBarChart, href: '/reports', permission: 'reports:view' },
+      { label: 'Night Audit', icon: Moon, href: '/night-audit', permission: 'night_audit:view' },
       { label: 'Refunds', icon: RotateCcw, href: '/refunds', permission: 'payments:refund' },
       { label: 'Cashback', icon: Gift, href: '/cashback', permission: 'cashback:view' },
     ],
