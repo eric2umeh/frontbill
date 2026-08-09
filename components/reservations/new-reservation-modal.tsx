@@ -66,6 +66,13 @@ import {
 } from '@/components/folio/folio-remarks-attachments-field'
 import { persistFolioAttachments } from '@/lib/folio/persist-folio-attachments'
 import { SelectedRoomsStickyBar } from '@/components/shared/selected-rooms-sticky-bar'
+import { PaymentAccountSelect } from '@/components/payments/payment-account-select'
+import {
+  appendAccountToNotes,
+  paymentAccountInsertFields,
+  paymentMethodRequiresAccount,
+  type PaymentAccount,
+} from '@/lib/payments/payment-accounts'
 
 const toLocalDateStr = (date: Date) => {
   const y = date.getFullYear()
@@ -138,6 +145,8 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
   const [customPrice, setCustomPrice] = useState<number | ''>('')
   // Payment
   const [paymentMethod, setPaymentMethod] = useState<ReservationPaymentMethod>('pos')
+  const [paymentAccountId, setPaymentAccountId] = useState('')
+  const [paymentAccount, setPaymentAccount] = useState<PaymentAccount | null>(null)
   const [paymentStatus, setPaymentStatus] = useState<'paid' | 'partial' | 'unpaid'>('paid')
   const [partialAmount, setPartialAmount] = useState<number | ''>('')
   const [payAboveRoomTotal, setPayAboveRoomTotal] = useState(false)
@@ -568,6 +577,15 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
       toast.error('Please enter the amount paid')
       return
     }
+    if (
+      !pendingHold &&
+      paymentStatus !== 'unpaid' &&
+      paymentMethodRequiresAccount(paymentMethod) &&
+      !paymentAccountId
+    ) {
+      toast.error('Select the POS / bank account where this payment was received')
+      return
+    }
 
     try {
       setLoading(true)
@@ -691,6 +709,10 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
         if (payFcErr) throw payFcErr
       }
 
+      const accountFields = paymentMethodRequiresAccount(paymentMethod)
+        ? paymentAccountInsertFields(paymentAccount)
+        : { payment_account_id: null, payment_account_label: null }
+
       if (!pendingHold) {
         await supabase.from('transactions').insert([{
           organization_id: orgId,
@@ -701,14 +723,21 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
           amount: totalAmount,
           payment_method: paymentMethod,
           status: bookingPaymentStatus,
-          description: `Reservation — ${folioId}`,
+          description: appendAccountToNotes(
+            `Reservation — ${folioId}`,
+            accountFields.payment_account_label,
+          ),
           received_by: currentUserId,
+          ...accountFields,
         }])
       }
 
       const paidAmount = pendingHold ? 0 : depositAmount
       const cashRecorded = pendingHold ? 0 : cashbackBreakdown.cashToCollect
       if (paidAmount > 0) {
+        const payNotesBase = cashbackBreakdown.cashbackDiscount > 0
+          ? `Reservation payment — Folio ${folioId} (incl. ${formatNaira(cashbackBreakdown.cashbackDiscount)} cashback discount)`
+          : `Reservation payment — Folio ${folioId}`
         await supabase.from('payments').insert([{
           organization_id: orgId,
           booking_id: booking.id,
@@ -716,10 +745,9 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
           amount: cashRecorded > 0 ? cashRecorded : paidAmount,
           payment_method: paymentMethod,
           payment_date: new Date().toISOString(),
-          notes: cashbackBreakdown.cashbackDiscount > 0
-            ? `Reservation payment — Folio ${folioId} (incl. ${formatNaira(cashbackBreakdown.cashbackDiscount)} cashback discount)`
-            : `Reservation payment — Folio ${folioId}`,
+          notes: appendAccountToNotes(payNotesBase, accountFields.payment_account_label),
           received_by: currentUserId || null,
+          ...accountFields,
         }])
       }
 
@@ -768,6 +796,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
     setCheckInDate(ci); setCheckOutDate(addDays(ci, 1)); setNights(1); setBackdateReason('')
     setSelectedRoomType(''); setSelectedRoom(null); setPricePerNight(0); setCustomPrice('')
     setPaymentMethod('pos'); setPaymentStatus('paid'); setPartialAmount(''); setPayAboveRoomTotal(false)
+    setPaymentAccountId(''); setPaymentAccount(null)
     setLedgerType('individual'); setLedgerSearch(''); setLedgerResults([])
     setSelectedLedger(null); setLedgerSearchOpen(false)
     setShowNewLedgerOrgForm(false); setNewLedgerOrgName(''); setNewLedgerOrgEmail(''); setNewLedgerOrgPhone(''); setNewLedgerOrgAddress('')
@@ -1016,6 +1045,8 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
               <Select
                 value={paymentMethod}
                 onValueChange={(v: ReservationPaymentMethod) => {
+                  setPaymentAccountId('')
+                  setPaymentAccount(null)
                   if (v === RESERVATION_PAYMENT_METHOD_PENDING) {
                     setPaymentMethod(v)
                     setPaymentStatus('unpaid')
@@ -1036,6 +1067,16 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
                 </SelectContent>
               </Select>
             </div>
+            <PaymentAccountSelect
+              paymentMethod={
+                pendingHold || paymentStatus === 'unpaid' ? 'cash' : paymentMethod
+              }
+              value={paymentAccountId}
+              onChange={(id, acc) => {
+                setPaymentAccountId(id)
+                setPaymentAccount(acc)
+              }}
+            />
 
             {selectedRoom && nights > 0 && (
               <div className="p-3 rounded-lg bg-muted space-y-1 text-sm border">
