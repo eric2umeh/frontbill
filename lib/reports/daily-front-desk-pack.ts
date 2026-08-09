@@ -8,6 +8,7 @@ import {
   shouldHideOutletPaymentDuplicate,
 } from '@/lib/outlets/outlet-financial-integration'
 import { filterDuplicatePaymentRows } from '@/lib/payments/dedupe-ledger-rows'
+import { resolvePaymentAccountLabel } from '@/lib/payments/payment-accounts'
 import { isOccupyingHotelNight } from '@/lib/utils/booking-in-house-dates'
 
 export type SalesCollectionCategory =
@@ -43,6 +44,7 @@ export type DailyCollectionLine = {
   category: SalesCollectionCategory
   reference: string
   description: string
+  payment_account_label: string
   at: string
   counts_as_cash_collection: boolean
 }
@@ -165,6 +167,7 @@ export function buildDailyFrontDeskPack(input: {
     guest_name?: string | null
     description?: string | null
     room?: string | null
+    payment_account_label?: string | null
   }>
   payments: Array<{
     id: string
@@ -175,6 +178,7 @@ export function buildDailyFrontDeskPack(input: {
     reference_number?: string | null
     notes?: string | null
     guest_id?: string | null
+    payment_account_label?: string | null
   }>
   guestNameById?: Record<string, string>
 }): DailyFrontDeskPack {
@@ -232,6 +236,10 @@ export function buildDailyFrontDeskPack(input: {
       category,
       reference: String(t.transaction_id || t.id),
       description: String(t.description || ''),
+      payment_account_label: resolvePaymentAccountLabel({
+        payment_account_label: t.payment_account_label,
+        description: t.description,
+      }),
       at: String(t.created_at || ''),
       counts_as_cash_collection: countsAsCashCollection(category, method, t.status),
     })
@@ -256,6 +264,10 @@ export function buildDailyFrontDeskPack(input: {
       category,
       reference: String(p.reference_number || p.id).slice(0, 24),
       description: String(p.notes || ''),
+      payment_account_label: resolvePaymentAccountLabel({
+        payment_account_label: p.payment_account_label,
+        notes: p.notes,
+      }),
       at: String(p.payment_date || ''),
       counts_as_cash_collection: countsAsCashCollection(category, method, 'paid'),
     })
