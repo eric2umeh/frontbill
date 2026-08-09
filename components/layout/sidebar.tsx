@@ -92,6 +92,22 @@ const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
+    title: 'Accounting',
+    routes: [
+      {
+        label: 'Transactions / Analytics',
+        icon: Receipt,
+        href: '/transactions/daily-book',
+        permissionAny: ['transactions:view', 'analytics:view'],
+      },
+      { label: 'Expenses', icon: Wallet, href: '/expenses', permission: 'expenses:view' },
+      { label: 'Reports', icon: FileBarChart, href: '/reports', permission: 'reports:view' },
+      { label: 'Night Audit', icon: Moon, href: '/night-audit', permission: 'night_audit:view' },
+      { label: 'Refunds', icon: RotateCcw, href: '/refunds', permission: 'payments:refund' },
+      { label: 'Cashback', icon: Gift, href: '/cashback', permission: 'cashback:view' },
+    ],
+  },
+  {
     title: 'Supply Chain',
     routes: [
       { label: 'Central Store', icon: Warehouse, href: '/supply/store', permission: 'supply:store' },
@@ -102,22 +118,6 @@ const NAV_SECTIONS: NavSection[] = [
         permissionAny: ['supply:purchasing', 'supply:approve_accountant', 'supply:approve_manager'],
       },
       { label: 'Supply Log', icon: ClipboardCheck, href: '/supply/activity', permission: 'supply:activity' },
-    ],
-  },
-  {
-    title: 'Accounting',
-    routes: [
-      {
-        label: 'Transactions / Analytics',
-        icon: Receipt,
-        href: '/transactions',
-        permissionAny: ['transactions:view', 'analytics:view'],
-      },
-      { label: 'Expenses', icon: Wallet, href: '/expenses', permission: 'expenses:view' },
-      { label: 'Reports', icon: FileBarChart, href: '/reports', permission: 'reports:view' },
-      { label: 'Night Audit', icon: Moon, href: '/night-audit', permission: 'night_audit:view' },
-      { label: 'Refunds', icon: RotateCcw, href: '/refunds', permission: 'payments:refund' },
-      { label: 'Cashback', icon: Gift, href: '/cashback', permission: 'cashback:view' },
     ],
   },
   {
@@ -171,7 +171,7 @@ function routeIsActive(
       pathname.startsWith('/organizations/')
     )
   }
-  if (href === '/transactions') {
+  if (href === '/transactions' || href === '/transactions/daily-book') {
     return (
       pathname === '/transactions' ||
       pathname.startsWith('/transactions/') ||
