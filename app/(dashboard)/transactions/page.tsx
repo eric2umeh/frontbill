@@ -26,6 +26,7 @@ import {
   shouldHideOutletPaymentDuplicate,
 } from '@/lib/outlets/outlet-financial-integration'
 import { filterDuplicatePaymentRows } from '@/lib/payments/dedupe-ledger-rows'
+import { resolvePaymentAccountLabel } from '@/lib/payments/payment-accounts'
 import {
   calendarDateMinusOneDay,
   hotelCalendarDayUtcBounds,
@@ -50,6 +51,7 @@ interface Payment {
   received_by_name?: string
   status?: string
   description?: string
+  payment_account_label?: string | null
   source: 'payment' | 'transaction'
 }
 
@@ -215,6 +217,7 @@ export default function TransactionsPage() {
         description?: string | null
         received_by?: string | null
         status?: string | null
+        payment_account_label?: string | null
       }) => ({
         id: t.id,
         booking_id: t.booking_id,
@@ -237,6 +240,10 @@ export default function TransactionsPage() {
         })(),
         status: t.status,
         description: t.description,
+        payment_account_label: resolvePaymentAccountLabel({
+          payment_account_label: t.payment_account_label,
+          description: t.description,
+        }),
         source: 'transaction' as const,
       }))
 
@@ -250,6 +257,7 @@ export default function TransactionsPage() {
         reference_number?: string | null
         notes?: string | null
         received_by?: string | null
+        payment_account_label?: string | null
       }) => ({
         id: `pay-${p.id}`,
         booking_id: p.booking_id,
@@ -272,6 +280,10 @@ export default function TransactionsPage() {
         })(),
         status: 'paid',
         description: p.notes || null,
+        payment_account_label: resolvePaymentAccountLabel({
+          payment_account_label: p.payment_account_label,
+          notes: p.notes,
+        }),
         source: 'payment' as const,
       }))
 
@@ -291,11 +303,12 @@ export default function TransactionsPage() {
   useEffect(() => { fetchPayments() }, [fetchPayments])
 
   const summary = useMemo(() => {
-    const isOpen = (p: Payment) =>
-      ['pending', 'unpaid', 'void', 'cancelled'].includes(String(p.status || '').toLowerCase())
+    // Align with Daily book: only drop voided rows (many paid TXNs use status completed/pending).
+    const isVoided = (p: Payment) =>
+      ['void', 'cancelled', 'failed', 'refunded'].includes(String(p.status || '').toLowerCase())
     const cashLike = payments.filter(
       (p) =>
-        ['cash', 'pos', 'transfer', 'bank_transfer'].includes(p.payment_method) && !isOpen(p),
+        ['cash', 'pos', 'transfer', 'bank_transfer'].includes(p.payment_method) && !isVoided(p),
     )
     const cash = cashLike
       .filter((p) => p.payment_method === 'cash')
@@ -423,7 +436,7 @@ export default function TransactionsPage() {
       <EnhancedDataTable
         compactTable
         data={payments}
-        searchKeys={['guest_name', 'folio_id', 'reference_number', 'notes']}
+        searchKeys={['guest_name', 'folio_id', 'reference_number', 'notes', 'payment_account_label']}
         onRowClick={(p) => router.push(`/transactions/${p.id}`)}
         filters={[
           {
@@ -448,6 +461,7 @@ export default function TransactionsPage() {
                 <MobileTableSubdetail>
                   {p.room && <div>{p.room}</div>}
                   <div className="capitalize">{(p.payment_method || 'cash').replace(/_/g, ' ')}</div>
+                  {p.payment_account_label ? <div>{p.payment_account_label}</div> : null}
                   <div>{format(new Date(p.payment_date), 'dd MMM yyyy · HH:mm')}</div>
                 </MobileTableSubdetail>
               </div>
@@ -476,6 +490,11 @@ export default function TransactionsPage() {
                     {cfg.icon}
                     {cfg.label}
                   </Badge>
+                  {p.payment_account_label ? (
+                    <div className="text-[10px] text-muted-foreground truncate max-w-[140px]" title={p.payment_account_label}>
+                      {p.payment_account_label}
+                    </div>
+                  ) : null}
                   {p.payment_method === 'city_ledger' && p.notes && (
                     <div className="text-[10px] text-muted-foreground truncate max-w-[100px]">
                       {p.notes.replace(/^City Ledger:\s*/, '')}
@@ -484,6 +503,16 @@ export default function TransactionsPage() {
                 </div>
               )
             },
+          },
+          {
+            key: 'payment_account_label',
+            label: 'Account',
+            responsive: 'lg+',
+            render: (p) => (
+              <span className="text-xs text-muted-foreground max-w-[160px] inline-block truncate" title={p.payment_account_label || ''}>
+                {p.payment_account_label || '—'}
+              </span>
+            ),
           },
           {
             key: 'received_by_name',

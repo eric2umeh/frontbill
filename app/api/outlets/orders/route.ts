@@ -224,6 +224,8 @@ export async function POST(request: Request) {
       settleNow,
       cityLedgerAccountId,
       isComplimentary,
+      payment_account_id: body?.payment_account_id ?? null,
+      payment_account_label: body?.payment_account_label ?? null,
     })
 
     return NextResponse.json({

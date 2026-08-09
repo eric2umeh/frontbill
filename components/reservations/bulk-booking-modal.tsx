@@ -67,6 +67,13 @@ import {
 } from '@/lib/cashback/cashback-client'
 import { paymentMethodEarnsCashback } from '@/lib/cashback/cashback-config'
 import { isGuestBookingCashbackEligible } from '@/lib/cashback/cashback-eligibility'
+import { PaymentAccountSelect } from '@/components/payments/payment-account-select'
+import {
+  appendAccountToNotes,
+  paymentAccountInsertFields,
+  paymentMethodRequiresAccount,
+  type PaymentAccount,
+} from '@/lib/payments/payment-accounts'
 
 function sortRoomsByNumber<T extends { room_number?: string | number | null }>(rows: T[]) {
   return [...rows].sort((a, b) =>
@@ -265,6 +272,8 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
   // Step 3: Payment
   const [customRate, setCustomRate] = useState<number | ''>('')
   const [paymentMethod, setPaymentMethod] = useState<ReservationPaymentMethod>('pos')
+  const [paymentAccountId, setPaymentAccountId] = useState('')
+  const [paymentAccount, setPaymentAccount] = useState<PaymentAccount | null>(null)
   const [paymentStatus, setPaymentStatus] = useState<'paid' | 'partial' | 'unpaid'>('unpaid')
   const [partialAmount, setPartialAmount] = useState<number | ''>('')
   const [payAboveBulkRoomTotal, setPayAboveBulkRoomTotal] = useState(false)
@@ -1122,6 +1131,16 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
       }
     }
 
+    if (
+      !pendingHold &&
+      paymentStatus !== 'unpaid' &&
+      paymentMethodRequiresAccount(paymentMethod) &&
+      !paymentAccountId
+    ) {
+      toast.error('Select the POS / bank account where this payment was received')
+      return
+    }
+
     setLoading(true)
     try {
       const supabase = createClient()
@@ -1213,6 +1232,17 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
           if (payFcErr) throw payFcErr
         }
 
+        const accountFields = paymentMethodRequiresAccount(paymentMethod)
+          ? paymentAccountInsertFields(paymentAccount)
+          : { payment_account_id: null, payment_account_label: null }
+        const payNotesBase =
+          pay.cashbackDiscount > 0
+            ? `Bulk ${wording} payment — ${folioId} (incl. ${formatNaira(pay.cashbackDiscount)} cashback discount)`
+            : `Bulk ${wording} payment — ${folioId}`
+        const txDescBase = `${
+          wording === 'booking' ? 'Bulk booking' : 'Bulk reservation'
+        } payment — ${folioId}`
+
         if (guestId) {
           await supabase.from('payments').insert([
             {
@@ -1222,11 +1252,12 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
               amount: Math.min(pay.cashToCollect || pay.depositAmt, totalAmt),
               payment_method: paymentMethod,
               payment_date: new Date().toISOString(),
-              notes:
-                pay.cashbackDiscount > 0
-                  ? `Bulk ${wording} payment — ${folioId} (incl. ${formatNaira(pay.cashbackDiscount)} cashback discount)`
-                  : `Bulk ${wording} payment — ${folioId}`,
+              notes: appendAccountToNotes(
+                payNotesBase,
+                accountFields.payment_account_label,
+              ),
               received_by: currentUserId,
+              ...accountFields,
             },
           ])
         }
@@ -1247,10 +1278,12 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
                 : pay.bookingPaymentStatus === 'partial'
                   ? 'partial'
                   : 'pending',
-            description: `${
-              wording === 'booking' ? 'Bulk booking' : 'Bulk reservation'
-            } payment — ${folioId}`,
+            description: appendAccountToNotes(
+              txDescBase,
+              accountFields.payment_account_label,
+            ),
             received_by: currentUserId,
+            ...accountFields,
           },
         ])
       }
@@ -1595,6 +1628,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
     setShowNewGuestForm(false); setNewGuestName(''); setNewGuestPhone(''); setNewGuestEmail(''); setNewGuestAddress('')
     setCheckIn(undefined); setCheckOut(undefined); setBackdateReason(''); setRoomAvailabilityChecked(false); setAvailableRooms([])
     setCustomRate(''); setPaymentMethod('pos'); setPaymentStatus('unpaid'); setPartialAmount('')
+    setPaymentAccountId(''); setPaymentAccount(null)
     setPayAboveBulkRoomTotal(false)
     setLedgerSearch(''); setLedgerResults([]); setSelectedLedger(null); setLedgerSearchOpen(false)
     setShowNewLedgerOrgForm(false); setNewLedgerOrgName(''); setNewLedgerOrgEmail(''); setNewLedgerOrgPhone('')
@@ -2002,6 +2036,8 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
                 <Select
                   value={paymentMethod}
                   onValueChange={(v: ReservationPaymentMethod) => {
+                    setPaymentAccountId('')
+                    setPaymentAccount(null)
                     if (v === RESERVATION_PAYMENT_METHOD_PENDING) {
                       setPaymentMethod(v)
                       setPaymentStatus('unpaid')
@@ -2027,6 +2063,16 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
                     : 'Payment validates the block. Choose Pay now for full payment per room, Part payment for a deposit, or Unpaid to collect at check-in. Pending holds dates with no payment.'}
                 </p>
               </div>
+              <PaymentAccountSelect
+                paymentMethod={
+                  pendingHold || paymentStatus === 'unpaid' ? 'cash' : paymentMethod
+                }
+                value={paymentAccountId}
+                onChange={(id, acc) => {
+                  setPaymentAccountId(id)
+                  setPaymentAccount(acc)
+                }}
+              />
 
               <div className="space-y-2">
                 <Label>Payment Status</Label>

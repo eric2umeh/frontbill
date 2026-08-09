@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { RevenueDepartment } from '@/lib/reports/revenue-category'
 import { getOutletDepartment } from '@/lib/outlets/departments'
+import { appendAccountToNotes } from '@/lib/payments/payment-accounts'
 
 export const OUTLET_TRANSACTION_ID_PREFIX = 'OUT-'
 
@@ -191,6 +192,8 @@ export type RecordOutletImmediatePaymentInput = {
   bookingId?: string | null
   guestName?: string | null
   roomNumber?: string | null
+  payment_account_id?: string | null
+  payment_account_label?: string | null
 }
 
 function isUniqueViolation(err: { code?: string; message?: string } | null): boolean {
@@ -245,14 +248,21 @@ export async function recordOutletImmediatePayment(
     }
   }
 
-  const notes = buildOutletSettlementNotes(
-    input.departmentLabel,
-    input.orderNumber,
-    input.lineDetail,
+  const accountFields = {
+    payment_account_id: input.payment_account_id ?? null,
+    payment_account_label: input.payment_account_label ?? null,
+  }
+  const notes = appendAccountToNotes(
+    buildOutletSettlementNotes(
+      input.departmentLabel,
+      input.orderNumber,
+      input.lineDetail,
+    ),
+    accountFields.payment_account_label,
   )
-  const txDescription = `${input.departmentLabel} — ${input.orderNumber} — ${input.lineDetail}`.slice(
-    0,
-    500,
+  const txDescription = appendAccountToNotes(
+    `${input.departmentLabel} — ${input.orderNumber} — ${input.lineDetail}`.slice(0, 500),
+    accountFields.payment_account_label,
   )
   const now = new Date().toISOString()
   const transactionId = outletTransactionId(input.orderNumber)
@@ -280,6 +290,7 @@ export async function recordOutletImmediatePayment(
         payment_date: now,
         notes,
         received_by: input.userId,
+        ...accountFields,
       })
       .select('id')
       .single()
@@ -300,6 +311,7 @@ export async function recordOutletImmediatePayment(
       status: 'paid',
       description: txDescription,
       received_by: input.userId,
+      ...accountFields,
     })
 
     if (txErr && !isUniqueViolation(txErr)) throw new Error(txErr.message)

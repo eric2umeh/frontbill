@@ -58,41 +58,50 @@ export async function GET(request: Request) {
     const tz = resolveHotelTimeZone(org?.timezone)
     const bounds = hotelCalendarDayUtcBounds(date, tz)
 
-    const [{ data: bookings }, { data: transactions }, { data: payments }] =
-      await Promise.all([
-        admin
-          .from('bookings')
-          .select(
-            'id, check_in, check_out, status, rate_per_night, folio_id, payment_status, guest_id, guests:guest_id(name), rooms:room_id(room_number, room_type)',
-          )
-          .eq('organization_id', orgId)
-          .in('status', ['confirmed', 'checked_in', 'reserved', 'checked_out'])
-          .lte('check_in', date)
-          .gt('check_out', date)
-          .limit(500),
-        admin
-          .from('transactions')
-          .select(
-            'id, amount, payment_method, status, booking_id, created_at, transaction_id, guest_name, description, room',
-          )
-          .eq('organization_id', orgId)
-          .gte('created_at', bounds.startIso)
-          .lte('created_at', bounds.endInclusiveIso)
-          .limit(5000),
-        admin
-          .from('payments')
-          .select(
-            'id, amount, payment_method, booking_id, payment_date, reference_number, notes, guest_id',
-          )
-          .eq('organization_id', orgId)
-          .gte('payment_date', bounds.startIso)
-          .lte('payment_date', bounds.endInclusiveIso)
-          .limit(5000),
-      ])
+    const [{ data: bookings, error: bookErr }, txRes, payRes] = await Promise.all([
+      admin
+        .from('bookings')
+        .select(
+          'id, check_in, check_out, status, rate_per_night, folio_id, payment_status, guest_id, guests:guest_id(name), rooms:room_id(room_number, room_type)',
+        )
+        .eq('organization_id', orgId)
+        .in('status', ['confirmed', 'checked_in', 'reserved', 'checked_out'])
+        .lte('check_in', date)
+        .gt('check_out', date)
+        .limit(500),
+      // select * so missing optional columns (e.g. before/after SQL 076) never zero-out the ledger
+      admin
+        .from('transactions')
+        .select('*')
+        .eq('organization_id', orgId)
+        .gte('created_at', bounds.startIso)
+        .lte('created_at', bounds.endInclusiveIso)
+        .limit(5000),
+      admin
+        .from('payments')
+        .select('*')
+        .eq('organization_id', orgId)
+        .gte('payment_date', bounds.startIso)
+        .lte('payment_date', bounds.endInclusiveIso)
+        .limit(5000),
+    ])
+
+    if (bookErr) {
+      console.error('[daily-front-desk] bookings', bookErr.message)
+    }
+    if (txRes.error) {
+      console.error('[daily-front-desk] transactions', txRes.error.message)
+    }
+    if (payRes.error) {
+      console.error('[daily-front-desk] payments', payRes.error.message)
+    }
+
+    const transactions = txRes.data || []
+    const payments = payRes.data || []
 
     const guestIds = Array.from(
-      new Set((payments || []).map((p: any) => p.guest_id).filter(Boolean)),
-    )
+      new Set((payments || []).map((p: { guest_id?: string | null }) => p.guest_id).filter(Boolean)),
+    ) as string[]
     const guestNameById: Record<string, string> = {}
     if (guestIds.length > 0) {
       const { data: guests } = await admin
@@ -100,21 +109,29 @@ export async function GET(request: Request) {
         .select('id, name')
         .in('id', guestIds)
       for (const g of guests || []) {
-        guestNameById[(g as any).id] = (g as any).name
+        guestNameById[(g as { id: string }).id] = (g as { name: string }).name
       }
     }
 
     const pack = buildDailyFrontDeskPack({
       dateYmd: date,
       bookings: (bookings || []) as any,
-      transactions: (transactions || []) as any,
-      payments: (payments || []) as any,
+      transactions: transactions as any,
+      payments: payments as any,
       guestNameById,
     })
 
     return NextResponse.json({
       ok: true,
       pack,
+      meta: {
+        bounds,
+        transactionCount: transactions.length,
+        paymentCount: payments.length,
+        bookingCount: (bookings || []).length,
+        txError: txRes.error?.message || null,
+        payError: payRes.error?.message || null,
+      },
       note:
         'Room revenue = sum of rate_per_night for guests occupying that hotel night. Sales collection = cash/POS/transfer inflows that day (city ledger posted separately, not in collection total).',
     })

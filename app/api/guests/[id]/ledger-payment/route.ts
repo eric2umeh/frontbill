@@ -104,6 +104,12 @@ export async function POST(request: Request, ctx: RouteCtx) {
       ledgerAccountId,
       currentLedgerBalance,
       syncGuestProfile: true,
+      payment_account_id:
+        body?.payment_account_id != null ? String(body.payment_account_id) : null,
+      payment_account_label:
+        body?.payment_account_label != null
+          ? String(body.payment_account_label)
+          : null,
     })
 
     const folioAfter = await guestFolioOutstandingTotal(

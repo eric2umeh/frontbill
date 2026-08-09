@@ -26,6 +26,12 @@ import { OutletOrderCustomerFields } from '@/components/outlets/outlet-order-cus
 import type { OutletClientOption } from '@/lib/outlets/types'
 import { outletApiHeaders } from '@/lib/outlets/outlet-api-headers'
 import { toast } from 'sonner'
+import { PaymentAccountSelect } from '@/components/payments/payment-account-select'
+import {
+  paymentAccountInsertFields,
+  paymentMethodRequiresAccount,
+  type PaymentAccount,
+} from '@/lib/payments/payment-accounts'
 
 type LedgerOption = { id: string; name: string; balance: number }
 
@@ -47,6 +53,8 @@ export function OutletSettleOrderDialog({
   onSettled,
 }: Props) {
   const [paymentMethod, setPaymentMethod] = useState('pos')
+  const [paymentAccountId, setPaymentAccountId] = useState('')
+  const [paymentAccount, setPaymentAccount] = useState<PaymentAccount | null>(null)
   const [guestName, setGuestName] = useState('')
   const [roomNumber, setRoomNumber] = useState('')
   const [bookingId, setBookingId] = useState('')
@@ -60,6 +68,8 @@ export function OutletSettleOrderDialog({
   useEffect(() => {
     if (!open || !order) return
     setPaymentMethod('pos')
+    setPaymentAccountId('')
+    setPaymentAccount(null)
     setGuestName(order.guest_name?.trim() || '')
     setRoomNumber(order.room_number?.trim() || '')
     setBookingId(order.booking_id?.trim() || '')
@@ -99,6 +109,14 @@ export function OutletSettleOrderDialog({
       toast.error('Choose a payment method')
       return
     }
+    if (
+      !isComplimentary &&
+      paymentMethodRequiresAccount(paymentMethod) &&
+      !paymentAccountId
+    ) {
+      toast.error('Select the POS / bank account where this payment was received')
+      return
+    }
     if (!isComplimentary && paymentMethod === 'city_ledger') {
       const hasRoom = roomNumber.trim().length > 0
       const hasGuest = guestName.trim().length > 0
@@ -125,6 +143,9 @@ export function OutletSettleOrderDialog({
           guest_name: guestName.trim() || order.guest_name,
           room_number: roomNumber.trim() || order.room_number,
           city_ledger_account_id: selectedLedger?.id || null,
+          ...(!isComplimentary && paymentMethodRequiresAccount(paymentMethod)
+            ? paymentAccountInsertFields(paymentAccount)
+            : {}),
         }),
       })
       const json = await res.json().catch(() => ({}))
@@ -164,7 +185,14 @@ export function OutletSettleOrderDialog({
             <>
               <div className="space-y-1">
                 <Label>Payment method</Label>
-                <Select value={paymentMethod} onValueChange={setPaymentMethod}>
+                <Select
+                  value={paymentMethod}
+                  onValueChange={(v) => {
+                    setPaymentMethod(v)
+                    setPaymentAccountId('')
+                    setPaymentAccount(null)
+                  }}
+                >
                   <SelectTrigger>
                     <SelectValue placeholder="Select payment method" />
                   </SelectTrigger>
@@ -176,6 +204,15 @@ export function OutletSettleOrderDialog({
                   </SelectContent>
                 </Select>
               </div>
+
+              <PaymentAccountSelect
+                paymentMethod={paymentMethod}
+                value={paymentAccountId}
+                onChange={(id, acc) => {
+                  setPaymentAccountId(id)
+                  setPaymentAccount(acc)
+                }}
+              />
 
               {paymentMethod === 'city_ledger' && (
                 <div className="space-y-2 rounded-lg border bg-muted/30 p-3">

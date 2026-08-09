@@ -44,6 +44,13 @@ import { useNightAuditClosedDates } from '@/hooks/use-night-audit-closed-dates'
 import { useAuth } from '@/lib/auth-context'
 import { hasPermission } from '@/lib/permissions'
 import { BOOKING_MODAL_ROOMS_LIMIT, normalizeRoomsForBookingPickers } from '@/lib/utils/room-bookability'
+import { PaymentAccountSelect } from '@/components/payments/payment-account-select'
+import {
+  appendAccountToNotes,
+  paymentAccountInsertFields,
+  paymentMethodRequiresAccount,
+  type PaymentAccount,
+} from '@/lib/payments/payment-accounts'
 
 interface CheckinModalProps {
   open: boolean
@@ -88,6 +95,8 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
 
   // Payment
   const [paymentMethod, setPaymentMethod] = useState('pos')
+  const [paymentAccountId, setPaymentAccountId] = useState('')
+  const [paymentAccount, setPaymentAccount] = useState<PaymentAccount | null>(null)
   const [customPrice, setCustomPrice] = useState<number | ''>('')
   const [ledgerSearch, setLedgerSearch] = useState('')
   const [ledgerResults, setLedgerResults] = useState<any[]>([])
@@ -342,6 +351,10 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
       toast.error('Please select a city ledger organization account')
       return
     }
+    if (paymentMethodRequiresAccount(paymentMethod) && !paymentAccountId) {
+      toast.error('Select the POS / bank account where this payment was received')
+      return
+    }
     try {
       setLoading(true)
       const supabase = createClient()
@@ -423,6 +436,10 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
       }])
       if (folioErr) throw folioErr
 
+      const accountFields = paymentMethodRequiresAccount(paymentMethod)
+        ? paymentAccountInsertFields(paymentAccount)
+        : { payment_account_id: null, payment_account_label: null }
+
       await supabase.from('transactions').insert([{
         organization_id: orgId,
         booking_id: booking.id,
@@ -432,8 +449,12 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
         amount: total,
         payment_method: paymentMethod,
         status: isPaid ? 'completed' : 'pending',
-        description: `Check-in — Folio ${folioId}`,
+        description: appendAccountToNotes(
+          `Check-in — Folio ${folioId}`,
+          accountFields.payment_account_label,
+        ),
         received_by: user?.id,
+        ...accountFields,
       }])
 
       await supabase.from('payments').insert([{
@@ -443,8 +464,12 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
         amount: total,
         payment_method: paymentMethod,
         payment_date: new Date().toISOString(),
-        notes: `Check-in payment — Folio ${folioId}`,
+        notes: appendAccountToNotes(
+          `Check-in payment — Folio ${folioId}`,
+          accountFields.payment_account_label,
+        ),
         received_by: user?.id,
+        ...accountFields,
       }])
 
       toast.success(`Guest checked in! Ref: ${folioId}`)
@@ -466,6 +491,7 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
     )
     setCheckInDate(ci); setCheckOutDate(addDays(ci, 1)); setNights(1)
     setSelectedRoom(null); setPaymentMethod('pos'); setCustomPrice('')
+    setPaymentAccountId(''); setPaymentAccount(null)
     setLedgerSearch(''); setLedgerResults([]); setSelectedLedger(null); setLedgerSearchOpen(false)
     setShowNewLedgerOrgForm(false); setNewLedgerOrgName(''); setNewLedgerOrgPhone('')
     setDriverCode(''); setDriverVerified(false); setDriverName('')
@@ -629,7 +655,11 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
             </div>
             <div className="space-y-2">
               <Label>Payment Mode *</Label>
-              <Select value={paymentMethod} onValueChange={setPaymentMethod}>
+              <Select value={paymentMethod} onValueChange={(v) => {
+                setPaymentMethod(v)
+                setPaymentAccountId('')
+                setPaymentAccount(null)
+              }}>
                 <SelectTrigger><SelectValue placeholder="Select payment mode" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="pos">POS</SelectItem>
@@ -639,6 +669,14 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
                 </SelectContent>
               </Select>
             </div>
+            <PaymentAccountSelect
+              paymentMethod={paymentMethod}
+              value={paymentAccountId}
+              onChange={(id, acc) => {
+                setPaymentAccountId(id)
+                setPaymentAccount(acc)
+              }}
+            />
             {paymentMethod === 'city_ledger' && (
               <div className="space-y-3 rounded-md border bg-muted/30 p-3">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">

@@ -3,13 +3,16 @@
 import { useCallback, useEffect, useState } from 'react'
 import { format } from 'date-fns'
 import { useAuth } from '@/lib/auth-context'
+import { createClient } from '@/lib/supabase/client'
 import { formatNaira } from '@/lib/utils/currency'
 import {
   calendarDateMinusOneDay,
+  hotelCalendarDayUtcBounds,
   hotelCalendarTodayYmd,
   resolveHotelTimeZone,
 } from '@/lib/hotel-date'
 import {
+  buildDailyFrontDeskPack,
   SALES_COLLECTION_LABELS,
   type DailyFrontDeskPack,
   type SalesCollectionCategory,
@@ -19,15 +22,9 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Calendar } from '@/components/ui/calendar'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
 import { PageLoadingState } from '@/components/loading-screen'
+import { EnhancedDataTable } from '@/components/shared/enhanced-data-table'
+import { MobileTableSubdetail } from '@/lib/utils/table-mobile'
 import { toast } from 'sonner'
 import { CalendarIcon, RefreshCw, Users, Wallet } from 'lucide-react'
 import { calendarPickerYmd } from '@/lib/utils/booking-in-house-dates'
@@ -41,7 +38,7 @@ function categoryBadgeVariant(
 }
 
 export function DailyFrontDeskPanel() {
-  const { userId } = useAuth()
+  const { userId, organizationId, role } = useAuth()
   const [day, setDay] = useState(() =>
     calendarDateMinusOneDay(hotelCalendarTodayYmd(new Date(), resolveHotelTimeZone())),
   )
@@ -53,24 +50,106 @@ export function DailyFrontDeskPanel() {
     if (!userId) return
     setLoading(true)
     try {
-      const qs = new URLSearchParams({ caller_id: userId, date: day })
-      const res = await fetch(`/api/reports/daily-front-desk?${qs}`, {
-        credentials: 'include',
-      })
-      const json = await res.json()
-      if (!res.ok) {
-        toast.error(json.error || 'Failed to load daily book')
+      const supabase = createClient()
+      if (!supabase) {
+        toast.error('Could not connect')
         setPack(null)
         return
       }
-      setPack(json.pack)
-    } catch {
+
+      const orgId = (organizationId || '').trim()
+      if (!orgId && role !== 'superadmin') {
+        toast.error('Your profile has no organization')
+        setPack(null)
+        return
+      }
+
+      const tz = resolveHotelTimeZone()
+      const bounds = hotelCalendarDayUtcBounds(day, tz)
+
+      let bookQ = supabase
+        .from('bookings')
+        .select(
+          'id, check_in, check_out, status, rate_per_night, folio_id, payment_status, guest_id, guests:guest_id(name), rooms:room_id(room_number, room_type)',
+        )
+        .in('status', ['confirmed', 'checked_in', 'reserved', 'checked_out'])
+        .lte('check_in', day)
+        .gt('check_out', day)
+        .limit(500)
+
+      let txQ = supabase
+        .from('transactions')
+        .select('*')
+        .gte('created_at', bounds.startIso)
+        .lte('created_at', bounds.endInclusiveIso)
+        .limit(5000)
+
+      let payQ = supabase
+        .from('payments')
+        .select('*')
+        .gte('payment_date', bounds.startIso)
+        .lte('payment_date', bounds.endInclusiveIso)
+        .limit(5000)
+
+      if (role !== 'superadmin' && orgId) {
+        bookQ = bookQ.eq('organization_id', orgId)
+        txQ = txQ.eq('organization_id', orgId)
+        payQ = payQ.eq('organization_id', orgId)
+      }
+
+      const [bookRes, txRes, payRes] = await Promise.all([bookQ, txQ, payQ])
+
+      if (txRes.error) {
+        console.error('[daily-book] transactions', txRes.error.message)
+        toast.error(txRes.error.message || 'Could not load transactions for daily book')
+      }
+      if (payRes.error) {
+        console.error('[daily-book] payments', payRes.error.message)
+      }
+      if (bookRes.error) {
+        console.error('[daily-book] bookings', bookRes.error.message)
+      }
+
+      const payments = payRes.data || []
+      const guestIds = Array.from(
+        new Set(payments.map((p: { guest_id?: string | null }) => p.guest_id).filter(Boolean)),
+      ) as string[]
+      const guestNameById: Record<string, string> = {}
+      if (guestIds.length > 0) {
+        const { data: guests } = await supabase.from('guests').select('id, name').in('id', guestIds)
+        for (const g of guests || []) {
+          guestNameById[(g as { id: string }).id] = (g as { name: string }).name
+        }
+      }
+
+      const next = buildDailyFrontDeskPack({
+        dateYmd: day,
+        bookings: (bookRes.data || []) as any,
+        transactions: (txRes.data || []) as any,
+        payments: payments as any,
+        guestNameById,
+      })
+      setPack(next)
+
+      // If still empty, try API (service role) as backup
+      if (next.salesCollection.total === 0 && next.lines.length === 0) {
+        const qs = new URLSearchParams({ caller_id: userId, date: day })
+        const res = await fetch(`/api/reports/daily-front-desk?${qs}`, {
+          credentials: 'include',
+        })
+        const json = await res.json()
+        if (res.ok && json.pack && (json.pack.lines?.length || json.pack.salesCollection?.total)) {
+          setPack(json.pack)
+        }
+      }
+    } catch (e) {
+      console.error(e)
       toast.error('Network error loading daily book')
       setPack(null)
     } finally {
       setLoading(false)
     }
-  }, [userId, day])
+  }, [userId, organizationId, role, day])
 
   useEffect(() => {
     void load()
@@ -159,7 +238,7 @@ export function DailyFrontDeskPanel() {
               ['Cash', sc?.cash],
               ['Bank transfer', sc?.transfer],
               ['Advance payment', sc?.advancePayment],
-              ['Additional (extend)', sc?.additionalPayment],
+              ['Additional (Extend stay etc)', sc?.additionalPayment],
               ['Extra charges', sc?.extraCharges],
               ['Debt recovery', sc?.debtRecovery],
               ['Other', sc?.other],
@@ -182,47 +261,82 @@ export function DailyFrontDeskPanel() {
             Stay date.
           </CardDescription>
         </CardHeader>
-        <CardContent className="overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-12">S/N</TableHead>
-                <TableHead>Guest</TableHead>
-                <TableHead>Room</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead className="text-right">Rate</TableHead>
-                <TableHead>Stay</TableHead>
-                <TableHead>Payment</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {(pack?.guests || []).length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
-                    No in-house guests for this date
-                  </TableCell>
-                </TableRow>
-              ) : (
-                pack!.guests.map((g, i) => (
-                  <TableRow key={g.booking_id}>
-                    <TableCell>{i + 1}</TableCell>
-                    <TableCell className="font-medium">{g.guest_name}</TableCell>
-                    <TableCell>{g.room_number}</TableCell>
-                    <TableCell>{g.room_type}</TableCell>
-                    <TableCell className="text-right">{formatNaira(g.rate_per_night)}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
-                      {g.check_in} → {g.check_out}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="outline" className="capitalize">
-                        {g.payment_status}
-                      </Badge>
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
+        <CardContent className="p-0 sm:p-6 pt-0">
+          <EnhancedDataTable
+            compactTable
+            data={(pack?.guests || []).map((g, i) => ({ ...g, sn: i + 1 }))}
+            searchKeys={['guest_name', 'room_number', 'folio_id']}
+            searchPlaceholder="Search guests, room, folio…"
+            emptyState={{ title: 'No in-house guests for this date' }}
+            rowKey={(g) => g.booking_id}
+            columns={[
+              {
+                key: 'guest_name',
+                label: 'Guest',
+                render: (g) => (
+                  <div>
+                    <div className="font-medium max-md:text-[13px]">
+                      <span className="text-muted-foreground mr-1.5 md:hidden">{g.sn}.</span>
+                      {g.guest_name}
+                    </div>
+                    <div className="text-[10px] text-muted-foreground max-md:hidden">
+                      {g.room_number} · {g.room_type}
+                    </div>
+                    <MobileTableSubdetail>
+                      <div>
+                        Rm {g.room_number} · {g.room_type}
+                      </div>
+                      <div>
+                        {g.check_in} → {g.check_out}
+                      </div>
+                      <div className="capitalize">{g.payment_status}</div>
+                    </MobileTableSubdetail>
+                  </div>
+                ),
+              },
+              {
+                key: 'rate_per_night',
+                label: 'Rate',
+                render: (g) => (
+                  <span className="font-semibold text-xs md:text-sm whitespace-nowrap">
+                    {formatNaira(g.rate_per_night)}
+                  </span>
+                ),
+              },
+              {
+                key: 'room_number',
+                label: 'Room',
+                responsive: 'md+',
+                render: (g) => g.room_number,
+              },
+              {
+                key: 'room_type',
+                label: 'Type',
+                responsive: 'md+',
+                render: (g) => g.room_type,
+              },
+              {
+                key: 'check_in',
+                label: 'Stay',
+                responsive: 'md+',
+                render: (g) => (
+                  <span className="text-xs text-muted-foreground whitespace-nowrap">
+                    {g.check_in} → {g.check_out}
+                  </span>
+                ),
+              },
+              {
+                key: 'payment_status',
+                label: 'Payment',
+                responsive: 'md+',
+                render: (g) => (
+                  <Badge variant="outline" className="capitalize">
+                    {g.payment_status}
+                  </Badge>
+                ),
+              },
+            ]}
+          />
         </CardContent>
       </Card>
 
@@ -230,57 +344,101 @@ export function DailyFrontDeskPanel() {
         <CardHeader>
           <CardTitle className="text-base">Collection lines</CardTitle>
           <CardDescription>
-            Individual receipts for the day with category labels. City ledger lines are listed but not
-            summed into Sales collection.
+            Individual receipts for the day with category labels and bank/POS account. City ledger
+            lines are listed but not summed into Sales collection.
           </CardDescription>
         </CardHeader>
-        <CardContent className="overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Guest</TableHead>
-                <TableHead className="text-right">Amount</TableHead>
-                <TableHead>Method</TableHead>
-                <TableHead>Category</TableHead>
-                <TableHead>Ref</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {(pack?.lines || []).length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
-                    No collections recorded for this date
-                  </TableCell>
-                </TableRow>
-              ) : (
-                pack!.lines.map((line) => (
-                  <TableRow
-                    key={line.id}
-                    className={!line.counts_as_cash_collection ? 'opacity-70' : undefined}
-                  >
-                    <TableCell>
-                      <div className="font-medium">{line.guest_name}</div>
-                      {line.room ? (
-                        <div className="text-xs text-muted-foreground">{line.room}</div>
-                      ) : null}
-                    </TableCell>
-                    <TableCell className="text-right font-medium">
-                      {formatNaira(line.amount)}
-                    </TableCell>
-                    <TableCell className="capitalize">
-                      {line.payment_method.replace(/_/g, ' ')}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={categoryBadgeVariant(line.category)}>
+        <CardContent className="p-0 sm:p-6 pt-0">
+          <EnhancedDataTable
+            compactTable
+            data={pack?.lines || []}
+            searchKeys={['guest_name', 'reference', 'payment_account_label', 'description']}
+            searchPlaceholder="Search collections…"
+            emptyState={{ title: 'No collections recorded for this date' }}
+            rowKey={(line) => line.id}
+            columns={[
+              {
+                key: 'guest_name',
+                label: 'Guest',
+                render: (line) => (
+                  <div className={!line.counts_as_cash_collection ? 'opacity-70' : undefined}>
+                    <div className="font-medium max-md:text-[13px]">{line.guest_name}</div>
+                    {line.room ? (
+                      <div className="text-[10px] text-muted-foreground max-md:hidden">{line.room}</div>
+                    ) : null}
+                    <MobileTableSubdetail>
+                      {line.room ? <div>{line.room}</div> : null}
+                      <div className="capitalize">
+                        {line.payment_method.replace(/_/g, ' ')} ·{' '}
                         {SALES_COLLECTION_LABELS[line.category]}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-xs font-mono">{line.reference}</TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
+                      </div>
+                      {line.payment_account_label ? <div>{line.payment_account_label}</div> : null}
+                    </MobileTableSubdetail>
+                  </div>
+                ),
+              },
+              {
+                key: 'amount',
+                label: 'Amount',
+                render: (line) => (
+                  <span className="font-semibold text-xs md:text-sm whitespace-nowrap">
+                    {formatNaira(line.amount)}
+                  </span>
+                ),
+              },
+              {
+                key: 'payment_method',
+                label: 'Method',
+                responsive: 'md+',
+                render: (line) => (
+                  <div className="space-y-1">
+                    <span className="capitalize text-sm">
+                      {line.payment_method.replace(/_/g, ' ')}
+                    </span>
+                    {line.payment_account_label ? (
+                      <div
+                        className="text-[10px] text-muted-foreground truncate max-w-[140px]"
+                        title={line.payment_account_label}
+                      >
+                        {line.payment_account_label}
+                      </div>
+                    ) : null}
+                  </div>
+                ),
+              },
+              {
+                key: 'category',
+                label: 'Category',
+                responsive: 'md+',
+                render: (line) => (
+                  <Badge variant={categoryBadgeVariant(line.category)}>
+                    {SALES_COLLECTION_LABELS[line.category]}
+                  </Badge>
+                ),
+              },
+              {
+                key: 'payment_account_label',
+                label: 'Account',
+                responsive: 'lg+',
+                render: (line) => (
+                  <span
+                    className="text-xs text-muted-foreground max-w-[160px] inline-block truncate"
+                    title={line.payment_account_label || ''}
+                  >
+                    {line.payment_account_label || '—'}
+                  </span>
+                ),
+              },
+              {
+                key: 'reference',
+                label: 'Ref',
+                responsive: 'lg+',
+                render: (line) => (
+                  <span className="font-mono text-[10px] text-muted-foreground">{line.reference}</span>
+                ),
+              },
+            ]}
+          />
         </CardContent>
       </Card>
     </div>

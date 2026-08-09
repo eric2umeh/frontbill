@@ -57,6 +57,12 @@ import {
 import { Search, Minus, Plus, Loader2, Receipt, FileText } from 'lucide-react'
 import { toast } from 'sonner'
 import { outletApiHeaders } from '@/lib/outlets/outlet-api-headers'
+import { PaymentAccountSelect } from '@/components/payments/payment-account-select'
+import {
+  paymentAccountInsertFields,
+  paymentMethodRequiresAccount,
+  type PaymentAccount,
+} from '@/lib/payments/payment-accounts'
 import { OutletOrderCustomerFields } from '@/components/outlets/outlet-order-customer-fields'
 import type { OutletClientOption } from '@/lib/outlets/types'
 import { useSupplyChain } from '@/lib/supply-chain/supply-chain-context'
@@ -118,6 +124,8 @@ export function OutletPos({
   const [waiterName, setWaiterName] = useState('')
   const [waiterId, setWaiterId] = useState<string | null>(null)
   const [paymentMethod, setPaymentMethod] = useState('pos')
+  const [paymentAccountId, setPaymentAccountId] = useState('')
+  const [paymentAccount, setPaymentAccount] = useState<PaymentAccount | null>(null)
   const [bookingId, setBookingId] = useState('')
   const [roomGuestLabel, setRoomGuestLabel] = useState<string | null>(null)
   const [ledgerSearch, setLedgerSearch] = useState('')
@@ -344,7 +352,12 @@ export function OutletPos({
       unit_price: l.unitPrice,
     })),
     ...(settleNow
-      ? { payment_method: isComplimentary ? 'complimentary' : paymentMethod }
+      ? {
+          payment_method: isComplimentary ? 'complimentary' : paymentMethod,
+          ...(!isComplimentary && paymentMethodRequiresAccount(paymentMethod)
+            ? paymentAccountInsertFields(paymentAccount)
+            : {}),
+        }
       : {}),
     is_complimentary: isComplimentary,
     order_type: orderType,
@@ -381,6 +394,8 @@ export function OutletPos({
     setIsComplimentary(false)
     setWaiterName('')
     setWaiterId(null)
+    setPaymentAccountId('')
+    setPaymentAccount(null)
   }
 
   const submitOrder = async (settleNow: boolean) => {
@@ -397,6 +412,15 @@ export function OutletPos({
     }
     if (settleNow && !isComplimentary && !paymentMethod) {
       toast.error('Choose a payment method to settle')
+      return
+    }
+    if (
+      settleNow &&
+      !isComplimentary &&
+      paymentMethodRequiresAccount(paymentMethod) &&
+      !paymentAccountId
+    ) {
+      toast.error('Select the POS / bank account where this payment was received')
       return
     }
     if (!isComplimentary && settleNow && paymentMethod === 'city_ledger') {
@@ -717,7 +741,14 @@ export function OutletPos({
             {!isComplimentary && (
               <div className="space-y-1">
                 <Label>Payment method</Label>
-                <Select value={paymentMethod} onValueChange={setPaymentMethod}>
+                <Select
+                  value={paymentMethod}
+                  onValueChange={(v) => {
+                    setPaymentMethod(v)
+                    setPaymentAccountId('')
+                    setPaymentAccount(null)
+                  }}
+                >
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="pos">POS</SelectItem>
@@ -727,6 +758,16 @@ export function OutletPos({
                   </SelectContent>
                 </Select>
               </div>
+            )}
+            {!isComplimentary && (
+              <PaymentAccountSelect
+                paymentMethod={paymentMethod}
+                value={paymentAccountId}
+                onChange={(id, acc) => {
+                  setPaymentAccountId(id)
+                  setPaymentAccount(acc)
+                }}
+              />
             )}
             {!isComplimentary && paymentMethod === 'city_ledger' && (
               <div className="space-y-2 rounded-lg border bg-muted/30 p-3">

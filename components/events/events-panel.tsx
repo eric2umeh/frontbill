@@ -13,6 +13,10 @@ import {
   type EventPaymentFormValue,
 } from '@/components/events/event-payment-section'
 import { computeEventPayment } from '@/lib/events/compute-event-payment'
+import {
+  paymentAccountInsertFields,
+  paymentMethodRequiresAccount,
+} from '@/lib/payments/payment-accounts'
 import { effectiveEventEndDate } from '@/lib/events/event-date-overlap'
 import { EventDateAvailability } from '@/components/events/event-date-availability'
 import { EventTimeField } from '@/components/events/event-time-field'
@@ -75,6 +79,8 @@ const defaultPayment = (): EventPaymentFormValue => ({
   payment_status: 'paid',
   partial_amount: '',
   pay_above_total: false,
+  payment_account_id: '',
+  payment_account: null,
   folio_extras: { remarks: '', files: [] },
 })
 
@@ -238,6 +244,8 @@ export function EventsPanel() {
             : ev.payment_status === 'partial'
               ? 'partial'
               : 'paid',
+        payment_account_id: '',
+        payment_account: null,
         partial_amount:
           ev.amount_paid != null
             ? String(ev.amount_paid)
@@ -291,6 +299,15 @@ export function EventsPanel() {
       toast.error('Please enter the amount paid')
       return
     }
+    if (
+      !editing &&
+      form.payment.payment_status !== 'unpaid' &&
+      paymentMethodRequiresAccount(form.payment.payment_method) &&
+      !form.payment.payment_account_id
+    ) {
+      toast.error('Select the POS / bank account where this payment was received')
+      return
+    }
     if (!form.client_name.trim()) {
       toast.error(
         form.client_type === 'organization'
@@ -328,6 +345,7 @@ export function EventsPanel() {
         partial_amount: form.payment.partial_amount,
         pay_above_total: form.payment.pay_above_total,
         remarks: form.payment.folio_extras.remarks,
+        ...paymentAccountInsertFields(form.payment.payment_account),
       }
       const url = editing ? `/api/events/${editing.id}` : '/api/events'
       const res = await fetch(url, {

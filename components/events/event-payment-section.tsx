@@ -23,12 +23,16 @@ import {
   formatEventPaymentMethodLabel,
   isEventPendingHold,
 } from '@/lib/events/event-payment-methods'
+import { PaymentAccountSelect } from '@/components/payments/payment-account-select'
+import type { PaymentAccount } from '@/lib/payments/payment-accounts'
 
 export type EventPaymentFormValue = {
   payment_method: string
   payment_status: EventPaymentStatus
   partial_amount: string | number
   pay_above_total: boolean
+  payment_account_id: string
+  payment_account: PaymentAccount | null
   folio_extras: FolioRemarksAttachmentsValue
 }
 
@@ -86,12 +90,17 @@ export function EventPaymentSection({ totalAmount, value, onChange, disabled }: 
                     payment_method: EVENT_PAYMENT_METHOD_PENDING,
                     partial_amount: '',
                     pay_above_total: false,
+                    payment_account_id: '',
+                    payment_account: null,
                   })
                 } else {
                   patch({
                     payment_status: v,
                     payment_method:
                       paymentMethod === EVENT_PAYMENT_METHOD_PENDING ? 'pos' : paymentMethod,
+                    ...(paymentMethod === EVENT_PAYMENT_METHOD_PENDING
+                      ? { payment_account_id: '', payment_account: null }
+                      : {}),
                   })
                 }
               }}
@@ -174,9 +183,15 @@ export function EventPaymentSection({ totalAmount, value, onChange, disabled }: 
                   payment_status: 'unpaid',
                   partial_amount: '',
                   pay_above_total: false,
+                  payment_account_id: '',
+                  payment_account: null,
                 })
               } else {
-                patch({ payment_method: v })
+                patch({
+                  payment_method: v,
+                  payment_account_id: '',
+                  payment_account: null,
+                })
               }
             }}
             disabled={disabled}
@@ -199,6 +214,17 @@ export function EventPaymentSection({ totalAmount, value, onChange, disabled }: 
             </p>
           )}
         </div>
+
+        <PaymentAccountSelect
+          paymentMethod={
+            pendingHold || paymentStatus === 'unpaid' ? 'cash' : paymentMethod
+          }
+          value={value.payment_account_id || ''}
+          disabled={disabled}
+          onChange={(id, acc) =>
+            patch({ payment_account_id: id, payment_account: acc })
+          }
+        />
 
         {totalAmount > 0 && (
           <div className="rounded-lg bg-muted space-y-1 p-3 text-sm border">

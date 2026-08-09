@@ -181,6 +181,10 @@ export async function POST(request: Request) {
     storedPaymentStatus: payment.payment_status,
     depositAmount: payment.depositAmount,
     balanceAmount: payment.balance,
+    paymentAccountId:
+      body.payment_account_id != null ? String(body.payment_account_id) : null,
+    paymentAccountLabel:
+      body.payment_account_label != null ? String(body.payment_account_label) : null,
   })
   if (side.error) {
     return NextResponse.json(

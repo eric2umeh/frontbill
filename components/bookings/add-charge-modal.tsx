@@ -30,6 +30,13 @@ import { createClient } from "@/lib/supabase/client";
 import { isSelectableLedgerName } from "@/lib/utils/ledger-organization";
 import { mergeCounterpartyOrganizationRows } from "@/lib/utils/search-counterparty-organizations";
 import { resolveOrganizationLedgerAccount } from "@/lib/utils/resolve-ledger-account";
+import { PaymentAccountSelect } from "@/components/payments/payment-account-select";
+import {
+  appendAccountToNotes,
+  paymentAccountInsertFields,
+  paymentMethodRequiresAccount,
+  type PaymentAccount,
+} from "@/lib/payments/payment-accounts";
 
 interface AddChargeModalProps {
   open: boolean;
@@ -53,6 +60,10 @@ export function AddChargeModal({
   const [description, setDescription] = useState("");
   const [amount, setAmount] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("city_ledger");
+  const [paymentAccountId, setPaymentAccountId] = useState("");
+  const [paymentAccount, setPaymentAccount] = useState<PaymentAccount | null>(
+    null,
+  );
   const [loading, setLoading] = useState(false);
   const [ledgerType, setLedgerType] = useState("individual");
   const [selectedLedger, setSelectedLedger] = useState<any>(null);
@@ -192,6 +203,12 @@ export function AddChargeModal({
       toast.error("Please select an account for City Ledger");
       return;
     }
+    if (paymentMethodRequiresAccount(paymentMethod) && !paymentAccountId) {
+      toast.error(
+        "Select the POS / bank account where this payment was received",
+      );
+      return;
+    }
 
     setLoading(true);
     try {
@@ -202,6 +219,9 @@ export function AddChargeModal({
       // city_ledger = deferred (pending)
       const isPaidNow =
         paymentMethod !== "city_ledger" && paymentMethod !== "deferred";
+      const accountFields = paymentMethodRequiresAccount(paymentMethod)
+        ? paymentAccountInsertFields(paymentAccount)
+        : { payment_account_id: null, payment_account_label: null };
 
       // Build folio_charges insert — without organization_id (column may not exist)
       const chargeData: any = {
@@ -247,8 +267,12 @@ export function AddChargeModal({
             amount: chargeAmount,
             payment_method: paymentMethod,
             status: isPaidNow ? "paid" : "pending",
-            description: description,
+            description: appendAccountToNotes(
+              description,
+              accountFields.payment_account_label,
+            ),
             received_by: currentUserId,
+            ...accountFields,
           },
         ]);
       } catch (_) {
@@ -345,6 +369,8 @@ export function AddChargeModal({
     setDescription("");
     setAmount("");
     setPaymentMethod("city_ledger");
+    setPaymentAccountId("");
+    setPaymentAccount(null);
     setLedgerType("individual");
     setSelectedLedger(null);
     setOrgSearchTerm("");
@@ -414,7 +440,14 @@ export function AddChargeModal({
 
             <div>
               <Label>Payment Method</Label>
-              <Select value={paymentMethod} onValueChange={setPaymentMethod}>
+              <Select
+                value={paymentMethod}
+                onValueChange={(v) => {
+                  setPaymentMethod(v);
+                  setPaymentAccountId("");
+                  setPaymentAccount(null);
+                }}
+              >
                 <SelectTrigger className="mt-2">
                   <SelectValue />
                 </SelectTrigger>
@@ -426,6 +459,15 @@ export function AddChargeModal({
                 </SelectContent>
               </Select>
             </div>
+
+            <PaymentAccountSelect
+              paymentMethod={paymentMethod}
+              value={paymentAccountId}
+              onChange={(id, acc) => {
+                setPaymentAccountId(id);
+                setPaymentAccount(acc);
+              }}
+            />
 
             {paymentMethod === "city_ledger" && (
               <>

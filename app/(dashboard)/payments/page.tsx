@@ -15,6 +15,13 @@ import { formatNaira } from '@/lib/utils/currency'
 import { usePageData } from '@/hooks/use-page-data'
 import { toast } from 'sonner'
 import { insertFolioCharges } from '@/lib/utils/insert-folio-charges'
+import { PaymentAccountSelect } from '@/components/payments/payment-account-select'
+import {
+  appendAccountToNotes,
+  paymentAccountInsertFields,
+  paymentMethodRequiresAccount,
+  type PaymentAccount,
+} from '@/lib/payments/payment-accounts'
 
 interface Payment {
   id: string
@@ -34,6 +41,8 @@ export default function PaymentsPage() {
   const [selectedBookingId, setSelectedBookingId] = useState('')
   const [amount, setAmount] = useState('')
   const [paymentMethod, setPaymentMethod] = useState('pos')
+  const [paymentAccountId, setPaymentAccountId] = useState('')
+  const [paymentAccount, setPaymentAccount] = useState<PaymentAccount | null>(null)
   const { initialLoading, startFetch, endFetch } = usePageData()
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -118,6 +127,10 @@ export default function PaymentsPage() {
       toast.error('Select a booking, amount, and payment method')
       return
     }
+    if (paymentMethodRequiresAccount(paymentMethod) && !paymentAccountId) {
+      toast.error('Select the POS / bank account where this payment was received')
+      return
+    }
     const booking = bookings.find((item) => item.id === selectedBookingId)
     if (!booking) {
       toast.error('Booking not found')
@@ -132,6 +145,9 @@ export default function PaymentsPage() {
       const newBalance = Math.max(0, Number(booking.balance || 0) - appliedAmount)
       const newDeposit = Number(booking.deposit || 0) + appliedAmount
       const reference = `PAY-${Date.now().toString(36).toUpperCase()}`
+      const accountFields = paymentMethodRequiresAccount(paymentMethod)
+        ? paymentAccountInsertFields(paymentAccount)
+        : { payment_account_id: null, payment_account_label: null }
 
       const { error: paymentError } = await supabase.from('payments').insert([{
         organization_id: organizationId,
@@ -142,7 +158,11 @@ export default function PaymentsPage() {
         payment_date: new Date().toISOString(),
         reference_number: reference,
         received_by: user?.id || null,
-        notes: `Payment received for folio ${booking.folio_id}`,
+        notes: appendAccountToNotes(
+          `Payment received for folio ${booking.folio_id}`,
+          accountFields.payment_account_label,
+        ),
+        ...accountFields,
       }])
       if (paymentError) throw paymentError
 
@@ -173,8 +193,12 @@ export default function PaymentsPage() {
         amount: appliedAmount,
         payment_method: paymentMethod,
         status: 'paid',
-        description: `Payment received - ${paymentMethod.replace(/_/g, ' ')}`,
+        description: appendAccountToNotes(
+          `Payment received - ${paymentMethod.replace(/_/g, ' ')}`,
+          accountFields.payment_account_label,
+        ),
         received_by: user?.id || null,
+        ...accountFields,
       }])
 
       toast.success('Payment recorded')
@@ -182,6 +206,8 @@ export default function PaymentsPage() {
       setSelectedBookingId('')
       setAmount('')
       setPaymentMethod('pos')
+      setPaymentAccountId('')
+      setPaymentAccount(null)
       fetchPayments()
     } catch (error: any) {
       toast.error(error.message || 'Failed to record payment')
@@ -280,7 +306,14 @@ export default function PaymentsPage() {
             </div>
             <div className="space-y-2">
               <Label>Payment Method</Label>
-              <Select value={paymentMethod} onValueChange={setPaymentMethod}>
+              <Select
+                value={paymentMethod}
+                onValueChange={(v) => {
+                  setPaymentMethod(v)
+                  setPaymentAccountId('')
+                  setPaymentAccount(null)
+                }}
+              >
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="pos">POS</SelectItem>
@@ -289,6 +322,14 @@ export default function PaymentsPage() {
                 </SelectContent>
               </Select>
             </div>
+            <PaymentAccountSelect
+              paymentMethod={paymentMethod}
+              value={paymentAccountId}
+              onChange={(id, acc) => {
+                setPaymentAccountId(id)
+                setPaymentAccount(acc)
+              }}
+            />
             <Button className="w-full" onClick={handleRecordPayment} disabled={recording || bookings.length === 0}>
               {recording && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Record Payment
