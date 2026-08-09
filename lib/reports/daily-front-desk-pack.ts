@@ -137,8 +137,9 @@ function countsAsCashCollection(
 ): boolean {
   if (category === 'city_ledger') return false
   if (!isCashLikeMethod(method)) return false
-  const st = String(status || 'paid').toLowerCase()
-  if (['pending', 'unpaid', 'void', 'cancelled'].includes(st)) return false
+  const st = String(status || '').toLowerCase().trim()
+  // Only drop clearly voided rows. Many paid dual-writes use status "pending"/"completed".
+  if (['void', 'cancelled', 'failed', 'refunded'].includes(st)) return false
   return true
 }
 
@@ -289,37 +290,47 @@ export function buildDailyFrontDeskPack(input: {
   }
 
   for (const line of lines) {
-    if (line.category === 'city_ledger' || normMethod(line.payment_method) === 'city_ledger') {
+    const method = normMethod(line.payment_method)
+    if (line.category === 'city_ledger' || method === 'city_ledger') {
       salesCollection.cityLedgerPosted += line.amount
       continue
     }
     if (!line.counts_as_cash_collection) continue
 
-    salesCollection.total += line.amount
+    const amt = Number(line.amount) || 0
+    salesCollection.total += amt
+
+    // Category buckets for the manual book; method buckets for uncategorized cash/POS/transfer.
     switch (line.category) {
-      case 'pos':
-        salesCollection.pos += line.amount
-        break
-      case 'cash':
-        salesCollection.cash += line.amount
-        break
-      case 'transfer':
-        salesCollection.transfer += line.amount
-        break
       case 'advance_payment':
-        salesCollection.advancePayment += line.amount
+        salesCollection.advancePayment += amt
         break
       case 'additional_payment':
-        salesCollection.additionalPayment += line.amount
+        salesCollection.additionalPayment += amt
         break
       case 'extra_charges':
-        salesCollection.extraCharges += line.amount
+        salesCollection.extraCharges += amt
         break
       case 'debt_recovery':
-        salesCollection.debtRecovery += line.amount
+        salesCollection.debtRecovery += amt
+        break
+      case 'pos':
+        salesCollection.pos += amt
+        break
+      case 'cash':
+        salesCollection.cash += amt
+        break
+      case 'transfer':
+        salesCollection.transfer += amt
         break
       default:
-        salesCollection.other += line.amount
+        if (method === 'pos') salesCollection.pos += amt
+        else if (method === 'cash') salesCollection.cash += amt
+        else if (method === 'transfer' || method === 'bank_transfer') {
+          salesCollection.transfer += amt
+        } else {
+          salesCollection.other += amt
+        }
         break
     }
   }
@@ -339,7 +350,7 @@ export const SALES_COLLECTION_LABELS: Record<SalesCollectionCategory, string> = 
   cash: 'Cash',
   transfer: 'Bank transfer',
   advance_payment: 'Advance payment',
-  additional_payment: 'Additional payment (extend)',
+  additional_payment: 'Additional (Extend stay etc)',
   extra_charges: 'Extra charges',
   debt_recovery: 'Debt recovery',
   city_ledger: 'City ledger (posted)',
