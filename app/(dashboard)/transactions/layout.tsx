@@ -16,6 +16,12 @@ const MAIN_TABS = [
       pathname === '/transactions' || isTransactionDetailPath(pathname),
   },
   {
+    href: '/transactions/daily-book',
+    label: 'Daily book',
+    permission: 'transactions:view' as const,
+    match: (pathname: string) => pathname.startsWith('/transactions/daily-book'),
+  },
+  {
     href: '/transactions/analytics/revenue',
     label: 'Analytics',
     permission: 'analytics:view' as const,
@@ -26,7 +32,8 @@ const MAIN_TABS = [
 function isTransactionDetailPath(pathname: string): boolean {
   return (
     /^\/transactions\/[^/]+$/.test(pathname) &&
-    !pathname.startsWith('/transactions/analytics')
+    !pathname.startsWith('/transactions/analytics') &&
+    !pathname.startsWith('/transactions/daily-book')
   )
 }
 
@@ -51,7 +58,7 @@ export default function TransactionsLayout({ children }: { children: React.React
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Transactions / Analytics</h1>
         <p className="text-muted-foreground">
-          Payment ledger, revenue collections, and profitability
+          Payment ledger, daily book (in-house guests + sales collection), and profitability
         </p>
       </div>
 

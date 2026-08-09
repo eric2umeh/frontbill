@@ -30,6 +30,7 @@ import { DailyExpenditurePanel } from '@/components/reports/daily-expenditure-pa
 import { MonthlyPlPanel } from '@/components/reports/monthly-pl-panel'
 import { cn } from '@/lib/utils'
 import { GuestDailyRevenueSummary } from '@/components/reports/guest-daily-revenue-summary'
+import { DailyFrontDeskPanel } from '@/components/reports/daily-front-desk-panel'
 import {
   DailyRevenueAccrualPanel,
   OccupancyRangePanel,
@@ -445,6 +446,10 @@ export default function ReportsPage() {
             <FileBarChart className="h-4 w-4" />
             Daily revenue
           </TabsTrigger>
+          <TabsTrigger value="daily-book" className="gap-1.5">
+            <ReceiptText className="h-4 w-4" />
+            Daily book
+          </TabsTrigger>
           <TabsTrigger value="sales-collection" className="gap-1.5">
             <Wallet className="h-4 w-4" />
             Sales collection
@@ -502,6 +507,10 @@ export default function ReportsPage() {
           </Card>
         </TabsContent>
 
+        <TabsContent value="daily-book">
+          <DailyFrontDeskPanel />
+        </TabsContent>
+
         <TabsContent value="sales-collection">
           <Card>
             <CardHeader>
@@ -509,6 +518,7 @@ export default function ReportsPage() {
               <CardDescription>
                 Payments and transaction receipts in the period minus refunds. Contrast with Daily revenue: a ₦200,000
                 prepayment counts here in full; earned room revenue counts in Daily revenue at ₦100,000/night.
+                For the front-desk daily guest list + category breakdown, use Daily book.
               </CardDescription>
             </CardHeader>
             <CardContent>

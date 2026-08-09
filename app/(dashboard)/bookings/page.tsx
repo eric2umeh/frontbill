@@ -49,6 +49,7 @@ import {
 } from "@/lib/utils/booking-bill-balance";
 import {
   bookingYmdHotel,
+  calendarPickerYmd,
   isInHouseOnCalendarDay,
   todayYmdHotel,
 } from "@/lib/utils/booking-in-house-dates";
@@ -205,15 +206,8 @@ export default function BookingsPage() {
     null,
   );
   const [catalogLoading, setCatalogLoading] = useState(false);
-  const handleBookingsDateFilterChange = useCallback(
-    (date: Date | undefined) => {
-      setTableFilters((prev) => ({
-        ...prev,
-        status: date ? "all" : "checked_in",
-      }));
-    },
-    [],
-  );
+  /** When set, table shows in-house guests for that hotel night (not arrivals-only). */
+  const [stayDateYmd, setStayDateYmd] = useState<string | null>(null);
   const [roomStats, setRoomStats] = useState<{
     total: number;
     occupied: number;
@@ -731,6 +725,140 @@ export default function BookingsPage() {
     [organizationId, userId],
   );
 
+  /** In-house / stayovers for a hotel night (daily book), including later checked-out guests. */
+  const fetchStayDateBookings = useCallback(
+    async (dayYmd: string) => {
+      if (!organizationId || !/^\d{4}-\d{2}-\d{2}$/.test(dayYmd)) return;
+      const supabase = createClient();
+      if (!supabase) return;
+
+      const scopeKey = `stay:${dayYmd}`;
+      setCatalogLoading(true);
+      try {
+        await withFetchRetry(async () => {
+          const { data, error } = await supabase
+            .from("bookings")
+            .select("*, guests(name, phone), rooms(id, room_number, room_type)")
+            .eq("organization_id", organizationId)
+            .in("status", ["confirmed", "checked_in", "reserved", "checked_out"])
+            .lte("check_in", dayYmd)
+            .gt("check_out", dayYmd)
+            .order("check_in", { ascending: false })
+            .limit(BOOKINGS_SCOPE_LIMIT);
+
+          if (error) throw error;
+
+          const userIds = Array.from(
+            new Set(
+              [
+                ...(data || []).map((b: any) => b.created_by),
+                ...(data || []).map((b: any) => b.updated_by),
+              ].filter(Boolean),
+            ),
+          );
+          const userMap = await fetchUserDisplayNameMap(
+            userIds as string[],
+            userId,
+          );
+
+          let bookingsWithUsers = (data || []).map((booking: any) => {
+            let payment_method = "cash";
+            let ledger_account_name = "";
+            if (booking.notes) {
+              if (booking.notes.startsWith("city_ledger:")) {
+                payment_method = "city_ledger";
+                ledger_account_name = booking.notes.replace(
+                  /^city_ledger:\s*/i,
+                  "",
+                );
+              } else if (booking.notes.startsWith("City Ledger:")) {
+                payment_method = "city_ledger";
+                ledger_account_name = booking.notes.replace(
+                  /^City Ledger:\s*/,
+                  "",
+                );
+              } else if (booking.notes.startsWith("payment_method:")) {
+                payment_method = booking.notes
+                  .replace(/^payment_method:\s*/, "")
+                  .split("|")[0]
+                  .trim();
+                const match = booking.notes.match(/\|ledger:(.+)/);
+                if (match) ledger_account_name = match[1].trim();
+              }
+            }
+            return {
+              ...booking,
+              _db_balance: Number(booking.balance ?? 0),
+              payment_method,
+              ledger_account_name,
+              guestName: booking.guests?.name || "",
+              guestPhone: booking.guests?.phone || "",
+              created_by_name: booking.created_by
+                ? userMap[booking.created_by] ||
+                  getUserDisplayName(null, booking.created_by)
+                : "System",
+              updated_by_name: booking.updated_by
+                ? userMap[booking.updated_by] ||
+                  getUserDisplayName(null, booking.updated_by)
+                : null,
+            };
+          });
+
+          const bookingIds = bookingsWithUsers.map((b: any) => b.id);
+          if (bookingIds.length > 0) {
+            const chargesByBooking = await fetchFolioChargesByBookingIds(
+              supabase,
+              bookingIds,
+            );
+            bookingsWithUsers.forEach((b: any) => {
+              const ch = chargesByBooking[b.id] ?? [];
+              b.balance = folioPositiveOutstandingSum(ch);
+              b.folio_credit = folioGuestCreditAmount(ch);
+            });
+          }
+          bookingsWithUsers.forEach((b: any) => {
+            delete b._db_balance;
+          });
+
+          setAllBookingsCatalog(groupBulkRows(bookingsWithUsers));
+          setCatalogScopeLoaded(scopeKey);
+        });
+      } catch (error: unknown) {
+        const detail = describeFetchError(error);
+        toast.error(
+          networkFetchHint(detail) ??
+            (detail
+              ? `Stay-date load failed: ${detail}`
+              : "Stay-date load failed"),
+        );
+      } finally {
+        setCatalogLoading(false);
+      }
+    },
+    [organizationId, userId],
+  );
+
+  const handleBookingsDateFilterChange = useCallback(
+    (date: Date | undefined) => {
+      if (date) {
+        const ymd = calendarPickerYmd(date);
+        setStayDateYmd(ymd);
+        setTableFilters((prev) => ({
+          ...prev,
+          status: "all",
+        }));
+        void fetchStayDateBookings(ymd);
+      } else {
+        setStayDateYmd(null);
+        setTableFilters((prev) => ({
+          ...prev,
+          status: "checked_in",
+        }));
+      }
+    },
+    [fetchStayDateBookings],
+  );
+
   useEffect(() => {
     if (!organizationId) {
       setInHouseBookings([]);
@@ -745,6 +873,8 @@ export default function BookingsPage() {
     if (!organizationId) return;
     const searching = tableSearchQuery.trim().length > 0;
     const statusKey = tableFilters.status || "checked_in";
+    // Stay-date catalog is loaded by the date picker; don't overwrite with generic "all".
+    if (stayDateYmd && !searching) return;
     const needsCatalog = searching || statusKey !== "checked_in";
     if (!needsCatalog) return;
 
@@ -758,6 +888,7 @@ export default function BookingsPage() {
     organizationId,
     tableSearchQuery,
     tableFilters.status,
+    stayDateYmd,
     catalogScopeLoaded,
     catalogLoading,
     allBookingsCatalog.length,
@@ -1315,9 +1446,12 @@ export default function BookingsPage() {
         emptyState={{
           title: "No bookings match your filters",
           description:
-            "Uses the hotel calendar (Africa/Lagos by default). Picking a check-in date switches status to All Status so past arrivals show. Clear the date to return to in-house guests.",
+            "Uses the hotel calendar (Africa/Lagos by default). Picking a stay date lists every guest in-house that night (arrivals + stayovers), not only same-day check-ins. Clear the date to return to today’s in-house guests.",
         }}
         dateField="check_in"
+        checkOutField="check_out"
+        dateMatchMode="stay_overlap"
+        datePickerPlaceholder="Stay date"
         onRowClick={(booking) => {
           router.push(
             booking.is_bulk
