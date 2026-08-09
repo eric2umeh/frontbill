@@ -70,6 +70,13 @@ import {
 import { computeCashbackDiscount } from "@/lib/cashback/cashback-payment-math";
 import { applyCashbackDiscountAndFolioPayments } from "@/lib/cashback/apply-cashback-folio-payment";
 import { CashbackPaymentPanel } from "@/components/cashback/cashback-payment-panel";
+import { PaymentAccountSelect } from "@/components/payments/payment-account-select";
+import {
+  appendAccountToNotes,
+  paymentAccountInsertFields,
+  paymentMethodRequiresAccount,
+  type PaymentAccount,
+} from "@/lib/payments/payment-accounts";
 import { paymentMethodEarnsCashback } from "@/lib/cashback/cashback-config";
 import {
   isGuestBookingCashbackEligible,
@@ -175,7 +182,17 @@ export default function BookingDetailPage({
   const [chargeAmount, setChargeAmount] = useState("");
   const [chargeDescription, setChargeDescription] = useState("");
   const [chargePaymentMethod, setChargePaymentMethod] = useState("");
+  const [chargePaymentAccountId, setChargePaymentAccountId] = useState("");
+  const [chargePaymentAccount, setChargePaymentAccount] =
+    useState<PaymentAccount | null>(null);
   const [paymentMethod, setPaymentMethod] = useState("");
+  const [paymentAccountId, setPaymentAccountId] = useState("");
+  const [paymentAccount, setPaymentAccount] = useState<PaymentAccount | null>(
+    null,
+  );
+  const [creditPaymentAccountId, setCreditPaymentAccountId] = useState("");
+  const [creditPaymentAccount, setCreditPaymentAccount] =
+    useState<PaymentAccount | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [deleteBookingDialogOpen, setDeleteBookingDialogOpen] = useState(false);
   const [deleteChargeTarget, setDeleteChargeTarget] = useState<{
@@ -638,6 +655,15 @@ export default function BookingDetailPage({
       toast.error("Please enter a description");
       return;
     }
+    if (
+      paymentMethodRequiresAccount(chargePaymentMethod) &&
+      !chargePaymentAccountId
+    ) {
+      toast.error(
+        "Select the POS / bank account where this payment was received",
+      );
+      return;
+    }
     if (!assertFolioEditable()) return;
 
     setAddChargeLoading(true);
@@ -648,6 +674,11 @@ export default function BookingDetailPage({
         chargePaymentMethod !== "city_ledger" &&
         chargePaymentMethod !== "deferred";
       const paymentStatus = isPaidNow ? "paid" : "pending";
+      const chargeAccountFields = paymentMethodRequiresAccount(
+        chargePaymentMethod,
+      )
+        ? paymentAccountInsertFields(chargePaymentAccount)
+        : { payment_account_id: null, payment_account_label: null };
 
       const { error: chargeInsertError } = await supabase
         .from("folio_charges")
@@ -674,8 +705,12 @@ export default function BookingDetailPage({
             amount: Number(chargeAmount),
             payment_method: chargePaymentMethod || "pending",
             status: paymentStatus,
-            description: chargeDescription,
+            description: appendAccountToNotes(
+              chargeDescription,
+              chargeAccountFields.payment_account_label,
+            ),
             received_by: userId,
+            ...chargeAccountFields,
           },
         ]);
       } catch (_) {
@@ -765,6 +800,8 @@ export default function BookingDetailPage({
       setChargeAmount("");
       setChargeDescription("");
       setChargePaymentMethod("");
+      setChargePaymentAccountId("");
+      setChargePaymentAccount(null);
 
       const newChargeEntry = {
         id: `local-${Date.now()}`,
@@ -799,6 +836,12 @@ export default function BookingDetailPage({
       toast.error("Please select a payment method");
       return;
     }
+    if (paymentMethodRequiresAccount(paymentMethod) && !paymentAccountId) {
+      toast.error(
+        "Select the POS / bank account where this payment was received",
+      );
+      return;
+    }
     if (!canManageFolio || !booking) return;
 
     const cashEntered = Number(chargeAmount);
@@ -806,6 +849,9 @@ export default function BookingDetailPage({
     try {
       const supabase = createClient();
       const guestId = booking.guest_id || booking.guests?.id;
+      const accountFields = paymentMethodRequiresAccount(paymentMethod)
+        ? paymentAccountInsertFields(paymentAccount)
+        : { payment_account_id: null, payment_account_label: null };
 
       const { data: freshBk2 } = await supabase
         .from("bookings")
@@ -940,6 +986,10 @@ export default function BookingDetailPage({
       }
 
       try {
+        const txDescBase =
+          breakdown.cashbackDiscount > 0
+            ? `Payment received - ${paymentMethod.replace(/_/g, " ")} (incl. ${formatNaira(breakdown.cashbackDiscount)} cashback discount)`
+            : `Payment received - ${paymentMethod.replace(/_/g, " ")}`;
         await supabase.from("transactions").insert([
           {
             organization_id: booking.organization_id || null,
@@ -950,11 +1000,12 @@ export default function BookingDetailPage({
             amount: breakdown.cashToCollect,
             payment_method: paymentMethod,
             status: "paid",
-            description:
-              breakdown.cashbackDiscount > 0
-                ? `Payment received - ${paymentMethod.replace(/_/g, " ")} (incl. ${formatNaira(breakdown.cashbackDiscount)} cashback discount)`
-                : `Payment received - ${paymentMethod.replace(/_/g, " ")}`,
+            description: appendAccountToNotes(
+              txDescBase,
+              accountFields.payment_account_label,
+            ),
             received_by: userId,
+            ...accountFields,
           },
         ]);
       } catch (_) {
@@ -995,6 +1046,8 @@ export default function BookingDetailPage({
       setPaymentCreditModalOpen(false);
       setChargeAmount("");
       setPaymentMethod("");
+      setPaymentAccountId("");
+      setPaymentAccount(null);
       setApplyOverpaymentAsCredit(false);
       setApplyCashback(false);
     } catch (error: any) {
@@ -1013,6 +1066,15 @@ export default function BookingDetailPage({
     }
     if (!creditPaymentMethod) {
       toast.error("Please select a payment method");
+      return;
+    }
+    if (
+      paymentMethodRequiresAccount(creditPaymentMethod) &&
+      !creditPaymentAccountId
+    ) {
+      toast.error(
+        "Select the POS / bank account where this payment was received",
+      );
       return;
     }
     if (!booking?.organization_id) return;
@@ -1071,6 +1133,12 @@ export default function BookingDetailPage({
       );
       const appliedToBooking = Math.min(amt, billBefore);
 
+      const creditAccountFields = paymentMethodRequiresAccount(
+        creditPaymentMethod,
+      )
+        ? paymentAccountInsertFields(creditPaymentAccount)
+        : { payment_account_id: null, payment_account_label: null };
+
       await recordGuestLedgerCashMovement(supabase, {
         organizationId: booking.organization_id,
         accountName: guestName,
@@ -1083,6 +1151,7 @@ export default function BookingDetailPage({
         ledgerAccountId: bookingLedgerSnapshot.id,
         currentLedgerBalance: bookingLedgerSnapshot.balance,
         syncGuestProfile: false,
+        ...creditAccountFields,
       });
 
       await supabase.from("folio_charges").insert([
@@ -1134,6 +1203,8 @@ export default function BookingDetailPage({
       );
       setCreditAmount("");
       setCreditPaymentMethod("");
+      setCreditPaymentAccountId("");
+      setCreditPaymentAccount(null);
       setCreditNotes("");
       setPaymentCreditModalOpen(false);
       await fetchBookingDetails(bookingId);
@@ -1688,7 +1759,11 @@ export default function BookingDetailPage({
                   <Label>How is this charge being settled?</Label>
               <Select
                 value={chargePaymentMethod}
-                onValueChange={setChargePaymentMethod}
+                onValueChange={(v) => {
+                  setChargePaymentMethod(v);
+                  setChargePaymentAccountId("");
+                  setChargePaymentAccount(null);
+                }}
               >
                     <SelectTrigger>
                       <SelectValue placeholder="Select settlement method" />
@@ -1712,6 +1787,14 @@ export default function BookingDetailPage({
                     </SelectContent>
                   </Select>
                 </div>
+            <PaymentAccountSelect
+              paymentMethod={chargePaymentMethod}
+              value={chargePaymentAccountId}
+              onChange={(id, acc) => {
+                setChargePaymentAccountId(id);
+                setChargePaymentAccount(acc);
+              }}
+            />
             {(chargePaymentMethod === "city_ledger" ||
               chargePaymentMethod === "deferred") && (
                   <p className="text-xs text-orange-600 bg-orange-50 border border-orange-200 rounded px-3 py-2">
@@ -1750,10 +1833,14 @@ export default function BookingDetailPage({
           if (!o) {
             setChargeAmount("");
             setPaymentMethod("");
+            setPaymentAccountId("");
+            setPaymentAccount(null);
             setApplyOverpaymentAsCredit(false);
             setPaymentCreditTab("payment");
             setCreditAmount("");
             setCreditPaymentMethod("");
+            setCreditPaymentAccountId("");
+            setCreditPaymentAccount(null);
             setCreditNotes("");
           }
         }}
@@ -1775,10 +1862,14 @@ export default function BookingDetailPage({
                 if (t === "payment") {
                   setCreditAmount("");
                   setCreditPaymentMethod("");
+                  setCreditPaymentAccountId("");
+                  setCreditPaymentAccount(null);
                   setCreditNotes("");
                 } else {
                   setChargeAmount("");
                   setPaymentMethod("");
+                  setPaymentAccountId("");
+                  setPaymentAccount(null);
                   setApplyOverpaymentAsCredit(false);
                 }
               }}
@@ -1824,7 +1915,11 @@ export default function BookingDetailPage({
                   <Label>Payment Method</Label>
                   <Select
                     value={paymentMethod}
-                    onValueChange={setPaymentMethod}
+                    onValueChange={(v) => {
+                      setPaymentMethod(v);
+                      setPaymentAccountId("");
+                      setPaymentAccount(null);
+                    }}
                   >
                     <SelectTrigger>
                       <SelectValue placeholder="Select method" />
@@ -1836,6 +1931,14 @@ export default function BookingDetailPage({
                     </SelectContent>
                   </Select>
                 </div>
+                <PaymentAccountSelect
+                  paymentMethod={paymentMethod}
+                  value={paymentAccountId}
+                  onChange={(id, acc) => {
+                    setPaymentAccountId(id);
+                    setPaymentAccount(acc);
+                  }}
+                />
                 {(booking?.guest_id || booking?.guests?.id) &&
                   bookingCashbackEligible &&
                   Number(chargeAmount) > 0 && (
@@ -1908,7 +2011,11 @@ export default function BookingDetailPage({
                   <Label>Payment Method</Label>
                   <Select
                     value={creditPaymentMethod}
-                    onValueChange={setCreditPaymentMethod}
+                    onValueChange={(v) => {
+                      setCreditPaymentMethod(v);
+                      setCreditPaymentAccountId("");
+                      setCreditPaymentAccount(null);
+                    }}
                   >
                     <SelectTrigger>
                       <SelectValue placeholder="Select method" />
@@ -1920,6 +2027,14 @@ export default function BookingDetailPage({
                     </SelectContent>
                   </Select>
                 </div>
+                <PaymentAccountSelect
+                  paymentMethod={creditPaymentMethod}
+                  value={creditPaymentAccountId}
+                  onChange={(id, acc) => {
+                    setCreditPaymentAccountId(id);
+                    setCreditPaymentAccount(acc);
+                  }}
+                />
                 <div className="space-y-2">
                   <Label>Notes (optional)</Label>
                   <Input
