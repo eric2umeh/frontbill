@@ -63,6 +63,8 @@ export async function settleOutletOrderRecord(
     cityLedgerAccountId?: string | null
     guestName?: string | null
     roomNumber?: string | null
+    payment_account_id?: string | null
+    payment_account_label?: string | null
   },
 ): Promise<SettleOutletOrderResult> {
   const { data: order, error: loadErr } = await admin
@@ -150,6 +152,8 @@ export async function settleOutletOrderRecord(
       bookingId,
       guestName,
       roomNumber,
+      payment_account_id: input.payment_account_id,
+      payment_account_label: input.payment_account_label,
     })
     if (bookingId && subtotal > 0 && !folioChargeId) {
       folioChargeId = await postPaidOutletSaleToBookingFolio(admin, {
@@ -268,6 +272,8 @@ export type CreateOutletOrderInput = {
   settleNow: boolean
   cityLedgerAccountId?: string | null
   isComplimentary?: boolean
+  payment_account_id?: string | null
+  payment_account_label?: string | null
 }
 
 export async function createOutletOrderRecord(
@@ -370,6 +376,8 @@ export async function createOutletOrderRecord(
       cityLedgerAccountId: input.cityLedgerAccountId,
       guestName: input.guestName,
       roomNumber: input.roomNumber,
+      payment_account_id: input.payment_account_id,
+      payment_account_label: input.payment_account_label,
     })
   }
 
