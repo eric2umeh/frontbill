@@ -19,6 +19,7 @@ import { SupplyChainProvider } from '@/lib/supply-chain/supply-chain-context'
 import { SupplyPendingAlerts } from '@/components/supply-chain/supply-pending-alerts'
 import { StockShortageDialogHost } from '@/components/shared/stock-shortage-dialog-host'
 import { InstallAppBanner } from '@/components/pwa/install-app-banner'
+import { HelpAssistant } from '@/components/help/help-assistant'
 
 const ROUTE_PERMISSIONS: Array<{ path: string; permission: Permission }> = [
   { path: '/dashboard', permission: 'dashboard:view' },
@@ -236,6 +237,7 @@ export function DashboardShell({
               >
                 {children}
               </main>
+              {allowed && <HelpAssistant />}
             </div>
           </div>
         </NightAuditPendingProvider>
