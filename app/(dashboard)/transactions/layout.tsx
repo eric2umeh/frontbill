@@ -9,17 +9,17 @@ import { hasPermission } from '@/lib/permissions'
 
 const MAIN_TABS = [
   {
+    href: '/transactions/daily-book',
+    label: 'Daily book',
+    permission: 'transactions:view' as const,
+    match: (pathname: string) => pathname.startsWith('/transactions/daily-book'),
+  },
+  {
     href: '/transactions',
     label: 'Transactions',
     permission: 'transactions:view' as const,
     match: (pathname: string) =>
       pathname === '/transactions' || isTransactionDetailPath(pathname),
-  },
-  {
-    href: '/transactions/daily-book',
-    label: 'Daily book',
-    permission: 'transactions:view' as const,
-    match: (pathname: string) => pathname.startsWith('/transactions/daily-book'),
   },
   {
     href: '/transactions/analytics/revenue',
