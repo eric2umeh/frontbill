@@ -15,7 +15,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
-import { Bell, Menu, LogOut, User as UserIcon, Loader2 } from 'lucide-react'
+import { Bell, Menu, LogOut, User as UserIcon, Loader2, CircleHelp } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { useAuth } from '@/lib/auth-context'
@@ -617,6 +617,17 @@ export function Header({ user, onMenuClick }: HeaderProps) {
       </div>
 
       <div className="flex items-center gap-1 shrink-0">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-8 gap-1.5 px-2"
+          type="button"
+          aria-label="Help"
+          onClick={() => window.dispatchEvent(new CustomEvent('frontbill:open-help'))}
+        >
+          <CircleHelp className="h-4 w-4" />
+          <span className="text-xs hidden sm:inline">Help</span>
+        </Button>
         {!radixReady ? (
           <>
             <Button
