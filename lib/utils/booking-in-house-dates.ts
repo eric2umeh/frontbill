@@ -40,3 +40,29 @@ export function isInHouseOnCalendarDay(
   if (!ci || !co || !today) return false
   return ci <= today && co >= today
 }
+
+/**
+ * True when the guest occupies a hotel night on `dayYmd`
+ * (`check_in ≤ day < check_out` — same rule as Daily revenue / room accrual).
+ * Use for historical daily books and date filters that should list stayovers, not only arrivals.
+ */
+export function isOccupyingHotelNight(
+  checkIn: string | Date,
+  checkOut: string | Date,
+  dayYmd: string,
+  timeZone: string = resolveHotelTimeZone(),
+): boolean {
+  const day = String(dayYmd || '').trim()
+  const ci = bookingYmdHotel(checkIn, timeZone)
+  const co = bookingYmdHotel(checkOut, timeZone)
+  if (!ci || !co || !day) return false
+  return ci <= day && co > day
+}
+
+/** YYYY-MM-DD from a calendar picker's Date (uses local calendar parts, not UTC). */
+export function calendarPickerYmd(date: Date): string {
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, '0')
+  const d = String(date.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
