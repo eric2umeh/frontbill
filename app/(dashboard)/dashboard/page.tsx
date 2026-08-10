@@ -14,7 +14,9 @@ import { UserCheck } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
 import { createClient } from '@/lib/supabase/client'
 import { hasPermission } from '@/lib/permissions'
-import { countInHouseRoomsFromBookings } from '@/lib/rooms/room-occupancy'
+import { countPhysicallyHeldRooms } from '@/lib/rooms/front-office-stay'
+import { resolveHotelTimeZone } from '@/lib/hotel-date'
+import { todayYmdHotel } from '@/lib/utils/booking-in-house-dates'
 import { reconcileRoomStatusesClient } from '@/lib/rooms/reconcile-room-status-client'
 
 function StatsLoader() {
@@ -95,7 +97,9 @@ export default function DashboardPage() {
         .in('status', ['checked_in', 'confirmed', 'reserved'])
 
       const totalRooms = rooms.length
-      const occupiedRooms = countInHouseRoomsFromBookings(inHouseRows ?? [])
+      const tz = resolveHotelTimeZone()
+      const todayHotel = todayYmdHotel(tz)
+      const occupiedRooms = countPhysicallyHeldRooms(inHouseRows ?? [], todayHotel, tz)
       const occupancyRate = totalRooms > 0 ? Math.round((occupiedRooms / totalRooms) * 100) : 0
       const totalRevenue = payments.reduce((sum: number, p: any) => sum + p.amount, 0)
 
