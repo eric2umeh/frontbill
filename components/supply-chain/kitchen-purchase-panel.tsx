@@ -179,7 +179,7 @@ export function KitchenPurchasePanel() {
             <div className="space-y-1">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="font-medium text-sm">{po.poNumber}</span>
-                <Badge variant="outline" className="text-[10px] bg-violet-50 text-violet-800">
+                <Badge variant="outline" className="text-xs bg-violet-50 text-violet-800">
                   Kitchen order
                 </Badge>
                 <span className="text-xs text-muted-foreground">

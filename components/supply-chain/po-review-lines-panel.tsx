@@ -142,7 +142,7 @@ function DeptSectionItems({
         <div
           className={cn(
             'flex items-center justify-between gap-1 text-muted-foreground',
-            compact ? 'text-[10px]' : 'text-xs',
+            compact ? 'text-xs' : 'text-sm',
           )}
         >
           <span className="min-w-0 truncate">
@@ -153,7 +153,7 @@ function DeptSectionItems({
               type="button"
               variant="outline"
               size="icon"
-              className={cn(compact ? 'h-6 w-6' : 'h-7 w-7')}
+              className={cn(compact ? 'h-7 w-7' : 'h-8 w-8')}
               disabled={safePage <= 1}
               onClick={() => setPage((p) => Math.max(1, p - 1))}
             >
@@ -166,7 +166,7 @@ function DeptSectionItems({
               type="button"
               variant="outline"
               size="icon"
-              className={cn(compact ? 'h-6 w-6' : 'h-7 w-7')}
+              className={cn(compact ? 'h-7 w-7' : 'h-8 w-8')}
               disabled={safePage >= totalPages}
               onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
             >
@@ -269,7 +269,7 @@ export function PoReviewLinesPanel(props: Props) {
   return (
     <div className={cn(compact ? 'space-y-2.5' : 'space-y-4')}>
       {!compact && (
-        <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">
+        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
           {heading}
         </p>
       )}
@@ -284,13 +284,13 @@ export function PoReviewLinesPanel(props: Props) {
           <p
             className={cn(
               'font-semibold text-foreground',
-              compact ? 'text-[10px]' : 'text-xs',
+              compact ? 'text-xs' : 'text-sm',
             )}
           >
             {compact ? 'By department' : 'Totals by department'}
           </p>
           {!compact && (
-            <p className="text-[11px] text-muted-foreground">
+            <p className="text-[13px] text-muted-foreground">
               {externalLocked
                 ? 'Filtered by the department selector above — only matching lines are listed.'
                 : 'Tap a department to focus its items. Tap again (or All) to show every department.'}
@@ -312,7 +312,7 @@ export function PoReviewLinesPanel(props: Props) {
                   }}
                   className={cn(
                     'w-full flex items-center justify-between gap-2 text-left transition-colors border-l-4 min-w-0',
-                    compact ? 'px-2 py-1.5' : 'gap-3 px-3 py-2.5 text-sm',
+                    compact ? 'px-2 py-1.5 text-[13px]' : 'gap-3 px-3 py-2.5 text-[15px]',
                     style.header,
                     active ? 'ring-1 ring-inset ring-foreground/10' : 'opacity-95 hover:opacity-100',
                     externalLocked && !active && 'opacity-40 cursor-not-allowed',
@@ -323,14 +323,14 @@ export function PoReviewLinesPanel(props: Props) {
                       variant="outline"
                       className={cn(
                         'shrink-0 border truncate max-w-[9rem]',
-                        compact ? 'text-[9px] px-1.5 py-0' : 'text-[10px]',
+                        compact ? 'text-[11px] px-1.5 py-0' : 'text-xs',
                         style.badge,
                       )}
                     >
                       {DEPT_LABELS[row.dept]}
                     </Badge>
                     {!compact && (
-                      <span className="text-xs text-muted-foreground tabular-nums">
+                      <span className="text-[13px] text-muted-foreground tabular-nums">
                         {row.count} item{row.count === 1 ? '' : 's'}
                       </span>
                     )}
@@ -338,7 +338,7 @@ export function PoReviewLinesPanel(props: Props) {
                   <span
                     className={cn(
                       'font-semibold tabular-nums shrink-0 whitespace-nowrap',
-                      compact ? 'text-[11px]' : 'text-sm',
+                      compact ? 'text-[13px]' : 'text-[15px]',
                       style.accent,
                     )}
                   >
@@ -360,7 +360,7 @@ export function PoReviewLinesPanel(props: Props) {
             <p
               className={cn(
                 'font-semibold truncate',
-                compact ? 'text-[11px]' : 'text-sm',
+                compact ? 'text-[13px]' : 'text-[15px]',
               )}
             >
               {focusDept === 'all'
@@ -372,7 +372,7 @@ export function PoReviewLinesPanel(props: Props) {
                   : `Sum total — ${DEPT_LABELS[focusDept as SupplyDept] ?? focusDept}`}
             </p>
             {!compact && (
-              <p className="text-[11px] text-muted-foreground tabular-nums">
+              <p className="text-[13px] text-muted-foreground tabular-nums">
                 {focusDept === 'all'
                   ? `${grandCount} item${grandCount === 1 ? '' : 's'} across ${deptSummaries.length} department${deptSummaries.length === 1 ? '' : 's'}`
                   : `${filteredGrouped[0]?.items.length ?? 0} item(s) in focus`}
@@ -382,7 +382,7 @@ export function PoReviewLinesPanel(props: Props) {
           <p
             className={cn(
               'font-bold tabular-nums shrink-0 whitespace-nowrap',
-              compact ? 'text-xs' : 'text-base',
+              compact ? 'text-[13px]' : 'text-lg',
             )}
           >
             {formatNaira(
@@ -406,7 +406,7 @@ export function PoReviewLinesPanel(props: Props) {
             placeholder={compact ? 'Search…' : 'Search items within departments…'}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className={cn(compact ? 'h-8 pl-8 text-xs' : 'pl-9')}
+            className={cn(compact ? 'h-8 pl-8 text-[13px]' : 'pl-9 text-[13px]')}
           />
         </div>
         {focusDept !== 'all' && !externalLocked && (
@@ -414,7 +414,7 @@ export function PoReviewLinesPanel(props: Props) {
             type="button"
             variant="outline"
             size="sm"
-            className={cn(compact && 'h-7 text-[11px]')}
+            className={cn(compact ? 'h-8 text-[13px]' : 'text-[13px]')}
             onClick={() => setFocusDept('all')}
           >
             {compact ? 'All depts' : 'Show all departments'}
@@ -426,7 +426,7 @@ export function PoReviewLinesPanel(props: Props) {
         <p
           className={cn(
             'text-muted-foreground text-center rounded-md border border-dashed',
-            compact ? 'text-[11px] py-4' : 'text-sm py-6',
+            compact ? 'text-[13px] py-4' : 'text-sm py-6',
           )}
         >
           No items match this search or department filter.
@@ -455,7 +455,7 @@ export function PoReviewLinesPanel(props: Props) {
                       variant="outline"
                       className={cn(
                         'border shrink-0',
-                        compact ? 'text-[9px] px-1.5 py-0' : 'text-[10px]',
+                        compact ? 'text-[11px] px-1.5 py-0' : 'text-xs',
                         style.badge,
                       )}
                     >
@@ -464,7 +464,7 @@ export function PoReviewLinesPanel(props: Props) {
                     <span
                       className={cn(
                         'text-muted-foreground tabular-nums shrink-0',
-                        compact ? 'text-[10px]' : 'text-xs',
+                        compact ? 'text-xs' : 'text-[13px]',
                       )}
                     >
                       {group.items.length}
@@ -473,7 +473,7 @@ export function PoReviewLinesPanel(props: Props) {
                   <p
                     className={cn(
                       'font-semibold tabular-nums shrink-0 whitespace-nowrap',
-                      compact ? 'text-[11px]' : 'text-sm',
+                      compact ? 'text-[13px]' : 'text-[15px]',
                       style.accent,
                     )}
                   >

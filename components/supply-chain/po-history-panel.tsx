@@ -153,20 +153,20 @@ export function PoHistoryPanel({
                           )}
                         </span>
                       </div>
-                      <p className="text-xs text-muted-foreground truncate">
+                      <p className="text-[13px] text-muted-foreground truncate">
                         Raised {formatPoRaisedAt(po.createdAt)} ·{" "}
                         {po.createdByName} · {boughtCount}/{lines.length} lines
                         {mode === "retirement" ? " (retirement)" : ""}
                       </p>
                     </div>
                   </div>
-                  <span className="text-[10px] text-muted-foreground hidden sm:inline max-w-[140px] truncate">
+                  <span className="text-[13px] text-muted-foreground hidden sm:inline max-w-[140px] truncate">
                     {po.weekLabel}
                   </span>
                 </button>
                 {open && (
                   <div className="border-t bg-muted/20 px-3 py-2">
-                    <p className="text-[10px] text-muted-foreground mb-2">
+                    <p className="text-[13px] text-muted-foreground mb-2">
                       Procurement week: {po.weekLabel}
                       {po.retirement && (
                         <>

@@ -33,8 +33,8 @@ export function DraftBasketSidebar({
     <div className="rounded-xl border bg-card p-3 h-fit sticky top-4 shadow-md space-y-2.5 overflow-hidden">
       <div className="flex justify-between items-start gap-2 min-w-0">
         <div className="min-w-0">
-          <h3 className="text-sm font-semibold leading-tight">Draft basket</h3>
-          <p className="text-[10px] text-muted-foreground leading-snug">
+          <h3 className="text-[15px] font-semibold leading-tight">Draft basket</h3>
+          <p className="text-[13px] text-muted-foreground leading-snug">
             {readOnly ? 'Locked in this status' : 'Dept totals, then items'}
           </p>
         </div>
@@ -43,7 +43,7 @@ export function DraftBasketSidebar({
             type="button"
             variant="ghost"
             size="sm"
-            className="h-7 shrink-0 px-2 text-[11px]"
+            className="h-8 shrink-0 px-2 text-[13px]"
             onClick={onClear}
           >
             Clear
@@ -52,7 +52,7 @@ export function DraftBasketSidebar({
       </div>
 
       {!basket.length ? (
-        <p className="text-[11px] text-muted-foreground py-6 text-center leading-snug">
+        <p className="text-[13px] text-muted-foreground py-6 text-center leading-snug">
           No items yet — enter quantities on Raise purchase request
         </p>
       ) : (
@@ -70,7 +70,7 @@ export function DraftBasketSidebar({
         </div>
       )}
 
-      <div className="border-t pt-2 flex justify-between items-center gap-2 min-w-0 text-sm font-bold">
+      <div className="border-t pt-2 flex justify-between items-center gap-2 min-w-0 text-[15px] font-bold">
         <span className="shrink-0">Sum total</span>
         <span className="tabular-nums shrink-0 whitespace-nowrap text-right">
           {formatNaira(total)}
@@ -79,7 +79,7 @@ export function DraftBasketSidebar({
 
       {onSend && !readOnly && (
         <Button
-          className="w-full h-9 text-xs"
+          className="w-full h-9 text-[13px]"
           disabled={!basket.length}
           onClick={onSend}
         >
