@@ -81,10 +81,6 @@ export async function syncGuestCityLedgerBalances(
   return ids.size;
 }
 
-function isLedgerSettlementType(transactionType: string): boolean {
-  return transactionType.toLowerCase().includes("settlement");
-}
-
 function mapFolioRows(
   rows: {
     amount?: unknown;
@@ -487,16 +483,15 @@ export async function recordGuestLedgerCashMovement(
   } = p;
   if (amount <= 0) return;
 
-  const isSettlement = isLedgerSettlementType(transactionType);
+  /** Top-up and settle both apply cash toward open folios when guest-synced. */
+  const applyTowardFolios = syncGuestProfile && Boolean(guestId);
 
-  const folioBefore =
-    isSettlement && syncGuestProfile && guestId
-      ? await guestFolioOutstandingTotal(supabase, guestId, organizationId)
-      : 0;
+  const folioBefore = applyTowardFolios
+    ? await guestFolioOutstandingTotal(supabase, guestId!, organizationId)
+    : 0;
 
-  let appliedToFolio = 0;
-  if (isSettlement && syncGuestProfile && guestId) {
-    appliedToFolio = await applyGuestSettlementToFolios(supabase, {
+  if (applyTowardFolios && guestId) {
+    await applyGuestSettlementToFolios(supabase, {
       organizationId,
       guestId,
       amount,
@@ -506,14 +501,12 @@ export async function recordGuestLedgerCashMovement(
     });
   }
 
-  let folioRemaining =
-    syncGuestProfile && guestId
-      ? await guestFolioOutstandingTotal(supabase, guestId, organizationId)
-      : null;
+  let folioRemaining = applyTowardFolios
+    ? await guestFolioOutstandingTotal(supabase, guestId!, organizationId)
+    : null;
 
   if (
-    isSettlement &&
-    syncGuestProfile &&
+    applyTowardFolios &&
     guestId &&
     folioBefore > 0.005 &&
     folioRemaining != null &&
@@ -534,73 +527,28 @@ export async function recordGuestLedgerCashMovement(
     );
   }
 
-  if (
-    isSettlement &&
-    syncGuestProfile &&
-    guestId &&
-    folioBefore > 0.005 &&
-    folioRemaining != null &&
-    folioRemaining > 0.005 &&
-    amount + 0.005 < folioBefore
-  ) {
-    throw new Error(
-      "Payment amount is less than the outstanding folio balance. Enter the full amount or settle from the booking folio.",
-    );
+  // Negative balance = prepaid credit the guest can use later.
+  let finalLedgerBalance: number;
+  if (folioRemaining != null && folioRemaining > 0.005) {
+    // Partial payment — ledger tracks remaining folio debt.
+    finalLedgerBalance = folioRemaining;
+  } else if (folioBefore <= 0.005 && currentLedgerBalance > 0.005) {
+    // Folio already clear; cash reduces ledger-only debit (may go into credit).
+    finalLedgerBalance = currentLedgerBalance - amount;
+  } else {
+    // Folios cleared by this payment — leftover cash becomes credit.
+    const credit = Math.max(0, amount - Math.max(0, folioBefore));
+    finalLedgerBalance = -credit;
   }
 
-  const ledgerAfterCash = Math.max(0, currentLedgerBalance - amount);
+  await syncGuestCityLedgerBalances(supabase, {
+    organizationId,
+    guestName: accountName,
+    balance: finalLedgerBalance,
+    primaryAccountId: ledgerAccountId,
+  });
 
-  // Ledger-only stale debit (folio already clear but city_ledger_accounts still shows debt).
-  if (
-    isSettlement &&
-    (folioBefore <= 0.005 ||
-      (folioRemaining != null && folioRemaining <= 0.005)) &&
-    currentLedgerBalance > 0.005
-  ) {
-    folioRemaining = 0;
-  }
-
-  const finalLedgerBalance =
-    folioRemaining != null ? Math.max(0, folioRemaining) : ledgerAfterCash;
-
-  if (
-    isSettlement &&
-    syncGuestProfile &&
-    guestId &&
-    folioBefore > 0.005 &&
-    finalLedgerBalance > 0.005 &&
-    amount + 0.005 >= folioBefore
-  ) {
-    throw new Error(
-      `₦${finalLedgerBalance.toLocaleString()} is still outstanding after payment. Open the booking folio and record payment there, or contact support.`,
-    );
-  }
-
-  if (isSettlement && syncGuestProfile) {
-    await syncGuestCityLedgerBalances(supabase, {
-      organizationId,
-      guestName: accountName,
-      balance: finalLedgerBalance,
-      primaryAccountId: ledgerAccountId,
-    });
-  } else if (ledgerAccountId) {
-    const { error } = await supabase
-      .from("city_ledger_accounts")
-      .update({
-        balance: finalLedgerBalance,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", ledgerAccountId);
-    if (error) throw new Error(`Ledger update failed: ${error.message}`);
-  } else if (finalLedgerBalance !== 0 || amount > 0) {
-    await syncGuestCityLedgerBalances(supabase, {
-      organizationId,
-      guestName: accountName,
-      balance: finalLedgerBalance,
-    });
-  }
-
-  const txId = `CLG-${Date.now()}`;
+  const txId = `CLG-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
   const accountFields = {
     payment_account_id: payment_account_id || null,
     payment_account_label: payment_account_label || null,

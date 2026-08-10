@@ -141,32 +141,23 @@ export default function TransactionDetailPage() {
                 toast.dismiss(t)
                 setDeleteLoading(true)
                 try {
-                  const supabase = createClient()
-                  const transactionDelete = await supabase
-                    .from('transactions')
-                    .delete()
-                    .eq('id', transaction.id)
-                    .select('id')
-
-                  if (transactionDelete.error) throw transactionDelete.error
-
-                  const paymentDelete = await supabase
-                    .from('payments')
-                    .delete()
-                    .eq('id', transaction.id)
-                    .select('id')
-
-                  if (paymentDelete.error) throw paymentDelete.error
-
-                  if ((transactionDelete.data || []).length === 0 && (paymentDelete.data || []).length === 0) {
-                    throw new Error('Transaction was not found or could not be deleted')
+                  const res = await fetch(`/api/transactions/${transaction.id}`, {
+                    method: 'DELETE',
+                  })
+                  const payload = await res.json().catch(() => ({}))
+                  if (!res.ok) {
+                    throw new Error(
+                      payload?.error || 'Transaction was not found or could not be deleted',
+                    )
                   }
 
                   toast.success('Transaction deleted')
                   router.replace('/transactions')
                   router.refresh()
-                } catch (error: any) {
-                  toast.error(error.message || 'Failed to delete transaction')
+                } catch (error: unknown) {
+                  const message =
+                    error instanceof Error ? error.message : 'Failed to delete transaction'
+                  toast.error(message)
                 } finally {
                   setDeleteLoading(false)
                 }

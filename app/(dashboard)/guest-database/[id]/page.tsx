@@ -539,8 +539,14 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
 
   if (!guest) return null
 
-  // Total Paid = sum of bookings.deposit (includes initial payment + all record-payment increments)
-  const totalSpent = bookings.reduce((s, b) => s + Number(b.deposit || 0), 0)
+  // Total Paid = deposits on bookings + prepaid credit still on city ledger
+  // (so a ₦400k pay against ₦240k debt with ₦160k credit shows ₦400k, not only deposits).
+  const depositPaid = bookings.reduce((s, b) => s + Number(b.deposit || 0), 0)
+  const ledgerCreditRemaining =
+    ledgerAccount?.id != null && Number(ledgerAccount.balance) < 0
+      ? Math.abs(Number(ledgerAccount.balance))
+      : 0
+  const totalSpent = depositPaid + ledgerCreditRemaining
   const totalBookingBalance = guestPendingBalance
   const lastVisit = bookings.length > 0 ? bookings[0].check_in : null
   const guestOutstandingBalance = guestPendingBalance

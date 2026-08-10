@@ -12,7 +12,12 @@ import {
   DialogHeader,
   DialogTitle,
   DialogDescription,
+  DialogScrollableBody,
+  DialogScrollableFooter,
+  DialogScrollableHeader,
+  dialogScrollableContentClass,
 } from "@/components/ui/dialog";
+import { cn } from "@/lib/utils";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import {
@@ -1845,15 +1850,17 @@ export default function BookingDetailPage({
           }
         }}
       >
-        <DialogContent>
-          <DialogHeader>
+        <DialogContent
+          className={cn(dialogScrollableContentClass, "sm:max-w-md")}
+        >
+          <DialogScrollableHeader>
             <DialogTitle>Record payment / Add credit</DialogTitle>
             <DialogDescription>
               Settle this folio or add prepaid credit to the guest&apos;s city
               ledger account
             </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
+          </DialogScrollableHeader>
+          <DialogScrollableBody className="space-y-4">
             <Tabs
               value={paymentCreditTab}
               onValueChange={(v) => {
@@ -1966,20 +1973,6 @@ export default function BookingDetailPage({
                       onApplyCashbackChange={setApplyCashback}
                     />
                   )}
-                <Button
-                  onClick={handleRecordPayment}
-                  className="w-full"
-                  disabled={addChargeLoading}
-                >
-                  {addChargeLoading ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Recording...
-                    </>
-                  ) : (
-                    "Record Payment"
-                  )}
-                </Button>
               </TabsContent>
 
               <TabsContent value="credit" className="space-y-4 mt-4">
@@ -2043,23 +2036,42 @@ export default function BookingDetailPage({
                     onChange={(e) => setCreditNotes(e.target.value)}
                   />
                 </div>
-                <Button
-                  onClick={handleBookingAddCredit}
-                  className="w-full"
-                  disabled={addChargeLoading}
-                >
-              {addChargeLoading ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Saving...
-                    </>
-              ) : (
-                    "Add Credit"
-              )}
-            </Button>
               </TabsContent>
             </Tabs>
-          </div>
+          </DialogScrollableBody>
+          <DialogScrollableFooter>
+            {paymentCreditTab === "payment" ? (
+              <Button
+                onClick={handleRecordPayment}
+                className="w-full sm:w-auto"
+                disabled={addChargeLoading}
+              >
+                {addChargeLoading ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Recording...
+                  </>
+                ) : (
+                  "Record Payment"
+                )}
+              </Button>
+            ) : (
+              <Button
+                onClick={handleBookingAddCredit}
+                className="w-full sm:w-auto"
+                disabled={addChargeLoading}
+              >
+                {addChargeLoading ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  "Add Credit"
+                )}
+              </Button>
+            )}
+          </DialogScrollableFooter>
         </DialogContent>
       </Dialog>
 
