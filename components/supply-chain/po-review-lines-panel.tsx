@@ -1,10 +1,11 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { BasketLine, PoLine } from '@/lib/supply-chain/types'
 import {
   DEPT_LABELS,
   STORE_DEPT_PICKER_OPTIONS_SORTED,
+  normalizeSupplyDept,
   type SupplyDept,
 } from '@/lib/supply-chain/types'
 import { formatNaira } from '@/lib/utils/currency'
@@ -14,10 +15,9 @@ import { Badge } from '@/components/ui/badge'
 import { PoLinesTable } from '@/components/supply-chain/po-lines-table'
 import { Search, ChevronLeft, ChevronRight } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { deptHeaderStyle } from '@/lib/supply-chain/dept-styles'
 
-type PoProps = {
-  kind?: 'po'
-  lines: PoLine[]
+type SharedProps = {
   editable?: boolean
   onQtyChange?: (stockItemId: string, qty: number) => void
   onDelete?: (stockItemId: string) => void
@@ -25,18 +25,18 @@ type PoProps = {
   compact?: boolean
   showDept?: boolean
   title?: string
+  /** External department filter (e.g. from PaginatedListShell). */
+  deptFilter?: string
 }
 
-type BasketProps = {
+type PoProps = SharedProps & {
+  kind?: 'po'
+  lines: PoLine[]
+}
+
+type BasketProps = SharedProps & {
   kind: 'basket'
   lines: BasketLine[]
-  editable?: boolean
-  onQtyChange?: (stockItemId: string, qty: number) => void
-  onDelete?: (stockItemId: string) => void
-  pageSize?: number
-  compact?: boolean
-  showDept?: boolean
-  title?: string
 }
 
 type Props = PoProps | BasketProps
@@ -55,7 +55,9 @@ type NormalizedLine = {
 }
 
 function deptOptionsFrom(depts: Iterable<string>) {
-  const present = new Set(depts)
+  const present = new Set(
+    [...depts].map((d) => normalizeSupplyDept(d)),
+  )
   return STORE_DEPT_PICKER_OPTIONS_SORTED.filter((d) => present.has(d)).map((d) => ({
     value: d,
     label: DEPT_LABELS[d as SupplyDept] ?? d,
@@ -68,7 +70,7 @@ function normalizeLines(kind: 'po' | 'basket', lines: PoLine[] | BasketLine[]): 
       key: l.stockItemId,
       stockItemId: l.stockItemId,
       name: l.name,
-      dept: l.dept,
+      dept: normalizeSupplyDept(l.dept),
       unit: l.unit,
       qty: l.qtyToBuy,
       unitPrice: l.unitPrice,
@@ -80,7 +82,7 @@ function normalizeLines(kind: 'po' | 'basket', lines: PoLine[] | BasketLine[]): 
     key: l.id,
     stockItemId: l.stockItemId,
     name: l.name,
-    dept: l.dept,
+    dept: normalizeSupplyDept(l.dept),
     unit: l.unit,
     qty: l.quantityOrdered,
     unitPrice: l.unitPrice,
@@ -112,6 +114,10 @@ function DeptSectionItems({
   const start = (safePage - 1) * pageSize
   const pageItems = items.slice(start, start + pageSize)
 
+  useEffect(() => {
+    setPage(1)
+  }, [items.length, pageSize])
+
   const rows =
     kind === 'basket'
       ? pageItems.map((n) => ({
@@ -130,32 +136,37 @@ function DeptSectionItems({
         }))
 
   return (
-    <div className="space-y-2">
+    <div className={cn('space-y-2', compact && 'space-y-1.5')}>
       <PoLinesTable rows={rows} compact={compact} showDept={false} />
       {totalPages > 1 && (
-        <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
-          <span>
-            Showing {start + 1}–{Math.min(start + pageSize, items.length)} of {items.length}
+        <div
+          className={cn(
+            'flex items-center justify-between gap-1 text-muted-foreground',
+            compact ? 'text-[10px]' : 'text-xs',
+          )}
+        >
+          <span className="min-w-0 truncate">
+            {start + 1}–{Math.min(start + pageSize, items.length)} / {items.length}
           </span>
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-0.5 shrink-0">
             <Button
               type="button"
               variant="outline"
               size="icon"
-              className="h-7 w-7"
+              className={cn(compact ? 'h-6 w-6' : 'h-7 w-7')}
               disabled={safePage <= 1}
               onClick={() => setPage((p) => Math.max(1, p - 1))}
             >
               <ChevronLeft className="h-3.5 w-3.5" />
             </Button>
-            <span className="tabular-nums px-1">
+            <span className="tabular-nums px-0.5">
               {safePage}/{totalPages}
             </span>
             <Button
               type="button"
               variant="outline"
               size="icon"
-              className="h-7 w-7"
+              className={cn(compact ? 'h-6 w-6' : 'h-7 w-7')}
               disabled={safePage >= totalPages}
               onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
             >
@@ -176,11 +187,20 @@ export function PoReviewLinesPanel(props: Props) {
     pageSize = 10,
     compact = false,
     title,
+    deptFilter,
   } = props
   const kind = props.kind ?? 'po'
   const lines = props.lines
   const [search, setSearch] = useState('')
   const [focusDept, setFocusDept] = useState<string>('all')
+
+  useEffect(() => {
+    if (deptFilter && deptFilter !== 'all') {
+      setFocusDept(normalizeSupplyDept(deptFilter))
+    } else if (deptFilter === 'all' || deptFilter === '') {
+      setFocusDept('all')
+    }
+  }, [deptFilter])
 
   const normalized = useMemo(
     () => normalizeLines(kind, lines as PoLine[] | BasketLine[]),
@@ -243,52 +263,85 @@ export function PoReviewLinesPanel(props: Props) {
     )
   }
 
-  const heading =
-    title ?? `Purchase list · ${grandCount} items`
+  const heading = title ?? `Purchase list · ${grandCount} items`
+  const externalLocked = Boolean(deptFilter && deptFilter !== 'all')
 
   return (
-    <div className="space-y-4">
-      <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">
-        {heading}
-      </p>
+    <div className={cn(compact ? 'space-y-2.5' : 'space-y-4')}>
+      {!compact && (
+        <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">
+          {heading}
+        </p>
+      )}
 
-      {/* 1. Department totals */}
       <div className="rounded-lg border bg-background overflow-hidden">
-        <div className="px-3 py-2 border-b bg-muted/40">
-          <p className="text-xs font-semibold text-foreground">Totals by department</p>
-          <p className="text-[11px] text-muted-foreground">
-            Tap a department to focus its items. Tap again (or All) to show every department.
+        <div
+          className={cn(
+            'border-b bg-muted/40',
+            compact ? 'px-2 py-1.5' : 'px-3 py-2',
+          )}
+        >
+          <p
+            className={cn(
+              'font-semibold text-foreground',
+              compact ? 'text-[10px]' : 'text-xs',
+            )}
+          >
+            {compact ? 'By department' : 'Totals by department'}
           </p>
+          {!compact && (
+            <p className="text-[11px] text-muted-foreground">
+              {externalLocked
+                ? 'Filtered by the department selector above — only matching lines are listed.'
+                : 'Tap a department to focus its items. Tap again (or All) to show every department.'}
+            </p>
+          )}
         </div>
         <ul className="divide-y">
           {deptSummaries.map((row) => {
             const active = focusDept === row.dept
+            const style = deptHeaderStyle(row.dept)
             return (
               <li key={row.dept}>
                 <button
                   type="button"
-                  onClick={() =>
+                  disabled={externalLocked && !active}
+                  onClick={() => {
+                    if (externalLocked) return
                     setFocusDept((prev) => (prev === row.dept ? 'all' : row.dept))
-                  }
+                  }}
                   className={cn(
-                    'w-full flex items-center justify-between gap-3 px-3 py-2.5 text-left text-sm transition-colors',
-                    active
-                      ? 'bg-primary/10'
-                      : 'hover:bg-muted/50',
+                    'w-full flex items-center justify-between gap-2 text-left transition-colors border-l-4 min-w-0',
+                    compact ? 'px-2 py-1.5' : 'gap-3 px-3 py-2.5 text-sm',
+                    style.header,
+                    active ? 'ring-1 ring-inset ring-foreground/10' : 'opacity-95 hover:opacity-100',
+                    externalLocked && !active && 'opacity-40 cursor-not-allowed',
                   )}
                 >
-                  <span className="flex items-center gap-2 min-w-0">
+                  <span className="flex items-center gap-1.5 min-w-0 overflow-hidden">
                     <Badge
-                      variant={active ? 'default' : 'outline'}
-                      className="text-[10px] shrink-0"
+                      variant="outline"
+                      className={cn(
+                        'shrink-0 border truncate max-w-[9rem]',
+                        compact ? 'text-[9px] px-1.5 py-0' : 'text-[10px]',
+                        style.badge,
+                      )}
                     >
                       {DEPT_LABELS[row.dept]}
                     </Badge>
-                    <span className="text-xs text-muted-foreground tabular-nums">
-                      {row.count} item{row.count === 1 ? '' : 's'}
-                    </span>
+                    {!compact && (
+                      <span className="text-xs text-muted-foreground tabular-nums">
+                        {row.count} item{row.count === 1 ? '' : 's'}
+                      </span>
+                    )}
                   </span>
-                  <span className="font-semibold tabular-nums shrink-0">
+                  <span
+                    className={cn(
+                      'font-semibold tabular-nums shrink-0 whitespace-nowrap',
+                      compact ? 'text-[11px]' : 'text-sm',
+                      style.accent,
+                    )}
+                  >
                     {formatNaira(row.total)}
                   </span>
                 </button>
@@ -297,85 +350,150 @@ export function PoReviewLinesPanel(props: Props) {
           })}
         </ul>
 
-        {/* 2. Grand total */}
-        <div className="flex items-center justify-between gap-3 px-3 py-3 border-t bg-muted/30">
-          <div className="min-w-0">
-            <p className="text-sm font-semibold">Sum total — all departments</p>
-            <p className="text-[11px] text-muted-foreground tabular-nums">
-              {grandCount} item{grandCount === 1 ? '' : 's'} across {deptSummaries.length}{' '}
-              department{deptSummaries.length === 1 ? '' : 's'}
+        <div
+          className={cn(
+            'flex items-center justify-between gap-2 border-t bg-muted/30 min-w-0',
+            compact ? 'px-2 py-1.5' : 'px-3 py-3 gap-3',
+          )}
+        >
+          <div className="min-w-0 overflow-hidden">
+            <p
+              className={cn(
+                'font-semibold truncate',
+                compact ? 'text-[11px]' : 'text-sm',
+              )}
+            >
+              {focusDept === 'all'
+                ? compact
+                  ? 'All depts'
+                  : 'Sum total — all departments'
+                : compact
+                  ? DEPT_LABELS[focusDept as SupplyDept] ?? focusDept
+                  : `Sum total — ${DEPT_LABELS[focusDept as SupplyDept] ?? focusDept}`}
             </p>
+            {!compact && (
+              <p className="text-[11px] text-muted-foreground tabular-nums">
+                {focusDept === 'all'
+                  ? `${grandCount} item${grandCount === 1 ? '' : 's'} across ${deptSummaries.length} department${deptSummaries.length === 1 ? '' : 's'}`
+                  : `${filteredGrouped[0]?.items.length ?? 0} item(s) in focus`}
+              </p>
+            )}
           </div>
-          <p className="text-base font-bold tabular-nums shrink-0">{formatNaira(grandTotal)}</p>
+          <p
+            className={cn(
+              'font-bold tabular-nums shrink-0 whitespace-nowrap',
+              compact ? 'text-xs' : 'text-base',
+            )}
+          >
+            {formatNaira(
+              focusDept === 'all'
+                ? grandTotal
+                : (filteredGrouped[0]?.total ?? 0),
+            )}
+          </p>
         </div>
       </div>
 
-      {/* Search + clear focus */}
-      <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
-        <div className="relative flex-1 max-w-md">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+      <div className={cn('flex flex-col gap-2', !compact && 'sm:flex-row sm:items-center')}>
+        <div className={cn('relative flex-1', !compact && 'max-w-md')}>
+          <Search
+            className={cn(
+              'absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground',
+              compact ? 'h-3.5 w-3.5' : 'left-3 h-4 w-4',
+            )}
+          />
           <Input
-            placeholder="Search items within departments…"
+            placeholder={compact ? 'Search…' : 'Search items within departments…'}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="pl-9"
+            className={cn(compact ? 'h-8 pl-8 text-xs' : 'pl-9')}
           />
         </div>
-        {focusDept !== 'all' && (
+        {focusDept !== 'all' && !externalLocked && (
           <Button
             type="button"
             variant="outline"
             size="sm"
+            className={cn(compact && 'h-7 text-[11px]')}
             onClick={() => setFocusDept('all')}
           >
-            Show all departments
+            {compact ? 'All depts' : 'Show all departments'}
           </Button>
         )}
       </div>
 
-      {/* 3. Items grouped by department */}
       {filteredGrouped.length === 0 ? (
-        <p className="text-sm text-muted-foreground py-6 text-center rounded-md border border-dashed">
-          No items match this search or department focus.
+        <p
+          className={cn(
+            'text-muted-foreground text-center rounded-md border border-dashed',
+            compact ? 'text-[11px] py-4' : 'text-sm py-6',
+          )}
+        >
+          No items match this search or department filter.
         </p>
       ) : (
-        <div className="space-y-4">
-          {filteredGrouped.map((group) => (
-            <section
-              key={group.dept}
-              className="rounded-lg border overflow-hidden bg-background"
-            >
-              <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 bg-muted/40 border-b">
-                <div className="flex items-center gap-2 min-w-0">
-                  <Badge variant="secondary" className="text-[10px]">
-                    {DEPT_LABELS[group.dept]}
-                  </Badge>
-                  <span className="text-xs text-muted-foreground tabular-nums">
-                    {group.items.length} item{group.items.length === 1 ? '' : 's'}
-                  </span>
-                </div>
-                <div className="text-right">
-                  <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                    Department total
-                  </p>
-                  <p className="text-sm font-semibold tabular-nums">
+        <div className={cn(compact ? 'space-y-2' : 'space-y-4')}>
+          {filteredGrouped.map((group) => {
+            const style = deptHeaderStyle(group.dept)
+            return (
+              <section
+                key={group.dept}
+                className={cn(
+                  'rounded-lg border overflow-hidden bg-background',
+                  style.header,
+                )}
+              >
+                <div
+                  className={cn(
+                    'flex items-center justify-between gap-2 border-b border-inherit min-w-0',
+                    compact ? 'px-2 py-1.5' : 'flex-wrap px-3 py-2.5',
+                    style.header,
+                  )}
+                >
+                  <div className="flex items-center gap-1.5 min-w-0 overflow-hidden">
+                    <Badge
+                      variant="outline"
+                      className={cn(
+                        'border shrink-0',
+                        compact ? 'text-[9px] px-1.5 py-0' : 'text-[10px]',
+                        style.badge,
+                      )}
+                    >
+                      {DEPT_LABELS[group.dept]}
+                    </Badge>
+                    <span
+                      className={cn(
+                        'text-muted-foreground tabular-nums shrink-0',
+                        compact ? 'text-[10px]' : 'text-xs',
+                      )}
+                    >
+                      {group.items.length}
+                    </span>
+                  </div>
+                  <p
+                    className={cn(
+                      'font-semibold tabular-nums shrink-0 whitespace-nowrap',
+                      compact ? 'text-[11px]' : 'text-sm',
+                      style.accent,
+                    )}
+                  >
                     {formatNaira(group.total)}
                   </p>
                 </div>
-              </div>
-              <div className="p-2 sm:p-3">
-                <DeptSectionItems
-                  kind={kind}
-                  items={group.items}
-                  editable={editable}
-                  onQtyChange={onQtyChange}
-                  onDelete={onDelete}
-                  compact={compact}
-                  pageSize={pageSize}
-                />
-              </div>
-            </section>
-          ))}
+                <div className={cn('bg-background', compact ? 'p-1.5' : 'p-2 sm:p-3')}>
+                  <DeptSectionItems
+                    kind={kind}
+                    items={group.items}
+                    editable={editable}
+                    onQtyChange={onQtyChange}
+                    onDelete={onDelete}
+                    compact={compact}
+                    pageSize={pageSize}
+                  />
+                </div>
+              </section>
+            )
+          })}
         </div>
       )}
     </div>
@@ -386,7 +504,7 @@ export function PoReviewLinesPanel(props: Props) {
 export function poDepartmentFilterOptions(orders: { lines: PoLine[] }[]) {
   const present = new Set<string>()
   for (const po of orders) {
-    for (const l of po.lines) present.add(l.dept)
+    for (const l of po.lines) present.add(normalizeSupplyDept(l.dept))
   }
   return deptOptionsFrom(present)
 }

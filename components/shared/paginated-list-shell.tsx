@@ -7,6 +7,11 @@ import {
 } from '@/lib/hooks/use-paginated-list'
 import { TableListControls } from '@/components/shared/table-list-controls'
 
+export type PaginatedListShellContext = {
+  search: string
+  activeFilters: Record<string, string>
+}
+
 type PaginatedListShellProps<T extends object> = {
   items: T[]
   pageSize?: number
@@ -17,7 +22,7 @@ type PaginatedListShellProps<T extends object> = {
   filterMatch?: (item: T, filterKey: string, filterValue: string) => boolean | undefined
   hideSearch?: boolean
   emptyMessage?: string
-  children: (paginatedItems: T[]) => ReactNode
+  children: (paginatedItems: T[], ctx: PaginatedListShellContext) => ReactNode
 }
 
 export function PaginatedListShell<T extends object>({
@@ -68,7 +73,7 @@ export function PaginatedListShell<T extends object>({
       {paginatedItems.length === 0 ? (
         <p className="py-8 text-center text-sm text-muted-foreground">{emptyMessage}</p>
       ) : (
-        children(paginatedItems)
+        children(paginatedItems, { search, activeFilters })
       )}
       {totalPages > 1 && (
         <TableListControls

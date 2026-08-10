@@ -282,15 +282,28 @@ export function StoreWorkspace() {
     })
   }, [basket])
 
-  const commitPurchaseQty = (item: StoreItem, raw: string, unitOverride?: string) => {
+  const commitPurchaseQty = (
+    item: StoreItem,
+    raw: string,
+    unitOverride?: string,
+    priceOverride?: string,
+  ) => {
     const trimmed = raw.trim()
     const purchaseUnit = unitOverride ?? purchaseUnitMap[item.id] ?? defaultUnitForStoreItem(item.unit)
     if (!trimmed) {
-      // Keep the basket line while the qty field is cleared for retyping.
+      // Empty qty removes the line so the shopping cart stays in sync.
+      if (basket.some((b) => b.stockItemId === item.id)) {
+        handleRemoveFromBasket(item.id)
+      }
       return
     }
     const qty = parseQuantityValue(trimmed)
-    if (qty <= 0) return
+    if (qty <= 0) {
+      if (basket.some((b) => b.stockItemId === item.id)) {
+        handleRemoveFromBasket(item.id)
+      }
+      return
+    }
     const storeQty = toStoreQty(item, qty, purchaseUnit)
     if (storeQty == null) {
       toast.error(`Set pack size for ${item.name} (${unitLabel(purchaseUnit)} per ${unitLabel(item.unit)})`)
@@ -303,10 +316,11 @@ export function StoreWorkspace() {
       item.unit,
       factors,
     )
+    const priceRaw =
+      priceOverride !== undefined ? priceOverride : (purchasePriceMap[item.id] ?? '')
+    const typedPrice = Number(priceRaw)
     const purchaseUnitPrice =
-      Number(purchasePriceMap[item.id]) > 0
-        ? Number(purchasePriceMap[item.id])
-        : defaultPurchasePrice
+      Number.isFinite(typedPrice) && typedPrice > 0 ? typedPrice : defaultPurchasePrice
     const storeUnitPrice = item.lastPrice
     const err = setBasketLineQty(item, storeQty, storeUnitPrice, actor, {
       purchaseUnit,
@@ -1373,8 +1387,15 @@ export function StoreWorkspace() {
                                       [item.id]: sanitizeQuantityInput(e.target.value),
                                     }))
                                   }
-                                  onBlur={() => {
-                                    if (rawQty.trim()) commitPurchaseQty(item, rawQty)
+                                  onBlur={(e) => {
+                                    if (rawQty.trim()) {
+                                      commitPurchaseQty(
+                                        item,
+                                        rawQty,
+                                        undefined,
+                                        e.target.value,
+                                      )
+                                    }
                                   }}
                                 />
                                 <span className="text-sm font-medium tabular-nums">
@@ -1526,8 +1547,15 @@ export function StoreWorkspace() {
                                           [item.id]: sanitizeQuantityInput(e.target.value),
                                         }))
                                       }
-                                      onBlur={() => {
-                                        if (rawQty.trim()) commitPurchaseQty(item, rawQty)
+                                      onBlur={(e) => {
+                                        if (rawQty.trim()) {
+                                          commitPurchaseQty(
+                                            item,
+                                            rawQty,
+                                            undefined,
+                                            e.target.value,
+                                          )
+                                        }
                                       }}
                                     />
                                     <p className="mt-1 text-[10px] text-muted-foreground">
