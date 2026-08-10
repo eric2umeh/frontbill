@@ -374,6 +374,48 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
         }
       }
 
+      // Client-side fallback when reconcile finds nothing but cash-in / folio credit exists
+      {
+        const cashIn = (txData || [])
+          .filter(
+            (t: { status?: string | null; description?: string | null }) =>
+              String(t.status || '').toLowerCase() !== 'cancelled' &&
+              isGuestCityLedgerCashInDescription(t.description),
+          )
+          .reduce(
+            (s: number, t: { amount?: number | null }) => s + Number(t.amount || 0),
+            0,
+          )
+        const deposits = rawBookings.reduce(
+          (s: number, b: { deposit?: number | null }) => s + Number(b.deposit || 0),
+          0,
+        )
+        const clientCredit = impliedGuestPrepaidCredit({
+          ledgerBalance: Number(ledgerData?.balance ?? 0),
+          folioOutstanding: pendingTotal,
+          ledgerCashInTotal: cashIn,
+          depositTotal: deposits,
+          folioCreditTotal: creditTotal,
+        })
+        if (
+          clientCredit > 0.005 &&
+          Number(ledgerData?.balance ?? 0) > -clientCredit + 0.5
+        ) {
+          const creditBal = -clientCredit
+          if (ledgerData) {
+            ledgerData = { ...ledgerData, balance: creditBal }
+          } else {
+            ledgerData = {
+              id: null,
+              balance: creditBal,
+              account_name: guestData.name,
+              account_type: 'individual',
+            }
+          }
+          setGuestFolioCreditTotal((prev) => Math.max(prev, clientCredit))
+        }
+      }
+
       if (ledgerData) {
         setLedgerAccount({
           id: ledgerData.id,
@@ -632,7 +674,8 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
   const ledgerCashInTotal = ledgerHistory
     .filter(
       (t) =>
-        t.status === 'paid' && isGuestCityLedgerCashInDescription(t.description),
+        String(t.status || '').toLowerCase() !== 'cancelled' &&
+        isGuestCityLedgerCashInDescription(t.description),
     )
     .reduce((s, t) => s + Number(t.amount || 0), 0)
   const totalBookingBalance = guestPendingBalance
@@ -648,16 +691,19 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
   })
   /** Folio-derived outstanding is source of truth for debit; ledger credit stays negative. */
   const ledgerDisplayBalance = (() => {
-    if (prepaidFromLedgerOrCashIn > 0.005 && guestOutstandingBalance <= 0.005) {
+    if (dbLedgerBalance < -0.005) return dbLedgerBalance
+    if (prepaidFromLedgerOrCashIn > 0.005) {
       return -prepaidFromLedgerOrCashIn
     }
     if (!ledgerAccount) return guestOutstandingBalance > 0 ? guestOutstandingBalance : 0
-    if (dbLedgerBalance < 0) return dbLedgerBalance
     if (guestOutstandingBalance > 0) return guestOutstandingBalance
     return Math.max(0, dbLedgerBalance)
   })()
 
-  const ledgerAccountCreditAmount = prepaidFromLedgerOrCashIn
+  const ledgerAccountCreditAmount = Math.max(
+    prepaidFromLedgerOrCashIn,
+    dbLedgerBalance < -0.005 ? Math.abs(dbLedgerBalance) : 0,
+  )
   const effectiveGuestCreditAmount = Math.max(
     guestFolioCreditTotal,
     ledgerAccountCreditAmount,

@@ -105,7 +105,7 @@ export function RoomInventoryStatsStrip({ className, refreshMs = 60_000 }: Props
       </div>
       <div
         className="inline-flex h-7 items-center gap-1 rounded-md border border-amber-200/80 bg-amber-50/50 px-1.5 text-[10px] font-medium leading-none shadow-sm dark:border-amber-900/50 dark:bg-amber-950/30"
-        title="Due out today or overdue (not counted in Occ)"
+        title="Checkout today (due out) — not counted in Occ"
       >
         <CalendarClock className="h-3 w-3 shrink-0 text-amber-700 dark:text-amber-400" aria-hidden />
         <span className="text-muted-foreground">Due</span>

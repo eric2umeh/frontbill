@@ -5,6 +5,9 @@
  * - occupied — checked in / confirmed, staying past today (check_out > today)
  * - due_out — still on folio, checkout today or overdue (check_out ≤ today)
  * - reserved — reservation / future arrival (not checked in yet)
+ *
+ * The Due *stat chip* counts only checkout **today** (not historical overdue).
+ * Overdue folios still classify as due_out for badges / held-room math.
  */
 
 import { resolveHotelTimeZone } from '@/lib/hotel-date'
@@ -27,7 +30,7 @@ export type FrontOfficeStayRow = {
 export type FrontOfficeStayStats = {
   /** Checked-in (or confirmed in-house) guests staying beyond today — excludes due-out and reservations. */
   occupied: number
-  /** Checkout today or overdue, still not checked out. */
+  /** Checkout **today** only (overdue open folios are not counted here). */
   dueOut: number
   /** Reserved / future arrivals (not checked in). */
   reserved: number
@@ -72,7 +75,7 @@ export function classifyFrontOfficeStay(
   return 'occupied'
 }
 
-/** Folio counts — Occ / Due / Res are unique (no double-count). */
+/** Folio counts — Occ / Due / Res are unique (no double-count). Due = checkout today only. */
 export function computeFrontOfficeStayStats(
   bookings: FrontOfficeStayRow[],
   todayYmd?: string,
@@ -86,17 +89,24 @@ export function computeFrontOfficeStayStats(
 
   for (const b of bookings) {
     const kind = classifyFrontOfficeStay(b, today, tz)
-    if (kind === 'occupied') occupied += 1
-    else if (kind === 'due_out') dueOut += 1
-    else if (kind === 'reserved') reserved += 1
+    if (kind === 'occupied') {
+      occupied += 1
+    } else if (kind === 'due_out') {
+      const co = bookingYmdHotel(b.check_out, tz)
+      // Chip = due out today only (stale overdue used to inflate Due into dozens)
+      if (co === today) dueOut += 1
+    } else if (kind === 'reserved') {
+      reserved += 1
+    }
   }
 
   return { occupied, dueOut, reserved }
 }
 
 /**
- * Default Bookings list: occupied stays + reservations that have arrived / arrive today.
- * Excludes due-out and future-dated reservations (those stay under Reservations / Res count).
+ * Default Bookings list for today: occupied + due out today + reservations
+ * that arrive today (or are already past arrival and not yet checked in).
+ * Future-dated reservations stay under Res / Reservations.
  */
 export function isShownOnDefaultBookingsList(
   booking: FrontOfficeStayRow,
@@ -107,6 +117,11 @@ export function isShownOnDefaultBookingsList(
   const today = todayYmd ?? todayYmdHotel(tz)
   const kind = classifyFrontOfficeStay(booking, today, tz)
   if (kind === 'occupied') return true
+  // Due out today (checkout date = today) — keep in default in-house table
+  if (kind === 'due_out') {
+    const co = bookingYmdHotel(booking.check_out, tz)
+    return co === today
+  }
   if (kind !== 'reserved') return false
   const ci = bookingYmdHotel(booking.check_in, tz)
   return Boolean(ci && ci <= today)

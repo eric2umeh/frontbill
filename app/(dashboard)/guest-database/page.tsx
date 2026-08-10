@@ -35,8 +35,10 @@ export default function GuestDatabasePage() {
   const router = useRouter()
 
   useEffect(() => {
+    if (!organizationId) return
     fetchGuests()
-  }, [])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [organizationId])
 
   const fetchGuests = async () => {
     try {
@@ -52,9 +54,15 @@ export default function GuestDatabasePage() {
 
       if (error) throw error
 
-      // Batch-fetch balances using optimized utility function
-      const guestIds = (data || []).map((g: any) => g.id)
-      const balanceMap = await calculateGuestBalancesBatch(supabase, guestIds)
+      // Folio debt (+) / prepaid credit (−) including city-ledger credit
+      const balanceMap = await calculateGuestBalancesBatch(
+        supabase,
+        (data || []).map((g: { id: string; name?: string | null }) => ({
+          id: g.id,
+          name: g.name,
+        })),
+        organizationId,
+      )
 
       // Attach balances to guests
       const guestsWithBalance = (data || []).map((guest: any) => ({
@@ -111,12 +119,25 @@ export default function GuestDatabasePage() {
             label: 'Balance',
             render: (guest) => {
               const balance = (guest as Guest).total_balance ?? 0
+              const isCredit = balance < -0.005
+              const isDebt = balance > 0.005
               return (
                 <div
-                  className={`text-xs font-medium cursor-pointer md:text-sm ${balance > 0 ? 'text-red-600' : 'text-green-600'}`}
+                  className={`text-xs font-medium cursor-pointer md:text-sm ${
+                    isDebt
+                      ? 'text-red-600'
+                      : isCredit
+                        ? 'text-blue-600'
+                        : 'text-green-600'
+                  }`}
                   onClick={() => goToGuest(guest)}
                 >
-                  {formatNaira(balance)}
+                  <div>{formatNaira(Math.abs(balance))}</div>
+                  {isCredit && (
+                    <div className="text-[10px] font-normal text-blue-600/80">
+                      Credit
+                    </div>
+                  )}
                 </div>
               )
             },
@@ -187,9 +208,29 @@ export default function GuestDatabasePage() {
                   <div className="font-semibold">{guest.name}</div>
                   <div className="text-sm text-muted-foreground">{guest.phone}</div>
                 </div>
-                <div className={`text-sm font-semibold ${((guest as any).total_balance || 0) > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                  {formatNaira((guest as any).total_balance || 0)}
-                </div>
+                {(() => {
+                  const bal = Number((guest as Guest).total_balance || 0)
+                  const isCredit = bal < -0.005
+                  const isDebt = bal > 0.005
+                  return (
+                    <div
+                      className={`text-sm font-semibold text-right ${
+                        isDebt
+                          ? 'text-red-600'
+                          : isCredit
+                            ? 'text-blue-600'
+                            : 'text-green-600'
+                      }`}
+                    >
+                      <div>{formatNaira(Math.abs(bal))}</div>
+                      {isCredit && (
+                        <div className="text-[10px] font-normal text-blue-600/80">
+                          Credit
+                        </div>
+                      )}
+                    </div>
+                  )
+                })()}
               </div>
               <div className="text-sm text-muted-foreground">{guest.email || '—'}</div>
             </div>
