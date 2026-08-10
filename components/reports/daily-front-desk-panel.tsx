@@ -7,10 +7,10 @@ import { createClient } from '@/lib/supabase/client'
 import { formatNaira } from '@/lib/utils/currency'
 import {
   calendarDateMinusOneDay,
-  hotelCalendarDayUtcBounds,
   hotelCalendarTodayYmd,
   resolveHotelTimeZone,
 } from '@/lib/hotel-date'
+import { fetchHotelBusinessNightUtcBounds } from '@/lib/payments/business-night-bounds'
 import {
   buildDailyFrontDeskPack,
   SALES_COLLECTION_LABELS,
@@ -65,7 +65,19 @@ export function DailyFrontDeskPanel() {
       }
 
       const tz = resolveHotelTimeZone()
-      const bounds = hotelCalendarDayUtcBounds(day, tz)
+      const bounds = orgId
+        ? await fetchHotelBusinessNightUtcBounds({
+            supabase,
+            organizationId: orgId,
+            ymd: day,
+            timeZone: tz,
+          })
+        : await (async () => {
+            // Superadmin without org: calendar day only
+            const { hotelCalendarDayUtcBounds } = await import('@/lib/hotel-date')
+            const b = hotelCalendarDayUtcBounds(day, tz)
+            return { ...b, empty: false, mode: 'calendar_fallback' as const, orgBusinessDate: null }
+          })()
 
       let bookQ = supabase
         .from('bookings')
@@ -77,27 +89,35 @@ export function DailyFrontDeskPanel() {
         .gt('check_out', day)
         .limit(500)
 
-      let txQ = supabase
-        .from('transactions')
-        .select('*')
-        .gte('created_at', bounds.startIso)
-        .lte('created_at', bounds.endInclusiveIso)
-        .limit(5000)
+      let txQ = bounds.empty
+        ? null
+        : supabase
+            .from('transactions')
+            .select('*')
+            .gte('created_at', bounds.startIso)
+            .lte('created_at', bounds.endInclusiveIso)
+            .limit(5000)
 
-      let payQ = supabase
-        .from('payments')
-        .select('*')
-        .gte('payment_date', bounds.startIso)
-        .lte('payment_date', bounds.endInclusiveIso)
-        .limit(5000)
+      let payQ = bounds.empty
+        ? null
+        : supabase
+            .from('payments')
+            .select('*')
+            .gte('payment_date', bounds.startIso)
+            .lte('payment_date', bounds.endInclusiveIso)
+            .limit(5000)
 
       if (role !== 'superadmin' && orgId) {
         bookQ = bookQ.eq('organization_id', orgId)
-        txQ = txQ.eq('organization_id', orgId)
-        payQ = payQ.eq('organization_id', orgId)
+        if (txQ) txQ = txQ.eq('organization_id', orgId)
+        if (payQ) payQ = payQ.eq('organization_id', orgId)
       }
 
-      const [bookRes, txRes, payRes] = await Promise.all([bookQ, txQ, payQ])
+      const [bookRes, txRes, payRes] = await Promise.all([
+        bookQ,
+        txQ || Promise.resolve({ data: [] as unknown[], error: null }),
+        payQ || Promise.resolve({ data: [] as unknown[], error: null }),
+      ])
 
       if (txRes.error) {
         console.error('[daily-book] transactions', txRes.error.message)
@@ -165,8 +185,8 @@ export function DailyFrontDeskPanel() {
         <div>
           <h2 className="text-xl font-semibold tracking-tight">Daily book</h2>
           <p className="text-sm text-muted-foreground">
-            In-house guest list (room revenue) and sales collection for owners — same structure as the
-            front-desk manual book.
+            In-house guest list (room revenue) and sales collection for owners. Sales include money
+            taken after midnight until Night Audit is run for that business night.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -218,7 +238,7 @@ export function DailyFrontDeskPanel() {
             <CardTitle className="text-3xl">{formatNaira(sc?.total || 0)}</CardTitle>
           </CardHeader>
           <CardContent className="text-sm text-primary-foreground/80">
-            Cash / POS / transfer inflows that day (city ledger excluded)
+            Cash / POS / transfer until night audit (city ledger excluded)
           </CardContent>
         </Card>
       </div>

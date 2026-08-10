@@ -33,6 +33,7 @@ import {
   hotelCalendarTodayYmd,
   resolveHotelTimeZone,
 } from '@/lib/hotel-date'
+import { fetchHotelBusinessNightUtcBounds } from '@/lib/payments/business-night-bounds'
 
 interface Payment {
   id: string
@@ -70,27 +71,27 @@ export default function TransactionsPage() {
     const now = new Date()
     const tz = resolveHotelTimeZone()
     switch (dateRange) {
-      case 'today': {
-        const b = hotelCalendarDayUtcBounds(hotelCalendarTodayYmd(now, tz), tz)
-        return { fromIso: b.startIso, toIso: b.endInclusiveIso }
-      }
-      case 'yesterday': {
-        const ymd = calendarDateMinusOneDay(hotelCalendarTodayYmd(now, tz))
-        const b = hotelCalendarDayUtcBounds(ymd, tz)
-        return { fromIso: b.startIso, toIso: b.endInclusiveIso }
-      }
+      case 'today':
+        return { mode: 'business_night' as const, ymd: hotelCalendarTodayYmd(now, tz) }
+      case 'yesterday':
+        return {
+          mode: 'business_night' as const,
+          ymd: calendarDateMinusOneDay(hotelCalendarTodayYmd(now, tz)),
+        }
       case 'this_week':
         return {
+          mode: 'range' as const,
           fromIso: startOfWeek(now, { weekStartsOn: 1 }).toISOString(),
           toIso: endOfWeek(now, { weekStartsOn: 1 }).toISOString(),
         }
       case 'this_month':
-        return { fromIso: startOfMonth(now).toISOString(), toIso: endOfMonth(now).toISOString() }
-      case 'custom': {
-        const ymd = format(customDate, 'yyyy-MM-dd')
-        const b = hotelCalendarDayUtcBounds(ymd, tz)
-        return { fromIso: b.startIso, toIso: b.endInclusiveIso }
-      }
+        return {
+          mode: 'range' as const,
+          fromIso: startOfMonth(now).toISOString(),
+          toIso: endOfMonth(now).toISOString(),
+        }
+      case 'custom':
+        return { mode: 'business_night' as const, ymd: format(customDate, 'yyyy-MM-dd') }
     }
   }, [dateRange, customDate])
 
@@ -108,8 +109,35 @@ export default function TransactionsPage() {
         return
       }
 
-      const fromIso = dateFilter.fromIso
-      const toIso = dateFilter.toIso
+      const tz = resolveHotelTimeZone()
+      let fromIso: string
+      let toIso: string
+      let empty = false
+
+      if (dateFilter.mode === 'business_night' && orgId) {
+        const b = await fetchHotelBusinessNightUtcBounds({
+          supabase,
+          organizationId: orgId,
+          ymd: dateFilter.ymd,
+          timeZone: tz,
+        })
+        fromIso = b.startIso
+        toIso = b.endInclusiveIso
+        empty = b.empty
+      } else if (dateFilter.mode === 'business_night') {
+        const b = hotelCalendarDayUtcBounds(dateFilter.ymd, tz)
+        fromIso = b.startIso
+        toIso = b.endInclusiveIso
+      } else {
+        fromIso = dateFilter.fromIso
+        toIso = dateFilter.toIso
+      }
+
+      if (empty) {
+        setPayments([])
+        endFetch()
+        return
+      }
 
       let txQuery = supabase
         .from('transactions')

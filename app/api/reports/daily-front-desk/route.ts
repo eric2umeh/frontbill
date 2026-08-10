@@ -1,10 +1,8 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
 import { canonicalRoleKey } from '@/lib/permissions'
-import {
-  hotelCalendarDayUtcBounds,
-  resolveHotelTimeZone,
-} from '@/lib/hotel-date'
+import { resolveHotelTimeZone } from '@/lib/hotel-date'
+import { fetchHotelBusinessNightUtcBounds } from '@/lib/payments/business-night-bounds'
 import { buildDailyFrontDeskPack } from '@/lib/reports/daily-front-desk-pack'
 
 function isYmd(s: string) {
@@ -51,13 +49,22 @@ export async function GET(request: Request) {
     const orgId = prof.organization_id
     const { data: org } = await admin
       .from('organizations')
-      .select('timezone')
+      .select('timezone, business_date')
       .eq('id', orgId)
       .single()
 
     const tz = resolveHotelTimeZone(org?.timezone)
-    const bounds = hotelCalendarDayUtcBounds(date, tz)
+    const orgBusinessDate =
+      typeof org?.business_date === 'string' ? String(org.business_date).slice(0, 10) : null
+    const bounds = await fetchHotelBusinessNightUtcBounds({
+      supabase: admin,
+      organizationId: orgId,
+      ymd: date,
+      timeZone: tz,
+      orgBusinessDate,
+    })
 
+    const emptyLedger = bounds.empty
     const [{ data: bookings, error: bookErr }, txRes, payRes] = await Promise.all([
       admin
         .from('bookings')
@@ -70,20 +77,24 @@ export async function GET(request: Request) {
         .gt('check_out', date)
         .limit(500),
       // select * so missing optional columns (e.g. before/after SQL 076) never zero-out the ledger
-      admin
-        .from('transactions')
-        .select('*')
-        .eq('organization_id', orgId)
-        .gte('created_at', bounds.startIso)
-        .lte('created_at', bounds.endInclusiveIso)
-        .limit(5000),
-      admin
-        .from('payments')
-        .select('*')
-        .eq('organization_id', orgId)
-        .gte('payment_date', bounds.startIso)
-        .lte('payment_date', bounds.endInclusiveIso)
-        .limit(5000),
+      emptyLedger
+        ? Promise.resolve({ data: [] as unknown[], error: null })
+        : admin
+            .from('transactions')
+            .select('*')
+            .eq('organization_id', orgId)
+            .gte('created_at', bounds.startIso)
+            .lte('created_at', bounds.endInclusiveIso)
+            .limit(5000),
+      emptyLedger
+        ? Promise.resolve({ data: [] as unknown[], error: null })
+        : admin
+            .from('payments')
+            .select('*')
+            .eq('organization_id', orgId)
+            .gte('payment_date', bounds.startIso)
+            .lte('payment_date', bounds.endInclusiveIso)
+            .limit(5000),
     ])
 
     if (bookErr) {
@@ -133,7 +144,7 @@ export async function GET(request: Request) {
         payError: payRes.error?.message || null,
       },
       note:
-        'Room revenue = sum of rate_per_night for guests occupying that hotel night. Sales collection = cash/POS/transfer inflows that day (city ledger posted separately, not in collection total).',
+        'Room revenue = sum of rate_per_night for guests occupying that hotel night. Sales collection = cash/POS/transfer from the previous night audit (or day start) until this night’s audit click (or now if still open). City ledger is posted separately and not in the collection total.',
     })
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Daily book failed'

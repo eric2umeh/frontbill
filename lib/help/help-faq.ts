@@ -382,7 +382,7 @@ export const HELP_FAQ: HelpFaqItem[] = [
     category: 'Daily book & Transactions',
     question: 'What is the Daily book?',
     answer:
-      'Owner/manager report for one hotel night: in-house guest list (room revenue = sum of rates) plus sales collection (cash/POS/transfer) by category — POS, cash, advance, Additional (Extend stay etc), extra charges, debt recovery. City ledger is listed separately.',
+      'Owner/manager report for one hotel night: in-house guest list (room revenue = sum of rates) plus sales collection (cash/POS/transfer) by category — POS, cash, advance, Additional (Extend stay etc), extra charges, debt recovery. City ledger is listed separately. Sales include payments after midnight until Night Audit is run for that night.',
     keywords: ['daily book', 'owner report', 'sales collection', 'room revenue'],
     aliases: ['dailybook', 'daily report', 'manual book', 'what is the daily book'],
     topics: ['daily_book'],
@@ -412,7 +412,7 @@ export const HELP_FAQ: HelpFaqItem[] = [
     category: 'Daily book & Transactions',
     question: 'Why is Daily book showing ₦0 when Transactions has cash?',
     answer:
-      'Pick the same hotel date on both screens (Yesterday / custom). Daily book sales collection is cash/POS/transfer only (not city ledger). Refresh Daily book after payments post. If still wrong, tell an admin — ledger date windows use Africa/Lagos hotel time.',
+      'Pick the same hotel date on both screens (Yesterday / custom). Daily book sales collection is cash/POS/transfer only (not city ledger), from the previous night’s audit (or day start) until this night’s audit click — so post-midnight money still belongs to the night being closed. Refresh after Night Audit. If still wrong, check City ledger (not in total) and Africa/Lagos hotel time.',
     keywords: ['zero', '0', 'naira', 'mismatch', 'wrong total'],
     aliases: ['daily book zero', 'not showing cash', 'sales collection 0'],
     topics: ['daily_book'],
