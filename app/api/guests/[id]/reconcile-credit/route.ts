@@ -56,6 +56,7 @@ export async function POST(request: Request, ctx: RouteCtx) {
       organizationId: profile.organization_id,
       guestName: guestRow.name,
       guestId: guestRow.id,
+      userId: authed,
     })
 
     return NextResponse.json({ ok: true, ...result })
