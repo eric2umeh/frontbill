@@ -32,11 +32,11 @@ import { LoadingSpinner } from '@/components/loading-screen'
 import { PaginatedListShell } from '@/components/shared/paginated-list-shell'
 import {
   formatHotelDateDisplayGB,
-  hotelCalendarDayUtcBounds,
   nightAuditClosingDateYmd,
   nightAuditNextBusinessDateYmd,
   resolveHotelTimeZone,
 } from '@/lib/hotel-date'
+import { fetchHotelBusinessNightUtcBounds } from '@/lib/payments/business-night-bounds'
 import { summarizeDayLedgerCollections } from '@/lib/payments/day-ledger-collections'
 
 interface AuditTrailLog {
@@ -129,7 +129,17 @@ export default function NightAuditPage() {
       }
       if (!supabase) { setAuditData(emptyData); endFetch(); return }
 
-      const dayBounds = hotelCalendarDayUtcBounds(closingDate, resolveHotelTimeZone())
+      const tz = resolveHotelTimeZone()
+      const dayBounds = organizationId
+        ? await fetchHotelBusinessNightUtcBounds({
+            supabase,
+            organizationId,
+            ymd: closingDate,
+            timeZone: tz,
+            orgBusinessDate: closingDate,
+          })
+        : null
+
       const [{ data: bookings }, { data: payments }, { data: dayTransactions }, { data: allRooms }, { data: arrivals }] =
         await Promise.all([
           supabase
@@ -137,19 +147,25 @@ export default function NightAuditPage() {
             .select('*, rooms(id, room_number), guests:guest_id(name)')
             .eq('organization_id', organizationId)
             .eq('status', 'checked_in'),
-          supabase
-            .from('payments')
-            .select('*')
-            .eq('organization_id', organizationId)
-            .gte('payment_date', dayBounds.startIso)
-            .lte('payment_date', dayBounds.endInclusiveIso),
-          supabase
-            .from('transactions')
-            .select('id, amount, payment_method, status, booking_id, created_at, transaction_id, guest_name, description')
-            .eq('organization_id', organizationId)
-            .gte('created_at', dayBounds.startIso)
-            .lte('created_at', dayBounds.endInclusiveIso)
-            .limit(5000),
+          !dayBounds || dayBounds.empty
+            ? Promise.resolve({ data: [] as unknown[] })
+            : supabase
+                .from('payments')
+                .select('*')
+                .eq('organization_id', organizationId)
+                .gte('payment_date', dayBounds.startIso)
+                .lte('payment_date', dayBounds.endInclusiveIso),
+          !dayBounds || dayBounds.empty
+            ? Promise.resolve({ data: [] as unknown[] })
+            : supabase
+                .from('transactions')
+                .select(
+                  'id, amount, payment_method, status, booking_id, created_at, transaction_id, guest_name, description',
+                )
+                .eq('organization_id', organizationId)
+                .gte('created_at', dayBounds.startIso)
+                .lte('created_at', dayBounds.endInclusiveIso)
+                .limit(5000),
           supabase
             .from('rooms')
             .select('id, room_number, status')
@@ -528,7 +544,9 @@ export default function NightAuditPage() {
           <Card>
             <CardHeader>
               <CardTitle>Expected Arrivals</CardTitle>
-              <CardDescription>Reservations arriving today</CardDescription>
+              <CardDescription>
+                Reservations arriving {formatHotelDateDisplayGB(nextBusinessDateYmd)} (next business day)
+              </CardDescription>
             </CardHeader>
             <CardContent>
               <PaginatedListShell
@@ -547,7 +565,7 @@ export default function NightAuditPage() {
                     .filter(Boolean)
                     .some((value) => String(value).toLowerCase().includes(q))
                 }}
-                emptyMessage="No expected arrivals for today."
+                emptyMessage={`No expected arrivals for ${formatHotelDateDisplayGB(nextBusinessDateYmd)}.`}
               >
                 {(pageRows) => (
                   <Table>
