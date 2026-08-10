@@ -67,8 +67,11 @@ export function hotelBusinessNightUtcBounds(input: BusinessNightBoundsInput): Bu
     : null
   const thisAudit = input.thisAuditCompletedAt ? new Date(input.thisAuditCompletedAt) : null
 
+  // Always start at the prior audit click when present — including pre-midnight audits
+  // (product default after 18:00). Flooring at calendar midnight would drop cash taken
+  // between that click and 00:00 from both the closed night and the next business night.
   const start =
-    prevAudit && !Number.isNaN(prevAudit.getTime()) && prevAudit.getTime() > calendarStart.getTime()
+    prevAudit && !Number.isNaN(prevAudit.getTime())
       ? prevAudit
       : calendarStart
 
