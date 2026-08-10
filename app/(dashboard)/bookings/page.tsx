@@ -28,6 +28,7 @@ import {
   Bed,
   AlertTriangle,
   CalendarClock,
+  CalendarDays,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -48,15 +49,18 @@ import {
   shouldReconcileBookingPaymentPaid,
 } from "@/lib/utils/booking-bill-balance";
 import {
-  bookingYmdHotel,
   calendarPickerYmd,
-  isInHouseOnCalendarDay,
   todayYmdHotel,
 } from "@/lib/utils/booking-in-house-dates";
 import { resolveHotelTimeZone } from "@/lib/hotel-date";
 import { cancelBookingReservation } from "@/lib/reservations/cancel-reservation";
-import { countInHouseRoomsFromBookings } from "@/lib/rooms/room-occupancy";
 import { reconcileRoomStatusesClient } from "@/lib/rooms/reconcile-room-status-client";
+import {
+  classifyFrontOfficeStay,
+  computeFrontOfficeStayStats,
+  countPhysicallyHeldRooms,
+  isShownOnDefaultBookingsList,
+} from "@/lib/rooms/front-office-stay";
 import { networkFetchHint, withFetchRetry } from "@/lib/utils/fetch-retry";
 import {
   formatShortStayDates,
@@ -211,6 +215,7 @@ export default function BookingsPage() {
   const [roomStats, setRoomStats] = useState<{
     total: number;
     occupied: number;
+    reserved: number;
     availableForCheckin: number;
     outOfOrder: number;
     dueOutToday: number;
@@ -269,37 +274,20 @@ export default function BookingsPage() {
         .toLowerCase()
         .replace(/-/g, "_");
     const list = roomRows || [];
-    const occupied = countInHouseRoomsFromBookings(dueBookings ?? []);
+    const stay = computeFrontOfficeStayStats(dueBookings ?? [], today, tz);
+    const physicallyHeld = countPhysicallyHeldRooms(dueBookings ?? [], today, tz);
     const outOfOrder = list.filter(
       (r: { status?: string }) => norm(r.status) === "out_of_order",
     ).length;
-    const unavailableForCheckin = list.filter((r: { status?: string }) => {
-      const s = norm(r.status);
-      return s === "occupied" || s === "out_of_order";
-    }).length;
-    const availableForCheckin = list.length - unavailableForCheckin;
-
-    let dueOutToday = 0;
-    for (const b of dueBookings || []) {
-      const row = b as {
-        check_in?: string;
-        check_out?: string;
-        status?: string;
-      };
-      const ci = row.check_in;
-      const co = row.check_out;
-      if (!ci || !co) continue;
-      if (bookingYmdHotel(co, tz) !== today) continue;
-      if (!isInHouseOnCalendarDay(ci, co, today, tz)) continue;
-      dueOutToday += 1;
-    }
+    const availableForCheckin = Math.max(0, list.length - physicallyHeld - outOfOrder);
 
     setRoomStats({
       total: list.length,
-      occupied,
+      occupied: stay.occupied,
+      reserved: stay.reserved,
       availableForCheckin,
       outOfOrder,
-      dueOutToday,
+      dueOutToday: stay.dueOut,
     });
   }, [organizationId]);
 
@@ -490,12 +478,10 @@ export default function BookingsPage() {
         });
 
         if (statusKey === "checked_in") {
-          bookingsWithUsers = bookingsWithUsers.filter((b: any) => {
-            const st = String(b.status || "").toLowerCase();
-            if (!["checked_in", "confirmed", "reserved"].includes(st))
-              return false;
-            return isInHouseOnCalendarDay(b.check_in, b.check_out, today, tz);
-          });
+          // Default list: Occ + Res only — due-out guests are excluded (use Due filter).
+          bookingsWithUsers = bookingsWithUsers.filter((b: any) =>
+            isShownOnDefaultBookingsList(b, today, tz),
+          );
         }
 
         // Derive each booking's balance from folio (same rules as booking detail / bill card)
@@ -604,6 +590,9 @@ export default function BookingsPage() {
             .eq("organization_id", organizationId)
             .limit(BOOKINGS_SCOPE_LIMIT);
 
+          const tz = resolveHotelTimeZone();
+          const today = todayYmdHotel(tz);
+
           if (scopeKey === "all") {
             query = query
               .in("status", [
@@ -617,6 +606,10 @@ export default function BookingsPage() {
             query = query
               .eq("status", "checked_out")
               .gte("check_out", sixtyDaysAgo);
+          } else if (scopeKey === "due_out") {
+            query = query
+              .in("status", ["checked_in", "confirmed", "reserved"])
+              .lte("check_out", today);
           } else {
             query = query
               .eq("status", scopeKey)
@@ -703,6 +696,14 @@ export default function BookingsPage() {
           bookingsWithUsers.forEach((b: any) => {
             delete b._db_balance;
           });
+
+          if (scopeKey === "due_out") {
+            const tz = resolveHotelTimeZone();
+            const today = todayYmdHotel(tz);
+            bookingsWithUsers = bookingsWithUsers.filter(
+              (b: any) => classifyFrontOfficeStay(b, today, tz) === "due_out",
+            );
+          }
 
           setAllBookingsCatalog(groupBulkRows(bookingsWithUsers));
           setCatalogScopeLoaded(scopeKey);
@@ -1280,20 +1281,20 @@ export default function BookingsPage() {
             Bookings
           </h1>
           <p className="text-muted-foreground text-xs sm:text-sm leading-snug max-w-3xl">
-            Default: <strong>in-house</strong> stays only (fast). Search finds
-            any booking in the last 90 days. Change Status for history. Checkout
-            frees the room.
+            Default: <strong>occupied + reservations</strong> (due-out guests
+            are listed under Status → Due out). Search finds any booking in the
+            last 90 days. Checkout frees the room.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-1.5 shrink-0">
           {roomStats !== null && (
             <>
               <div
-                className="inline-flex h-7 items-center gap-1 rounded-md border border-input bg-background px-1.5 text-[10px] font-medium leading-none shadow-sm"
-                title="Distinct rooms with an in-house folio today (matches Checked in filter)"
+                className="inline-flex h-7 items-center gap-1 rounded-md border border-blue-200/80 bg-blue-50/50 px-1.5 text-[10px] font-medium leading-none shadow-sm"
+                title="Checked-in guests staying past today (excludes due-out and reservations)"
               >
                 <Bed
-                  className="h-3 w-3 shrink-0 text-muted-foreground"
+                  className="h-3 w-3 shrink-0 text-blue-700"
                   aria-hidden
                 />
                 <span className="text-muted-foreground">Occ</span>
@@ -1302,24 +1303,24 @@ export default function BookingsPage() {
                 </span>
               </div>
               <div
-                className="inline-flex h-7 items-center gap-1 rounded-md border border-input bg-background px-1.5 text-[10px] font-medium leading-none shadow-sm"
-                title="Rooms not Occupied and not Out of order — available for check-in"
+                className="inline-flex h-7 items-center gap-1 rounded-md border border-violet-200/80 bg-violet-50/50 px-1.5 text-[10px] font-medium leading-none shadow-sm"
+                title="Reservations / not checked in yet"
               >
-                <DoorOpen
-                  className="h-3 w-3 shrink-0 text-muted-foreground"
+                <CalendarDays
+                  className="h-3 w-3 shrink-0 text-violet-700"
                   aria-hidden
                 />
-                <span className="text-muted-foreground">Avail</span>
+                <span className="text-muted-foreground">Res</span>
                 <span className="tabular-nums text-foreground">
-                  {roomStats.availableForCheckin}
+                  {roomStats.reserved}
                 </span>
               </div>
               <div
-                className="inline-flex h-7 items-center gap-1 rounded-md border border-input bg-background px-1.5 text-[10px] font-medium leading-none shadow-sm"
-                title="In-house folios with checkout today (hotel date)"
+                className="inline-flex h-7 items-center gap-1 rounded-md border border-amber-200/80 bg-amber-50/50 px-1.5 text-[10px] font-medium leading-none shadow-sm"
+                title="Due out today or overdue — not counted in Occ; use Status → Due out"
               >
                 <CalendarClock
-                  className="h-3 w-3 shrink-0 text-muted-foreground"
+                  className="h-3 w-3 shrink-0 text-amber-700"
                   aria-hidden
                 />
                 <span className="text-muted-foreground">Due</span>
@@ -1328,11 +1329,24 @@ export default function BookingsPage() {
                 </span>
               </div>
               <div
-                className="inline-flex h-7 items-center gap-1 rounded-md border border-input bg-background px-1.5 text-[10px] font-medium leading-none shadow-sm"
+                className="inline-flex h-7 items-center gap-1 rounded-md border border-green-200/80 bg-green-50/50 px-1.5 text-[10px] font-medium leading-none shadow-sm"
+                title="Rooms free for check-in (not held by Occ/Due, not OOO)"
+              >
+                <DoorOpen
+                  className="h-3 w-3 shrink-0 text-green-700"
+                  aria-hidden
+                />
+                <span className="text-muted-foreground">Avail</span>
+                <span className="tabular-nums text-foreground">
+                  {roomStats.availableForCheckin}
+                </span>
+              </div>
+              <div
+                className="inline-flex h-7 items-center gap-1 rounded-md border border-orange-200/80 bg-orange-50/50 px-1.5 text-[10px] font-medium leading-none shadow-sm"
                 title="Rooms marked Out of order"
               >
                 <AlertTriangle
-                  className="h-3 w-3 shrink-0 text-muted-foreground"
+                  className="h-3 w-3 shrink-0 text-orange-700"
                   aria-hidden
                 />
                 <span className="text-muted-foreground">OOO</span>
@@ -1415,18 +1429,28 @@ export default function BookingsPage() {
           return parts.some((p) => p.toLowerCase().includes(q));
         }}
         resolveFilterMatch={(row, key, val) => {
-          if (key !== "status" || val.trim().toLowerCase() !== "checked_in")
-            return undefined;
+          const statusVal = val.trim().toLowerCase();
+          if (key !== "status") return undefined;
           const r = row as Booking;
-          if (r.is_bulk && r.bulk_members?.length) {
-            return r.bulk_members.some((m) =>
-              ["checked_in", "confirmed", "reserved"].includes(
-                String(m.status || "").toLowerCase(),
-              ),
-            );
+          const tz = resolveHotelTimeZone();
+          const today = todayYmdHotel(tz);
+          if (statusVal === "checked_in") {
+            if (r.is_bulk && r.bulk_members?.length) {
+              return r.bulk_members.some((m) =>
+                isShownOnDefaultBookingsList(m, today, tz),
+              );
+            }
+            return isShownOnDefaultBookingsList(r, today, tz);
           }
-          const st = String(r.status || "").toLowerCase();
-          return ["checked_in", "confirmed", "reserved"].includes(st);
+          if (statusVal === "due_out") {
+            if (r.is_bulk && r.bulk_members?.length) {
+              return r.bulk_members.some(
+                (m) => classifyFrontOfficeStay(m, today, tz) === "due_out",
+              );
+            }
+            return classifyFrontOfficeStay(r, today, tz) === "due_out";
+          }
+          return undefined;
         }}
         filters={[
           {
@@ -1442,7 +1466,8 @@ export default function BookingsPage() {
             key: "status",
             label: "Status",
             options: [
-              { value: "checked_in", label: "Checked in (in house)" },
+              { value: "checked_in", label: "In house (Occ + Res)" },
+              { value: "due_out", label: "Due out today" },
               { value: "reserved", label: "Reserved" },
               { value: "confirmed", label: "Confirmed" },
               { value: "checked_out", label: "Checked out" },
@@ -1452,7 +1477,7 @@ export default function BookingsPage() {
         emptyState={{
           title: "No bookings match your filters",
           description:
-            "Uses the hotel calendar (Africa/Lagos by default). Picking a stay date lists every guest in-house that night (arrivals + stayovers), not only same-day check-ins. Clear the date to return to today’s in-house guests.",
+            "Default list hides due-out guests (use Status → Due out). Stay date lists every guest occupying that hotel night. Clear the date for today’s Occ + Res list.",
         }}
         dateField="check_in"
         checkOutField="check_out"
@@ -1469,9 +1494,20 @@ export default function BookingsPage() {
           {
             key: "guest",
             label: "Guest",
-            render: (booking) => (
+            render: (booking) => {
+              const stayKind = classifyFrontOfficeStay(
+                booking,
+                todayYmdHotel(),
+                resolveHotelTimeZone(),
+              );
+              const isReservationRow = stayKind === "reserved";
+              return (
               <div
-                className="cursor-pointer hover:text-primary"
+                className={`cursor-pointer hover:text-primary ${
+                  isReservationRow
+                    ? "rounded-md border border-violet-200 bg-violet-50/60 px-1.5 py-1 dark:border-violet-900/40 dark:bg-violet-950/30"
+                    : ""
+                }`}
                 onClick={() =>
                   router.push(
                     booking.is_bulk
@@ -1480,8 +1516,16 @@ export default function BookingsPage() {
                   )
                 }
               >
-                <div className="font-medium max-md:text-[13px]">
-                  {booking.guests?.name}
+                <div className="font-medium max-md:text-[13px] flex flex-wrap items-center gap-1.5">
+                  <span>{booking.guests?.name}</span>
+                  {isReservationRow && (
+                    <Badge
+                      variant="outline"
+                      className="text-[10px] px-1 py-0 bg-violet-100 text-violet-800 border-violet-200"
+                    >
+                      Reservation — not checked in
+                    </Badge>
+                  )}
                 </div>
                 <div className="text-xs text-muted-foreground max-md:hidden">
                   {booking.guests?.phone}
@@ -1495,9 +1539,13 @@ export default function BookingsPage() {
                   <div>
                     {formatShortStayDates(booking.check_in, booking.check_out)}
                   </div>
+                  {isReservationRow && (
+                    <div className="text-violet-700">Reservation</div>
+                  )}
                 </MobileTableSubdetail>
               </div>
-            ),
+              );
+            },
           },
           {
             key: "room",
