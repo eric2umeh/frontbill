@@ -2,12 +2,13 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
 import { hasPermission } from '@/lib/permissions'
 import {
+  calendarDateMinusOneDay,
   formatYMDInTimeZone,
-  hotelCalendarDayUtcBounds,
   nightAuditClosingDateYmd,
   nightAuditNextBusinessDateYmd,
   resolveHotelTimeZone,
 } from '@/lib/hotel-date'
+import { hotelBusinessNightUtcBounds } from '@/lib/payments/business-night-bounds'
 import { summarizeDayLedgerCollections } from '@/lib/payments/day-ledger-collections'
 
 export async function POST(request: Request) {
@@ -55,7 +56,9 @@ export async function POST(request: Request) {
     }
 
     const nextBusinessDate = nightAuditNextBusinessDateYmd(closingDate)
-    const dayBounds = hotelCalendarDayUtcBounds(closingDate, tz)
+    const prevBusinessDate = calendarDateMinusOneDay(closingDate)
+    const orgBusinessDate =
+      typeof org?.business_date === 'string' ? String(org.business_date).slice(0, 10) : null
 
     const { data: existing } = await admin
       .from('night_audits')
@@ -71,6 +74,23 @@ export async function POST(request: Request) {
       )
     }
 
+    const { data: prevAudit } = await admin
+      .from('night_audits')
+      .select('created_at')
+      .eq('organization_id', orgId)
+      .eq('audit_date', prevBusinessDate)
+      .maybeSingle()
+
+    // Include post-midnight payments until this audit click (end = now).
+    const dayBounds = hotelBusinessNightUtcBounds({
+      ymd: closingDate,
+      timeZone: tz,
+      now,
+      orgBusinessDate: orgBusinessDate || closingDate,
+      previousAuditCompletedAt: prevAudit?.created_at ?? null,
+      thisAuditCompletedAt: null,
+    })
+
     const [
       { data: checkedInBookings },
       { data: payments },
@@ -85,19 +105,25 @@ export async function POST(request: Request) {
         .select('*, rooms(id, room_number), guests:guest_id(name)')
         .eq('organization_id', orgId)
         .eq('status', 'checked_in'),
-      admin
-        .from('payments')
-        .select('*')
-        .eq('organization_id', orgId)
-        .gte('payment_date', dayBounds.startIso)
-        .lte('payment_date', dayBounds.endInclusiveIso),
-      admin
-        .from('transactions')
-        .select('id, amount, payment_method, status, booking_id, created_at, transaction_id, guest_name, description')
-        .eq('organization_id', orgId)
-        .gte('created_at', dayBounds.startIso)
-        .lte('created_at', dayBounds.endInclusiveIso)
-        .limit(5000),
+      dayBounds.empty
+        ? Promise.resolve({ data: [] as unknown[] })
+        : admin
+            .from('payments')
+            .select('*')
+            .eq('organization_id', orgId)
+            .gte('payment_date', dayBounds.startIso)
+            .lte('payment_date', dayBounds.endInclusiveIso),
+      dayBounds.empty
+        ? Promise.resolve({ data: [] as unknown[] })
+        : admin
+            .from('transactions')
+            .select(
+              'id, amount, payment_method, status, booking_id, created_at, transaction_id, guest_name, description',
+            )
+            .eq('organization_id', orgId)
+            .gte('created_at', dayBounds.startIso)
+            .lte('created_at', dayBounds.endInclusiveIso)
+            .limit(5000),
       admin
         .from('rooms')
         .select('id, room_number, status')
