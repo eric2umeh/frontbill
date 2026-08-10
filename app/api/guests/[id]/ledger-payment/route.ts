@@ -92,6 +92,43 @@ export async function POST(request: Request, ctx: RouteCtx) {
       callerProfile.organization_id,
     )
 
+    // Guard against double-submit / retry after a false client error.
+    const sinceIso = new Date(Date.now() - 90_000).toISOString()
+    const { data: recentTx } = await admin
+      .from('transactions')
+      .select('id, amount, description, created_at')
+      .eq('organization_id', callerProfile.organization_id)
+      .ilike('guest_name', guestRow.name)
+      .eq('amount', amount)
+      .gte('created_at', sinceIso)
+      .order('created_at', { ascending: false })
+      .limit(8)
+
+    const typeKey = transactionType.toLowerCase()
+    const duplicate = (recentTx || []).find((row) => {
+      const desc = String(row.description || '').toLowerCase()
+      return (
+        Math.abs(Number(row.amount) - amount) < 0.01 &&
+        (desc.includes(typeKey) ||
+          (typeKey.includes('top-up') && desc.includes('top-up')) ||
+          (typeKey.includes('settlement') && desc.includes('settlement')))
+      )
+    })
+
+    if (duplicate) {
+      const folioAfter = await guestFolioOutstandingTotal(
+        admin,
+        guestRow.id,
+        callerProfile.organization_id,
+      )
+      return NextResponse.json({
+        ok: true,
+        duplicate: true,
+        folio_before: folioBefore,
+        folio_after: folioAfter,
+      })
+    }
+
     await recordGuestLedgerCashMovement(admin, {
       organizationId: callerProfile.organization_id,
       accountName: guestRow.name,
