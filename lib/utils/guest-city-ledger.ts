@@ -7,6 +7,53 @@ import {
 import { insertFolioCharges } from "@/lib/utils/insert-folio-charges";
 import { appendAccountToNotes } from "@/lib/payments/payment-accounts";
 
+/**
+ * Prefer outstanding debit when any row still owes; otherwise prefer the
+ * largest prepaid credit (most negative). Never hide credit behind a ₦0 duplicate row.
+ */
+export function pickPreferredGuestLedgerAccount<
+  T extends { balance?: unknown },
+>(rows: T[]): T | null {
+  if (!rows.length) return null;
+  const withDebt = rows.filter((r) => Number(r.balance ?? 0) > 0.005);
+  if (withDebt.length) {
+    return withDebt.reduce((best, row) =>
+      Number(row.balance ?? 0) > Number(best.balance ?? 0) ? row : best,
+    );
+  }
+  return rows.reduce((best, row) =>
+    Number(row.balance ?? 0) < Number(best.balance ?? 0) ? row : best,
+  );
+}
+
+export function isGuestCityLedgerCashInDescription(
+  desc: string | null | undefined,
+): boolean {
+  const d = (desc || "").toLowerCase();
+  return (
+    d.includes("city ledger") ||
+    d.includes("top-up") ||
+    d.includes("top up") ||
+    d.includes("settlement") ||
+    (d.includes("credit") && !d.includes("cashback"))
+  );
+}
+
+/** Prepaid credit available for future charges (negative ledger or overpayment vs deposits). */
+export function impliedGuestPrepaidCredit(args: {
+  ledgerBalance: number;
+  folioOutstanding: number;
+  ledgerCashInTotal: number;
+  depositTotal: number;
+}): number {
+  if (args.ledgerBalance < -0.005) return Math.abs(args.ledgerBalance);
+  if (args.folioOutstanding > 0.005) return 0;
+  return Math.max(
+    0,
+    args.ledgerCashInTotal - Math.max(0, args.depositTotal),
+  );
+}
+
 export async function fetchGuestCityLedgerAccount(
   supabase: SupabaseClient,
   organizationId: string,
@@ -17,10 +64,90 @@ export async function fetchGuestCityLedgerAccount(
     organizationId,
     guestName,
   );
-  if (!rows.length) return null;
-  return rows.reduce((best, row) =>
-    Number(row.balance ?? 0) > Number(best.balance ?? 0) ? row : best,
+  return pickPreferredGuestLedgerAccount(rows);
+}
+
+/**
+ * If cash-in exceeds deposits while folios are clear but ledger was zeroed,
+ * write the prepaid credit (negative balance) onto all matching ledger rows.
+ */
+export async function reconcileGuestPrepaidCredit(
+  supabase: SupabaseClient,
+  args: {
+    organizationId: string;
+    guestName: string;
+    guestId: string;
+    primaryAccountId?: string | null;
+  },
+): Promise<{ credit: number; updated: boolean }> {
+  const { organizationId, guestName, guestId, primaryAccountId } = args;
+  const folioOutstanding = await guestFolioOutstandingTotal(
+    supabase,
+    guestId,
+    organizationId,
   );
+
+  const accounts = await fetchAllGuestCityLedgerAccounts(
+    supabase,
+    organizationId,
+    guestName,
+  );
+  const preferred = pickPreferredGuestLedgerAccount(accounts);
+  const ledgerBalance = Number(preferred?.balance ?? 0);
+
+  const { data: txRows } = await supabase
+    .from("transactions")
+    .select("amount, description, status")
+    .eq("organization_id", organizationId)
+    .ilike("guest_name", guestName.trim())
+    .eq("status", "paid")
+    .limit(100);
+
+  const ledgerCashInTotal = (txRows || [])
+    .filter((t) => isGuestCityLedgerCashInDescription(t.description))
+    .reduce((s, t) => s + Number(t.amount || 0), 0);
+
+  const { data: bookingRows } = await supabase
+    .from("bookings")
+    .select("deposit, organization_id")
+    .eq("guest_id", guestId);
+
+  const depositTotal = (bookingRows || [])
+    .filter(
+      (b) =>
+        !b.organization_id ||
+        String(b.organization_id) === String(organizationId),
+    )
+    .reduce((s, b) => s + Number(b.deposit || 0), 0);
+
+  const credit = impliedGuestPrepaidCredit({
+    ledgerBalance,
+    folioOutstanding,
+    ledgerCashInTotal,
+    depositTotal,
+  });
+
+  if (credit <= 0.005) {
+    return { credit: 0, updated: false };
+  }
+
+  // Already stored correctly
+  if (ledgerBalance <= -credit + 0.5 && ledgerBalance >= -credit - 0.5) {
+    return { credit, updated: false };
+  }
+
+  // Ledger missing prepaid credit (common after older top-up bug zeroed the balance)
+  if (ledgerBalance > -credit + 0.5) {
+    await syncGuestCityLedgerBalances(supabase, {
+      organizationId,
+      guestName,
+      balance: -credit,
+      primaryAccountId: primaryAccountId ?? preferred?.id,
+    });
+    return { credit, updated: true };
+  }
+
+  return { credit: Math.abs(Math.min(0, ledgerBalance)), updated: false };
 }
 
 /** All individual/guest ledger rows for this name (handles duplicates / spelling variants). */
