@@ -107,9 +107,19 @@ export const HELP_FAQ: HelpFaqItem[] = [
     category: 'Bookings',
     question: 'Why does Bookings show fewer guests than my manual list for a date?',
     answer:
-      'Use the Stay date picker. It lists everyone in-house that hotel night (arrivals + stayovers), not only people who checked in that day. Clear the date to return to today’s in-house list.',
-    keywords: ['stay date', 'in-house', 'stayovers', 'arrivals', 'manual', 'fewer'],
-    aliases: ['missing guests', 'only 4 guests', 'not showing all guests', 'stay date'],
+      'Use the Stay date picker. It lists everyone occupying that hotel night (arrivals + stayovers), not only people who checked in that day. Clear the date to return to today’s list. Default today view shows Occ + Res only — due-out guests are under Status → Due out (and counted in the Due chip, not Occ).',
+    keywords: ['stay date', 'in-house', 'stayovers', 'arrivals', 'manual', 'fewer', 'due out', 'occ'],
+    aliases: ['missing guests', 'only 4 guests', 'not showing all guests', 'stay date', 'due out not in list'],
+    topics: ['create_booking'],
+  },
+  {
+    id: 'bookings-occ-due-res',
+    category: 'Bookings',
+    question: 'What do Occ, Res, and Due mean on Bookings?',
+    answer:
+      'Occ = checked-in guests staying past today. Res = reservations not checked in yet. Due = checkout today or overdue. The three counts are unique (a due-out guest is not also in Occ). Default table lists Occ + today’s reservations; open Status → Due out to work the departures.',
+    keywords: ['occ', 'res', 'due', 'occupied', 'reservation', 'stats'],
+    aliases: ['what is occ', 'what is due', 'occupied count wrong', 'res stat'],
     topics: ['create_booking'],
   },
   {
