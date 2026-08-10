@@ -1717,36 +1717,19 @@ function useSupplyChainImpl() {
 
   const submitRetirement = useCallback(
     (poId: string, lines: RetirementLine[], actor: Actor) => {
-      setPurchaseOrders((prev) => {
-        const po = prev.find((p) => p.id === poId);
-        if (!po) return prev;
-        const normalized = lines.map((l) => ({
-          ...l,
-          notBought: l.notBought ?? l.removed ?? false,
-        }));
-        const actualSpent = normalized
-          .filter((l) => !l.notBought)
-          .reduce((s, l) => s + l.totalPaid, 0);
-        const refund = po.cashDisbursed - actualSpent;
+      const po = purchaseOrders.find((p) => p.id === poId);
+      if (!po) return;
+      const normalized = lines.map((l) => ({
+        ...l,
+        notBought: l.notBought ?? l.removed ?? false,
+      }));
+      const actualSpent = normalized
+        .filter((l) => !l.notBought)
+        .reduce((s, l) => s + l.totalPaid, 0);
+      const refund = po.cashDisbursed - actualSpent;
 
-        setActivityLog((a) =>
-          log(
-            a,
-            "retirement_submitted",
-            actor,
-            `Retirement submitted for accountant review — est. spend ₦${actualSpent.toLocaleString()}, refund ₦${refund.toLocaleString()}`,
-            poId,
-          ),
-        );
-
-        pushSupplyNotification({
-          audience: ["accountant"],
-          title: `Retirement submitted — ${po.poNumber}`,
-          body: `${actor.name} submitted market retirement (₦${actualSpent.toLocaleString()} spent)`,
-          href: "/expenses?tab=retirement",
-        });
-
-        return prev.map((p) =>
+      setPurchaseOrders((prev) =>
+        prev.map((p) =>
           p.id === poId
             ? {
                 ...p,
@@ -1762,11 +1745,26 @@ function useSupplyChainImpl() {
                 },
               }
             : p,
-        );
+        ),
+      );
+      setActivityLog((a) =>
+        log(
+          a,
+          "retirement_submitted",
+          actor,
+          `Retirement submitted for accountant review — est. spend ₦${actualSpent.toLocaleString()}, refund ₦${refund.toLocaleString()}`,
+          poId,
+        ),
+      );
+      pushSupplyNotification({
+        audience: ["accountant"],
+        title: `Retirement submitted — ${po.poNumber}`,
+        body: `${actor.name} submitted market retirement (₦${actualSpent.toLocaleString()} spent)`,
+        href: "/expenses?tab=retirement",
       });
       persistSnapshotsNow();
     },
-    [schedulePersistSnapshots, persistSnapshotsNow],
+    [purchaseOrders, persistSnapshotsNow],
   );
 
   const accountantRetirementDecision = useCallback(

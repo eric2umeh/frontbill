@@ -76,12 +76,12 @@ function QtyDraftInput({
   const commit = () => {
     const trimmed = draft.trim()
     if (!trimmed) {
-      setDraft(String(committedQty))
+      onCommit(stockItemId, 0)
       return
     }
     const qty = parseQuantityValue(trimmed)
     if (!Number.isFinite(qty) || qty <= 0) {
-      setDraft(String(committedQty))
+      onCommit(stockItemId, 0)
       return
     }
     if (qty !== committedQty) onCommit(stockItemId, qty)
@@ -91,7 +91,13 @@ function QtyDraftInput({
   const liveTotal = liveQty * (Number.isFinite(unitPrice) ? unitPrice : 0)
 
   return (
-    <div className={showTotal ? 'flex items-center justify-end gap-2' : undefined}>
+    <div
+      className={
+        showTotal
+          ? 'flex w-full min-w-0 items-center justify-between gap-1.5'
+          : undefined
+      }
+    >
       <Input
         inputMode="decimal"
         min={0}
@@ -107,7 +113,7 @@ function QtyDraftInput({
         }}
       />
       {showTotal ? (
-        <span className="font-medium tabular-nums min-w-[4.5rem] text-right">
+        <span className="font-medium tabular-nums shrink-0 text-right text-[13px] leading-none whitespace-nowrap pl-1">
           {formatNaira(liveTotal)}
         </span>
       ) : null}
@@ -124,6 +130,116 @@ export function PoLinesTable({ rows, showDept = true, compact = false }: Props) 
     )
   }
 
+  // Compact (sidebar cart): always use dense stacked rows so wide tables
+  // never clip amounts in a ~300px column.
+  if (compact) {
+    return (
+      <ul className="space-y-1.5">
+        {rows.map((row) => {
+          if (row.kind === 'basket') {
+            const line = row.line
+            const qty = line.qtyToBuy
+            const total = line.qtyToBuy * line.unitPrice
+            return (
+              <li
+                key={line.stockItemId}
+                className="rounded-md border px-2 py-1.5 space-y-1"
+              >
+                <div className="flex items-start gap-1.5 min-w-0">
+                  <p className="min-w-0 flex-1 text-[13px] font-medium leading-snug truncate">
+                    {line.name}
+                    <span className="text-muted-foreground font-normal text-xs">
+                      {' '}
+                      ({formatUnitLabel(line.unit)})
+                    </span>
+                  </p>
+                  {row.editable && row.onDelete ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6 shrink-0 text-destructive -mt-0.5"
+                      onClick={() => row.onDelete!(line.stockItemId)}
+                      aria-label={`Remove ${line.name}`}
+                    >
+                      ×
+                    </Button>
+                  ) : null}
+                </div>
+                <div className="flex items-center gap-1.5 min-w-0">
+                  {row.editable && row.onQtyChange ? (
+                    <QtyDraftInput
+                      stockItemId={line.stockItemId}
+                      committedQty={qty}
+                      unitPrice={line.unitPrice}
+                      onCommit={row.onQtyChange}
+                      className={`h-8 w-16 text-[13px] ${PO_QTY_INPUT_CLASS}`}
+                      showTotal
+                    />
+                  ) : (
+                    <>
+                      <span className="text-xs text-muted-foreground tabular-nums">
+                        {qty} {formatUnitLabel(line.unit)}
+                      </span>
+                      <span className="ml-auto text-[13px] font-medium tabular-nums shrink-0 whitespace-nowrap">
+                        {formatNaira(total)}
+                      </span>
+                    </>
+                  )}
+                </div>
+              </li>
+            )
+          }
+
+          const line = row.line
+          return (
+            <li key={line.id} className="rounded-md border px-2 py-1.5 space-y-1">
+              <p className="text-[13px] font-medium leading-snug truncate">
+                {line.name}
+                <span className="text-muted-foreground font-normal text-xs">
+                  {' '}
+                  ({formatUnitLabel(line.unit)})
+                </span>
+              </p>
+              <div className="flex items-center justify-between gap-1.5">
+                {row.editable && row.onQtyChange ? (
+                  <QtyDraftInput
+                    stockItemId={line.stockItemId}
+                    committedQty={line.quantityOrdered}
+                    unitPrice={line.unitPrice}
+                    onCommit={row.onQtyChange}
+                    className={`h-8 w-16 text-[13px] ${PO_QTY_INPUT_CLASS}`}
+                    showTotal
+                  />
+                ) : (
+                  <>
+                    <span className="text-xs text-muted-foreground tabular-nums">
+                      {line.quantityOrdered} {formatUnitLabel(line.unit)}
+                    </span>
+                    <span className="text-[13px] font-medium tabular-nums shrink-0 whitespace-nowrap">
+                      {formatNaira(line.lineTotal)}
+                    </span>
+                  </>
+                )}
+                {row.editable && row.onDelete ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6 shrink-0 text-destructive"
+                    onClick={() => row.onDelete!(line.stockItemId)}
+                  >
+                    ×
+                  </Button>
+                ) : null}
+              </div>
+            </li>
+          )
+        })}
+      </ul>
+    )
+  }
+
   return (
     <>
       <div className="md:hidden space-y-2">
@@ -134,17 +250,17 @@ export function PoLinesTable({ rows, showDept = true, compact = false }: Props) 
             const total = line.qtyToBuy * line.unitPrice
 
             return (
-              <div key={line.stockItemId} className="rounded-lg border p-2.5 text-sm space-y-2">
+              <div key={line.stockItemId} className="rounded-lg border p-2.5 text-[13px] space-y-2">
                 <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <p className="font-medium leading-snug">
+                  <div className="min-w-0">
+                    <p className="font-medium leading-snug truncate text-[13px]">
                       {line.name}{' '}
-                      <span className="text-muted-foreground font-normal">
+                      <span className="text-muted-foreground font-normal text-xs">
                         ({formatUnitLabel(line.unit)})
                       </span>
                     </p>
                     {line.storeUnit && line.storeUnit !== line.unit && (
-                      <p className="text-[11px] text-muted-foreground">
+                      <p className="text-xs text-muted-foreground">
                         Receives {line.storeQtyToBuy} {formatUnitLabel(line.storeUnit)}
                       </p>
                     )}
@@ -159,7 +275,7 @@ export function PoLinesTable({ rows, showDept = true, compact = false }: Props) 
                     <Eye className="h-3.5 w-3.5" />
                   </Button>
                 </div>
-                <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center justify-between gap-2 min-w-0">
                   {row.editable && row.onQtyChange ? (
                     <QtyDraftInput
                       stockItemId={line.stockItemId}
@@ -174,7 +290,9 @@ export function PoLinesTable({ rows, showDept = true, compact = false }: Props) 
                       <span className="text-muted-foreground text-xs">
                         Qty: {qty} {formatUnitLabel(line.unit)}
                       </span>
-                      <span className="font-medium tabular-nums">{formatNaira(total)}</span>
+                      <span className="font-medium tabular-nums shrink-0 whitespace-nowrap">
+                        {formatNaira(total)}
+                      </span>
                     </>
                   )}
                   {row.editable && row.onDelete && (
@@ -182,7 +300,7 @@ export function PoLinesTable({ rows, showDept = true, compact = false }: Props) 
                       type="button"
                       variant="ghost"
                       size="icon"
-                      className="h-8 w-8 text-destructive"
+                      className="h-8 w-8 text-destructive shrink-0"
                       onClick={() => row.onDelete!(line.stockItemId)}
                     >
                       ×
@@ -195,17 +313,17 @@ export function PoLinesTable({ rows, showDept = true, compact = false }: Props) 
 
           const line = row.line
           return (
-            <div key={line.id} className="rounded-lg border p-2.5 text-sm space-y-2">
+            <div key={line.id} className="rounded-lg border p-2.5 text-[13px] space-y-2">
               <div className="flex items-start justify-between gap-2">
-                <div>
-                  <p className="font-medium leading-snug">
+                <div className="min-w-0">
+                  <p className="font-medium leading-snug text-[13px] truncate">
                     {line.name}{' '}
-                    <span className="text-muted-foreground font-normal">
+                    <span className="text-muted-foreground font-normal text-xs">
                       ({formatUnitLabel(line.unit)})
                     </span>
                   </p>
                   {line.storeUnit && line.storeUnit !== line.unit && (
-                    <p className="text-[11px] text-muted-foreground">
+                    <p className="text-xs text-muted-foreground">
                       Receives {line.stockQuantityOrdered} {formatUnitLabel(line.storeUnit)}
                     </p>
                   )}
@@ -227,15 +345,17 @@ export function PoLinesTable({ rows, showDept = true, compact = false }: Props) 
                     committedQty={line.quantityOrdered}
                     unitPrice={line.unitPrice}
                     onCommit={row.onQtyChange}
-                    className={`w-20 ${PO_QTY_INPUT_CLASS}`}
+                    className={`w-20 text-[13px] ${PO_QTY_INPUT_CLASS}`}
                     showTotal
                   />
                 ) : (
                   <>
-                    <span className="text-muted-foreground text-xs">
+                    <span className="text-muted-foreground text-[13px]">
                       Qty: {line.quantityOrdered} {formatUnitLabel(line.unit)}
                     </span>
-                    <span className="font-medium tabular-nums">{formatNaira(line.lineTotal)}</span>
+                    <span className="font-medium tabular-nums text-[13px] shrink-0 whitespace-nowrap">
+                      {formatNaira(line.lineTotal)}
+                    </span>
                   </>
                 )}
                 {row.editable && row.onDelete && (
@@ -255,9 +375,9 @@ export function PoLinesTable({ rows, showDept = true, compact = false }: Props) 
         })}
       </div>
 
-      <table className="hidden md:table w-full text-sm">
+      <table className="hidden md:table w-full text-[13px]">
         <thead>
-          <tr className="border-b text-left text-muted-foreground">
+          <tr className="border-b text-left text-muted-foreground text-[13px]">
             <th className="pb-2 font-medium">Item</th>
             {showDept && !compact && <th className="pb-2 font-medium">Dept</th>}
             <th className="pb-2 font-medium text-right">Qty</th>
@@ -388,12 +508,12 @@ function EditableBasketTableRow({
   const commit = () => {
     const trimmed = draft.trim()
     if (!trimmed) {
-      setDraft(String(l.qtyToBuy))
+      onQtyChange?.(l.stockItemId, 0)
       return
     }
     const qty = parseQuantityValue(trimmed)
     if (!Number.isFinite(qty) || qty <= 0) {
-      setDraft(String(l.qtyToBuy))
+      onQtyChange?.(l.stockItemId, 0)
       return
     }
     if (qty !== l.qtyToBuy) onQtyChange?.(l.stockItemId, qty)
@@ -403,21 +523,21 @@ function EditableBasketTableRow({
   const liveTotal = liveQty * (Number.isFinite(l.unitPrice) ? l.unitPrice : 0)
 
   return (
-    <tr className="border-b last:border-0">
-      <td className="py-2 pr-2 font-medium">
+    <tr className="border-b last:border-0 text-[13px]">
+      <td className="py-2 pr-2 font-medium text-[13px]">
         {l.name}{' '}
-        <span className="text-muted-foreground font-normal">
+        <span className="text-muted-foreground font-normal text-xs">
           ({formatUnitLabel(l.unit)})
         </span>
         {l.storeUnit && l.storeUnit !== l.unit && (
-          <span className="block text-[11px] text-muted-foreground font-normal">
+          <span className="block text-xs text-muted-foreground font-normal">
             Receives {l.storeQtyToBuy} {formatUnitLabel(l.storeUnit)}
           </span>
         )}
       </td>
       {showDept && !compact && (
         <td className="py-2">
-          <Badge variant="outline" className="text-[10px]">
+          <Badge variant="outline" className="text-xs">
             {DEPT_LABELS[l.dept]}
           </Badge>
         </td>
@@ -427,7 +547,7 @@ function EditableBasketTableRow({
           <Input
             inputMode="decimal"
             min={0}
-            className={`w-16 ${PO_QTY_INPUT_CLASS}`}
+            className={`w-16 text-[13px] ${PO_QTY_INPUT_CLASS}`}
             value={draft}
             onChange={(e) => setDraft(sanitizeQuantityInput(e.target.value))}
             onBlur={commit}
@@ -439,15 +559,17 @@ function EditableBasketTableRow({
             }}
           />
         ) : (
-          <span className="tabular-nums">
+          <span className="tabular-nums text-[13px]">
             {l.qtyToBuy} {formatUnitLabel(l.unit)}
           </span>
         )}
       </td>
       {!compact && (
-        <td className="py-2 text-right tabular-nums">{formatNaira(l.unitPrice)}</td>
+        <td className="py-2 text-right tabular-nums text-[13px]">{formatNaira(l.unitPrice)}</td>
       )}
-      <td className="py-2 text-right tabular-nums font-medium">{formatNaira(liveTotal)}</td>
+      <td className="py-2 text-right tabular-nums font-medium text-[13px] whitespace-nowrap">
+        {formatNaira(liveTotal)}
+      </td>
       {editable && onDelete && (
         <td className="py-2 text-right">
           <Button
@@ -488,12 +610,12 @@ function EditablePoTableRow({
   const commit = () => {
     const trimmed = draft.trim()
     if (!trimmed) {
-      setDraft(String(l.quantityOrdered))
+      onQtyChange?.(l.stockItemId, 0)
       return
     }
     const qty = parseQuantityValue(trimmed)
     if (!Number.isFinite(qty) || qty <= 0) {
-      setDraft(String(l.quantityOrdered))
+      onQtyChange?.(l.stockItemId, 0)
       return
     }
     if (qty !== l.quantityOrdered) onQtyChange?.(l.stockItemId, qty)
@@ -503,21 +625,21 @@ function EditablePoTableRow({
   const liveTotal = liveQty * (Number.isFinite(l.unitPrice) ? l.unitPrice : 0)
 
   return (
-    <tr className="border-b last:border-0">
-      <td className="py-2 pr-2 font-medium">
+    <tr className="border-b last:border-0 text-[13px]">
+      <td className="py-2 pr-2 font-medium text-[13px]">
         {l.name}{' '}
-        <span className="text-muted-foreground font-normal">
+        <span className="text-muted-foreground font-normal text-xs">
           ({formatUnitLabel(l.unit)})
         </span>
         {l.storeUnit && l.storeUnit !== l.unit && (
-          <span className="block text-[11px] text-muted-foreground font-normal">
+          <span className="block text-xs text-muted-foreground font-normal">
             Receives {l.stockQuantityOrdered} {formatUnitLabel(l.storeUnit)}
           </span>
         )}
       </td>
       {showDept && !compact && (
         <td className="py-2">
-          <Badge variant="outline" className="text-[10px]">
+          <Badge variant="outline" className="text-xs">
             {DEPT_LABELS[l.dept]}
           </Badge>
         </td>
@@ -527,7 +649,7 @@ function EditablePoTableRow({
           <Input
             inputMode="decimal"
             min={0}
-            className={`w-16 ${PO_QTY_INPUT_CLASS}`}
+            className={`w-16 text-[13px] ${PO_QTY_INPUT_CLASS}`}
             value={draft}
             onChange={(e) => setDraft(sanitizeQuantityInput(e.target.value))}
             onBlur={commit}
@@ -539,15 +661,17 @@ function EditablePoTableRow({
             }}
           />
         ) : (
-          <span className="tabular-nums">
+          <span className="tabular-nums text-[13px]">
             {l.quantityOrdered} {formatUnitLabel(l.unit)}
           </span>
         )}
       </td>
       {!compact && (
-        <td className="py-2 text-right tabular-nums">{formatNaira(l.unitPrice)}</td>
+        <td className="py-2 text-right tabular-nums text-[13px]">{formatNaira(l.unitPrice)}</td>
       )}
-      <td className="py-2 text-right tabular-nums font-medium">{formatNaira(liveTotal)}</td>
+      <td className="py-2 text-right tabular-nums font-medium text-[13px] whitespace-nowrap">
+        {formatNaira(liveTotal)}
+      </td>
       {editable && onDelete && (
         <td className="py-2 text-right">
           <Button

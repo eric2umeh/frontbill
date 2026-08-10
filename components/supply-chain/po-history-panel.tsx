@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { PoLine, PurchaseOrder } from "@/lib/supply-chain/types";
+import { normalizeSupplyDept, type PoLine, type PurchaseOrder } from "@/lib/supply-chain/types";
 import { formatNaira } from "@/lib/utils/currency";
 import {
   formatPoRaisedAt,
@@ -101,7 +101,8 @@ export function PoHistoryPanel({
         }
         if (key === "dept") {
           if (!value || value === "all") return true;
-          return po.lines.some((l) => l.dept === value);
+          const want = normalizeSupplyDept(value);
+          return po.lines.some((l) => normalizeSupplyDept(l.dept) === want);
         }
         return undefined;
       }}
@@ -110,7 +111,7 @@ export function PoHistoryPanel({
         "No accepted purchase orders in history yet. POs appear here after manager approval and market purchase."
       }
     >
-      {(pagePos) => (
+      {(pagePos, ctx) => (
         <div className="space-y-1.5">
           {pagePos.map((po) => {
             const open = expandedId === po.id;
@@ -120,7 +121,7 @@ export function PoHistoryPanel({
               id: line.id,
               stockItemId: line.stockItemId,
               name: line.name,
-              dept: line.dept,
+              dept: normalizeSupplyDept(line.dept),
               unit: line.unit,
               quantityOrdered: line.quantity,
               unitPrice: line.unitPrice,
@@ -152,20 +153,20 @@ export function PoHistoryPanel({
                           )}
                         </span>
                       </div>
-                      <p className="text-xs text-muted-foreground truncate">
+                      <p className="text-[13px] text-muted-foreground truncate">
                         Raised {formatPoRaisedAt(po.createdAt)} ·{" "}
                         {po.createdByName} · {boughtCount}/{lines.length} lines
                         {mode === "retirement" ? " (retirement)" : ""}
                       </p>
                     </div>
                   </div>
-                  <span className="text-[10px] text-muted-foreground hidden sm:inline max-w-[140px] truncate">
+                  <span className="text-[13px] text-muted-foreground hidden sm:inline max-w-[140px] truncate">
                     {po.weekLabel}
                   </span>
                 </button>
                 {open && (
                   <div className="border-t bg-muted/20 px-3 py-2">
-                    <p className="text-[10px] text-muted-foreground mb-2">
+                    <p className="text-[13px] text-muted-foreground mb-2">
                       Procurement week: {po.weekLabel}
                       {po.retirement && (
                         <>
@@ -180,6 +181,7 @@ export function PoHistoryPanel({
                       pageSize={10}
                       showDept
                       compact
+                      deptFilter={ctx.activeFilters.dept ?? "all"}
                       title={`${mode === "retirement" ? "Retirement" : "Order"} lines (${lines.length})`}
                     />
                   </div>

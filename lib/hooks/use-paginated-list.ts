@@ -16,7 +16,7 @@ export interface UsePaginatedListOptions<T> {
   filterMatch?: (item: T, filterKey: string, filterValue: string) => boolean | undefined
 }
 
-export function usePaginatedList<T extends Record<string, unknown>>({
+export function usePaginatedList<T extends object>({
   items,
   pageSize = 15,
   search = '',
@@ -36,7 +36,10 @@ export function usePaginatedList<T extends Record<string, unknown>>({
           ? searchMatch(item, search)
           : searchKeys.length === 0
             ? true
-            : searchKeys.some((key) => String(item[key] ?? '').toLowerCase().includes(q))
+            : searchKeys.some((key) => {
+                const record = item as Record<string, unknown>
+                return String(record[key] ?? '').toLowerCase().includes(q)
+              })
         if (!matchesSearch) return false
       }
       for (const [key, value] of Object.entries(activeFilters)) {
@@ -46,7 +49,8 @@ export function usePaginatedList<T extends Record<string, unknown>>({
           if (!custom) return false
           continue
         }
-        if (String(item[key] ?? '').toLowerCase() !== value.toLowerCase()) return false
+        const record = item as Record<string, unknown>
+        if (String(record[key] ?? '').toLowerCase() !== value.toLowerCase()) return false
       }
       return true
     })

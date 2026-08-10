@@ -9,6 +9,7 @@ import type { PurchaseOrder, RetirementLine, SupplyDept } from "@/lib/supply-cha
 import {
   DEPT_LABELS,
   STORE_DEPT_PICKER_OPTIONS_SORTED,
+  normalizeSupplyDept,
 } from "@/lib/supply-chain/types";
 import { formatNaira } from "@/lib/utils/currency";
 import { canonicalRoleKey, canAddStoreItemDirect } from "@/lib/permissions";
@@ -271,7 +272,7 @@ export function PurchasingWorkspace() {
             const poLine = selected.lines.find((l) => l.id === line.lineId);
             return {
               ...line,
-              dept: (poLine?.dept ?? "kitchen") as Exclude<SupplyDept, "all">,
+              dept: normalizeSupplyDept(poLine?.dept ?? "kitchen"),
             };
           })}
           pageSize={8}
@@ -279,10 +280,11 @@ export function PurchasingWorkspace() {
           searchMatch={(line, query) => {
             const q = query.trim().toLowerCase();
             if (!q) return true;
+            const dept = normalizeSupplyDept(line.dept);
             return (
               line.name.toLowerCase().includes(q) ||
               (line.unit ?? "").toLowerCase().includes(q) ||
-              (DEPT_LABELS[line.dept] ?? line.dept).toLowerCase().includes(q)
+              (DEPT_LABELS[dept] ?? dept).toLowerCase().includes(q)
             );
           }}
           filters={[
@@ -290,7 +292,7 @@ export function PurchasingWorkspace() {
               key: "dept",
               label: "Department",
               options: STORE_DEPT_PICKER_OPTIONS_SORTED.filter((d) =>
-                selected.lines.some((l) => l.dept === d),
+                selected.lines.some((l) => normalizeSupplyDept(l.dept) === d),
               ).map((d) => ({
                 value: d,
                 label: DEPT_LABELS[d],
@@ -300,7 +302,7 @@ export function PurchasingWorkspace() {
           filterMatch={(line, key, value) => {
             if (key !== "dept") return undefined;
             if (!value || value === "all") return true;
-            return line.dept === value;
+            return normalizeSupplyDept(line.dept) === normalizeSupplyDept(value);
           }}
           emptyMessage="No retirement lines match."
         >

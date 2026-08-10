@@ -148,12 +148,12 @@ function PoDecisionCard({
             {poOriginOf(po) === "kitchen" ? (
               <Badge
                 variant="outline"
-                className="text-[10px] bg-violet-50 text-violet-800 border-violet-200"
+                className="text-xs bg-violet-50 text-violet-800 border-violet-200"
               >
                 Kitchen order
               </Badge>
             ) : (
-              <Badge variant="outline" className="text-[10px]">
+              <Badge variant="outline" className="text-xs">
                 Store order
               </Badge>
             )}
@@ -161,20 +161,20 @@ function PoDecisionCard({
           <p className="text-sm text-muted-foreground">
             {po.weekLabel} · {formatNaira(po.totalAmount)}
           </p>
-          <p className="text-xs text-muted-foreground">{formatPoActorStamp(po)}</p>
+          <p className="text-[13px] text-muted-foreground">{formatPoActorStamp(po)}</p>
           {formatPoDecisionStamp(po) ? (
-            <p className="text-xs font-medium text-foreground">
+            <p className="text-[13px] font-medium text-foreground">
               {formatPoDecisionStamp(po)}
             </p>
           ) : null}
-          <p className="text-xs text-muted-foreground">
+          <p className="text-[13px] text-muted-foreground">
             Created {formatPoRaisedAt(po.createdAt)}
             {po.sentToAccountantAt
               ? ` · Sent to accountant ${formatPoRaisedAt(po.sentToAccountantAt)}`
               : ""}
           </p>
           {editable ? (
-            <p className="text-[11px] text-muted-foreground mt-1">
+            <p className="text-[13px] text-muted-foreground mt-1">
               Edit or delete lines below. To add items, open{" "}
               <Link href="/supply/store?tab=orders" className="underline text-primary">
                 Store → Purchase orders
@@ -198,12 +198,12 @@ function PoDecisionCard({
       {testingAdmin && (
         <Badge
           variant="outline"
-          className="text-[10px] bg-amber-50 text-amber-900 border-amber-200"
+          className="text-xs bg-amber-50 text-amber-900 border-amber-200"
         >
           Testing — admin fast-track (skips separate accountant/manager logins)
         </Badge>
       )}
-      <p className="text-xs font-medium text-muted-foreground">{title}</p>
+      <p className="text-[13px] font-medium text-muted-foreground">{title}</p>
       {po.lines.length > 0 && (
         <div className="rounded-md border bg-muted/20 p-3">
           <PoReviewLinesPanel

@@ -211,7 +211,7 @@ export function ActivePurchaseOrderPanel({ actor, storeItems }: Props) {
               >
                 <div className="min-w-0">
                   <p className="text-sm font-medium">{kpo.poNumber}</p>
-                  <p className="text-xs text-muted-foreground">{formatPoActorStamp(kpo)}</p>
+                  <p className="text-[13px] text-muted-foreground">{formatPoActorStamp(kpo)}</p>
                   {decision ? (
                     <p className="text-xs text-red-700 mt-0.5">{decision}</p>
                   ) : null}
@@ -245,7 +245,7 @@ export function ActivePurchaseOrderPanel({ actor, storeItems }: Props) {
           <div className="flex flex-wrap items-center gap-2">
             <p className="text-sm font-medium">{po.poNumber} — purchase list</p>
             {poOriginOf(po) === 'kitchen' ? (
-              <Badge variant="outline" className="text-[10px] bg-violet-50 text-violet-800">
+              <Badge variant="outline" className="text-xs bg-violet-50 text-violet-800">
                 Kitchen order
               </Badge>
             ) : null}
@@ -265,7 +265,7 @@ export function ActivePurchaseOrderPanel({ actor, storeItems }: Props) {
         </div>
         <p className="text-sm font-semibold tabular-nums">{formatNaira(stats.basketTotal)}</p>
       </div>
-      <p className="px-4 pt-2 text-xs text-muted-foreground">{formatPoActorStamp(po)}</p>
+      <p className="px-4 pt-2 text-[13px] text-muted-foreground">{formatPoActorStamp(po)}</p>
 
       {po.accountantComment && isRejected && (
         <div className="p-3 border-b">

@@ -8,6 +8,7 @@ import { storeItemMatchesDept, type BasketLine, type StoreItem } from '@/lib/sup
 import {
   defaultUnitForStoreItem,
   formatUnitLabel,
+  isCompleteQuantityInput,
   parseQuantityValue,
   sanitizeQuantityInput,
   unitOptionsForStoreItem,
@@ -95,12 +96,20 @@ export function KitchenPurchasePanel() {
     }
     const trimmed = raw.trim()
     const purchaseUnit = unitOverride ?? purchaseUnitMap[item.id] ?? defaultUnitForStoreItem(item.unit)
-    if (!trimmed) {
-      // Keep the line while the qty field is cleared for retyping.
+    if (!trimmed || parseQuantityValue(trimmed) <= 0) {
+      // Empty / zero qty removes the line so the shopping cart stays in sync.
+      const res = removeFromBasket(item.id)
+      if (res && typeof res === 'object' && 'error' in res) toast.error(String(res.error))
+      else {
+        setQtyMap((m) => {
+          const next = { ...m }
+          delete next[item.id]
+          return next
+        })
+      }
       return
     }
     const qty = parseQuantityValue(trimmed)
-    if (qty <= 0) return
     const storeQty = toStoreQty(item, qty, purchaseUnit)
     if (storeQty == null) {
       toast.error(
@@ -170,7 +179,7 @@ export function KitchenPurchasePanel() {
             <div className="space-y-1">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="font-medium text-sm">{po.poNumber}</span>
-                <Badge variant="outline" className="text-[10px] bg-violet-50 text-violet-800">
+                <Badge variant="outline" className="text-xs bg-violet-50 text-violet-800">
                   Kitchen order
                 </Badge>
                 <span className="text-xs text-muted-foreground">
@@ -244,6 +253,9 @@ export function KitchenPurchasePanel() {
                           onChange={(e) => {
                             const cleaned = sanitizeQuantityInput(e.target.value)
                             setQtyMap((m) => ({ ...m, [item.id]: cleaned }))
+                            if (isCompleteQuantityInput(cleaned)) {
+                              commitQty(item, cleaned)
+                            }
                           }}
                           onBlur={(e) => commitQty(item, e.target.value)}
                           onKeyDown={(e) => {

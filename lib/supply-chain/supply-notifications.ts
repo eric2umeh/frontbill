@@ -39,6 +39,14 @@ export function persistSupplyNotifications(items: SupplyNotification[]) {
   }
 }
 
+/** Defer so Header (and other listeners) never setState during a render/updater. */
+function emitSupplyNotificationsChanged() {
+  if (typeof window === 'undefined') return
+  queueMicrotask(() => {
+    window.dispatchEvent(new CustomEvent('frontbill:supply-notifications'))
+  })
+}
+
 export function pushSupplyNotification(
   input: Omit<SupplyNotification, 'id' | 'createdAt' | 'read'>,
 ): SupplyNotification {
@@ -51,9 +59,7 @@ export function pushSupplyNotification(
   const prev = loadSupplyNotifications()
   const next = [note, ...prev]
   persistSupplyNotifications(next)
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent('frontbill:supply-notifications'))
-  }
+  emitSupplyNotificationsChanged()
   return note
 }
 
@@ -72,17 +78,13 @@ export function markSupplyNotificationRead(id: string) {
     n.id === id ? { ...n, read: true } : n,
   )
   persistSupplyNotifications(next)
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent('frontbill:supply-notifications'))
-  }
+  emitSupplyNotificationsChanged()
 }
 
 export function markAllSupplyNotificationsRead() {
   const next = loadSupplyNotifications().map((n) => ({ ...n, read: true }))
   persistSupplyNotifications(next)
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent('frontbill:supply-notifications'))
-  }
+  emitSupplyNotificationsChanged()
 }
 
 export function audiencesForRole(roleKey: string): SupplyNotificationAudience[] {

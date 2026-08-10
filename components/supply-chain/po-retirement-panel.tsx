@@ -4,7 +4,11 @@ import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useAuth } from '@/lib/auth-context'
 import { useSupplyChain } from '@/lib/supply-chain/supply-chain-context'
-import type { PoLine, PurchaseOrder } from '@/lib/supply-chain/types'
+import {
+  normalizeSupplyDept,
+  type PoLine,
+  type PurchaseOrder,
+} from '@/lib/supply-chain/types'
 import { formatNaira } from '@/lib/utils/currency'
 import {
   canonicalRoleKey,
@@ -34,7 +38,7 @@ function retirementLinesAsPoLines(po: PurchaseOrder): PoLine[] {
       id: line.lineId,
       stockItemId: poLine?.stockItemId ?? line.lineId,
       name: notBought ? `* ${line.name}` : line.name,
-      dept: poLine?.dept ?? 'kitchen',
+      dept: normalizeSupplyDept(poLine?.dept ?? 'kitchen'),
       unit: poLine?.unit ?? '',
       quantityOrdered: notBought ? line.quantityOrdered : line.quantityBought,
       unitPrice: notBought ? line.poPrice : line.actualPrice,
@@ -47,10 +51,12 @@ function RetirementReviewCard({
   po,
   canReview,
   onDecide,
+  deptFilter = 'all',
 }: {
   po: PurchaseOrder
   canReview: boolean
   onDecide: (approved: boolean, comment: string) => void
+  deptFilter?: string
 }) {
   const [comment, setComment] = useState('')
   const r = po.retirement
@@ -79,6 +85,7 @@ function RetirementReviewCard({
             lines={browseLines}
             pageSize={8}
             showDept
+            deptFilter={deptFilter}
             title={`Retirement lines (${browseLines.length})`}
           />
         </div>
@@ -205,16 +212,18 @@ export function PoRetirementPanel() {
             filterMatch={(po, key, value) => {
               if (key !== 'dept') return undefined
               if (!value || value === 'all') return true
-              return po.lines.some((l) => l.dept === value)
+              const want = normalizeSupplyDept(value)
+              return po.lines.some((l) => normalizeSupplyDept(l.dept) === want)
             }}
             emptyMessage="No retirements match this search or filter."
           >
-            {(pageItems) => (
+            {(pageItems, ctx) => (
               <div className="space-y-3">
                 {pageItems.map((po) => (
                   <RetirementReviewCard
                     key={po.id}
                     po={po}
+                    deptFilter={ctx.activeFilters.dept ?? 'all'}
                     canReview={canReview || adminTester}
                     onDecide={(approved, comment) => {
                       const res = accountantRetirementDecision(
