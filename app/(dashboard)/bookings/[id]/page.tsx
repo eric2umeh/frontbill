@@ -408,7 +408,7 @@ export default function BookingDetailPage({
         chargeCreatorIds,
         uid,
       );
-      const chargesWithCreator = chargesData.map((charge: any) => {
+      let chargesWithCreator = chargesData.map((charge: any) => {
         const creatorName = charge.created_by
           ? chargeCreatorMap[charge.created_by] ||
             getUserDisplayName(null, charge.created_by)
@@ -483,11 +483,43 @@ export default function BookingDetailPage({
       if (guestName && bookingData.organization_id) {
         try {
           if (guestIdForLedger && uid) {
-            await fetch(`/api/guests/${guestIdForLedger}/reconcile-credit`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ caller_id: uid }),
-            });
+            const reconRes = await fetch(
+              `/api/guests/${guestIdForLedger}/reconcile-credit`,
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ caller_id: uid }),
+              },
+            );
+            const reconPayload = await reconRes.json().catch(() => ({}));
+            // Reconcile may post a prepaid folio line — refresh charges for Credit display
+            if (reconRes.ok && reconPayload?.updated) {
+              const { data: refreshedCharges } = await supabase
+                .from("folio_charges")
+                .select("*")
+                .eq("booking_id", id)
+                .order("created_at", { ascending: true });
+              if (refreshedCharges) {
+                chargesWithCreator = refreshedCharges.map((charge: any) => {
+                  const creatorName = charge.created_by
+                    ? chargeCreatorMap[charge.created_by] ||
+                      getUserDisplayName(null, charge.created_by)
+                    : "System";
+                  return {
+                    id: charge.id,
+                    date: charge.created_at?.split("T")[0],
+                    timestamp: charge.created_at,
+                    description: charge.description,
+                    amount: charge.amount,
+                    type: charge.charge_type,
+                    createdBy: creatorName,
+                    paymentStatus: charge.payment_status,
+                    paymentMethod: charge.payment_method,
+                  };
+                });
+                setFolioCharges(chargesWithCreator);
+              }
+            }
           }
           const row = await fetchGuestCityLedgerAccount(
             supabase,
@@ -528,6 +560,7 @@ export default function BookingDetailPage({
               folioOutstanding: Math.max(0, Number(bookingData.balance) || 0),
               ledgerCashInTotal: cashIn,
               depositTotal: deposits,
+              folioCreditTotal: folioGuestCreditAmount(chargesWithCreator),
             });
             if (implied > 0.005) balance = -implied;
           }

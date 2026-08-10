@@ -124,6 +124,71 @@ async function fetchFolioChargesByBookingIds(
   return chargesByBooking;
 }
 
+/**
+ * When city-ledger prepaid credit exists but was never posted as a folio line,
+ * surface it under the most recent paid booking for that guest (Credit under paid).
+ */
+async function attachGuestLedgerCreditToBookings(
+  supabase: NonNullable<ReturnType<typeof createClient>>,
+  organizationId: string,
+  bookings: Array<{
+    id: string;
+    guestName?: string;
+    guests?: { name?: string | null } | null;
+    check_in?: string;
+    balance?: number;
+    folio_credit?: number;
+  }>,
+): Promise<void> {
+  if (!bookings.length || !organizationId) return;
+
+  const { data: creditRows } = await supabase
+    .from("city_ledger_accounts")
+    .select("account_name, balance")
+    .eq("organization_id", organizationId)
+    .in("account_type", ["individual", "guest"])
+    .lt("balance", -0.005)
+    .limit(500);
+
+  if (!creditRows?.length) return;
+
+  const creditByName = new Map<string, number>();
+  for (const row of creditRows) {
+    const key = String(row.account_name || "")
+      .trim()
+      .toLowerCase();
+    if (!key) continue;
+    const amt = Math.abs(Number(row.balance || 0));
+    creditByName.set(key, Math.max(creditByName.get(key) || 0, amt));
+  }
+
+  for (const [nameKey, creditAmt] of creditByName) {
+    const guestBookings = bookings.filter((b) => {
+      const n = String(b.guestName || b.guests?.name || "")
+        .trim()
+        .toLowerCase();
+      return n === nameKey;
+    });
+    if (!guestBookings.length) continue;
+
+    const folioCreditSum = guestBookings.reduce(
+      (s, b) => s + Math.max(0, Number(b.folio_credit || 0)),
+      0,
+    );
+    if (folioCreditSum >= creditAmt - 0.5) continue;
+
+    const target = [...guestBookings].sort((a, b) =>
+      String(b.check_in || "").localeCompare(String(a.check_in || "")),
+    )[0];
+    if (Number(target.balance || 0) > 0.005) continue;
+
+    target.folio_credit = Math.max(
+      Number(target.folio_credit || 0),
+      creditAmt,
+    );
+  }
+}
+
 interface Booking {
   id: string;
   folio_id: string;
@@ -334,6 +399,10 @@ export default function BookingsPage() {
             (sum, row) => sum + Number(row.balance || 0),
             0,
           ),
+          folio_credit: groupRows.reduce(
+            (sum, row) => sum + Number(row.folio_credit || 0),
+            0,
+          ),
           guests: {
             name:
               guestNames.length > 1
@@ -496,6 +565,11 @@ export default function BookingsPage() {
             b.balance = folioPositiveOutstandingSum(ch);
             b.folio_credit = folioGuestCreditAmount(ch);
           });
+          await attachGuestLedgerCreditToBookings(
+            supabase,
+            organizationId,
+            bookingsWithUsers,
+          );
 
           const healIds = bookingsWithUsers
             .filter((b: any) =>
@@ -691,6 +765,11 @@ export default function BookingsPage() {
               b.balance = folioPositiveOutstandingSum(ch);
               b.folio_credit = folioGuestCreditAmount(ch);
             });
+            await attachGuestLedgerCreditToBookings(
+              supabase,
+              organizationId,
+              bookingsWithUsers,
+            );
           }
 
           bookingsWithUsers.forEach((b: any) => {
@@ -816,6 +895,11 @@ export default function BookingsPage() {
               b.balance = folioPositiveOutstandingSum(ch);
               b.folio_credit = folioGuestCreditAmount(ch);
             });
+            await attachGuestLedgerCreditToBookings(
+              supabase,
+              organizationId,
+              bookingsWithUsers,
+            );
           }
           bookingsWithUsers.forEach((b: any) => {
             delete b._db_balance;
@@ -926,15 +1010,6 @@ export default function BookingsPage() {
     const creditAmt = Math.max(0, Number(booking.folio_credit ?? 0));
     const isCancelledLike = booking.status === "cancelled";
 
-    if (creditAmt > 0) {
-      return {
-        badgeClass: paymentColors.credit,
-        badgeText: "credit",
-        owedLine: null as number | null,
-        creditLine: creditAmt,
-      };
-    }
-
     let effectiveStatus =
       booking.payment_method === "city_ledger" &&
       booking.payment_status === "paid" &&
@@ -947,11 +1022,21 @@ export default function BookingsPage() {
     }
 
     const key = String(effectiveStatus || "pending").toLowerCase();
+    // Paid + prepaid overpay: keep the paid pill and show Credit underneath.
+    if (!isCancelledLike && owed <= 0 && creditAmt > 0) {
+      return {
+        badgeClass: paymentColors.paid,
+        badgeText: "paid",
+        owedLine: null as number | null,
+        creditLine: creditAmt,
+      };
+    }
+
     return {
       badgeClass: paymentColors[key] ?? paymentColors.pending,
       badgeText: key,
       owedLine: owed > 0 ? owed : null,
-      creditLine: null as number | null,
+      creditLine: creditAmt > 0 ? creditAmt : null,
     };
   };
 

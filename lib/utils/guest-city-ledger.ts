@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   billIsFullySettled,
+  folioGuestCreditAmount,
   folioPositiveOutstandingSum,
   type FolioLineForBalance,
 } from "@/lib/utils/booking-bill-balance";
@@ -45,13 +46,98 @@ export function impliedGuestPrepaidCredit(args: {
   folioOutstanding: number;
   ledgerCashInTotal: number;
   depositTotal: number;
+  /** Extra folio overpayment already posted (payments − charges). */
+  folioCreditTotal?: number;
 }): number {
   if (args.ledgerBalance < -0.005) return Math.abs(args.ledgerBalance);
-  if (args.folioOutstanding > 0.005) return 0;
-  return Math.max(
-    0,
-    args.ledgerCashInTotal - Math.max(0, args.depositTotal),
+  const folioCredit = Math.max(0, Number(args.folioCreditTotal ?? 0));
+  if (folioCredit > 0.005) return folioCredit;
+  // Cash received on city ledger beyond what was applied as booking deposits.
+  const overpay =
+    args.ledgerCashInTotal - Math.max(0, args.depositTotal);
+  if (overpay <= 0.005) return 0;
+  // If folio still shows a small debt, still keep clear prepaid overpay visible.
+  return Math.max(0, overpay);
+}
+
+/**
+ * Post leftover cash as a folio payment line so the bookings "paid" pill
+ * can show Credit (folioGuestCreditAmount) and guest UI stays in sync.
+ */
+export async function postGuestPrepaidCreditToFolio(
+  supabase: SupabaseClient,
+  args: {
+    organizationId: string;
+    guestId: string;
+    creditAmount: number;
+    paymentMethod: string;
+    userId: string;
+    notes?: string;
+  },
+): Promise<boolean> {
+  const { organizationId, guestId, creditAmount, paymentMethod, userId, notes } =
+    args;
+  if (creditAmount <= 0.005) return false;
+
+  const bookings = await fetchBookingsForGuestSettlement(
+    supabase,
+    guestId,
+    organizationId,
   );
+  if (!bookings.length) return false;
+
+  // Prefer the most recent booking (last check-in).
+  const target = [...bookings].sort((a, b) =>
+    String(b.check_in || "").localeCompare(String(a.check_in || "")),
+  )[0];
+
+  const { data: existing } = await supabase
+    .from("folio_charges")
+    .select("id, amount, description")
+    .eq("booking_id", target.id)
+    .ilike("description", "%Prepaid credit%")
+    .limit(20);
+
+  const alreadyPosted = (existing || []).reduce(
+    (s, row) => s + Math.abs(Number(row.amount || 0)),
+    0,
+  );
+  const need = Math.round((creditAmount - alreadyPosted) * 100) / 100;
+  if (need <= 0.005) return false;
+
+  const bookingOrgId = target.organization_id || organizationId;
+  const methodLabel = paymentMethod.replace(/_/g, " ");
+  const { error: payErr } = await insertFolioCharges(supabase, [
+    {
+      booking_id: target.id,
+      organization_id: bookingOrgId,
+      description: `Prepaid credit — city ledger (${methodLabel})${notes ? ` | ${notes}` : ""}`,
+      amount: -need,
+      charge_type: "payment",
+      payment_method: paymentMethod,
+      payment_status: "paid",
+      created_by: userId,
+    },
+  ]);
+  if (payErr) throw new Error(`Prepaid folio credit failed: ${payErr.message}`);
+
+  const { data: fcAfter } = await supabase
+    .from("folio_charges")
+    .select("amount, charge_type, payment_status, payment_method")
+    .eq("booking_id", target.id);
+
+  const netAfter = folioPositiveOutstandingSum(mapFolioRows(fcAfter || []));
+  // Negative booking.balance = folio credit available
+  const bookingBalance = netAfter <= 0 ? netAfter : Math.max(0, netAfter);
+  await supabase
+    .from("bookings")
+    .update({
+      balance: bookingBalance,
+      payment_status: bookingBalance > 0.005 ? "partial" : "paid",
+    })
+    .eq("id", target.id);
+
+  return true;
 }
 
 export async function fetchGuestCityLedgerAccount(
@@ -71,6 +157,45 @@ export async function fetchGuestCityLedgerAccount(
  * If cash-in exceeds deposits while folios are clear but ledger was zeroed,
  * write the prepaid credit (negative balance) onto all matching ledger rows.
  */
+/** Sum folio overpayments (payments − charges) across all guest bookings. */
+export async function guestFolioCreditTotal(
+  supabase: SupabaseClient,
+  guestId: string,
+  organizationId: string,
+): Promise<number> {
+  const bookings = await fetchBookingsForGuestSettlement(
+    supabase,
+    guestId,
+    organizationId,
+  );
+  if (!bookings.length) return 0;
+
+  const bookingIds = bookings.map((b) => b.id);
+  const { data: charges } = await supabase
+    .from("folio_charges")
+    .select("booking_id, amount, charge_type, payment_status, payment_method")
+    .in("booking_id", bookingIds);
+
+  const byBooking: Record<string, FolioLineForBalance[]> = {};
+  for (const c of charges || []) {
+    const bid = String((c as { booking_id?: string }).booking_id || "");
+    if (!bid) continue;
+    if (!byBooking[bid]) byBooking[bid] = [];
+    byBooking[bid].push({
+      amount: (c as { amount?: unknown }).amount,
+      charge_type: (c as { charge_type?: string | null }).charge_type,
+      payment_status: (c as { payment_status?: string | null }).payment_status,
+      payment_method: (c as { payment_method?: string | null }).payment_method,
+    });
+  }
+
+  let total = 0;
+  for (const bk of bookings) {
+    total += folioGuestCreditAmount(byBooking[bk.id] ?? []);
+  }
+  return Math.round(total * 100) / 100;
+}
+
 export async function reconcileGuestPrepaidCredit(
   supabase: SupabaseClient,
   args: {
@@ -78,10 +203,18 @@ export async function reconcileGuestPrepaidCredit(
     guestName: string;
     guestId: string;
     primaryAccountId?: string | null;
+    /** When set, missing prepaid credit is also posted as a folio payment line. */
+    userId?: string | null;
   },
 ): Promise<{ credit: number; updated: boolean }> {
-  const { organizationId, guestName, guestId, primaryAccountId } = args;
+  const { organizationId, guestName, guestId, primaryAccountId, userId } =
+    args;
   const folioOutstanding = await guestFolioOutstandingTotal(
+    supabase,
+    guestId,
+    organizationId,
+  );
+  let folioCreditTotal = await guestFolioCreditTotal(
     supabase,
     guestId,
     organizationId,
@@ -95,16 +228,36 @@ export async function reconcileGuestPrepaidCredit(
   const preferred = pickPreferredGuestLedgerAccount(accounts);
   const ledgerBalance = Number(preferred?.balance ?? 0);
 
-  const { data: txRows } = await supabase
-    .from("transactions")
-    .select("amount, description, status")
-    .eq("organization_id", organizationId)
-    .ilike("guest_name", guestName.trim())
-    .eq("status", "paid")
-    .limit(100);
+  const name = guestName.trim().replace(/[%_,()]/g, " ");
+  let txRows:
+    | { amount?: unknown; description?: string | null; status?: string | null }[]
+    | null = null;
+  {
+    const { data, error } = await supabase
+      .from("transactions")
+      .select("amount, description, status, guest_name")
+      .eq("organization_id", organizationId)
+      .or(`guest_name.ilike.%${name}%,description.ilike.%${name}%`)
+      .limit(200);
+    if (!error) {
+      txRows = data;
+    } else {
+      const { data: fallback } = await supabase
+        .from("transactions")
+        .select("amount, description, status")
+        .eq("organization_id", organizationId)
+        .ilike("guest_name", guestName.trim())
+        .limit(200);
+      txRows = fallback;
+    }
+  }
 
   const ledgerCashInTotal = (txRows || [])
-    .filter((t) => isGuestCityLedgerCashInDescription(t.description))
+    .filter(
+      (t) =>
+        String(t.status || "").toLowerCase() !== "cancelled" &&
+        isGuestCityLedgerCashInDescription(t.description),
+    )
     .reduce((s, t) => s + Number(t.amount || 0), 0);
 
   const { data: bookingRows } = await supabase
@@ -125,16 +278,14 @@ export async function reconcileGuestPrepaidCredit(
     folioOutstanding,
     ledgerCashInTotal,
     depositTotal,
+    folioCreditTotal,
   });
 
   if (credit <= 0.005) {
     return { credit: 0, updated: false };
   }
 
-  // Already stored correctly
-  if (ledgerBalance <= -credit + 0.5 && ledgerBalance >= -credit - 0.5) {
-    return { credit, updated: false };
-  }
+  let updated = false;
 
   // Ledger missing prepaid credit (common after older top-up bug zeroed the balance)
   if (ledgerBalance > -credit + 0.5) {
@@ -144,10 +295,30 @@ export async function reconcileGuestPrepaidCredit(
       balance: -credit,
       primaryAccountId: primaryAccountId ?? preferred?.id,
     });
-    return { credit, updated: true };
+    updated = true;
   }
 
-  return { credit: Math.abs(Math.min(0, ledgerBalance)), updated: false };
+  // Folio missing prepaid line — bookings "paid" pill reads folioGuestCreditAmount
+  if (userId && folioCreditTotal < credit - 0.5) {
+    const posted = await postGuestPrepaidCreditToFolio(supabase, {
+      organizationId,
+      guestId,
+      creditAmount: credit,
+      paymentMethod: "pos",
+      userId,
+      notes: "Reconciled prepaid credit",
+    });
+    if (posted) {
+      updated = true;
+      folioCreditTotal = await guestFolioCreditTotal(
+        supabase,
+        guestId,
+        organizationId,
+      );
+    }
+  }
+
+  return { credit: Math.max(credit, folioCreditTotal), updated };
 }
 
 /** All individual/guest ledger rows for this name (handles duplicates / spelling variants). */
@@ -674,6 +845,18 @@ export async function recordGuestLedgerCashMovement(
     balance: finalLedgerBalance,
     primaryAccountId: ledgerAccountId,
   });
+
+  // Leftover cash → folio prepaid line so bookings list shows Credit under paid.
+  if (applyTowardFolios && guestId && finalLedgerBalance < -0.005) {
+    await postGuestPrepaidCreditToFolio(supabase, {
+      organizationId,
+      guestId,
+      creditAmount: Math.abs(finalLedgerBalance),
+      paymentMethod,
+      userId,
+      notes,
+    });
+  }
 
   const txId = `CLG-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
   const accountFields = {

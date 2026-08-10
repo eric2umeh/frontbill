@@ -328,6 +328,46 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
                 account_type: 'individual',
               }
             }
+            // Keep Outstanding / bookings credit UI in sync when reconcile posts folio credit
+            setGuestFolioCreditTotal((prev) =>
+              Math.max(prev, Number(payload.credit)),
+            )
+            if (payload.updated && bookingIds.length > 0) {
+              const { data: refreshedFolio } = await supabase
+                .from('folio_charges')
+                .select('booking_id, amount, payment_status, charge_type, payment_method')
+                .in('booking_id', bookingIds)
+              const refreshedByBooking: typeof chargesByBooking = {}
+              for (const c of refreshedFolio || []) {
+                const bid = (c as { booking_id?: string }).booking_id
+                if (!bid) continue
+                if (!refreshedByBooking[bid]) refreshedByBooking[bid] = []
+                refreshedByBooking[bid].push({
+                  amount: (c as { amount?: unknown }).amount,
+                  type: (c as { charge_type?: string | null }).charge_type,
+                  charge_type: (c as { charge_type?: string | null }).charge_type,
+                  payment_status: (c as { payment_status?: string | null }).payment_status,
+                  payment_method: (c as { payment_method?: string | null }).payment_method,
+                })
+              }
+              let refreshedCredit = 0
+              const refreshedBookings = rawBookings.map((b: any) => {
+                const ch = refreshedByBooking[b.id] ?? []
+                const net = bookingDisplayBillBalance(
+                  {
+                    balance: b.balance,
+                    deposit: b.deposit,
+                    total_amount: b.total_amount,
+                    payment_status: b.payment_status,
+                  },
+                  ch,
+                )
+                refreshedCredit += folioGuestCreditAmount(ch)
+                return { ...b, balance: net }
+              })
+              setBookings(refreshedBookings)
+              setGuestFolioCreditTotal(Math.max(refreshedCredit, Number(payload.credit)))
+            }
           }
         } catch {
           /* display can still infer credit from transactions below */
@@ -604,6 +644,7 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
     folioOutstanding: guestOutstandingBalance,
     ledgerCashInTotal,
     depositTotal: depositPaid,
+    folioCreditTotal: guestFolioCreditTotal,
   })
   /** Folio-derived outstanding is source of truth for debit; ledger credit stays negative. */
   const ledgerDisplayBalance = (() => {
