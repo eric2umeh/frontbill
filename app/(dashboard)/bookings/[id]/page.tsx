@@ -127,6 +127,8 @@ import {
   applyBookingPaymentToGuestLedger,
   applyPaymentToGuestCityLedger,
   recordGuestLedgerCashMovement,
+  impliedGuestPrepaidCredit,
+  isGuestCityLedgerCashInDescription,
 } from "@/lib/utils/guest-city-ledger";
 import { isOutletFolioDescription } from "@/lib/outlets/booking-folio";
 
@@ -474,6 +476,69 @@ export default function BookingDetailPage({
       }
 
       setBooking(bookingData);
+
+      // Load / restore guest city-ledger prepaid credit for front-desk visibility
+      const guestName = (bookingData.guests?.name || "").trim();
+      const guestIdForLedger = bookingData.guest_id || bookingData.guests?.id;
+      if (guestName && bookingData.organization_id) {
+        try {
+          if (guestIdForLedger && uid) {
+            await fetch(`/api/guests/${guestIdForLedger}/reconcile-credit`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ caller_id: uid }),
+            });
+          }
+          const row = await fetchGuestCityLedgerAccount(
+            supabase,
+            bookingData.organization_id,
+            guestName,
+          );
+          let balance = Number(row?.balance) || 0;
+          if (balance >= -0.005 && guestIdForLedger) {
+            const [{ data: txRows }, { data: bkRows }] = await Promise.all([
+              supabase
+                .from("transactions")
+                .select("amount, description, status")
+                .eq("organization_id", bookingData.organization_id)
+                .ilike("guest_name", guestName)
+                .eq("status", "paid")
+                .limit(50),
+              supabase
+                .from("bookings")
+                .select("deposit")
+                .eq("guest_id", guestIdForLedger),
+            ]);
+            const cashIn = (txRows || [])
+              .filter((t: { description?: string | null }) =>
+                isGuestCityLedgerCashInDescription(t.description),
+              )
+              .reduce(
+                (s: number, t: { amount?: number | null }) =>
+                  s + Number(t.amount || 0),
+                0,
+              );
+            const deposits = (bkRows || []).reduce(
+              (s: number, b: { deposit?: number | null }) =>
+                s + Number(b.deposit || 0),
+              0,
+            );
+            const implied = impliedGuestPrepaidCredit({
+              ledgerBalance: balance,
+              folioOutstanding: Math.max(0, Number(bookingData.balance) || 0),
+              ledgerCashInTotal: cashIn,
+              depositTotal: deposits,
+            });
+            if (implied > 0.005) balance = -implied;
+          }
+          setBookingLedgerSnapshot({
+            id: row?.id ?? null,
+            balance,
+          });
+        } catch {
+          setBookingLedgerSnapshot({ id: null, balance: 0 });
+        }
+      }
 
       if (uid) {
         try {
@@ -2575,9 +2640,19 @@ export default function BookingDetailPage({
               </div>
               {folioBookingCreditAmount > 0 && (
                 <div className="flex justify-between">
-                  <span className="text-muted-foreground">Credit</span>
+                  <span className="text-muted-foreground">Folio credit</span>
                   <span className="font-semibold text-blue-600">
                     {formatNaira(folioBookingCreditAmount)}
+                  </span>
+                </div>
+              )}
+              {Number(bookingLedgerSnapshot.balance) < -0.005 && (
+                <div className="flex justify-between rounded-md border border-blue-200 bg-blue-50/80 px-3 py-2">
+                  <span className="text-sm font-medium text-blue-900">
+                    Guest account credit (city ledger)
+                  </span>
+                  <span className="font-bold text-blue-700 tabular-nums">
+                    {formatNaira(Math.abs(Number(bookingLedgerSnapshot.balance)))}
                   </span>
                 </div>
               )}

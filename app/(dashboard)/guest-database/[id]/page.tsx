@@ -34,6 +34,11 @@ import { useAuth } from '@/lib/auth-context'
 import { hasPermission } from '@/lib/permissions'
 import { toast } from 'sonner'
 import { folioGuestCreditAmount, folioPositiveOutstandingSum, bookingDisplayBillBalance } from '@/lib/utils/booking-bill-balance'
+import {
+  impliedGuestPrepaidCredit,
+  isGuestCityLedgerCashInDescription,
+  pickPreferredGuestLedgerAccount,
+} from '@/lib/utils/guest-city-ledger'
 import { PageLoadingState } from '@/components/loading-screen'
 import { fetchGuestCashbackBalanceClient } from '@/lib/cashback/cashback-client'
 import { GuestCashbackPanel } from '@/components/cashback/guest-cashback-panel'
@@ -263,7 +268,7 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
         setSelectedFolioId(enrichedBookings[0].folio_id)
       }
 
-      // City ledger — prefer the row with the highest debit (duplicate name rows can exist)
+      // City ledger — prefer debit when owed, otherwise largest prepaid credit
       const { data: ledgerRows } = await supabase
         .from('city_ledger_accounts')
         .select('id, balance, account_name, account_type')
@@ -271,12 +276,63 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
         .ilike('account_name', guestData.name)
         .in('account_type', ['individual', 'guest'])
 
-      const ledgerData =
-        ledgerRows && ledgerRows.length > 0
-          ? ledgerRows.reduce((best, row) =>
-              Number(row.balance ?? 0) > Number(best.balance ?? 0) ? row : best,
-            )
-          : null
+      type LedgerRow = {
+        id: string | null
+        balance: number
+        account_name: string
+        account_type: string
+      }
+      const mappedLedgerRows: LedgerRow[] = (ledgerRows || []).map(
+        (row: {
+          id: string
+          balance?: number | null
+          account_name?: string | null
+          account_type?: string | null
+        }) => ({
+          id: row.id,
+          balance: Number(row.balance ?? 0),
+          account_name: String(row.account_name || guestData.name),
+          account_type: String(row.account_type || 'individual'),
+        }),
+      )
+      let ledgerData = pickPreferredGuestLedgerAccount(mappedLedgerRows)
+
+      const { data: txData } = await supabase
+        .from('transactions')
+        .select('id, transaction_id, amount, payment_method, status, description, created_at')
+        .eq('organization_id', profile.organization_id)
+        .ilike('guest_name', guestData.name)
+        .order('created_at', { ascending: false })
+        .limit(50)
+
+      setLedgerHistory(txData || [])
+
+      // Restore prepaid credit when cash-in > deposits but ledger was zeroed by older bugs
+      if (guestData.id && currentUserId) {
+        try {
+          const res = await fetch(`/api/guests/${guestData.id}/reconcile-credit`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ caller_id: currentUserId }),
+          })
+          const payload = await res.json().catch(() => ({}))
+          if (res.ok && typeof payload.credit === 'number' && payload.credit > 0.005) {
+            const creditBal = -Number(payload.credit)
+            if (ledgerData) {
+              ledgerData = { ...ledgerData, balance: creditBal }
+            } else {
+              ledgerData = {
+                id: null,
+                balance: creditBal,
+                account_name: guestData.name,
+                account_type: 'individual',
+              }
+            }
+          }
+        } catch {
+          /* display can still infer credit from transactions below */
+        }
+      }
 
       if (ledgerData) {
         setLedgerAccount({
@@ -295,15 +351,6 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
       } else {
         setLedgerAccount(null)
       }
-      const { data: txData } = await supabase
-        .from('transactions')
-        .select('id, transaction_id, amount, payment_method, status, description, created_at')
-        .eq('organization_id', profile.organization_id)
-        .ilike('guest_name', guestData.name)
-        .order('created_at', { ascending: false })
-        .limit(20)
-
-      setLedgerHistory(txData || [])
     } catch {
       router.push('/guest-database')
     } finally {
@@ -542,27 +589,39 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
   // Total Paid = deposits on bookings + prepaid credit still on city ledger
   // (so a ₦400k pay against ₦240k debt with ₦160k credit shows ₦400k, not only deposits).
   const depositPaid = bookings.reduce((s, b) => s + Number(b.deposit || 0), 0)
-  const ledgerCreditRemaining =
-    ledgerAccount?.id != null && Number(ledgerAccount.balance) < 0
-      ? Math.abs(Number(ledgerAccount.balance))
-      : 0
-  const totalSpent = depositPaid + ledgerCreditRemaining
+  const ledgerCashInTotal = ledgerHistory
+    .filter(
+      (t) =>
+        t.status === 'paid' && isGuestCityLedgerCashInDescription(t.description),
+    )
+    .reduce((s, t) => s + Number(t.amount || 0), 0)
   const totalBookingBalance = guestPendingBalance
   const lastVisit = bookings.length > 0 ? bookings[0].check_in : null
   const guestOutstandingBalance = guestPendingBalance
-  /** Folio-derived outstanding is source of truth for debit; ledger DB may lag after partial pay. */
+  const dbLedgerBalance = Number(ledgerAccount?.balance ?? 0)
+  const prepaidFromLedgerOrCashIn = impliedGuestPrepaidCredit({
+    ledgerBalance: dbLedgerBalance,
+    folioOutstanding: guestOutstandingBalance,
+    ledgerCashInTotal,
+    depositTotal: depositPaid,
+  })
+  /** Folio-derived outstanding is source of truth for debit; ledger credit stays negative. */
   const ledgerDisplayBalance = (() => {
-    if (!ledgerAccount) return 0
-    const dbBal = Number(ledgerAccount.balance ?? 0)
-    if (dbBal < 0) return dbBal
+    if (prepaidFromLedgerOrCashIn > 0.005 && guestOutstandingBalance <= 0.005) {
+      return -prepaidFromLedgerOrCashIn
+    }
+    if (!ledgerAccount) return guestOutstandingBalance > 0 ? guestOutstandingBalance : 0
+    if (dbLedgerBalance < 0) return dbLedgerBalance
     if (guestOutstandingBalance > 0) return guestOutstandingBalance
-    return Math.max(0, dbBal)
+    return Math.max(0, dbLedgerBalance)
   })()
 
-  /** Real city ledger only: negative DB balance = prepaid credit not always visible on folio totals. */
-  const ledgerAccountCreditAmount =
-    ledgerAccount?.id != null && ledgerDisplayBalance < 0 ? Math.abs(ledgerDisplayBalance) : 0
-  const effectiveGuestCreditAmount = Math.max(guestFolioCreditTotal, ledgerAccountCreditAmount)
+  const ledgerAccountCreditAmount = prepaidFromLedgerOrCashIn
+  const effectiveGuestCreditAmount = Math.max(
+    guestFolioCreditTotal,
+    ledgerAccountCreditAmount,
+  )
+  const totalSpent = depositPaid + effectiveGuestCreditAmount
   const hasOutstandingDebit = totalBookingBalance > 0
   const hasGuestCredit = effectiveGuestCreditAmount > 0
 
@@ -1031,7 +1090,14 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
         {/* Booking History */}
         <Card className="lg:col-span-2">
           <CardHeader>
-            <CardTitle className="text-base">Booking History ({statementFilteredBookings.length})</CardTitle>
+            <div className="space-y-1">
+              <CardTitle className="text-base">Booking History ({statementFilteredBookings.length})</CardTitle>
+              {hasGuestCredit && (
+                <p className="text-xs font-medium text-blue-700">
+                  Guest account credit: {formatNaira(effectiveGuestCreditAmount)} available for future charges
+                </p>
+              )}
+            </div>
           </CardHeader>
           <CardContent>
             {bookings.length === 0 ? (
@@ -1064,18 +1130,29 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
                       {b.balance > 0 && (
                         <div className="text-xs text-red-600">Balance: {formatNaira(b.balance)}</div>
                       )}
-                      {b.balance < 0 && (
-                        <div className="text-xs font-medium text-blue-600">Credit: {formatNaira(-b.balance)}</div>
+                      {Number(b.balance) < 0 && (
+                        <div className="text-xs font-medium text-blue-600">
+                          Folio credit: {formatNaira(-Number(b.balance))}
+                        </div>
+                      )}
+                      {hasGuestCredit && Number(b.balance) <= 0 && (
+                        <div className="text-xs font-medium text-blue-600">
+                          Account credit: {formatNaira(effectiveGuestCreditAmount)}
+                        </div>
                       )}
                       <Badge
                         variant="outline"
                         className={`text-xs ${
-                          Number(b.balance) < 0
+                          Number(b.balance) < 0 || (hasGuestCredit && Number(b.balance) <= 0)
                             ? 'text-blue-700 border-blue-200 bg-blue-50'
                             : statusColor(b.payment_status)
                         }`}
                       >
-                        {Number(b.balance) < 0 ? 'credit' : b.payment_status}
+                        {Number(b.balance) < 0
+                          ? 'credit'
+                          : hasGuestCredit && Number(b.balance) <= 0
+                            ? 'paid · credit'
+                            : b.payment_status}
                       </Badge>
                     </div>
                   </div>

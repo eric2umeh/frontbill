@@ -207,10 +207,24 @@ export default function CityLedgerPage() {
                       </div>
                     </div>
                     <div className="text-right">
-                      <p className={`font-semibold ${acc.balance > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                        {formatNaira(acc.balance)}
+                      <p
+                        className={`font-semibold ${
+                          acc.balance > 0
+                            ? 'text-red-600'
+                            : acc.balance < 0
+                              ? 'text-blue-600'
+                              : 'text-green-600'
+                        }`}
+                      >
+                        {formatNaira(Math.abs(Number(acc.balance) || 0))}
                       </p>
-                      <p className="text-xs text-muted-foreground">Balance</p>
+                      <p className="text-xs text-muted-foreground">
+                        {acc.balance > 0
+                          ? 'Debit (owes)'
+                          : acc.balance < 0
+                            ? 'Credit available'
+                            : 'Settled'}
+                      </p>
                     </div>
                   </div>
                 ))
