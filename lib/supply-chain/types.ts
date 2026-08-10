@@ -106,8 +106,12 @@ export function isBarStoreDept(dept: string): boolean {
   return dept === 'main_bar' || dept === 'bar'
 }
 
+export type PoOrigin = 'store' | 'kitchen'
+
 export type PoStatus =
   | 'draft'
+  /** Kitchen raised a list — waiting for central store to review / enrich. */
+  | 'pending_store'
   | 'pending_accountant'
   | 'accountant_rejected'
   | 'pending_manager'
@@ -296,14 +300,32 @@ export interface PurchaseOrder {
   poNumber: string
   weekLabel: string
   status: PoStatus
+  /** Who raised the list — kitchen chef vs central store / purchaser. */
+  origin?: PoOrigin
   createdBy: string
   createdByName: string
   createdAt: string
+  /** When kitchen sent the list to store (ISO). */
+  sentToStoreAt?: string
+  sentToStoreBy?: string
+  /** When store/purchaser sent the list to accountant (ISO). */
+  sentToAccountantAt?: string
+  sentToAccountantBy?: string
+  /** Last workflow status change (ISO) — used when merging local vs remote snapshots. */
+  workflowUpdatedAt?: string
   cashDisbursed: number
   lines: PoLine[]
   totalAmount: number
   accountantComment?: string
+  /** Who last accepted/rejected at accountant (or admin test) stage. */
+  accountantDecidedBy?: string
+  accountantDecidedRole?: string
+  accountantDecidedAt?: string
   managerComment?: string
+  /** Who last accepted/rejected at manager (or admin test) stage. */
+  managerDecidedBy?: string
+  managerDecidedRole?: string
+  managerDecidedAt?: string
   retirementComment?: string
   retirement?: RetirementRecord
 }

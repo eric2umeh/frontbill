@@ -1,15 +1,106 @@
 'use client'
 
+import { useEffect, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { DEPT_LABELS, type BasketLine, type SupplyDept } from '@/lib/supply-chain/types'
-import { parseQuantityValue, formatUnitLabel } from '@/lib/supply-chain/measurement-units'
+import {
+  DEPT_LABELS,
+  STORE_DEPT_PICKER_OPTIONS_SORTED,
+  type BasketLine,
+  type SupplyDept,
+} from '@/lib/supply-chain/types'
+import {
+  parseQuantityValue,
+  formatUnitLabel,
+  sanitizeQuantityInput,
+} from '@/lib/supply-chain/measurement-units'
 import { formatNaira } from '@/lib/utils/currency'
 import { Minus, Plus, Send, Trash2 } from 'lucide-react'
+import { PaginatedListShell } from '@/components/shared/paginated-list-shell'
+
+function BasketLineQtyControls({
+  stockItemId,
+  committedQty,
+  unitPrice,
+  onCommit,
+}: {
+  stockItemId: string
+  committedQty: number
+  unitPrice: number
+  onCommit: (qty: number) => void
+}) {
+  const [draft, setDraft] = useState(String(committedQty))
+  useEffect(() => {
+    setDraft(String(committedQty))
+  }, [committedQty, stockItemId])
+
+  const commit = () => {
+    const trimmed = draft.trim()
+    if (!trimmed) {
+      setDraft(String(committedQty))
+      return
+    }
+    const qty = parseQuantityValue(trimmed)
+    if (!Number.isFinite(qty) || qty <= 0) {
+      setDraft(String(committedQty))
+      return
+    }
+    if (qty !== committedQty) onCommit(qty)
+  }
+
+  const trimmed = draft.trim()
+  const parsed = trimmed ? parseQuantityValue(trimmed) : NaN
+  const liveQty = Number.isFinite(parsed) && parsed > 0 ? parsed : committedQty
+  const liveTotal = liveQty * (Number.isFinite(unitPrice) ? unitPrice : 0)
+
+  return (
+    <>
+      <div className="flex items-center gap-1">
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          className="h-7 w-7"
+          allowRepeatClick
+          onClick={() => onCommit(Math.max(0, committedQty - 1))}
+        >
+          <Minus className="h-3 w-3" />
+        </Button>
+        <Input
+          inputMode="decimal"
+          className="h-7 w-14 text-center px-1"
+          value={draft}
+          onChange={(e) => setDraft(sanitizeQuantityInput(e.target.value))}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              ;(e.target as HTMLInputElement).blur()
+            }
+          }}
+        />
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          className="h-7 w-7"
+          allowRepeatClick
+          onClick={() => onCommit(committedQty + 1)}
+        >
+          <Plus className="h-3 w-3" />
+        </Button>
+      </div>
+      <span className="tabular-nums font-medium min-w-[4.5rem] text-right">
+        {formatNaira(liveTotal)}
+      </span>
+    </>
+  )
+}
 
 type Props = {
   basket: BasketLine[]
-  basketByDept: Map<string, BasketLine[]>
+  /** @deprecated grouping is handled by the department filter */
+  basketByDept?: Map<string, BasketLine[]>
   total: number
   readOnly?: boolean
   onClear: () => void
@@ -21,7 +112,6 @@ type Props = {
 
 export function DraftBasketSidebar({
   basket,
-  basketByDept,
   total,
   readOnly = false,
   onClear,
@@ -30,6 +120,22 @@ export function DraftBasketSidebar({
   onSend,
   sendLabel = 'Send for approval',
 }: Props) {
+  const deptFilters = useMemo(() => {
+    const present = new Set(basket.map((b) => b.dept))
+    return [
+      {
+        key: 'dept',
+        label: 'Department',
+        options: STORE_DEPT_PICKER_OPTIONS_SORTED.filter((d) => present.has(d)).map(
+          (d) => ({
+            value: d,
+            label: DEPT_LABELS[d as SupplyDept] ?? d,
+          }),
+        ),
+      },
+    ]
+  }, [basket])
+
   return (
     <div className="rounded-xl border bg-card p-4 h-fit sticky top-4 shadow-md space-y-3">
       <div className="flex justify-between items-center">
@@ -37,8 +143,8 @@ export function DraftBasketSidebar({
           <h3 className="font-semibold">Draft basket</h3>
           <p className="text-[11px] text-muted-foreground">
             {readOnly
-              ? 'Locked while accountant reviews or PO is in approval'
-              : 'Quick view — send from Purchase orders tab'}
+              ? 'Locked for your role in this status'
+              : 'Quick view — send from Purchase orders / kitchen tab'}
           </p>
         </div>
         {!readOnly && basket.length > 0 && (
@@ -53,14 +159,31 @@ export function DraftBasketSidebar({
           No items yet — enter quantities on Raise purchase request
         </p>
       ) : (
-        <div className="space-y-4 max-h-[420px] overflow-y-auto">
-          {[...basketByDept.entries()].map(([dept, lines]) => (
-            <div key={dept}>
-              <p className="text-xs font-bold text-muted-foreground mb-1.5">
-                {DEPT_LABELS[dept as SupplyDept]?.toUpperCase() ?? dept}
-              </p>
+        <div className="max-h-[480px] overflow-y-auto pr-0.5">
+          <PaginatedListShell
+            items={basket}
+            pageSize={8}
+            searchPlaceholder="Search basket…"
+            searchMatch={(line, query) => {
+              const q = query.trim().toLowerCase()
+              if (!q) return true
+              return (
+                line.name.toLowerCase().includes(q) ||
+                line.unit.toLowerCase().includes(q) ||
+                (DEPT_LABELS[line.dept] ?? line.dept).toLowerCase().includes(q)
+              )
+            }}
+            filters={deptFilters}
+            filterMatch={(line, key, value) => {
+              if (key !== 'dept') return undefined
+              if (!value || value === 'all') return true
+              return line.dept === value
+            }}
+            emptyMessage="No basket lines match."
+          >
+            {(pageItems) => (
               <ul className="space-y-2">
-                {lines.map((l) => (
+                {pageItems.map((l) => (
                   <li
                     key={l.stockItemId}
                     className="rounded-lg border px-2 py-2 text-sm space-y-1.5"
@@ -68,7 +191,12 @@ export function DraftBasketSidebar({
                     <div className="flex justify-between gap-2 items-start">
                       <span className="font-medium leading-snug">
                         {l.name}{' '}
-                        <span className="text-muted-foreground font-normal">({formatUnitLabel(l.unit)})</span>
+                        <span className="text-muted-foreground font-normal">
+                          ({formatUnitLabel(l.unit)})
+                        </span>
+                        <span className="block text-[10px] text-muted-foreground font-normal">
+                          {DEPT_LABELS[l.dept] ?? l.dept}
+                        </span>
                       </span>
                       {!readOnly && (
                         <Button
@@ -89,57 +217,30 @@ export function DraftBasketSidebar({
                           {l.qtyToBuy} {formatUnitLabel(l.unit)} × {formatNaira(l.unitPrice)}
                         </span>
                       ) : (
-                        <div className="flex items-center gap-1">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="icon"
-                            className="h-7 w-7"
-                            allowRepeatClick
-                            onClick={() => onQtyChange(l.stockItemId, Math.max(0, l.qtyToBuy - 1))}
-                          >
-                            <Minus className="h-3 w-3" />
-                          </Button>
-                          <Input
-                            inputMode="decimal"
-                            className="h-7 w-14 text-center px-1"
-                            value={String(l.qtyToBuy)}
-                            onChange={(e) =>
-                              onQtyChange(
-                                l.stockItemId,
-                                parseQuantityValue(e.target.value),
-                              )
-                            }
-                          />
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="icon"
-                            className="h-7 w-7"
-                            allowRepeatClick
-                            onClick={() => onQtyChange(l.stockItemId, l.qtyToBuy + 1)}
-                          >
-                            <Plus className="h-3 w-3" />
-                          </Button>
-                        </div>
+                        <BasketLineQtyControls
+                          stockItemId={l.stockItemId}
+                          committedQty={l.qtyToBuy}
+                          unitPrice={l.unitPrice}
+                          onCommit={(qty) => onQtyChange(l.stockItemId, qty)}
+                        />
                       )}
-                      <span className="tabular-nums font-medium">
-                        {formatNaira(l.qtyToBuy * l.unitPrice)}
-                      </span>
                     </div>
-                    {l.storeQtyToBuy != null && l.storeUnit && l.storeUnit !== l.unit && (
-                      <p className="text-[11px] text-muted-foreground">
-                        Receives {l.storeQtyToBuy} {formatUnitLabel(l.storeUnit)} into store
-                        {l.storeUnitPrice
-                          ? ` · ${formatNaira(l.storeUnitPrice)}/${formatUnitLabel(l.storeUnit)}`
-                          : ''}
-                      </p>
-                    )}
+                    {l.storeQtyToBuy != null &&
+                      l.storeUnit &&
+                      l.storeUnit !== l.unit && (
+                        <p className="text-[11px] text-muted-foreground">
+                          Receives {l.storeQtyToBuy} {formatUnitLabel(l.storeUnit)} into
+                          store
+                          {l.storeUnitPrice
+                            ? ` · ${formatNaira(l.storeUnitPrice)}/${formatUnitLabel(l.storeUnit)}`
+                            : ''}
+                        </p>
+                      )}
                   </li>
                 ))}
               </ul>
-            </div>
-          ))}
+            )}
+          </PaginatedListShell>
         </div>
       )}
 

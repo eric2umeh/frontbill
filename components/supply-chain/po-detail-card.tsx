@@ -5,7 +5,9 @@ import type { PurchaseOrder } from "@/lib/supply-chain/types";
 import { formatNaira } from "@/lib/utils/currency";
 import { poStatusBadge } from "@/components/supply-chain/po-approval-panel";
 import { formatPoRaisedAt, getPoHistoryLines } from "@/lib/supply-chain/po-format";
-import { PoLinesTable } from "@/components/supply-chain/po-lines-table";
+import { formatPoDecisionStamp } from "@/lib/supply-chain/po-active";
+import { PoReviewLinesPanel } from "@/components/supply-chain/po-review-lines-panel";
+import type { PoLine } from "@/lib/supply-chain/types";
 import { PoCommentBanner } from "@/components/supply-chain/po-comment-banner";
 import { Button } from "@/components/ui/button";
 import { ChevronDown, ChevronRight } from "lucide-react";
@@ -69,6 +71,11 @@ export function PoDetailCard({
               Raised {formatPoRaisedAt(po.createdAt)} · {po.createdByName} ·{" "}
               {formatNaira(po.totalAmount)}
             </p>
+            {formatPoDecisionStamp(po) ? (
+              <p className="text-xs font-medium text-foreground">
+                {formatPoDecisionStamp(po)}
+              </p>
+            ) : null}
             <p className="text-xs text-muted-foreground">{po.weekLabel}</p>
           </div>
         </div>
@@ -109,28 +116,27 @@ export function PoDetailCard({
               compact
             />
           )}
-          <PoLinesTable
-            rows={
-              historyLines.mode === "retirement"
+          <PoReviewLinesPanel
+            lines={
+              (historyLines.mode === "retirement"
                 ? historyLines.lines.map((line) => {
                     const orig = po.lines.find((l) => l.id === line.id);
                     return {
-                      kind: "po" as const,
-                      line: {
-                        id: line.id,
-                        stockItemId: orig?.stockItemId ?? line.id,
-                        name: line.notBought ? `* ${line.name}` : line.name,
-                        dept: orig?.dept ?? "kitchen",
-                        unit: line.unit,
-                        quantityOrdered: line.quantity,
-                        unitPrice: line.unitPrice,
-                        lineTotal: line.lineTotal,
-                      },
-                    };
+                      id: line.id,
+                      stockItemId: orig?.stockItemId ?? line.stockItemId,
+                      name: line.notBought ? `* ${line.name}` : line.name,
+                      dept: line.dept,
+                      unit: line.unit,
+                      quantityOrdered: line.quantity,
+                      unitPrice: line.unitPrice,
+                      lineTotal: line.lineTotal,
+                    } satisfies PoLine;
                   })
-                : po.lines.map((line) => ({ kind: "po" as const, line }))
+                : po.lines) as PoLine[]
             }
             compact
+            showDept
+            pageSize={10}
           />
         </div>
       )}

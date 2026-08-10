@@ -112,10 +112,38 @@ export async function GET(request: Request) {
       )
     }
 
+    // Resolve login emails from Auth (profiles table has no email column).
+    const emailById: Record<string, string> = {}
+    try {
+      let page = 1
+      const perPage = 200
+      for (;;) {
+        const { data: authPage, error: authErr } = await admin.auth.admin.listUsers({
+          page,
+          perPage,
+        })
+        if (authErr) {
+          console.warn('[users/list] listUsers:', authErr.message)
+          break
+        }
+        const batch = authPage?.users || []
+        for (const u of batch) {
+          if (u.id && u.email) emailById[u.id] = u.email
+        }
+        if (batch.length < perPage) break
+        page += 1
+        if (page > 50) break
+      }
+    } catch (e) {
+      console.warn('[users/list] email lookup failed', e)
+    }
+
     const usersWithAddedBy = (users || []).map((user: any) => {
       const addedByKey = user.added_by != null ? String(user.added_by) : null
+      const id = String(user.id)
       return {
         ...user,
+        email: emailById[id] || user.email || null,
         added_by: addedByKey,
         added_by_name: addedByKey ? addedByMap[addedByKey] ?? null : null,
       }

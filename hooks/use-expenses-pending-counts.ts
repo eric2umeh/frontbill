@@ -2,7 +2,10 @@
 
 import { useMemo } from 'react'
 import { useSupplyChain } from '@/lib/supply-chain/supply-chain-context'
-import { getActivePurchaseOrder } from '@/lib/supply-chain/po-active'
+import {
+  listOrdersAwaitingAccountant,
+  listOrdersAwaitingManager,
+} from '@/lib/supply-chain/po-active'
 import {
   canAdminTestApproveSupplyPo,
   canSupplyPoAccountantReview,
@@ -24,18 +27,11 @@ export function useExpensesPendingCounts(role: string | null | undefined): Expen
     let purchaseOrdersCount = 0
     let retirements = 0
 
-    const active = getActivePurchaseOrder(purchaseOrders)
-    if (
-      active?.status === 'pending_accountant' &&
-      (canSupplyPoAccountantReview(role) || admin)
-    ) {
-      purchaseOrdersCount += 1
+    if (canSupplyPoAccountantReview(role) || admin) {
+      purchaseOrdersCount += listOrdersAwaitingAccountant(purchaseOrders).length
     }
-    if (
-      active?.status === 'pending_manager' &&
-      (canSupplyPoManagerReview(role) || admin)
-    ) {
-      purchaseOrdersCount += 1
+    if (canSupplyPoManagerReview(role) || admin) {
+      purchaseOrdersCount += listOrdersAwaitingManager(purchaseOrders).length
     }
 
     if (canSupplyRetirementReview(role) || admin) {

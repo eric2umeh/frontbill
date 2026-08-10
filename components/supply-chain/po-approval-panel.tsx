@@ -17,14 +17,21 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Info } from "lucide-react";
 import { toast } from "sonner";
-import { PoLinesTable } from "@/components/supply-chain/po-lines-table";
+import { PoReviewLinesPanel } from "@/components/supply-chain/po-review-lines-panel";
 import { PoCommentBanner } from "@/components/supply-chain/po-comment-banner";
 import { formatPoRaisedAt } from "@/lib/supply-chain/po-format";
-import { getActivePurchaseOrder } from "@/lib/supply-chain/po-active";
+import {
+  formatPoActorStamp,
+  formatPoDecisionStamp,
+  listOrdersAwaitingAccountant,
+  listOrdersAwaitingManager,
+  poOriginOf,
+} from "@/lib/supply-chain/po-active";
 
 const WORKFLOW_STEPS = [
-  "Store raises PO",
-  "Accountant accepts or rejects (comment required)",
+  "Kitchen or store raises a purchase list",
+  "Kitchen lists go to store first (edit / enrich), then to accountant",
+  "Accountant accepts or rejects (comment required) — may edit lines in place",
   "Manager / Admin accepts or rejects (comment required)",
   "Cash disbursed — purchaser buys at market",
   "Retirement updates central store stock",
@@ -36,6 +43,10 @@ function poStatusBadge(status: PurchaseOrder["status"]) {
     { label: string; className: string }
   > = {
     draft: { label: "Draft", className: "bg-muted text-muted-foreground" },
+    pending_store: {
+      label: "Awaiting store (kitchen)",
+      className: "bg-violet-100 text-violet-900",
+    },
     pending_accountant: {
       label: "Awaiting accountant",
       className: "bg-amber-100 text-amber-900",
@@ -105,11 +116,17 @@ function PoDecisionCard({
   stage,
   onDecide,
   testingAdmin,
+  canEditLines,
+  onLineQtyChange,
+  onLineDelete,
 }: {
   po: PurchaseOrder;
   stage: "accountant" | "manager" | "admin_test";
   onDecide: (approved: boolean, comment: string) => void;
   testingAdmin?: boolean;
+  canEditLines?: boolean;
+  onLineQtyChange?: (stockItemId: string, qty: number) => void;
+  onLineDelete?: (stockItemId: string) => void;
 }) {
   const [comment, setComment] = useState("");
 
@@ -120,17 +137,51 @@ function PoDecisionCard({
         ? "Accountant review — accept or reject with comment"
         : "Manager review — accept or reject with comment";
 
+  const editable = Boolean(canEditLines && onLineQtyChange);
+
   return (
     <div className="rounded-lg border p-4 space-y-3">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
-          <p className="font-medium">{po.poNumber}</p>
+          <div className="font-medium flex flex-wrap items-center gap-2">
+            {po.poNumber}
+            {poOriginOf(po) === "kitchen" ? (
+              <Badge
+                variant="outline"
+                className="text-[10px] bg-violet-50 text-violet-800 border-violet-200"
+              >
+                Kitchen order
+              </Badge>
+            ) : (
+              <Badge variant="outline" className="text-[10px]">
+                Store order
+              </Badge>
+            )}
+          </div>
           <p className="text-sm text-muted-foreground">
-            {po.weekLabel} · {po.createdByName} · {formatNaira(po.totalAmount)}
+            {po.weekLabel} · {formatNaira(po.totalAmount)}
           </p>
+          <p className="text-xs text-muted-foreground">{formatPoActorStamp(po)}</p>
+          {formatPoDecisionStamp(po) ? (
+            <p className="text-xs font-medium text-foreground">
+              {formatPoDecisionStamp(po)}
+            </p>
+          ) : null}
           <p className="text-xs text-muted-foreground">
-            Raised {formatPoRaisedAt(po.createdAt)}
+            Created {formatPoRaisedAt(po.createdAt)}
+            {po.sentToAccountantAt
+              ? ` · Sent to accountant ${formatPoRaisedAt(po.sentToAccountantAt)}`
+              : ""}
           </p>
+          {editable ? (
+            <p className="text-[11px] text-muted-foreground mt-1">
+              Edit or delete lines below. To add items, open{" "}
+              <Link href="/supply/store?tab=orders" className="underline text-primary">
+                Store → Purchase orders
+              </Link>
+              .
+            </p>
+          ) : null}
           {po.accountantComment && stage === "manager" && (
             <div className="mt-2 w-full">
               <PoCommentBanner
@@ -154,12 +205,13 @@ function PoDecisionCard({
       )}
       <p className="text-xs font-medium text-muted-foreground">{title}</p>
       {po.lines.length > 0 && (
-        <div className="rounded-md border bg-muted/20 p-2">
-          <p className="text-[10px] font-semibold text-muted-foreground mb-2 uppercase tracking-wide">
-            Purchase list ({po.lines.length} items)
-          </p>
-          <PoLinesTable
-            rows={po.lines.map((line) => ({ kind: "po" as const, line }))}
+        <div className="rounded-md border bg-muted/20 p-3">
+          <PoReviewLinesPanel
+            lines={po.lines}
+            editable={editable}
+            onQtyChange={editable ? onLineQtyChange : undefined}
+            onDelete={editable ? onLineDelete : undefined}
+            pageSize={10}
           />
         </div>
       )}
@@ -207,20 +259,28 @@ export function PoApprovalPanel({ compact }: { compact?: boolean }) {
     accountantDecision,
     managerDecision,
     adminTestPoDecision,
+    mutatePurchaseOrderLine,
   } = useSupplyChain();
   const actor = {
     name: name ?? "Staff",
     role: canonicalRoleKey(role) ?? "staff",
   };
 
-  const activePo = getActivePurchaseOrder(purchaseOrders);
-  const pendingAccountant =
-    activePo?.status === "pending_accountant" ? [activePo] : [];
-  const pendingManager =
-    activePo?.status === "pending_manager" ? [activePo] : [];
+  const pendingAccountant = listOrdersAwaitingAccountant(purchaseOrders);
+  const pendingManager = listOrdersAwaitingManager(purchaseOrders);
   const canAccountant = canSupplyPoAccountantReview(role);
   const canManager = canSupplyPoManagerReview(role);
   const adminTester = canAdminTestApproveSupplyPo(role);
+
+  const handleLineQty = (poId: string, stockItemId: string, qty: number) => {
+    const err = mutatePurchaseOrderLine?.(poId, stockItemId, qty);
+    if (err) toast.error(err);
+  };
+  const handleLineDelete = (poId: string, stockItemId: string) => {
+    const err = mutatePurchaseOrderLine?.(poId, stockItemId, 0);
+    if (err) toast.error(err);
+    else toast.success("Line removed");
+  };
 
   if (
     !pendingAccountant.length &&
@@ -253,12 +313,15 @@ export function PoApprovalPanel({ compact }: { compact?: boolean }) {
                 po={po}
                 stage="admin_test"
                 testingAdmin
+                canEditLines
+                onLineQtyChange={(id, qty) => handleLineQty(po.id, id, qty)}
+                onLineDelete={(id) => handleLineDelete(po.id, id)}
                 onDecide={(approved, comment) => {
                   adminTestPoDecision(po.id, approved, comment, actor);
                   toast.success(
                     approved
                       ? "PO accepted — released for market purchase (admin test)"
-                      : "PO rejected (admin test)",
+                      : "PO rejected — returned to store (admin test)",
                   );
                 }}
               />
@@ -267,12 +330,15 @@ export function PoApprovalPanel({ compact }: { compact?: boolean }) {
                 key={po.id}
                 po={po}
                 stage="accountant"
+                canEditLines
+                onLineQtyChange={(id, qty) => handleLineQty(po.id, id, qty)}
+                onLineDelete={(id) => handleLineDelete(po.id, id)}
                 onDecide={(approved, comment) => {
                   accountantDecision(po.id, approved, comment, actor);
                   toast.success(
                     approved
                       ? "Forwarded to manager for approval"
-                      : "PO rejected by accountant",
+                      : "PO rejected — returned to store for editing",
                   );
                 }}
               />
@@ -288,12 +354,7 @@ export function PoApprovalPanel({ compact }: { compact?: boolean }) {
                   {poStatusBadge(po.status)}
                 </div>
                 {po.lines.length > 0 && (
-                  <PoLinesTable
-                    rows={po.lines.map((line) => ({
-                      kind: "po" as const,
-                      line,
-                    }))}
-                  />
+                  <PoReviewLinesPanel lines={po.lines} pageSize={10} />
                 )}
               </div>
             ),

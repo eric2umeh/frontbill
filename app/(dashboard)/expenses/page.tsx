@@ -40,6 +40,7 @@ function ExpensesPageContent() {
   const [importOpen, setImportOpen] = useState(false)
   const [refreshKey, setRefreshKey] = useState(0)
   const [activeTab, setActiveTab] = useState('expenses')
+  const [tabsReady, setTabsReady] = useState(false)
 
   const canView = canAccessExpenseMenu(role) && hasPermission(role, 'expenses:view')
   const canAdd = hasPermission(role, 'expenses:create')
@@ -54,6 +55,10 @@ function ExpensesPageContent() {
     canSupplyPoManagerReview(role) ||
     canAdminTestApproveSupplyPo(role)
   const canRetirement = canSupplyRetirementReview(role)
+
+  useEffect(() => {
+    setTabsReady(true)
+  }, [])
 
   useEffect(() => {
     if (tabParam === 'purchase_orders' && canPurchaseOrders) {
@@ -90,6 +95,9 @@ function ExpensesPageContent() {
         )}
       </div>
 
+      {!tabsReady ? (
+        <div className="p-8 text-sm text-muted-foreground">Loading expenses…</div>
+      ) : (
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1">
           <TabsTrigger value="expenses" className="gap-1.5">
@@ -199,6 +207,7 @@ function ExpensesPageContent() {
           </TabsContent>
         )}
       </Tabs>
+      )}
 
       {userId && (
         <ExpenseImportDialog

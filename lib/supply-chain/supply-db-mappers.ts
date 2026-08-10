@@ -115,10 +115,12 @@ export const SUPPLY_SNAPSHOT_KEYS = [
 
 export type SupplySnapshotKey = (typeof SUPPLY_SNAPSHOT_KEYS)[number]
 
-/** Snapshot keys kitchen-only roles may upsert (no PO / store basket / catalogue). */
+/** Snapshot keys kitchen-only roles may upsert (includes kitchen-raised POs). */
 export const KITCHEN_WRITE_SNAPSHOT_KEYS = [
   'batches',
   'kitchen_stock',
   'kitchen_raw_stock',
   'activity_log',
+  'purchase_orders',
+  'basket',
 ] as const satisfies readonly SupplySnapshotKey[]

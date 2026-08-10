@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import type { PurchaseOrder } from "@/lib/supply-chain/types";
+import { useMemo, useState } from "react";
+import type { PoLine, PurchaseOrder } from "@/lib/supply-chain/types";
 import { formatNaira } from "@/lib/utils/currency";
 import {
   formatPoRaisedAt,
@@ -10,8 +10,11 @@ import {
 } from "@/lib/supply-chain/po-format";
 import { poStatusBadge } from "@/components/supply-chain/po-approval-panel";
 import { PaginatedListShell } from "@/components/shared/paginated-list-shell";
+import {
+  PoReviewLinesPanel,
+  poDepartmentFilterOptions,
+} from "@/components/supply-chain/po-review-lines-panel";
 import { ChevronDown, ChevronRight } from "lucide-react";
-import { cn } from "@/lib/utils";
 
 export function PoHistoryPanel({
   purchaseOrders,
@@ -32,6 +35,28 @@ export function PoHistoryPanel({
   );
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
+  const deptFilterOptions = useMemo(
+    () => poDepartmentFilterOptions(history),
+    [history],
+  );
+
+  const statusOptions = useMemo(() => {
+    const present = new Set(history.map((p) => p.status));
+    const all = [
+      { value: "disbursed", label: "Disbursed" },
+      { value: "retirement_pending", label: "Retirement pending" },
+      {
+        value: "retirement_pending_accountant",
+        label: "Retirement review",
+      },
+      { value: "retirement_rejected", label: "Retirement rejected" },
+      { value: "retired", label: "Retired" },
+      { value: "accountant_rejected", label: "Accountant rejected" },
+      { value: "manager_rejected", label: "Manager rejected" },
+    ];
+    return all.filter((o) => present.has(o.value as PurchaseOrder["status"]));
+  }, [history]);
+
   return (
     <PaginatedListShell
       items={history}
@@ -45,24 +70,41 @@ export function PoHistoryPanel({
           po.poNumber.toLowerCase().includes(q) ||
           po.weekLabel.toLowerCase().includes(q) ||
           po.createdByName.toLowerCase().includes(q) ||
-          formatPoRaisedAt(po.createdAt).toLowerCase().includes(q)
+          formatPoRaisedAt(po.createdAt).toLowerCase().includes(q) ||
+          po.lines.some((l) => l.name.toLowerCase().includes(q))
         );
       }}
       filters={[
-        {
-          key: "status",
-          label: "Status",
-          options: [
-            { value: "disbursed", label: "Disbursed" },
-            { value: "retirement_pending", label: "Retirement pending" },
-            {
-              value: "retirement_pending_accountant",
-              label: "Retirement review",
-            },
-            { value: "retired", label: "Retired" },
-          ],
-        },
+        ...(statusOptions.length
+          ? [
+              {
+                key: "status",
+                label: "Status",
+                options: statusOptions,
+              },
+            ]
+          : []),
+        ...(deptFilterOptions.length
+          ? [
+              {
+                key: "dept",
+                label: "Department",
+                options: deptFilterOptions,
+              },
+            ]
+          : []),
       ]}
+      filterMatch={(po, key, value) => {
+        if (key === "status") {
+          if (!value || value === "all") return true;
+          return po.status === value;
+        }
+        if (key === "dept") {
+          if (!value || value === "all") return true;
+          return po.lines.some((l) => l.dept === value);
+        }
+        return undefined;
+      }}
       emptyMessage={
         emptyMessageProp ??
         "No accepted purchase orders in history yet. POs appear here after manager approval and market purchase."
@@ -74,6 +116,16 @@ export function PoHistoryPanel({
             const open = expandedId === po.id;
             const { mode, lines } = getPoHistoryLines(po);
             const boughtCount = lines.filter((l) => !l.notBought).length;
+            const asPoLines: PoLine[] = lines.map((line) => ({
+              id: line.id,
+              stockItemId: line.stockItemId,
+              name: line.name,
+              dept: line.dept,
+              unit: line.unit,
+              quantityOrdered: line.quantity,
+              unitPrice: line.unitPrice,
+              lineTotal: line.lineTotal,
+            }));
 
             return (
               <div key={po.id} className="rounded-md border overflow-hidden">
@@ -123,66 +175,13 @@ export function PoHistoryPanel({
                         </>
                       )}
                     </p>
-                    <div className="space-y-1 sm:hidden">
-                      {lines.map((line) => (
-                        <div
-                          key={line.id}
-                          className={cn(
-                            "rounded border bg-background px-2 py-1.5 text-xs",
-                            line.notBought && "opacity-60 line-through",
-                          )}
-                        >
-                          <p className="font-medium">
-                            {line.notBought ? "* " : ""}
-                            {line.name}
-                          </p>
-                          <p className="text-muted-foreground tabular-nums">
-                            {line.quantity} {line.unit} ·{" "}
-                            {formatNaira(line.lineTotal)}
-                          </p>
-                        </div>
-                      ))}
-                    </div>
-                    <table className="w-full text-xs hidden sm:table">
-                      <thead>
-                        <tr className="text-left text-muted-foreground">
-                          <th className="pb-1 font-medium">Item</th>
-                          <th className="pb-1 font-medium text-right">Qty</th>
-                          <th className="pb-1 font-medium text-right">Unit</th>
-                          <th className="pb-1 font-medium text-right">Total</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {lines.map((line) => (
-                          <tr
-                            key={line.id}
-                            className={cn(
-                              "border-t border-border/50",
-                              line.notBought && "opacity-60",
-                            )}
-                          >
-                            <td
-                              className={cn(
-                                "py-1 pr-2",
-                                line.notBought && "line-through",
-                              )}
-                            >
-                              {line.notBought ? "* " : ""}
-                              {line.name}
-                            </td>
-                            <td className="py-1 text-right tabular-nums">
-                              {line.quantity} {line.unit}
-                            </td>
-                            <td className="py-1 text-right tabular-nums">
-                              {formatNaira(line.unitPrice)}
-                            </td>
-                            <td className="py-1 text-right tabular-nums font-medium">
-                              {formatNaira(line.lineTotal)}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                    <PoReviewLinesPanel
+                      lines={asPoLines}
+                      pageSize={10}
+                      showDept
+                      compact
+                      title={`${mode === "retirement" ? "Retirement" : "Order"} lines (${lines.length})`}
+                    />
                   </div>
                 )}
               </div>
