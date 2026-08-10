@@ -1,8 +1,10 @@
 import { createClient } from '@/lib/supabase/client'
 import {
+  folioGuestCreditAmount,
   folioPositiveOutstandingSum,
   type FolioLineForBalance,
 } from '@/lib/utils/booking-bill-balance'
+import { pickPreferredGuestLedgerAccount } from '@/lib/utils/guest-city-ledger'
 
 /**
  * Computes the net outstanding balance for a guest across all their bookings.
@@ -36,7 +38,7 @@ export async function calculateGuestBalance(
   // Get all folio charges for these bookings
   const { data: charges } = await supabase
     .from('folio_charges')
-    .select('amount, charge_type, payment_status, payment_method')
+    .select('booking_id, amount, charge_type, payment_status, payment_method')
     .in('booking_id', bookingIds)
 
   if (!charges || charges.length === 0) {
@@ -54,8 +56,10 @@ export async function calculateGuestBalance(
   const byBooking: Record<string, FolioLineForBalance[]> = {}
   for (const c of charges) {
     if (c.payment_status === 'posted_to_ledger') continue
-    if (!byBooking[c.booking_id]) byBooking[c.booking_id] = []
-    byBooking[c.booking_id].push({
+    const bid = String((c as { booking_id?: string }).booking_id || '')
+    if (!bid) continue
+    if (!byBooking[bid]) byBooking[bid] = []
+    byBooking[bid].push({
       amount: c.amount,
       charge_type: c.charge_type,
       payment_status: c.payment_status,
@@ -63,24 +67,49 @@ export async function calculateGuestBalance(
     })
   }
 
-  let balance = 0
+  let debt = 0
+  let credit = 0
   for (const b of bookings) {
-    balance += Math.max(0, folioPositiveOutstandingSum(byBooking[b.id] ?? []))
+    const ch = byBooking[b.id] ?? []
+    debt += Math.max(0, folioPositiveOutstandingSum(ch))
+    credit += folioGuestCreditAmount(ch)
   }
 
-  return Math.max(0, balance)
+  if (debt > 0.005) return debt
+  if (credit > 0.005) return -credit
+  return 0
+}
+
+type GuestBalanceInput = string | { id: string; name?: string | null }
+
+function normalizeGuestInputs(
+  guestIdsOrGuests: GuestBalanceInput[],
+): { id: string; name: string }[] {
+  return guestIdsOrGuests.map((g) =>
+    typeof g === 'string'
+      ? { id: g, name: '' }
+      : { id: g.id, name: String(g.name || '').trim() },
+  )
 }
 
 /**
  * Batch-calculate balances for multiple guests in one set of queries.
- * Accepts supabase instance (created in the page) to share organization context.
- * Returns a map of guestId → balance.
+ * Positive = still owes; negative = prepaid credit available.
+ * When organizationId + guest names are provided, city-ledger credit is included.
  */
 export async function calculateGuestBalancesBatch(
   supabase: any,
-  guestIds: string[]
+  guestIdsOrGuests: GuestBalanceInput[],
+  organizationId?: string | null,
 ): Promise<Record<string, number>> {
+  const guests = normalizeGuestInputs(guestIdsOrGuests)
+  const guestIds = guests.map((g) => g.id)
   if (!guestIds.length) return {}
+
+  const nameById: Record<string, string> = {}
+  for (const g of guests) {
+    if (g.name) nameById[g.id] = g.name
+  }
 
   // Get all bookings for these guests (across all orgs, will check per guest later)
   const { data: bookings } = await supabase
@@ -89,66 +118,160 @@ export async function calculateGuestBalancesBatch(
     .in('guest_id', guestIds)
     .not('status', 'in', '("cancelled")')
 
+  const debtMap: Record<string, number> = Object.fromEntries(
+    guestIds.map((id) => [id, 0]),
+  )
+  const creditMap: Record<string, number> = Object.fromEntries(
+    guestIds.map((id) => [id, 0]),
+  )
+
   if (!bookings || bookings.length === 0) {
-    return Object.fromEntries(guestIds.map(id => [id, 0]))
+    return await applyLedgerCreditsToBalanceMap(
+      supabase,
+      debtMap,
+      creditMap,
+      nameById,
+      organizationId,
+    )
   }
 
   // Get all folio charges for all these bookings in one query
   const { data: charges } = await supabase
     .from('folio_charges')
     .select('booking_id, amount, charge_type, payment_status, payment_method')
-    .in('booking_id', bookings.map(b => b.id))
+    .in(
+      'booking_id',
+      bookings.map((b: { id: string }) => b.id),
+    )
 
   // Build a bookingId → guestId map
   const bookingToGuest: Record<string, string> = {}
-  const bookingMap: Record<string, { total_amount: number; deposit: number; balance?: number; payment_status: string }> = {}
-  bookings.forEach(b => {
+  bookings.forEach((b: { id: string; guest_id: string }) => {
     bookingToGuest[b.id] = b.guest_id
-    bookingMap[b.id] = b
   })
-
-  // Compute balance per guest
-  const balanceMap: Record<string, number> = Object.fromEntries(guestIds.map(id => [id, 0]))
 
   if (!charges || charges.length === 0) {
     // Fall back: compute from booking totals
-    bookings.forEach(b => {
-      const gId = b.guest_id
-      if (b.payment_status !== 'paid') {
-        const owed = Math.max(0, (b.total_amount || 0) - (b.deposit || 0))
-        balanceMap[gId] = (balanceMap[gId] || 0) + owed
-      }
-    })
-    return balanceMap
+    bookings.forEach(
+      (b: {
+        guest_id: string
+        payment_status?: string
+        total_amount?: number
+        deposit?: number
+      }) => {
+        const gId = b.guest_id
+        if (b.payment_status !== 'paid') {
+          const owed = Math.max(0, (b.total_amount || 0) - (b.deposit || 0))
+          debtMap[gId] = (debtMap[gId] || 0) + owed
+        }
+      },
+    )
+    return await applyLedgerCreditsToBalanceMap(
+      supabase,
+      debtMap,
+      creditMap,
+      nameById,
+      organizationId,
+    )
   }
 
   const chargesByBooking: Record<string, FolioLineForBalance[]> = {}
   const postedToOrganizationLedger = new Set<string>()
-  charges.forEach((c) => {
-    if (c.payment_status === 'posted_to_ledger') {
-      postedToOrganizationLedger.add(c.booking_id)
-      return
-    }
-    if (!chargesByBooking[c.booking_id]) chargesByBooking[c.booking_id] = []
-    chargesByBooking[c.booking_id].push({
-      amount: c.amount,
-      charge_type: c.charge_type,
-      payment_status: c.payment_status,
-      payment_method: c.payment_method,
-    })
-  })
+  charges.forEach(
+    (c: {
+      booking_id: string
+      payment_status?: string | null
+      amount?: unknown
+      charge_type?: string | null
+      payment_method?: string | null
+    }) => {
+      if (c.payment_status === 'posted_to_ledger') {
+        postedToOrganizationLedger.add(c.booking_id)
+        return
+      }
+      if (!chargesByBooking[c.booking_id]) chargesByBooking[c.booking_id] = []
+      chargesByBooking[c.booking_id].push({
+        amount: c.amount,
+        charge_type: c.charge_type,
+        payment_status: c.payment_status,
+        payment_method: c.payment_method,
+      })
+    },
+  )
 
-  bookings.forEach((b) => {
+  bookings.forEach((b: { id: string; guest_id: string }) => {
     const gId = b.guest_id
     if (postedToOrganizationLedger.has(b.id)) return
-    const outstanding = folioPositiveOutstandingSum(chargesByBooking[b.id] ?? [])
-    balanceMap[gId] = (balanceMap[gId] || 0) + Math.max(0, outstanding)
+    const ch = chargesByBooking[b.id] ?? []
+    debtMap[gId] = (debtMap[gId] || 0) + Math.max(0, folioPositiveOutstandingSum(ch))
+    creditMap[gId] = (creditMap[gId] || 0) + folioGuestCreditAmount(ch)
   })
 
-  // Clamp negatives to 0 (credit balance shown elsewhere)
-  Object.keys(balanceMap).forEach(id => {
-    balanceMap[id] = Math.max(0, balanceMap[id] || 0)
-  })
+  return await applyLedgerCreditsToBalanceMap(
+    supabase,
+    debtMap,
+    creditMap,
+    nameById,
+    organizationId,
+  )
+}
+
+async function applyLedgerCreditsToBalanceMap(
+  supabase: any,
+  debtMap: Record<string, number>,
+  creditMap: Record<string, number>,
+  nameById: Record<string, string>,
+  organizationId?: string | null,
+): Promise<Record<string, number>> {
+  const balanceMap: Record<string, number> = {}
+  const ledgerCreditByName = new Map<string, number>()
+
+  const names = Object.values(nameById).filter(Boolean)
+  if (organizationId && names.length > 0) {
+    const { data: ledgerRows } = await supabase
+      .from('city_ledger_accounts')
+      .select('account_name, balance, account_type')
+      .eq('organization_id', organizationId)
+      .in('account_type', ['individual', 'guest'])
+      .limit(2000)
+
+    // Group by name — prefer largest prepaid credit (most negative)
+    const byName: Record<string, { balance?: unknown }[]> = {}
+    for (const row of ledgerRows || []) {
+      const key = String(row.account_name || '')
+        .trim()
+        .toLowerCase()
+      if (!key) continue
+      if (!byName[key]) byName[key] = []
+      byName[key].push(row)
+    }
+    for (const [key, rows] of Object.entries(byName)) {
+      const preferred = pickPreferredGuestLedgerAccount(rows)
+      const bal = Number(preferred?.balance ?? 0)
+      if (bal < -0.005) {
+        ledgerCreditByName.set(key, Math.abs(bal))
+      }
+    }
+  }
+
+  for (const id of Object.keys(debtMap)) {
+    const debt = Math.max(0, debtMap[id] || 0)
+    const folioCredit = Math.max(0, creditMap[id] || 0)
+    const nameKey = String(nameById[id] || '')
+      .trim()
+      .toLowerCase()
+    const ledgerCredit = nameKey ? ledgerCreditByName.get(nameKey) || 0 : 0
+    const credit = Math.max(folioCredit, ledgerCredit)
+
+    if (debt > 0.005) {
+      // Still owing — show debt; credit is tracked on guest detail
+      balanceMap[id] = debt
+    } else if (credit > 0.005) {
+      balanceMap[id] = -credit
+    } else {
+      balanceMap[id] = 0
+    }
+  }
 
   return balanceMap
 }

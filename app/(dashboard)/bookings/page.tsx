@@ -547,7 +547,7 @@ export default function BookingsPage() {
         });
 
         if (statusKey === "checked_in") {
-          // Default list: Occ + Res only — due-out guests are excluded (use Due filter).
+          // Default list: Occ + due-today + arrive-today reservations.
           bookingsWithUsers = bookingsWithUsers.filter((b: any) =>
             isShownOnDefaultBookingsList(b, today, tz),
           );
@@ -1366,9 +1366,9 @@ export default function BookingsPage() {
             Bookings
           </h1>
           <p className="text-muted-foreground text-xs sm:text-sm leading-snug max-w-3xl">
-            Default: <strong>occupied + reservations</strong> (due-out guests
-            are listed under Status → Due out). Search finds any booking in the
-            last 90 days. Checkout frees the room.
+            Default: <strong>occupied + due today + today’s arrivals</strong>.
+            Due guests stay in this list with a note. Search finds any booking
+            in the last 90 days. Checkout frees the room.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-1.5 shrink-0">
@@ -1402,7 +1402,7 @@ export default function BookingsPage() {
               </div>
               <div
                 className="inline-flex h-7 items-center gap-1 rounded-md border border-amber-200/80 bg-amber-50/50 px-1.5 text-[10px] font-medium leading-none shadow-sm"
-                title="Due out today or overdue — not counted in Occ; use Status → Due out"
+                title="Checkout today (due out) — not counted in Occ; also shown in the default list"
               >
                 <CalendarClock
                   className="h-3 w-3 shrink-0 text-amber-700"
@@ -1551,7 +1551,7 @@ export default function BookingsPage() {
             key: "status",
             label: "Status",
             options: [
-              { value: "checked_in", label: "In house (Occ + Res)" },
+              { value: "checked_in", label: "In house (Occ + Due + Res)" },
               { value: "due_out", label: "Due out today" },
               { value: "reserved", label: "Reserved" },
               { value: "confirmed", label: "Confirmed" },
@@ -1562,7 +1562,7 @@ export default function BookingsPage() {
         emptyState={{
           title: "No bookings match your filters",
           description:
-            "Default list hides due-out guests (use Status → Due out). Stay date lists every guest occupying that hotel night. Clear the date for today’s Occ + Res list.",
+            "Default list shows occupied, due today, and today’s arrivals. Stay date lists every guest occupying that hotel night. Clear the date for today’s in-house list.",
         }}
         dateField="check_in"
         checkOutField="check_out"
@@ -1586,12 +1586,15 @@ export default function BookingsPage() {
                 resolveHotelTimeZone(),
               );
               const isReservationRow = stayKind === "reserved";
+              const isDueOutRow = stayKind === "due_out";
               return (
               <div
                 className={`cursor-pointer hover:text-primary ${
                   isReservationRow
                     ? "rounded-md border border-violet-200 bg-violet-50/60 px-1.5 py-1 dark:border-violet-900/40 dark:bg-violet-950/30"
-                    : ""
+                    : isDueOutRow
+                      ? "rounded-md border border-amber-200 bg-amber-50/60 px-1.5 py-1 dark:border-amber-900/40 dark:bg-amber-950/30"
+                      : ""
                 }`}
                 onClick={() =>
                   router.push(
@@ -1611,6 +1614,14 @@ export default function BookingsPage() {
                       Reservation — not checked in
                     </Badge>
                   )}
+                  {isDueOutRow && (
+                    <Badge
+                      variant="outline"
+                      className="text-[10px] px-1 py-0 bg-amber-100 text-amber-900 border-amber-200"
+                    >
+                      Due out today
+                    </Badge>
+                  )}
                 </div>
                 <div className="text-xs text-muted-foreground max-md:hidden">
                   {booking.guests?.phone}
@@ -1626,6 +1637,9 @@ export default function BookingsPage() {
                   </div>
                   {isReservationRow && (
                     <div className="text-violet-700">Reservation</div>
+                  )}
+                  {isDueOutRow && (
+                    <div className="text-amber-800">Due out today</div>
                   )}
                 </MobileTableSubdetail>
               </div>

@@ -138,9 +138,14 @@ export default function AccountsPage() {
       )
 
       const guestData = allGuests ?? []
-      const guestIds = guestData.map((g) => g.id)
       const balanceMap =
-        guestIds.length > 0 ? await calculateGuestBalancesBatch(supabase, guestIds) : {}
+        guestData.length > 0
+          ? await calculateGuestBalancesBatch(
+              supabase,
+              guestData.map((g) => ({ id: g.id, name: g.name })),
+              organizationId,
+            )
+          : {}
 
       const unifiedGuests = buildGuestAccounts(guestData, balanceMap, inHouseGuestIds)
       const inHouseGuests = unifiedGuests.filter((g) => g.inHouseToday)
@@ -381,13 +386,29 @@ export default function AccountsPage() {
                 {
                   key: 'balance',
                   label: 'Balance',
-                  render: (row: UnifiedAccount) => (
-                    <span
-                      className={`font-semibold text-xs md:text-sm ${row.balance > 0 ? 'text-red-600' : 'text-green-600'}`}
-                    >
-                      {formatNaira(row.balance)}
-                    </span>
-                  ),
+                  render: (row: UnifiedAccount) => {
+                    const bal = Number(row.balance || 0)
+                    const isCredit = bal < -0.005
+                    const isDebt = bal > 0.005
+                    return (
+                      <div
+                        className={`font-semibold text-xs md:text-sm ${
+                          isDebt
+                            ? 'text-red-600'
+                            : isCredit
+                              ? 'text-blue-600'
+                              : 'text-green-600'
+                        }`}
+                      >
+                        <div>{formatNaira(Math.abs(bal))}</div>
+                        {isCredit && (
+                          <div className="text-[10px] font-normal text-blue-600/80">
+                            Credit
+                          </div>
+                        )}
+                      </div>
+                    )
+                  },
                 },
                 {
                   key: 'accountType',
