@@ -35,6 +35,7 @@ import type {
   KitchenRawStockItem,
   KitchenStockItem,
   PendingStoreItem,
+  PoLine,
   ProductionBatch,
   PurchaseOrder,
   RawKitchenIssueInput,
@@ -61,13 +62,19 @@ import {
 import {
   basketLineToPoLine,
   canEditStorePurchaseOrder,
+  canMutatePurchaseOrder,
   getActivePurchaseOrder,
   isPurchaseOrderAwaitingAccountant,
+  listKitchenOrdersAtStore,
+  listOrdersAwaitingAccountant,
+  listOrdersAwaitingManager,
   poLinesToBasketLines,
+  poOriginOf,
   recalcPoTotals,
   showsStoreDraftPurchaseList,
   storeItemToPoLine,
 } from "./po-active";
+import type { PoOrigin } from "./types";
 import { pushSupplyNotification } from "./supply-notifications";
 import { toast } from "sonner";
 import { clearKitchenBatchDraft } from "./kitchen-batch-draft";
@@ -89,7 +96,7 @@ import {
   updateSupplyCatalogItem,
 } from "./supply-db-client";
 import { resolveSupplySnapshot } from "./snapshot-merge";
-import { mergePurchaseOrdersFromRemote } from "./po-sync-merge";
+import { mergePurchaseOrdersFromRemote, dedupePurchaseOrders } from "./po-sync-merge";
 import {
   mergeProductionBatchesFromRemote,
   mergeRecipesFromRemote,
@@ -377,6 +384,8 @@ function useSupplyChainImpl() {
   useEffect(() => {
     basketRef.current = basket;
   }, [basket]);
+  const [workingPoId, setWorkingPoId] = useState<string | null>(null);
+  const [poWorkspaceOrigin, setPoWorkspaceOrigin] = useState<PoOrigin>("store");
   const [purchaseOrders, setPurchaseOrders] = usePersistedArrayState<PurchaseOrder>(
     PURCHASE_ORDERS_STORAGE_KEY,
     EMPTY_PURCHASE_ORDERS,
@@ -561,7 +570,9 @@ function useSupplyChainImpl() {
         if (mergedFnbRaw.length) setFnbRawStock(mergedFnbRaw);
         if (mergedActivity.length) setActivityLog(mergedActivity);
         if (Array.isArray(snapshots.purchase_orders) && snapshots.purchase_orders.length) {
-          setPurchaseOrders(snapshots.purchase_orders as PurchaseOrder[]);
+          setPurchaseOrders(
+            dedupePurchaseOrders(snapshots.purchase_orders as PurchaseOrder[]),
+          );
         }
         if (Array.isArray(snapshots.issue_out_log) && snapshots.issue_out_log.length) {
           setIssueOutLog(snapshots.issue_out_log as IssueOutRecord[]);
@@ -877,9 +888,30 @@ function useSupplyChainImpl() {
   }, []);
 
   const activePurchaseOrder = useMemo(
-    () => getActivePurchaseOrder(purchaseOrders),
+    () => getActivePurchaseOrder(purchaseOrders, poWorkspaceOrigin, workingPoId),
+    [purchaseOrders, poWorkspaceOrigin, workingPoId],
+  );
+
+  const selectWorkingPurchaseOrder = useCallback(
+    (poId: string | null) => {
+      setWorkingPoId(poId);
+      if (!poId) return;
+      const focused = purchaseOrders.find((p) => p.id === poId);
+      if (
+        focused &&
+        focused.lines.length > 0 &&
+        showsStoreDraftPurchaseList(focused)
+      ) {
+        setBasket(poLinesToBasketLines(focused.lines));
+      }
+    },
     [purchaseOrders],
   );
+
+  const setPurchaseWorkspaceOrigin = useCallback((origin: PoOrigin) => {
+    setPoWorkspaceOrigin(origin);
+    setWorkingPoId(null);
+  }, []);
 
   const basketMigratedRef = useRef(false);
 
@@ -891,8 +923,14 @@ function useSupplyChainImpl() {
     }
     if (activePurchaseOrder.lines.length) {
       setBasket(poLinesToBasketLines(activePurchaseOrder.lines));
+    } else {
+      setBasket([]);
     }
-  }, [activePurchaseOrder?.id, activePurchaseOrder?.status]);
+  }, [
+    activePurchaseOrder?.id,
+    activePurchaseOrder?.status,
+    activePurchaseOrder?.lines,
+  ]);
 
   useEffect(() => {
     if (basketMigratedRef.current || activePurchaseOrder) return;
@@ -907,6 +945,7 @@ function useSupplyChainImpl() {
       poNumber: formatPurchaseOrderNumber(now),
       weekLabel: formatPurchaseWeekLabel(now),
       status: "draft",
+      origin: "store",
       createdBy: "Store",
       createdByName: "Store",
       createdAt: now.toISOString(),
@@ -915,9 +954,9 @@ function useSupplyChainImpl() {
       lines,
     };
     setPurchaseOrders((prev) =>
-      getActivePurchaseOrder(prev) ? prev : [po, ...prev],
+      getActivePurchaseOrder(prev, "store", workingPoId) ? prev : [po, ...prev],
     );
-  }, [activePurchaseOrder, basket]);
+  }, [activePurchaseOrder, basket, workingPoId]);
 
   const upsertActivePoLine = useCallback(
     (
@@ -936,10 +975,10 @@ function useSupplyChainImpl() {
       let err: string | undefined;
       let basketPatch: BasketLine[] | "remove-item" | undefined;
       setPurchaseOrders((prev) => {
-        const active = getActivePurchaseOrder(prev);
+        const active = getActivePurchaseOrder(prev, poWorkspaceOrigin, workingPoId);
         if (active && !canEditStorePurchaseOrder(active)) {
           err =
-            "Cannot add items — a purchase order is already with the accountant or in approval.";
+            "Cannot add items — this purchase order is locked in its current status.";
           return prev;
         }
 
@@ -977,6 +1016,7 @@ function useSupplyChainImpl() {
             poNumber: formatPurchaseOrderNumber(now),
             weekLabel: formatPurchaseWeekLabel(now),
             status: "draft",
+            origin: poWorkspaceOrigin,
             createdBy: actor.name,
             createdByName: actor.name,
             createdAt: now.toISOString(),
@@ -985,6 +1025,7 @@ function useSupplyChainImpl() {
             lines,
           };
           basketPatch = poLinesToBasketLines(lines);
+          setWorkingPoId(po.id);
           return [po, ...prev];
         }
 
@@ -1011,7 +1052,7 @@ function useSupplyChainImpl() {
       }
       return err;
     },
-    [],
+    [poWorkspaceOrigin, workingPoId],
   );
 
   const addToBasket = useCallback(
@@ -1041,14 +1082,18 @@ function useSupplyChainImpl() {
   );
 
   const clearBasket = useCallback((): { ok: true } | { error: string } => {
-    const active = getActivePurchaseOrder(purchaseOrders);
+    const active = getActivePurchaseOrder(
+      purchaseOrders,
+      poWorkspaceOrigin,
+      workingPoId,
+    );
     if (active && !canEditStorePurchaseOrder(active)) {
       return {
         error: "Cannot clear — purchase order is locked while in approval.",
       };
     }
     setPurchaseOrders((prev) => {
-      const current = getActivePurchaseOrder(prev);
+      const current = getActivePurchaseOrder(prev, poWorkspaceOrigin, workingPoId);
       if (!current || !canEditStorePurchaseOrder(current)) return prev;
       return prev.map((p) =>
         p.id === current.id
@@ -1058,7 +1103,7 @@ function useSupplyChainImpl() {
     });
     setBasket([]);
     return { ok: true };
-  }, [purchaseOrders]);
+  }, [purchaseOrders, poWorkspaceOrigin, workingPoId]);
 
   const setBasketLineQty = useCallback(
     (
@@ -1087,7 +1132,11 @@ function useSupplyChainImpl() {
 
   const removeFromBasket = useCallback(
     (stockItemId: string): { ok: true } | { error: string } => {
-      const active = getActivePurchaseOrder(purchaseOrders);
+      const active = getActivePurchaseOrder(
+        purchaseOrders,
+        poWorkspaceOrigin,
+        workingPoId,
+      );
       if (active && !canEditStorePurchaseOrder(active)) {
         return {
           error: "Cannot remove — purchase order is locked while in approval.",
@@ -1095,7 +1144,11 @@ function useSupplyChainImpl() {
       }
       let basketPatch: BasketLine[] | undefined;
       setPurchaseOrders((prev) => {
-        const current = getActivePurchaseOrder(prev);
+        const current = getActivePurchaseOrder(
+          prev,
+          poWorkspaceOrigin,
+          workingPoId,
+        );
         if (!current || !canEditStorePurchaseOrder(current)) return prev;
         const nextLines = current.lines.filter(
           (l) => l.stockItemId !== stockItemId,
@@ -1111,15 +1164,29 @@ function useSupplyChainImpl() {
       if (basketPatch !== undefined) setBasket(basketPatch);
       return { ok: true };
     },
-    [purchaseOrders],
+    [purchaseOrders, poWorkspaceOrigin, workingPoId],
   );
 
   const sendBasketForApproval = useCallback(
     (actor: Actor): { po: PurchaseOrder } | { error: string } => {
-      const active = getActivePurchaseOrder(purchaseOrders);
+      const active = getActivePurchaseOrder(
+        purchaseOrders,
+        poWorkspaceOrigin,
+        workingPoId,
+      );
       const lines = active?.lines ?? basket;
       if (!lines.length) {
         return { error: "Add items to the draft purchase list first" };
+      }
+
+      // Kitchen drafts go to store first — not straight to accountant.
+      if (
+        (!active || active.status === "draft" || active.status === "accountant_rejected") &&
+        (poWorkspaceOrigin === "kitchen" || poOriginOf(active) === "kitchen")
+      ) {
+        return {
+          error: "Use “Send to store” for kitchen orders.",
+        };
       }
 
       if (active && isPurchaseOrderAwaitingAccountant(active)) {
@@ -1128,7 +1195,26 @@ function useSupplyChainImpl() {
         };
       }
 
-      if (active && !canEditStorePurchaseOrder(active)) {
+      const otherAwaiting = purchaseOrders.find(
+        (p) =>
+          p.status === "pending_accountant" &&
+          p.id !== active?.id &&
+          p.poNumber !== active?.poNumber,
+      );
+      if (otherAwaiting) {
+        return {
+          error: `${otherAwaiting.poNumber} is already awaiting accountant. Finish that review before sending another.`,
+        };
+      }
+
+      if (
+        active &&
+        active.status !== "draft" &&
+        active.status !== "accountant_rejected" &&
+        active.status !== "manager_rejected" &&
+        active.status !== "pending_store" &&
+        !canEditStorePurchaseOrder(active)
+      ) {
         return {
           error: "This purchase order cannot be edited or resent in its current status.",
         };
@@ -1139,6 +1225,7 @@ function useSupplyChainImpl() {
         : (lines as BasketLine[]).map((b) => basketLineToPoLine(b));
       const { total, lines: recalcLines } = recalcPoTotals(poLines);
       const now = new Date();
+      const nowIso = now.toISOString();
       const submitted: PurchaseOrder = active
         ? {
             ...active,
@@ -1147,15 +1234,123 @@ function useSupplyChainImpl() {
             totalAmount: total,
             cashDisbursed: total,
             accountantComment: undefined,
+            accountantDecidedBy: undefined,
+            accountantDecidedRole: undefined,
+            accountantDecidedAt: undefined,
+            managerComment: undefined,
+            managerDecidedBy: undefined,
+            managerDecidedRole: undefined,
+            managerDecidedAt: undefined,
+            sentToAccountantAt: nowIso,
+            sentToAccountantBy: actor.name,
+            workflowUpdatedAt: nowIso,
           }
         : {
             id: uid("po"),
             poNumber: formatPurchaseOrderNumber(now),
             weekLabel: formatPurchaseWeekLabel(now),
             status: "pending_accountant",
+            origin: "store",
             createdBy: actor.name,
             createdByName: actor.name,
-            createdAt: now.toISOString(),
+            createdAt: nowIso,
+            sentToAccountantAt: nowIso,
+            sentToAccountantBy: actor.name,
+            workflowUpdatedAt: nowIso,
+            cashDisbursed: total,
+            totalAmount: total,
+            lines: recalcLines,
+          };
+
+      setPurchaseOrders((prev) => {
+        const next = active
+          ? prev.map((p) => (p.id === active.id ? submitted : p))
+          : [submitted, ...prev];
+        return dedupePurchaseOrders(next);
+      });
+      setBasket(poLinesToBasketLines(recalcLines));
+      // Keep focus on the sent PO so the UI does not jump back to another draft.
+      setWorkingPoId(submitted.id);
+      setActivityLog((a) =>
+        log(
+          a,
+          "po_submitted",
+          actor,
+          `Sent ${submitted.poNumber} — ₦${total.toLocaleString()} to accountant for approval`,
+          submitted.id,
+        ),
+      );
+      const originNote =
+        poOriginOf(submitted) === "kitchen" ? " (kitchen order)" : "";
+      pushSupplyNotification({
+        audience: ["accountant", "manager"],
+        title: `PO raised — ${submitted.poNumber}`,
+        body: `${actor.name} sent ${submitted.poNumber}${originNote} (₦${total.toLocaleString()}) for approval`,
+        href: "/expenses?tab=purchase_orders",
+      });
+      schedulePersistSnapshots();
+      return { po: submitted };
+    },
+    [
+      basket,
+      purchaseOrders,
+      poWorkspaceOrigin,
+      workingPoId,
+      schedulePersistSnapshots,
+      persistSnapshotsNow,
+    ],
+  );
+
+  /** Chef / kitchen: send draft kitchen list to central store for review. */
+  const sendKitchenOrderToStore = useCallback(
+    (actor: Actor): { po: PurchaseOrder } | { error: string } => {
+      const active = getActivePurchaseOrder(purchaseOrders, "kitchen", workingPoId);
+      const lines = active?.lines ?? (poWorkspaceOrigin === "kitchen" ? basket : []);
+      if (!lines.length) {
+        return { error: "Add kitchen items to the purchase list first" };
+      }
+      if (
+        active &&
+        active.status !== "draft" &&
+        active.status !== "accountant_rejected" &&
+        active.status !== "manager_rejected"
+      ) {
+        return {
+          error: "This kitchen order is already with the store or in approval.",
+        };
+      }
+
+      const poLines = active
+        ? active.lines
+        : (lines as BasketLine[]).map((b) => basketLineToPoLine(b));
+      const { total, lines: recalcLines } = recalcPoTotals(poLines);
+      const now = new Date();
+      const nowIso = now.toISOString();
+      const submitted: PurchaseOrder = active
+        ? {
+            ...active,
+            origin: "kitchen",
+            status: "pending_store",
+            lines: recalcLines,
+            totalAmount: total,
+            cashDisbursed: total,
+            accountantComment: undefined,
+            sentToStoreAt: nowIso,
+            sentToStoreBy: actor.name,
+            workflowUpdatedAt: nowIso,
+          }
+        : {
+            id: uid("po"),
+            poNumber: formatPurchaseOrderNumber(now),
+            weekLabel: formatPurchaseWeekLabel(now),
+            status: "pending_store",
+            origin: "kitchen",
+            createdBy: actor.name,
+            createdByName: actor.name,
+            createdAt: nowIso,
+            sentToStoreAt: nowIso,
+            sentToStoreBy: actor.name,
+            workflowUpdatedAt: nowIso,
             cashDisbursed: total,
             totalAmount: total,
             lines: recalcLines,
@@ -1167,26 +1362,33 @@ function useSupplyChainImpl() {
         }
         return [submitted, ...prev];
       });
-      setBasket(poLinesToBasketLines(recalcLines));
+      setBasket([]);
+      setWorkingPoId(null);
       setActivityLog((a) =>
         log(
           a,
           "po_submitted",
           actor,
-          `Sent ${submitted.poNumber} — ₦${total.toLocaleString()} to accountant for approval`,
+          `Kitchen order ${submitted.poNumber} sent to store`,
           submitted.id,
         ),
       );
       pushSupplyNotification({
-        audience: ["accountant", "manager"],
-        title: `PO raised — ${submitted.poNumber}`,
-        body: `${actor.name} sent ${submitted.poNumber} (₦${total.toLocaleString()}) for approval`,
-        href: "/expenses?tab=purchase_orders",
+        audience: ["store"],
+        title: `Kitchen order — ${submitted.poNumber}`,
+        body: `${actor.name} sent a kitchen purchase list (₦${total.toLocaleString()}) for store review`,
+        href: "/supply/store?tab=orders",
       });
       schedulePersistSnapshots();
       return { po: submitted };
     },
-    [basket, purchaseOrders, schedulePersistSnapshots, persistSnapshotsNow],
+    [
+      basket,
+      purchaseOrders,
+      poWorkspaceOrigin,
+      workingPoId,
+      schedulePersistSnapshots,
+    ],
   );
 
   const submitBasketAsPo = useCallback(
@@ -1198,18 +1400,26 @@ function useSupplyChainImpl() {
 
   const accountantDecision = useCallback(
     (poId: string, approved: boolean, comment: string, actor: Actor) => {
+      const nowIso = new Date().toISOString();
       if (approved) setBasket([]);
       setPurchaseOrders((prev) =>
-        prev.map((po) =>
-          po.id === poId
-            ? {
-                ...po,
-                status: approved ? "pending_manager" : "accountant_rejected",
-                accountantComment: comment,
-              }
-            : po,
+        dedupePurchaseOrders(
+          prev.map((po) =>
+            po.id === poId
+              ? {
+                  ...po,
+                  status: approved ? "pending_manager" : "accountant_rejected",
+                  accountantComment: comment,
+                  accountantDecidedBy: actor.name,
+                  accountantDecidedRole: actor.role,
+                  accountantDecidedAt: nowIso,
+                  workflowUpdatedAt: nowIso,
+                }
+              : po,
+          ),
         ),
       );
+      if (!approved) setWorkingPoId(null);
       setActivityLog((a) =>
         log(
           a,
@@ -1229,20 +1439,33 @@ function useSupplyChainImpl() {
             href: "/expenses?tab=purchase_orders",
           });
         } else {
+          // Rejected lists return to store for edit/resend; kitchen is also notified.
           pushSupplyNotification({
             audience: ["store"],
             title: `PO rejected — ${po.poNumber}`,
-            body: comment || "Accountant rejected this purchase order.",
-            href: "/supply/store",
+            body: comment || "Accountant rejected this purchase order. Edit and resend.",
+            href: "/supply/store?tab=orders",
           });
+          if (poOriginOf(po) === "kitchen") {
+            pushSupplyNotification({
+              audience: ["kitchen"],
+              title: `Kitchen order rejected — ${po.poNumber}`,
+              body:
+                comment ||
+                "Accountant rejected this kitchen order. Store will edit and resend.",
+              href: "/supply/kitchen?tab=purchase",
+            });
+          }
         }
       }
+      schedulePersistSnapshots();
     },
-    [purchaseOrders],
+    [purchaseOrders, schedulePersistSnapshots],
   );
 
   const managerDecision = useCallback(
     (poId: string, approved: boolean, comment: string, actor: Actor) => {
+      const nowIso = new Date().toISOString();
       setPurchaseOrders((prev) =>
         prev.map((po) =>
           po.id === poId
@@ -1250,6 +1473,10 @@ function useSupplyChainImpl() {
                 ...po,
                 status: approved ? "disbursed" : "manager_rejected",
                 managerComment: comment,
+                managerDecidedBy: actor.name,
+                managerDecidedRole: actor.role,
+                managerDecidedAt: nowIso,
+                workflowUpdatedAt: nowIso,
               }
             : po,
         ),
@@ -1277,12 +1504,13 @@ function useSupplyChainImpl() {
             audience: ["store", "accountant"],
             title: `PO rejected by manager — ${po.poNumber}`,
             body: comment || "Manager rejected this purchase order.",
-            href: "/supply/store",
+            href: "/supply/store?tab=orders",
           });
         }
       }
+      schedulePersistSnapshots();
     },
-    [purchaseOrders],
+    [purchaseOrders, schedulePersistSnapshots],
   );
 
   /** Testing: admin approves or rejects a raised PO in one step (skips accountant → manager chain). */
@@ -1297,6 +1525,7 @@ function useSupplyChainImpl() {
       ) {
         setBasket([]);
       }
+      const nowIso = new Date().toISOString();
       setPurchaseOrders((prev) =>
         prev.map((po) => {
           if (po.id !== poId) return po;
@@ -1310,6 +1539,13 @@ function useSupplyChainImpl() {
               ...po,
               status: "disbursed" as const,
               accountantComment: `[Admin test] ${comment}`,
+              accountantDecidedBy: actor.name,
+              accountantDecidedRole: actor.role,
+              accountantDecidedAt: nowIso,
+              managerDecidedBy: actor.name,
+              managerDecidedRole: actor.role,
+              managerDecidedAt: nowIso,
+              workflowUpdatedAt: nowIso,
             };
           }
           if (po.status === "pending_manager") {
@@ -1317,12 +1553,20 @@ function useSupplyChainImpl() {
               ...po,
               status: "manager_rejected" as const,
               managerComment: `[Admin test] ${comment}`,
+              managerDecidedBy: actor.name,
+              managerDecidedRole: actor.role,
+              managerDecidedAt: nowIso,
+              workflowUpdatedAt: nowIso,
             };
           }
           return {
             ...po,
             status: "accountant_rejected" as const,
             accountantComment: `[Admin test] ${comment}`,
+            accountantDecidedBy: actor.name,
+            accountantDecidedRole: actor.role,
+            accountantDecidedAt: nowIso,
+            workflowUpdatedAt: nowIso,
           };
         }),
       );
@@ -1348,11 +1592,95 @@ function useSupplyChainImpl() {
           audience: ["store"],
           title: `PO rejected (admin test) — ${po.poNumber}`,
           body: comment,
-          href: "/supply/store",
+          href: "/supply/store?tab=orders",
         });
+        if (poOriginOf(po) === "kitchen") {
+          pushSupplyNotification({
+            audience: ["kitchen"],
+            title: `Kitchen order rejected (admin test) — ${po.poNumber}`,
+            body: comment,
+            href: "/supply/kitchen?tab=purchase",
+          });
+        }
       }
+      schedulePersistSnapshots();
     },
-    [purchaseOrders],
+    [purchaseOrders, schedulePersistSnapshots],
+  );
+
+  /** Mutate lines on a specific PO (accountant / privileged in-queue edits). */
+  const mutatePurchaseOrderLine = useCallback(
+    (
+      poId: string,
+      stockItemId: string,
+      qty: number,
+      unitPrice?: number,
+    ): string | undefined => {
+      let err: string | undefined;
+      let basketPatch: BasketLine[] | undefined;
+      setPurchaseOrders((prev) => {
+        const po = prev.find((p) => p.id === poId);
+        if (!po) {
+          err = "Purchase order not found";
+          return prev;
+        }
+        if (
+          !canEditStorePurchaseOrder(po) &&
+          po.status !== "pending_accountant" &&
+          po.status !== "pending_manager"
+        ) {
+          err = "This purchase order cannot be edited in its current status.";
+          return prev;
+        }
+        let nextLines: PoLine[];
+        if (!Number.isFinite(qty) || qty <= 0) {
+          nextLines = po.lines.filter((l) => l.stockItemId !== stockItemId);
+        } else {
+          const existing = po.lines.find((l) => l.stockItemId === stockItemId);
+          if (!existing) {
+            err = "Line not found — add items from Store → Purchase orders.";
+            return prev;
+          }
+          nextLines = po.lines.map((l) =>
+            l.stockItemId === stockItemId
+              ? {
+                  ...l,
+                  quantityOrdered: qty,
+                  unitPrice: unitPrice ?? l.unitPrice,
+                  lineTotal: qty * (unitPrice ?? l.unitPrice),
+                  stockQuantityOrdered:
+                    l.stockQuantityOrdered != null && l.quantityOrdered > 0
+                      ? (qty / l.quantityOrdered) * l.stockQuantityOrdered
+                      : qty,
+                }
+              : l,
+          );
+        }
+        const { total, lines } = recalcPoTotals(nextLines);
+        if (
+          workingPoId === poId ||
+          getActivePurchaseOrder(prev, poWorkspaceOrigin, workingPoId)?.id ===
+            poId
+        ) {
+          basketPatch = poLinesToBasketLines(lines);
+        }
+        return prev.map((p) =>
+          p.id === poId
+            ? {
+                ...p,
+                lines,
+                totalAmount: total,
+                cashDisbursed: total,
+                workflowUpdatedAt: new Date().toISOString(),
+              }
+            : p,
+        );
+      });
+      if (basketPatch !== undefined) setBasket(basketPatch);
+      schedulePersistSnapshots();
+      return err;
+    },
+    [poWorkspaceOrigin, workingPoId, schedulePersistSnapshots],
   );
 
   const applyRetirementToStock = useCallback(
@@ -3408,13 +3736,22 @@ function useSupplyChainImpl() {
     pendingStoreItems,
     basket: draftLines,
     activePurchaseOrder,
+    workingPoId,
+    selectWorkingPurchaseOrder,
+    setPurchaseWorkspaceOrigin,
+    poWorkspaceOrigin,
+    kitchenOrdersAtStore: listKitchenOrdersAtStore(purchaseOrders),
+    ordersAwaitingAccountant: listOrdersAwaitingAccountant(purchaseOrders),
+    ordersAwaitingManager: listOrdersAwaitingManager(purchaseOrders),
     addToBasket,
     setBasketLineQty,
     removeFromBasket,
     clearBasket,
     sendBasketForApproval,
+    sendKitchenOrderToStore,
     submitBasketAsPo,
     purchaseOrders,
+    mutatePurchaseOrderLine,
     accountantDecision,
     managerDecision,
     adminTestPoDecision,
@@ -3555,5 +3892,17 @@ export function useSupplyChain() {
     sendBasketForApproval:
       ctx.sendBasketForApproval ??
       (() => ({ error: "Basket not ready — refresh the page" })),
+    sendKitchenOrderToStore:
+      ctx.sendKitchenOrderToStore ??
+      (() => ({ error: "Kitchen PO not ready — refresh the page" })),
+    mutatePurchaseOrderLine:
+      ctx.mutatePurchaseOrderLine ??
+      (() => "Supply chain not ready — refresh the page"),
+    selectWorkingPurchaseOrder: ctx.selectWorkingPurchaseOrder ?? (() => {}),
+    setPurchaseWorkspaceOrigin: ctx.setPurchaseWorkspaceOrigin ?? (() => {}),
+    poWorkspaceOrigin: ctx.poWorkspaceOrigin ?? "store",
+    kitchenOrdersAtStore: ctx.kitchenOrdersAtStore ?? [],
+    ordersAwaitingAccountant: ctx.ordersAwaitingAccountant ?? [],
+    ordersAwaitingManager: ctx.ordersAwaitingManager ?? [],
   };
 }

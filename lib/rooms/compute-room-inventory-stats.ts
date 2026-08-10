@@ -1,13 +1,20 @@
+import type { OccupyingBookingRow } from '@/lib/rooms/room-occupancy'
 import {
-  countInHouseRoomsFromBookings,
-  type OccupyingBookingRow,
-} from '@/lib/rooms/room-occupancy'
+  computeFrontOfficeStayStats,
+  countPhysicallyHeldRooms,
+  type FrontOfficeStayStats,
+} from '@/lib/rooms/front-office-stay'
 
 export type RoomInventoryStats = {
   total: number
   available: number
+  /** Checked-in staying guests only (excludes due-out and reservations). */
   occupied: number
+  dueOut: number
+  reserved: number
   outOfOrder: number
+  /** Occ + Due rooms still held — for occupancy rate. */
+  physicallyHeld: number
 }
 
 function normStatus(s: string | null | undefined): string {
@@ -17,7 +24,11 @@ function normStatus(s: string | null | undefined): string {
 /** Count rooms by housekeeping/PMS status (view-only dashboard strip). */
 export function computeRoomInventoryStats(
   rows: { status?: string | null }[],
-): RoomInventoryStats {
+): Omit<RoomInventoryStats, 'dueOut' | 'reserved' | 'physicallyHeld'> & {
+  dueOut?: number
+  reserved?: number
+  physicallyHeld?: number
+} {
   let available = 0
   let occupied = 0
   let outOfOrder = 0
@@ -36,16 +47,26 @@ export function computeRoomInventoryStats(
 }
 
 /**
- * Room strip stats aligned with Bookings in-house list: Occ = active folios today,
- * not only rooms.status (which may lag until reconcile runs).
+ * Room strip stats aligned with Bookings: Occ / Due / Res are mutually exclusive folio counts.
  */
 export function computeRoomInventoryStatsWithBookings(
   rooms: { status?: string | null }[],
   bookings: OccupyingBookingRow[],
 ): RoomInventoryStats {
   const base = computeRoomInventoryStats(rooms)
+  const stay: FrontOfficeStayStats = computeFrontOfficeStayStats(bookings)
+  const physicallyHeld = countPhysicallyHeldRooms(bookings)
+  const ooo = base.outOfOrder
+  // Avail for check-in ≈ sellable rooms not held by Occ/Due and not OOO
+  const availableForCheckin = Math.max(0, base.total - physicallyHeld - ooo)
+
   return {
-    ...base,
-    occupied: countInHouseRoomsFromBookings(bookings),
+    total: base.total,
+    available: availableForCheckin,
+    occupied: stay.occupied,
+    dueOut: stay.dueOut,
+    reserved: stay.reserved,
+    outOfOrder: ooo,
+    physicallyHeld,
   }
 }

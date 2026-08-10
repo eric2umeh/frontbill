@@ -6,6 +6,8 @@ import {
   resolveSupplyAuthedUser,
 } from '@/lib/supply-chain/supply-api-auth'
 import { SUPPLY_SNAPSHOT_KEYS, KITCHEN_WRITE_SNAPSHOT_KEYS, type SupplySnapshotKey } from '@/lib/supply-chain/supply-db-mappers'
+import { mergePurchaseOrdersFromRemote } from '@/lib/supply-chain/po-sync-merge'
+import type { PurchaseOrder } from '@/lib/supply-chain/types'
 
 function missingTableResponse(message: string) {
   if (/supply_chain_snapshots|schema cache|does not exist/i.test(message)) {
@@ -81,7 +83,22 @@ export async function PUT(request: Request) {
 
     for (const key of Object.keys(snapshots) as SupplySnapshotKey[]) {
       if (!writableKeySet.has(key)) continue
-      const data = snapshots[key]
+      let data = snapshots[key]
+
+      // Merge purchase orders so a stale client cannot overwrite a newer reject/approve.
+      if (key === 'purchase_orders' && Array.isArray(data)) {
+        const { data: existingRow } = await admin
+          .from('supply_chain_snapshots')
+          .select('data')
+          .eq('organization_id', auth.orgId)
+          .eq('snapshot_key', 'purchase_orders')
+          .maybeSingle()
+        const remote = Array.isArray(existingRow?.data)
+          ? (existingRow.data as PurchaseOrder[])
+          : []
+        data = mergePurchaseOrdersFromRemote(data as PurchaseOrder[], remote)
+      }
+
       const { error } = await admin.from('supply_chain_snapshots').upsert(
         {
           organization_id: auth.orgId,

@@ -39,6 +39,7 @@ import {
   stockLevelTextClass,
 } from '@/lib/supply-chain/stock-level-ui'
 import type { Recipe } from '@/lib/supply-chain/types'
+import { KitchenPurchasePanel } from '@/components/supply-chain/kitchen-purchase-panel'
 
 type RawStockTableRow = {
   key: string
@@ -298,10 +299,15 @@ export function KitchenWorkspace() {
         <TabsList className="flex h-auto flex-wrap">
           <TabsTrigger value="stock">Finished / Prep Stock</TabsTrigger>
           <TabsTrigger value="raw-stock">Raw from Store</TabsTrigger>
+          <TabsTrigger value="purchase">Raise Purchase Order</TabsTrigger>
           <TabsTrigger value="production">Production Records</TabsTrigger>
           <TabsTrigger value="recipes">All Batches</TabsTrigger>
           <TabsTrigger value="budget">Budget</TabsTrigger>
         </TabsList>
+
+        <TabsContent value="purchase" className="mt-4">
+          <KitchenPurchasePanel />
+        </TabsContent>
 
         <TabsContent value="raw-stock" className="mt-4 space-y-4">
         <div className="space-y-4">

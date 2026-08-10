@@ -5,7 +5,11 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { useSupplyChain } from "@/lib/supply-chain/supply-chain-context";
-import type { PurchaseOrder, RetirementLine } from "@/lib/supply-chain/types";
+import type { PurchaseOrder, RetirementLine, SupplyDept } from "@/lib/supply-chain/types";
+import {
+  DEPT_LABELS,
+  STORE_DEPT_PICKER_OPTIONS_SORTED,
+} from "@/lib/supply-chain/types";
 import { formatNaira } from "@/lib/utils/currency";
 import { canonicalRoleKey, canAddStoreItemDirect } from "@/lib/permissions";
 import { SupplyHistoryClearButton } from "@/components/supply-chain/supply-history-clear-button";
@@ -33,6 +37,7 @@ import {
 } from "@/lib/supply-chain/measurement-units";
 import { useClientMounted } from "@/hooks/use-client-mounted";
 import { playNotificationBeep } from "@/lib/utils/play-notification-beep";
+import { PaginatedListShell } from "@/components/shared/paginated-list-shell";
 
 const RETIRE_QTY_INPUT_CLASS =
   "h-8 tabular-nums [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none";
@@ -261,83 +266,136 @@ export function PurchasingWorkspace() {
           />
         </div>
 
-        <div className="space-y-2">
-          {retireLines.map((line) => {
-            const notBought = lineNotBought(line);
-            return (
-              <div
-                key={line.lineId}
-                className={`rounded-lg border p-3 text-sm space-y-2 ${
-                  notBought ? "bg-muted/40 opacity-80" : ""
-                }`}
-              >
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className={`font-medium ${notBought ? "line-through" : ""}`}>
-                    {notBought ? "* " : ""}
-                    {line.name}
-                  </p>
-                  <div className="flex items-center gap-2">
-                    <Label htmlFor={`bought-${line.lineId}`} className="text-xs">
-                      Bought
-                    </Label>
-                    <Switch
-                      id={`bought-${line.lineId}`}
-                      checked={!notBought}
-                      onCheckedChange={(bought) =>
-                        setRetireLines((prev) =>
-                          prev.map((l) =>
-                            l.lineId === line.lineId
-                              ? { ...l, notBought: !bought, removed: !bought }
-                              : l,
-                          ),
-                        )
-                      }
-                    />
-                  </div>
-                </div>
-                {!notBought && (
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 items-end">
-                    <div>
-                      <p className="text-[10px] text-muted-foreground mb-0.5">Ordered</p>
-                      <p className="tabular-nums">
-                        {line.quantityOrdered} {line.unit ?? ''}
-                        {line.stockQuantityOrdered != null && line.storeUnit && line.storeUnit !== line.unit ? (
-                          <span className="block text-[10px] text-muted-foreground">
-                            Expected in store: {line.stockQuantityOrdered} {line.storeUnit}
-                          </span>
-                        ) : null}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-[10px] text-muted-foreground mb-0.5">Bought qty</p>
-                      <Input
-                        inputMode="decimal"
-                        className={RETIRE_QTY_INPUT_CLASS}
-                        placeholder="0"
-                        value={retireQtyText[line.lineId] ?? ""}
-                        onChange={(e) => updateRetireQty(line.lineId, e.target.value)}
-                      />
-                    </div>
-                    <div>
-                      <p className="text-[10px] text-muted-foreground mb-0.5">Actual price</p>
-                      <Input
-                        inputMode="decimal"
-                        className={RETIRE_QTY_INPUT_CLASS}
-                        placeholder="0"
-                        value={retirePriceText[line.lineId] ?? ""}
-                        onChange={(e) => updateRetirePrice(line.lineId, e.target.value)}
-                      />
-                    </div>
-                    <div>
-                      <p className="text-[10px] text-muted-foreground mb-0.5">Total paid</p>
-                      <p className="font-medium tabular-nums">{formatNaira(line.totalPaid)}</p>
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
+        <PaginatedListShell
+          items={retireLines.map((line) => {
+            const poLine = selected.lines.find((l) => l.id === line.lineId);
+            return {
+              ...line,
+              dept: (poLine?.dept ?? "kitchen") as Exclude<SupplyDept, "all">,
+            };
           })}
-        </div>
+          pageSize={8}
+          searchPlaceholder="Search retirement items…"
+          searchMatch={(line, query) => {
+            const q = query.trim().toLowerCase();
+            if (!q) return true;
+            return (
+              line.name.toLowerCase().includes(q) ||
+              (line.unit ?? "").toLowerCase().includes(q) ||
+              (DEPT_LABELS[line.dept] ?? line.dept).toLowerCase().includes(q)
+            );
+          }}
+          filters={[
+            {
+              key: "dept",
+              label: "Department",
+              options: STORE_DEPT_PICKER_OPTIONS_SORTED.filter((d) =>
+                selected.lines.some((l) => l.dept === d),
+              ).map((d) => ({
+                value: d,
+                label: DEPT_LABELS[d],
+              })),
+            },
+          ]}
+          filterMatch={(line, key, value) => {
+            if (key !== "dept") return undefined;
+            if (!value || value === "all") return true;
+            return line.dept === value;
+          }}
+          emptyMessage="No retirement lines match."
+        >
+          {(pageItems) => (
+            <div className="space-y-2">
+              {pageItems.map((line) => {
+                const notBought = lineNotBought(line);
+                return (
+                  <div
+                    key={line.lineId}
+                    className={`rounded-lg border p-3 text-sm space-y-2 ${
+                      notBought ? "bg-muted/40 opacity-80" : ""
+                    }`}
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <p className={`font-medium ${notBought ? "line-through" : ""}`}>
+                          {notBought ? "* " : ""}
+                          {line.name}
+                        </p>
+                        <p className="text-[10px] text-muted-foreground">
+                          {DEPT_LABELS[line.dept] ?? line.dept}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Label htmlFor={`bought-${line.lineId}`} className="text-xs">
+                          Bought
+                        </Label>
+                        <Switch
+                          id={`bought-${line.lineId}`}
+                          checked={!notBought}
+                          onCheckedChange={(bought) =>
+                            setRetireLines((prev) =>
+                              prev.map((l) =>
+                                l.lineId === line.lineId
+                                  ? { ...l, notBought: !bought, removed: !bought }
+                                  : l,
+                              ),
+                            )
+                          }
+                        />
+                      </div>
+                    </div>
+                    {!notBought && (
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 items-end">
+                        <div>
+                          <p className="text-[10px] text-muted-foreground mb-0.5">Ordered</p>
+                          <p className="tabular-nums">
+                            {line.quantityOrdered} {line.unit ?? ""}
+                            {line.stockQuantityOrdered != null &&
+                            line.storeUnit &&
+                            line.storeUnit !== line.unit ? (
+                              <span className="block text-[10px] text-muted-foreground">
+                                Expected in store: {line.stockQuantityOrdered}{" "}
+                                {line.storeUnit}
+                              </span>
+                            ) : null}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] text-muted-foreground mb-0.5">Bought qty</p>
+                          <Input
+                            inputMode="decimal"
+                            className={RETIRE_QTY_INPUT_CLASS}
+                            placeholder="0"
+                            value={retireQtyText[line.lineId] ?? ""}
+                            onChange={(e) => updateRetireQty(line.lineId, e.target.value)}
+                          />
+                        </div>
+                        <div>
+                          <p className="text-[10px] text-muted-foreground mb-0.5">Actual price</p>
+                          <Input
+                            inputMode="decimal"
+                            className={RETIRE_QTY_INPUT_CLASS}
+                            placeholder="0"
+                            value={retirePriceText[line.lineId] ?? ""}
+                            onChange={(e) =>
+                              updateRetirePrice(line.lineId, e.target.value)
+                            }
+                          />
+                        </div>
+                        <div>
+                          <p className="text-[10px] text-muted-foreground mb-0.5">Total paid</p>
+                          <p className="font-medium tabular-nums">
+                            {formatNaira(line.totalPaid)}
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </PaginatedListShell>
 
         <Button
           onClick={() => {

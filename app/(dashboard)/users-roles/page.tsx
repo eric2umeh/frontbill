@@ -239,6 +239,7 @@ export default function UsersRolesPage() {
   const filteredUsers = useMemo(() =>
     users.filter(u =>
       (u.full_name || '').toLowerCase().includes(search.toLowerCase()) ||
+      (u.email || '').toLowerCase().includes(search.toLowerCase()) ||
       u.role.toLowerCase().includes(search.toLowerCase()) ||
       (u.added_by_name || '').toLowerCase().includes(search.toLowerCase())
     ), [users, search])
@@ -337,14 +338,33 @@ export default function UsersRolesPage() {
                             {role?.label || user.role}
                           </Badge>
                         </div>
-                        <div className="text-xs text-muted-foreground mt-0.5">
-                          Added {new Date(user.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
-                          {' '}| Added By:{' '}
-                          {user.added_by && user.added_by === user.id
-                            ? 'Self'
-                            : user.added_by
-                              ? (user.added_by_name?.trim() || 'Unknown staff')
-                              : (user.added_by_name?.trim() || '—')}
+                        <div className="text-xs text-muted-foreground mt-0.5 break-all">
+                          {user.email?.trim() ? (
+                            <span className="block sm:inline">
+                              <span className="text-foreground/80">{user.email.trim()}</span>
+                              <span className="hidden sm:inline"> · </span>
+                            </span>
+                          ) : (
+                            <span className="block sm:inline text-amber-700/80">
+                              No email on file
+                              <span className="hidden sm:inline"> · </span>
+                            </span>
+                          )}
+                          <span className="block sm:inline">
+                            Added{' '}
+                            {new Date(user.created_at).toLocaleDateString('en-GB', {
+                              day: 'numeric',
+                              month: 'short',
+                              year: 'numeric',
+                            })}
+                            {' '}
+                            | Added By:{' '}
+                            {user.added_by && user.added_by === user.id
+                              ? 'Self'
+                              : user.added_by
+                                ? user.added_by_name?.trim() || 'Unknown staff'
+                                : user.added_by_name?.trim() || '—'}
+                          </span>
                         </div>
                       </div>
                       {/* Permissions quick-view */}

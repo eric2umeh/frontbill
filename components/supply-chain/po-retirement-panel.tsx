@@ -1,10 +1,10 @@
 'use client'
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useAuth } from '@/lib/auth-context'
 import { useSupplyChain } from '@/lib/supply-chain/supply-chain-context'
-import type { PurchaseOrder } from '@/lib/supply-chain/types'
+import type { PoLine, PurchaseOrder } from '@/lib/supply-chain/types'
 import { formatNaira } from '@/lib/utils/currency'
 import {
   canonicalRoleKey,
@@ -16,10 +16,32 @@ import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { Info } from 'lucide-react'
 import { toast } from 'sonner'
-import { PoCommentBanner } from '@/components/supply-chain/po-comment-banner'
 import { formatPoRaisedAt } from '@/lib/supply-chain/po-format'
 import { PoHistoryPanel } from '@/components/supply-chain/po-history-panel'
 import { poStatusBadge } from '@/components/supply-chain/po-approval-panel'
+import { PaginatedListShell } from '@/components/shared/paginated-list-shell'
+import {
+  PoReviewLinesPanel,
+  poDepartmentFilterOptions,
+} from '@/components/supply-chain/po-review-lines-panel'
+
+function retirementLinesAsPoLines(po: PurchaseOrder): PoLine[] {
+  const rLines = po.retirement?.lines ?? []
+  return rLines.map((line) => {
+    const poLine = po.lines.find((l) => l.id === line.lineId)
+    const notBought = line.notBought ?? line.removed
+    return {
+      id: line.lineId,
+      stockItemId: poLine?.stockItemId ?? line.lineId,
+      name: notBought ? `* ${line.name}` : line.name,
+      dept: poLine?.dept ?? 'kitchen',
+      unit: poLine?.unit ?? '',
+      quantityOrdered: notBought ? line.quantityOrdered : line.quantityBought,
+      unitPrice: notBought ? line.poPrice : line.actualPrice,
+      lineTotal: notBought ? 0 : line.totalPaid,
+    }
+  })
+}
 
 function RetirementReviewCard({
   po,
@@ -32,6 +54,7 @@ function RetirementReviewCard({
 }) {
   const [comment, setComment] = useState('')
   const r = po.retirement
+  const browseLines = useMemo(() => retirementLinesAsPoLines(po), [po])
 
   return (
     <div className="rounded-lg border p-4 space-y-3">
@@ -50,18 +73,14 @@ function RetirementReviewCard({
         </div>
         {poStatusBadge(po.status)}
       </div>
-      {r?.lines?.length ? (
-        <div className="rounded-md border bg-muted/20 p-2 text-xs space-y-1">
-          {r.lines.map((line) => {
-            const notBought = line.notBought ?? line.removed
-            return (
-              <p key={line.lineId} className={notBought ? 'line-through opacity-60' : ''}>
-                {notBought ? '* ' : ''}
-                {line.name} — bought {line.quantityBought} @ {formatNaira(line.actualPrice)} ={' '}
-                {formatNaira(line.totalPaid)}
-              </p>
-            )
-          })}
+      {browseLines.length > 0 ? (
+        <div className="rounded-md border bg-muted/20 p-3">
+          <PoReviewLinesPanel
+            lines={browseLines}
+            pageSize={8}
+            showDept
+            title={`Retirement lines (${browseLines.length})`}
+          />
         </div>
       ) : null}
       {canReview ? (
@@ -116,6 +135,11 @@ export function PoRetirementPanel() {
   const canReview = canSupplyRetirementReview(role)
   const adminTester = canAdminTestApproveSupplyPo(role)
 
+  const pendingDeptFilters = useMemo(
+    () => poDepartmentFilterOptions(pending),
+    [pending],
+  )
+
   return (
     <div className="space-y-6">
       <div className="rounded-lg border border-violet-200 bg-violet-50/50 dark:bg-violet-950/20 p-4 flex gap-3 text-sm">
@@ -127,8 +151,9 @@ export function PoRetirementPanel() {
             <Link href="/supply/purchasing" className="underline font-medium text-foreground">
               Supply chain → Purchasing
             </Link>
-            . Accept to update central store stock; reject sends the PO back to the purchaser to edit
-            and resubmit.
+            . Accept to update central store stock; reject sends the PO back to the purchaser.
+            Accountant, store, purchaser, auditor, admin, and superadmin may also edit the
+            retirement on Purchasing without rejecting first.
           </p>
         </div>
       </div>
@@ -152,25 +177,65 @@ export function PoRetirementPanel() {
             No retirements awaiting review.
           </p>
         ) : (
-          <div className="space-y-3">
-            {pending.map((po) => (
-              <RetirementReviewCard
-                key={po.id}
-                po={po}
-                canReview={canReview || adminTester}
-                onDecide={(approved, comment) => {
-                  const res = accountantRetirementDecision(po.id, approved, comment, actor)
-                  if ('error' in res) toast.error(res.error)
-                  else
-                    toast.success(
-                      approved
-                        ? 'Retirement approved — stock updated'
-                        : 'Retirement sent back to Purchasing',
-                    )
-                }}
-              />
-            ))}
-          </div>
+          <PaginatedListShell
+            items={pending}
+            pageSize={5}
+            searchPlaceholder="Search PO number, submitter…"
+            searchMatch={(po, query) => {
+              const q = query.trim().toLowerCase()
+              if (!q) return true
+              return (
+                po.poNumber.toLowerCase().includes(q) ||
+                (po.retirement?.submittedBy ?? '').toLowerCase().includes(q) ||
+                po.createdByName.toLowerCase().includes(q) ||
+                po.lines.some((l) => l.name.toLowerCase().includes(q))
+              )
+            }}
+            filters={
+              pendingDeptFilters.length
+                ? [
+                    {
+                      key: 'dept',
+                      label: 'Department',
+                      options: pendingDeptFilters,
+                    },
+                  ]
+                : []
+            }
+            filterMatch={(po, key, value) => {
+              if (key !== 'dept') return undefined
+              if (!value || value === 'all') return true
+              return po.lines.some((l) => l.dept === value)
+            }}
+            emptyMessage="No retirements match this search or filter."
+          >
+            {(pageItems) => (
+              <div className="space-y-3">
+                {pageItems.map((po) => (
+                  <RetirementReviewCard
+                    key={po.id}
+                    po={po}
+                    canReview={canReview || adminTester}
+                    onDecide={(approved, comment) => {
+                      const res = accountantRetirementDecision(
+                        po.id,
+                        approved,
+                        comment,
+                        actor,
+                      )
+                      if ('error' in res) toast.error(res.error)
+                      else
+                        toast.success(
+                          approved
+                            ? 'Retirement approved — stock updated'
+                            : 'Retirement sent back to Purchasing',
+                        )
+                    }}
+                  />
+                ))}
+              </div>
+            )}
+          </PaginatedListShell>
         )}
       </section>
 

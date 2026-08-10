@@ -12,6 +12,8 @@ export const PURCHASE_CONVERSION_UNITS = [
   'mudu',
   'basket',
   'cup',
+  'set',
+  'head',
 ] as const
 
 /** SI units available when building a kitchen batch recipe line. */
@@ -34,4 +36,6 @@ export const KITCHEN_BATCH_UNITS = [
   'tin',
   'can',
   'portion',
+  'set',
+  'head',
 ] as const

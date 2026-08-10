@@ -1,15 +1,22 @@
 'use client'
 
+import { useEffect } from 'react'
 import { useSupplyChain } from '@/lib/supply-chain/supply-chain-context'
 import {
   canDeleteStorePurchaseOrder,
   canEditStorePurchaseOrder,
+  formatPoActorStamp,
+  formatPoDecisionStamp,
   isPurchaseOrderAwaitingAccountant,
+  listKitchenOrdersAtStore,
+  poOriginOf,
   showsStoreDraftPurchaseList,
 } from '@/lib/supply-chain/po-active'
+import { useAuth } from '@/lib/auth-context'
+import { Badge } from '@/components/ui/badge'
 import { formatNaira } from '@/lib/utils/currency'
 import { Button } from '@/components/ui/button'
-import { PoLinesTable } from '@/components/supply-chain/po-lines-table'
+import { PoReviewLinesPanel } from '@/components/supply-chain/po-review-lines-panel'
 import { PoDetailCard } from '@/components/supply-chain/po-detail-card'
 import { PoCommentBanner } from '@/components/supply-chain/po-comment-banner'
 import { poStatusBadge } from '@/components/supply-chain/po-approval-panel'
@@ -36,24 +43,52 @@ type Props = {
 }
 
 export function ActivePurchaseOrderPanel({ actor, storeItems }: Props) {
+  const { role } = useAuth()
   const {
     activePurchaseOrder,
+    purchaseOrders,
     basket,
     stats,
     setBasketLineQty,
     removeFromBasket,
     sendBasketForApproval,
     deleteActivePurchaseOrder,
+    selectWorkingPurchaseOrder,
+    kitchenOrdersAtStore,
   } = useSupplyChain()
 
   const po = activePurchaseOrder
   const canEdit = canEditStorePurchaseOrder(po)
-  const canDelete = canDeleteStorePurchaseOrder(po)
+  const canDelete = canDeleteStorePurchaseOrder(po, role)
   const awaitingAccountant = isPurchaseOrderAwaitingAccountant(po)
   const showDraftList = showsStoreDraftPurchaseList(po)
   const isDraft = po?.status === 'draft'
-  const isRejected = po?.status === 'accountant_rejected'
-  const linesEditable = canEdit && (isDraft || isRejected)
+  const isRejected =
+    po?.status === 'accountant_rejected' || po?.status === 'manager_rejected'
+  const isPendingStore = po?.status === 'pending_store'
+  const linesEditable =
+    canEdit &&
+    !awaitingAccountant &&
+    (isDraft || isRejected || isPendingStore)
+  const kitchenInbox =
+    kitchenOrdersAtStore ?? listKitchenOrdersAtStore(purchaseOrders ?? [])
+
+  // Rejected / store-review kitchen POs must load lines into the cart for editing.
+  useEffect(() => {
+    if (!po) return
+    if (!(isRejected || isPendingStore)) return
+    if (!po.lines.length) return
+    if (basket.length > 0) return
+    selectWorkingPurchaseOrder?.(po.id)
+  }, [
+    po?.id,
+    po?.status,
+    po?.lines?.length,
+    basket.length,
+    isRejected,
+    isPendingStore,
+    selectWorkingPurchaseOrder,
+  ])
 
   const handleSend = () => {
     const res = sendBasketForApproval(actor)
@@ -70,22 +105,40 @@ export function ActivePurchaseOrderPanel({ actor, storeItems }: Props) {
     const item = storeItems.find((s) => s.id === stockItemId)
     if (!item) return
     const existing = basket.find((line) => line.stockItemId === stockItemId)
+    const poLine = po?.lines.find((l) => l.stockItemId === stockItemId)
     const storeQty =
       existing?.storeQtyToBuy && existing.qtyToBuy > 0
         ? (qty / existing.qtyToBuy) * existing.storeQtyToBuy
-        : qty
-    const unitPrice = existing?.unitPrice ?? item.lastPrice
+        : poLine?.stockQuantityOrdered && poLine.quantityOrdered > 0
+          ? (qty / poLine.quantityOrdered) * poLine.stockQuantityOrdered
+          : qty
+    const unitPrice =
+      (existing?.unitPrice && existing.unitPrice > 0
+        ? existing.unitPrice
+        : undefined) ??
+      (poLine?.unitPrice && poLine.unitPrice > 0 ? poLine.unitPrice : undefined) ??
+      (item.lastPrice > 0 ? item.lastPrice : 0)
     const storeUnitPrice =
-      existing?.storeUnitPrice ??
-      (storeQty > 0 ? (qty * unitPrice) / storeQty : item.lastPrice)
+      (existing?.storeUnitPrice && existing.storeUnitPrice > 0
+        ? existing.storeUnitPrice
+        : undefined) ??
+      (poLine?.stockUnitPrice && poLine.stockUnitPrice > 0
+        ? poLine.stockUnitPrice
+        : undefined) ??
+      (storeQty > 0 && unitPrice > 0 ? (qty * unitPrice) / storeQty : item.lastPrice)
     const err = setBasketLineQty(item, storeQty, storeUnitPrice, actor, {
-      purchaseUnit: existing?.unit ?? item.unit,
+      purchaseUnit: existing?.unit ?? poLine?.unit ?? item.unit,
       purchaseQty: qty,
       purchaseUnitPrice: unitPrice,
       storeQty,
       storeUnitPrice,
     })
     if (err) toast.error(err)
+  }
+
+  const handleRemoveLine = (stockItemId: string) => {
+    const res = removeFromBasket(stockItemId)
+    if (res && typeof res === 'object' && 'error' in res) toast.error(String(res.error))
   }
 
   const handleDeletePo = () => {
@@ -132,24 +185,87 @@ export function ActivePurchaseOrderPanel({ actor, storeItems }: Props) {
     )
   }
 
-  const showSend = canEdit && basket.length > 0 && !awaitingAccountant
-  const displayRows = basket.map((line) => ({
-    kind: 'basket' as const,
-    line,
-    editable: linesEditable,
-    onQtyChange: linesEditable ? handleQtyChange : undefined,
-    onDelete: linesEditable ? (id: string) => handleQtyChange(id, 0) : undefined,
-  }))
+  const showSend =
+    canEdit &&
+    basket.length > 0 &&
+    !awaitingAccountant &&
+    (isDraft || isRejected || isPendingStore)
 
   return (
+    <div className="space-y-4">
+      {kitchenInbox.length > 0 && (
+        <div className="rounded-xl border border-violet-200 bg-violet-50/40 p-3 space-y-2">
+          <p className="text-sm font-semibold text-violet-900">Kitchen orders awaiting store</p>
+          <p className="text-xs text-muted-foreground">
+            Open a kitchen list to edit (same cart UX), add store lines if needed, then send to
+            accountant.
+          </p>
+          <ul className="space-y-2">
+            {kitchenInbox.map((kpo) => {
+              const isEditing = po?.id === kpo.id
+              const decision = formatPoDecisionStamp(kpo)
+              return (
+              <li
+                key={kpo.id}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-background px-3 py-2"
+              >
+                <div className="min-w-0">
+                  <p className="text-sm font-medium">{kpo.poNumber}</p>
+                  <p className="text-xs text-muted-foreground">{formatPoActorStamp(kpo)}</p>
+                  {decision ? (
+                    <p className="text-xs text-red-700 mt-0.5">{decision}</p>
+                  ) : null}
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={isEditing ? 'default' : 'outline'}
+                  onClick={() => {
+                    // Always focus + reload basket (toggle-to-null was a no-op for rejected POs).
+                    selectWorkingPurchaseOrder?.(kpo.id)
+                    if (isEditing) {
+                      toast.message('This list is open for editing below')
+                    } else {
+                      toast.success(`Opened ${kpo.poNumber} for editing`)
+                    }
+                  }}
+                >
+                  {isEditing ? 'Editing' : 'Open & edit'}
+                </Button>
+              </li>
+              )
+            })}
+          </ul>
+        </div>
+      )}
+
     <div className="rounded-xl border overflow-hidden">
       <div className="border-b px-4 py-3 bg-muted/30 flex flex-wrap items-center justify-between gap-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <p className="text-sm font-medium">{po.poNumber} — purchase list</p>
-          {poStatusBadge(po.status)}
+        <div className="min-w-0 space-y-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-sm font-medium">{po.poNumber} — purchase list</p>
+            {poOriginOf(po) === 'kitchen' ? (
+              <Badge variant="outline" className="text-[10px] bg-violet-50 text-violet-800">
+                Kitchen order
+              </Badge>
+            ) : null}
+            {poStatusBadge(po.status)}
+          </div>
+          {formatPoDecisionStamp(po) ? (
+            <p
+              className={
+                isRejected
+                  ? 'text-xs text-red-700 font-medium'
+                  : 'text-xs text-emerald-800 font-medium'
+              }
+            >
+              {formatPoDecisionStamp(po)}
+            </p>
+          ) : null}
         </div>
         <p className="text-sm font-semibold tabular-nums">{formatNaira(stats.basketTotal)}</p>
       </div>
+      <p className="px-4 pt-2 text-xs text-muted-foreground">{formatPoActorStamp(po)}</p>
 
       {po.accountantComment && isRejected && (
         <div className="p-3 border-b">
@@ -168,19 +284,31 @@ export function ActivePurchaseOrderPanel({ actor, storeItems }: Props) {
         </p>
       ) : (
         <div className="p-3">
-          <PoLinesTable rows={displayRows} compact showDept={false} />
+          <PoReviewLinesPanel
+            kind="basket"
+            lines={basket}
+            editable={linesEditable}
+            onQtyChange={linesEditable ? handleQtyChange : undefined}
+            onDelete={linesEditable ? handleRemoveLine : undefined}
+            compact
+            showDept
+            pageSize={10}
+            title={`Draft lines (${basket.length} · ${formatNaira(stats.basketTotal)})`}
+          />
         </div>
       )}
 
       <div className="border-t px-4 py-3 flex flex-wrap items-center justify-between gap-3">
         <p className="text-xs text-muted-foreground max-w-xl">
           {awaitingAccountant
-            ? 'Sent to accountant — list stays visible until approved. Editing is locked while under review.'
-            : isDraft
-              ? 'Adjust quantities here or on Raise purchase request, then send to accountant.'
-              : isRejected
-                ? 'Accountant rejected — edit quantities directly, then send again.'
-                : 'Update lines, then send to accountant again.'}
+            ? 'With accountant — quantities are locked until they accept or reject. Open Expenses → Purchase orders to review.'
+            : isPendingStore
+              ? 'Kitchen order at store — edit or add lines, then send to accountant.'
+              : isDraft
+                ? 'Adjust quantities here or on Raise purchase request, then send to accountant.'
+                : isRejected
+                  ? 'Rejected — edit quantities directly, then send again.'
+                  : 'Update lines, then send to accountant again.'}
         </p>
         <div className="flex flex-wrap gap-2">
           {canDelete && (
@@ -219,6 +347,7 @@ export function ActivePurchaseOrderPanel({ actor, storeItems }: Props) {
           )}
         </div>
       </div>
+    </div>
     </div>
   )
 }

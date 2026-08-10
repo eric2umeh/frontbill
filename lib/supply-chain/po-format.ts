@@ -1,5 +1,5 @@
 import { endOfWeek, format, startOfWeek } from "date-fns";
-import type { PurchaseOrder, RetirementLine } from "./types";
+import type { PurchaseOrder, RetirementLine, SupplyDept } from "./types";
 
 /** ISO week number (1–53) for purchase order numbering. */
 export function isoWeekNumber(date = new Date()): number {
@@ -52,7 +52,9 @@ export function getPoHistoryLines(po: PurchaseOrder): {
   mode: "order" | "retirement";
   lines: Array<{
     id: string;
+    stockItemId: string;
     name: string;
+    dept: Exclude<SupplyDept, "all">;
     quantity: number;
     unit: string;
     unitPrice: number;
@@ -78,7 +80,9 @@ export function getPoHistoryLines(po: PurchaseOrder): {
         const poLine = po.lines.find((l) => l.id === rl.lineId);
         return {
           id: rl.lineId,
+          stockItemId: poLine?.stockItemId ?? rl.lineId,
           name: rl.name,
+          dept: poLine?.dept ?? "kitchen",
           quantity: notBought ? rl.quantityOrdered : rl.quantityBought,
           unit: poLine?.unit ?? "",
           unitPrice: notBought ? rl.poPrice : rl.actualPrice,
@@ -93,7 +97,9 @@ export function getPoHistoryLines(po: PurchaseOrder): {
     mode: "order",
     lines: po.lines.map((line) => ({
       id: line.id,
+      stockItemId: line.stockItemId,
       name: line.name,
+      dept: line.dept,
       quantity: line.quantityOrdered,
       unit: line.unit,
       unitPrice: line.unitPrice,
@@ -104,9 +110,14 @@ export function getPoHistoryLines(po: PurchaseOrder): {
 
 /** POs the purchaser can retire at market (cash already disbursed). */
 export function isPurchasingRetireCandidate(status: string): boolean {
-  return ["disbursed", "approved", "retirement_pending", "retirement_rejected"].includes(
-    status,
-  );
+  return [
+    "disbursed",
+    "approved",
+    "retirement_pending",
+    "retirement_rejected",
+    /** Privileged roles may keep editing while accountant reviews. */
+    "retirement_pending_accountant",
+  ].includes(status);
 }
 
 /** Retirement submitted — awaiting accountant sign-off. */
@@ -122,6 +133,7 @@ export function isPurchasingRetiredHistory(status: string): boolean {
 /** POs still in the approval workflow (not draft, not yet at market). */
 export function isPurchaseOrderInFlightStatus(status: string): boolean {
   return [
+    "pending_store",
     "pending_accountant",
     "pending_manager",
     "accountant_rejected",

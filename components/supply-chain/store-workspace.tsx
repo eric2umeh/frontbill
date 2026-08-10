@@ -130,6 +130,11 @@ export function StoreWorkspace() {
   const [issuingCart, setIssuingCart] = useState(false)
   const mounted = useClientMounted()
   const [tab, setTab] = useState('stock')
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const t = new URLSearchParams(window.location.search).get('tab')
+    if (t) setTab(t)
+  }, [])
   const [editItem, setEditItem] = useState<StoreItem | null>(null)
   const [stockQtyMap, setStockQtyMap] = useState<Record<string, string>>({})
   const canIssue = canIssueStockFromStore(role)
@@ -189,6 +194,54 @@ export function StoreWorkspace() {
     toast.success(`Updated ${item.name} to ${qty} ${unitLabel(item.unit)}`)
   }
 
+  // Keep raise-purchase qty/price fields aligned when committed PO lines change.
+  const poLinesSyncKey =
+    activePurchaseOrder?.lines
+      ?.map((l) => `${l.stockItemId}:${l.quantityOrdered}:${l.unitPrice}`)
+      .join('|') ?? ''
+
+  useEffect(() => {
+    const lines = activePurchaseOrder?.lines
+    if (!lines?.length) return
+    setQtyMap((prev) => {
+      const next = { ...prev }
+      let changed = false
+      for (const l of lines) {
+        const str = String(l.quantityOrdered)
+        if (next[l.stockItemId] !== str) {
+          next[l.stockItemId] = str
+          changed = true
+        }
+      }
+      return changed ? next : prev
+    })
+    setPurchaseUnitMap((prev) => {
+      const next = { ...prev }
+      let changed = false
+      for (const l of lines) {
+        if (l.unit && next[l.stockItemId] !== l.unit) {
+          next[l.stockItemId] = l.unit
+          changed = true
+        }
+      }
+      return changed ? next : prev
+    })
+    setPurchasePriceMap((prev) => {
+      const next = { ...prev }
+      let changed = false
+      for (const l of lines) {
+        if (Number.isFinite(l.unitPrice) && l.unitPrice > 0) {
+          const str = String(l.unitPrice)
+          if (next[l.stockItemId] !== str) {
+            next[l.stockItemId] = str
+            changed = true
+          }
+        }
+      }
+      return changed ? next : prev
+    })
+  }, [activePurchaseOrder?.id, poLinesSyncKey])
+
   useEffect(() => {
     setQtyMap((prev) => {
       const next = { ...prev }
@@ -205,7 +258,7 @@ export function StoreWorkspace() {
       const next = { ...prev }
       let changed = false
       for (const b of basket) {
-        if (b.unit && next[b.stockItemId] !== b.unit) {
+        if (b.unit && !(b.stockItemId in next)) {
           next[b.stockItemId] = b.unit
           changed = true
         }
@@ -216,7 +269,11 @@ export function StoreWorkspace() {
       const next = { ...prev }
       let changed = false
       for (const b of basket) {
-        if (Number.isFinite(b.unitPrice) && b.unitPrice > 0 && !(b.stockItemId in next)) {
+        if (
+          Number.isFinite(b.unitPrice) &&
+          b.unitPrice > 0 &&
+          !(b.stockItemId in next)
+        ) {
           next[b.stockItemId] = String(b.unitPrice)
           changed = true
         }
@@ -229,15 +286,7 @@ export function StoreWorkspace() {
     const trimmed = raw.trim()
     const purchaseUnit = unitOverride ?? purchaseUnitMap[item.id] ?? defaultUnitForStoreItem(item.unit)
     if (!trimmed) {
-      const res = removeFromBasket(item.id)
-      if (res && 'error' in res) toast.error(res.error)
-      else {
-        setQtyMap((m) => {
-          const next = { ...m }
-          delete next[item.id]
-          return next
-        })
-      }
+      // Keep the basket line while the qty field is cleared for retyping.
       return
     }
     const qty = parseQuantityValue(trimmed)
@@ -326,14 +375,24 @@ export function StoreWorkspace() {
     }
     setQtyMap((m) => ({ ...m, [stockItemId]: String(qty) }))
     const existing = basket.find((b) => b.stockItemId === stockItemId)
+    const mappedPrice = Number(purchasePriceMap[stockItemId])
     const storeQty =
       existing?.storeQtyToBuy && existing.qtyToBuy > 0
         ? (qty / existing.qtyToBuy) * existing.storeQtyToBuy
         : qty
-    const purchaseUnitPrice = existing?.unitPrice ?? item.lastPrice
+    const purchaseUnitPrice =
+      (existing?.unitPrice && existing.unitPrice > 0
+        ? existing.unitPrice
+        : undefined) ??
+      (mappedPrice > 0 ? mappedPrice : undefined) ??
+      (item.lastPrice > 0 ? item.lastPrice : 0)
     const storeUnitPrice =
-      existing?.storeUnitPrice ??
-      (storeQty > 0 ? (qty * purchaseUnitPrice) / storeQty : item.lastPrice)
+      (existing?.storeUnitPrice && existing.storeUnitPrice > 0
+        ? existing.storeUnitPrice
+        : undefined) ??
+      (storeQty > 0 && purchaseUnitPrice > 0
+        ? (qty * purchaseUnitPrice) / storeQty
+        : item.lastPrice)
     const err = setBasketLineQty(item, storeQty, storeUnitPrice, actor, {
       purchaseUnit: existing?.unit ?? item.unit,
       purchaseQty: qty,
