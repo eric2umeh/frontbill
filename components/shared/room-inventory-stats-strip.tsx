@@ -113,7 +113,7 @@ export function RoomInventoryStatsStrip({ className, refreshMs = 60_000 }: Props
       </div>
       <div
         className="inline-flex h-7 items-center gap-1 rounded-md border border-green-200/80 bg-green-50/50 px-1.5 text-[10px] font-medium leading-none shadow-sm dark:border-green-900/50 dark:bg-green-950/30"
-        title="Rooms free for check-in (not held by Occ/Due, not OOO)"
+        title="Rooms free for check-in (total − Occ − Due today − OOO)"
       >
         <DoorOpen className="h-3 w-3 shrink-0 text-green-700 dark:text-green-400" aria-hidden />
         <span className="text-muted-foreground">Avail</span>

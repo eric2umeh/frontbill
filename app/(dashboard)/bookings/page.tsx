@@ -1415,7 +1415,7 @@ export default function BookingsPage() {
               </div>
               <div
                 className="inline-flex h-7 items-center gap-1 rounded-md border border-green-200/80 bg-green-50/50 px-1.5 text-[10px] font-medium leading-none shadow-sm"
-                title="Rooms free for check-in (not held by Occ/Due, not OOO)"
+                title="Rooms free for check-in (total − Occ − Due today − OOO)"
               >
                 <DoorOpen
                   className="h-3 w-3 shrink-0 text-green-700"
