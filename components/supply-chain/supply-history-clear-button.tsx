@@ -15,6 +15,7 @@ import {
 import { Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useSupplyChain } from '@/lib/supply-chain/supply-chain-context'
+import { useClientMounted } from '@/hooks/use-client-mounted'
 
 type Props = {
   actor: { name: string; role: string }
@@ -29,7 +30,18 @@ export function SupplyHistoryClearButton({
   description = 'Removes all purchase order history, issue-out log entries, and supply activity log on this device. Stock and kitchen data are not affected.',
   className,
 }: Props) {
+  const mounted = useClientMounted()
   const { clearSupplyHistory } = useSupplyChain()
+
+  // Avoid Radix aria-controls id mismatch between SSR and client.
+  if (!mounted) {
+    return (
+      <Button variant="outline" size="sm" className={className} disabled>
+        <Trash2 className="h-4 w-4 mr-2" />
+        {label}
+      </Button>
+    )
+  }
 
   return (
     <AlertDialog>

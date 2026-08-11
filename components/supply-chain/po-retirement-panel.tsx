@@ -1,12 +1,10 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import Link from 'next/link'
 import { useAuth } from '@/lib/auth-context'
 import { useSupplyChain } from '@/lib/supply-chain/supply-chain-context'
 import {
   normalizeSupplyDept,
-  type PoLine,
   type PurchaseOrder,
 } from '@/lib/supply-chain/types'
 import { formatNaira } from '@/lib/utils/currency'
@@ -18,34 +16,13 @@ import {
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
-import { Info } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatPoRaisedAt } from '@/lib/supply-chain/po-format'
 import { PoHistoryPanel } from '@/components/supply-chain/po-history-panel'
 import { poStatusBadge } from '@/components/supply-chain/po-approval-panel'
 import { PaginatedListShell } from '@/components/shared/paginated-list-shell'
-import {
-  PoReviewLinesPanel,
-  poDepartmentFilterOptions,
-} from '@/components/supply-chain/po-review-lines-panel'
-
-function retirementLinesAsPoLines(po: PurchaseOrder): PoLine[] {
-  const rLines = po.retirement?.lines ?? []
-  return rLines.map((line) => {
-    const poLine = po.lines.find((l) => l.id === line.lineId)
-    const notBought = line.notBought ?? line.removed
-    return {
-      id: line.lineId,
-      stockItemId: poLine?.stockItemId ?? line.lineId,
-      name: notBought ? `* ${line.name}` : line.name,
-      dept: normalizeSupplyDept(poLine?.dept ?? 'kitchen'),
-      unit: poLine?.unit ?? '',
-      quantityOrdered: notBought ? line.quantityOrdered : line.quantityBought,
-      unitPrice: notBought ? line.poPrice : line.actualPrice,
-      lineTotal: notBought ? 0 : line.totalPaid,
-    }
-  })
-}
+import { poDepartmentFilterOptions } from '@/components/supply-chain/po-review-lines-panel'
+import { RetirementLinesReview } from '@/components/supply-chain/retirement-lines-review'
 
 function RetirementReviewCard({
   po,
@@ -60,7 +37,6 @@ function RetirementReviewCard({
 }) {
   const [comment, setComment] = useState('')
   const r = po.retirement
-  const browseLines = useMemo(() => retirementLinesAsPoLines(po), [po])
 
   return (
     <div className="rounded-lg border p-4 space-y-3">
@@ -77,17 +53,14 @@ function RetirementReviewCard({
             </p>
           ) : null}
         </div>
-        {poStatusBadge(po.status)}
+        {poStatusBadge(po)}
       </div>
-      {browseLines.length > 0 ? (
-        <div className="rounded-md border bg-muted/20 p-3">
-          <PoReviewLinesPanel
-            lines={browseLines}
-            pageSize={8}
-            showDept
-            deptFilter={deptFilter}
-            title={`Retirement lines (${browseLines.length})`}
-          />
+      {(po.retirement?.lines?.length ?? 0) > 0 ? (
+        <div className="rounded-md border bg-muted/20 p-3 space-y-2">
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+            Retirement lines ({po.retirement?.lines.length})
+          </p>
+          <RetirementLinesReview po={po} deptFilter={deptFilter} />
         </div>
       ) : null}
       {canReview ? (
@@ -149,22 +122,6 @@ export function PoRetirementPanel() {
 
   return (
     <div className="space-y-6">
-      <div className="rounded-lg border border-violet-200 bg-violet-50/50 dark:bg-violet-950/20 p-4 flex gap-3 text-sm">
-        <Info className="h-5 w-5 shrink-0 text-violet-600" />
-        <div className="space-y-1">
-          <p className="font-medium">Market retirement review</p>
-          <p className="text-muted-foreground">
-            Purchasers submit retirements from{' '}
-            <Link href="/supply/purchasing" className="underline font-medium text-foreground">
-              Supply chain → Purchasing
-            </Link>
-            . Accept to update central store stock; reject sends the PO back to the purchaser.
-            Accountant, store, purchaser, auditor, admin, and superadmin may also edit the
-            retirement on Purchasing without rejecting first.
-          </p>
-        </div>
-      </div>
-
       <section className="space-y-3">
         <div>
           <h2 className="text-sm font-semibold">
@@ -176,7 +133,7 @@ export function PoRetirementPanel() {
             ) : null}
           </h2>
           <p className="text-xs text-muted-foreground">
-            Retirements submitted after market purchase — comment required to accept or reject.
+            Retirements from Purchasing after market buy — accept to add stock; reject returns to purchaser.
           </p>
         </div>
         {pending.length === 0 ? (

@@ -31,7 +31,7 @@ export function PoCommentBanner({
   const styles = {
     reject: 'border-red-300 bg-red-50 text-red-900 dark:bg-red-950/30 dark:border-red-900',
     manager: 'border-blue-300 bg-blue-50 text-blue-900 dark:bg-blue-950/30 dark:border-blue-900',
-    info: 'border-amber-300 bg-amber-50 text-amber-950 dark:bg-amber-950/30 dark:border-amber-900',
+    info: 'border-sky-300 bg-sky-50 text-sky-950 dark:bg-sky-950/30 dark:border-sky-900',
   }
 
   return (

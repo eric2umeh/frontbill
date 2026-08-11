@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { normalizeSupplyDept, type PoLine, type PurchaseOrder } from "@/lib/supply-chain/types";
+import { normalizeSupplyDept, type PurchaseOrder } from "@/lib/supply-chain/types";
 import { formatNaira } from "@/lib/utils/currency";
 import {
   formatPoRaisedAt,
@@ -14,6 +14,7 @@ import {
   PoReviewLinesPanel,
   poDepartmentFilterOptions,
 } from "@/components/supply-chain/po-review-lines-panel";
+import { RetirementLinesReview } from "@/components/supply-chain/retirement-lines-review";
 import { ChevronDown, ChevronRight } from "lucide-react";
 
 export function PoHistoryPanel({
@@ -29,9 +30,10 @@ export function PoHistoryPanel({
   searchPlaceholder?: string;
 }) {
   const history = purchaseOrders.filter((po) =>
-    includeStatuses
+    !po.deletedAt &&
+    (includeStatuses
       ? includeStatuses.includes(po.status)
-      : isPurchaseOrderHistoryStatus(po.status),
+      : isPurchaseOrderHistoryStatus(po.status)),
   );
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
@@ -60,7 +62,7 @@ export function PoHistoryPanel({
   return (
     <PaginatedListShell
       items={history}
-      pageSize={10}
+      pageSize={8}
       searchPlaceholder={
         searchPlaceholderProp ?? "Search PO number, raised date, store…"
       }
@@ -117,16 +119,7 @@ export function PoHistoryPanel({
             const open = expandedId === po.id;
             const { mode, lines } = getPoHistoryLines(po);
             const boughtCount = lines.filter((l) => !l.notBought).length;
-            const asPoLines: PoLine[] = lines.map((line) => ({
-              id: line.id,
-              stockItemId: line.stockItemId,
-              name: line.name,
-              dept: normalizeSupplyDept(line.dept),
-              unit: line.unit,
-              quantityOrdered: line.quantity,
-              unitPrice: line.unitPrice,
-              lineTotal: line.lineTotal,
-            }));
+            const deptFilter = ctx.activeFilters.dept ?? "all";
 
             return (
               <div key={po.id} className="rounded-md border overflow-hidden">
@@ -146,7 +139,7 @@ export function PoHistoryPanel({
                         <span className="text-sm font-medium tabular-nums">
                           {po.poNumber}
                         </span>
-                        {poStatusBadge(po.status)}
+                        {poStatusBadge(po)}
                         <span className="text-sm font-semibold tabular-nums">
                           {formatNaira(
                             po.retirement?.actualSpent ?? po.totalAmount,
@@ -165,8 +158,8 @@ export function PoHistoryPanel({
                   </span>
                 </button>
                 {open && (
-                  <div className="border-t bg-muted/20 px-3 py-2">
-                    <p className="text-[13px] text-muted-foreground mb-2">
+                  <div className="border-t bg-muted/20 px-3 py-2 space-y-2">
+                    <p className="text-[13px] text-muted-foreground">
                       Procurement week: {po.weekLabel}
                       {po.retirement && (
                         <>
@@ -176,14 +169,18 @@ export function PoHistoryPanel({
                         </>
                       )}
                     </p>
-                    <PoReviewLinesPanel
-                      lines={asPoLines}
-                      pageSize={10}
-                      showDept
-                      compact
-                      deptFilter={ctx.activeFilters.dept ?? "all"}
-                      title={`${mode === "retirement" ? "Retirement" : "Order"} lines (${lines.length})`}
-                    />
+                    {mode === "retirement" && po.retirement?.lines?.length ? (
+                      <RetirementLinesReview po={po} deptFilter={deptFilter} />
+                    ) : (
+                      <PoReviewLinesPanel
+                        lines={po.lines}
+                        pageSize={10}
+                        showDept
+                        compact
+                        deptFilter={deptFilter}
+                        title={`Order lines (${po.lines.length})`}
+                      />
+                    )}
                   </div>
                 )}
               </div>

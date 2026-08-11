@@ -299,9 +299,9 @@ export function KitchenWorkspace() {
         <TabsList className="flex h-auto flex-wrap">
           <TabsTrigger value="stock">Finished / Prep Stock</TabsTrigger>
           <TabsTrigger value="raw-stock">Raw from Store</TabsTrigger>
-          <TabsTrigger value="purchase">Raise Purchase Order</TabsTrigger>
           <TabsTrigger value="production">Production Records</TabsTrigger>
           <TabsTrigger value="recipes">All Batches</TabsTrigger>
+          <TabsTrigger value="purchase">Raise Purchase Order</TabsTrigger>
           <TabsTrigger value="budget">Budget</TabsTrigger>
         </TabsList>
 

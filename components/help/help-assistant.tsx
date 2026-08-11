@@ -1,6 +1,12 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -10,7 +16,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet'
-import { CircleHelp, MessageCircle, Send } from 'lucide-react'
+import { CircleHelp, GripVertical, MessageCircle, Send } from 'lucide-react'
 import { HELP_SUGGESTION_CHIPS, matchHelpQuestion } from '@/lib/help/match-help'
 import { cn } from '@/lib/utils'
 
@@ -21,8 +27,25 @@ type ChatMsg =
 const WELCOME =
   "Hi! I'm the FrontBill help assistant. Try a chip below, or ask things like “How do I make a booking?” or “How do I make a reservation?” Keyword answers only — nothing is sent to an AI server."
 
+const POS_KEY = 'frontbill_help_fab_pos'
+
+type FabPos = { x: number; y: number }
+
 function newId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+}
+
+function clampPos(x: number, y: number, w: number, h: number): FabPos {
+  const pad = 8
+  return {
+    x: Math.min(Math.max(pad, x), Math.max(pad, window.innerWidth - w - pad)),
+    y: Math.min(Math.max(pad, y), Math.max(pad, window.innerHeight - h - pad)),
+  }
+}
+
+function defaultPos(w: number, h: number): FabPos {
+  if (typeof window === 'undefined') return { x: 24, y: 24 }
+  return clampPos(window.innerWidth - w - 24, window.innerHeight - h - 24, w, h)
 }
 
 export function HelpAssistant() {
@@ -32,6 +55,36 @@ export function HelpAssistant() {
     { id: 'welcome', role: 'assistant', text: WELCOME },
   ])
   const bottomRef = useRef<HTMLDivElement>(null)
+  const btnRef = useRef<HTMLButtonElement>(null)
+  const dragRef = useRef<{
+    pointerId: number
+    startX: number
+    startY: number
+    origX: number
+    origY: number
+    moved: boolean
+  } | null>(null)
+
+  const [pos, setPos] = useState<FabPos | null>(null)
+  const [dragging, setDragging] = useState(false)
+
+  useEffect(() => {
+    const w = 72
+    const h = 36
+    try {
+      const raw = localStorage.getItem(POS_KEY)
+      if (raw) {
+        const parsed = JSON.parse(raw) as FabPos
+        if (typeof parsed.x === 'number' && typeof parsed.y === 'number') {
+          setPos(clampPos(parsed.x, parsed.y, w, h))
+          return
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+    setPos(defaultPos(w, h))
+  }, [])
 
   useEffect(() => {
     if (!open) return
@@ -43,6 +96,74 @@ export function HelpAssistant() {
     window.addEventListener('frontbill:open-help', openHelp)
     return () => window.removeEventListener('frontbill:open-help', openHelp)
   }, [])
+
+  useEffect(() => {
+    const onResize = () => {
+      setPos((p) => {
+        if (!p) return p
+        const rect = btnRef.current?.getBoundingClientRect()
+        const w = rect?.width ?? 96
+        const h = rect?.height ?? 48
+        return clampPos(p.x, p.y, w, h)
+      })
+    }
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
+
+  const persistPos = useCallback((next: FabPos) => {
+    try {
+      localStorage.setItem(POS_KEY, JSON.stringify(next))
+    } catch {
+      /* ignore */
+    }
+  }, [])
+
+  const onPointerDown = (e: ReactPointerEvent<HTMLButtonElement>) => {
+    if (e.button !== 0) return
+    const rect = e.currentTarget.getBoundingClientRect()
+    dragRef.current = {
+      pointerId: e.pointerId,
+      startX: e.clientX,
+      startY: e.clientY,
+      origX: rect.left,
+      origY: rect.top,
+      moved: false,
+    }
+    e.currentTarget.setPointerCapture(e.pointerId)
+    setDragging(true)
+  }
+
+  const onPointerMove = (e: ReactPointerEvent<HTMLButtonElement>) => {
+    const d = dragRef.current
+    if (!d || d.pointerId !== e.pointerId) return
+    const dx = e.clientX - d.startX
+    const dy = e.clientY - d.startY
+    if (Math.abs(dx) > 4 || Math.abs(dy) > 4) d.moved = true
+    if (!d.moved) return
+    const rect = e.currentTarget.getBoundingClientRect()
+    setPos(clampPos(d.origX + dx, d.origY + dy, rect.width, rect.height))
+  }
+
+  const onPointerUp = (e: ReactPointerEvent<HTMLButtonElement>) => {
+    const d = dragRef.current
+    if (!d || d.pointerId !== e.pointerId) return
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId)
+    } catch {
+      /* ignore */
+    }
+    setDragging(false)
+    if (d.moved) {
+      setPos((p) => {
+        if (p) persistPos(p)
+        return p
+      })
+    } else {
+      setOpen(true)
+    }
+    dragRef.current = null
+  }
 
   const ask = (question: string) => {
     const q = question.trim()
@@ -75,13 +196,28 @@ export function HelpAssistant() {
   return (
     <>
       <Button
+        ref={btnRef}
         type="button"
-        onClick={() => setOpen(true)}
-        className="fixed bottom-4 right-4 z-40 h-12 gap-2 rounded-full px-4 shadow-lg md:bottom-6 md:right-6"
-        aria-label="Open help"
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
+        className={cn(
+          'fixed z-40 h-9 gap-1 rounded-full px-2.5 py-0 shadow-md touch-none select-none',
+          dragging ? 'cursor-grabbing scale-[1.03]' : 'cursor-grab',
+          !pos && 'bottom-4 right-4 md:bottom-6 md:right-6',
+        )}
+        style={
+          pos
+            ? { left: pos.x, top: pos.y, right: 'auto', bottom: 'auto' }
+            : undefined
+        }
+        aria-label="Open help (drag to move)"
+        title="Drag to move · click to open"
       >
-        <CircleHelp className="h-5 w-5" />
-        <span className="text-sm font-medium hidden sm:inline">Help</span>
+        <GripVertical className="h-3 w-3 opacity-60 shrink-0" aria-hidden />
+        <CircleHelp className="h-4 w-4" />
+        <span className="text-[11px] font-medium leading-none">Help</span>
       </Button>
 
       <Sheet open={open} onOpenChange={setOpen}>

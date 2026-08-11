@@ -5,9 +5,12 @@ import type { PurchaseOrder } from "@/lib/supply-chain/types";
 import { formatNaira } from "@/lib/utils/currency";
 import { poStatusBadge } from "@/components/supply-chain/po-approval-panel";
 import { formatPoRaisedAt, getPoHistoryLines } from "@/lib/supply-chain/po-format";
-import { formatPoDecisionStamp } from "@/lib/supply-chain/po-active";
+import {
+  formatPoDecisionStamp,
+  formatPoLinesEditStamp,
+} from "@/lib/supply-chain/po-active";
 import { PoReviewLinesPanel } from "@/components/supply-chain/po-review-lines-panel";
-import type { PoLine } from "@/lib/supply-chain/types";
+import { RetirementLinesReview } from "@/components/supply-chain/retirement-lines-review";
 import { PoCommentBanner } from "@/components/supply-chain/po-comment-banner";
 import { Button } from "@/components/ui/button";
 import { ChevronDown, ChevronRight } from "lucide-react";
@@ -65,12 +68,17 @@ export function PoDetailCard({
           <div className="space-y-1 min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <p className="font-medium">{po.poNumber}</p>
-              {poStatusBadge(po.status)}
+              {poStatusBadge(po)}
             </div>
             <p className="text-sm text-muted-foreground">
               Raised {formatPoRaisedAt(po.createdAt)} · {po.createdByName} ·{" "}
               {formatNaira(po.totalAmount)}
             </p>
+            {formatPoLinesEditStamp(po) ? (
+              <p className="text-xs text-sky-800 dark:text-sky-200">
+                {formatPoLinesEditStamp(po)}
+              </p>
+            ) : null}
             {formatPoDecisionStamp(po) ? (
               <p className="text-xs font-medium text-foreground">
                 {formatPoDecisionStamp(po)}
@@ -116,28 +124,16 @@ export function PoDetailCard({
               compact
             />
           )}
-          <PoReviewLinesPanel
-            lines={
-              (historyLines.mode === "retirement"
-                ? historyLines.lines.map((line) => {
-                    const orig = po.lines.find((l) => l.id === line.id);
-                    return {
-                      id: line.id,
-                      stockItemId: orig?.stockItemId ?? line.stockItemId,
-                      name: line.notBought ? `* ${line.name}` : line.name,
-                      dept: line.dept,
-                      unit: line.unit,
-                      quantityOrdered: line.quantity,
-                      unitPrice: line.unitPrice,
-                      lineTotal: line.lineTotal,
-                    } satisfies PoLine;
-                  })
-                : po.lines) as PoLine[]
-            }
-            compact
-            showDept
-            pageSize={10}
-          />
+          {historyLines.mode === "retirement" && po.retirement?.lines?.length ? (
+            <RetirementLinesReview po={po} />
+          ) : (
+            <PoReviewLinesPanel
+              lines={po.lines}
+              compact
+              showDept
+              pageSize={10}
+            />
+          )}
         </div>
       )}
     </div>

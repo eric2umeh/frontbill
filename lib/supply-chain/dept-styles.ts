@@ -1,84 +1,87 @@
 import type { SupplyDept } from '@/lib/supply-chain/types'
 
-/** Distinct header colors per department for PO / basket section cards. */
+/**
+ * Distinct department colors for PO / basket sections.
+ * Avoids green / amber-yellow / orange / red (status-like impressions).
+ */
 export const DEPT_HEADER_STYLES: Record<
   Exclude<SupplyDept, 'all'>,
   { header: string; badge: string; accent: string }
 > = {
   kitchen: {
-    header: 'bg-orange-100/90 border-orange-200 dark:bg-orange-950/40 dark:border-orange-800',
-    badge: 'bg-orange-200 text-orange-950 border-orange-300 dark:bg-orange-900 dark:text-orange-50',
-    accent: 'text-orange-800 dark:text-orange-200',
+    header: 'bg-indigo-100/90 border-indigo-300 dark:bg-indigo-950/45 dark:border-indigo-700',
+    badge: 'bg-indigo-200 text-indigo-950 border-indigo-400 dark:bg-indigo-900 dark:text-indigo-50',
+    accent: 'text-indigo-900 dark:text-indigo-100',
   },
   main_bar: {
-    header: 'bg-violet-100/90 border-violet-200 dark:bg-violet-950/40 dark:border-violet-800',
-    badge: 'bg-violet-200 text-violet-950 border-violet-300 dark:bg-violet-900 dark:text-violet-50',
-    accent: 'text-violet-800 dark:text-violet-200',
+    header: 'bg-violet-100/90 border-violet-300 dark:bg-violet-950/45 dark:border-violet-700',
+    badge: 'bg-violet-200 text-violet-950 border-violet-400 dark:bg-violet-900 dark:text-violet-50',
+    accent: 'text-violet-900 dark:text-violet-100',
   },
   restaurant: {
-    header: 'bg-rose-100/90 border-rose-200 dark:bg-rose-950/40 dark:border-rose-800',
-    badge: 'bg-rose-200 text-rose-950 border-rose-300 dark:bg-rose-900 dark:text-rose-50',
-    accent: 'text-rose-800 dark:text-rose-200',
+    header: 'bg-fuchsia-100/90 border-fuchsia-300 dark:bg-fuchsia-950/45 dark:border-fuchsia-700',
+    badge: 'bg-fuchsia-200 text-fuchsia-950 border-fuchsia-400 dark:bg-fuchsia-900 dark:text-fuchsia-50',
+    accent: 'text-fuchsia-900 dark:text-fuchsia-100',
   },
   pastry: {
-    header: 'bg-pink-100/90 border-pink-200 dark:bg-pink-950/40 dark:border-pink-800',
-    badge: 'bg-pink-200 text-pink-950 border-pink-300 dark:bg-pink-900 dark:text-pink-50',
-    accent: 'text-pink-800 dark:text-pink-200',
+    header: 'bg-purple-100/90 border-purple-300 dark:bg-purple-950/45 dark:border-purple-700',
+    badge: 'bg-purple-200 text-purple-950 border-purple-400 dark:bg-purple-900 dark:text-purple-50',
+    accent: 'text-purple-900 dark:text-purple-100',
   },
   frozen: {
-    header: 'bg-sky-100/90 border-sky-200 dark:bg-sky-950/40 dark:border-sky-800',
-    badge: 'bg-sky-200 text-sky-950 border-sky-300 dark:bg-sky-900 dark:text-sky-50',
-    accent: 'text-sky-800 dark:text-sky-200',
+    header: 'bg-sky-100/90 border-sky-300 dark:bg-sky-950/45 dark:border-sky-700',
+    badge: 'bg-sky-200 text-sky-950 border-sky-400 dark:bg-sky-900 dark:text-sky-50',
+    accent: 'text-sky-900 dark:text-sky-100',
   },
   beverage: {
-    header: 'bg-cyan-100/90 border-cyan-200 dark:bg-cyan-950/40 dark:border-cyan-800',
-    badge: 'bg-cyan-200 text-cyan-950 border-cyan-300 dark:bg-cyan-900 dark:text-cyan-50',
-    accent: 'text-cyan-800 dark:text-cyan-200',
+    header: 'bg-cyan-100/90 border-cyan-300 dark:bg-cyan-950/45 dark:border-cyan-700',
+    badge: 'bg-cyan-200 text-cyan-950 border-cyan-400 dark:bg-cyan-900 dark:text-cyan-50',
+    accent: 'text-cyan-900 dark:text-cyan-100',
   },
   housekeeping: {
-    header: 'bg-teal-100/90 border-teal-200 dark:bg-teal-950/40 dark:border-teal-800',
-    badge: 'bg-teal-200 text-teal-950 border-teal-300 dark:bg-teal-900 dark:text-teal-50',
-    accent: 'text-teal-800 dark:text-teal-200',
+    header: 'bg-teal-100/90 border-teal-300 dark:bg-teal-950/45 dark:border-teal-700',
+    badge: 'bg-teal-200 text-teal-950 border-teal-400 dark:bg-teal-900 dark:text-teal-50',
+    accent: 'text-teal-900 dark:text-teal-100',
   },
   laundry: {
-    header: 'bg-emerald-100/90 border-emerald-200 dark:bg-emerald-950/40 dark:border-emerald-800',
-    badge: 'bg-emerald-200 text-emerald-950 border-emerald-300 dark:bg-emerald-900 dark:text-emerald-50',
-    accent: 'text-emerald-800 dark:text-emerald-200',
+    header: 'bg-blue-100/90 border-blue-300 dark:bg-blue-950/45 dark:border-blue-700',
+    badge: 'bg-blue-200 text-blue-950 border-blue-400 dark:bg-blue-900 dark:text-blue-50',
+    accent: 'text-blue-900 dark:text-blue-100',
   },
   maintenance: {
-    header: 'bg-amber-100/90 border-amber-200 dark:bg-amber-950/40 dark:border-amber-800',
-    badge: 'bg-amber-200 text-amber-950 border-amber-300 dark:bg-amber-900 dark:text-amber-50',
-    accent: 'text-amber-800 dark:text-amber-200',
+    header: 'bg-stone-200/90 border-stone-400 dark:bg-stone-800/70 dark:border-stone-600',
+    badge: 'bg-stone-300 text-stone-950 border-stone-500 dark:bg-stone-700 dark:text-stone-50',
+    accent: 'text-stone-900 dark:text-stone-100',
   },
   front_office: {
-    header: 'bg-indigo-100/90 border-indigo-200 dark:bg-indigo-950/40 dark:border-indigo-800',
-    badge: 'bg-indigo-200 text-indigo-950 border-indigo-300 dark:bg-indigo-900 dark:text-indigo-50',
-    accent: 'text-indigo-800 dark:text-indigo-200',
+    header: 'bg-slate-200/90 border-slate-400 dark:bg-slate-800/70 dark:border-slate-600',
+    badge: 'bg-slate-300 text-slate-950 border-slate-500 dark:bg-slate-700 dark:text-slate-50',
+    accent: 'text-slate-900 dark:text-slate-100',
   },
   administration: {
-    header: 'bg-slate-200/90 border-slate-300 dark:bg-slate-800/60 dark:border-slate-600',
-    badge: 'bg-slate-300 text-slate-950 border-slate-400 dark:bg-slate-700 dark:text-slate-50',
-    accent: 'text-slate-800 dark:text-slate-200',
+    header: 'bg-zinc-200/90 border-zinc-400 dark:bg-zinc-800/70 dark:border-zinc-600',
+    badge: 'bg-zinc-300 text-zinc-950 border-zinc-500 dark:bg-zinc-700 dark:text-zinc-50',
+    accent: 'text-zinc-900 dark:text-zinc-100',
   },
   account: {
-    header: 'bg-lime-100/90 border-lime-200 dark:bg-lime-950/40 dark:border-lime-800',
-    badge: 'bg-lime-200 text-lime-950 border-lime-300 dark:bg-lime-900 dark:text-lime-50',
-    accent: 'text-lime-800 dark:text-lime-200',
+    header: 'bg-neutral-200/90 border-neutral-400 dark:bg-neutral-800/70 dark:border-neutral-600',
+    badge: 'bg-neutral-300 text-neutral-950 border-neutral-500 dark:bg-neutral-700 dark:text-neutral-50',
+    accent: 'text-neutral-900 dark:text-neutral-100',
   },
   general_store: {
-    header: 'bg-stone-200/90 border-stone-300 dark:bg-stone-800/60 dark:border-stone-600',
-    badge: 'bg-stone-300 text-stone-950 border-stone-400 dark:bg-stone-700 dark:text-stone-50',
-    accent: 'text-stone-800 dark:text-stone-200',
+    header: 'bg-blue-50 border-blue-200 dark:bg-blue-950/30 dark:border-blue-800',
+    badge: 'bg-blue-100 text-blue-950 border-blue-300 dark:bg-blue-900 dark:text-blue-50',
+    accent: 'text-blue-900 dark:text-blue-100',
   },
+}
+
+const FALLBACK = {
+  header: 'bg-muted/40 border-border',
+  badge: 'bg-muted text-foreground border-border',
+  accent: 'text-muted-foreground',
 }
 
 export function deptHeaderStyle(dept: string) {
   const key = dept as Exclude<SupplyDept, 'all'>
-  return (
-    DEPT_HEADER_STYLES[key] ?? {
-      header: 'bg-muted/40 border-border',
-      badge: '',
-      accent: 'text-muted-foreground',
-    }
-  )
+  return DEPT_HEADER_STYLES[key] ?? FALLBACK
 }

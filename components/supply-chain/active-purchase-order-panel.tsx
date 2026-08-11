@@ -1,17 +1,20 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useMemo } from 'react'
 import { useSupplyChain } from '@/lib/supply-chain/supply-chain-context'
 import {
   canDeleteStorePurchaseOrder,
   canEditStorePurchaseOrder,
   formatPoActorStamp,
   formatPoDecisionStamp,
+  formatPoLinesEditStamp,
   isPurchaseOrderAwaitingAccountant,
+  isPurchaseOrderDeleted,
   listKitchenOrdersAtStore,
   poOriginOf,
   showsStoreDraftPurchaseList,
 } from '@/lib/supply-chain/po-active'
+import { resolvePoDisplayStatus } from '@/lib/supply-chain/po-format'
 import { useAuth } from '@/lib/auth-context'
 import { Badge } from '@/components/ui/badge'
 import { formatNaira } from '@/lib/utils/currency'
@@ -58,14 +61,16 @@ export function ActivePurchaseOrderPanel({ actor, storeItems }: Props) {
   } = useSupplyChain()
 
   const po = activePurchaseOrder
+  const displayStatus = po ? resolvePoDisplayStatus(po) : undefined
   const canEdit = canEditStorePurchaseOrder(po)
   const canDelete = canDeleteStorePurchaseOrder(po, role)
-  const awaitingAccountant = isPurchaseOrderAwaitingAccountant(po)
+  const awaitingAccountant =
+    displayStatus === 'pending_accountant' || isPurchaseOrderAwaitingAccountant(po)
   const showDraftList = showsStoreDraftPurchaseList(po)
-  const isDraft = po?.status === 'draft'
+  const isDraft = displayStatus === 'draft'
   const isRejected =
-    po?.status === 'accountant_rejected' || po?.status === 'manager_rejected'
-  const isPendingStore = po?.status === 'pending_store'
+    displayStatus === 'accountant_rejected' || displayStatus === 'manager_rejected'
+  const isPendingStore = displayStatus === 'pending_store'
   const linesEditable =
     canEdit &&
     !awaitingAccountant &&
@@ -73,15 +78,32 @@ export function ActivePurchaseOrderPanel({ actor, storeItems }: Props) {
   const kitchenInbox =
     kitchenOrdersAtStore ?? listKitchenOrdersAtStore(purchaseOrders ?? [])
 
-  // Rejected / store-review kitchen POs must load lines into the cart for editing.
+  /** Store's own in-progress list — kept separate from kitchen inbox for concurrent work. */
+  const storeDraftSibling = useMemo(() => {
+    return (purchaseOrders ?? []).find(
+      (p) =>
+        !isPurchaseOrderDeleted(p) &&
+        poOriginOf(p) === 'store' &&
+        (p.status === 'draft' ||
+          p.status === 'accountant_rejected' ||
+          p.status === 'manager_rejected') &&
+        p.lines.length > 0 &&
+        p.id !== po?.id,
+    )
+  }, [purchaseOrders, po?.id])
+
+  // Only auto-focus a kitchen inbox PO when it is already the active cart and the
+  // basket is empty — never steal focus from a store draft that already has lines.
   useEffect(() => {
     if (!po) return
+    if (po.origin !== 'kitchen') return
     if (!(isRejected || isPendingStore)) return
     if (!po.lines.length) return
     if (basket.length > 0) return
     selectWorkingPurchaseOrder?.(po.id)
   }, [
     po?.id,
+    po?.origin,
     po?.status,
     po?.lines?.length,
     basket.length,
@@ -96,7 +118,7 @@ export function ActivePurchaseOrderPanel({ actor, storeItems }: Props) {
     else {
       playNotificationBeep()
       toast.success(
-        `${res.po.poNumber} sent — accountant reviews in Expenses → Purchase orders`,
+        `${res.po.poNumber} sent — kitchen + store draft lines are combined for accountant review under Purchase Orders`,
       )
     }
   }
@@ -158,25 +180,149 @@ export function ActivePurchaseOrderPanel({ actor, storeItems }: Props) {
     )
   }
 
+  const approvedForMarket =
+    displayStatus === 'approved' ||
+    displayStatus === 'disbursed' ||
+    displayStatus === 'retirement_pending' ||
+    displayStatus === 'retirement_rejected'
+  const retirementInReview = displayStatus === 'retirement_pending_accountant'
+  const inApprovalPipeline =
+    displayStatus === 'pending_accountant' || displayStatus === 'pending_manager'
+  const decidedBy =
+    po.managerDecidedBy ||
+    po.accountantDecidedBy ||
+    'Manager'
+
+  const kitchenInboxBlock =
+    kitchenInbox.length > 0 || storeDraftSibling ? (
+      <div className="rounded-xl border border-violet-200 bg-violet-50/40 p-3 space-y-2">
+        <p className="text-sm font-semibold text-violet-900">Kitchen orders awaiting store</p>
+        <p className="text-xs text-muted-foreground">
+          Kitchen lists stay listed here until you send. Send to accountant combines the open list
+          with your store draft into one approval for the accountant.
+        </p>
+        {storeDraftSibling && poOriginOf(po) === 'kitchen' ? (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-sky-200 bg-sky-50/60 px-3 py-2">
+            <div className="min-w-0">
+              <p className="text-sm font-medium">{storeDraftSibling.poNumber}</p>
+              <p className="text-[13px] text-muted-foreground">Your store draft (in progress)</p>
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                selectWorkingPurchaseOrder?.(storeDraftSibling.id)
+                toast.success(`Back to ${storeDraftSibling.poNumber}`)
+              }}
+            >
+              Back to store draft
+            </Button>
+          </div>
+        ) : null}
+        <ul className="space-y-2">
+          {kitchenInbox.map((kpo) => {
+            const isEditing = po?.id === kpo.id
+            const decision = formatPoDecisionStamp(kpo)
+            return (
+              <li
+                key={kpo.id}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-background px-3 py-2"
+              >
+                <div className="min-w-0">
+                  <p className="text-sm font-medium">{kpo.poNumber}</p>
+                  <p className="text-[13px] text-muted-foreground">{formatPoActorStamp(kpo)}</p>
+                  {formatPoLinesEditStamp(kpo) ? (
+                    <p className="text-[12px] text-sky-800 dark:text-sky-200">
+                      {formatPoLinesEditStamp(kpo)}
+                    </p>
+                  ) : null}
+                  {decision ? (
+                    <p className="text-xs text-red-700 mt-0.5">{decision}</p>
+                  ) : null}
+                  {isEditing ? (
+                    <p className="text-[12px] font-medium text-violet-800 mt-0.5">
+                      Open below for review
+                    </p>
+                  ) : null}
+                </div>
+                {!isEditing ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      selectWorkingPurchaseOrder?.(kpo.id)
+                      toast.success(`Opened ${kpo.poNumber} for editing`)
+                    }}
+                  >
+                    Open & edit
+                  </Button>
+                ) : null}
+              </li>
+            )
+          })}
+        </ul>
+      </div>
+    ) : null
+
   if (!showDraftList) {
     return (
       <div className="space-y-3">
-        <p className="text-sm text-muted-foreground">
-          Accountant accepted this PO — it is with the manager or at market until retired.
-        </p>
+        {kitchenInboxBlock}
+        {approvedForMarket || retirementInReview ? (
+          <div className="rounded-lg border border-emerald-200 bg-emerald-50/70 dark:bg-emerald-950/30 px-3 py-2.5 space-y-1">
+            <p className="text-sm font-semibold text-emerald-900 dark:text-emerald-100">
+              {retirementInReview
+                ? 'Retirement awaiting accountant review'
+                : displayStatus === 'retirement_rejected'
+                  ? 'Retirement rejected — adjust and retire again'
+                  : `Approved by ${decidedBy} — ready for market`}
+            </p>
+            <p className="text-xs text-emerald-800/90 dark:text-emerald-200/90">
+              {retirementInReview
+                ? 'You cannot retire again until the accountant accepts or rejects this submission.'
+                : displayStatus === 'retirement_rejected'
+                  ? 'Fix the retirement and resubmit from Purchasing.'
+                  : 'Cash is disbursed for purchasing. Retire at market when shopping is done.'}
+            </p>
+          </div>
+        ) : inApprovalPipeline ? (
+          <div className="rounded-lg border border-sky-200 bg-sky-50/70 dark:bg-sky-950/30 px-3 py-2.5 space-y-1">
+            <p className="text-sm font-semibold text-sky-900 dark:text-sky-100">
+              {displayStatus === 'pending_manager'
+                ? 'Awaiting manager approval'
+                : 'Awaiting accountant review'}
+            </p>
+            <p className="text-xs text-sky-800/90 dark:text-sky-200/90">
+              This list has been sent for approval. Editing is locked until it is accepted or
+              rejected.
+            </p>
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            This PO is in the approval pipeline — open Purchase Orders to track it.
+          </p>
+        )}
         <PoDetailCard
           po={po}
           defaultOpen
           action={
-            ['approved', 'disbursed', 'retirement_pending', 'retirement_rejected'].includes(
-              po.status,
-            ) ? (
+            retirementInReview ? (
+              <Badge className="bg-violet-100 text-violet-900">
+                Retirement in review
+              </Badge>
+            ) : approvedForMarket ? (
               <Button asChild variant="outline" size="sm">
-                <Link href={`/supply/purchasing?po=${po.id}`}>Retire at market</Link>
+                <Link href={`/supply/purchasing?po=${po.id}`}>
+                  {displayStatus === 'retirement_rejected'
+                    ? 'Edit retirement'
+                    : 'Retire at market'}
+                </Link>
               </Button>
             ) : (
               <Button asChild variant="outline" size="sm">
-                <Link href="/expenses?tab=purchase_orders">Open in Accounting</Link>
+                <Link href="/supply/purchase-orders?tab=approvals">Open approvals</Link>
               </Button>
             )
           }
@@ -193,51 +339,7 @@ export function ActivePurchaseOrderPanel({ actor, storeItems }: Props) {
 
   return (
     <div className="space-y-4">
-      {kitchenInbox.length > 0 && (
-        <div className="rounded-xl border border-violet-200 bg-violet-50/40 p-3 space-y-2">
-          <p className="text-sm font-semibold text-violet-900">Kitchen orders awaiting store</p>
-          <p className="text-xs text-muted-foreground">
-            Open a kitchen list to edit (same cart UX), add store lines if needed, then send to
-            accountant.
-          </p>
-          <ul className="space-y-2">
-            {kitchenInbox.map((kpo) => {
-              const isEditing = po?.id === kpo.id
-              const decision = formatPoDecisionStamp(kpo)
-              return (
-              <li
-                key={kpo.id}
-                className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-background px-3 py-2"
-              >
-                <div className="min-w-0">
-                  <p className="text-sm font-medium">{kpo.poNumber}</p>
-                  <p className="text-[13px] text-muted-foreground">{formatPoActorStamp(kpo)}</p>
-                  {decision ? (
-                    <p className="text-xs text-red-700 mt-0.5">{decision}</p>
-                  ) : null}
-                </div>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={isEditing ? 'default' : 'outline'}
-                  onClick={() => {
-                    // Always focus + reload basket (toggle-to-null was a no-op for rejected POs).
-                    selectWorkingPurchaseOrder?.(kpo.id)
-                    if (isEditing) {
-                      toast.message('This list is open for editing below')
-                    } else {
-                      toast.success(`Opened ${kpo.poNumber} for editing`)
-                    }
-                  }}
-                >
-                  {isEditing ? 'Editing' : 'Open & edit'}
-                </Button>
-              </li>
-              )
-            })}
-          </ul>
-        </div>
-      )}
+      {kitchenInboxBlock}
 
     <div className="rounded-xl border overflow-hidden">
       <div className="border-b px-4 py-3 bg-muted/30 flex flex-wrap items-center justify-between gap-2">
@@ -249,7 +351,7 @@ export function ActivePurchaseOrderPanel({ actor, storeItems }: Props) {
                 Kitchen order
               </Badge>
             ) : null}
-            {poStatusBadge(po.status)}
+            {poStatusBadge(po)}
           </div>
           {formatPoDecisionStamp(po) ? (
             <p
@@ -263,9 +365,16 @@ export function ActivePurchaseOrderPanel({ actor, storeItems }: Props) {
             </p>
           ) : null}
         </div>
-        <p className="text-sm font-semibold tabular-nums">{formatNaira(stats.basketTotal)}</p>
+        {stats.basketTotal > 0 ? (
+          <p className="text-sm font-semibold tabular-nums">{formatNaira(stats.basketTotal)}</p>
+        ) : null}
       </div>
       <p className="px-4 pt-2 text-[13px] text-muted-foreground">{formatPoActorStamp(po)}</p>
+      {formatPoLinesEditStamp(po) ? (
+        <p className="px-4 text-[12px] text-sky-800 dark:text-sky-200">
+          {formatPoLinesEditStamp(po)}
+        </p>
+      ) : null}
 
       {po.accountantComment && isRejected && (
         <div className="p-3 border-b">
@@ -301,9 +410,9 @@ export function ActivePurchaseOrderPanel({ actor, storeItems }: Props) {
       <div className="border-t px-4 py-3 flex flex-wrap items-center justify-between gap-3">
         <p className="text-xs text-muted-foreground max-w-xl">
           {awaitingAccountant
-            ? 'With accountant — quantities are locked until they accept or reject. Open Expenses → Purchase orders to review.'
+            ? 'With accountant — quantities are locked until they accept or reject. Open Supply Chain → Purchase Orders to review.'
             : isPendingStore
-              ? 'Kitchen order at store — edit or add lines, then send to accountant.'
+              ? 'Kitchen order at store — review this draft list (same as Raise purchase), edit if needed, then Send to accountant.'
               : isDraft
                 ? 'Adjust quantities here or on Raise purchase request, then send to accountant.'
                 : isRejected

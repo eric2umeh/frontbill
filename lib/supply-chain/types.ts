@@ -273,6 +273,23 @@ export interface BasketLine {
   storeQtyToBuy?: number
   /** Computed cost per store catalogue unit. */
   storeUnitPrice?: number
+  /** Carried from PoLine for draft / review stamps. */
+  addedBy?: string
+  addedAt?: string
+  lastEditedBy?: string
+  lastEditedAt?: string
+  lastEditedRole?: string
+}
+
+/** Who added/changed a PO line — visible to store, accounts, managers, auditors. */
+export interface PoLineEditEvent {
+  at: string
+  by: string
+  role?: string
+  action: 'added' | 'updated' | 'removed'
+  stockItemId: string
+  name: string
+  detail?: string
 }
 
 export interface PoLine {
@@ -293,6 +310,15 @@ export interface PoLine {
   /** Computed cost per store catalogue unit. */
   stockUnitPrice?: number
   lineTotal: number
+  /** First person who put this line on the PO. */
+  addedBy?: string
+  addedAt?: string
+  /** Last person who changed qty / price / unit on this line. */
+  lastEditedBy?: string
+  lastEditedAt?: string
+  lastEditedRole?: string
+  /** Display-only: line was marked not bought / removed at market retirement. */
+  notBought?: boolean
 }
 
 export interface PurchaseOrder {
@@ -313,6 +339,9 @@ export interface PurchaseOrder {
   sentToAccountantBy?: string
   /** Last workflow status change (ISO) — used when merging local vs remote snapshots. */
   workflowUpdatedAt?: string
+  /** Soft-delete tombstone — kept in snapshots so cloud merge does not resurrect the PO. */
+  deletedAt?: string
+  deletedBy?: string
   cashDisbursed: number
   lines: PoLine[]
   totalAmount: number
@@ -328,6 +357,12 @@ export interface PurchaseOrder {
   managerDecidedAt?: string
   retirementComment?: string
   retirement?: RetirementRecord
+  /** Latest line add/edit/remove (chef, store, accountant, etc.). */
+  linesLastEditedBy?: string
+  linesLastEditedAt?: string
+  linesLastEditedRole?: string
+  /** Recent line-level edits for review trail (newest first, capped). */
+  lineEdits?: PoLineEditEvent[]
 }
 
 export interface RetirementLine {

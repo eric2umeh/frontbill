@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { BasketLine, PoLine } from '@/lib/supply-chain/types'
 import {
   DEPT_LABELS,
@@ -192,13 +192,15 @@ export function PoReviewLinesPanel(props: Props) {
   const kind = props.kind ?? 'po'
   const lines = props.lines
   const [search, setSearch] = useState('')
-  const [focusDept, setFocusDept] = useState<string>('all')
+  /** Highlight only — does not filter the list or change the sum total. */
+  const [highlightDept, setHighlightDept] = useState<string | null>(null)
+  const sectionRefs = useRef<Record<string, HTMLElement | null>>({})
 
   useEffect(() => {
     if (deptFilter && deptFilter !== 'all') {
-      setFocusDept(normalizeSupplyDept(deptFilter))
+      setHighlightDept(normalizeSupplyDept(deptFilter))
     } else if (deptFilter === 'all' || deptFilter === '') {
-      setFocusDept('all')
+      setHighlightDept(null)
     }
   }, [deptFilter])
 
@@ -232,7 +234,10 @@ export function PoReviewLinesPanel(props: Props) {
   const filteredGrouped = useMemo(() => {
     const q = search.trim().toLowerCase()
     const matched = normalized.filter((line) => {
-      if (focusDept !== 'all' && line.dept !== focusDept) return false
+      // External list filter may still restrict to one department
+      if (deptFilter && deptFilter !== 'all') {
+        if (line.dept !== normalizeSupplyDept(deptFilter)) return false
+      }
       if (!q) return true
       return (
         line.name.toLowerCase().includes(q) ||
@@ -255,7 +260,17 @@ export function PoReviewLinesPanel(props: Props) {
       })
     }
     return groups
-  }, [normalized, search, focusDept])
+  }, [normalized, search, deptFilter])
+
+  const scrollToDept = (dept: string) => {
+    setHighlightDept(dept)
+    // Wait a tick so highlight class applies, then smooth-scroll
+    requestAnimationFrame(() => {
+      const el = sectionRefs.current[dept]
+      if (!el) return
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
+  }
 
   if (!lines.length) {
     return (
@@ -277,29 +292,49 @@ export function PoReviewLinesPanel(props: Props) {
       <div className="rounded-lg border bg-background overflow-hidden">
         <div
           className={cn(
-            'border-b bg-muted/40',
-            compact ? 'px-2 py-1.5' : 'px-3 py-2',
+            'border-b bg-muted/40 flex items-start justify-between gap-3 min-w-0',
+            compact ? 'px-2 py-1.5' : 'px-3 py-2.5',
           )}
         >
-          <p
-            className={cn(
-              'font-semibold text-foreground',
-              compact ? 'text-xs' : 'text-sm',
-            )}
-          >
-            {compact ? 'By department' : 'Totals by department'}
-          </p>
-          {!compact && (
-            <p className="text-[13px] text-muted-foreground">
-              {externalLocked
-                ? 'Filtered by the department selector above — only matching lines are listed.'
-                : 'Tap a department to focus its items. Tap again (or All) to show every department.'}
+          <div className="min-w-0">
+            <p
+              className={cn(
+                'font-semibold text-foreground',
+                compact ? 'text-xs' : 'text-sm',
+              )}
+            >
+              By Departments
             </p>
-          )}
+            {!compact && (
+              <p className="text-[13px] text-muted-foreground">
+                {externalLocked
+                  ? 'Filtered by the department selector above — only matching lines are listed.'
+                  : 'Tap a department to jump to its items below.'}
+              </p>
+            )}
+          </div>
+          <div className="text-right shrink-0">
+            <p
+              className={cn(
+                'font-semibold text-muted-foreground',
+                compact ? 'text-[11px]' : 'text-xs',
+              )}
+            >
+              All Departments
+            </p>
+            <p
+              className={cn(
+                'text-muted-foreground tabular-nums',
+                compact ? 'text-[10px]' : 'text-xs',
+              )}
+            >
+              {grandCount} item{grandCount === 1 ? '' : 's'}
+            </p>
+          </div>
         </div>
         <ul className="divide-y">
           {deptSummaries.map((row) => {
-            const active = focusDept === row.dept
+            const active = highlightDept === row.dept
             const style = deptHeaderStyle(row.dept)
             return (
               <li key={row.dept}>
@@ -307,14 +342,13 @@ export function PoReviewLinesPanel(props: Props) {
                   type="button"
                   disabled={externalLocked && !active}
                   onClick={() => {
-                    if (externalLocked) return
-                    setFocusDept((prev) => (prev === row.dept ? 'all' : row.dept))
+                    scrollToDept(row.dept)
                   }}
                   className={cn(
                     'w-full flex items-center justify-between gap-2 text-left transition-colors border-l-4 min-w-0',
                     compact ? 'px-2 py-1.5 text-[13px]' : 'gap-3 px-3 py-2.5 text-[15px]',
                     style.header,
-                    active ? 'ring-1 ring-inset ring-foreground/10' : 'opacity-95 hover:opacity-100',
+                    active ? 'ring-1 ring-inset ring-foreground/15' : 'opacity-95 hover:opacity-100',
                     externalLocked && !active && 'opacity-40 cursor-not-allowed',
                   )}
                 >
@@ -337,8 +371,8 @@ export function PoReviewLinesPanel(props: Props) {
                   </span>
                   <span
                     className={cn(
-                      'font-semibold tabular-nums shrink-0 whitespace-nowrap',
-                      compact ? 'text-[13px]' : 'text-[15px]',
+                      'font-medium tabular-nums shrink-0 whitespace-nowrap',
+                      compact ? 'text-[11px]' : 'text-xs',
                       style.accent,
                     )}
                   >
@@ -363,33 +397,21 @@ export function PoReviewLinesPanel(props: Props) {
                 compact ? 'text-[13px]' : 'text-[15px]',
               )}
             >
-              {focusDept === 'all'
-                ? compact
-                  ? 'All depts'
-                  : 'Sum total — all departments'
-                : compact
-                  ? DEPT_LABELS[focusDept as SupplyDept] ?? focusDept
-                  : `Sum total — ${DEPT_LABELS[focusDept as SupplyDept] ?? focusDept}`}
+              All Departments
             </p>
             {!compact && (
               <p className="text-[13px] text-muted-foreground tabular-nums">
-                {focusDept === 'all'
-                  ? `${grandCount} item${grandCount === 1 ? '' : 's'} across ${deptSummaries.length} department${deptSummaries.length === 1 ? '' : 's'}`
-                  : `${filteredGrouped[0]?.items.length ?? 0} item(s) in focus`}
+                {`${grandCount} item${grandCount === 1 ? '' : 's'} across ${deptSummaries.length} department${deptSummaries.length === 1 ? '' : 's'}`}
               </p>
             )}
           </div>
           <p
             className={cn(
               'font-bold tabular-nums shrink-0 whitespace-nowrap',
-              compact ? 'text-[13px]' : 'text-lg',
+              compact ? 'text-sm' : 'text-base',
             )}
           >
-            {formatNaira(
-              focusDept === 'all'
-                ? grandTotal
-                : (filteredGrouped[0]?.total ?? 0),
-            )}
+            {formatNaira(grandTotal)}
           </p>
         </div>
       </div>
@@ -409,17 +431,6 @@ export function PoReviewLinesPanel(props: Props) {
             className={cn(compact ? 'h-8 pl-8 text-[13px]' : 'pl-9 text-[13px]')}
           />
         </div>
-        {focusDept !== 'all' && !externalLocked && (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className={cn(compact ? 'h-8 text-[13px]' : 'text-[13px]')}
-            onClick={() => setFocusDept('all')}
-          >
-            {compact ? 'All depts' : 'Show all departments'}
-          </Button>
-        )}
       </div>
 
       {filteredGrouped.length === 0 ? (
@@ -435,12 +446,18 @@ export function PoReviewLinesPanel(props: Props) {
         <div className={cn(compact ? 'space-y-2' : 'space-y-4')}>
           {filteredGrouped.map((group) => {
             const style = deptHeaderStyle(group.dept)
+            const highlighted = highlightDept === group.dept
             return (
               <section
                 key={group.dept}
+                id={`po-dept-${group.dept}`}
+                ref={(el) => {
+                  sectionRefs.current[group.dept] = el
+                }}
                 className={cn(
-                  'rounded-lg border overflow-hidden bg-background',
+                  'rounded-lg border overflow-hidden bg-background scroll-mt-4 transition-shadow',
                   style.header,
+                  highlighted && 'ring-2 ring-offset-2 ring-offset-background ring-foreground/25 shadow-md',
                 )}
               >
                 <div
@@ -472,8 +489,8 @@ export function PoReviewLinesPanel(props: Props) {
                   </div>
                   <p
                     className={cn(
-                      'font-semibold tabular-nums shrink-0 whitespace-nowrap',
-                      compact ? 'text-[13px]' : 'text-[15px]',
+                      'font-medium tabular-nums shrink-0 whitespace-nowrap',
+                      compact ? 'text-[11px]' : 'text-xs',
                       style.accent,
                     )}
                   >

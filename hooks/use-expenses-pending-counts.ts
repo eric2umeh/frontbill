@@ -13,13 +13,16 @@ import {
   canSupplyRetirementReview,
 } from '@/lib/permissions'
 
-export type ExpensesPendingCounts = {
+/** Pending PO approvals + retirement reviews for Supply Chain → Purchase Orders. */
+export type SupplyPoPendingCounts = {
   total: number
   purchaseOrders: number
   retirements: number
 }
 
-export function useExpensesPendingCounts(role: string | null | undefined): ExpensesPendingCounts {
+export function useSupplyPoPendingCounts(
+  role: string | null | undefined,
+): SupplyPoPendingCounts {
   const { purchaseOrders } = useSupplyChain()
 
   return useMemo(() => {
@@ -36,7 +39,7 @@ export function useExpensesPendingCounts(role: string | null | undefined): Expen
 
     if (canSupplyRetirementReview(role) || admin) {
       retirements = purchaseOrders.filter(
-        (p) => p.status === 'retirement_pending_accountant',
+        (p) => !p.deletedAt && p.status === 'retirement_pending_accountant',
       ).length
     }
 
@@ -48,8 +51,14 @@ export function useExpensesPendingCounts(role: string | null | undefined): Expen
   }, [purchaseOrders, role])
 }
 
-export function expensesHrefForPendingCounts(counts: ExpensesPendingCounts): string {
-  if (counts.retirements > 0) return '/expenses?tab=retirement'
-  if (counts.purchaseOrders > 0) return '/expenses?tab=purchase_orders'
-  return '/expenses'
+export function supplyPoHrefForPendingCounts(counts: SupplyPoPendingCounts): string {
+  if (counts.retirements > 0) return '/supply/purchase-orders?tab=retirement'
+  if (counts.purchaseOrders > 0) return '/supply/purchase-orders?tab=approvals'
+  return '/supply/purchase-orders'
 }
+
+/** @deprecated Use useSupplyPoPendingCounts — PO queue moved out of Expenses. */
+export const useExpensesPendingCounts = useSupplyPoPendingCounts
+/** @deprecated Use supplyPoHrefForPendingCounts */
+export const expensesHrefForPendingCounts = supplyPoHrefForPendingCounts
+export type ExpensesPendingCounts = SupplyPoPendingCounts

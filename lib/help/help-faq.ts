@@ -634,7 +634,7 @@ export const HELP_FAQ: HelpFaqItem[] = [
     category: 'Supply & kitchen',
     question: 'What is Supply Chain for?',
     answer:
-      'Central store, purchasing, and supply activity log for hotel inventory. Kitchen and F&B Store are under Kitchen. Roles control who can approve purchase orders.',
+      'Central Store (stock & raising POs), Purchase Orders (approvals & retirement review for Accountant / Manager / Admin), Purchasing (market buy & retire), and Supply Log. Kitchen and F&B Store are under Kitchen. Stock is added to Central Store only after retirement is accepted — not when a PO is approved.',
     keywords: ['supply', 'store', 'purchasing', 'inventory', 'po'],
     aliases: ['stock', 'purchase order', 'supply chain'],
     topics: ['supply'],
@@ -644,20 +644,52 @@ export const HELP_FAQ: HelpFaqItem[] = [
     category: 'Supply & kitchen',
     question: 'How do I use Central Store?',
     answer:
-      'Supply Chain → Central Store: add/edit items, approve pending items, Issue Out to departments, view Issue Out Log, raise purchase requests / draft POs, and review stock history / bulk stock in-out.',
+      'Supply Chain → Central Store: add/edit items, Issue Out to departments, raise a draft purchase list and send to the accountant. Only one open PO at a time until it is retired. Approvals are under Supply Chain → Purchase Orders (not Expenses).',
     keywords: ['central store', 'issue out', 'stock in', 'stock out'],
     aliases: ['issue out basket', 'store items', 'stock history'],
     topics: ['supply'],
   },
   {
+    id: 'purchase-orders-approvals',
+    category: 'Supply & kitchen',
+    question: 'How does the purchase order approval chain work?',
+    answer:
+      'Supply Chain → Purchase Orders (Accountant, Manager, Admin, Superadmin). Flow: (1) Kitchen or store raises a purchase list. (2) Kitchen lists go to store first to edit/enrich, then to accountant. (3) Accountant accepts or rejects with a comment (may edit lines). (4) Manager / Admin accepts or rejects with a comment. (5) Cash is disbursed and the purchaser buys at market. (6) Retirement is submitted from Purchasing; when accepted, Central Store stock is updated. A raised PO cannot go to market until accountant then manager review it.',
+    keywords: [
+      'purchase order',
+      'approve po',
+      'approval chain',
+      'accountant',
+      'manager',
+      'disbursed',
+    ],
+    aliases: [
+      'po approval',
+      'purchase order approval chain',
+      'how do pos get approved',
+      'expenses purchase orders',
+    ],
+    topics: ['supply'],
+  },
+  {
     id: 'purchasing',
     category: 'Supply & kitchen',
-    question: 'How do purchase order approvals work?',
+    question: 'How do Purchasing and retirement work?',
     answer:
-      'Supply Chain → Purchasing: accountants/managers approve POs per role. Retire/close market purchases when done; use history and comments for audit.',
-    keywords: ['purchasing', 'purchase order', 'approve po', 'retire'],
-    aliases: ['approve purchase order', 'market retirement', 'po history'],
-    topics: ['supply', 'expense'],
+      'Supply Chain → Purchasing: after a PO is approved/disbursed, record what was bought at market (toggle off items not purchased), then submit retirement. Accountant reviews at Supply Chain → Purchase Orders → Retirement. Accept updates stock; reject returns the PO to the purchaser to edit and resubmit.',
+    keywords: ['purchasing', 'retire', 'retirement', 'market'],
+    aliases: ['market retirement', 'retire po', 'po history'],
+    topics: ['supply'],
+  },
+  {
+    id: 'kitchen-po',
+    category: 'Supply & kitchen',
+    question: 'How does Kitchen raise a purchase order?',
+    answer:
+      'Kitchen builds a cart from the kitchen catalogue and sends it to Central Store. Store can edit/add lines, then send to the accountant. If the accountant rejects, the list returns to store (kitchen is notified).',
+    keywords: ['kitchen purchase', 'kitchen po', 'raise kitchen'],
+    aliases: ['kitchen order', 'send to store'],
+    topics: ['supply'],
   },
   {
     id: 'kitchen',

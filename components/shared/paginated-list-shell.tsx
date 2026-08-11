@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import {
   usePaginatedList,
   type PaginatedListFilter,
@@ -22,6 +22,13 @@ type PaginatedListShellProps<T extends object> = {
   filterMatch?: (item: T, filterKey: string, filterValue: string) => boolean | undefined
   hideSearch?: boolean
   emptyMessage?: string
+  /** When set, replaces the search box value (e.g. deep-link to an item). */
+  seedSearch?: string
+  /**
+   * When this value changes (e.g. department pill), jump to page 1 without
+   * remounting row inputs (remount + blur was wiping the draft basket).
+   */
+  resetKey?: string | number
   children: (paginatedItems: T[], ctx: PaginatedListShellContext) => ReactNode
 }
 
@@ -35,10 +42,17 @@ export function PaginatedListShell<T extends object>({
   filterMatch,
   hideSearch = false,
   emptyMessage = 'No matching results',
+  seedSearch,
+  resetKey,
   children,
 }: PaginatedListShellProps<T>) {
   const [search, setSearch] = useState('')
   const [activeFilters, setActiveFilters] = useState<Record<string, string>>({})
+
+  useEffect(() => {
+    if (seedSearch == null) return
+    setSearch(seedSearch)
+  }, [seedSearch])
 
   const { paginatedItems, page, setPage, totalPages, totalCount, startIndex } = usePaginatedList({
     items,
@@ -49,6 +63,11 @@ export function PaginatedListShell<T extends object>({
     activeFilters,
     filterMatch,
   })
+
+  useEffect(() => {
+    if (resetKey === undefined) return
+    setPage(1)
+  }, [resetKey, setPage])
 
   return (
     <div className="space-y-3">

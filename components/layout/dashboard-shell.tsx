@@ -9,6 +9,7 @@ import type { DashboardUserPayload } from '@/lib/auth/load-dashboard-user'
 import {
   hasPermission,
   canAccessExpenseMenu,
+  canAccessSupplyPurchaseOrdersMenu,
   type Permission,
   canonicalRoleKey,
 } from '@/lib/permissions'
@@ -20,6 +21,7 @@ import { SupplyPendingAlerts } from '@/components/supply-chain/supply-pending-al
 import { StockShortageDialogHost } from '@/components/shared/stock-shortage-dialog-host'
 import { InstallAppBanner } from '@/components/pwa/install-app-banner'
 import { HelpAssistant } from '@/components/help/help-assistant'
+import { RoleOnboardingTour } from '@/components/onboarding/role-onboarding-tour'
 
 const ROUTE_PERMISSIONS: Array<{ path: string; permission: Permission }> = [
   { path: '/dashboard', permission: 'dashboard:view' },
@@ -91,13 +93,10 @@ function canAccessPath(pathname: string, userRole: string): boolean {
     if (pathname.startsWith('/supply/fnb'))
       return hasPermission(userRole, 'supply:fnb') || hasPermission(userRole, 'outlet:view')
     if (pathname.startsWith('/supply/purchasing')) {
-      const rk = canonicalRoleKey(userRole)
-      if (rk === 'admin' || rk === 'superadmin') return true
-      return (
-        hasPermission(userRole, 'supply:purchasing') ||
-        hasPermission(userRole, 'supply:approve_accountant') ||
-        hasPermission(userRole, 'supply:approve_manager')
-      )
+      return hasPermission(userRole, 'supply:purchasing')
+    }
+    if (pathname.startsWith('/supply/purchase-orders')) {
+      return canAccessSupplyPurchaseOrdersMenu(userRole)
     }
     if (pathname.startsWith('/supply/activity')) return hasPermission(userRole, 'supply:activity')
     return hasPermission(userRole, 'supply:store')
@@ -223,6 +222,7 @@ export function DashboardShell({
                 <Header user={user} onMenuClick={() => setMobileMenuOpen(true)} />
               )}
               {allowed && <InstallAppBanner />}
+              {allowed && <RoleOnboardingTour />}
               {!allowed && (
                 <div className="flex flex-1 items-center justify-center">
                   <p className="text-sm text-muted-foreground">Checking access…</p>

@@ -12,10 +12,15 @@ export function isoWeekNumber(date = new Date()): number {
   return Math.ceil(((d.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
 }
 
+/**
+ * Unique PO label. Week prefix groups procurement week; suffix avoids colliding
+ * store + kitchen drafts (they used to share `PO-W{year}-{week}` and merge wiped lines).
+ */
 export function formatPurchaseOrderNumber(date = new Date()): string {
   const year = date.getFullYear();
   const week = String(isoWeekNumber(date)).padStart(2, "0");
-  return `PO-W${year}-${week}`;
+  const suffix = Math.random().toString(36).slice(2, 6).toUpperCase();
+  return `PO-W${year}-${week}-${suffix}`;
 }
 
 /**
@@ -108,6 +113,42 @@ export function getPoHistoryLines(po: PurchaseOrder): {
   };
 }
 
+/**
+ * Heal stale/incorrect status for display (e.g. kitchen PO still labelled
+ * "Awaiting store" after it was sent or approved — stamps tell the truth).
+ */
+export function resolvePoDisplayStatus(po: PurchaseOrder): PurchaseOrder["status"] {
+  const status = po.status;
+  if (
+    status === "retired" ||
+    status === "retirement_pending_accountant" ||
+    status === "retirement_rejected" ||
+    status === "retirement_pending" ||
+    status === "disbursed" ||
+    status === "approved" ||
+    status === "pending_manager" ||
+    status === "pending_accountant" ||
+    status === "accountant_rejected" ||
+    status === "manager_rejected"
+  ) {
+    return status;
+  }
+
+  if (po.retirement?.lines?.length) {
+    if (status === "retired") return "retired";
+    if (po.retirement.reviewedAt) {
+      return po.retirementComment || po.retirement.accountantComment
+        ? "retirement_rejected"
+        : "retired";
+    }
+    return "retirement_pending_accountant";
+  }
+  if (po.managerDecidedBy) return "disbursed";
+  if (po.accountantDecidedBy) return "pending_manager";
+  if (po.sentToAccountantAt) return "pending_accountant";
+  return status;
+}
+
 /** POs the purchaser can retire at market (cash already disbursed). */
 export function isPurchasingRetireCandidate(status: string): boolean {
   return [
@@ -115,8 +156,8 @@ export function isPurchasingRetireCandidate(status: string): boolean {
     "approved",
     "retirement_pending",
     "retirement_rejected",
-    /** Privileged roles may keep editing while accountant reviews. */
-    "retirement_pending_accountant",
+    // Do NOT include retirement_pending_accountant — store must wait for review
+    // (or edit again only after rejection).
   ].includes(status);
 }
 
