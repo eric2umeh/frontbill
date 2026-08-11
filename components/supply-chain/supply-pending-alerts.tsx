@@ -75,7 +75,7 @@ export function SupplyPendingAlerts() {
           description: `${po.createdByName} sent a PO for accountant review.`,
           action: {
             label: 'Review',
-            onClick: () => router.push('/expenses?tab=purchase_orders'),
+            onClick: () => router.push('/supply/purchase-orders?tab=approvals'),
           },
         })
         continue
@@ -91,7 +91,7 @@ export function SupplyPendingAlerts() {
           description: 'Accountant approved — manager review needed.',
           action: {
             label: 'Review',
-            onClick: () => router.push('/expenses?tab=purchase_orders'),
+            onClick: () => router.push('/supply/purchase-orders?tab=approvals'),
           },
         })
         continue
@@ -107,7 +107,7 @@ export function SupplyPendingAlerts() {
           description: `${po.retirement?.submittedBy ?? 'Purchaser'} submitted market retirement.`,
           action: {
             label: 'Review',
-            onClick: () => router.push('/expenses?tab=retirement'),
+            onClick: () => router.push('/supply/purchase-orders?tab=retirement'),
           },
         })
         continue

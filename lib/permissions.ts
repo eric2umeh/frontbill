@@ -987,13 +987,33 @@ export function canSupplyPoManagerReview(
   );
 }
 
-/** Market retirement review — accountant, administrator, superadmin. */
+/** Market retirement review — accountant, auditor, administrator, superadmin, manager. */
 export function canSupplyRetirementReview(
   userRole: string | null | undefined,
 ): boolean {
+  const roleKey = canonicalRoleKey(userRole);
   return (
     hasPermission(userRole, "supply:approve_accountant") ||
-    canAdminTestApproveSupplyPo(userRole)
+    canAdminTestApproveSupplyPo(userRole) ||
+    roleKey === "auditor" ||
+    roleKey === "manager"
+  );
+}
+
+/**
+ * Sidebar → Supply Chain → Purchase Orders (approvals + retirement review).
+ * Accountant / Manager / Admin / Superadmin / Auditor — not store or kitchen.
+ */
+export function canAccessSupplyPurchaseOrdersMenu(
+  userRole: string | null | undefined,
+): boolean {
+  const roleKey = canonicalRoleKey(userRole);
+  return (
+    roleKey === "accountant" ||
+    roleKey === "manager" ||
+    roleKey === "admin" ||
+    roleKey === "superadmin" ||
+    roleKey === "auditor"
   );
 }
 

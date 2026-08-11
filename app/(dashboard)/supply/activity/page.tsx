@@ -6,12 +6,24 @@ import { PaginatedListShell } from '@/components/shared/paginated-list-shell'
 import { ExpandableText } from '@/components/shared/expandable-text'
 import { SupplyHistoryClearButton } from '@/components/supply-chain/supply-history-clear-button'
 import { canonicalRoleKey, canAddStoreItemDirect } from '@/lib/permissions'
+import { useClientMounted } from '@/hooks/use-client-mounted'
+import { Loader2 } from 'lucide-react'
 
 export default function SupplyActivityPage() {
+  const mounted = useClientMounted()
   const { name, role } = useAuth()
   const { activityLog } = useSupplyChain()
   const actor = { name: name ?? 'Staff', role: canonicalRoleKey(role) ?? 'staff' }
   const canClear = canAddStoreItemDirect(role)
+
+  // Radix AlertDialog / Select generate unstable SSR ids — defer until mount.
+  if (!mounted) {
+    return (
+      <div className="flex justify-center py-24">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-4">

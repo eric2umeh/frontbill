@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useClientMounted } from '@/hooks/use-client-mounted'
-import Link from 'next/link'
 import { useAuth } from '@/lib/auth-context'
 import { useSupplyChain } from '@/lib/supply-chain/supply-chain-context'
 import { DEPT_LABELS, STORE_DEPT_PICKER_OPTIONS, isBarStoreDept, storeItemDepartments, storeItemMatchesDept, type SupplyDept } from '@/lib/supply-chain/types'
@@ -24,7 +23,7 @@ import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { ArrowRightFromLine, History, Pencil, Trash2 } from 'lucide-react'
+import { ArrowRightFromLine, History, Pencil, Trash2, AlertTriangle } from 'lucide-react'
 import { OrgStaffSearchField } from '@/components/shared/org-staff-search-field'
 import {
   Select,
@@ -35,6 +34,7 @@ import {
 } from '@/components/ui/select'
 import { Label } from '@/components/ui/label'
 import { toast } from 'sonner'
+import { playNotificationBeep } from '@/lib/utils/play-notification-beep'
 import { PaginatedListShell } from '@/components/shared/paginated-list-shell'
 import {
   getStockLevel,
@@ -45,7 +45,7 @@ import {
 import { DraftBasketSidebar } from '@/components/supply-chain/draft-basket-sidebar'
 import { PoHistoryPanel } from '@/components/supply-chain/po-history-panel'
 import { ActivePurchaseOrderPanel } from '@/components/supply-chain/active-purchase-order-panel'
-import { canEditStorePurchaseOrder } from '@/lib/supply-chain/po-active'
+import { canEditStorePurchaseOrder, poOriginOf } from '@/lib/supply-chain/po-active'
 import { RESPONSIVE_HIDE_MD, RESPONSIVE_HIDE_LG } from '@/lib/ui/responsive-table'
 import {
   defaultUnitForStoreItem,
@@ -94,6 +94,7 @@ export function StoreWorkspace() {
     setBasketLineQty,
     removeFromBasket,
     clearBasket,
+    sendBasketForApproval,
     activePurchaseOrder,
     purchaseOrders,
     stats,
@@ -116,6 +117,59 @@ export function StoreWorkspace() {
   const [purchaseUnitMap, setPurchaseUnitMap] = useState<Record<string, string>>({})
   const [purchasePriceMap, setPurchasePriceMap] = useState<Record<string, string>>({})
   const [factorMap, setFactorMap] = useState<Record<string, Record<string, number>>>({})
+  const [raiseSeedSearch, setRaiseSeedSearch] = useState('')
+  const [focusRaiseItemId, setFocusRaiseItemId] = useState<string | null>(null)
+  const mounted = useClientMounted()
+  const [tab, setTab] = useState('stock')
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const t = new URLSearchParams(window.location.search).get('tab')
+    if (t) setTab(t)
+  }, [])
+
+  useEffect(() => {
+    const onFocus = (e: Event) => {
+      const detail = (e as CustomEvent<{ stockItemId: string; name: string }>).detail
+      if (!detail?.stockItemId) return
+      setRaiseSeedSearch(detail.name)
+      setFocusRaiseItemId(detail.stockItemId)
+      setTab('purchase')
+    }
+    window.addEventListener('frontbill:focus-raise-po-item', onFocus)
+    return () => window.removeEventListener('frontbill:focus-raise-po-item', onFocus)
+  }, [])
+
+  useEffect(() => {
+    if (!focusRaiseItemId || tab !== 'purchase') return
+    const id = focusRaiseItemId
+    const timer = window.setTimeout(() => {
+      const candidates = Array.from(
+        document.querySelectorAll<HTMLElement>(`[data-raise-po-item="${id}"]`),
+      )
+      const row =
+        candidates.find((el) => el.getClientRects().length > 0) ?? candidates[0]
+      if (!row) return
+      row.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      row.classList.add(
+        'ring-2',
+        'ring-sky-500',
+        'ring-offset-2',
+        'ring-offset-background',
+      )
+      window.setTimeout(() => {
+        row.classList.remove(
+          'ring-2',
+          'ring-sky-500',
+          'ring-offset-2',
+          'ring-offset-background',
+        )
+      }, 2200)
+      row.querySelector<HTMLInputElement>('input[data-raise-po-price="1"]')?.focus()
+      setFocusRaiseItemId(null)
+    }, 120)
+    return () => window.clearTimeout(timer)
+  }, [focusRaiseItemId, raiseSeedSearch, tab])
 
   const factorsFor = (item: StoreItem) =>
     factorMap[item.id] ?? mergeUnitFactors(item.id, item.unit, item.unitFactors)
@@ -128,13 +182,6 @@ export function StoreWorkspace() {
   const [issueNotes, setIssueNotes] = useState('')
   const [issueCart, setIssueCart] = useState<IssueOutCartLine[]>([])
   const [issuingCart, setIssuingCart] = useState(false)
-  const mounted = useClientMounted()
-  const [tab, setTab] = useState('stock')
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    const t = new URLSearchParams(window.location.search).get('tab')
-    if (t) setTab(t)
-  }, [])
   const [editItem, setEditItem] = useState<StoreItem | null>(null)
   const [stockQtyMap, setStockQtyMap] = useState<Record<string, string>>({})
   const canIssue = canIssueStockFromStore(role)
@@ -146,6 +193,10 @@ export function StoreWorkspace() {
   const purchaseLocked = Boolean(
     activePurchaseOrder && !canEditStorePurchaseOrder(activePurchaseOrder),
   )
+  /** Kitchen list at store — keep the draft visible until store sends to accountant. */
+  const kitchenAwaitingStore =
+    activePurchaseOrder?.status === 'pending_store' &&
+    poOriginOf(activePurchaseOrder) === 'kitchen'
 
   const filtered = useMemo(() => {
     const list =
@@ -175,6 +226,20 @@ export function StoreWorkspace() {
   }, [storeItems])
 
   const actor = { name: name ?? 'Store', role: canonicalRoleKey(role) ?? 'store' }
+
+  const handleSendToAccountant = () => {
+    const res = sendBasketForApproval(actor)
+    if (res && typeof res === 'object' && 'error' in res) {
+      toast.error(String(res.error))
+      return
+    }
+    if (res && 'po' in res) {
+      playNotificationBeep()
+      toast.success(
+        `${res.po.poNumber} sent — kitchen + store draft lines are combined for accountant review`,
+      )
+    }
+  }
 
   const unitLabel = (unit: string) => formatUnitLabel(unit)
 
@@ -291,9 +356,16 @@ export function StoreWorkspace() {
     const trimmed = raw.trim()
     const purchaseUnit = unitOverride ?? purchaseUnitMap[item.id] ?? defaultUnitForStoreItem(item.unit)
     if (!trimmed) {
-      // Empty qty removes the line so the shopping cart stays in sync.
+      // Intentional clear (blur / Enter) — remove this line. Unmount blur is ignored
+      // via isConnected on the input. While typing, empty is not committed (see onChange).
       if (basket.some((b) => b.stockItemId === item.id)) {
         handleRemoveFromBasket(item.id)
+      } else {
+        setQtyMap((m) => {
+          const next = { ...m }
+          delete next[item.id]
+          return next
+        })
       }
       return
     }
@@ -341,24 +413,29 @@ export function StoreWorkspace() {
         [item.id]: defaultUnitForStoreItem(item.unit),
       }))
     }
+    // Keep the field blank while deleting — do not commit empty until blur/Enter.
+    if (!cleaned.trim()) return
     if (isCompleteQuantityInput(cleaned)) {
       commitPurchaseQty(item, cleaned)
     }
   }
 
   const handleClearBasket = () => {
-    const res = clearBasket()
-    if (res && 'error' in res) {
-      toast.error(res.error)
-      return
-    }
-    setQtyMap({})
-    setPurchaseUnitMap({})
-    setPurchasePriceMap({})
+    void (async () => {
+      const res = await clearBasket(actor)
+      if (res && 'error' in res) {
+        toast.error(res.error)
+        return
+      }
+      setQtyMap({})
+      setPurchaseUnitMap({})
+      setPurchasePriceMap({})
+      toast.success('Draft basket cleared')
+    })()
   }
 
   const handleRemoveFromBasket = (stockItemId: string) => {
-    const res = removeFromBasket(stockItemId)
+    const res = removeFromBasket(stockItemId, actor)
     if (res && 'error' in res) {
       toast.error(res.error)
       return
@@ -481,10 +558,16 @@ export function StoreWorkspace() {
       basketByDept={basketByDept}
       total={stats.basketTotal}
       readOnly={purchaseLocked}
+      hideClear={kitchenAwaitingStore}
       onClear={handleClearBasket}
       onRemove={handleRemoveFromBasket}
       onQtyChange={handleBasketQtyChange}
       sendLabel="Send to accountant"
+      onSend={
+        !purchaseLocked && basket.length > 0
+          ? handleSendToAccountant
+          : undefined
+      }
     />
   )
 
@@ -1290,7 +1373,7 @@ export function StoreWorkspace() {
 
         <TabsContent value="purchase" className="mt-4">
           {purchaseLocked && (
-            <div className="rounded-lg border border-amber-200 bg-amber-50/50 dark:bg-amber-950/20 p-3 text-sm text-muted-foreground mb-4">
+            <div className="rounded-lg border border-sky-200 bg-sky-50/50 dark:bg-sky-950/20 p-3 text-sm text-muted-foreground mb-4">
               A purchase order is already in the approval pipeline. You can add items again after the
               accountant rejects it or once the current PO is retired.
             </div>
@@ -1304,6 +1387,8 @@ export function StoreWorkspace() {
                 <PaginatedListShell
                   items={filtered}
                   pageSize={15}
+                  resetKey={dept}
+                  seedSearch={raiseSeedSearch}
                   searchPlaceholder="Search items to purchase…"
                   searchKeys={['name']}
                   emptyMessage="No items match your search."
@@ -1332,13 +1417,20 @@ export function StoreWorkspace() {
                           const inBasket = basket.some((b) => b.stockItemId === item.id)
                           return (
                             <div
+                              data-raise-po-item={item.id}
                               key={item.id}
                               className={cn(
-                                'rounded-lg border p-3 space-y-2',
-                                inBasket && 'bg-amber-50/40',
+                                'rounded-lg border p-3 space-y-2 scroll-mt-24 transition-shadow',
+                                inBasket && 'bg-sky-50/50 dark:bg-sky-950/20',
                               )}
                             >
                               <p className="font-medium text-sm">
+                                {!(price > 0) && (
+                                  <AlertTriangle
+                                    className="mr-1 inline h-3.5 w-3.5 -mt-0.5 text-sky-700 dark:text-sky-300"
+                                    aria-label="Unit price is ₦0"
+                                  />
+                                )}
                                 {item.name} ({unitLabel(item.unit)})
                               </p>
                               <div className="flex flex-wrap gap-1">
@@ -1362,7 +1454,10 @@ export function StoreWorkspace() {
                                     className="h-8 w-20 text-right"
                                     value={rawQty}
                                     onChange={(e) => handlePurchaseQtyChange(item, e.target.value)}
-                                    onBlur={(e) => commitPurchaseQty(item, e.target.value)}
+                                    onBlur={(e) => {
+                                      if (!e.currentTarget.isConnected) return
+                                      commitPurchaseQty(item, e.target.value)
+                                    }}
                                   />
                                   <UnitSelect
                                     storeUnit={item.unit}
@@ -1378,6 +1473,7 @@ export function StoreWorkspace() {
                                 <Input
                                   inputMode="decimal"
                                   disabled={purchaseLocked}
+                                  data-raise-po-price="1"
                                   className="h-8 w-24 text-right"
                                   placeholder={`₦/${unitLabel(purchaseUnit)}`}
                                   value={purchasePriceMap[item.id] ?? ''}
@@ -1388,6 +1484,7 @@ export function StoreWorkspace() {
                                     }))
                                   }
                                   onBlur={(e) => {
+                                    if (!e.currentTarget.isConnected) return
                                     if (rawQty.trim()) {
                                       commitPurchaseQty(
                                         item,
@@ -1398,6 +1495,11 @@ export function StoreWorkspace() {
                                     }
                                   }}
                                 />
+                                {!(price > 0) && (
+                                  <span className="text-[10px] font-medium text-sky-800 dark:text-sky-200 whitespace-nowrap">
+                                    Warning: ₦0 unit price
+                                  </span>
+                                )}
                                 <span className="text-sm font-medium tabular-nums">
                                   {storeQty != null && storeQty > 0
                                     ? formatNaira(qty * price)
@@ -1465,11 +1567,25 @@ export function StoreWorkspace() {
                               const inBasket = basket.some((b) => b.stockItemId === item.id)
                               return (
                                 <TableRow
+                                  data-raise-po-item={item.id}
                                   key={item.id}
-                                  className={inBasket ? 'bg-amber-50/40' : undefined}
+                                  className={cn(
+                                    'scroll-mt-24 transition-shadow',
+                                    inBasket && 'bg-sky-50/50 dark:bg-sky-950/20',
+                                  )}
                                 >
                                   <TableCell>
-                                    {item.name} ({unitLabel(item.unit)})
+                                    <div className="flex items-start gap-1.5">
+                                      {!(price > 0) && (
+                                        <AlertTriangle
+                                          className="h-3.5 w-3.5 shrink-0 mt-0.5 text-sky-700 dark:text-sky-300"
+                                          aria-label="Unit price is ₦0"
+                                        />
+                                      )}
+                                      <span>
+                                        {item.name} ({unitLabel(item.unit)})
+                                      </span>
+                                    </div>
                                   </TableCell>
                                   <TableCell className={RESPONSIVE_HIDE_MD}>
                                     <div className="flex flex-wrap gap-1">
@@ -1495,7 +1611,10 @@ export function StoreWorkspace() {
                                         onChange={(e) =>
                                           handlePurchaseQtyChange(item, e.target.value)
                                         }
-                                        onBlur={(e) => commitPurchaseQty(item, e.target.value)}
+                                        onBlur={(e) => {
+                                          if (!e.currentTarget.isConnected) return
+                                          commitPurchaseQty(item, e.target.value)
+                                        }}
                                         onKeyDown={(e) => {
                                           if (e.key === 'Enter') {
                                             e.currentTarget.blur()
@@ -1535,35 +1654,46 @@ export function StoreWorkspace() {
                                     )}
                                   </TableCell>
                                   <TableCell className={`text-right ${RESPONSIVE_HIDE_MD}`}>
-                                    <Input
-                                      inputMode="decimal"
-                                      disabled={purchaseLocked}
-                                      className="h-8 w-24 ml-auto text-right"
-                                      placeholder={formatNaira(defaultPurchasePrice)}
-                                      value={purchasePriceMap[item.id] ?? ''}
-                                      onChange={(e) =>
-                                        setPurchasePriceMap((m) => ({
-                                          ...m,
-                                          [item.id]: sanitizeQuantityInput(e.target.value),
-                                        }))
-                                      }
-                                      onBlur={(e) => {
-                                        if (rawQty.trim()) {
-                                          commitPurchaseQty(
-                                            item,
-                                            rawQty,
-                                            undefined,
-                                            e.target.value,
-                                          )
+                                    <div className="flex flex-wrap items-center justify-end gap-x-1.5 gap-y-0.5">
+                                      <Input
+                                        inputMode="decimal"
+                                        disabled={purchaseLocked}
+                                        data-raise-po-price="1"
+                                        className="h-8 w-24 text-right"
+                                        placeholder={formatNaira(defaultPurchasePrice)}
+                                        value={purchasePriceMap[item.id] ?? ''}
+                                        onChange={(e) =>
+                                          setPurchasePriceMap((m) => ({
+                                            ...m,
+                                            [item.id]: sanitizeQuantityInput(e.target.value),
+                                          }))
                                         }
-                                      }}
-                                    />
-                                    <p className="mt-1 text-[10px] text-muted-foreground">
-                                      per {unitLabel(purchaseUnit)}
-                                      {storeQty != null && storeQty > 0
-                                        ? ` · ${formatNaira(item.lastPrice)}/${unitLabel(item.unit)} in store`
-                                        : ''}
-                                    </p>
+                                        onBlur={(e) => {
+                                          if (!e.currentTarget.isConnected) return
+                                          if (rawQty.trim()) {
+                                            commitPurchaseQty(
+                                              item,
+                                              rawQty,
+                                              undefined,
+                                              e.target.value,
+                                            )
+                                          }
+                                        }}
+                                      />
+                                      {!(price > 0) ? (
+                                        <span className="text-[10px] font-medium text-sky-800 dark:text-sky-200 whitespace-nowrap">
+                                          Warning: ₦0 unit price
+                                        </span>
+                                      ) : (
+                                        <span className="text-[10px] text-muted-foreground whitespace-nowrap">
+                                          {`per ${unitLabel(purchaseUnit)}${
+                                            storeQty != null && storeQty > 0
+                                              ? ` · ${formatNaira(item.lastPrice)}/${unitLabel(item.unit)} in store`
+                                              : ''
+                                          }`}
+                                        </span>
+                                      )}
+                                    </div>
                                   </TableCell>
                                   <TableCell className="text-right tabular-nums">
                                     {storeQty != null && storeQty > 0
@@ -1586,14 +1716,6 @@ export function StoreWorkspace() {
         </TabsContent>
 
         <TabsContent value="orders" className="mt-4 space-y-4">
-          <div className="rounded-lg border border-amber-200 bg-amber-50/50 dark:bg-amber-950/20 p-3 text-sm text-muted-foreground">
-            Only <strong className="text-foreground">one purchase order</strong> at a time. The list
-            stays here after you send to the accountant until the PO is retired. Approval is in{' '}
-            <Link href="/expenses?tab=purchase_orders" className="underline font-medium text-foreground">
-              Expenses → Purchase orders
-            </Link>
-            .
-          </div>
           <ActivePurchaseOrderPanel actor={actor} storeItems={storeItems} />
         </TabsContent>
 

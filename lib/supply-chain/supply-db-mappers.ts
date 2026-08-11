@@ -122,5 +122,6 @@ export const KITCHEN_WRITE_SNAPSHOT_KEYS = [
   'kitchen_raw_stock',
   'activity_log',
   'purchase_orders',
-  'basket',
+  // Do not write org `basket` — that mirrors the store cart and would wipe store
+  // draft lines when chef sends a kitchen list concurrently.
 ] as const satisfies readonly SupplySnapshotKey[]

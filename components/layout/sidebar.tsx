@@ -8,7 +8,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { useAuth } from '@/lib/auth-context'
-import { canonicalRoleKey, hasPermission, type Permission } from '@/lib/permissions'
+import { canonicalRoleKey, hasPermission, canAccessSupplyPurchaseOrdersMenu, type Permission } from '@/lib/permissions'
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
 import {
   Collapsible,
@@ -38,6 +38,7 @@ import {
   ChefHat,
   ShoppingCart,
   ClipboardCheck,
+  FileCheck2,
   Store,
   RotateCcw,
   Building2,
@@ -51,6 +52,7 @@ import {
   expensesHrefForPendingCounts,
   useExpensesPendingCounts,
 } from '@/hooks/use-expenses-pending-counts'
+import { tourTargetAttr } from '@/components/onboarding/role-onboarding-tour'
 
 type NavChild = { label: string; href: string; permission?: Permission; permissionAny?: Permission[] }
 
@@ -112,10 +114,19 @@ const NAV_SECTIONS: NavSection[] = [
     routes: [
       { label: 'Central Store', icon: Warehouse, href: '/supply/store', permission: 'supply:store' },
       {
+        label: 'Purchase Orders',
+        icon: FileCheck2,
+        href: '/supply/purchase-orders',
+        permissionAny: [
+          'supply:approve_accountant',
+          'supply:approve_manager',
+        ],
+      },
+      {
         label: 'Purchasing',
         icon: ShoppingCart,
         href: '/supply/purchasing',
-        permissionAny: ['supply:purchasing', 'supply:approve_accountant', 'supply:approve_manager'],
+        permission: 'supply:purchasing',
       },
       { label: 'Supply Log', icon: ClipboardCheck, href: '/supply/activity', permission: 'supply:activity' },
     ],
@@ -140,6 +151,9 @@ const NAV_SECTIONS: NavSection[] = [
 function routeIsVisible(route: NavRoute | NavChild, role: string | null): boolean {
   const roleKey = canonicalRoleKey(role)
   if ('href' in route && route.href === '/dashboard' && roleKey === 'cashier') return false
+  if ('href' in route && route.href === '/supply/purchase-orders') {
+    return canAccessSupplyPurchaseOrdersMenu(role)
+  }
   if (route.permissionAny?.length) {
     return route.permissionAny.some((p) => hasPermission(role, p))
   }
@@ -269,21 +283,21 @@ function SidebarInner({ mobileOpen, onMobileClose, isMobile = false }: SidebarPr
       ? nightAuditHrefForPendingCounts(nightAuditPending)
       : '/night-audit'
   const expensesPending = useExpensesPendingCounts(role)
-  const pendingExpensesTotal = expensesPending.total
-  const expensesHref =
-    pendingExpensesTotal > 0
+  const pendingSupplyPoTotal = expensesPending.total
+  const supplyPoHref =
+    pendingSupplyPoTotal > 0
       ? expensesHrefForPendingCounts(expensesPending)
-      : '/expenses'
+      : '/supply/purchase-orders'
 
   const navHref = (path: string) => {
     if (path === '/night-audit') return nightAuditHref
-    if (path === '/expenses') return expensesHref
+    if (path === '/supply/purchase-orders') return supplyPoHref
     return path
   }
 
   const pendingNavCount = (path: string) => {
     if (path === '/night-audit') return pendingNightAuditTotal
-    if (path === '/expenses') return pendingExpensesTotal
+    if (path === '/supply/purchase-orders') return pendingSupplyPoTotal
     return 0
   }
 
@@ -294,6 +308,30 @@ function SidebarInner({ mobileOpen, onMobileClose, isMobile = false }: SidebarPr
   useEffect(() => {
     setRadixReady(true)
   }, [])
+
+  useEffect(() => {
+    const onTourOpen = (ev: Event) => {
+      const href = String((ev as CustomEvent).detail?.href || '')
+      if (!href) return
+      // Expand any compact dropdown that contains this route
+      setOpenGroups((prev) => {
+        const next = { ...prev }
+        for (const section of visibleSections) {
+          for (const route of section.routes) {
+            if (!route.children?.length) continue
+            const groupKey = `${section.title}-${route.label}`
+            if (route.children.some((c) => c.href === href || href.startsWith(`${c.href}/`))) {
+              next[groupKey] = true
+            }
+          }
+        }
+        return next
+      })
+      if (!isMobile) setCollapsed(false)
+    }
+    window.addEventListener('frontbill:tour-open-nav', onTourOpen)
+    return () => window.removeEventListener('frontbill:tour-open-nav', onTourOpen)
+  }, [visibleSections, isMobile])
 
   const isGroupOpen = (key: string, children: NavChild[]) => {
     if (openGroups[key] !== undefined) return openGroups[key]
@@ -408,6 +446,7 @@ function SidebarInner({ mobileOpen, onMobileClose, isMobile = false }: SidebarPr
                               <Link
                                 key={child.href}
                                 href={href}
+                                data-tour={tourTargetAttr(child.href)}
                                 onClick={() => isMobile && onMobileClose?.()}
                                 className={childLinkClass(childActive)}
                               >
@@ -457,6 +496,7 @@ function SidebarInner({ mobileOpen, onMobileClose, isMobile = false }: SidebarPr
                               <Link
                                 key={child.href}
                                 href={href}
+                                data-tour={tourTargetAttr(child.href)}
                                 onClick={() => isMobile && onMobileClose?.()}
                                 className={childLinkClass(childActive)}
                               >
@@ -482,6 +522,7 @@ function SidebarInner({ mobileOpen, onMobileClose, isMobile = false }: SidebarPr
                     <Link
                       key={route.href}
                       href={href}
+                      data-tour={tourTargetAttr(route.href!)}
                       onClick={() => isMobile && onMobileClose?.()}
                       className={linkClass(isActive)}
                       title={

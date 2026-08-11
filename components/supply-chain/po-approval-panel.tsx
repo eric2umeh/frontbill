@@ -15,29 +15,27 @@ import {
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { Info } from "lucide-react";
 import { toast } from "sonner";
 import { PoReviewLinesPanel } from "@/components/supply-chain/po-review-lines-panel";
 import { PoCommentBanner } from "@/components/supply-chain/po-comment-banner";
-import { formatPoRaisedAt } from "@/lib/supply-chain/po-format";
+import {
+  formatPoRaisedAt,
+  resolvePoDisplayStatus,
+} from "@/lib/supply-chain/po-format";
 import {
   formatPoActorStamp,
   formatPoDecisionStamp,
+  formatPoLinesEditStamp,
   listOrdersAwaitingAccountant,
   listOrdersAwaitingManager,
   poOriginOf,
 } from "@/lib/supply-chain/po-active";
 
-const WORKFLOW_STEPS = [
-  "Kitchen or store raises a purchase list",
-  "Kitchen lists go to store first (edit / enrich), then to accountant",
-  "Accountant accepts or rejects (comment required) — may edit lines in place",
-  "Manager / Admin accepts or rejects (comment required)",
-  "Cash disbursed — purchaser buys at market",
-  "Retirement updates central store stock",
-] as const;
-
-function poStatusBadge(status: PurchaseOrder["status"]) {
+function poStatusBadge(statusOrPo: PurchaseOrder["status"] | PurchaseOrder) {
+  const status =
+    typeof statusOrPo === "string"
+      ? statusOrPo
+      : resolvePoDisplayStatus(statusOrPo);
   const map: Record<
     PurchaseOrder["status"],
     { label: string; className: string }
@@ -48,32 +46,32 @@ function poStatusBadge(status: PurchaseOrder["status"]) {
       className: "bg-violet-100 text-violet-900",
     },
     pending_accountant: {
-      label: "Awaiting accountant",
-      className: "bg-amber-100 text-amber-900",
+      label: "Accepted — awaiting accountant",
+      className: "bg-sky-100 text-sky-900",
     },
     accountant_rejected: {
       label: "Accountant rejected",
       className: "bg-red-100 text-red-800",
     },
     pending_manager: {
-      label: "Awaiting manager",
+      label: "Accepted — awaiting manager",
       className: "bg-blue-100 text-blue-900",
     },
     manager_rejected: {
       label: "Manager rejected",
       className: "bg-red-100 text-red-800",
     },
-    approved: {
-      label: "Approved",
-      className: "bg-emerald-100 text-emerald-800",
-    },
     disbursed: {
-      label: "Disbursed — buy at market",
-      className: "bg-emerald-100 text-emerald-800",
+      label: "Approved by manager — buy at market",
+      className: "bg-emerald-100 text-emerald-900",
+    },
+    approved: {
+      label: "Approved by manager",
+      className: "bg-emerald-100 text-emerald-900",
     },
     retirement_pending: {
       label: "Retirement pending",
-      className: "bg-amber-100 text-amber-900",
+      className: "bg-sky-100 text-sky-900",
     },
     retirement_pending_accountant: {
       label: "Retirement — awaiting accountant",
@@ -87,28 +85,6 @@ function poStatusBadge(status: PurchaseOrder["status"]) {
   };
   const s = map[status];
   return <Badge className={s.className}>{s.label}</Badge>;
-}
-
-export function PoApprovalWorkflowBanner() {
-  return (
-    <div className="rounded-lg border border-blue-200 bg-blue-50/50 dark:bg-blue-950/20 p-4 flex gap-3 text-sm">
-      <Info className="h-5 w-5 shrink-0 text-blue-600" />
-      <div className="space-y-2">
-        <p className="font-medium">Purchase order approval chain</p>
-        <p className="text-muted-foreground">
-          A raised PO cannot go to market until the accountant and then the
-          manager each review it with a comment. Store staff, Administrators,
-          and Superadmins may accept or reject a raised PO directly from the
-          queue below.
-        </p>
-        <ol className="list-decimal list-inside text-xs text-muted-foreground space-y-0.5">
-          {WORKFLOW_STEPS.map((step) => (
-            <li key={step}>{step}</li>
-          ))}
-        </ol>
-      </div>
-    </div>
-  );
 }
 
 function PoDecisionCard({
@@ -162,6 +138,34 @@ function PoDecisionCard({
             {po.weekLabel} · {formatNaira(po.totalAmount)}
           </p>
           <p className="text-[13px] text-muted-foreground">{formatPoActorStamp(po)}</p>
+          {formatPoLinesEditStamp(po) ? (
+            <p className="text-[13px] text-sky-800 dark:text-sky-200 font-medium">
+              {formatPoLinesEditStamp(po)}
+            </p>
+          ) : null}
+          {po.lineEdits && po.lineEdits.length > 0 ? (
+            <details className="text-[12px] text-muted-foreground">
+              <summary className="cursor-pointer select-none hover:text-foreground">
+                Recent line edits ({Math.min(po.lineEdits.length, 8)})
+              </summary>
+              <ul className="mt-1.5 space-y-1 border-l-2 border-sky-200 pl-2.5">
+                {po.lineEdits.slice(0, 8).map((e, i) => (
+                  <li key={`${e.at}-${e.stockItemId}-${i}`}>
+                    <span className="font-medium text-foreground">{e.by}</span>
+                    {e.role ? ` (${e.role})` : ""} · {e.action}{" "}
+                    <span className="text-foreground">{e.name}</span>
+                    {e.detail ? ` — ${e.detail}` : ""} ·{" "}
+                    {new Date(e.at).toLocaleString("en-GB", {
+                      day: "2-digit",
+                      month: "short",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          ) : null}
           {formatPoDecisionStamp(po) ? (
             <p className="text-[13px] font-medium text-foreground">
               {formatPoDecisionStamp(po)}
@@ -193,12 +197,12 @@ function PoDecisionCard({
             </div>
           )}
         </div>
-        {poStatusBadge(po.status)}
+        {poStatusBadge(po)}
       </div>
       {testingAdmin && (
         <Badge
           variant="outline"
-          className="text-xs bg-amber-50 text-amber-900 border-amber-200"
+          className="text-xs bg-sky-50 text-sky-900 border-sky-200"
         >
           Testing — admin fast-track (skips separate accountant/manager logins)
         </Badge>
@@ -273,11 +277,11 @@ export function PoApprovalPanel({ compact }: { compact?: boolean }) {
   const adminTester = canAdminTestApproveSupplyPo(role);
 
   const handleLineQty = (poId: string, stockItemId: string, qty: number) => {
-    const err = mutatePurchaseOrderLine?.(poId, stockItemId, qty);
+    const err = mutatePurchaseOrderLine?.(poId, stockItemId, qty, undefined, actor);
     if (err) toast.error(err);
   };
   const handleLineDelete = (poId: string, stockItemId: string) => {
-    const err = mutatePurchaseOrderLine?.(poId, stockItemId, 0);
+    const err = mutatePurchaseOrderLine?.(poId, stockItemId, 0, undefined, actor);
     if (err) toast.error(err);
     else toast.success("Line removed");
   };
@@ -288,19 +292,14 @@ export function PoApprovalPanel({ compact }: { compact?: boolean }) {
   ) {
     if (compact) return null;
     return (
-      <div className="space-y-4">
-        {!compact && <PoApprovalWorkflowBanner />}
-        <p className="text-sm text-muted-foreground">
-          No purchase orders awaiting approval.
-        </p>
-      </div>
+      <p className="text-sm text-muted-foreground">
+        No purchase orders awaiting approval.
+      </p>
     );
   }
 
   return (
     <div className="space-y-4">
-      {!compact && <PoApprovalWorkflowBanner />}
-
       {pendingAccountant.length > 0 && (
         <div className="space-y-3">
           <p className="text-sm font-semibold">
@@ -351,7 +350,7 @@ export function PoApprovalPanel({ compact }: { compact?: boolean }) {
                       Waiting for accountant review
                     </p>
                   </div>
-                  {poStatusBadge(po.status)}
+                  {poStatusBadge(po)}
                 </div>
                 {po.lines.length > 0 && (
                   <PoReviewLinesPanel lines={po.lines} pageSize={10} />
@@ -408,7 +407,7 @@ export function PoApprovalPanel({ compact }: { compact?: boolean }) {
                     Waiting for manager review
                   </p>
                 </div>
-                {poStatusBadge(po.status)}
+                {poStatusBadge(po)}
               </div>
             ),
           )}

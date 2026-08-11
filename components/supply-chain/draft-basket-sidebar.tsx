@@ -3,7 +3,7 @@
 import { Button } from '@/components/ui/button'
 import type { BasketLine } from '@/lib/supply-chain/types'
 import { formatNaira } from '@/lib/utils/currency'
-import { Send } from 'lucide-react'
+import { AlertTriangle, Send } from 'lucide-react'
 import { PoReviewLinesPanel } from '@/components/supply-chain/po-review-lines-panel'
 
 type Props = {
@@ -17,6 +17,8 @@ type Props = {
   onQtyChange: (stockItemId: string, qty: number) => void
   onSend?: () => void
   sendLabel?: string
+  /** Hide Clear when the list must stay until Send (e.g. kitchen → store). */
+  hideClear?: boolean
 }
 
 export function DraftBasketSidebar({
@@ -28,17 +30,22 @@ export function DraftBasketSidebar({
   onQtyChange,
   onSend,
   sendLabel = 'Send for approval',
+  hideClear = false,
 }: Props) {
+  const zeroPriceItems = basket.filter((b) => !(Number(b.unitPrice) > 0))
+
   return (
     <div className="rounded-xl border bg-card p-3 h-fit sticky top-4 shadow-md space-y-2.5 overflow-hidden">
       <div className="flex justify-between items-start gap-2 min-w-0">
         <div className="min-w-0">
           <h3 className="text-[15px] font-semibold leading-tight">Draft basket</h3>
           <p className="text-[13px] text-muted-foreground leading-snug">
-            {readOnly ? 'Locked in this status' : 'Dept totals, then items'}
+            {readOnly
+              ? 'Locked in this status'
+              : `${basket.length} item${basket.length === 1 ? '' : 's'} · dept totals below`}
           </p>
         </div>
-        {!readOnly && basket.length > 0 && (
+        {!readOnly && !hideClear && basket.length > 0 && (
           <Button
             type="button"
             variant="ghost"
@@ -50,6 +57,41 @@ export function DraftBasketSidebar({
           </Button>
         )}
       </div>
+
+      {zeroPriceItems.length > 0 && (
+        <div className="flex gap-2 rounded-md border border-sky-300 bg-sky-50 px-2.5 py-2 text-[12px] text-sky-950 dark:border-sky-700 dark:bg-sky-950/40 dark:text-sky-100">
+          <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+          <div className="leading-snug min-w-0 space-y-1">
+            <p>
+              <span className="font-semibold">₦0 price</span>
+              {' — '}
+              set a unit price before sending if this is not intentional:
+            </p>
+            <p className="flex flex-wrap gap-x-1.5 gap-y-1">
+              {zeroPriceItems.map((item, i) => (
+                <button
+                  key={item.stockItemId}
+                  type="button"
+                  className="underline underline-offset-2 font-medium hover:text-sky-700 dark:hover:text-sky-50 text-left"
+                  onClick={() => {
+                    window.dispatchEvent(
+                      new CustomEvent('frontbill:focus-raise-po-item', {
+                        detail: {
+                          stockItemId: item.stockItemId,
+                          name: item.name,
+                        },
+                      }),
+                    )
+                  }}
+                >
+                  {item.name}
+                  {i < zeroPriceItems.length - 1 ? ',' : ''}
+                </button>
+              ))}
+            </p>
+          </div>
+        </div>
+      )}
 
       {!basket.length ? (
         <p className="text-[13px] text-muted-foreground py-6 text-center leading-snug">
@@ -70,11 +112,19 @@ export function DraftBasketSidebar({
         </div>
       )}
 
-      <div className="border-t pt-2 flex justify-between items-center gap-2 min-w-0 text-[15px] font-bold">
-        <span className="shrink-0">Sum total</span>
-        <span className="tabular-nums shrink-0 whitespace-nowrap text-right">
-          {formatNaira(total)}
-        </span>
+      <div className="border-t pt-2 space-y-1">
+        <div className="flex justify-between items-center gap-2 min-w-0 text-[13px] text-muted-foreground">
+          <span>Items</span>
+          <span className="tabular-nums font-medium text-foreground">
+            {basket.length}
+          </span>
+        </div>
+        <div className="flex justify-between items-center gap-2 min-w-0 text-[15px] font-bold">
+          <span className="shrink-0">Sum total</span>
+          <span className="tabular-nums shrink-0 whitespace-nowrap text-right text-base">
+            {formatNaira(total)}
+          </span>
+        </div>
       </div>
 
       {onSend && !readOnly && (

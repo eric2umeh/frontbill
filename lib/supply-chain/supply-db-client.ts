@@ -9,9 +9,13 @@ async function authHeaders(): Promise<Record<string, string>> {
     const { createClient } = await import('@/lib/supabase/client')
     const supabase = createClient()
     if (!supabase) return {}
-    const {
+    let {
       data: { session },
     } = await supabase.auth.getSession()
+    if (!session?.access_token) {
+      const refreshed = await supabase.auth.refreshSession()
+      session = refreshed.data.session
+    }
     if (!session?.access_token) return {}
     return { Authorization: `Bearer ${session.access_token}` }
   } catch {

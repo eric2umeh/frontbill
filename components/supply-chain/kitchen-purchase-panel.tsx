@@ -31,6 +31,7 @@ import { playNotificationBeep } from '@/lib/utils/play-notification-beep'
 import {
   canMutatePurchaseOrder,
   formatPoDecisionStamp,
+  formatPoLinesEditStamp,
   poOriginOf,
 } from '@/lib/supply-chain/po-active'
 
@@ -62,11 +63,55 @@ export function KitchenPurchasePanel() {
   const [qtyMap, setQtyMap] = useState<Record<string, string>>({})
   const [purchaseUnitMap, setPurchaseUnitMap] = useState<Record<string, string>>({})
   const [purchasePriceMap, setPurchasePriceMap] = useState<Record<string, string>>({})
+  const [raiseSeedSearch, setRaiseSeedSearch] = useState('')
+  const [focusRaiseItemId, setFocusRaiseItemId] = useState<string | null>(null)
 
   const kitchenItems = useMemo(
     () => storeItems.filter((i) => storeItemMatchesDept(i, 'kitchen')),
     [storeItems],
   )
+
+  useEffect(() => {
+    const onFocus = (e: Event) => {
+      const detail = (e as CustomEvent<{ stockItemId: string; name: string }>).detail
+      if (!detail?.stockItemId) return
+      setRaiseSeedSearch(detail.name)
+      setFocusRaiseItemId(detail.stockItemId)
+    }
+    window.addEventListener('frontbill:focus-raise-po-item', onFocus)
+    return () => window.removeEventListener('frontbill:focus-raise-po-item', onFocus)
+  }, [])
+
+  useEffect(() => {
+    if (!focusRaiseItemId) return
+    const id = focusRaiseItemId
+    const timer = window.setTimeout(() => {
+      const candidates = Array.from(
+        document.querySelectorAll<HTMLElement>(`[data-raise-po-item="${id}"]`),
+      )
+      const row =
+        candidates.find((el) => el.getClientRects().length > 0) ?? candidates[0]
+      if (!row) return
+      row.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      row.classList.add(
+        'ring-2',
+        'ring-sky-500',
+        'ring-offset-2',
+        'ring-offset-background',
+      )
+      window.setTimeout(() => {
+        row.classList.remove(
+          'ring-2',
+          'ring-sky-500',
+          'ring-offset-2',
+          'ring-offset-background',
+        )
+      }, 2200)
+      row.querySelector<HTMLInputElement>('input[data-raise-po-price="1"]')?.focus()
+      setFocusRaiseItemId(null)
+    }, 80)
+    return () => window.clearTimeout(timer)
+  }, [focusRaiseItemId, raiseSeedSearch, kitchenItems])
 
   const basketByDept = useMemo(() => {
     const m = new Map<string, BasketLine[]>()
@@ -98,7 +143,7 @@ export function KitchenPurchasePanel() {
     const purchaseUnit = unitOverride ?? purchaseUnitMap[item.id] ?? defaultUnitForStoreItem(item.unit)
     if (!trimmed || parseQuantityValue(trimmed) <= 0) {
       // Empty / zero qty removes the line so the shopping cart stays in sync.
-      const res = removeFromBasket(item.id)
+      const res = removeFromBasket(item.id, actor)
       if (res && typeof res === 'object' && 'error' in res) toast.error(String(res.error))
       else {
         setQtyMap((m) => {
@@ -149,17 +194,6 @@ export function KitchenPurchasePanel() {
   return (
     <div className="grid lg:grid-cols-[1fr_320px] gap-4">
       <div className="space-y-3">
-        <div className="rounded-lg border border-violet-200 bg-violet-50/50 dark:bg-violet-950/20 p-3 text-sm">
-          <p className="font-medium text-violet-900 dark:text-violet-100">
-            Raise kitchen purchase order
-          </p>
-          <p className="text-xs text-muted-foreground mt-1">
-            Shopping cart of kitchen catalogue items. Send to Central Store — they can edit/add
-            lines, then send to the accountant. Accountant rejection returns the list to store
-            (you are notified too).
-          </p>
-        </div>
-
         {isRejected && po?.accountantComment ? (
           <PoCommentBanner
             label="Accountant rejected — edit and resend to store"
@@ -192,6 +226,11 @@ export function KitchenPurchasePanel() {
                   })}
                 </span>
               </div>
+              {formatPoLinesEditStamp(po) ? (
+                <p className="text-xs text-sky-800 dark:text-sky-200">
+                  {formatPoLinesEditStamp(po)}
+                </p>
+              ) : null}
               {formatPoDecisionStamp(po) ? (
                 <p className="text-xs font-medium text-red-700">{formatPoDecisionStamp(po)}</p>
               ) : null}
@@ -209,6 +248,7 @@ export function KitchenPurchasePanel() {
           <PaginatedListShell
             items={kitchenItems}
             pageSize={40}
+            seedSearch={raiseSeedSearch}
             searchPlaceholder="Search kitchen store items…"
             searchMatch={(item, q) =>
               `${item.name} ${item.unit}`.toLowerCase().includes(q.toLowerCase())
@@ -223,8 +263,9 @@ export function KitchenPurchasePanel() {
                   const unitOpts = unitOptionsForStoreItem(item.unit, item.name)
                   return (
                     <div
+                      data-raise-po-item={item.id}
                       key={item.id}
-                      className="flex flex-col sm:flex-row sm:items-center gap-2 border rounded-lg p-2.5"
+                      className="flex flex-col sm:flex-row sm:items-center gap-2 border rounded-lg p-2.5 scroll-mt-24 transition-shadow"
                     >
                       <div className="flex-1 min-w-0">
                         <p className="font-medium text-sm truncate">{item.name}</p>
@@ -253,11 +294,16 @@ export function KitchenPurchasePanel() {
                           onChange={(e) => {
                             const cleaned = sanitizeQuantityInput(e.target.value)
                             setQtyMap((m) => ({ ...m, [item.id]: cleaned }))
+                            // Keep blank while deleting — commit empty only on blur/Enter.
+                            if (!cleaned.trim()) return
                             if (isCompleteQuantityInput(cleaned)) {
                               commitQty(item, cleaned)
                             }
                           }}
-                          onBlur={(e) => commitQty(item, e.target.value)}
+                          onBlur={(e) => {
+                            if (!e.currentTarget.isConnected) return
+                            commitQty(item, e.target.value)
+                          }}
                           onKeyDown={(e) => {
                             if (e.key === 'Enter') {
                               e.preventDefault()
@@ -270,6 +316,7 @@ export function KitchenPurchasePanel() {
                           min={0}
                           step="any"
                           placeholder="Price"
+                          data-raise-po-price="1"
                           className="w-24 h-8 text-xs"
                           value={purchasePriceMap[item.id] ?? ''}
                           onChange={(e) =>
@@ -302,16 +349,22 @@ export function KitchenPurchasePanel() {
         total={stats.basketTotal}
         readOnly={locked}
         onClear={() => {
-          const res = clearBasket()
-          if (res && typeof res === 'object' && 'error' in res) toast.error(String(res.error))
+          void (async () => {
+            const res = await clearBasket(actor)
+            if (res && typeof res === 'object' && 'error' in res) {
+              toast.error(String(res.error))
+            } else {
+              toast.success('Draft basket cleared')
+            }
+          })()
         }}
         onRemove={(id) => {
-          const res = removeFromBasket(id)
+          const res = removeFromBasket(id, actor)
           if (res && typeof res === 'object' && 'error' in res) toast.error(String(res.error))
         }}
         onQtyChange={(stockItemId, qty) => {
           if (qty <= 0) {
-            const res = removeFromBasket(stockItemId)
+            const res = removeFromBasket(stockItemId, actor)
             if (res && typeof res === 'object' && 'error' in res) {
               toast.error(String(res.error))
             }

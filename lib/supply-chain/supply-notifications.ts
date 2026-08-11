@@ -97,6 +97,8 @@ export function audiencesForRole(roleKey: string): SupplyNotificationAudience[] 
     case 'admin':
     case 'superadmin':
       return ['manager', 'accountant', 'store', 'purchasing']
+    case 'auditor':
+      return ['accountant', 'manager', 'store', 'purchasing']
     case 'purchaser':
       return ['purchasing']
     case 'chef':

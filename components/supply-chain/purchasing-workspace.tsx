@@ -20,7 +20,6 @@ import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Info } from "lucide-react";
 import { toast } from "sonner";
 import {
   poStatusBadge,
@@ -31,6 +30,7 @@ import { PoHistoryPanel } from "@/components/supply-chain/po-history-panel";
 import {
   formatPoRaisedAt,
   isPurchasingRetireCandidate,
+  isPurchasingRetirementInReview,
 } from "@/lib/supply-chain/po-format";
 import {
   parseQuantityValue,
@@ -54,12 +54,14 @@ function PurchasingRetireRow({
   po: PurchaseOrder;
   onRetire: () => void;
 }) {
+  const inReview = isPurchasingRetirementInReview(po.status);
+  const rejected = po.status === "retirement_rejected";
   return (
     <div className="flex flex-wrap justify-between items-center rounded-md border px-3 py-2 gap-2">
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
           <p className="text-sm font-medium tabular-nums">{po.poNumber}</p>
-          {poStatusBadge(po.status)}
+          {poStatusBadge(po)}
           <span className="text-sm font-semibold tabular-nums">
             {formatNaira(po.cashDisbursed)}
           </span>
@@ -68,15 +70,26 @@ function PurchasingRetireRow({
           Raised {formatPoRaisedAt(po.createdAt)} · {po.createdByName} ·{" "}
           {po.lines.length} line{po.lines.length === 1 ? "" : "s"}
         </p>
-        {po.status === "retirement_rejected" && (
+        {rejected && (
           <Badge variant="outline" className="mt-1 text-red-700 border-red-200">
             Retirement rejected — adjust & resubmit
           </Badge>
         )}
+        {inReview && (
+          <Badge variant="outline" className="mt-1 text-violet-800 border-violet-200">
+            Awaiting accountant — retire locked
+          </Badge>
+        )}
       </div>
-      <Button size="sm" className="shrink-0" onClick={onRetire}>
-        {po.status === "retirement_rejected" ? "Edit retirement" : "Retire at market"}
-      </Button>
+      {inReview ? (
+        <Button size="sm" className="shrink-0" variant="outline" disabled>
+          In review
+        </Button>
+      ) : (
+        <Button size="sm" className="shrink-0" onClick={onRetire}>
+          {rejected ? "Edit retirement" : "Retire at market"}
+        </Button>
+      )}
     </div>
   );
 }
@@ -116,6 +129,10 @@ export function PurchasingWorkspace() {
   const initRetire = (poId: string) => {
     const po = purchaseOrders.find((p) => p.id === poId);
     if (!po) return;
+    if (isPurchasingRetirementInReview(po.status)) {
+      toast.message("Retirement is awaiting accountant review — wait for accept or reject");
+      return;
+    }
     setSelectedId(poId);
     let lines: RetirementLine[];
     if (po.retirement?.lines?.length && po.status === "retirement_rejected") {
@@ -234,6 +251,29 @@ export function PurchasingWorkspace() {
   if (
     selectedId &&
     selected &&
+    isPurchasingRetirementInReview(selected.status)
+  ) {
+    return (
+      <div className="space-y-6">
+        <Button variant="ghost" onClick={() => setSelectedId(null)}>
+          ← Back to PO list
+        </Button>
+        <div className="rounded-lg border border-violet-200 bg-violet-50/70 dark:bg-violet-950/30 px-3 py-2.5 space-y-1">
+          <p className="text-sm font-semibold text-violet-900">
+            Retirement awaiting accountant — retire locked
+          </p>
+          <p className="text-xs text-violet-800/90">
+            You can edit again only if the accountant rejects this submission.
+          </p>
+        </div>
+        <PoDetailPanel po={selected} onBack={() => setSelectedId(null)} />
+      </div>
+    );
+  }
+
+  if (
+    selectedId &&
+    selected &&
     isPurchasingRetireCandidate(selected.status)
   ) {
     return (
@@ -256,7 +296,7 @@ export function PurchasingWorkspace() {
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
           <StatCard label="Cash Disbursed" value={formatNaira(selected.cashDisbursed)} />
           <StatCard label="Actual Spent" value={formatNaira(actualSpent)} highlight />
-          <StatCard label="Not bought (*)" value={formatNaira(notBoughtTotal)} />
+          <StatCard label="Not bought" value={formatNaira(notBoughtTotal)} />
           <StatCard label="Refund to Cashier" value={formatNaira(refund)} />
           <StatCard
             label="Price changes"
@@ -314,18 +354,22 @@ export function PurchasingWorkspace() {
                   <div
                     key={line.lineId}
                     className={`rounded-lg border p-3 text-sm space-y-2 ${
-                      notBought ? "bg-muted/40 opacity-80" : ""
+                      notBought
+                        ? "border-red-200 bg-red-50/70 dark:bg-red-950/20 opacity-90"
+                        : ""
                     }`}
                   >
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div>
-                        <p className={`font-medium ${notBought ? "line-through" : ""}`}>
-                          {notBought ? "* " : ""}
+                        <p className={`font-medium ${notBought ? "line-through decoration-2 text-muted-foreground" : ""}`}>
                           {line.name}
                         </p>
                         <p className="text-[10px] text-muted-foreground">
                           {DEPT_LABELS[line.dept] ?? line.dept}
                         </p>
+                        {notBought ? (
+                          <Badge className="mt-1 bg-red-100 text-red-900">Not bought / removed</Badge>
+                        ) : null}
                       </div>
                       <div className="flex items-center gap-2">
                         <Label htmlFor={`bought-${line.lineId}`} className="text-xs">
@@ -403,7 +447,7 @@ export function PurchasingWorkspace() {
           onClick={() => {
             submitRetirement(selected.id, retireLines, actor);
             playNotificationBeep();
-            toast.success("Retirement submitted — accountant will review in Expenses → Retirement");
+            toast.success("Retirement submitted — accountant will review in Supply Chain → Purchase Orders");
             setSelectedId(null);
             setTab("active");
           }}
@@ -419,7 +463,7 @@ export function PurchasingWorkspace() {
       <div>
         <h1 className="text-2xl font-bold">Purchasing</h1>
         <p className="text-sm text-muted-foreground">
-          Market purchase, retirement, and your PO history
+          Market purchase, retirement, and your PO history. Stock updates when the accountant accepts retirement.
         </p>
       </div>
 
@@ -447,29 +491,47 @@ export function PurchasingWorkspace() {
           </TabsList>
 
           <TabsContent value="active" className="mt-4 space-y-6">
-            <div className="rounded-lg border border-blue-200 bg-blue-50/50 dark:bg-blue-950/20 p-4 flex gap-3 text-sm">
-              <Info className="h-5 w-5 shrink-0 text-blue-600" />
-              <div>
-                <p className="font-medium">Retirement workflow</p>
-                <p className="text-muted-foreground">
-                  After cash disbursement, record what was bought at market. Toggle off items not
-                  purchased (*). Submit for accountant review — stock updates when accepted.
-                </p>
-              </div>
-            </div>
-
             {submittedForReview.length > 0 && (
-              <div className="rounded-lg border border-violet-200 bg-violet-50/50 dark:bg-violet-950/20 p-3 text-sm text-muted-foreground">
-                {submittedForReview.length} retirement
-                {submittedForReview.length === 1 ? "" : "s"} submitted — awaiting accountant at{" "}
-                <Link
-                  href="/expenses?tab=retirement"
-                  className="underline font-medium text-foreground"
+              <section className="space-y-3">
+                <div className="rounded-lg border border-violet-200 bg-violet-50/50 dark:bg-violet-950/20 p-3 text-sm text-muted-foreground">
+                  {submittedForReview.length} retirement
+                  {submittedForReview.length === 1 ? "" : "s"} submitted — awaiting accountant at{" "}
+                  <Link
+                    href="/supply/purchase-orders?tab=retirement"
+                    className="underline font-medium text-foreground"
+                  >
+                    Supply Chain → Purchase Orders → Retirement
+                  </Link>
+                  . Retire at market stays locked until accept or reject.
+                </div>
+                <PaginatedListShell
+                  items={submittedForReview}
+                  pageSize={8}
+                  searchPlaceholder="Search submitted retirement…"
+                  searchMatch={(po, query) => {
+                    const q = query.trim().toLowerCase();
+                    if (!q) return true;
+                    return (
+                      po.poNumber.toLowerCase().includes(q) ||
+                      po.createdByName.toLowerCase().includes(q) ||
+                      (po.retirement?.submittedBy ?? "").toLowerCase().includes(q)
+                    );
+                  }}
+                  emptyMessage="No retirements awaiting accountant."
                 >
-                  Expenses → Retirement
-                </Link>
-                . You can edit again if the accountant rejects.
-              </div>
+                  {(pageItems) => (
+                    <div className="space-y-2">
+                      {pageItems.map((po) => (
+                        <PurchasingRetireRow
+                          key={po.id}
+                          po={po}
+                          onRetire={() => initRetire(po.id)}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </PaginatedListShell>
+              </section>
             )}
 
             <section className="space-y-3">
@@ -484,15 +546,34 @@ export function PurchasingWorkspace() {
                   No POs ready for retirement. Complete accountant and manager approvals first.
                 </p>
               ) : (
-                <div className="space-y-2">
-                  {retireCandidates.map((po) => (
-                    <PurchasingRetireRow
-                      key={po.id}
-                      po={po}
-                      onRetire={() => initRetire(po.id)}
-                    />
-                  ))}
-                </div>
+                <PaginatedListShell
+                  items={retireCandidates}
+                  pageSize={8}
+                  searchPlaceholder="Search PO number, raiser…"
+                  searchMatch={(po, query) => {
+                    const q = query.trim().toLowerCase();
+                    if (!q) return true;
+                    return (
+                      po.poNumber.toLowerCase().includes(q) ||
+                      po.createdByName.toLowerCase().includes(q) ||
+                      formatPoRaisedAt(po.createdAt).toLowerCase().includes(q) ||
+                      po.lines.some((l) => l.name.toLowerCase().includes(q))
+                    );
+                  }}
+                  emptyMessage="No POs ready for retirement."
+                >
+                  {(pageItems) => (
+                    <div className="space-y-2">
+                      {pageItems.map((po) => (
+                        <PurchasingRetireRow
+                          key={po.id}
+                          po={po}
+                          onRetire={() => initRetire(po.id)}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </PaginatedListShell>
               )}
             </section>
           </TabsContent>

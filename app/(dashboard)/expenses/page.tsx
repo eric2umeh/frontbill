@@ -1,7 +1,7 @@
 'use client'
 
 import { Suspense, useState, useEffect } from 'react'
-import { useSearchParams } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { useAuth } from '@/lib/auth-context'
 import { canAccessExpenseMenu, hasPermission } from '@/lib/permissions'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -11,15 +11,7 @@ import { ExpenseLedger } from '@/components/expenses/expense-ledger'
 import { ExpenseCategoriesManager } from '@/components/expenses/expense-categories-manager'
 import { ExpenseImportDialog } from '@/components/expenses/expense-import-dialog'
 import { ExpenseBudgetsPanel } from '@/components/expenses/expense-budgets-panel'
-import { Upload, Receipt, Tags, Target, ShoppingCart, ClipboardCheck } from 'lucide-react'
-import { PoApprovalPanel } from '@/components/supply-chain/po-approval-panel'
-import { PoRetirementPanel } from '@/components/supply-chain/po-retirement-panel'
-import {
-  canAdminTestApproveSupplyPo,
-  canSupplyPoAccountantReview,
-  canSupplyPoManagerReview,
-  canSupplyRetirementReview,
-} from '@/lib/permissions'
+import { Upload, Receipt, Tags, Target } from 'lucide-react'
 
 export default function ExpensesPage() {
   return (
@@ -35,6 +27,7 @@ export default function ExpensesPage() {
 
 function ExpensesPageContent() {
   const { userId, role } = useAuth()
+  const router = useRouter()
   const searchParams = useSearchParams()
   const tabParam = searchParams.get('tab')
   const [importOpen, setImportOpen] = useState(false)
@@ -50,24 +43,21 @@ function ExpensesPageContent() {
   const canManageCategories = hasPermission(role, 'expenses:edit')
   const canImport = hasPermission(role, 'expenses:export')
   const canBudget = hasPermission(role, 'expenses:budget')
-  const canPurchaseOrders =
-    canSupplyPoAccountantReview(role) ||
-    canSupplyPoManagerReview(role) ||
-    canAdminTestApproveSupplyPo(role)
-  const canRetirement = canSupplyRetirementReview(role)
 
   useEffect(() => {
     setTabsReady(true)
   }, [])
 
+  // Legacy deep links from Expenses → Purchase orders / Retirement
   useEffect(() => {
-    if (tabParam === 'purchase_orders' && canPurchaseOrders) {
-      setActiveTab('purchase_orders')
+    if (tabParam === 'purchase_orders') {
+      router.replace('/supply/purchase-orders?tab=approvals')
+      return
     }
-    if (tabParam === 'retirement' && canRetirement) {
-      setActiveTab('retirement')
+    if (tabParam === 'retirement') {
+      router.replace('/supply/purchase-orders?tab=retirement')
     }
-  }, [tabParam, canPurchaseOrders, canRetirement])
+  }, [tabParam, router])
 
   if (!canView) {
     return (
@@ -84,7 +74,7 @@ function ExpensesPageContent() {
           <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Operating expenses</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             Record each expense as a line with category, amount, and reference. Totals feed Reports → Monthly P&amp;L
-            and Daily expenditure.
+            and Daily expenditure. Purchase order approvals live under Supply Chain → Purchase Orders.
           </p>
         </div>
         {canImport && userId && (
@@ -104,18 +94,6 @@ function ExpensesPageContent() {
             <Receipt className="h-4 w-4" />
             Expenses
           </TabsTrigger>
-          {canPurchaseOrders && (
-            <TabsTrigger value="purchase_orders" className="gap-1.5">
-              <ShoppingCart className="h-4 w-4" />
-              Purchase orders
-            </TabsTrigger>
-          )}
-          {canRetirement && (
-            <TabsTrigger value="retirement" className="gap-1.5">
-              <ClipboardCheck className="h-4 w-4" />
-              Retirement
-            </TabsTrigger>
-          )}
           <TabsTrigger value="categories" className="gap-1.5">
             <Tags className="h-4 w-4" />
             Categories
@@ -142,47 +120,12 @@ function ExpensesPageContent() {
           )}
         </TabsContent>
 
-        {canPurchaseOrders && (
-          <TabsContent value="purchase_orders" className="mt-4">
-            <Card>
-              <CardHeader>
-                <CardTitle>Store purchase orders</CardTitle>
-                <CardDescription>
-                  Accountant accepts or rejects raised POs, then manager / admin approves for market purchase.
-                  Store staff send POs from Supply chain → Central store.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <PoApprovalPanel />
-              </CardContent>
-            </Card>
-          </TabsContent>
-        )}
-
-        {canRetirement && (
-          <TabsContent value="retirement" className="mt-4">
-            <Card>
-              <CardHeader>
-                <CardTitle>Market retirements</CardTitle>
-                <CardDescription>
-                  Review retirements submitted from Purchasing after market purchase. Rejected
-                  retirements return to the purchaser to edit and resubmit.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <PoRetirementPanel />
-              </CardContent>
-            </Card>
-          </TabsContent>
-        )}
-
         <TabsContent value="categories" className="mt-4">
           <Card>
             <CardHeader>
               <CardTitle>Expense categories</CardTitle>
               <CardDescription>
-                Add or edit categories used when recording expenses. Run migrations 044 and 045 in Supabase before first
-                use.
+                Add or edit categories used when recording expenses.
               </CardDescription>
             </CardHeader>
             <CardContent>
