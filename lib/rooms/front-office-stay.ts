@@ -127,7 +127,11 @@ export function isShownOnDefaultBookingsList(
   return Boolean(ci && ci <= today)
 }
 
-/** Rooms still physically held (Occ + Due) — used for occupancy % / availability math. */
+/**
+ * Rooms still held for sellable availability: Occ + Due **today** only.
+ * Overdue open folios are excluded so Avail matches total − Occ − Due − OOO
+ * (stale overdue used to crush Available into the 30s on a 64-room house).
+ */
 export function countPhysicallyHeldRooms(
   bookings: FrontOfficeStayRow[],
   todayYmd?: string,
@@ -138,9 +142,17 @@ export function countPhysicallyHeldRooms(
   const rooms = new Set<string>()
   for (const b of bookings) {
     const kind = classifyFrontOfficeStay(b, today, tz)
-    if (kind !== 'occupied' && kind !== 'due_out') continue
-    if (b.room_id) rooms.add(b.room_id)
-    else if (b.id) rooms.add(`folio:${b.id}`)
+    if (kind === 'occupied') {
+      if (b.room_id) rooms.add(b.room_id)
+      else if (b.id) rooms.add(`folio:${b.id}`)
+      continue
+    }
+    if (kind === 'due_out') {
+      const co = bookingYmdHotel(b.check_out, tz)
+      if (co !== today) continue
+      if (b.room_id) rooms.add(b.room_id)
+      else if (b.id) rooms.add(`folio:${b.id}`)
+    }
   }
   return rooms.size
 }
