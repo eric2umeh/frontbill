@@ -743,6 +743,45 @@ export async function applyBookingPaymentToGuestLedger(
 }
 
 /**
+ * Next city-ledger balance after cash-in.
+ * Positive = guest owes hotel; negative = prepaid credit.
+ *
+ * When `folioRemaining` is set, this call applied cash to folios.
+ * When omitted, the caller applied folio payments separately — pass
+ * `externalFolioApplied` so bill-covered cash is not also stored as credit.
+ */
+export function nextLedgerBalanceAfterCashIn(args: {
+  priorBalance: number;
+  cashIn: number;
+  folioBefore?: number;
+  folioRemaining?: number | null;
+  externalFolioApplied?: number;
+}): number {
+  const cash = Math.max(0, Number(args.cashIn) || 0);
+  const prior = Number(args.priorBalance) || 0;
+
+  if (args.folioRemaining != null) {
+    const folioBefore = Math.max(0, Number(args.folioBefore) || 0);
+    const folioRemaining = Math.max(0, Number(args.folioRemaining) || 0);
+    if (folioRemaining > 0.005) {
+      return Math.round(folioRemaining * 100) / 100;
+    }
+    const leftover = Math.max(0, cash - folioBefore);
+    const priorCredit = Math.max(0, -prior);
+    const priorDebitBeyondFolio = Math.max(0, prior - folioBefore);
+    return (
+      Math.round((priorDebitBeyondFolio - priorCredit - leftover) * 100) / 100
+    );
+  }
+
+  // Same continuum as applyBookingPaymentToGuestLedger.
+  const billCovered = Math.max(0, Number(args.externalFolioApplied) || 0);
+  const excess = Math.max(0, cash - billCovered);
+  const towardDebit = Math.min(Math.max(cash - excess, 0), Math.max(0, prior));
+  return Math.round((prior - towardDebit - excess) * 100) / 100;
+}
+
+/**
  * Record money-in on a guest city ledger (settle / add credit from guest profile or booking UI).
  * Settlements also post to folio charges so guest outstanding balance clears in the UI.
  */
@@ -760,6 +799,8 @@ export async function recordGuestLedgerCashMovement(
     ledgerAccountId: string | null;
     currentLedgerBalance: number;
     syncGuestProfile: boolean;
+    /** When syncGuestProfile is false, cash already posted to folio by the caller. */
+    externalFolioApplied?: number;
     payment_account_id?: string | null;
     payment_account_label?: string | null;
   },
@@ -776,6 +817,7 @@ export async function recordGuestLedgerCashMovement(
     ledgerAccountId,
     currentLedgerBalance,
     syncGuestProfile,
+    externalFolioApplied = 0,
     payment_account_id = null,
     payment_account_label = null,
   } = p;
@@ -825,19 +867,24 @@ export async function recordGuestLedgerCashMovement(
     );
   }
 
-  // Negative balance = prepaid credit the guest can use later.
-  let finalLedgerBalance: number;
-  if (folioRemaining != null && folioRemaining > 0.005) {
-    // Partial payment — ledger tracks remaining folio debt.
-    finalLedgerBalance = folioRemaining;
-  } else if (folioBefore <= 0.005 && currentLedgerBalance > 0.005) {
-    // Folio already clear; cash reduces ledger-only debit (may go into credit).
-    finalLedgerBalance = currentLedgerBalance - amount;
-  } else {
-    // Folios cleared by this payment — leftover cash becomes credit.
-    const credit = Math.max(0, amount - Math.max(0, folioBefore));
-    finalLedgerBalance = -credit;
-  }
+  // Prefer live ledger balance over a possibly stale client snapshot.
+  const serverAcct = await fetchGuestCityLedgerAccount(
+    supabase,
+    organizationId,
+    accountName,
+  );
+  const priorBalance =
+    serverAcct?.id != null
+      ? Number(serverAcct.balance) || 0
+      : Number(currentLedgerBalance) || 0;
+
+  const finalLedgerBalance = nextLedgerBalanceAfterCashIn({
+    priorBalance,
+    cashIn: amount,
+    folioBefore,
+    folioRemaining,
+    externalFolioApplied: applyTowardFolios ? 0 : externalFolioApplied,
+  });
 
   await syncGuestCityLedgerBalances(supabase, {
     organizationId,
