@@ -1253,7 +1253,9 @@ export default function BookingDetailPage({
         userId: user.id,
         ledgerAccountId: bookingLedgerSnapshot.id,
         currentLedgerBalance: bookingLedgerSnapshot.balance,
+        // Folio payment is posted below — only excess cash becomes ledger credit.
         syncGuestProfile: false,
+        externalFolioApplied: appliedToBooking,
         ...creditAccountFields,
       });
 
