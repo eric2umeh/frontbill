@@ -34,6 +34,7 @@ import { useAuth } from '@/lib/auth-context'
 import { hasPermission } from '@/lib/permissions'
 import { toast } from 'sonner'
 import { folioGuestCreditAmount, folioPositiveOutstandingSum, bookingDisplayBillBalance } from '@/lib/utils/booking-bill-balance'
+import { calculateGuestBalancesBatch } from '@/lib/balance'
 import {
   impliedGuestPrepaidCredit,
   isGuestCityLedgerCashInDescription,
@@ -116,6 +117,8 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
   const [repairingBalance, setRepairingBalance] = useState(false)
   const [guestPendingBalance, setGuestPendingBalance] = useState(0)
   const [guestFolioCreditTotal, setGuestFolioCreditTotal] = useState(0)
+  /** Same signed-balance credit the Guest Database table uses (positive = credit ₦). */
+  const [guestTableCredit, setGuestTableCredit] = useState(0)
   const [cashbackEarned, setCashbackEarned] = useState(0)
   const [cashbackAvailable, setCashbackAvailable] = useState(0)
   const [guestTab, setGuestTab] = useState('overview')
@@ -262,6 +265,21 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
       setBookings(enrichedBookings)
       setGuestPendingBalance(pendingTotal)
       setGuestFolioCreditTotal(creditTotal)
+
+      // Same credit source as Guest Database table Balance column
+      let tableCreditAmt = 0
+      try {
+        const tableBalanceMap = await calculateGuestBalancesBatch(
+          supabase,
+          [{ id: guestData.id, name: guestData.name }],
+          profile.organization_id,
+        )
+        const signed = Number(tableBalanceMap[guestData.id] ?? 0)
+        if (signed < -0.005) tableCreditAmt = Math.abs(signed)
+        setGuestTableCredit(tableCreditAmt)
+      } catch {
+        setGuestTableCredit(0)
+      }
 
       // Set selected folio to most recent booking's folio
       if (enrichedBookings.length > 0) {
@@ -413,6 +431,24 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
             }
           }
           setGuestFolioCreditTotal((prev) => Math.max(prev, clientCredit))
+        }
+      }
+
+      // Prefer table/ledger credit so the guest page matches the guest list Balance column
+      if (
+        tableCreditAmt > 0.005 &&
+        Number(ledgerData?.balance ?? 0) > -tableCreditAmt + 0.5
+      ) {
+        const creditBal = -tableCreditAmt
+        if (ledgerData) {
+          ledgerData = { ...ledgerData, balance: creditBal }
+        } else {
+          ledgerData = {
+            id: null,
+            balance: creditBal,
+            account_name: guestData.name,
+            account_type: 'individual',
+          }
         }
       }
 
@@ -707,10 +743,11 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
   const effectiveGuestCreditAmount = Math.max(
     guestFolioCreditTotal,
     ledgerAccountCreditAmount,
+    guestTableCredit,
   )
   const totalSpent = depositPaid + effectiveGuestCreditAmount
   const hasOutstandingDebit = totalBookingBalance > 0
-  const hasGuestCredit = effectiveGuestCreditAmount > 0
+  const hasGuestCredit = effectiveGuestCreditAmount > 0.005
 
   const statusColor = (status: string) => {
     switch (status) {
@@ -722,13 +759,23 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
   }
 
   const ledgerStatusBadge = () => {
-    if (!ledgerAccount) return { label: 'No Account', color: 'text-muted-foreground', bg: 'bg-muted/40 border-border' }
+    if (hasGuestCredit && !hasOutstandingDebit) {
+      return { label: 'Credit', color: 'text-blue-700', bg: 'bg-blue-50 border-blue-200' }
+    }
+    if (!ledgerAccount && !hasGuestCredit) {
+      return { label: 'No Account', color: 'text-muted-foreground', bg: 'bg-muted/40 border-border' }
+    }
     if (ledgerDisplayBalance > 0) return { label: 'Debit', color: 'text-red-600', bg: 'bg-red-50 border-red-200' }
-    if (ledgerDisplayBalance < 0) return { label: 'Credit', color: 'text-blue-700', bg: 'bg-blue-50 border-blue-200' }
+    if (ledgerDisplayBalance < 0 || hasGuestCredit) {
+      return { label: 'Credit', color: 'text-blue-700', bg: 'bg-blue-50 border-blue-200' }
+    }
     return { label: 'Settled', color: 'text-muted-foreground', bg: 'bg-muted/40 border-border' }
   }
 
   const ls = ledgerStatusBadge()
+  const cityLedgerShownBalance = hasGuestCredit
+    ? effectiveGuestCreditAmount
+    : Math.abs(ledgerDisplayBalance)
 
   const handleRepairStaleBalance = async () => {
     if (!guest || !currentUserId) return
@@ -844,6 +891,37 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
         </div>
       </div>
 
+      {hasGuestCredit && (
+        <div className="rounded-xl border-2 border-blue-300 bg-blue-50 px-4 py-4 sm:px-5 dark:border-blue-800 dark:bg-blue-950/40">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-start gap-3 min-w-0">
+              <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-blue-100 dark:bg-blue-900/60">
+                <Wallet className="h-5 w-5 text-blue-700 dark:text-blue-300" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-blue-900 dark:text-blue-100">
+                  Account credit available
+                </p>
+                <p className="text-xs text-blue-800/80 dark:text-blue-200/80 mt-0.5">
+                  Prepaid balance that can be applied to future stays or charges for this guest.
+                </p>
+              </div>
+            </div>
+            <div className="text-right shrink-0">
+              <p className="text-3xl font-bold tabular-nums text-blue-700 dark:text-blue-300">
+                {formatNaira(effectiveGuestCreditAmount)}
+              </p>
+              <Badge
+                variant="outline"
+                className="mt-1 border-blue-300 bg-white text-blue-800 dark:bg-blue-950 dark:text-blue-200"
+              >
+                Credit
+              </Badge>
+            </div>
+          </div>
+        </div>
+      )}
+
       <Tabs value={guestTab} onValueChange={setGuestTab} className="w-full">
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>
@@ -910,7 +988,7 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
       </Card>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         <Card>
           <CardContent className="p-5 flex flex-col gap-1">
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -930,11 +1008,42 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
         </Card>
         <Card
           className={
+            hasGuestCredit
+              ? 'border-blue-300 bg-blue-500/5 ring-1 ring-blue-200'
+              : 'border-dashed'
+          }
+        >
+          <CardContent className="p-5 flex flex-col gap-2">
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground min-w-0">
+                <Wallet className="h-4 w-4 shrink-0" />
+                <span>Account Credit</span>
+              </div>
+              {hasGuestCredit && (
+                <Badge variant="outline" className="shrink-0 text-xs border-blue-200 bg-blue-50 text-blue-700 font-medium">
+                  Available
+                </Badge>
+              )}
+            </div>
+            {hasGuestCredit ? (
+              <>
+                <p className="text-3xl font-bold text-blue-600 tabular-nums">
+                  {formatNaira(effectiveGuestCreditAmount)}
+                </p>
+                <p className="text-xs text-muted-foreground leading-snug">
+                  Prepaid credit ready for future bookings or folio charges.
+                </p>
+              </>
+            ) : (
+              <p className="text-3xl font-bold text-muted-foreground">₦0</p>
+            )}
+          </CardContent>
+        </Card>
+        <Card
+          className={
             hasOutstandingDebit
               ? 'border-red-200'
-              : hasGuestCredit
-                ? 'border-blue-200 bg-blue-500/5'
-                : ''
+              : ''
           }
         >
           <CardContent className="p-5 flex flex-col gap-2">
@@ -948,34 +1057,14 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
                   Outstanding
                 </Badge>
               )}
-              {!hasOutstandingDebit && hasGuestCredit && (
-                <Badge variant="outline" className="shrink-0 text-xs border-blue-200 bg-blue-50 text-blue-700 font-medium">
-                  Credit
+              {!hasOutstandingDebit && (
+                <Badge variant="outline" className="shrink-0 text-xs border-green-200 bg-green-50 text-green-700 font-medium">
+                  Settled
                 </Badge>
               )}
             </div>
             {hasOutstandingDebit ? (
-              <>
-                <p className="text-3xl font-bold text-red-600">{formatNaira(totalBookingBalance)}</p>
-                {hasGuestCredit && (
-                  <p className="text-sm font-semibold text-blue-600 tabular-nums">
-                    Credit · {formatNaira(effectiveGuestCreditAmount)}
-                  </p>
-                )}
-              </>
-            ) : hasGuestCredit ? (
-              <>
-                <p className="text-3xl font-bold text-blue-600 tabular-nums">
-                  {formatNaira(effectiveGuestCreditAmount)}
-                </p>
-                <p className="text-xs text-muted-foreground leading-snug">
-                  {guestFolioCreditTotal > 0 && ledgerAccountCreditAmount > 0
-                    ? 'Credit reflected on folio and on the city ledger account.'
-                    : ledgerAccountCreditAmount > 0 && guestFolioCreditTotal <= 0
-                      ? 'Prepaid balance on city ledger account.'
-                      : 'Overpayment held on folio(s).'}
-                </p>
-              </>
+              <p className="text-3xl font-bold text-red-600">{formatNaira(totalBookingBalance)}</p>
             ) : (
               <p className="text-3xl font-bold text-muted-foreground">Settled</p>
             )}
@@ -1072,13 +1161,13 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
       )}
 
       {/* City Ledger Account — always shown */}
-      <Card className={`border-2 ${ls.bg}`}>
+      <Card className={`border-2 ${hasGuestCredit ? 'border-blue-300 bg-blue-50/40' : ls.bg}`}>
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between flex-wrap gap-3">
             <div className="flex items-center gap-2">
               <Wallet className="h-5 w-5 text-primary" />
               <CardTitle className="text-base">City Ledger Account</CardTitle>
-              {ledgerAccount ? (
+              {(ledgerAccount || hasGuestCredit) ? (
                 <Badge variant="outline" className={`text-xs ${ls.color} ${ls.bg} border font-normal`}>
                   {ls.label}
                 </Badge>
@@ -1086,7 +1175,7 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
                 <Badge variant="secondary" className="text-xs">No Account</Badge>
               )}
             </div>
-            {ledgerAccount && (
+            {(ledgerAccount || hasGuestCredit) && (
               <div className="flex flex-wrap gap-2">
                 <Button size="sm" onClick={() => setPaymentModalOpen(true)}>
                   Settle / Top Up
@@ -1106,19 +1195,25 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
           </div>
         </CardHeader>
         <CardContent>
-          {!ledgerAccount ? (
+          {!ledgerAccount && !hasGuestCredit ? (
             <p className="text-sm text-muted-foreground">
               No city ledger account linked to this guest. City ledger accounts are created when a booking is made using City Ledger as the payment method.
             </p>
           ) : (
             <div className="flex items-end gap-6 flex-wrap">
               <div>
-                <p className="text-xs text-muted-foreground mb-1">Current Balance</p>
-                <p className={`text-4xl font-bold ${ls.color}`}>
-                  {formatNaira(Math.abs(ledgerDisplayBalance))}
+                <p className="text-xs text-muted-foreground mb-1">
+                  {hasGuestCredit ? 'Account credit' : 'Current Balance'}
+                </p>
+                <p className={`text-4xl font-bold ${hasGuestCredit ? 'text-blue-700' : ls.color}`}>
+                  {formatNaira(cityLedgerShownBalance)}
                 </p>
                 <p className="text-xs text-muted-foreground mt-1">
-                  {ledgerDisplayBalance > 0
+                  {hasOutstandingDebit && !hasGuestCredit
+                    ? 'Amount owed to hotel (debit)'
+                    : hasGuestCredit
+                    ? `Credit of ${formatNaira(effectiveGuestCreditAmount)} available for future charges`
+                    : ledgerDisplayBalance > 0
                     ? 'Amount owed to hotel (debit)'
                     : ledgerDisplayBalance < 0
                     ? `Credit of ${formatNaira(Math.abs(ledgerDisplayBalance))} available`
@@ -1126,8 +1221,8 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
                 </p>
               </div>
               <div className="text-sm text-muted-foreground space-y-1">
-                <p>Account: <span className="font-medium text-foreground">{ledgerAccount.account_name}</span></p>
-                <p>Type: <span className="font-medium text-foreground capitalize">{ledgerAccount.account_type}</span></p>
+                <p>Account: <span className="font-medium text-foreground">{ledgerAccount?.account_name || guest.name}</span></p>
+                <p>Type: <span className="font-medium text-foreground capitalize">{ledgerAccount?.account_type || 'individual'}</span></p>
               </div>
             </div>
           )}
