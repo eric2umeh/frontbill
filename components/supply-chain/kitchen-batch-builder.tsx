@@ -46,6 +46,7 @@ import {
 import { UnitSelect } from '@/components/supply-chain/unit-select'
 import { toTitleCaseWords } from '@/lib/supply-chain/title-case'
 import type { BatchOutletMenuSync } from '@/lib/supply-chain/batch-outlet-sync'
+import { dedupeBatchMaterials } from '@/lib/supply-chain/parse-csv-row'
 import {
   batchOutletMenuSyncLabel,
   normalizeBatchOutletMenuSync,
@@ -132,6 +133,8 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
     ...loadKitchenBatchDraft(),
     draftVersion: KITCHEN_BATCH_DRAFT_VERSION,
   })
+  /** Only hydrate edit form once per recipe id — recipes poll must not restore deleted lines. */
+  const hydratedEditRecipeIdRef = useRef<string | null>(null)
 
   const buildDraftSnapshot = useCallback((): KitchenBatchDraft => {
     return {
@@ -206,9 +209,14 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
   }, [editRecipeId])
 
   useLayoutEffect(() => {
-    if (!editRecipeId) return
+    if (!editRecipeId) {
+      hydratedEditRecipeIdRef.current = null
+      return
+    }
+    if (hydratedEditRecipeIdRef.current === editRecipeId) return
     const recipe = recipes.find((r) => r.id === editRecipeId)
     if (!recipe) return
+    hydratedEditRecipeIdRef.current = editRecipeId
     setBatchName(recipe.name)
     setMenuCategory(recipe.category)
     setPlannedPortions(numberInputValue(recipe.yieldPortions))
@@ -224,7 +232,7 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
     setOutletMenuSync(
       normalizeBatchOutletMenuSync(recipe.outletMenuSync ?? recipe.fnbEligible),
     )
-    setCart(
+    const required = dedupeBatchMaterials(
       recipe.ingredients
         .filter((ing) => !ing.optional)
         .map((ing) => ({
@@ -237,22 +245,28 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
           optional: false,
         })),
     )
-    const optionalIngredients = recipe.ingredients
-      .filter((ing) => ing.optional)
-      .map((ing) => ({
-        storeItemId: ing.stockItemId,
-        name: ing.name,
-        unit: ing.unit,
-        quantity: ing.quantity,
-        unitCost: ing.quantity > 0 ? ing.cost / ing.quantity : 0,
-        source: ing.source ?? 'raw',
-        optional: true,
-      }))
+    const optionalIngredients = dedupeBatchMaterials(
+      recipe.ingredients
+        .filter((ing) => ing.optional)
+        .map((ing) => ({
+          storeItemId: ing.stockItemId,
+          name: ing.name,
+          unit: ing.unit,
+          quantity: ing.quantity,
+          unitCost: ing.quantity > 0 ? ing.cost / ing.quantity : 0,
+          source: ing.source ?? 'raw',
+          optional: true,
+        })),
+    )
+    setCart(required)
     setOptionalCart(optionalIngredients)
     setOptionalIngredientsOpen(optionalIngredients.length > 0)
     setQtyInputMap(
       Object.fromEntries(
-        recipe.ingredients.map((ing) => [ing.stockItemId, numberInputValue(ing.quantity)]),
+        [...required, ...optionalIngredients].map((ing) => [
+          ing.storeItemId,
+          numberInputValue(ing.quantity),
+        ]),
       ),
     )
     setDraftLoaded(true)
@@ -547,10 +561,12 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
     const stockId =
       linkedKitchenStockId?.trim() || `ks-${outletStockSlug(titledName)}`
 
-    const materialsWithCost = [...cart, ...optionalCart].map((m) => ({
-      ...m,
-      lineCost: lineCost(m),
-    }))
+    const materialsWithCost = dedupeBatchMaterials(
+      [...cart, ...optionalCart].map((m) => ({
+        ...m,
+        lineCost: lineCost(m),
+      })),
+    )
 
     if (editing && editRecipeId) {
       const res = updateRecipe(
@@ -644,7 +660,7 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
           source !== 'kitchen_stock' && store && needsUnitFactor(line.unit, store.unit, factors)
         return (
           <li
-            key={`${optional ? 'opt-' : 'req-'}${line.storeItemId}`}
+            key={`${optional ? 'opt-' : 'req-'}${line.source ?? 'raw'}-${line.storeItemId}-${line.unit}`}
             className="rounded-lg border p-2 text-xs bg-background space-y-1.5"
           >
             <div className="flex justify-between gap-1 items-start">
