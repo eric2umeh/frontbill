@@ -44,9 +44,14 @@ export function mergeProductionBatchesFromRemote(
   return merged.sort((a, b) => (b.openedAt || '').localeCompare(a.openedAt || ''))
 }
 
-/** Admin-created batch standards visible to kitchen staff after poll/hydrate. */
+/**
+ * Admin-created batch standards visible to kitchen staff after poll/hydrate.
+ * Prefer local for shared ids so in-progress edits / pending persist are not
+ * overwritten by a stale remote snapshot (which resurrected deleted ingredients).
+ * Remote-only recipes are still added.
+ */
 export function mergeRecipesFromRemote(local: Recipe[], remote: Recipe[]): Recipe[] {
   if (local.length === 0) return remote
   if (remote.length === 0) return local
-  return mergeSnapshotRowsById(local, remote)
+  return mergeSnapshotRowsById(remote, local)
 }
