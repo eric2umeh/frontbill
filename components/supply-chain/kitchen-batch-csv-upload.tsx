@@ -13,7 +13,7 @@ import {
 } from '@/components/ui/dialog'
 import { useAuth } from '@/lib/auth-context'
 import { useSupplyChain } from '@/lib/supply-chain/supply-chain-context'
-import { canonicalRoleKey } from '@/lib/permissions'
+import { canonicalRoleKey, canManageKitchenBatchStandards } from '@/lib/permissions'
 import {
   mapIngredientRowsToMaterials,
   mapIngredientLinesToMaterials,
@@ -48,11 +48,10 @@ export function KitchenBatchCsvUpload({ variant = 'default', onComplete }: Props
   const [templateDownloading, setTemplateDownloading] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  const roleKey = canonicalRoleKey(role) ?? ''
-  const canUpload = roleKey === 'superadmin' || roleKey === 'admin' || roleKey === 'manager'
+  const canUpload = canManageKitchenBatchStandards(role)
   if (!canUpload) return null
 
-  const actor = { name: name ?? 'Kitchen', role: roleKey || 'staff' }
+  const actor = { name: name ?? 'Kitchen', role: canonicalRoleKey(role) ?? 'staff' }
 
   const downloadTemplate = async () => {
     if (templateDownloading) return
