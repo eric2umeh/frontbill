@@ -82,7 +82,10 @@ export function folioPositiveOutstandingSum(
   return Math.max(0, unpaidPositiveCharges - totalPayments);
 }
 
-/** Bill Balance (Unpaid) for the payment summary card — never below folio-vs-booking max (accounts/[id]). */
+/** Bill Balance (Unpaid) for the payment summary card.
+ * When folio lines exist, folio outstanding is the source of truth — do not inflate
+ * with a stale `total_amount − deposit` (common after city-ledger extensions).
+ */
 export function bookingDisplayBillBalance(
   booking:
     | {
@@ -96,13 +99,16 @@ export function bookingDisplayBillBalance(
   folioCharges: FolioLineForBalance[],
 ): number {
   const fromFolio = folioPositiveOutstandingSum(folioCharges ?? []);
+  if ((folioCharges?.length ?? 0) > 0) {
+    return fromFolio;
+  }
   if (!booking) return fromFolio;
   const bookingBal = Math.max(0, Number(booking.balance ?? 0));
   const fallbackOwed = Math.max(
     0,
     Number(booking.total_amount ?? 0) - Number(booking.deposit ?? 0),
   );
-  return Math.max(fromFolio, bookingBal, fallbackOwed);
+  return Math.max(bookingBal, fallbackOwed);
 }
 
 /** True when the same rules as the folio “Bill balance” show nothing left to collect — DB `payment_status` should usually be `paid`. */

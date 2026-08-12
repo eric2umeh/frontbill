@@ -25,10 +25,15 @@ import { Input } from "@/components/ui/input";
 import { formatNaira } from "@/lib/utils/currency";
 import { toast } from "sonner";
 import { CreditCard, Check, X } from "lucide-react";
-import { format, differenceInDays } from "date-fns";
+import { format } from "date-fns";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/lib/auth-context";
 import { insertFolioCharges } from "@/lib/utils/insert-folio-charges";
+import {
+  extensionAdditionalNights,
+  calendarNightsBetween,
+  toYmd,
+} from "@/lib/booking/edit-booking-patch";
 import { guestOrOrganizationNameTaken } from "@/lib/utils/guest-org-name-uniqueness";
 import { isSelectableLedgerName } from "@/lib/utils/ledger-organization";
 import { mergeCounterpartyOrganizationRows } from "@/lib/utils/search-counterparty-organizations";
@@ -249,15 +254,27 @@ export function ExtendStayModal({
     }
   };
 
-  // Normalize to midnight local time to avoid timezone-offset arithmetic issues
-  const currentCheckOut = (() => {
-    const d = new Date(booking.currentCheckOut);
-    return new Date(d.getFullYear(), d.getMonth(), d.getDate());
-  })();
-  const additionalNights = newCheckOutDate
-    ? differenceInDays(newCheckOutDate, currentCheckOut)
+  // Calendar YMD math only — never `new Date('yyyy-MM-dd')` + differenceInDays
+  // (that timezone path can charge 3 nights while the UI still says “2 nights”).
+  const currentCheckOutYmd = toYmd(booking.currentCheckOut);
+  const checkInYmd = toYmd(booking.check_in);
+  const newCheckOutYmd = newCheckOutDate
+    ? format(newCheckOutDate, "yyyy-MM-dd")
+    : "";
+  const additionalNights = newCheckOutYmd
+    ? extensionAdditionalNights({
+        checkInYmd,
+        currentCheckOutYmd,
+        newCheckOutYmd,
+      })
     : 0;
-  const additionalAmount = additionalNights * booking.ratePerNight;
+  const ratePerNight = Math.max(0, Number(booking.ratePerNight) || 0);
+  const additionalAmount = additionalNights * ratePerNight;
+  const currentCheckOutLabel = (() => {
+    if (!currentCheckOutYmd) return "—";
+    const [y, m, d] = currentCheckOutYmd.split("-").map(Number);
+    return format(new Date(y, m - 1, d), "PP");
+  })();
 
   const handleDiscountRequest = async () => {
     if (!newCheckOutDate || !paymentMethod || paymentMethod === "city_ledger") {
@@ -351,6 +368,14 @@ export function ExtendStayModal({
       toast.error("Please complete all fields");
       return;
     }
+    if (additionalNights <= 0) {
+      toast.error("New checkout must be after the current checkout date");
+      return;
+    }
+    if (!(ratePerNight > 0)) {
+      toast.error("Rate per night is missing or zero — fix the booking rate first");
+      return;
+    }
 
     if (!booking.id) {
       toast.error(
@@ -381,6 +406,7 @@ export function ExtendStayModal({
       const supabase = createClient();
       const { data: authData } = await supabase.auth.getUser();
       const currentUserId = authData.user?.id || booking.created_by || null;
+      const newCheckoutStr = newCheckOutYmd;
 
       // Add charge to folio_charges
       // For immediate payments (cash/pos/transfer): status = 'paid'
@@ -408,40 +434,46 @@ export function ExtendStayModal({
       ]);
       if (chargeError) throw chargeError;
 
-      // Update booking checkout date
-      await supabase
+      // Keep booking stay totals in sync with the extension (dates + nights + room total).
+      const { data: freshBk } = await supabase
         .from("bookings")
-        .update({ check_out: format(newCheckOutDate, "yyyy-MM-dd") })
-        .eq("id", booking.id);
+        .select(
+          "balance, deposit, total_amount, number_of_nights, check_in, check_out, rate_per_night",
+        )
+        .eq("id", booking.id)
+        .single();
 
-      // Bump booking balance (city_ledger) OR deposit (paid now)
+      const stayCheckIn = toYmd(freshBk?.check_in) || checkInYmd;
+      const totalNights = stayCheckIn
+        ? calendarNightsBetween(stayCheckIn, newCheckoutStr)
+        : Math.max(
+            1,
+            (Number(freshBk?.number_of_nights) || 0) + additionalNights,
+          );
+      const prevTotal = Number(freshBk?.total_amount) || 0;
+      const nextTotal = prevTotal + additionalAmount;
+      const prevDeposit = Number(freshBk?.deposit) || 0;
+      const prevBalance = Number(freshBk?.balance) || 0;
+
+      const bookingUpdate: Record<string, unknown> = {
+        check_out: newCheckoutStr,
+        number_of_nights: totalNights,
+        total_amount: nextTotal,
+      };
       if (paymentMethod === "city_ledger") {
-        const { data: freshBk } = await supabase
-          .from("bookings")
-          .select("balance")
-          .eq("id", booking.id)
-          .single();
-        await supabase
-          .from("bookings")
-          .update({
-            balance: (freshBk?.balance || 0) + additionalAmount,
-            payment_status: "pending",
-          })
-          .eq("id", booking.id);
+        bookingUpdate.balance = prevBalance + additionalAmount;
+        bookingUpdate.payment_status = "pending";
       } else {
-        // Immediate payment (cash/pos/transfer) — increment deposit so Amount Paid is accurate
-        const { data: freshBk } = await supabase
-          .from("bookings")
-          .select("deposit")
-          .eq("id", booking.id)
-          .single();
-        await supabase
-          .from("bookings")
-          .update({
-            deposit: (Number(freshBk?.deposit) || 0) + additionalAmount,
-          })
-          .eq("id", booking.id);
+        bookingUpdate.deposit = prevDeposit + additionalAmount;
+        // Paid extension: owed room total rose but deposit covered the add-on.
+        bookingUpdate.balance = Math.max(0, nextTotal - (prevDeposit + additionalAmount));
       }
+
+      const { error: bookingError } = await supabase
+        .from("bookings")
+        .update(bookingUpdate)
+        .eq("id", booking.id);
+      if (bookingError) throw bookingError;
 
       const accountFields = paymentMethodRequiresAccount(paymentMethod)
         ? paymentAccountInsertFields(paymentAccount)
@@ -636,13 +668,13 @@ export function ExtendStayModal({
                 Current checkout
               </span>
               <span className="text-right font-medium">
-                {format(currentCheckOut, "PP")}
+                {currentCheckOutLabel}
               </span>
             </div>
             <div className="flex justify-between gap-2">
               <span className="text-muted-foreground">Rate / night</span>
               <span className="font-medium">
-                {formatNaira(booking.ratePerNight)}
+                {formatNaira(ratePerNight)}
               </span>
             </div>
           </div>
@@ -657,7 +689,15 @@ export function ExtendStayModal({
                   mode="single"
                   selected={newCheckOutDate}
                   onSelect={setNewCheckOutDate}
-                  disabled={(date) => date < currentCheckOut}
+                  disabled={(date) => {
+                    if (!currentCheckOutYmd) return true;
+                    const [y, m, d] = currentCheckOutYmd.split("-").map(Number);
+                    const min = new Date(y, m - 1, d);
+                    min.setHours(0, 0, 0, 0);
+                    const day = new Date(date);
+                    day.setHours(0, 0, 0, 0);
+                    return day <= min;
+                  }}
                   className="origin-top scale-[0.92] rounded-md border p-2 sm:scale-100 sm:p-3"
                 />
               </div>
