@@ -1875,9 +1875,12 @@ export default function BookingsPage() {
                               guestId: actionableMember.guest_id,
                               room: `Room ${actionableMember.rooms?.room_number}`,
                               currentCheckOut: actionableMember.check_out,
+                              check_in: actionableMember.check_in,
                               ratePerNight: actionableMember.rate_per_night,
                               organization_id: actionableMember.organization_id,
                               created_by: actionableMember.created_by,
+                              status: actionableMember.status,
+                              folio_status: actionableMember.folio_status,
                             });
                             setExtendModalOpen(true);
                           }}
@@ -2014,9 +2017,12 @@ export default function BookingsPage() {
                                 guestId: booking.guest_id,
                                 room: `Room ${booking.rooms?.room_number}`,
                                 currentCheckOut: booking.check_out,
+                                check_in: booking.check_in,
                                 ratePerNight: booking.rate_per_night,
                                 organization_id: booking.organization_id,
                                 created_by: booking.created_by,
+                                status: booking.status,
+                                folio_status: booking.folio_status,
                               });
                               setExtendModalOpen(true);
                             }}

@@ -1,4 +1,3 @@
-import { differenceInCalendarDays, parseISO } from 'date-fns'
 import { z } from 'zod'
 
 export const editBookingPatchSchema = z
@@ -21,11 +20,65 @@ export const editBookingPatchSchema = z
 
 export type EditBookingPatch = z.infer<typeof editBookingPatchSchema>
 
+/** Normalize DB / ISO timestamps to `YYYY-MM-DD` (calendar date only). */
+export function toYmd(value: string | Date | null | undefined): string {
+  if (!value) return ''
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return ''
+    const y = value.getFullYear()
+    const m = String(value.getMonth() + 1).padStart(2, '0')
+    const d = String(value.getDate()).padStart(2, '0')
+    return `${y}-${m}-${d}`
+  }
+  const s = String(value).trim()
+  const m = /^(\d{4}-\d{2}-\d{2})/.exec(s)
+  return m ? m[1] : ''
+}
+
+/**
+ * Calendar nights between two YMD dates (checkout exclusive).
+ * Uses UTC calendar arithmetic so `new Date('YYYY-MM-DD')` timezone shifts cannot
+ * turn a 2-night extension into 3 nights (or vice versa).
+ */
+export function calendarDaysBetween(fromYmd: string, toYmdDate: string): number {
+  const a = toYmd(fromYmd)
+  const b = toYmd(toYmdDate)
+  if (!a || !b) return 0
+  const [ay, am, ad] = a.split('-').map(Number)
+  const [by, bm, bd] = b.split('-').map(Number)
+  const start = Date.UTC(ay, am - 1, ad)
+  const end = Date.UTC(by, bm - 1, bd)
+  return Math.max(0, Math.round((end - start) / 86_400_000))
+}
+
+/** Full stay length for a booking — at least 1 night when dates are valid. */
 export function calendarNightsBetween(checkInYmd: string, checkOutYmd: string): number {
-  const a = parseISO(checkInYmd)
-  const b = parseISO(checkOutYmd)
-  const d = differenceInCalendarDays(b, a)
-  return Math.max(1, d)
+  return Math.max(1, calendarDaysBetween(checkInYmd, checkOutYmd))
+}
+
+/**
+ * Extra nights when moving checkout later.
+ * Prefer (nights after − nights before) using check-in so a stale/mis-parsed
+ * current checkout cannot charge the whole stay again as an “extension”.
+ */
+export function extensionAdditionalNights(input: {
+  checkInYmd?: string | null
+  currentCheckOutYmd: string
+  newCheckOutYmd: string
+}): number {
+  const checkIn = toYmd(input.checkInYmd)
+  const currentOut = toYmd(input.currentCheckOutYmd)
+  const newOut = toYmd(input.newCheckOutYmd)
+  if (!newOut || !currentOut) return 0
+  if (newOut <= currentOut) return 0
+
+  if (checkIn && checkIn < currentOut) {
+    const before = calendarDaysBetween(checkIn, currentOut)
+    const after = calendarDaysBetween(checkIn, newOut)
+    return Math.max(0, after - before)
+  }
+
+  return calendarDaysBetween(currentOut, newOut)
 }
 
 /** Apply validated patch onto existing row values and return DB-ready fields (subset). */

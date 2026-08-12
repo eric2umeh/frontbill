@@ -4,6 +4,11 @@ import { canonicalRoleKey, hasPermission } from '@/lib/permissions'
 import { canRequestExtendStayDiscount } from '@/lib/utils/booking-checkout-ui'
 import { insertFolioCharges } from '@/lib/utils/insert-folio-charges'
 import { notifyNightAuditRequestCreated } from '@/lib/night-audit/notify-request-created'
+import {
+  calendarNightsBetween,
+  extensionAdditionalNights,
+  toYmd,
+} from '@/lib/booking/edit-booking-patch'
 
 const DECISION = ['approved', 'rejected'] as const
 
@@ -87,10 +92,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Only front-office roles can request a discounted extension' }, { status: 403 })
     }
 
-    const nights = Math.max(1, Number(additional_nights) || 0)
     const { data: booking } = await admin
       .from('bookings')
-      .select('id, organization_id, status, folio_status, guest_id, rate_per_night, check_out')
+      .select('id, organization_id, status, folio_status, guest_id, rate_per_night, check_in, check_out')
       .eq('id', booking_id)
       .single()
     if (!booking || booking.organization_id !== prof.organization_id) {
@@ -106,6 +110,25 @@ export async function POST(request: Request) {
       )
     }
 
+    const currentCo = toYmd(booking.check_out)
+    const newCo = toYmd(new_check_out)
+    if (!newCo || !currentCo || newCo <= currentCo) {
+      return NextResponse.json({ error: 'New checkout must be after the current checkout date' }, { status: 400 })
+    }
+
+    const nights = extensionAdditionalNights({
+      checkInYmd: booking.check_in,
+      currentCheckOutYmd: currentCo,
+      newCheckOutYmd: newCo,
+    })
+    if (nights <= 0) {
+      return NextResponse.json({ error: 'Extension must add at least one night' }, { status: 400 })
+    }
+    // Ignore client-reported nights if they don't match calendar math (prevents overcharge).
+    if (Number(additional_nights) > 0 && Number(additional_nights) !== nights) {
+      // Prefer server calendar nights; soft-accept only when client matches.
+    }
+
     const rate = Number(booking.rate_per_night) || 0
     const std = rate * nights
     const disc = Number(discounted_total)
@@ -117,12 +140,6 @@ export async function POST(request: Request) {
     }
     const discountAmount = std - disc
 
-    const currentCo = String(booking.check_out || '').slice(0, 10)
-    const newCo = String(new_check_out).slice(0, 10)
-    if (newCo <= currentCo) {
-      return NextResponse.json({ error: 'New checkout must be after the current checkout date' }, { status: 400 })
-    }
-
     const { data: inserted, error: insE } = await admin
       .from('extend_stay_discount_requests')
       .insert([
@@ -130,7 +147,7 @@ export async function POST(request: Request) {
           organization_id: prof.organization_id,
           booking_id,
           requested_by: caller_id,
-          new_check_out: String(new_check_out).slice(0, 10),
+          new_check_out: newCo,
           additional_nights: nights,
           standard_total: std,
           discounted_total: disc,
@@ -219,13 +236,20 @@ export async function PATCH(request: Request) {
 
     const { data: booking } = await admin
       .from('bookings')
-      .select('id, deposit, balance, guest_id, folio_id, organization_id')
+      .select('id, deposit, balance, total_amount, number_of_nights, check_in, guest_id, folio_id, organization_id')
       .eq('id', row.booking_id)
       .single()
     if (!booking) return NextResponse.json({ error: 'Booking missing' }, { status: 400 })
 
     const discTotal = Number(row.discounted_total) || 0
     const nights = Number(row.additional_nights) || 0
+    const newCo = toYmd(row.new_check_out)
+    const stayCheckIn = toYmd(booking.check_in)
+    const totalNights = stayCheckIn && newCo
+      ? calendarNightsBetween(stayCheckIn, newCo)
+      : Math.max(1, (Number(booking.number_of_nights) || 0) + nights)
+    const nextTotal = (Number(booking.total_amount) || 0) + discTotal
+    const nextDeposit = (Number(booking.deposit) || 0) + discTotal
     const approverLabel = (await admin.from('profiles').select('full_name').eq('id', caller_id).maybeSingle()).data
       ?.full_name || caller_id.slice(0, 8)
 
@@ -246,8 +270,11 @@ export async function PATCH(request: Request) {
     await admin
       .from('bookings')
       .update({
-        check_out: row.new_check_out,
-        deposit: (Number(booking.deposit) || 0) + discTotal,
+        check_out: newCo,
+        number_of_nights: totalNights,
+        total_amount: nextTotal,
+        deposit: nextDeposit,
+        balance: Math.max(0, nextTotal - nextDeposit),
       })
       .eq('id', row.booking_id)
 

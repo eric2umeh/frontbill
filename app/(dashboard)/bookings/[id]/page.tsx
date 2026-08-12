@@ -1462,14 +1462,28 @@ export default function BookingDetailPage({
     0,
   );
 
-  // Pending (city ledger / deferred / unpaid) folio charges — positive amount, not payment rows
+  const isStayChargeType = (ctype: string) =>
+    ["room_charge", "extended_stay", "reservation"].includes(
+      String(ctype || "").toLowerCase(),
+    );
+
+  // Folio stay lines (room + extensions) — source of truth for the room bill
+  const stayChargesTotal = folioCharges
+    .filter((c: any) => {
+      const ctype = c.type || c.charge_type;
+      if (ctype === "payment" || Number(c.amount) <= 0) return false;
+      return isStayChargeType(ctype);
+    })
+    .reduce((sum: number, c: any) => sum + Number(c.amount), 0);
+
+  // Other positive folio charges (minibar, add-charge, etc.) — unpaid / city ledger
   const pendingAdditionalCharges = folioCharges
     .filter((c: any) => {
       const ctype = c.type || c.charge_type;
       if (
         ctype === "payment" ||
-        ctype === "room_charge" ||
-        ctype === "reservation"
+        isStayChargeType(ctype) ||
+        ctype === "folio_note"
       )
         return false;
       const status = String(
@@ -1483,6 +1497,27 @@ export default function BookingDetailPage({
       return (
         ["pending", "unpaid", "city_ledger"].includes(status) ||
         (method === "city_ledger" && status !== "paid")
+      );
+    })
+    .reduce((sum: number, c: any) => sum + Number(c.amount), 0);
+
+  // Unpaid stay charges on city ledger / deferred (included in bill balance, shown separately)
+  const pendingStayCharges = folioCharges
+    .filter((c: any) => {
+      const ctype = c.type || c.charge_type;
+      if (!isStayChargeType(ctype)) return false;
+      if (!Number(c.amount) || Number(c.amount) <= 0) return false;
+      const status = String(
+        c.paymentStatus ?? c.payment_status ?? "",
+      ).toLowerCase();
+      if (status === "posted_to_ledger" || status === "paid") return false;
+      const method = String(
+        c.paymentMethod ?? c.payment_method ?? "",
+      ).toLowerCase();
+      return (
+        ["pending", "unpaid", "city_ledger", "partial"].includes(status) ||
+        (method === "city_ledger" && status !== "paid") ||
+        status === ""
       );
     })
     .reduce((sum: number, c: any) => sum + Number(c.amount), 0);
@@ -2640,11 +2675,28 @@ export default function BookingDetailPage({
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="flex justify-between">
-                <span className="text-muted-foreground">Room Charge</span>
+                <span className="text-muted-foreground">
+                  Stay charges (folio)
+                </span>
                 <span className="font-semibold">
-                  {formatNaira(booking.total_amount)}
+                  {formatNaira(
+                    stayChargesTotal > 0
+                      ? stayChargesTotal
+                      : Number(booking.total_amount) || 0,
+                  )}
                 </span>
               </div>
+              {pendingStayCharges > 0 &&
+                pendingStayCharges !== stayChargesTotal && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">
+                      Of which unpaid / city ledger
+                    </span>
+                    <span className="font-medium text-orange-600">
+                      {formatNaira(pendingStayCharges)}
+                    </span>
+                  </div>
+                )}
               {paidAdditionalCharges > 0 && (
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">
@@ -2658,7 +2710,7 @@ export default function BookingDetailPage({
               {pendingAdditionalCharges > 0 && (
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">
-                    City Ledger / Deferred Charges
+                    Other city ledger / deferred
                   </span>
                   <span className="font-semibold text-orange-600">
                     +{formatNaira(pendingAdditionalCharges)}

@@ -55,6 +55,7 @@ export function unitFactorDefinition(
     'crate',
     'pack',
     'bag',
+    'ball',
     'basket',
     'tin',
     'can',
@@ -65,6 +66,7 @@ export function unitFactorDefinition(
     'cup',
     'sachet',
     'cooking_spoon',
+    'head',
   ])
   if (containerUnits.has(selected) && !containerUnits.has(store)) {
     return {
