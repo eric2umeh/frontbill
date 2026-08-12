@@ -93,7 +93,7 @@ import {
 } from "./unit-factor-storage";
 import type { StockShortageLine } from "@/lib/ui/stock-shortage-dialog";
 import { useAuth } from "@/lib/auth-context";
-import { hasPermission } from "@/lib/permissions";
+import { canManageKitchenBatchStandards, hasPermission } from "@/lib/permissions";
 import {
   deleteSupplyCatalogItem,
   fetchSupplyCatalog,
@@ -2406,6 +2406,9 @@ function useSupplyChainImpl() {
       input: CreateKitchenBatchInput,
       actor: Actor,
     ): { ok: true; kitchenStockId: string; recipeId: string } | { error: string } => {
+      if (!canManageKitchenBatchStandards(actor.role)) {
+        return { error: "Only Admin or Superadmin can create a kitchen batch" };
+      }
       const batchName = toTitleCaseWords(input.batchName);
       const menuCategory = toTitleCaseWords(input.menuCategory);
       if (!batchName) return { error: "Enter a batch / menu name" };
@@ -2545,6 +2548,9 @@ function useSupplyChainImpl() {
     ):
       | { ok: true; kitchenStockId: string; menuItemName: string; category: string; outletMenuSync: import("./types").BatchOutletMenuSync }
       | { error: string } => {
+      if (!canManageKitchenBatchStandards(actor.role)) {
+        return { error: "Only Admin or Superadmin can edit a kitchen batch" };
+      }
       const existing = recipes.find((r) => r.id === recipeId);
       if (!existing) return { error: "Batch standard not found" };
 
@@ -2635,6 +2641,9 @@ function useSupplyChainImpl() {
 
   const deleteRecipe = useCallback(
     (recipeId: string, actor: Actor): { ok: true } | { error: string } => {
+      if (!canManageKitchenBatchStandards(actor.role)) {
+        return { error: "Only Admin or Superadmin can delete a kitchen batch" };
+      }
       const existing = recipes.find((r) => r.id === recipeId);
       if (!existing) return { error: "Batch standard not found" };
 
