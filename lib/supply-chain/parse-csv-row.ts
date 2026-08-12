@@ -474,6 +474,53 @@ function parseIngredientQuantity(line: string): number {
   return parseFractionToken(m[1]) ?? 1
 }
 
+/** Stable unmatched id so the same free-text line merges across CSV rows. */
+export function unmatchedCsvIngredientId(
+  prefix: 'csv-ing' | 'csv-prep',
+  name: string,
+): string {
+  const slug =
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 48) || 'item'
+  return `${prefix}-${slug}`
+}
+
+/**
+ * Merge duplicate materials that share store item + source + unit + optional.
+ * CSV bulk upload often maps several free-text lines onto the same store item.
+ */
+export function dedupeBatchMaterials(materials: BatchMaterialLine[]): BatchMaterialLine[] {
+  const map = new Map<string, BatchMaterialLine>()
+  for (const m of materials) {
+    if (!Number.isFinite(m.quantity) || m.quantity <= 0) continue
+    const source = m.source ?? 'raw'
+    const unit = (m.unit || 'unit').trim().toLowerCase()
+    const optional = m.optional ? '1' : '0'
+    const key = `${source}::${m.storeItemId}::${unit}::${optional}`
+    const existing = map.get(key)
+    if (!existing) {
+      map.set(key, { ...m, source, optional: Boolean(m.optional) })
+      continue
+    }
+    const existingCost =
+      existing.lineCost ?? existing.quantity * existing.unitCost
+    const addCost = m.lineCost ?? m.quantity * m.unitCost
+    const nextQty = existing.quantity + m.quantity
+    const nextCost = existingCost + addCost
+    map.set(key, {
+      ...existing,
+      quantity: nextQty,
+      unitCost: nextQty > 0 ? nextCost / nextQty : existing.unitCost,
+      lineCost: nextCost,
+      name: existing.name || m.name,
+    })
+  }
+  return Array.from(map.values())
+}
+
 function matchKitchenStoreItem(
   ingredientLine: string,
   kitchenItems: Pick<StoreItem, 'id' | 'name' | 'dept' | 'lastPrice' | 'unit'>[],
@@ -506,7 +553,7 @@ export function mapIngredientLinesToMaterials(
 ): BatchMaterialLine[] {
   const kitchenItems = storeItems.filter((s) => s.dept === 'kitchen')
   const out: BatchMaterialLine[] = []
-  lines.forEach((line, i) => {
+  lines.forEach((line) => {
     const trimmed = line.trim()
     if (!trimmed) return
     const matched = matchKitchenStoreItem(trimmed, kitchenItems)
@@ -521,7 +568,7 @@ export function mapIngredientLinesToMaterials(
       })
     } else {
       out.push({
-        storeItemId: `csv-ing-${i}`,
+        storeItemId: unmatchedCsvIngredientId('csv-ing', trimmed),
         name: trimmed.slice(0, 120),
         unit: 'unit',
         quantity,
@@ -529,7 +576,7 @@ export function mapIngredientLinesToMaterials(
       })
     }
   })
-  return out
+  return dedupeBatchMaterials(out)
 }
 
 function matchKitchenStockItem(
@@ -545,35 +592,38 @@ export function mapIngredientRowsToMaterials(
   storeItems: Pick<StoreItem, 'id' | 'name' | 'dept' | 'lastPrice' | 'unit'>[],
   kitchenStockItems: Pick<KitchenStockItem, 'id' | 'name' | 'availablePortions' | 'unit'>[] = [],
 ): BatchMaterialLine[] {
-  return rows.map((row, i) => {
+  const mapped = rows.map((row) => {
     const parsed = parseRecipeQuantity(row.text)
     const quantity = parsed?.quantity ?? parseIngredientQuantity(row.text)
     const parsedUnit = parsed?.unit && parsed.unit !== 'unit' ? parsed.unit : ''
 
     if (row.source === 'kitchen_stock') {
       const matched = matchKitchenStockItem(row.text, kitchenStockItems)
+      const fallbackName = row.text.slice(0, 120)
       return {
-        storeItemId: matched?.id ?? `csv-prep-${i}`,
-        name: matched?.name ?? row.text.slice(0, 120),
+        storeItemId: matched?.id ?? unmatchedCsvIngredientId('csv-prep', fallbackName),
+        name: matched?.name ?? fallbackName,
         unit: parsedUnit || matched?.unit || 'portion',
         quantity,
         unitCost: row.lineCost && quantity > 0 ? row.lineCost / quantity : 0,
-        source: 'kitchen_stock',
+        source: 'kitchen_stock' as const,
         optional: row.optional,
         lineCost: row.lineCost,
       }
     }
 
     const matched = matchKitchenStoreItem(row.text, storeItems.filter((s) => s.dept === 'kitchen'))
+    const fallbackName = row.text.slice(0, 120)
     return {
-      storeItemId: matched?.id ?? `csv-ing-${i}`,
-      name: matched?.name ?? row.text.slice(0, 120),
+      storeItemId: matched?.id ?? unmatchedCsvIngredientId('csv-ing', fallbackName),
+      name: matched?.name ?? fallbackName,
       unit: parsedUnit || matched?.unit || 'unit',
       quantity,
       unitCost: matched?.lastPrice ?? (row.lineCost && quantity > 0 ? row.lineCost / quantity : 0),
-      source: 'raw',
+      source: 'raw' as const,
       optional: row.optional,
       lineCost: row.lineCost,
     }
   })
+  return dedupeBatchMaterials(mapped)
 }
