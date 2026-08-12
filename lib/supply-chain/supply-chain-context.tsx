@@ -110,6 +110,7 @@ import {
   mergeRecipesFromRemote,
 } from "./kitchen-sync-merge";
 import { snapshotsPayloadForRole } from "./supply-snapshot-payload";
+import { dedupeBatchMaterials } from "./parse-csv-row";
 
 function notifyKitchenRawStockChanged() {
   if (typeof window !== "undefined") {
@@ -2413,7 +2414,9 @@ function useSupplyChainImpl() {
         return { error: "Enter planned portions for this batch" };
       }
 
-      const materials = input.materials.filter((m) => m.quantity > 0);
+      const materials = dedupeBatchMaterials(
+        input.materials.filter((m) => m.quantity > 0),
+      );
       for (const line of materials) {
         if (line.source === "kitchen_stock") continue;
         const store = storeItems.find((s) => s.id === line.storeItemId);
@@ -2555,7 +2558,27 @@ function useSupplyChainImpl() {
       const overheadGas = patch.overheadGas ?? existing.overheadGas ?? 0;
       const overheadOther =
         patch.overheadOther ?? existing.overheadOther ?? patch.overheadCost ?? existing.overheadCost ?? 0;
-      const ingredients = patch.ingredients ?? existing.ingredients;
+      const ingredientsRaw = patch.ingredients ?? existing.ingredients;
+      const ingredients = dedupeBatchMaterials(
+        ingredientsRaw.map((ing) => ({
+          storeItemId: ing.stockItemId,
+          name: ing.name,
+          unit: ing.unit,
+          quantity: ing.quantity,
+          unitCost: ing.quantity > 0 ? ing.cost / ing.quantity : 0,
+          source: ing.source ?? "raw",
+          optional: ing.optional,
+          lineCost: ing.cost,
+        })),
+      ).map((m) => ({
+        stockItemId: m.storeItemId,
+        name: m.name,
+        quantity: m.quantity,
+        unit: m.unit,
+        cost: m.lineCost ?? m.quantity * m.unitCost,
+        source: m.source ?? "raw",
+        optional: m.optional,
+      }));
       const outletMenuSync = normalizeBatchOutletMenuSync(
         patch.outletMenuSync ?? patch.fnbEligible ?? existing.outletMenuSync ?? existing.fnbEligible,
       );
@@ -2604,10 +2627,10 @@ function useSupplyChainImpl() {
           recipeId,
         ),
       );
-      schedulePersistSnapshots();
+      void persistSnapshotsNow();
       return { ok: true, kitchenStockId, menuItemName: name, category, outletMenuSync };
     },
-    [recipes, kitchenStock, schedulePersistSnapshots],
+    [recipes, kitchenStock, persistSnapshotsNow],
   );
 
   const deleteRecipe = useCallback(
