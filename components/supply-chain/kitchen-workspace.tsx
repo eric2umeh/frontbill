@@ -699,8 +699,11 @@ export function KitchenWorkspace() {
                 <p className="text-sm text-muted-foreground">Yield: {r.yieldLabel}</p>
                 <p className="text-sm font-medium text-emerald-600">Gross margin: {econ.marginPct}%</p>
                 <ul className="text-sm space-y-1">
-                  {r.ingredients.map((i) => (
-                    <li key={i.name} className="flex justify-between">
+                  {r.ingredients.map((i, idx) => (
+                    <li
+                      key={`${i.stockItemId}-${i.source ?? 'raw'}-${i.unit}-${i.optional ? 'opt' : 'req'}-${idx}`}
+                      className="flex justify-between"
+                    >
                       <span>{i.name} — {i.quantity} {i.unit}</span>
                       <span>{formatNaira(i.cost)}</span>
                     </li>

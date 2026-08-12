@@ -93,7 +93,7 @@ import {
 } from "./unit-factor-storage";
 import type { StockShortageLine } from "@/lib/ui/stock-shortage-dialog";
 import { useAuth } from "@/lib/auth-context";
-import { hasPermission } from "@/lib/permissions";
+import { canManageKitchenBatchStandards, hasPermission } from "@/lib/permissions";
 import {
   deleteSupplyCatalogItem,
   fetchSupplyCatalog,
@@ -110,6 +110,7 @@ import {
   mergeRecipesFromRemote,
 } from "./kitchen-sync-merge";
 import { snapshotsPayloadForRole } from "./supply-snapshot-payload";
+import { dedupeBatchMaterials } from "./parse-csv-row";
 
 function notifyKitchenRawStockChanged() {
   if (typeof window !== "undefined") {
@@ -2405,6 +2406,9 @@ function useSupplyChainImpl() {
       input: CreateKitchenBatchInput,
       actor: Actor,
     ): { ok: true; kitchenStockId: string; recipeId: string } | { error: string } => {
+      if (!canManageKitchenBatchStandards(actor.role)) {
+        return { error: "Only Admin or Superadmin can create a kitchen batch" };
+      }
       const batchName = toTitleCaseWords(input.batchName);
       const menuCategory = toTitleCaseWords(input.menuCategory);
       if (!batchName) return { error: "Enter a batch / menu name" };
@@ -2413,7 +2417,9 @@ function useSupplyChainImpl() {
         return { error: "Enter planned portions for this batch" };
       }
 
-      const materials = input.materials.filter((m) => m.quantity > 0);
+      const materials = dedupeBatchMaterials(
+        input.materials.filter((m) => m.quantity > 0),
+      );
       for (const line of materials) {
         if (line.source === "kitchen_stock") continue;
         const store = storeItems.find((s) => s.id === line.storeItemId);
@@ -2542,6 +2548,9 @@ function useSupplyChainImpl() {
     ):
       | { ok: true; kitchenStockId: string; menuItemName: string; category: string; outletMenuSync: import("./types").BatchOutletMenuSync }
       | { error: string } => {
+      if (!canManageKitchenBatchStandards(actor.role)) {
+        return { error: "Only Admin or Superadmin can edit a kitchen batch" };
+      }
       const existing = recipes.find((r) => r.id === recipeId);
       if (!existing) return { error: "Batch standard not found" };
 
@@ -2555,7 +2564,27 @@ function useSupplyChainImpl() {
       const overheadGas = patch.overheadGas ?? existing.overheadGas ?? 0;
       const overheadOther =
         patch.overheadOther ?? existing.overheadOther ?? patch.overheadCost ?? existing.overheadCost ?? 0;
-      const ingredients = patch.ingredients ?? existing.ingredients;
+      const ingredientsRaw = patch.ingredients ?? existing.ingredients;
+      const ingredients = dedupeBatchMaterials(
+        ingredientsRaw.map((ing) => ({
+          storeItemId: ing.stockItemId,
+          name: ing.name,
+          unit: ing.unit,
+          quantity: ing.quantity,
+          unitCost: ing.quantity > 0 ? ing.cost / ing.quantity : 0,
+          source: ing.source ?? "raw",
+          optional: ing.optional,
+          lineCost: ing.cost,
+        })),
+      ).map((m) => ({
+        stockItemId: m.storeItemId,
+        name: m.name,
+        quantity: m.quantity,
+        unit: m.unit,
+        cost: m.lineCost ?? m.quantity * m.unitCost,
+        source: m.source ?? "raw",
+        optional: m.optional,
+      }));
       const outletMenuSync = normalizeBatchOutletMenuSync(
         patch.outletMenuSync ?? patch.fnbEligible ?? existing.outletMenuSync ?? existing.fnbEligible,
       );
@@ -2604,14 +2633,17 @@ function useSupplyChainImpl() {
           recipeId,
         ),
       );
-      schedulePersistSnapshots();
+      void persistSnapshotsNow();
       return { ok: true, kitchenStockId, menuItemName: name, category, outletMenuSync };
     },
-    [recipes, kitchenStock, schedulePersistSnapshots],
+    [recipes, kitchenStock, persistSnapshotsNow],
   );
 
   const deleteRecipe = useCallback(
     (recipeId: string, actor: Actor): { ok: true } | { error: string } => {
+      if (!canManageKitchenBatchStandards(actor.role)) {
+        return { error: "Only Admin or Superadmin can delete a kitchen batch" };
+      }
       const existing = recipes.find((r) => r.id === recipeId);
       if (!existing) return { error: "Batch standard not found" };
 

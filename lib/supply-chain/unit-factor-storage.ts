@@ -67,6 +67,7 @@ export function unitFactorDefinition(
     'sachet',
     'cooking_spoon',
     'head',
+    'slice',
   ])
   if (containerUnits.has(selected) && !containerUnits.has(store)) {
     return {

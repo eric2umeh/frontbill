@@ -4,7 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useAuth } from '@/lib/auth-context'
 import { useSupplyChain } from '@/lib/supply-chain/supply-chain-context'
 import type { BatchMaterialLine, KitchenBatchDraft, StoreItem } from '@/lib/supply-chain/types'
-import { canonicalRoleKey } from '@/lib/permissions'
+import { canonicalRoleKey, canManageKitchenBatchStandards } from '@/lib/permissions'
 import { formatNaira } from '@/lib/utils/currency'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -46,6 +46,7 @@ import {
 import { UnitSelect } from '@/components/supply-chain/unit-select'
 import { toTitleCaseWords } from '@/lib/supply-chain/title-case'
 import type { BatchOutletMenuSync } from '@/lib/supply-chain/batch-outlet-sync'
+import { dedupeBatchMaterials } from '@/lib/supply-chain/parse-csv-row'
 import {
   batchOutletMenuSyncLabel,
   normalizeBatchOutletMenuSync,
@@ -53,8 +54,6 @@ import {
 } from '@/lib/supply-chain/batch-outlet-sync'
 import { syncBatchToRestaurantOutlet } from '@/lib/supply-chain/sync-restaurant-outlet'
 import { KITCHEN_BATCH_UNITS } from '@/lib/supply-chain/conversion-units'
-
-const BATCH_CREATOR_ROLES = new Set(['superadmin', 'admin', 'manager', 'store'])
 
 type IngredientSearchItem =
   | { source: 'raw'; id: string; name: string; unit: string; lastPrice: number; stockOnHand: number }
@@ -132,6 +131,8 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
     ...loadKitchenBatchDraft(),
     draftVersion: KITCHEN_BATCH_DRAFT_VERSION,
   })
+  /** Only hydrate edit form once per recipe id — recipes poll must not restore deleted lines. */
+  const hydratedEditRecipeIdRef = useRef<string | null>(null)
 
   const buildDraftSnapshot = useCallback((): KitchenBatchDraft => {
     return {
@@ -206,9 +207,14 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
   }, [editRecipeId])
 
   useLayoutEffect(() => {
-    if (!editRecipeId) return
+    if (!editRecipeId) {
+      hydratedEditRecipeIdRef.current = null
+      return
+    }
+    if (hydratedEditRecipeIdRef.current === editRecipeId) return
     const recipe = recipes.find((r) => r.id === editRecipeId)
     if (!recipe) return
+    hydratedEditRecipeIdRef.current = editRecipeId
     setBatchName(recipe.name)
     setMenuCategory(recipe.category)
     setPlannedPortions(numberInputValue(recipe.yieldPortions))
@@ -224,7 +230,7 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
     setOutletMenuSync(
       normalizeBatchOutletMenuSync(recipe.outletMenuSync ?? recipe.fnbEligible),
     )
-    setCart(
+    const required = dedupeBatchMaterials(
       recipe.ingredients
         .filter((ing) => !ing.optional)
         .map((ing) => ({
@@ -237,22 +243,28 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
           optional: false,
         })),
     )
-    const optionalIngredients = recipe.ingredients
-      .filter((ing) => ing.optional)
-      .map((ing) => ({
-        storeItemId: ing.stockItemId,
-        name: ing.name,
-        unit: ing.unit,
-        quantity: ing.quantity,
-        unitCost: ing.quantity > 0 ? ing.cost / ing.quantity : 0,
-        source: ing.source ?? 'raw',
-        optional: true,
-      }))
+    const optionalIngredients = dedupeBatchMaterials(
+      recipe.ingredients
+        .filter((ing) => ing.optional)
+        .map((ing) => ({
+          storeItemId: ing.stockItemId,
+          name: ing.name,
+          unit: ing.unit,
+          quantity: ing.quantity,
+          unitCost: ing.quantity > 0 ? ing.cost / ing.quantity : 0,
+          source: ing.source ?? 'raw',
+          optional: true,
+        })),
+    )
+    setCart(required)
     setOptionalCart(optionalIngredients)
     setOptionalIngredientsOpen(optionalIngredients.length > 0)
     setQtyInputMap(
       Object.fromEntries(
-        recipe.ingredients.map((ing) => [ing.stockItemId, numberInputValue(ing.quantity)]),
+        [...required, ...optionalIngredients].map((ing) => [
+          ing.storeItemId,
+          numberInputValue(ing.quantity),
+        ]),
       ),
     )
     setDraftLoaded(true)
@@ -274,7 +286,7 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
   }, [editing, flushDraft])
 
   const actor = { name: name ?? 'Kitchen', role: canonicalRoleKey(role) ?? 'staff' }
-  const canCreateBatch = BATCH_CREATOR_ROLES.has(canonicalRoleKey(role) ?? '')
+  const canCreateBatch = canManageKitchenBatchStandards(role)
 
   const kitchenStoreItems = useMemo(
     () => storeItems.filter((s) => s.dept === 'kitchen'),
@@ -535,7 +547,7 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
 
   const handleCreate = async () => {
     if (!canCreateBatch) {
-      toast.error('Only Admin, Manager, or Superadmin can create a new production batch')
+      toast.error('Only Admin or Superadmin can create or edit a kitchen batch')
       return
     }
     if (!menuCategory.trim()) {
@@ -547,10 +559,12 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
     const stockId =
       linkedKitchenStockId?.trim() || `ks-${outletStockSlug(titledName)}`
 
-    const materialsWithCost = [...cart, ...optionalCart].map((m) => ({
-      ...m,
-      lineCost: lineCost(m),
-    }))
+    const materialsWithCost = dedupeBatchMaterials(
+      [...cart, ...optionalCart].map((m) => ({
+        ...m,
+        lineCost: lineCost(m),
+      })),
+    )
 
     if (editing && editRecipeId) {
       const res = updateRecipe(
@@ -644,7 +658,7 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
           source !== 'kitchen_stock' && store && needsUnitFactor(line.unit, store.unit, factors)
         return (
           <li
-            key={`${optional ? 'opt-' : 'req-'}${line.storeItemId}`}
+            key={`${optional ? 'opt-' : 'req-'}${line.source ?? 'raw'}-${line.storeItemId}-${line.unit}`}
             className="rounded-lg border p-2 text-xs bg-background space-y-1.5"
           >
             <div className="flex justify-between gap-1 items-start">
@@ -1022,7 +1036,7 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
           </div>
           {!canCreateBatch && (
             <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-2 py-1.5">
-              Chefs can build the list; only Admin / Manager / Superadmin can create the batch.
+              Only Admin or Superadmin can create or save batch standards.
             </p>
           )}
           <div className="flex gap-2">
