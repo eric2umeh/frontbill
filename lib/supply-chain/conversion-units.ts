@@ -1,5 +1,7 @@
 /** Units offered when defining purchase conversion on catalogue items. */
 export const PURCHASE_CONVERSION_UNITS = [
+  'kg',
+  'g',
   'pack',
   'carton',
   'bag',
@@ -16,6 +18,7 @@ export const PURCHASE_CONVERSION_UNITS = [
   'set',
   'head',
   'slice',
+  'fillet',
 ] as const
 
 /** SI units available when building a kitchen batch recipe line. */
@@ -42,4 +45,5 @@ export const KITCHEN_BATCH_UNITS = [
   'set',
   'head',
   'slice',
+  'fillet',
 ] as const

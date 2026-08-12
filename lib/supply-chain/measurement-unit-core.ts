@@ -9,6 +9,7 @@ export const MEASUREMENT_UNITS = [
   'crate',
   'cooking_spoon',
   'cup',
+  'fillet',
   'g',
   'head',
   'kg',
@@ -86,6 +87,8 @@ const UNIT_ALIASES: Record<string, string> = {
   balls: 'ball',
   slice: 'slice',
   slices: 'slice',
+  fillet: 'fillet',
+  fillets: 'fillet',
   carton: 'carton',
   cartons: 'carton',
   ctn: 'carton',
@@ -114,6 +117,7 @@ export function formatUnitLabel(unit: string): string {
   if (normalized === 'set') return 'set'
   if (normalized === 'ball') return 'ball'
   if (normalized === 'slice') return 'slice'
+  if (normalized === 'fillet') return 'fillet'
   return normalized
 }
 
@@ -154,7 +158,7 @@ export function unitOptionsForStoreItem(storeUnit: string, itemName?: string): s
     options.add('pack')
     options.add('pcs')
   }
-  if (['pack', 'pcs', 'sachet', 'tin', 'can', 'carton', 'bag', 'roll', 'set', 'head', 'ball', 'slice'].includes(base)) {
+  if (['pack', 'pcs', 'sachet', 'tin', 'can', 'carton', 'bag', 'roll', 'set', 'head', 'ball', 'slice', 'fillet'].includes(base)) {
     options.add('pack')
     options.add('pcs')
     options.add('sachet')
@@ -167,18 +171,21 @@ export function unitOptionsForStoreItem(storeUnit: string, itemName?: string): s
     options.add('head')
     options.add('ball')
     options.add('slice')
+    options.add('fillet')
   }
   const produceHint =
     base === 'head' ||
     base === 'set' ||
     base === 'ball' ||
     base === 'slice' ||
+    base === 'fillet' ||
     /\b(lettuce|cabbage|cauliflower|broccoli|garlic|onion|fish|okra|egusi|melon|bread|ham|cheese|bacon)\b/.test(name)
   if (produceHint) {
     options.add('head')
     options.add('set')
     options.add('ball')
     options.add('slice')
+    options.add('fillet')
     options.add('pcs')
     options.add('kg')
   }
