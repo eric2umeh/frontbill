@@ -85,7 +85,7 @@ import {
 } from "./po-active";
 import { pushSupplyNotification } from "./supply-notifications";
 import { toast } from "sonner";
-import { clearKitchenBatchDraft } from "./kitchen-batch-draft";
+import { clearAllKitchenBatchDrafts } from "./kitchen-batch-draft";
 import { convertToStoreUnits, materialCostForUnit } from "./measurement-units";
 import {
   convertToStoreUnitsWithFactors,
@@ -845,7 +845,7 @@ function useSupplyChainImpl() {
       removePersistedStock(BATCHES_STORAGE_KEY);
       removePersistedStock(KITCHEN_STOCK_STORAGE_KEY);
       removePersistedStock(KITCHEN_RAW_STOCK_STORAGE_KEY);
-      clearKitchenBatchDraft();
+      clearAllKitchenBatchDrafts();
       setRecipes([]);
       setKitchenStock([]);
       setKitchenRawStock([]);
@@ -2701,7 +2701,7 @@ function useSupplyChainImpl() {
     removePersistedStock(BATCHES_STORAGE_KEY);
     removePersistedStock(KITCHEN_STOCK_STORAGE_KEY);
     removePersistedStock(KITCHEN_RAW_STOCK_STORAGE_KEY);
-    clearKitchenBatchDraft();
+    clearAllKitchenBatchDrafts();
     notifyKitchenRawStockChanged();
 
     setActivityLog((a) =>
@@ -2801,7 +2801,7 @@ function useSupplyChainImpl() {
     setIssueOutLog([]);
     setActivityLog([]);
     removeAllPersistedSupplyKeys();
-    clearKitchenBatchDraft();
+    clearAllKitchenBatchDrafts();
     notifyKitchenRawStockChanged();
     notifyBarStockChanged();
     notifyFnbRawStockChanged();
