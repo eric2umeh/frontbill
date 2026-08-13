@@ -23,9 +23,11 @@ import {
   clearKitchenBatchDraft,
   EMPTY_KITCHEN_BATCH_DRAFT,
   KITCHEN_BATCH_DRAFT_VERSION,
+  kitchenBatchDraftHasContent,
   loadKitchenBatchDraft,
   persistKitchenBatchDraft,
 } from '@/lib/supply-chain/kitchen-batch-draft'
+import { useClientMounted } from '@/hooks/use-client-mounted'
 import {
   mergeUnitFactors,
   needsUnitFactor,
@@ -60,7 +62,7 @@ type IngredientSearchItem =
   | { source: 'kitchen_stock'; id: string; name: string; unit: string; lastPrice: number; stockOnHand: number }
 
 const numberInputValue = (value: number | null | undefined) =>
-  value != null && Number(value) !== 0 ? String(value) : ''
+  value != null && Number.isFinite(Number(value)) ? String(value) : ''
 
 function applyKitchenBatchDraft(draft: KitchenBatchDraft) {
   const optionalCart = draft.cart.filter((c) => c.optional)
@@ -105,6 +107,7 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
     updateRecipe,
   } = useSupplyChain()
   const editing = Boolean(editRecipeId)
+  const mounted = useClientMounted()
   const [draftLoaded, setDraftLoaded] = useState(false)
   const [search, setSearch] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
@@ -128,11 +131,35 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
   const [qtyInputMap, setQtyInputMap] = useState<Record<string, string>>({})
   const [factorMap, setFactorMap] = useState<Record<string, Record<string, number>>>({})
   const draftSnapshotRef = useRef<KitchenBatchDraft>({
-    ...loadKitchenBatchDraft(),
+    ...EMPTY_KITCHEN_BATCH_DRAFT,
     draftVersion: KITCHEN_BATCH_DRAFT_VERSION,
   })
   /** Only hydrate edit form once per recipe id — recipes poll must not restore deleted lines. */
   const hydratedEditRecipeIdRef = useRef<string | null>(null)
+  /** After save/reset, skip persisting the outgoing form back to localStorage. */
+  const skipDraftPersistRef = useRef(false)
+
+  const applyDraftToForm = useCallback((draft: KitchenBatchDraft) => {
+    const applied = applyKitchenBatchDraft(draft)
+    setSearch(applied.search)
+    setMenuCategory(applied.menuCategory)
+    setMenuCategoryId(applied.menuCategoryId)
+    setBatchName(applied.batchName)
+    setMenuItemId(applied.menuItemId)
+    setLinkedKitchenStockId(applied.linkedKitchenStockId)
+    setPlannedPortions(applied.plannedPortions)
+    setYieldUnit(applied.yieldUnit)
+    setSellingPrice(applied.sellingPrice)
+    setOverheadLabour(applied.overheadLabour)
+    setOverheadGas(applied.overheadGas)
+    setOverheadOther(applied.overheadOther)
+    setOutletMenuSync(applied.outletMenuSync)
+    setNotes(applied.notes)
+    setCart(applied.cart)
+    setOptionalCart(applied.optionalCart)
+    setOptionalIngredientsOpen(applied.optionalIngredientsOpen)
+    setQtyInputMap(applied.qtyInputMap)
+  }, [])
 
   const buildDraftSnapshot = useCallback((): KitchenBatchDraft => {
     return {
@@ -176,35 +203,24 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
 
   const flushDraft = useCallback(
     (force?: boolean) => {
-      if (editing) return
-      persistKitchenBatchDraft(draftSnapshotRef.current, { force })
+      if (skipDraftPersistRef.current) return
+      persistKitchenBatchDraft(draftSnapshotRef.current, {
+        force,
+        editRecipeId: editRecipeId ?? null,
+      })
     },
-    [editing],
+    [editRecipeId],
   )
 
   useLayoutEffect(() => {
-    if (editRecipeId) return
-    const applied = applyKitchenBatchDraft(loadKitchenBatchDraft())
-    setSearch(applied.search)
-    setMenuCategory(applied.menuCategory)
-    setMenuCategoryId(applied.menuCategoryId)
-    setBatchName(applied.batchName)
-    setMenuItemId(applied.menuItemId)
-    setLinkedKitchenStockId(applied.linkedKitchenStockId)
-    setPlannedPortions(applied.plannedPortions)
-    setYieldUnit(applied.yieldUnit)
-    setSellingPrice(applied.sellingPrice)
-    setOverheadLabour(applied.overheadLabour)
-    setOverheadGas(applied.overheadGas)
-    setOverheadOther(applied.overheadOther)
-    setOutletMenuSync(applied.outletMenuSync)
-    setNotes(applied.notes)
-    setCart(applied.cart)
-    setOptionalCart(applied.optionalCart)
-    setOptionalIngredientsOpen(applied.optionalIngredientsOpen)
-    setQtyInputMap(applied.qtyInputMap)
-    setDraftLoaded(true)
+    skipDraftPersistRef.current = false
   }, [editRecipeId])
+
+  useLayoutEffect(() => {
+    if (editRecipeId) return
+    applyDraftToForm(loadKitchenBatchDraft())
+    setDraftLoaded(true)
+  }, [editRecipeId, applyDraftToForm])
 
   useLayoutEffect(() => {
     if (!editRecipeId) {
@@ -212,11 +228,23 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
       return
     }
     if (hydratedEditRecipeIdRef.current === editRecipeId) return
+
+    const editDraft = loadKitchenBatchDraft(editRecipeId)
+    if (kitchenBatchDraftHasContent(editDraft)) {
+      hydratedEditRecipeIdRef.current = editRecipeId
+      applyDraftToForm(editDraft)
+      setDraftLoaded(true)
+      return
+    }
+
     const recipe = recipes.find((r) => r.id === editRecipeId)
     if (!recipe) return
     hydratedEditRecipeIdRef.current = editRecipeId
     setBatchName(recipe.name)
     setMenuCategory(recipe.category)
+    setMenuCategoryId(null)
+    setMenuItemId(null)
+    setLinkedKitchenStockId(null)
     setPlannedPortions(numberInputValue(recipe.yieldPortions))
     setYieldUnit(recipe.yieldUnit ?? 'portion')
     setSellingPrice(numberInputValue(recipe.sellingPricePerPortion))
@@ -268,22 +296,21 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
       ),
     )
     setDraftLoaded(true)
-  }, [editRecipeId, recipes])
+  }, [editRecipeId, recipes, applyDraftToForm])
 
   useLayoutEffect(() => {
-    if (!draftLoaded || editing) return
+    if (!draftLoaded) return
     flushDraft()
-  }, [draftLoaded, editing, flushDraft, buildDraftSnapshot])
+  }, [draftLoaded, flushDraft, buildDraftSnapshot])
 
   useEffect(() => {
-    if (editing) return
     const onPageHide = () => flushDraft(true)
     window.addEventListener('pagehide', onPageHide)
     return () => {
       window.removeEventListener('pagehide', onPageHide)
       flushDraft(true)
     }
-  }, [editing, flushDraft])
+  }, [flushDraft])
 
   const actor = { name: name ?? 'Kitchen', role: canonicalRoleKey(role) ?? 'staff' }
   const canCreateBatch = canManageKitchenBatchStandards(role)
@@ -520,6 +547,7 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
   }
 
   const resetForm = () => {
+    skipDraftPersistRef.current = true
     setCart([])
     setOptionalCart([])
     setOptionalIngredientsOpen(false)
@@ -538,7 +566,7 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
     setOutletMenuSync('none')
     setNotes('')
     setSearch('')
-    clearKitchenBatchDraft()
+    clearKitchenBatchDraft(editRecipeId ?? null)
     draftSnapshotRef.current = {
       ...EMPTY_KITCHEN_BATCH_DRAFT,
       draftVersion: KITCHEN_BATCH_DRAFT_VERSION,
@@ -601,6 +629,8 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
           ? `Batch "${titledName}" updated — ${batchOutletMenuSyncLabel(res.outletMenuSync)}`
           : `Batch "${titledName}" updated`,
       )
+      skipDraftPersistRef.current = true
+      clearKitchenBatchDraft(editRecipeId)
       onSaved?.()
       return
     }
@@ -735,6 +765,10 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
     </ul>
   )
 
+  if (!mounted || !draftLoaded) {
+    return <div className="h-[min(72vh,720px)] rounded-xl border bg-muted/40 animate-pulse" />
+  }
+
   return (
     <div className="grid gap-4 lg:grid-cols-[minmax(240px,300px)_1fr] min-h-[min(72vh,720px)]">
       <div className="rounded-xl border flex flex-col overflow-hidden bg-card">
@@ -819,8 +853,8 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
           </h3>
           <p className="text-xs text-muted-foreground mt-1">
             {editing
-              ? 'Update ingredients, overhead, and selling price.'
-              : 'Recipe definition — raw stock is not required. Saved automatically.'}
+              ? 'Update ingredients, overhead, and selling price. Unsaved changes are kept if you refresh.'
+              : 'Recipe definition — raw stock is not required. Draft saved automatically.'}
           </p>
         </div>
 
