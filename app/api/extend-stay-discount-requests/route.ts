@@ -6,6 +6,7 @@ import { insertFolioCharges } from '@/lib/utils/insert-folio-charges'
 import { notifyNightAuditRequestCreated } from '@/lib/night-audit/notify-request-created'
 import {
   calendarNightsBetween,
+  extendDiscountStayConflict,
   extensionAdditionalNights,
   toYmd,
 } from '@/lib/booking/edit-booking-patch'
@@ -236,7 +237,7 @@ export async function PATCH(request: Request) {
 
     const { data: booking } = await admin
       .from('bookings')
-      .select('id, deposit, balance, total_amount, number_of_nights, check_in, guest_id, folio_id, organization_id')
+      .select('id, deposit, balance, total_amount, number_of_nights, check_in, check_out, guest_id, folio_id, organization_id')
       .eq('id', row.booking_id)
       .single()
     if (!booking) return NextResponse.json({ error: 'Booking missing' }, { status: 400 })
@@ -244,6 +245,15 @@ export async function PATCH(request: Request) {
     const discTotal = Number(row.discounted_total) || 0
     const nights = Number(row.additional_nights) || 0
     const newCo = toYmd(row.new_check_out)
+    const stayConflict = extendDiscountStayConflict({
+      currentCheckOutYmd: booking.check_out,
+      requestedNewCheckOutYmd: newCo,
+      additionalNights: nights,
+    })
+    if (stayConflict) {
+      return NextResponse.json({ error: stayConflict }, { status: 409 })
+    }
+
     const stayCheckIn = toYmd(booking.check_in)
     const totalNights = stayCheckIn && newCo
       ? calendarNightsBetween(stayCheckIn, newCo)
@@ -253,21 +263,63 @@ export async function PATCH(request: Request) {
     const approverLabel = (await admin.from('profiles').select('full_name').eq('id', caller_id).maybeSingle()).data
       ?.full_name || caller_id.slice(0, 8)
 
-    const folioRow: Record<string, unknown> = {
-      booking_id: row.booking_id,
-      description: `Extended Stay — ${nights} night(s) (DISCOUNTED). Approved by ${approverLabel}. ${String(row.reason || '').slice(0, 200)}`,
-      amount: discTotal,
-      charge_type: 'extended_stay',
-      payment_method: row.payment_method,
-      payment_status: 'paid',
-      created_by: caller_id,
+    const { data: claimed, error: claimErr } = await admin
+      .from('extend_stay_discount_requests')
+      .update({
+        status: 'approved',
+        approved_by: caller_id,
+        decided_at: decidedAt,
+        decision_note: decision_note?.trim() || 'Approved',
+      })
+      .eq('id', request_id)
+      .eq('status', 'pending')
+      .select()
+      .maybeSingle()
+    if (claimErr) return NextResponse.json({ error: claimErr.message }, { status: 500 })
+    if (!claimed) {
+      return NextResponse.json({ error: 'Already decided' }, { status: 400 })
     }
-    if (booking.organization_id) folioRow.organization_id = booking.organization_id
 
-    const { error: fcErr } = await insertFolioCharges(admin, [folioRow])
-    if (fcErr) return NextResponse.json({ error: fcErr.message }, { status: 500 })
+    const revertClaim = async () => {
+      await admin
+        .from('extend_stay_discount_requests')
+        .update({
+          status: 'pending',
+          approved_by: null,
+          decided_at: null,
+          decision_note: null,
+        })
+        .eq('id', request_id)
+        .eq('status', 'approved')
+    }
 
-    await admin
+    const { data: existingFolio } = await admin
+      .from('folio_charges')
+      .select('id')
+      .eq('booking_id', row.booking_id)
+      .ilike('description', `%${row.id}%`)
+      .limit(1)
+
+    if (!existingFolio?.length) {
+      const folioRow: Record<string, unknown> = {
+        booking_id: row.booking_id,
+        description: `Extended Stay — ${nights} night(s) (DISCOUNTED). Request ${row.id}. Approved by ${approverLabel}. ${String(row.reason || '').slice(0, 200)}`,
+        amount: discTotal,
+        charge_type: 'extended_stay',
+        payment_method: row.payment_method,
+        payment_status: 'paid',
+        created_by: caller_id,
+      }
+      if (booking.organization_id) folioRow.organization_id = booking.organization_id
+
+      const { error: fcErr } = await insertFolioCharges(admin, [folioRow])
+      if (fcErr) {
+        await revertClaim()
+        return NextResponse.json({ error: fcErr.message }, { status: 500 })
+      }
+    }
+
+    const { error: bookingErr } = await admin
       .from('bookings')
       .update({
         check_out: newCo,
@@ -277,21 +329,12 @@ export async function PATCH(request: Request) {
         balance: Math.max(0, nextTotal - nextDeposit),
       })
       .eq('id', row.booking_id)
+    if (bookingErr) {
+      await revertClaim()
+      return NextResponse.json({ error: bookingErr.message }, { status: 500 })
+    }
 
-    const { data: updated, error: ue } = await admin
-      .from('extend_stay_discount_requests')
-      .update({
-        status: 'approved',
-        approved_by: caller_id,
-        decided_at: decidedAt,
-        decision_note: decision_note?.trim() || 'Approved',
-      })
-      .eq('id', request_id)
-      .select()
-      .single()
-    if (ue) return NextResponse.json({ error: ue.message }, { status: 500 })
-
-    return NextResponse.json({ request: updated, booking_id: row.booking_id })
+    return NextResponse.json({ request: claimed, booking_id: row.booking_id })
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 })
   }

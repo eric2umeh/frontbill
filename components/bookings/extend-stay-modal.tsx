@@ -30,6 +30,11 @@ import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/lib/auth-context";
 import { insertFolioCharges } from "@/lib/utils/insert-folio-charges";
 import {
+  fetchGuestCityLedgerAccount,
+  incrementCityLedgerDebit,
+  usableCityLedgerAccountId,
+} from "@/lib/utils/guest-city-ledger";
+import {
   extensionAdditionalNights,
   calendarNightsBetween,
   toYmd,
@@ -412,6 +417,31 @@ export function ExtendStayModal({
       // For immediate payments (cash/pos/transfer): status = 'paid'
       // For deferred payments (city_ledger): status = 'pending'
       const isPaidNow = paymentMethod !== "city_ledger";
+      let cityLedgerAccountId: string | null = null;
+      if (paymentMethod === "city_ledger" && booking.organization_id) {
+        if (ledgerType === "organization" && selectedLedger?.id) {
+          const { data: byId } = await supabase
+            .from("city_ledger_accounts")
+            .select("id")
+            .eq("id", selectedLedger.id)
+            .eq("organization_id", booking.organization_id)
+            .maybeSingle();
+          cityLedgerAccountId = byId?.id || null;
+        } else {
+          const guestName =
+            (await supabase
+              .from("guests")
+              .select("name")
+              .eq("id", booking.guestId)
+              .maybeSingle()).data?.name || booking.guestName;
+          const acct = await fetchGuestCityLedgerAccount(
+            supabase,
+            booking.organization_id,
+            guestName,
+          );
+          cityLedgerAccountId = acct?.id || null;
+        }
+      }
       const chargeData: Record<string, unknown> = {
         booking_id: booking.id,
         description: `Extended Stay - ${additionalNights} night${additionalNights !== 1 ? "s" : ""}`,
@@ -419,7 +449,7 @@ export function ExtendStayModal({
         charge_type: "extended_stay",
         payment_method: paymentMethod,
         ledger_account_id:
-          paymentMethod === "city_ledger" ? selectedLedger?.id : null,
+          paymentMethod === "city_ledger" ? cityLedgerAccountId : null,
         ledger_account_type:
           paymentMethod === "city_ledger" ? ledgerType : null,
         payment_status: isPaidNow ? "paid" : "pending",
@@ -503,74 +533,59 @@ export function ExtendStayModal({
         /* non-fatal */
       }
 
-      // City ledger: update guest balance + city_ledger_accounts balance
-      if (paymentMethod === "city_ledger") {
-        if (booking.guestId) {
-          const { data: guestRow } = await supabase
-            .from("guests")
-            .select("name")
-            .eq("id", booking.guestId)
-            .single();
-          if (guestRow) {
-            // If no city_ledger_account was selected, create/update one for this guest
-            if (!selectedLedger?.id && guestRow.name) {
-              const { data: existingAcct } = await supabase
-                .from("city_ledger_accounts")
-                .select("id, balance")
-                .eq("organization_id", booking.organization_id)
-                .ilike("account_name", guestRow.name)
-                .maybeSingle();
+      // City ledger: debit the real city_ledger_accounts row (never guest UUID).
+      if (paymentMethod === "city_ledger" && booking.organization_id) {
+        const accountName =
+          ledgerType === "organization"
+            ? selectedLedger?.account_name ||
+              selectedLedger?.name ||
+              booking.guestName
+            : (await supabase
+                .from("guests")
+                .select("name")
+                .eq("id", booking.guestId)
+                .maybeSingle()).data?.name || booking.guestName;
 
-              if (existingAcct) {
-                await supabase
-                  .from("city_ledger_accounts")
-                  .update({
-                    balance: (existingAcct.balance || 0) + additionalAmount,
-                  })
-                  .eq("id", existingAcct.id);
-              } else {
-                await supabase.from("city_ledger_accounts").insert([
-                  {
-                    organization_id: booking.organization_id,
-                    account_name: guestRow.name,
-                    account_type: "individual",
-                    balance: additionalAmount,
-                  },
-                ]);
-              }
-            }
-          }
+        const ledgerId = await incrementCityLedgerDebit(supabase, {
+          organizationId: booking.organization_id,
+          amount: additionalAmount,
+          accountName,
+          ledgerAccountId:
+            cityLedgerAccountId ||
+            usableCityLedgerAccountId(selectedLedger?.id, booking.guestId),
+          accountType:
+            ledgerType === "organization" ? "organization" : "individual",
+        });
+        if (ledgerId) {
+          cityLedgerAccountId = ledgerId;
         }
 
-        // If a specific ledger account was selected, update it
-        if (selectedLedger?.id) {
-          const { data: acct } = await supabase
-            .from("city_ledger_accounts")
-            .select("balance")
-            .eq("id", selectedLedger.id)
-            .single();
-          await supabase
-            .from("city_ledger_accounts")
-            .update({ balance: (acct?.balance || 0) + additionalAmount })
-            .eq("id", selectedLedger.id);
-
-          // If it's an organization ledger, also bump organizations.current_balance
-          if (ledgerType === "organization") {
-            const { data: orgRow } = await supabase
-              .from("organizations")
-              .select("current_balance")
-              .eq("id", selectedLedger.id)
-              .single();
-            if (orgRow) {
+        if (ledgerType === "organization") {
+          const orgIdCandidate = selectedLedger?.id;
+          const { data: orgById } = orgIdCandidate
+            ? await supabase
+                .from("organizations")
+                .select("id, current_balance")
+                .eq("id", orgIdCandidate)
+                .maybeSingle()
+            : { data: null };
+          const orgRow =
+            orgById ||
+            (
               await supabase
                 .from("organizations")
-                .update({
-                  current_balance:
-                    ((orgRow.current_balance as number) || 0) +
-                    additionalAmount,
-                })
-                .eq("id", selectedLedger.id);
-            }
+                .select("id, current_balance")
+                .ilike("name", accountName)
+                .maybeSingle()
+            ).data;
+          if (orgRow?.id) {
+            await supabase
+              .from("organizations")
+              .update({
+                current_balance:
+                  ((orgRow.current_balance as number) || 0) + additionalAmount,
+              })
+              .eq("id", orgRow.id);
           }
         }
       }

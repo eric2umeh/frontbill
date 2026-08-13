@@ -9,6 +9,21 @@ import { insertFolioCharges } from "@/lib/utils/insert-folio-charges";
 import { appendAccountToNotes } from "@/lib/payments/payment-accounts";
 
 /**
+ * City-ledger UI often auto-selects `{ id: guestId }`. That UUID is not a
+ * `city_ledger_accounts` row — using it as `.eq('id', guestId)` silently
+ * updates zero rows and drops the debit.
+ */
+export function usableCityLedgerAccountId(
+  candidateId: string | null | undefined,
+  guestId?: string | null,
+): string | null {
+  const id = String(candidateId || "").trim();
+  if (!id) return null;
+  if (guestId && id === guestId) return null;
+  return id;
+}
+
+/**
  * Prefer outstanding debit when any row still owes; otherwise prefer the
  * largest prepaid credit (most negative). Never hide credit behind a ₦0 duplicate row.
  */
@@ -377,6 +392,102 @@ export async function syncGuestCityLedgerBalances(
     .in("id", [...ids]);
   if (error) throw new Error(`Ledger sync failed: ${error.message}`);
   return ids.size;
+}
+
+/**
+ * Add a city-ledger debit (guest/org owes the hotel more).
+ * `ledgerAccountId` is used only when it actually exists on city_ledger_accounts —
+ * guest UUIDs and organization row ids must not be treated as ledger ids.
+ */
+export async function incrementCityLedgerDebit(
+  supabase: SupabaseClient,
+  args: {
+    organizationId: string;
+    amount: number;
+    accountName: string;
+    ledgerAccountId?: string | null;
+    accountType?: "individual" | "organization";
+  },
+): Promise<string | null> {
+  const amount = Number(args.amount) || 0;
+  if (amount <= 0 || !args.organizationId) return null;
+
+  const ledgerAccountId = args.ledgerAccountId || null;
+  if (ledgerAccountId) {
+    const { data } = await supabase
+      .from("city_ledger_accounts")
+      .select("id, balance")
+      .eq("id", ledgerAccountId)
+      .eq("organization_id", args.organizationId)
+      .maybeSingle();
+    if (data?.id) {
+      const { error } = await supabase
+        .from("city_ledger_accounts")
+        .update({
+          balance: (Number(data.balance) || 0) + amount,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", data.id);
+      if (error) throw new Error(`Ledger update failed: ${error.message}`);
+      return data.id;
+    }
+  }
+
+  const name = String(args.accountName || "").trim();
+  if (!name) return null;
+
+  if (args.accountType === "organization") {
+    const { data: existing } = await supabase
+      .from("city_ledger_accounts")
+      .select("id, balance")
+      .eq("organization_id", args.organizationId)
+      .ilike("account_name", name)
+      .maybeSingle();
+    if (existing?.id) {
+      const { error } = await supabase
+        .from("city_ledger_accounts")
+        .update({
+          balance: (Number(existing.balance) || 0) + amount,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", existing.id);
+      if (error) throw new Error(`Ledger update failed: ${error.message}`);
+      return existing.id;
+    }
+    const { data: created, error } = await supabase
+      .from("city_ledger_accounts")
+      .insert([
+        {
+          organization_id: args.organizationId,
+          account_name: name,
+          account_type: "organization",
+          balance: amount,
+        },
+      ])
+      .select("id")
+      .single();
+    if (error) throw new Error(`Ledger insert failed: ${error.message}`);
+    return created?.id ?? null;
+  }
+
+  const acct = await fetchGuestCityLedgerAccount(
+    supabase,
+    args.organizationId,
+    name,
+  );
+  const next = (Number(acct?.balance) || 0) + amount;
+  await syncGuestCityLedgerBalances(supabase, {
+    organizationId: args.organizationId,
+    guestName: name,
+    balance: next,
+    primaryAccountId: acct?.id ?? null,
+  });
+  const after = await fetchGuestCityLedgerAccount(
+    supabase,
+    args.organizationId,
+    name,
+  );
+  return after?.id ?? null;
 }
 
 function mapFolioRows(
