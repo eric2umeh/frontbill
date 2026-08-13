@@ -464,7 +464,7 @@ export interface CreateKitchenBatchInput {
   fnbEligible?: boolean
 }
 
-/** Draft new-batch cart — persisted while switching kitchen tabs. */
+/** Draft new/edit batch cart — persisted locally while switching tabs or refreshing. */
 export interface KitchenBatchDraft {
   draftVersion?: number
   search: string
