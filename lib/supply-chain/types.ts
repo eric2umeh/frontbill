@@ -428,6 +428,8 @@ export interface Recipe {
   outletMenuSync?: BatchOutletMenuSync
   /** @deprecated use outletMenuSync */
   fnbEligible?: boolean
+  /** ISO timestamp — used to keep the newest recipe when merging local + remote. */
+  updatedAt?: string
 }
 
 export interface BatchMaterialLine {

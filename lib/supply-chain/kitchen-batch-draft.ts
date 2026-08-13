@@ -28,7 +28,6 @@ export const EMPTY_KITCHEN_BATCH_DRAFT: KitchenBatchDraft = {
   cart: [],
 }
 
-/** New-batch draft uses the base key; edit drafts are scoped per recipe id. */
 export function kitchenBatchDraftKey(editRecipeId?: string | null): string {
   if (editRecipeId) return `${KITCHEN_BATCH_DRAFT_EDIT_PREFIX}${editRecipeId}`
   return KITCHEN_BATCH_DRAFT_KEY
@@ -114,7 +113,6 @@ export function clearKitchenBatchDraft(editRecipeId?: string | null) {
   }
 }
 
-/** Clears new-batch and all edit-batch drafts (e.g. kitchen wipe / logout). */
 export function clearAllKitchenBatchDrafts() {
   if (typeof window === 'undefined') return
   try {

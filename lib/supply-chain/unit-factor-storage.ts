@@ -69,6 +69,11 @@ export function unitFactorDefinition(
     'head',
     'slice',
     'fillet',
+    'leaf',
+    'container',
+    'cloves',
+    'loaf',
+    'bunch',
   ])
   if (containerUnits.has(selected) && !containerUnits.has(store)) {
     return {

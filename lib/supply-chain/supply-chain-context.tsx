@@ -289,15 +289,22 @@ function usePersistedArrayState<T>(
   fallbackRef.current = fallback;
   const [state, setState] = useState<T[]>(() => [...fallbackRef.current]);
   const storageReadyRef = useRef(!persist);
+  /** Skip one persist after loading from storage so we never write [] over saved data. */
+  const skipNextPersistRef = useRef(persist);
 
   useEffect(() => {
     if (!persist) return;
     setState(loadPersistedStock(key, fallbackRef.current));
+    skipNextPersistRef.current = true;
     storageReadyRef.current = true;
   }, [key, persist]);
 
   useEffect(() => {
     if (!persist || !storageReadyRef.current) return;
+    if (skipNextPersistRef.current) {
+      skipNextPersistRef.current = false;
+      return;
+    }
     persistStock(key, state);
   }, [key, state, persist]);
 
@@ -573,7 +580,10 @@ function useSupplyChainImpl() {
           EMPTY_ACTIVITY_LOG,
         );
 
-        const mergedRecipes = resolveSupplySnapshot(localRecipes, snapshots.recipes);
+        const mergedRecipes = mergeRecipesFromRemote(
+          localRecipes,
+          Array.isArray(snapshots.recipes) ? (snapshots.recipes as Recipe[]) : [],
+        );
         const mergedBatches = resolveSupplySnapshot(localBatches, snapshots.batches);
         const mergedKitchenStock = resolveSupplySnapshot(localKitchenStock, snapshots.kitchen_stock);
         const mergedKitchenRaw = resolveSupplySnapshot(localKitchenRaw, snapshots.kitchen_raw_stock);
@@ -2502,13 +2512,16 @@ function useSupplyChainImpl() {
         outletMenuSync: normalizeBatchOutletMenuSync(
           input.outletMenuSync ?? input.fnbEligible,
         ),
+        updatedAt: new Date().toISOString(),
       };
       setRecipes((prev) => {
         const idx = prev.findIndex((r) => r.id === recipeId || r.name === batchName);
-        if (idx >= 0) {
-          return prev.map((r, i) => (i === idx ? { ...recipeRow, id: r.id } : r));
-        }
-        return [recipeRow, ...prev];
+        const next =
+          idx >= 0
+            ? prev.map((r, i) => (i === idx ? { ...recipeRow, id: r.id } : r))
+            : [recipeRow, ...prev];
+        recipesRef.current = next;
+        return next;
       });
 
       setActivityLog((a) =>
@@ -2520,10 +2533,10 @@ function useSupplyChainImpl() {
           recipeId,
         ),
       );
-      schedulePersistSnapshots();
+      void persistSnapshotsNow();
       return { ok: true, kitchenStockId, recipeId };
     },
-    [storeItems, schedulePersistSnapshots],
+    [storeItems, persistSnapshotsNow],
   );
 
   const updateRecipe = useCallback(
@@ -2610,15 +2623,18 @@ function useSupplyChainImpl() {
         overheadOther,
         outletMenuSync,
         ingredients,
+        updatedAt: new Date().toISOString(),
       };
 
       const kitchenRow = kitchenStock.find((k) => k.linkedRecipeId === recipeId);
       const kitchenStockId =
         kitchenRow?.id ?? `ks-${outletStockSlug(name)}`;
 
-      setRecipes((prev) =>
-        prev.map((r) => (r.id === recipeId ? updated : r)),
-      );
+      setRecipes((prev) => {
+        const next = prev.map((r) => (r.id === recipeId ? updated : r));
+        recipesRef.current = next;
+        return next;
+      });
       setKitchenStock((prev) =>
         prev.map((k) =>
           k.linkedRecipeId === recipeId ? { ...k, name, unit: yieldUnit } : k,

@@ -62,7 +62,7 @@ type IngredientSearchItem =
   | { source: 'kitchen_stock'; id: string; name: string; unit: string; lastPrice: number; stockOnHand: number }
 
 const numberInputValue = (value: number | null | undefined) =>
-  value != null && Number(value) !== 0 ? String(value) : ''
+  value != null && Number.isFinite(Number(value)) ? String(value) : ''
 
 function applyKitchenBatchDraft(draft: KitchenBatchDraft) {
   const optionalCart = draft.cart.filter((c) => c.optional)
@@ -242,6 +242,9 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
     hydratedEditRecipeIdRef.current = editRecipeId
     setBatchName(recipe.name)
     setMenuCategory(recipe.category)
+    setMenuCategoryId(null)
+    setMenuItemId(null)
+    setLinkedKitchenStockId(null)
     setPlannedPortions(numberInputValue(recipe.yieldPortions))
     setYieldUnit(recipe.yieldUnit ?? 'portion')
     setSellingPrice(numberInputValue(recipe.sellingPricePerPortion))
@@ -626,8 +629,8 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
           ? `Batch "${titledName}" updated — ${batchOutletMenuSyncLabel(res.outletMenuSync)}`
           : `Batch "${titledName}" updated`,
       )
-      clearKitchenBatchDraft(editRecipeId)
       skipDraftPersistRef.current = true
+      clearKitchenBatchDraft(editRecipeId)
       onSaved?.()
       return
     }

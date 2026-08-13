@@ -44,14 +44,47 @@ export function mergeProductionBatchesFromRemote(
   return merged.sort((a, b) => (b.openedAt || '').localeCompare(a.openedAt || ''))
 }
 
+function recipeUpdatedAtMs(recipe: Recipe | undefined): number {
+  if (!recipe?.updatedAt) return 0
+  const ms = Date.parse(recipe.updatedAt)
+  return Number.isFinite(ms) ? ms : 0
+}
+
 /**
- * Admin-created batch standards visible to kitchen staff after poll/hydrate.
- * Prefer local for shared ids so in-progress edits / pending persist are not
- * overwritten by a stale remote snapshot (which resurrected deleted ingredients).
- * Remote-only recipes are still added.
+ * Prefer the newer recipe (by updatedAt) for shared ids.
+ * Remote-only / local-only rows are kept. When timestamps tie or are missing,
+ * prefer local so in-progress edits are not wiped by a stale poll.
  */
 export function mergeRecipesFromRemote(local: Recipe[], remote: Recipe[]): Recipe[] {
   if (local.length === 0) return remote
   if (remote.length === 0) return local
+
+  const localById = new Map(local.map((r) => [r.id, r]))
+  const remoteById = new Map(remote.map((r) => [r.id, r]))
+  const ids = new Set([...localById.keys(), ...remoteById.keys()])
+  const merged: Recipe[] = []
+
+  for (const id of ids) {
+    const l = localById.get(id)
+    const r = remoteById.get(id)
+    if (!l) {
+      if (r) merged.push(r)
+      continue
+    }
+    if (!r) {
+      merged.push(l)
+      continue
+    }
+    const lt = recipeUpdatedAtMs(l)
+    const rt = recipeUpdatedAtMs(r)
+    if (rt > lt) merged.push(r)
+    else merged.push(l)
+  }
+
+  return merged
+}
+
+/** @deprecated Prefer mergeRecipesFromRemote — kept for callers that only need id merge. */
+export function mergeRecipesByIdPreferLocal(local: Recipe[], remote: Recipe[]): Recipe[] {
   return mergeSnapshotRowsById(remote, local)
 }

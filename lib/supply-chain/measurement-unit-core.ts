@@ -4,8 +4,11 @@ export const MEASUREMENT_UNITS = [
   'ball',
   'basket',
   'bottle',
+  'bunch',
   'can',
   'carton',
+  'cloves',
+  'container',
   'crate',
   'cooking_spoon',
   'cup',
@@ -14,6 +17,8 @@ export const MEASUREMENT_UNITS = [
   'head',
   'kg',
   'l',
+  'leaf',
+  'loaf',
   'ml',
   'mudu',
   'pack',
@@ -89,6 +94,16 @@ const UNIT_ALIASES: Record<string, string> = {
   slices: 'slice',
   fillet: 'fillet',
   fillets: 'fillet',
+  leaf: 'leaf',
+  leaves: 'leaf',
+  container: 'container',
+  containers: 'container',
+  clove: 'cloves',
+  cloves: 'cloves',
+  loaf: 'loaf',
+  loaves: 'loaf',
+  bunch: 'bunch',
+  bunches: 'bunch',
   carton: 'carton',
   cartons: 'carton',
   ctn: 'carton',
@@ -118,6 +133,11 @@ export function formatUnitLabel(unit: string): string {
   if (normalized === 'ball') return 'ball'
   if (normalized === 'slice') return 'slice'
   if (normalized === 'fillet') return 'fillet'
+  if (normalized === 'leaf') return 'leaf'
+  if (normalized === 'container') return 'container'
+  if (normalized === 'cloves') return 'cloves'
+  if (normalized === 'loaf') return 'loaf'
+  if (normalized === 'bunch') return 'bunch'
   return normalized
 }
 
@@ -126,6 +146,27 @@ export function defaultUnitForStoreItem(unit?: string): string {
   if (MEASUREMENT_UNITS.includes(normalized as MeasurementUnit)) return normalized
   return DEFAULT_MEASUREMENT_UNIT
 }
+
+const COUNT_LIKE_UNITS = [
+  'pack',
+  'pcs',
+  'sachet',
+  'tin',
+  'can',
+  'carton',
+  'bag',
+  'roll',
+  'set',
+  'head',
+  'ball',
+  'slice',
+  'fillet',
+  'leaf',
+  'container',
+  'cloves',
+  'loaf',
+  'bunch',
+] as const
 
 /** Contextual unit choices (store unit + related SI / pack units), sorted. */
 export function unitOptionsForStoreItem(storeUnit: string, itemName?: string): string[] {
@@ -158,20 +199,8 @@ export function unitOptionsForStoreItem(storeUnit: string, itemName?: string): s
     options.add('pack')
     options.add('pcs')
   }
-  if (['pack', 'pcs', 'sachet', 'tin', 'can', 'carton', 'bag', 'roll', 'set', 'head', 'ball', 'slice', 'fillet'].includes(base)) {
-    options.add('pack')
-    options.add('pcs')
-    options.add('sachet')
-    options.add('tin')
-    options.add('can')
-    options.add('carton')
-    options.add('bag')
-    options.add('roll')
-    options.add('set')
-    options.add('head')
-    options.add('ball')
-    options.add('slice')
-    options.add('fillet')
+  if ((COUNT_LIKE_UNITS as readonly string[]).includes(base)) {
+    for (const u of COUNT_LIKE_UNITS) options.add(u)
   }
   const produceHint =
     base === 'head' ||
@@ -179,13 +208,23 @@ export function unitOptionsForStoreItem(storeUnit: string, itemName?: string): s
     base === 'ball' ||
     base === 'slice' ||
     base === 'fillet' ||
-    /\b(lettuce|cabbage|cauliflower|broccoli|garlic|onion|fish|okra|egusi|melon|bread|ham|cheese|bacon)\b/.test(name)
+    base === 'leaf' ||
+    base === 'bunch' ||
+    base === 'cloves' ||
+    base === 'loaf' ||
+    /\b(lettuce|cabbage|cauliflower|broccoli|garlic|onion|fish|okra|egusi|melon|bread|ham|cheese|bacon|herb|basil|spinach)\b/.test(
+      name,
+    )
   if (produceHint) {
     options.add('head')
     options.add('set')
     options.add('ball')
     options.add('slice')
     options.add('fillet')
+    options.add('leaf')
+    options.add('bunch')
+    options.add('cloves')
+    options.add('loaf')
     options.add('pcs')
     options.add('kg')
   }
