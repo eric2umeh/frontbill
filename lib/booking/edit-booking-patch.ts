@@ -81,6 +81,44 @@ export function extensionAdditionalNights(input: {
   return calendarDaysBetween(currentOut, newOut)
 }
 
+/** Shift a YMD calendar date by a signed day count (UTC date arithmetic). */
+export function addCalendarDaysYmd(ymd: string, days: number): string {
+  const d = toYmd(ymd)
+  if (!d) return ''
+  const [y, m, day] = d.split('-').map(Number)
+  const utc = new Date(Date.UTC(y, m - 1, day))
+  utc.setUTCDate(utc.getUTCDate() + days)
+  const ny = utc.getUTCFullYear()
+  const nm = String(utc.getUTCMonth() + 1).padStart(2, '0')
+  const nd = String(utc.getUTCDate()).padStart(2, '0')
+  return `${ny}-${nm}-${nd}`
+}
+
+/**
+ * Reject discounted-extension approval when the stay moved after the request
+ * was filed (standard Extend Stay, another approval, or shortened dates).
+ * Approving blindly would post a second folio charge and can overwrite
+ * checkout backward (losing later nights).
+ */
+export function extendDiscountStayConflict(input: {
+  currentCheckOutYmd?: string | null
+  requestedNewCheckOutYmd?: string | null
+  additionalNights?: number | null
+}): string | null {
+  const requested = toYmd(input.requestedNewCheckOutYmd)
+  const current = toYmd(input.currentCheckOutYmd)
+  const nights = Math.max(0, Number(input.additionalNights) || 0)
+  if (!requested) return 'Requested checkout date is missing'
+  if (!current) return 'Booking checkout date is missing'
+  if (nights <= 0) return 'Extension must add at least one night'
+  const expectedBaseCheckout = addCalendarDaysYmd(requested, -nights)
+  if (!expectedBaseCheckout) return 'Requested checkout date is invalid'
+  if (current !== expectedBaseCheckout) {
+    return 'Stay dates changed since this request was created. Reject it and submit a new discount request from the current checkout.'
+  }
+  return null
+}
+
 /** Apply validated patch onto existing row values and return DB-ready fields (subset). */
 export function mergeBookingPatch(
   current: Record<string, unknown>,
