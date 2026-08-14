@@ -37,15 +37,36 @@ export function UnitSelect({
   units,
 }: Props) {
   const normalized = normalizeMeasurementUnit(value)
-  const options = units?.length
-    ? [...new Set(units.map(normalizeMeasurementUnit))].sort()
-    : storeUnit
-      ? unitOptionsForStoreItem(storeUnit, itemName)
+  const store = storeUnit ? normalizeMeasurementUnit(storeUnit) : ''
+
+  const baseOptions = units?.length
+    ? [...new Set(units.map(normalizeMeasurementUnit))]
+    : store
+      ? unitOptionsForStoreItem(store, itemName)
       : [...MEASUREMENT_UNITS]
 
+  const extra: string[] = []
+  if (store && !baseOptions.includes(store)) extra.push(store)
+  if (normalized && !baseOptions.includes(normalized) && normalized !== store) {
+    extra.push(normalized)
+  }
+
+  const rest = baseOptions
+    .filter((u) => u !== store && u !== normalized)
+    .sort()
+  const options = [
+    ...(store ? [store] : []),
+    ...(normalized && normalized !== store ? [normalized] : []),
+    ...extra.filter((u) => u !== store && u !== normalized),
+    ...rest,
+  ]
+
+  // Keep the catalogue unit (or current value). Never fall back to the first A–Z option (bag).
   const safeValue = options.includes(normalized)
     ? normalized
-    : (options[0] ?? DEFAULT_MEASUREMENT_UNIT)
+    : store && options.includes(store)
+      ? store
+      : (options[0] ?? DEFAULT_MEASUREMENT_UNIT)
 
   return (
     <Select value={safeValue} onValueChange={onChange} disabled={disabled}>
