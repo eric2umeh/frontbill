@@ -90,6 +90,7 @@ const PURCHASE_CONTAINER_UNITS = new Set([
   'cloves',
   'loaf',
   'bunch',
+  'wrap',
   'bottle',
 ])
 

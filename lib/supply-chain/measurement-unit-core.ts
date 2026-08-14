@@ -32,6 +32,7 @@ export const MEASUREMENT_UNITS = [
   'tbsp',
   'tin',
   'tsp',
+  'wrap',
 ] as const
 
 export type MeasurementUnit = (typeof MEASUREMENT_UNITS)[number]
@@ -104,6 +105,8 @@ const UNIT_ALIASES: Record<string, string> = {
   loaves: 'loaf',
   bunch: 'bunch',
   bunches: 'bunch',
+  wrap: 'wrap',
+  wraps: 'wrap',
   carton: 'carton',
   cartons: 'carton',
   ctn: 'carton',
@@ -138,6 +141,7 @@ export function formatUnitLabel(unit: string): string {
   if (normalized === 'cloves') return 'cloves'
   if (normalized === 'loaf') return 'loaf'
   if (normalized === 'bunch') return 'bunch'
+  if (normalized === 'wrap') return 'wrap'
   return normalized
 }
 
@@ -166,6 +170,7 @@ const COUNT_LIKE_UNITS = [
   'cloves',
   'loaf',
   'bunch',
+  'wrap',
 ] as const
 
 /** Contextual unit choices (store unit + related SI / pack units), sorted. */
@@ -212,6 +217,7 @@ export function unitOptionsForStoreItem(storeUnit: string, itemName?: string): s
     base === 'bunch' ||
     base === 'cloves' ||
     base === 'loaf' ||
+    base === 'wrap' ||
     /\b(lettuce|cabbage|cauliflower|broccoli|garlic|onion|fish|okra|egusi|melon|bread|ham|cheese|bacon|herb|basil|spinach)\b/.test(
       name,
     )
@@ -225,6 +231,7 @@ export function unitOptionsForStoreItem(storeUnit: string, itemName?: string): s
     options.add('bunch')
     options.add('cloves')
     options.add('loaf')
+    options.add('wrap')
     options.add('pcs')
     options.add('kg')
   }
