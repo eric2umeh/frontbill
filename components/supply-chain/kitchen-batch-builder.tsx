@@ -374,7 +374,7 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
 
   const addMaterial = (item: IngredientSearchItem, optional = false) => {
     if (optional) setOptionalIngredientsOpen(true)
-    const unit = defaultUnitForStoreItem(item.unit)
+    const unit = defaultUnitForStoreItem(item.unit) || item.unit
     const setter = optional ? setOptionalCart : setCart
     setter((prev) => {
       const ex = prev.find((c) => c.storeItemId === item.id && (c.source ?? 'raw') === item.source)
