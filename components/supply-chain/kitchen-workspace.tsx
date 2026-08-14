@@ -79,6 +79,18 @@ function downloadCsv(filename: string, rows: unknown[][]) {
   URL.revokeObjectURL(url)
 }
 
+const RECIPE_DESCRIPTION_PREVIEW_LINES = 3
+
+function recipeDescriptionPreview(text: string, maxLines = RECIPE_DESCRIPTION_PREVIEW_LINES): string {
+  const lines = text
+    .trim()
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+  if (lines.length <= maxLines) return lines.join('\n')
+  return `${lines.slice(0, maxLines).join('\n')}…`
+}
+
 function downloadKitchenBatchCsv(recipes: Recipe[]) {
   const header = [
     'batch / menu name',
@@ -723,6 +735,16 @@ export function KitchenWorkspace() {
                     </span>
                   </li>
                 </ul>
+                {r.description?.trim() ? (
+                  <div className="rounded-md border border-dashed bg-muted/20 px-3 py-2">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                      Recipe description
+                    </p>
+                    <p className="mt-1 whitespace-pre-wrap text-sm leading-snug text-muted-foreground">
+                      {recipeDescriptionPreview(r.description)}
+                    </p>
+                  </div>
+                ) : null}
                 <div className="flex justify-between text-sm border-t pt-2">
                   <span>Cost / portion: {formatNaira(econ.costPerPortion)}</span>
                   <span className="text-emerald-600 font-medium">Sell: {formatNaira(r.sellingPricePerPortion)}</span>
