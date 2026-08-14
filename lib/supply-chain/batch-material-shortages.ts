@@ -1,9 +1,9 @@
-import type { Recipe } from '@/lib/supply-chain/types'
-import type { StockShortageLine } from '@/lib/ui/stock-shortage-dialog'
+import type { Recipe } from './types'
+import type { StockShortageLine } from '../ui/stock-shortage-dialog'
 import {
   convertToStoreUnitsWithFactors,
   type UnitFactorMap,
-} from '@/lib/supply-chain/unit-factor-storage'
+} from './unit-factor-storage'
 
 export type BatchOnHandLookup = {
   quantity: number
