@@ -12,7 +12,9 @@ import { Label } from '@/components/ui/label'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Checkbox } from '@/components/ui/checkbox'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
-import { Search, Trash2, ChefHat, ChevronDown } from 'lucide-react'
+import { Textarea } from '@/components/ui/textarea'
+import { Badge } from '@/components/ui/badge'
+import { Search, Trash2, ChefHat, ChevronDown, FileText } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   Collapsible,
@@ -128,6 +130,7 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
   const [cart, setCart] = useState<BatchMaterialLine[]>([])
   const [optionalCart, setOptionalCart] = useState<BatchMaterialLine[]>([])
   const [optionalIngredientsOpen, setOptionalIngredientsOpen] = useState(false)
+  const [recipeDescriptionOpen, setRecipeDescriptionOpen] = useState(false)
   const [qtyInputMap, setQtyInputMap] = useState<Record<string, string>>({})
   const [factorMap, setFactorMap] = useState<Record<string, Record<string, number>>>({})
   const draftSnapshotRef = useRef<KitchenBatchDraft>({
@@ -158,6 +161,7 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
     setCart(applied.cart)
     setOptionalCart(applied.optionalCart)
     setOptionalIngredientsOpen(applied.optionalIngredientsOpen)
+    setRecipeDescriptionOpen(applied.notes.trim().length > 0)
     setQtyInputMap(applied.qtyInputMap)
   }, [])
 
@@ -258,6 +262,8 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
     setOutletMenuSync(
       normalizeBatchOutletMenuSync(recipe.outletMenuSync ?? recipe.fnbEligible),
     )
+    setNotes(recipe.description ?? '')
+    setRecipeDescriptionOpen(Boolean(recipe.description?.trim()))
     const required = dedupeBatchMaterials(
       recipe.ingredients
         .filter((ing) => !ing.optional)
@@ -551,6 +557,7 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
     setCart([])
     setOptionalCart([])
     setOptionalIngredientsOpen(false)
+    setRecipeDescriptionOpen(false)
     setQtyInputMap({})
     setBatchName('')
     setMenuItemId(null)
@@ -607,6 +614,7 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
           overheadGas: Number(overheadGas) || 0,
           overheadOther: Number(overheadOther) || 0,
           outletMenuSync,
+          description: notes.trim() || undefined,
           ingredients: materialsWithCost.map((m) => ({
             stockItemId: m.storeItemId,
             name: m.name,
@@ -644,6 +652,7 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
         sellingPricePerPortion: sell,
         materials: materialsWithCost,
         notes: notes.trim() || undefined,
+        description: notes.trim() || undefined,
         kitchenStockId: stockId,
         overheadLabour: Number(overheadLabour) || 0,
         overheadGas: Number(overheadGas) || 0,
@@ -874,6 +883,61 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
                 renderMaterialLines(cart, false)
               )}
             </div>
+            <Collapsible
+              open={recipeDescriptionOpen}
+              onOpenChange={setRecipeDescriptionOpen}
+              className="rounded-lg border border-dashed bg-muted/10"
+            >
+              <CollapsibleTrigger asChild>
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left hover:bg-muted/40 rounded-lg"
+                >
+                  <div className="flex min-w-0 items-start gap-2.5">
+                    <FileText className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <h4 className="text-xs font-semibold">Recipe description</h4>
+                        <Badge variant="outline" className="h-4 px-1.5 text-[9px] font-normal">
+                          Optional
+                        </Badge>
+                      </div>
+                      <p className="text-[11px] text-muted-foreground">
+                        {recipeDescriptionOpen
+                          ? 'Method, plating, or serving notes for this dish — not required to save.'
+                          : notes.trim()
+                            ? `${notes.trim().split(/\n+/).filter(Boolean).length} note(s) saved · click to edit`
+                            : 'Click to add method or serving notes'}
+                      </p>
+                    </div>
+                  </div>
+                  <span className="flex shrink-0 items-center gap-1 text-[10px] text-muted-foreground">
+                    {recipeDescriptionOpen ? 'Hide' : 'Show'}
+                    <ChevronDown
+                      className={`h-4 w-4 transition-transform ${
+                        recipeDescriptionOpen ? 'rotate-180' : ''
+                      }`}
+                    />
+                  </span>
+                </button>
+              </CollapsibleTrigger>
+              <CollapsibleContent className="border-t px-3 pb-3 pt-2">
+                <Label htmlFor="batch-recipe-description" className="sr-only">
+                  Recipe description
+                </Label>
+                <Textarea
+                  id="batch-recipe-description"
+                  rows={6}
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder={'e.g.\n1. Heat oil, add onions until translucent.\n2. Stir in pepper and simmer 8 minutes.\n3. Plate with garnish; serve hot.'}
+                  className="min-h-[120px] resize-y text-sm"
+                />
+                <p className="mt-1.5 text-[10px] text-muted-foreground">
+                  One step per line works well. This does not affect cost or stock.
+                </p>
+              </CollapsibleContent>
+            </Collapsible>
             <Collapsible
               open={optionalIngredientsOpen}
               onOpenChange={setOptionalIngredientsOpen}

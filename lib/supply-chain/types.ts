@@ -430,6 +430,8 @@ export interface Recipe {
   fnbEligible?: boolean
   /** ISO timestamp — used to keep the newest recipe when merging local + remote. */
   updatedAt?: string
+  /** Optional method / serving notes for kitchen staff. */
+  description?: string
 }
 
 export interface BatchMaterialLine {
@@ -454,6 +456,8 @@ export interface CreateKitchenBatchInput {
   sellingPricePerPortion: number
   materials: BatchMaterialLine[]
   notes?: string
+  /** Optional method / serving notes for kitchen staff. */
+  description?: string
   /** Reuse kitchen stock row when linking to an existing Restaurant menu item. */
   kitchenStockId?: string
   overheadLabour?: number

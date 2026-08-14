@@ -2512,6 +2512,7 @@ function useSupplyChainImpl() {
         outletMenuSync: normalizeBatchOutletMenuSync(
           input.outletMenuSync ?? input.fnbEligible,
         ),
+        description: (input.description ?? input.notes)?.trim() || undefined,
         updatedAt: new Date().toISOString(),
       };
       setRecipes((prev) => {
@@ -2556,6 +2557,7 @@ function useSupplyChainImpl() {
         /** @deprecated */
         fnbEligible?: boolean;
         ingredients?: Recipe["ingredients"];
+        description?: string;
       },
       actor: Actor,
     ):
@@ -2601,6 +2603,10 @@ function useSupplyChainImpl() {
       const outletMenuSync = normalizeBatchOutletMenuSync(
         patch.outletMenuSync ?? patch.fnbEligible ?? existing.outletMenuSync ?? existing.fnbEligible,
       );
+      const description =
+        patch.description !== undefined
+          ? patch.description.trim() || undefined
+          : existing.description;
 
       if (!name) return { error: "Enter a batch name" };
       if (!category) return { error: "Enter a menu category" };
@@ -2623,6 +2629,7 @@ function useSupplyChainImpl() {
         overheadOther,
         outletMenuSync,
         ingredients,
+        description,
         updatedAt: new Date().toISOString(),
       };
 
