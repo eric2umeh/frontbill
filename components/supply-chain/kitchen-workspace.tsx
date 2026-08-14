@@ -20,6 +20,7 @@ import { toast } from 'sonner'
 import { RESPONSIVE_HIDE_MD, RESPONSIVE_HIDE_LG } from '@/lib/ui/responsive-table'
 import { PaginatedListShell } from '@/components/shared/paginated-list-shell'
 import { sanitizeQuantityInput, parseQuantityValue } from '@/lib/supply-chain/measurement-units'
+import { mergeUnitFactors } from '@/lib/supply-chain/unit-factor-storage'
 import { batchMaterialShortages } from '@/lib/supply-chain/batch-material-shortages'
 import { BatchMaterialShortageList } from '@/components/supply-chain/batch-material-shortage-list'
 import { syncBatchToRestaurantOutlet } from '@/lib/supply-chain/sync-restaurant-outlet'
@@ -243,14 +244,31 @@ export function KitchenWorkspace() {
   const openBatchPortions = batchDialog
     ? parseQuantityValue(plannedInput) || batchDialog.defaultPortions
     : 0
+  const lookupBatchOnHand = (
+    stockItemId: string,
+    source: 'raw' | 'kitchen_stock',
+  ) => {
+    if (source === 'kitchen_stock') {
+      const stock = kitchenStock.find((k) => k.id === stockItemId)
+      return {
+        quantity: stock?.availablePortions ?? 0,
+        unit: stock?.unit || 'portion',
+      }
+    }
+    const raw = kitchenRawStock.find((k) => k.storeItemId === stockItemId)
+    const store = storeItems.find((s) => s.id === stockItemId)
+    return {
+      quantity: kitchenRawOnHand(stockItemId),
+      unit: raw?.unit || store?.unit || 'kg',
+      factors: store
+        ? mergeUnitFactors(stockItemId, store.unit, store.unitFactors)
+        : undefined,
+    }
+  }
+
   const openBatchShortages = useMemo(
-    () =>
-      batchMaterialShortages(openBatchRecipe, openBatchPortions, (stockItemId, source) =>
-        source === 'kitchen_stock'
-          ? kitchenStock.find((k) => k.id === stockItemId)?.availablePortions ?? 0
-          : kitchenRawOnHand(stockItemId),
-      ),
-    [openBatchRecipe, openBatchPortions, kitchenRawOnHand, kitchenRawStock, kitchenStock, stockTick],
+    () => batchMaterialShortages(openBatchRecipe, openBatchPortions, lookupBatchOnHand),
+    [openBatchRecipe, openBatchPortions, kitchenRawOnHand, kitchenRawStock, kitchenStock, storeItems, stockTick],
   )
 
   const closeBatchRecord = closeDialog
@@ -264,12 +282,9 @@ export function KitchenWorkspace() {
       batchMaterialShortages(
         closeBatchRecipe,
         closeBatchRecord?.plannedPortions ?? 0,
-        (stockItemId, source) =>
-          source === 'kitchen_stock'
-            ? kitchenStock.find((k) => k.id === stockItemId)?.availablePortions ?? 0
-            : kitchenRawOnHand(stockItemId),
+        lookupBatchOnHand,
       ),
-    [closeBatchRecipe, closeBatchRecord?.plannedPortions, kitchenRawOnHand, kitchenRawStock, kitchenStock, stockTick],
+    [closeBatchRecipe, closeBatchRecord?.plannedPortions, kitchenRawOnHand, kitchenRawStock, kitchenStock, storeItems, stockTick],
   )
 
   return (
