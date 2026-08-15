@@ -15,6 +15,7 @@ import {
   pickOccupyingBooking,
   type OccupyingBookingRow,
 } from "@/lib/rooms/room-occupancy";
+import { isTransientNetworkError, withFetchRetry } from "@/lib/utils/fetch-retry";
 
 interface Room {
   id: string;
@@ -63,18 +64,24 @@ export function RoomStatusGrid() {
 
         await reconcileRoomStatusesClient();
 
-        const [{ data, error }, { data: bookingRows }] = await Promise.all([
-          supabase
-            .from("rooms")
-            .select("id, room_number, room_type, status, organization_id")
-            .eq("organization_id", organizationId)
-            .order("room_number", { ascending: true }),
-          supabase
-            .from("bookings")
-            .select("id, room_id, status, check_in, check_out, folio_status")
-            .eq("organization_id", organizationId)
-            .in("status", [...OCCUPYING_BOOKING_STATUSES]),
-        ]);
+        const [{ data, error }, { data: bookingRows }] = await withFetchRetry(async () => {
+          const result = await Promise.all([
+            supabase
+              .from("rooms")
+              .select("id, room_number, room_type, status, organization_id")
+              .eq("organization_id", organizationId)
+              .order("room_number", { ascending: true }),
+            supabase
+              .from("bookings")
+              .select("id, room_id, status, check_in, check_out, folio_status")
+              .eq("organization_id", organizationId)
+              .in("status", [...OCCUPYING_BOOKING_STATUSES]),
+          ]);
+          if (result[0].error && isTransientNetworkError(result[0].error)) {
+            throw result[0].error;
+          }
+          return result;
+        });
 
         if (error) throw error;
 
@@ -105,8 +112,13 @@ export function RoomStatusGrid() {
             );
           });
         if (isMounted) setRooms(sortedRooms);
-      } catch (error: any) {
-        console.error("Error fetching rooms:", error);
+      } catch (error: unknown) {
+        if (!isTransientNetworkError(error) && isMounted) {
+          const msg = error instanceof Error ? error.message : String(error ?? "");
+          if (msg && msg !== "{}") {
+            console.warn("Error fetching rooms:", msg);
+          }
+        }
         if (isMounted) setRooms([]);
       } finally {
         if (isMounted) setLoading(false);

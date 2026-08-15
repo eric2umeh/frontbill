@@ -12,6 +12,7 @@ export const MEASUREMENT_UNITS = [
   'crate',
   'cooking_spoon',
   'cup',
+  'derica',
   'fillet',
   'g',
   'head',
@@ -107,6 +108,10 @@ const UNIT_ALIASES: Record<string, string> = {
   bunches: 'bunch',
   wrap: 'wrap',
   wraps: 'wrap',
+  derica: 'derica',
+  'de rica': 'derica',
+  'de-rica': 'derica',
+  'de_rica': 'derica',
   carton: 'carton',
   cartons: 'carton',
   ctn: 'carton',
@@ -142,6 +147,7 @@ export function formatUnitLabel(unit: string): string {
   if (normalized === 'loaf') return 'loaf'
   if (normalized === 'bunch') return 'bunch'
   if (normalized === 'wrap') return 'wrap'
+  if (normalized === 'derica') return 'De Rica'
   return normalized
 }
 
@@ -171,6 +177,7 @@ const COUNT_LIKE_UNITS = [
   'loaf',
   'bunch',
   'wrap',
+  'derica',
 ] as const
 
 /** Contextual unit choices (store unit + related SI / pack units), sorted. */
@@ -218,6 +225,7 @@ export function unitOptionsForStoreItem(storeUnit: string, itemName?: string): s
     base === 'cloves' ||
     base === 'loaf' ||
     base === 'wrap' ||
+    base === 'derica' ||
     /\b(lettuce|cabbage|cauliflower|broccoli|garlic|onion|fish|okra|egusi|melon|bread|ham|cheese|bacon|herb|basil|spinach)\b/.test(
       name,
     )
@@ -232,6 +240,7 @@ export function unitOptionsForStoreItem(storeUnit: string, itemName?: string): s
     options.add('cloves')
     options.add('loaf')
     options.add('wrap')
+    options.add('derica')
     options.add('pcs')
     options.add('kg')
   }

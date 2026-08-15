@@ -421,7 +421,7 @@ export const ALL_PERMISSIONS: {
   },
   {
     key: "supply:fnb",
-    label: "F&B sales (auto stock deduct)",
+    label: "F&B Store (daily inventory & Main Bar transfer)",
     group: "Supply Chain",
   },
   {
@@ -804,10 +804,11 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
     key: "food_beverage",
     label: "Food & Beverage",
     description:
-      "Food & Beverage department: Restaurant, Main Bar, Pool Bar, and Banquets & Events POS — take orders, print receipts, and daily outlet reports. Menu changes are done by Superadmin, Administrator, or Manager. No front desk, store, laundry, or gym.",
+      "Food & Beverage department: Restaurant, Main Bar, Pool Bar, and Banquets POS; F&B Store daily inventory; transfer stock to Main Bar; drink categories and outlet menus. No front desk, laundry, or gym.",
     color: "bg-rose-100 text-rose-900 dark:bg-rose-950/40 dark:text-rose-100",
     permissions: [
       "outlet:view",
+      "outlet:menu",
       "outlet:sell",
       "outlet:reports",
       "outlet:receipt",
@@ -1065,6 +1066,19 @@ export function canManageStoreCatalog(
   userRole: string | null | undefined,
 ): boolean {
   return canAddStoreItemDirect(userRole);
+}
+
+/** F&B Store daily sheet, drink categories, and F&B → Main Bar transfers. */
+export function canManageFnbStore(
+  userRole: string | null | undefined,
+): boolean {
+  const roleKey = canonicalRoleKey(userRole);
+  return (
+    roleKey === "superadmin" ||
+    roleKey === "admin" ||
+    roleKey === "manager" ||
+    roleKey === "food_beverage"
+  );
 }
 
 /** Kitchen batch standards (recipe definitions) — Admin / Superadmin only. */

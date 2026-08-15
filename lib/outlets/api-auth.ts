@@ -72,7 +72,7 @@ export async function resolveOutletAuthed(
   }
 }
 
-/** Auth for POST/PATCH/DELETE on outlet menu — superadmin, admin, manager only. */
+/** Auth for POST/PATCH/DELETE on outlet menu — F&B, superadmin, admin, manager. */
 export async function resolveOutletMenuManage(
   request: Request,
   opts?: { department?: string },
@@ -84,7 +84,7 @@ export async function resolveOutletMenuManage(
   if ('error' in auth) return auth
   if (!canManageOutletMenu(auth.ctx.role)) {
     return {
-      error: 'Only Superadmin, Administrator, or Manager can change the outlet menu',
+      error: 'Only F&B, Superadmin, Administrator, or Manager can change the outlet menu',
       status: 403,
     }
   }

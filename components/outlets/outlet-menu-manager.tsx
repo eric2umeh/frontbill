@@ -58,6 +58,7 @@ import {
 import {
   formatOutletStockQtyDisplay,
 } from '@/lib/outlets/outlet-supply-stock'
+import { seedDefaultDrinkCategories } from '@/lib/outlets/seed-drink-categories'
 
 type Props = {
   department: OutletDepartmentKey
@@ -116,6 +117,18 @@ export function OutletMenuManager({ department, categories, items, canManage, on
       return haystack.includes(q)
     })
   }, [sortedItems, sortedCategories, itemSearch, itemCategoryFilter])
+  const drinkMenu = department === 'main_bar' || department === 'pool_bar'
+  const groupedDrinkItems = useMemo(() => {
+    if (!drinkMenu) return null
+    const groups: { id: string; name: string; items: typeof filteredItems }[] = []
+    for (const c of sortedCategories) {
+      const its = filteredItems.filter((it) => it.category_id === c.id)
+      if (its.length) groups.push({ id: c.id, name: c.name, items: its })
+    }
+    const uncat = filteredItems.filter((it) => !it.category_id)
+    if (uncat.length) groups.push({ id: '__uncategorized__', name: 'Uncategorized', items: uncat })
+    return groups
+  }, [drinkMenu, filteredItems, sortedCategories])
   const [saving, setSaving] = useState(false)
   const [newCatName, setNewCatName] = useState('')
   const [newCatPriceEditable, setNewCatPriceEditable] = useState(false)
@@ -405,7 +418,7 @@ export function OutletMenuManager({ department, categories, items, canManage, on
       )}
       {!canManage && (
         <p className="text-sm text-muted-foreground rounded-lg border bg-muted/40 px-3 py-2">
-          View only. Superadmin, Administrator, or Manager can add, edit, or delete categories and items.
+          View only. F&amp;B, Superadmin, Administrator, or Manager can add, edit, or delete categories and items.
         </p>
       )}
 
@@ -418,10 +431,12 @@ export function OutletMenuManager({ department, categories, items, canManage, on
           {showOutletQty && (
             <CardDescription>
               {storeControlledFnb
-                ? 'Qty from kitchen/bar stock. Admin/Manager can kickstart quantities here until store supply updates them.'
+                ? department === 'main_bar' || department === 'pool_bar'
+                  ? 'Qty from Main Bar stock after F&B Store transfers it (Central Store → F&B Store → here).'
+                  : 'Qty from kitchen/bar stock. Admin/Manager can kickstart quantities here until store supply updates them.'
                 : stockPipeline === 'kitchen'
                   ? 'Qty = kitchen portions (store → batch → prepared food).'
-                  : 'Qty = bar stock issued from central store after PO retirement.'}
+                  : 'Qty = bar stock transferred from F&B Store (same path as kitchen → restaurant).'}
             </CardDescription>
           )}
         </CardHeader>
@@ -492,7 +507,18 @@ export function OutletMenuManager({ department, categories, items, canManage, on
                     </td>
                   </tr>
                 ) : (
-                  filteredItems.map((it) => {
+                  (groupedDrinkItems ?? [{ id: 'all', name: '', items: filteredItems }]).flatMap((group) => {
+                    const header = group.name ? (
+                      <tr key={`cat-${group.id}`}>
+                        <td
+                          colSpan={(canManage || canAdjustStock ? 5 : 4) + (showOutletQty ? 1 : 0)}
+                          className="bg-muted/60 p-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+                        >
+                          {group.name}
+                        </td>
+                      </tr>
+                    ) : null
+                    const rows = group.items.map((it) => {
                   const cat = sortedCategories.find((c) => c.id === it.category_id)
                   const stockLink = showOutletQty
                     ? supply.getOutletItemStock(department, it)
@@ -611,7 +637,9 @@ export function OutletMenuManager({ department, categories, items, canManage, on
                       )}
                     </tr>
                   )
-                })
+                    })
+                    return header ? [header, ...rows] : rows
+                  })
                 )}
               </tbody>
             </table>
@@ -624,8 +652,9 @@ export function OutletMenuManager({ department, categories, items, canManage, on
           <CardHeader>
             <CardTitle>Categories</CardTitle>
             <CardDescription>
-              Group items (e.g. Buffet, Banquets). Enable flexible POS price for categories where
-              the cashier may change the amount per order only.
+              {drinkMenu
+                ? 'Group drinks (Wine, Soft Drink, Cocktail, Spirits, …). Same list as F&B Store. F&B, Admin, Manager, or Superadmin can create categories.'
+                : 'Group items (e.g. Buffet, Banquets). Enable flexible POS price for categories where the cashier may change the amount per order only.'}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -642,6 +671,36 @@ export function OutletMenuManager({ department, categories, items, canManage, on
                     <Plus className="h-4 w-4" />
                   </Button>
                 </div>
+                {drinkMenu && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={saving}
+                    onClick={async () => {
+                      setSaving(true)
+                      try {
+                        const res = await seedDefaultDrinkCategories(
+                          department === 'pool_bar' ? 'pool_bar' : 'main_bar',
+                        )
+                        if ('error' in res) {
+                          toast.error(res.error)
+                          return
+                        }
+                        toast.success(
+                          res.created
+                            ? `Added ${res.created} drink categories`
+                            : 'Default drink categories already exist',
+                        )
+                        onRefresh()
+                      } finally {
+                        setSaving(false)
+                      }
+                    }}
+                  >
+                    Add default drink categories
+                  </Button>
+                )}
                 <div className="flex items-center gap-2 rounded-md border bg-muted/30 px-2 py-1.5">
                   <Switch
                     id="new-cat-price-editable"

@@ -25,6 +25,7 @@ export const PURCHASE_CONVERSION_UNITS = [
   'slice',
   'fillet',
   'wrap',
+  'derica',
 ] as const
 
 /** SI units available when building a kitchen batch recipe line. */
@@ -58,4 +59,5 @@ export const KITCHEN_BATCH_UNITS = [
   'slice',
   'fillet',
   'wrap',
+  'derica',
 ] as const

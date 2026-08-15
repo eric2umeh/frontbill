@@ -1,6 +1,7 @@
 /** Outlets / departments items can be issued or sold to — shown in store movements & reports. */
 export const OUTLET_DEPARTMENTS = [
   'Restaurant',
+  'F&B Store',
   'Main Bar',
   'Beverages / Mini-bar',
   'Housekeeping',
@@ -20,6 +21,7 @@ export type OutletDepartment = (typeof OUTLET_DEPARTMENTS)[number]
 /** Outlets highlighted in Store: switch context & issue totals (main stock still lives in central). */
 export const STORE_FOCUS_OUTLETS = [
   'Restaurant',
+  'F&B Store',
   'Main Bar',
   'Kitchen',
   'Housekeeping',

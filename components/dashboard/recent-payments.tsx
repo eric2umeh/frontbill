@@ -8,6 +8,7 @@ import { formatNaira } from '@/lib/utils/currency'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/lib/auth-context'
 import { format, parseISO } from 'date-fns'
+import { isTransientNetworkError, withFetchRetry } from '@/lib/utils/fetch-retry'
 
 type PaymentRow = {
   id: string
@@ -38,20 +39,26 @@ export function RecentPayments() {
         return
       }
 
-      const { data, error } = await supabase
-        .from('payments')
-        .select(
-          `id, amount, payment_method, payment_date, notes,
+      const { data, error } = await withFetchRetry(async () => {
+        const result = await supabase
+          .from('payments')
+          .select(
+            `id, amount, payment_method, payment_date, notes,
            guests:guest_id(name),
            bookings:booking_id(folio_id)`,
-        )
-        .eq('organization_id', organizationId)
-        .gt('amount', 0)
-        .order('payment_date', { ascending: false })
-        .limit(5)
+          )
+          .eq('organization_id', organizationId)
+          .gt('amount', 0)
+          .order('payment_date', { ascending: false })
+          .limit(5)
+        if (result.error && isTransientNetworkError(result.error)) {
+          throw result.error
+        }
+        return result
+      })
 
       if (error) {
-        console.error('Error fetching payments:', error.message || error.code || error)
+        console.warn('Error fetching payments:', error.message || error.code || error)
         setPayments([])
         return
       }
@@ -78,8 +85,12 @@ export function RecentPayments() {
 
       setPayments(rows)
     } catch (error: unknown) {
+      if (isTransientNetworkError(error)) {
+        setPayments([])
+        return
+      }
       const msg = error instanceof Error ? error.message : String(error)
-      console.error('Error fetching payments:', msg)
+      console.warn('Error fetching payments:', msg)
       setPayments([])
     } finally {
       setLoading(false)

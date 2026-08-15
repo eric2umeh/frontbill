@@ -9,6 +9,14 @@ import { SUPPLY_SNAPSHOT_KEYS, KITCHEN_WRITE_SNAPSHOT_KEYS, type SupplySnapshotK
 import { mergePurchaseOrdersFromRemote } from '@/lib/supply-chain/po-sync-merge'
 import type { PurchaseOrder } from '@/lib/supply-chain/types'
 
+function isAbortLike(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err ?? '')
+  return (
+    (err instanceof Error && err.name === 'AbortError') ||
+    /terminated|aborted|the operation was aborted/i.test(msg)
+  )
+}
+
 function missingTableResponse(message: string) {
   if (/supply_chain_snapshots|schema cache|does not exist/i.test(message)) {
     return NextResponse.json(
@@ -55,6 +63,9 @@ export async function GET(request: Request) {
 
     return NextResponse.json({ snapshots })
   } catch (err: unknown) {
+    if (isAbortLike(err)) {
+      return new NextResponse(null, { status: 499 })
+    }
     const message = err instanceof Error ? err.message : 'Server error'
     return NextResponse.json({ error: message }, { status: 500 })
   }
@@ -117,6 +128,9 @@ export async function PUT(request: Request) {
 
     return NextResponse.json({ ok: true })
   } catch (err: unknown) {
+    if (isAbortLike(err)) {
+      return new NextResponse(null, { status: 499 })
+    }
     const message = err instanceof Error ? err.message : 'Server error'
     return NextResponse.json({ error: message }, { status: 500 })
   }
