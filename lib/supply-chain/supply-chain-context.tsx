@@ -98,6 +98,7 @@ import {
 import type { StockShortageLine } from "@/lib/ui/stock-shortage-dialog";
 import { useAuth } from "@/lib/auth-context";
 import { canManageFnbStore, canManageKitchenBatchStandards, hasPermission } from "@/lib/permissions";
+import { isRetryableSupplyError } from "@/lib/utils/fetch-retry";
 import { isFnbStoreDestination, issueCreditsFnbStore, formatSupplyActorStamp } from "./fnb-store";
 import {
   deleteSupplyCatalogItem,
@@ -546,6 +547,10 @@ function useSupplyChainImpl() {
       try {
         await saveSupplySnapshots(userId, payload, orgIdRef.current || undefined);
       } catch (err2) {
+        if (isRetryableSupplyError(err2)) {
+          console.warn("[supply-chain] snapshot sync retryable:", err2);
+          return;
+        }
         console.error("[supply-chain] snapshot sync failed", err2);
         toast.error(
           err2 instanceof Error
@@ -717,16 +722,21 @@ function useSupplyChainImpl() {
 
         removeAllPersistedSupplyKeys();
       } catch (err) {
+        if (cancelled) return;
         const message =
           err instanceof Error ? err.message : "Failed to load supply data from database";
-        console.error("[supply-chain] failed to load from Supabase", err);
-        toast.error(message);
         const localCatalog = loadPersistedStock<StoreItem>(
           STORE_ITEMS_STORAGE_KEY,
           EMPTY_STORE_ITEMS,
         );
         if (localCatalog.length > 0) {
           setStoreItems(localCatalog);
+        }
+        if (isRetryableSupplyError(err)) {
+          console.warn("[supply-chain] snapshot hydrate retryable:", message);
+        } else {
+          console.error("[supply-chain] failed to load from Supabase", err);
+          toast.error(message);
         }
       } finally {
         if (!cancelled) {
@@ -750,6 +760,10 @@ function useSupplyChainImpl() {
     if (!hasPermission(role, "supply:store")) return;
     const timer = window.setTimeout(() => {
       void syncSupplyCatalog(userId, storeItems.map(applyStoreItemDeptFields), orgIdRef.current || undefined).catch((err) => {
+        if (isRetryableSupplyError(err)) {
+          console.warn("[supply-chain] catalogue sync retryable:", err);
+          return;
+        }
         const message =
           err instanceof Error ? err.message : "Failed to sync catalogue to database";
         console.error("[supply-chain] catalogue sync failed", err);

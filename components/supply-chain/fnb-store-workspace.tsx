@@ -23,7 +23,6 @@ import { toast } from 'sonner'
 import { PageHeader } from '@/components/layout/page-header'
 import { RESPONSIVE_HIDE_MD, RESPONSIVE_HIDE_LG } from '@/lib/ui/responsive-table'
 import type { FnbDailySheetLine } from '@/lib/supply-chain/types'
-import type { OutletMenuCategoryRow } from '@/lib/outlets/types'
 import {
   fnbSheetAmount,
   fnbSheetClosing,
@@ -37,6 +36,7 @@ import {
   seedDefaultDrinkCategories,
 } from '@/lib/outlets/seed-drink-categories'
 import { outletApiHeaders } from '@/lib/outlets/outlet-api-headers'
+import { PaginatedListShell } from '@/components/shared/paginated-list-shell'
 import { ClipboardList, FolderTree, Plus, Wine } from 'lucide-react'
 
 function numOrZero(raw: string): number {
@@ -114,21 +114,37 @@ export function FnbStoreWorkspace() {
     try {
       const rows = await fetchOutletCategories('main_bar')
       setCategories(rows)
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Could not load drink categories')
+    } catch {
+      /* Auth/session races — Categories tab can retry on open. */
     }
   }
 
   useEffect(() => {
-    if (!canManage) return
+    if (!canManage || tab !== 'categories') return
     void loadCategories()
-  }, [stockTick, canManage])
+  }, [canManage, tab])
 
   const patchLine = (itemId: string, patch: Partial<FnbDailySheetLine>) => {
     setLines((prev) => prev.map((l) => (l.itemId === itemId ? { ...l, ...patch } : l)))
   }
 
-  const salesTotal = lines.reduce((s, l) => s + fnbSheetAmount(l.soldQty, l.unitPrice), 0)
+  const dailyRows = useMemo(() => {
+    const byId = new Map((fnbRawStock ?? []).map((f) => [f.id, f]))
+    return lines.flatMap((line) => {
+      const item = byId.get(line.itemId)
+      if (!item) return []
+      return [
+        {
+          ...line,
+          name: item.name,
+          unit: item.unit,
+          category: item.drinkCategoryName ?? '',
+        },
+      ]
+    })
+  }, [lines, fnbRawStock])
+
+  const salesTotal = dailyRows.reduce((s, l) => s + fnbSheetAmount(l.soldQty, l.unitPrice), 0)
 
   const recentMoves = useMemo(
     () => (fnbMovements ?? []).slice(0, 20),
@@ -292,9 +308,14 @@ export function FnbStoreWorkspace() {
                 ? `Last saved by ${formatSupplyActorStamp(savedSheet.savedBy, savedSheet.savedAt)}`
                 : 'Not saved yet today'}
             </div>
-            <Button size="sm" disabled={!canManage || lines.length === 0} onClick={saveDaily}>
-              Save daily sheet
-            </Button>
+            <div className="flex items-center gap-3">
+              <span className="text-sm tabular-nums text-muted-foreground">
+                Sales total {formatNaira(salesTotal)}
+              </span>
+              <Button size="sm" disabled={!canManage || lines.length === 0} onClick={saveDaily}>
+                Save daily sheet
+              </Button>
+            </div>
           </div>
 
           {(fnbRawStock ?? []).length === 0 ? (
@@ -303,132 +324,140 @@ export function FnbStoreWorkspace() {
               (not directly to Main Bar). They appear here as Opening / New.
             </p>
           ) : (
-            <div className="rounded-xl border overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Item</TableHead>
-                    <TableHead className="text-right">Opening</TableHead>
-                    <TableHead className="text-right">New</TableHead>
-                    <TableHead className="text-right">Total</TableHead>
-                    <TableHead className="text-right">Compliments</TableHead>
-                    <TableHead className={RESPONSIVE_HIDE_MD}>Compliment note</TableHead>
-                    <TableHead className="text-right">Qty sold</TableHead>
-                    <TableHead className="text-right">Unit price</TableHead>
-                    <TableHead className={`text-right ${RESPONSIVE_HIDE_MD}`}>Amount</TableHead>
-                    <TableHead className="text-right">Damage</TableHead>
-                    <TableHead className={`text-right ${RESPONSIVE_HIDE_LG}`}>To Main Bar</TableHead>
-                    <TableHead className="text-right">Closing</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {lines.map((line) => {
-                    const item = (fnbRawStock ?? []).find((f) => f.id === line.itemId)
-                    if (!item) return null
-                    const total = Math.max(0, line.opening) + Math.max(0, line.newQty)
-                    const amount = fnbSheetAmount(line.soldQty, line.unitPrice)
-                    const closing = fnbSheetClosing(line)
-                    return (
-                      <TableRow key={line.itemId}>
-                        <TableCell className="font-medium whitespace-nowrap">
-                          {item.name}
-                          <span className="block text-[10px] text-muted-foreground font-normal">
-                            {item.unit}
-                            {item.drinkCategoryName ? ` · ${item.drinkCategoryName}` : ''}
-                          </span>
-                        </TableCell>
-                        <TableCell>
-                          <Input
-                            inputMode="decimal"
-                            disabled={!canManage}
-                            className="h-7 w-16 ml-auto text-right"
-                            value={line.opening || ''}
-                            onChange={(e) =>
-                              patchLine(line.itemId, { opening: numOrZero(e.target.value) })
-                            }
-                          />
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums text-muted-foreground">
-                          {line.newQty}
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums">{total}</TableCell>
-                        <TableCell>
-                          <Input
-                            inputMode="decimal"
-                            disabled={!canManage}
-                            className="h-7 w-16 ml-auto text-right"
-                            value={line.complimentary || ''}
-                            onChange={(e) =>
-                              patchLine(line.itemId, { complimentary: numOrZero(e.target.value) })
-                            }
-                          />
-                        </TableCell>
-                        <TableCell className={RESPONSIVE_HIDE_MD}>
-                          <Input
-                            disabled={!canManage}
-                            className="h-7 min-w-[7rem]"
-                            placeholder="Board Room, Director…"
-                            value={line.complimentaryNote ?? ''}
-                            onChange={(e) =>
-                              patchLine(line.itemId, { complimentaryNote: e.target.value })
-                            }
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <Input
-                            inputMode="decimal"
-                            disabled={!canManage}
-                            className="h-7 w-16 ml-auto text-right"
-                            value={line.soldQty || ''}
-                            onChange={(e) =>
-                              patchLine(line.itemId, { soldQty: numOrZero(e.target.value) })
-                            }
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <Input
-                            inputMode="decimal"
-                            disabled={!canManage}
-                            className="h-7 w-20 ml-auto text-right"
-                            value={line.unitPrice || ''}
-                            onChange={(e) =>
-                              patchLine(line.itemId, { unitPrice: numOrZero(e.target.value) })
-                            }
-                          />
-                        </TableCell>
-                        <TableCell className={`text-right tabular-nums ${RESPONSIVE_HIDE_MD}`}>
-                          {amount ? formatNaira(amount) : '—'}
-                        </TableCell>
-                        <TableCell>
-                          <Input
-                            inputMode="decimal"
-                            disabled={!canManage}
-                            className="h-7 w-16 ml-auto text-right"
-                            value={line.damage || ''}
-                            onChange={(e) =>
-                              patchLine(line.itemId, { damage: numOrZero(e.target.value) })
-                            }
-                          />
-                        </TableCell>
-                        <TableCell className={`text-right tabular-nums ${RESPONSIVE_HIDE_LG}`}>
-                          {line.toMainBar}
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums font-medium">{closing}</TableCell>
+            <PaginatedListShell
+              items={dailyRows}
+              pageSize={15}
+              resetKey={ymd}
+              searchPlaceholder="Search item, category, compliment note…"
+              searchMatch={(row, query) => {
+                const q = query.trim().toLowerCase()
+                return (
+                  row.name.toLowerCase().includes(q) ||
+                  row.unit.toLowerCase().includes(q) ||
+                  row.category.toLowerCase().includes(q) ||
+                  (row.complimentaryNote ?? '').toLowerCase().includes(q)
+                )
+              }}
+              emptyMessage="No items match your search."
+            >
+              {(pageRows) => (
+                <div className="rounded-xl border overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Item</TableHead>
+                        <TableHead className="text-right">Opening</TableHead>
+                        <TableHead className="text-right">New</TableHead>
+                        <TableHead className="text-right">Total</TableHead>
+                        <TableHead className="text-right">Compliments</TableHead>
+                        <TableHead className={RESPONSIVE_HIDE_MD}>Compliment note</TableHead>
+                        <TableHead className="text-right">Qty sold</TableHead>
+                        <TableHead className="text-right">Unit price</TableHead>
+                        <TableHead className={`text-right ${RESPONSIVE_HIDE_MD}`}>Amount</TableHead>
+                        <TableHead className="text-right">Damage</TableHead>
+                        <TableHead className={`text-right ${RESPONSIVE_HIDE_LG}`}>To Main Bar</TableHead>
+                        <TableHead className="text-right">Closing</TableHead>
                       </TableRow>
-                    )
-                  })}
-                  <TableRow>
-                    <TableCell colSpan={8} className="text-right font-medium">
-                      Sales total
-                    </TableCell>
-                    <TableCell className={`text-right font-medium ${RESPONSIVE_HIDE_MD}`}>
-                      {formatNaira(salesTotal)}
-                    </TableCell>
-                    <TableCell colSpan={3} />
-                  </TableRow>
-                </TableBody>
-              </Table>
-            </div>
+                    </TableHeader>
+                    <TableBody>
+                      {pageRows.map((line) => {
+                        const total = Math.max(0, line.opening) + Math.max(0, line.newQty)
+                        const amount = fnbSheetAmount(line.soldQty, line.unitPrice)
+                        const closing = fnbSheetClosing(line)
+                        return (
+                          <TableRow key={line.itemId}>
+                            <TableCell className="font-medium whitespace-nowrap">
+                              {line.name}
+                              <span className="block text-[10px] text-muted-foreground font-normal">
+                                {line.unit}
+                                {line.category ? ` · ${line.category}` : ''}
+                              </span>
+                            </TableCell>
+                            <TableCell>
+                              <Input
+                                inputMode="decimal"
+                                disabled={!canManage}
+                                className="h-7 w-16 ml-auto text-right"
+                                value={line.opening || ''}
+                                onChange={(e) =>
+                                  patchLine(line.itemId, { opening: numOrZero(e.target.value) })
+                                }
+                              />
+                            </TableCell>
+                            <TableCell className="text-right tabular-nums text-muted-foreground">
+                              {line.newQty}
+                            </TableCell>
+                            <TableCell className="text-right tabular-nums">{total}</TableCell>
+                            <TableCell>
+                              <Input
+                                inputMode="decimal"
+                                disabled={!canManage}
+                                className="h-7 w-16 ml-auto text-right"
+                                value={line.complimentary || ''}
+                                onChange={(e) =>
+                                  patchLine(line.itemId, { complimentary: numOrZero(e.target.value) })
+                                }
+                              />
+                            </TableCell>
+                            <TableCell className={RESPONSIVE_HIDE_MD}>
+                              <Input
+                                disabled={!canManage}
+                                className="h-7 min-w-[7rem]"
+                                placeholder="Board Room, Director…"
+                                value={line.complimentaryNote ?? ''}
+                                onChange={(e) =>
+                                  patchLine(line.itemId, { complimentaryNote: e.target.value })
+                                }
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <Input
+                                inputMode="decimal"
+                                disabled={!canManage}
+                                className="h-7 w-16 ml-auto text-right"
+                                value={line.soldQty || ''}
+                                onChange={(e) =>
+                                  patchLine(line.itemId, { soldQty: numOrZero(e.target.value) })
+                                }
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <Input
+                                inputMode="decimal"
+                                disabled={!canManage}
+                                className="h-7 w-20 ml-auto text-right"
+                                value={line.unitPrice || ''}
+                                onChange={(e) =>
+                                  patchLine(line.itemId, { unitPrice: numOrZero(e.target.value) })
+                                }
+                              />
+                            </TableCell>
+                            <TableCell className={`text-right tabular-nums ${RESPONSIVE_HIDE_MD}`}>
+                              {amount ? formatNaira(amount) : '—'}
+                            </TableCell>
+                            <TableCell>
+                              <Input
+                                inputMode="decimal"
+                                disabled={!canManage}
+                                className="h-7 w-16 ml-auto text-right"
+                                value={line.damage || ''}
+                                onChange={(e) =>
+                                  patchLine(line.itemId, { damage: numOrZero(e.target.value) })
+                                }
+                              />
+                            </TableCell>
+                            <TableCell className={`text-right tabular-nums ${RESPONSIVE_HIDE_LG}`}>
+                              {line.toMainBar}
+                            </TableCell>
+                            <TableCell className="text-right tabular-nums font-medium">{closing}</TableCell>
+                          </TableRow>
+                        )
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </PaginatedListShell>
           )}
         </TabsContent>
 
@@ -438,76 +467,93 @@ export function FnbStoreWorkspace() {
               Nothing to move. Issue items from Central Store to <strong>F&amp;B Store</strong> first.
             </p>
           ) : (
-            <div className="rounded-xl border overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Item</TableHead>
-                    <TableHead className="text-right">F&amp;B on hand</TableHead>
-                    <TableHead className={`text-right ${RESPONSIVE_HIDE_MD}`}>At Main Bar</TableHead>
-                    <TableHead className="text-right">Move qty</TableHead>
-                    <TableHead className={RESPONSIVE_HIDE_MD}>Note</TableHead>
-                    <TableHead />
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {(fnbRawStock ?? []).map((item) => {
-                    const atBar =
-                      (barStock ?? []).find((b) => b.storeItemId === item.storeItemId)
-                        ?.quantityOnHand ?? 0
-                    return (
-                      <TableRow key={item.id}>
-                        <TableCell className="font-medium">
-                          {item.name}
-                          <span className="block text-[10px] text-muted-foreground font-normal">
-                            {item.unit}
-                            {item.drinkCategoryName ? ` · ${item.drinkCategoryName}` : ''}
-                          </span>
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums">
-                          {item.quantityOnHand} {item.unit}
-                        </TableCell>
-                        <TableCell className={`text-right tabular-nums ${RESPONSIVE_HIDE_MD}`}>
-                          {atBar} {item.unit}
-                        </TableCell>
-                        <TableCell>
-                          <Input
-                            inputMode="decimal"
-                            disabled={!canManage}
-                            className="h-8 w-20 ml-auto text-right"
-                            placeholder="Qty"
-                            value={moveQty[item.id] ?? ''}
-                            onChange={(e) =>
-                              setMoveQty((m) => ({ ...m, [item.id]: e.target.value }))
-                            }
-                          />
-                        </TableCell>
-                        <TableCell className={RESPONSIVE_HIDE_MD}>
-                          <Input
-                            disabled={!canManage}
-                            className="h-8 min-w-[8rem]"
-                            placeholder="Optional note"
-                            value={moveNote[item.id] ?? ''}
-                            onChange={(e) =>
-                              setMoveNote((m) => ({ ...m, [item.id]: e.target.value }))
-                            }
-                          />
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <Button
-                            size="sm"
-                            disabled={!canManage || !numOrZero(moveQty[item.id] ?? '')}
-                            onClick={() => void moveToBar(item.id)}
-                          >
-                            Move to Main Bar
-                          </Button>
-                        </TableCell>
+            <PaginatedListShell
+              items={fnbRawStock ?? []}
+              pageSize={15}
+              searchPlaceholder="Search item or category…"
+              searchMatch={(item, query) => {
+                const q = query.trim().toLowerCase()
+                return (
+                  item.name.toLowerCase().includes(q) ||
+                  item.unit.toLowerCase().includes(q) ||
+                  (item.drinkCategoryName ?? '').toLowerCase().includes(q)
+                )
+              }}
+              emptyMessage="No items match your search."
+            >
+              {(pageItems) => (
+                <div className="rounded-xl border overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Item</TableHead>
+                        <TableHead className="text-right">F&amp;B on hand</TableHead>
+                        <TableHead className={`text-right ${RESPONSIVE_HIDE_MD}`}>At Main Bar</TableHead>
+                        <TableHead className="text-right">Move qty</TableHead>
+                        <TableHead className={RESPONSIVE_HIDE_MD}>Note</TableHead>
+                        <TableHead />
                       </TableRow>
-                    )
-                  })}
-                </TableBody>
-              </Table>
-            </div>
+                    </TableHeader>
+                    <TableBody>
+                      {pageItems.map((item) => {
+                        const atBar =
+                          (barStock ?? []).find((b) => b.storeItemId === item.storeItemId)
+                            ?.quantityOnHand ?? 0
+                        return (
+                          <TableRow key={item.id}>
+                            <TableCell className="font-medium">
+                              {item.name}
+                              <span className="block text-[10px] text-muted-foreground font-normal">
+                                {item.unit}
+                                {item.drinkCategoryName ? ` · ${item.drinkCategoryName}` : ''}
+                              </span>
+                            </TableCell>
+                            <TableCell className="text-right tabular-nums">
+                              {item.quantityOnHand} {item.unit}
+                            </TableCell>
+                            <TableCell className={`text-right tabular-nums ${RESPONSIVE_HIDE_MD}`}>
+                              {atBar} {item.unit}
+                            </TableCell>
+                            <TableCell>
+                              <Input
+                                inputMode="decimal"
+                                disabled={!canManage}
+                                className="h-8 w-20 ml-auto text-right"
+                                placeholder="Qty"
+                                value={moveQty[item.id] ?? ''}
+                                onChange={(e) =>
+                                  setMoveQty((m) => ({ ...m, [item.id]: e.target.value }))
+                                }
+                              />
+                            </TableCell>
+                            <TableCell className={RESPONSIVE_HIDE_MD}>
+                              <Input
+                                disabled={!canManage}
+                                className="h-8 min-w-[8rem]"
+                                placeholder="Optional note"
+                                value={moveNote[item.id] ?? ''}
+                                onChange={(e) =>
+                                  setMoveNote((m) => ({ ...m, [item.id]: e.target.value }))
+                                }
+                              />
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <Button
+                                size="sm"
+                                disabled={!canManage || !numOrZero(moveQty[item.id] ?? '')}
+                                onClick={() => void moveToBar(item.id)}
+                              >
+                                Move to Main Bar
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        )
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </PaginatedListShell>
           )}
 
           <Card>

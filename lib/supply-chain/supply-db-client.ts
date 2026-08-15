@@ -2,8 +2,9 @@
 
 import type { StoreItem } from './types'
 import type { SupplySnapshotKey } from './supply-db-mappers'
+import { isRetryableSupplyError, withFetchRetry } from '@/lib/utils/fetch-retry'
 
-async function authHeaders(): Promise<Record<string, string>> {
+async function authHeaders(forceRefresh = false): Promise<Record<string, string>> {
   if (typeof window === 'undefined') return {}
   try {
     const { createClient } = await import('@/lib/supabase/client')
@@ -12,7 +13,9 @@ async function authHeaders(): Promise<Record<string, string>> {
     let {
       data: { session },
     } = await supabase.auth.getSession()
-    if (!session?.access_token) {
+    const expiresSoon =
+      !!session?.expires_at && session.expires_at * 1000 < Date.now() + 15_000
+    if (forceRefresh || !session?.access_token || expiresSoon) {
       const refreshed = await supabase.auth.refreshSession()
       session = refreshed.data.session
     }
@@ -23,10 +26,24 @@ async function authHeaders(): Promise<Record<string, string>> {
   }
 }
 
+function errorFromBody(body: unknown, fallback: string): Error {
+  const msg =
+    typeof body === 'object' &&
+    body != null &&
+    'error' in body &&
+    typeof (body as { error: unknown }).error === 'string'
+      ? (body as { error: string }).error
+      : fallback
+  return new Error(msg)
+}
+
 async function parseJson(res: Response) {
+  if (res.status === 499) {
+    throw new Error('terminated')
+  }
   const body = await res.json().catch(() => ({}))
   if (!res.ok) {
-    throw new Error(typeof body?.error === 'string' ? body.error : 'Request failed')
+    throw errorFromBody(body, res.status === 401 ? 'Unauthorized' : 'Request failed')
   }
   return body
 }
@@ -47,16 +64,36 @@ function authBody(userId: string, organizationId: string | undefined, extra: Rec
   }
 }
 
+async function supplyRequest(url: string, init: RequestInit): Promise<Response> {
+  const headers = await authHeaders()
+  let res = await fetch(url, {
+    ...fetchOpts,
+    ...init,
+    headers: { ...headers, ...(init.headers as Record<string, string> | undefined) },
+  })
+  if (res.status === 401) {
+    const retryHeaders = await authHeaders(true)
+    res = await fetch(url, {
+      ...fetchOpts,
+      ...init,
+      headers: { ...retryHeaders, ...(init.headers as Record<string, string> | undefined) },
+    })
+  }
+  return res
+}
+
+async function supplyJson(url: string, init: RequestInit = {}): Promise<ReturnType<typeof parseJson>> {
+  return withFetchRetry(
+    async () => parseJson(await supplyRequest(url, init)),
+    { retries: 2, baseDelayMs: 400, retryIf: isRetryableSupplyError },
+  )
+}
+
 export async function fetchSupplyCatalog(
   userId: string,
   organizationId?: string,
 ): Promise<StoreItem[]> {
-  const headers = await authHeaders()
-  const res = await fetch(`/api/supply/catalog?${queryParams(userId, organizationId)}`, {
-    ...fetchOpts,
-    headers,
-  })
-  const body = await parseJson(res)
+  const body = await supplyJson(`/api/supply/catalog?${queryParams(userId, organizationId)}`)
   return (body.items ?? []) as StoreItem[]
 }
 
@@ -65,14 +102,11 @@ export async function insertSupplyCatalogItem(
   item: StoreItem,
   organizationId?: string,
 ): Promise<StoreItem> {
-  const headers = await authHeaders()
-  const res = await fetch('/api/supply/catalog', {
-    ...fetchOpts,
+  const body = await supplyJson('/api/supply/catalog', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...headers },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(authBody(userId, organizationId, { item })),
   })
-  const body = await parseJson(res)
   return body.item as StoreItem
 }
 
@@ -82,14 +116,11 @@ export async function updateSupplyCatalogItem(
   patch: Partial<StoreItem>,
   organizationId?: string,
 ): Promise<void> {
-  const headers = await authHeaders()
-  const res = await fetch(`/api/supply/catalog/${encodeURIComponent(itemId)}`, {
-    ...fetchOpts,
+  await supplyJson(`/api/supply/catalog/${encodeURIComponent(itemId)}`, {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json', ...headers },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(authBody(userId, organizationId, { patch })),
   })
-  await parseJson(res)
 }
 
 export async function deleteSupplyCatalogItem(
@@ -97,26 +128,18 @@ export async function deleteSupplyCatalogItem(
   itemId: string,
   organizationId?: string,
 ): Promise<void> {
-  const headers = await authHeaders()
-  const res = await fetch(`/api/supply/catalog/${encodeURIComponent(itemId)}`, {
-    ...fetchOpts,
+  await supplyJson(`/api/supply/catalog/${encodeURIComponent(itemId)}`, {
     method: 'DELETE',
-    headers: { 'Content-Type': 'application/json', ...headers },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(authBody(userId, organizationId, {})),
   })
-  await parseJson(res)
 }
 
 export async function fetchSupplySnapshots(
   userId: string,
   organizationId?: string,
 ): Promise<Partial<Record<SupplySnapshotKey, unknown>>> {
-  const headers = await authHeaders()
-  const res = await fetch(`/api/supply/state?${queryParams(userId, organizationId)}`, {
-    ...fetchOpts,
-    headers,
-  })
-  const body = await parseJson(res)
+  const body = await supplyJson(`/api/supply/state?${queryParams(userId, organizationId)}`)
   return (body.snapshots ?? {}) as Partial<Record<SupplySnapshotKey, unknown>>
 }
 
@@ -125,14 +148,11 @@ export async function saveSupplySnapshots(
   snapshots: Partial<Record<SupplySnapshotKey, unknown>>,
   organizationId?: string,
 ): Promise<void> {
-  const headers = await authHeaders()
-  const res = await fetch('/api/supply/state', {
-    ...fetchOpts,
+  await supplyJson('/api/supply/state', {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json', ...headers },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(authBody(userId, organizationId, { snapshots })),
   })
-  await parseJson(res)
 }
 
 export async function syncSupplyCatalog(
@@ -140,12 +160,9 @@ export async function syncSupplyCatalog(
   items: StoreItem[],
   organizationId?: string,
 ): Promise<void> {
-  const headers = await authHeaders()
-  const res = await fetch('/api/supply/catalog/sync', {
-    ...fetchOpts,
+  await supplyJson('/api/supply/catalog/sync', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...headers },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(authBody(userId, organizationId, { items })),
   })
-  await parseJson(res)
 }
