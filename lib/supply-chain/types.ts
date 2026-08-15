@@ -134,6 +134,8 @@ export type ActivityAction =
   | 'stock_issued_kitchen'
   | 'stock_issued_bar'
   | 'stock_issued_out'
+  | 'fnb_sheet_saved'
+  | 'fnb_transferred_bar'
   | 'batch_opened'
   | 'batch_closed'
   | 'fnb_order_posted'
@@ -513,7 +515,7 @@ export interface ProductionBatch {
   disposition?: { sold: number; staff: number; waste: number; returned: number }
 }
 
-/** F&B raw stock — drinks/supplies issued from central store to Restaurant F&B. */
+/** F&B raw stock — drinks/supplies issued from central store to F&B Store. */
 export interface FnbRawStockItem {
   id: string
   storeItemId: string
@@ -522,6 +524,59 @@ export interface FnbRawStockItem {
   reorderLevel: number
   unit: string
   sellingPricePerPortion?: number
+  /** Main Bar drink category (outlet_menu_categories id). */
+  drinkCategoryId?: string
+  drinkCategoryName?: string
+}
+
+/** One line on the F&B Store daily inventory sheet (Opening → Closing). */
+export interface FnbDailySheetLine {
+  itemId: string
+  opening: number
+  newQty: number
+  complimentary: number
+  complimentaryNote?: string
+  soldQty: number
+  unitPrice: number
+  damage: number
+  remark?: string
+  toMainBar: number
+  /** Last quantities already deducted from F&B on-hand (re-save applies the delta). */
+  appliedComplimentary?: number
+  appliedSold?: number
+  appliedDamage?: number
+}
+
+export interface FnbDailySheet {
+  date: string
+  lines: FnbDailySheetLine[]
+  savedAt: string
+  savedBy: string
+  savedByRole: string
+}
+
+export type FnbMovementKind = 'to_main_bar' | 'complimentary' | 'sold' | 'damage'
+
+/** F&B Store stock leaving the store (transfer, complimentary, recorded sale, damage). */
+export interface FnbMovement {
+  id: string
+  fnbRawId: string
+  storeItemId: string
+  itemName: string
+  quantity: number
+  unit: string
+  kind: FnbMovementKind
+  note?: string
+  actorName: string
+  actorRole: string
+  at: string
+}
+
+export interface FnbDrinkCategory {
+  id: string
+  name: string
+  createdAt: string
+  createdBy: string
 }
 
 export interface KitchenStockItem {
