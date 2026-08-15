@@ -91,6 +91,7 @@ import {
   convertToStoreUnitsWithFactors,
   mergeUnitFactors,
 } from "./unit-factor-storage";
+import { batchMaterialNeeds } from "./batch-material-shortages";
 import type { StockShortageLine } from "@/lib/ui/stock-shortage-dialog";
 import { useAuth } from "@/lib/auth-context";
 import { canManageKitchenBatchStandards, hasPermission } from "@/lib/permissions";
@@ -3145,34 +3146,47 @@ function useSupplyChainImpl() {
         ? recipes.find((r) => r.id === batch.recipeId)
         : undefined;
 
-      const scale =
-        recipe && recipe.yieldPortions > 0
-          ? actualPortions / recipe.yieldPortions
-          : 1;
-      const materialLines =
-        recipe?.ingredients
-          .filter((ing) => !ing.optional)
-          .map((ing) => ({
-            storeItemId: ing.stockItemId,
-            name: ing.name,
-            unit: ing.unit,
-            quantity: Math.round(ing.quantity * scale * 1000) / 1000,
-            source: ing.source ?? "raw",
-          })) ?? [];
+      const materialNeeds = batchMaterialNeeds(
+        recipe,
+        actualPortions,
+        (stockItemId, source) => {
+          if (source === "kitchen_stock") {
+            const k = kitchenStock.find((row) => row.id === stockItemId);
+            return {
+              quantity: k?.availablePortions ?? 0,
+              unit: k?.unit || "portion",
+            };
+          }
+          const raw = kitchenRawStock.find((k) => k.storeItemId === stockItemId);
+          const store = storeItems.find((s) => s.id === stockItemId);
+          return {
+            quantity: kitchenRawOnHand(stockItemId),
+            unit: raw?.unit || store?.unit || "kg",
+            factors: store
+              ? mergeUnitFactors(stockItemId, store.unit, store.unitFactors)
+              : undefined,
+          };
+        },
+      );
+
+      const unconverted = materialNeeds.find(
+        (n) => n.recipeQuantity > 0 && n.stockQuantity == null,
+      );
+      if (unconverted) {
+        return {
+          error: `Set pack size for ${unconverted.name} (${unconverted.recipeUnit} → ${unconverted.stockUnit}) before closing`,
+        };
+      }
 
       const shortages: StockShortageLine[] = [];
-      for (const line of materialLines) {
-        if (line.quantity <= 0) continue;
-        const onHand =
-          line.source === "kitchen_stock"
-            ? kitchenStock.find((k) => k.id === line.storeItemId)?.availablePortions ?? 0
-            : kitchenRawOnHand(line.storeItemId);
-        if (onHand < line.quantity) {
+      for (const need of materialNeeds) {
+        if (need.stockQuantity == null || need.stockQuantity <= 0) continue;
+        if (need.onHand < need.stockQuantity) {
           shortages.push({
-            name: line.name,
-            need: line.quantity,
-            onHand,
-            unit: line.unit,
+            name: need.name,
+            need: need.stockQuantity,
+            onHand: need.onHand,
+            unit: need.stockUnit,
           });
         }
       }
@@ -3187,26 +3201,37 @@ function useSupplyChainImpl() {
         };
       }
 
-      if (materialLines.length) {
+      if (materialNeeds.length) {
         deductKitchenRawMaterials(
-          materialLines
-            .filter((l) => l.quantity > 0 && l.source !== "kitchen_stock")
-            .map((l) => ({
-              storeItemId: l.storeItemId,
-              quantity: l.quantity,
+          materialNeeds
+            .filter(
+              (n) =>
+                n.stockQuantity != null &&
+                n.stockQuantity > 0 &&
+                n.source !== "kitchen_stock",
+            )
+            .map((n) => ({
+              storeItemId: n.storeItemId,
+              quantity: n.stockQuantity as number,
             })),
         );
-        const kitchenStockLines = materialLines.filter(
-          (l) => l.quantity > 0 && l.source === "kitchen_stock",
+        const kitchenStockLines = materialNeeds.filter(
+          (n) =>
+            n.stockQuantity != null &&
+            n.stockQuantity > 0 &&
+            n.source === "kitchen_stock",
         );
         if (kitchenStockLines.length) {
           setKitchenStock((prev) =>
             prev.map((k) => {
               const line = kitchenStockLines.find((l) => l.storeItemId === k.id);
-              if (!line) return k;
+              if (!line || line.stockQuantity == null) return k;
               return {
                 ...k,
-                availablePortions: Math.max(0, k.availablePortions - line.quantity),
+                availablePortions: Math.max(
+                  0,
+                  k.availablePortions - line.stockQuantity,
+                ),
               };
             }),
           );
@@ -3253,20 +3278,32 @@ function useSupplyChainImpl() {
                 batchCost: foodCost,
                 closedAt: new Date().toISOString(),
                 disposition,
-                deductedMaterials: materialLines
-                  .filter((l) => l.quantity > 0 && l.source !== "kitchen_stock")
-                  .map((l) => ({
-                    storeItemId: l.storeItemId,
-                    quantity: l.quantity,
+                deductedMaterials: materialNeeds
+                  .filter(
+                    (n) =>
+                      n.stockQuantity != null &&
+                      n.stockQuantity > 0 &&
+                      n.source !== "kitchen_stock",
+                  )
+                  .map((n) => ({
+                    storeItemId: n.storeItemId,
+                    quantity: n.stockQuantity as number,
                   })),
-                deductedKitchenStock: materialLines
-                  .filter((l) => l.quantity > 0 && l.source === "kitchen_stock")
-                  .map((l) => ({
-                    kitchenStockId: l.storeItemId,
-                    quantity: l.quantity,
+                deductedKitchenStock: materialNeeds
+                  .filter(
+                    (n) =>
+                      n.stockQuantity != null &&
+                      n.stockQuantity > 0 &&
+                      n.source === "kitchen_stock",
+                  )
+                  .map((n) => ({
+                    kitchenStockId: n.storeItemId,
+                    quantity: n.stockQuantity as number,
                   })),
-                materialsUsed: materialLines.map(
-                  (i) => `${i.quantity} ${i.unit} ${i.name}`,
+                materialsUsed: materialNeeds.map((n) =>
+                  n.stockQuantity != null && n.stockUnit !== n.recipeUnit
+                    ? `${n.recipeQuantity} ${n.recipeUnit} ${n.name} (${n.stockQuantity} ${n.stockUnit})`
+                    : `${n.recipeQuantity} ${n.recipeUnit} ${n.name}`,
                 ),
               }
             : b,
@@ -3318,6 +3355,8 @@ function useSupplyChainImpl() {
       batches,
       recipes,
       kitchenStock,
+      kitchenRawStock,
+      storeItems,
       kitchenRawOnHand,
       deductKitchenRawMaterials,
       recipeTotalCostWithLivePrices,
