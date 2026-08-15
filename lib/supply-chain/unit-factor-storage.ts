@@ -91,6 +91,7 @@ const PURCHASE_CONTAINER_UNITS = new Set([
   'loaf',
   'bunch',
   'wrap',
+  'derica',
   'bottle',
 ])
 
