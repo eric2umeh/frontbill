@@ -106,6 +106,8 @@ export const SUPPLY_SNAPSHOT_KEYS = [
   'kitchen_raw_stock',
   'bar_stock',
   'fnb_raw_stock',
+  'fnb_daily_sheets',
+  'fnb_movements',
   'purchase_orders',
   'issue_out_log',
   'activity_log',
