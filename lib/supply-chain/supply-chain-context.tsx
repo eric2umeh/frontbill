@@ -28,8 +28,12 @@ import type {
   ActivityEntry,
   BasketLine,
   CreateKitchenBatchInput,
+  FnbDailySheet,
+  FnbDailySheetLine,
+  FnbMovement,
   FnbOrder,
   FnbRawStockItem,
+  FnbMenuItem,
   IssueOutCartLine,
   IssueOutRecord,
   KitchenRawStockItem,
@@ -93,7 +97,8 @@ import {
 } from "./unit-factor-storage";
 import type { StockShortageLine } from "@/lib/ui/stock-shortage-dialog";
 import { useAuth } from "@/lib/auth-context";
-import { canManageKitchenBatchStandards, hasPermission } from "@/lib/permissions";
+import { canManageFnbStore, canManageKitchenBatchStandards, hasPermission } from "@/lib/permissions";
+import { isFnbStoreDestination, issueCreditsFnbStore, formatSupplyActorStamp } from "./fnb-store";
 import {
   deleteSupplyCatalogItem,
   fetchSupplyCatalog,
@@ -140,6 +145,13 @@ function notifyIssueOutLogChanged() {
   }
 }
 
+function notifyFnbDailyChanged() {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("frontbill:fnb-daily-changed"));
+    window.dispatchEvent(new CustomEvent("frontbill:supply-stock-changed"));
+  }
+}
+
 type Actor = { name: string; role: string };
 
 let uidSeq = 0;
@@ -180,6 +192,8 @@ const BASKET_STORAGE_KEY = "frontbill_supply_basket";
 const PURCHASE_ORDERS_STORAGE_KEY = "frontbill_supply_purchase_orders";
 const PENDING_STORE_ITEMS_KEY = "frontbill_pending_store_items";
 const FNB_RAW_STOCK_KEY = "frontbill_fnb_raw_stock";
+const FNB_DAILY_SHEETS_KEY = "frontbill_fnb_daily_sheets";
+const FNB_MOVEMENTS_KEY = "frontbill_fnb_movements";
 const ACTIVITY_LOG_STORAGE_KEY = "frontbill_supply_activity_log";
 
 const EMPTY_STORE_ITEMS: StoreItem[] = [];
@@ -203,6 +217,8 @@ const ALL_SUPPLY_STORAGE_KEYS = [
   KITCHEN_STOCK_STORAGE_KEY,
   KITCHEN_RAW_STOCK_STORAGE_KEY,
   FNB_RAW_STOCK_KEY,
+  FNB_DAILY_SHEETS_KEY,
+  FNB_MOVEMENTS_KEY,
   BAR_STOCK_STORAGE_KEY,
   BATCHES_STORAGE_KEY,
   ISSUE_OUT_LOG_STORAGE_KEY,
@@ -432,6 +448,16 @@ function useSupplyChainImpl() {
     [],
     true,
   );
+  const [fnbDailySheets, setFnbDailySheets] = usePersistedArrayState<FnbDailySheet>(
+    FNB_DAILY_SHEETS_KEY,
+    [],
+    true,
+  );
+  const [fnbMovements, setFnbMovements] = usePersistedArrayState<FnbMovement>(
+    FNB_MOVEMENTS_KEY,
+    [],
+    true,
+  );
   const [issueOutLog, setIssueOutLog] = usePersistedArrayState<IssueOutRecord>(
     ISSUE_OUT_LOG_STORAGE_KEY,
     EMPTY_ISSUE_OUT_LOG,
@@ -456,6 +482,8 @@ function useSupplyChainImpl() {
   const kitchenRawStockRef = useRef(kitchenRawStock);
   const barStockRef = useRef(barStock);
   const fnbRawStockRef = useRef(fnbRawStock);
+  const fnbDailySheetsRef = useRef(fnbDailySheets);
+  const fnbMovementsRef = useRef(fnbMovements);
   const purchaseOrdersRef = useRef(purchaseOrders);
   const issueOutLogRef = useRef(issueOutLog);
   const activityLogRef = useRef(activityLog);
@@ -467,6 +495,8 @@ function useSupplyChainImpl() {
     kitchenRawStockRef.current = kitchenRawStock;
     barStockRef.current = barStock;
     fnbRawStockRef.current = fnbRawStock;
+    fnbDailySheetsRef.current = fnbDailySheets;
+    fnbMovementsRef.current = fnbMovements;
     purchaseOrdersRef.current = purchaseOrders;
     issueOutLogRef.current = issueOutLog;
     activityLogRef.current = activityLog;
@@ -478,6 +508,8 @@ function useSupplyChainImpl() {
     kitchenRawStock,
     barStock,
     fnbRawStock,
+    fnbDailySheets,
+    fnbMovements,
     purchaseOrders,
     issueOutLog,
     activityLog,
@@ -496,6 +528,8 @@ function useSupplyChainImpl() {
         kitchen_raw_stock: kitchenRawStockRef.current,
         bar_stock: barStockRef.current,
         fnb_raw_stock: fnbRawStockRef.current,
+        fnb_daily_sheets: fnbDailySheetsRef.current,
+        fnb_movements: fnbMovementsRef.current,
         purchase_orders: purchaseOrdersRef.current,
         issue_out_log: issueOutLogRef.current,
         activity_log: activityLogRef.current,
@@ -575,6 +609,8 @@ function useSupplyChainImpl() {
         );
         const localBarStock = loadPersistedStock<BarStockItem>(BAR_STOCK_STORAGE_KEY, EMPTY_BAR_STOCK);
         const localFnbRaw = loadPersistedStock<FnbRawStockItem>(FNB_RAW_STOCK_KEY, []);
+        const localFnbSheets = loadPersistedStock<FnbDailySheet>(FNB_DAILY_SHEETS_KEY, []);
+        const localFnbMovements = loadPersistedStock<FnbMovement>(FNB_MOVEMENTS_KEY, []);
         const localActivity = loadPersistedStock<ActivityEntry>(
           ACTIVITY_LOG_STORAGE_KEY,
           EMPTY_ACTIVITY_LOG,
@@ -589,6 +625,8 @@ function useSupplyChainImpl() {
         const mergedKitchenRaw = resolveSupplySnapshot(localKitchenRaw, snapshots.kitchen_raw_stock);
         const mergedBarStock = resolveSupplySnapshot(localBarStock, snapshots.bar_stock);
         const mergedFnbRaw = resolveSupplySnapshot(localFnbRaw, snapshots.fnb_raw_stock);
+        const mergedFnbSheets = resolveSupplySnapshot(localFnbSheets, snapshots.fnb_daily_sheets);
+        const mergedFnbMovements = resolveSupplySnapshot(localFnbMovements, snapshots.fnb_movements);
         const mergedActivity = resolveSupplySnapshot(localActivity, snapshots.activity_log);
 
         if (mergedRecipes.length) setRecipes(mergedRecipes);
@@ -597,6 +635,8 @@ function useSupplyChainImpl() {
         if (mergedKitchenRaw.length) setKitchenRawStock(mergedKitchenRaw);
         if (mergedBarStock.length) setBarStock(mergedBarStock);
         if (mergedFnbRaw.length) setFnbRawStock(mergedFnbRaw);
+        if (mergedFnbSheets.length) setFnbDailySheets(mergedFnbSheets);
+        if (mergedFnbMovements.length) setFnbMovements(mergedFnbMovements);
         if (mergedActivity.length) setActivityLog(mergedActivity);
         // Merge local + remote so soft-deletes (tombstones) survive a refresh before cloud sync.
         const localPurchaseOrders = loadPersistedStock<PurchaseOrder>(
@@ -640,6 +680,8 @@ function useSupplyChainImpl() {
           kitchen_raw_stock: mergedKitchenRaw,
           bar_stock: mergedBarStock,
           fnb_raw_stock: mergedFnbRaw,
+          fnb_daily_sheets: mergedFnbSheets,
+          fnb_movements: mergedFnbMovements,
           activity_log: mergedActivity,
           purchase_orders: mergedPurchaseOrders,
           issue_out_log: loadPersistedStock<IssueOutRecord>(
@@ -736,6 +778,8 @@ function useSupplyChainImpl() {
     kitchenRawStock,
     barStock,
     fnbRawStock,
+    fnbDailySheets,
+    fnbMovements,
     purchaseOrders,
     issueOutLog,
     activityLog,
@@ -3524,8 +3568,7 @@ function useSupplyChainImpl() {
   }
 
   function destinationCreditsFnbRaw(destination: string): boolean {
-    const d = destination.trim().toLowerCase();
-    return d === "restaurant" || d.includes("fnb") || d.includes("food");
+    return issueCreditsFnbStore(destination);
   }
 
   const issueFromStoreToDepartment = useCallback(
@@ -3557,7 +3600,13 @@ function useSupplyChainImpl() {
         };
       }
 
-      if (isBarStoreDept(store.dept) && destinationCreditsBarStock(dest)) {
+      const toFnbStore = isFnbStoreDestination(dest);
+
+      if (
+        isBarStoreDept(store.dept) &&
+        destinationCreditsBarStock(dest) &&
+        !toFnbStore
+      ) {
         const barRes = issueFromStoreToBar(storeItemId, qty, actor, {
           destination: dest,
           receivedBy,
@@ -3609,7 +3658,10 @@ function useSupplyChainImpl() {
         notifyKitchenRawStockChanged();
       }
 
-      if (isBarStoreDept(store.dept) && destinationCreditsFnbRaw(dest)) {
+      if (
+        toFnbStore ||
+        (isBarStoreDept(store.dept) && destinationCreditsFnbRaw(dest))
+      ) {
         setFnbRawStock((prev) => {
           const idx = prev.findIndex((f) => f.storeItemId === storeItemId);
           if (idx >= 0) {
@@ -3783,6 +3835,299 @@ function useSupplyChainImpl() {
       return { ok: true, storeItemId: row.storeItemId, name: row.name };
     },
     [fnbRawStock],
+  );
+
+  const setFnbItemCategory = useCallback(
+    (
+      fnbRawId: string,
+      categoryId: string,
+      categoryName: string,
+      actor: Actor,
+    ): { ok: true } | { error: string } => {
+      if (!canManageFnbStore(role)) {
+        return {
+          error:
+            "Only F&B, Admin, Manager, or Superadmin can assign drink categories",
+        };
+      }
+      const row = fnbRawStock.find((f) => f.id === fnbRawId);
+      if (!row) return { error: "F&B stock item not found" };
+      const name = categoryName.trim();
+      setFnbRawStock((prev) =>
+        prev.map((f) =>
+          f.id === fnbRawId
+            ? {
+                ...f,
+                drinkCategoryId: categoryId || undefined,
+                drinkCategoryName: name || undefined,
+              }
+            : f,
+        ),
+      );
+      setActivityLog((a) =>
+        log(
+          a,
+          "recipe_updated",
+          actor,
+          name
+            ? `F&B category: ${row.name} → ${name} (${formatSupplyActorStamp(actor.name)})`
+            : `F&B category cleared: ${row.name} (${formatSupplyActorStamp(actor.name)})`,
+          fnbRawId,
+        ),
+      );
+      schedulePersistSnapshots();
+      notifyFnbDailyChanged();
+      return { ok: true as const };
+    },
+    [fnbRawStock, role, schedulePersistSnapshots],
+  );
+
+  const transferFnbToMainBar = useCallback(
+    (
+      fnbRawId: string,
+      qty: number,
+      actor: Actor,
+      opts?: { notes?: string },
+    ):
+      | { ok: true; barStockId: string; itemName: string; unit: string; unitPrice: number; categoryName: string }
+      | { error: string } => {
+      if (!canManageFnbStore(role)) {
+        return {
+          error:
+            "Only F&B, Admin, Manager, or Superadmin can move items from F&B Store to Main Bar",
+        };
+      }
+      if (!Number.isFinite(qty) || qty <= 0) {
+        return { error: "Enter a quantity to move to Main Bar" };
+      }
+      const row = fnbRawStock.find((f) => f.id === fnbRawId);
+      if (!row) return { error: "F&B stock item not found" };
+      if (row.quantityOnHand < qty) {
+        return {
+          error: `Insufficient ${row.name} in F&B Store (${row.quantityOnHand} ${row.unit} on hand)`,
+        };
+      }
+
+      const barStockId = `bar-${row.storeItemId}`;
+      const note = opts?.notes?.trim();
+      const stamp = formatSupplyActorStamp(actor.name);
+
+      setFnbRawStock((prev) =>
+        prev.map((f) =>
+          f.id === fnbRawId
+            ? { ...f, quantityOnHand: Math.max(0, f.quantityOnHand - qty) }
+            : f,
+        ),
+      );
+
+      setBarStock((prev) => {
+        const idx = prev.findIndex((b) => b.storeItemId === row.storeItemId);
+        if (idx >= 0) {
+          return prev.map((b, i) =>
+            i === idx ? { ...b, quantityOnHand: b.quantityOnHand + qty } : b,
+          );
+        }
+        return [
+          ...prev,
+          {
+            id: barStockId,
+            storeItemId: row.storeItemId,
+            name: row.name,
+            quantityOnHand: qty,
+            reorderLevel: row.reorderLevel,
+            unitsPerSale: 1,
+            unit: row.unit,
+          },
+        ];
+      });
+
+      const movement: FnbMovement = {
+        id: uid("fnbmv"),
+        fnbRawId,
+        storeItemId: row.storeItemId,
+        itemName: row.name,
+        quantity: qty,
+        unit: row.unit,
+        kind: "to_main_bar",
+        note: note || undefined,
+        actorName: actor.name,
+        actorRole: actor.role,
+        at: new Date().toISOString(),
+      };
+      setFnbMovements((prev) => [movement, ...prev]);
+
+      const extra = note ? ` · ${note}` : "";
+      setActivityLog((a) =>
+        log(
+          a,
+          "fnb_transferred_bar",
+          actor,
+          `Moved ${qty} ${row.unit} ${row.name} F&B Store → Main Bar (${stamp})${extra}`,
+          fnbRawId,
+        ),
+      );
+      notifyFnbRawStockChanged();
+      notifyBarStockChanged();
+      notifyFnbDailyChanged();
+      schedulePersistSnapshots();
+      return {
+        ok: true as const,
+        barStockId,
+        itemName: row.name,
+        unit: row.unit,
+        unitPrice: row.sellingPricePerPortion ?? 0,
+        categoryName: row.drinkCategoryName?.trim() || "Beverages",
+      };
+    },
+    [fnbRawStock, role, schedulePersistSnapshots],
+  );
+
+  const saveFnbDailySheet = useCallback(
+    (
+      date: string,
+      lines: FnbDailySheetLine[],
+      actor: Actor,
+    ): { ok: true; stamp: string } | { error: string } => {
+      if (!canManageFnbStore(role)) {
+        return {
+          error:
+            "Only F&B, Admin, Manager, or Superadmin can save the F&B daily inventory",
+        };
+      }
+      const ymd = date.trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) {
+        return { error: "Pick a valid date" };
+      }
+
+      const now = new Date().toISOString();
+      const stamp = formatSupplyActorStamp(actor.name, now);
+      const movements: FnbMovement[] = [];
+      const nets = new Map<string, number>();
+      const prices = new Map<string, number>();
+
+      for (const line of lines) {
+        const item = fnbRawStock.find((f) => f.id === line.itemId);
+        if (!item) continue;
+        const dComp =
+          Math.max(0, line.complimentary) - Math.max(0, line.appliedComplimentary ?? 0);
+        const dSold = Math.max(0, line.soldQty) - Math.max(0, line.appliedSold ?? 0);
+        const dDmg = Math.max(0, line.damage) - Math.max(0, line.appliedDamage ?? 0);
+        const net = dComp + dSold + dDmg;
+        if (net > item.quantityOnHand + 1e-9) {
+          return {
+            error: `Insufficient ${item.name} in F&B Store for complimentary / sold / damage (need ${net}, have ${item.quantityOnHand} ${item.unit})`,
+          };
+        }
+        nets.set(item.id, net);
+        prices.set(item.id, Math.max(0, line.unitPrice));
+        if (dComp > 0) {
+          movements.push({
+            id: uid("fnbmv"),
+            fnbRawId: item.id,
+            storeItemId: item.storeItemId,
+            itemName: item.name,
+            quantity: dComp,
+            unit: item.unit,
+            kind: "complimentary",
+            note: line.complimentaryNote?.trim() || undefined,
+            actorName: actor.name,
+            actorRole: actor.role,
+            at: now,
+          });
+        }
+        if (dSold > 0) {
+          movements.push({
+            id: uid("fnbmv"),
+            fnbRawId: item.id,
+            storeItemId: item.storeItemId,
+            itemName: item.name,
+            quantity: dSold,
+            unit: item.unit,
+            kind: "sold",
+            actorName: actor.name,
+            actorRole: actor.role,
+            at: now,
+          });
+        }
+        if (dDmg > 0) {
+          movements.push({
+            id: uid("fnbmv"),
+            fnbRawId: item.id,
+            storeItemId: item.storeItemId,
+            itemName: item.name,
+            quantity: dDmg,
+            unit: item.unit,
+            kind: "damage",
+            note: line.remark?.trim() || undefined,
+            actorName: actor.name,
+            actorRole: actor.role,
+            at: now,
+          });
+        }
+      }
+
+      setFnbRawStock((prev) =>
+        prev.map((item) => {
+          const net = nets.get(item.id) ?? 0;
+          const price = prices.get(item.id);
+          const nextQty = Math.max(0, item.quantityOnHand - net);
+          const nextPrice =
+            price != null && price !== item.sellingPricePerPortion
+              ? price
+              : item.sellingPricePerPortion;
+          if (nextQty === item.quantityOnHand && nextPrice === item.sellingPricePerPortion) {
+            return item;
+          }
+          return {
+            ...item,
+            quantityOnHand: nextQty,
+            sellingPricePerPortion: nextPrice,
+          };
+        }),
+      );
+
+      const persistedLines: FnbDailySheetLine[] = lines.map((l) => ({
+        ...l,
+        appliedComplimentary: Math.max(0, l.complimentary),
+        appliedSold: Math.max(0, l.soldQty),
+        appliedDamage: Math.max(0, l.damage),
+      }));
+
+      const sheet: FnbDailySheet = {
+        date: ymd,
+        lines: persistedLines,
+        savedAt: now,
+        savedBy: actor.name,
+        savedByRole: actor.role,
+      };
+
+      setFnbDailySheets((prev) => {
+        const idx = prev.findIndex((s) => s.date === ymd);
+        if (idx >= 0) {
+          return prev.map((s, i) => (i === idx ? sheet : s));
+        }
+        return [sheet, ...prev];
+      });
+
+      if (movements.length) {
+        setFnbMovements((prev) => [...movements, ...prev]);
+      }
+
+      setActivityLog((a) =>
+        log(
+          a,
+          "fnb_sheet_saved",
+          actor,
+          `F&B daily inventory saved for ${ymd} (${stamp})`,
+          ymd,
+        ),
+      );
+      notifyFnbRawStockChanged();
+      notifyFnbDailyChanged();
+      schedulePersistSnapshots();
+      return { ok: true as const, stamp };
+    },
+    [fnbRawStock, role, schedulePersistSnapshots],
   );
 
   /** Admin kickstart: set absolute on-hand qty for a menu item (creates kitchen/bar link if missing). */
@@ -4156,6 +4501,8 @@ function useSupplyChainImpl() {
     kitchenStock,
     kitchenRawStock,
     fnbRawStock,
+    fnbDailySheets,
+    fnbMovements,
     issueOutLog,
     barStock,
     issueFromStoreToBar,
@@ -4171,6 +4518,9 @@ function useSupplyChainImpl() {
     clearAllSupplyChainData,
     clearSupplyHistory,
     updateFnbRawSellingPrice,
+    setFnbItemCategory,
+    transferFnbToMainBar,
+    saveFnbDailySheet,
     kickstartOutletMenuStock,
     issueRawToKitchenPortions,
     getOutletItemStock,
@@ -4230,6 +4580,8 @@ export function useSupplyChain() {
       (() => ({ error: "Supply chain not ready — refresh the page" })),
     pendingStoreItems: ctx.pendingStoreItems ?? [],
     fnbRawStock: ctx.fnbRawStock ?? [],
+    fnbDailySheets: ctx.fnbDailySheets ?? [],
+    fnbMovements: ctx.fnbMovements ?? [],
     issueOutCart:
       ctx.issueOutCart ??
       (() => ({ error: "Supply chain not ready — refresh the page" })),
@@ -4270,6 +4622,15 @@ export function useSupplyChain() {
       (() => ({ error: "Supply chain not ready — refresh the page" })),
     updateFnbRawSellingPrice:
       ctx.updateFnbRawSellingPrice ??
+      (() => ({ error: "Supply chain not ready — refresh the page" })),
+    setFnbItemCategory:
+      ctx.setFnbItemCategory ??
+      (() => ({ error: "Supply chain not ready — refresh the page" })),
+    transferFnbToMainBar:
+      ctx.transferFnbToMainBar ??
+      (() => ({ error: "Supply chain not ready — refresh the page" })),
+    saveFnbDailySheet:
+      ctx.saveFnbDailySheet ??
       (() => ({ error: "Supply chain not ready — refresh the page" })),
     accountantRetirementDecision:
       ctx.accountantRetirementDecision ??
