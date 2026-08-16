@@ -23,6 +23,8 @@ import { toast } from 'sonner'
 import { PageHeader } from '@/components/layout/page-header'
 import { RESPONSIVE_HIDE_MD, RESPONSIVE_HIDE_LG } from '@/lib/ui/responsive-table'
 import type { FnbDailySheetLine } from '@/lib/supply-chain/types'
+import type { OutletMenuCategoryRow } from '@/lib/outlets/types'
+import { titleCaseWhileTyping, toTitleCaseWords } from '@/lib/supply-chain/title-case'
 import {
   fnbSheetAmount,
   fnbSheetClosing,
@@ -37,7 +39,24 @@ import {
 } from '@/lib/outlets/seed-drink-categories'
 import { outletApiHeaders } from '@/lib/outlets/outlet-api-headers'
 import { PaginatedListShell } from '@/components/shared/paginated-list-shell'
-import { ClipboardList, FolderTree, Plus, Wine } from 'lucide-react'
+import { ClipboardList, FolderTree, Pencil, Plus, Trash2, Wine } from 'lucide-react'
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 
 function numOrZero(raw: string): number {
   const n = Number(raw)
@@ -68,6 +87,9 @@ export function FnbStoreWorkspace() {
   const [categories, setCategories] = useState<OutletMenuCategoryRow[]>([])
   const [newCatName, setNewCatName] = useState('')
   const [saving, setSaving] = useState(false)
+  const [editCategory, setEditCategory] = useState<OutletMenuCategoryRow | null>(null)
+  const [editCatName, setEditCatName] = useState('')
+  const [deleteCategory, setDeleteCategory] = useState<OutletMenuCategoryRow | null>(null)
 
   useEffect(() => {
     const bump = () => setStockTick((t) => t + 1)
@@ -120,9 +142,9 @@ export function FnbStoreWorkspace() {
   }
 
   useEffect(() => {
-    if (!canManage || tab !== 'categories') return
+    if (tab !== 'categories') return
     void loadCategories()
-  }, [canManage, tab])
+  }, [tab])
 
   const patchLine = (itemId: string, patch: Partial<FnbDailySheetLine>) => {
     setLines((prev) => prev.map((l) => (l.itemId === itemId ? { ...l, ...patch } : l)))
@@ -138,7 +160,7 @@ export function FnbStoreWorkspace() {
           ...line,
           name: item.name,
           unit: item.unit,
-          category: item.drinkCategoryName ?? '',
+          category: item.drinkCategoryName ? toTitleCaseWords(item.drinkCategoryName) : '',
         },
       ]
     })
@@ -190,7 +212,7 @@ export function FnbStoreWorkspace() {
   }
 
   const addCategory = async () => {
-    const name = newCatName.trim()
+    const name = toTitleCaseWords(newCatName)
     if (!name) return
     setSaving(true)
     try {
@@ -207,6 +229,65 @@ export function FnbStoreWorkspace() {
       }
       toast.success(`Category “${name}” created · ${formatSupplyActorStamp(actor.name)}`)
       setNewCatName('')
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('frontbill:outlet-menu-synced'))
+      }
+      await loadCategories()
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const saveCategory = async () => {
+    if (!editCategory) return
+    const name = toTitleCaseWords(editCatName)
+    if (!name) return
+    setSaving(true)
+    try {
+      const res = await fetch('/api/outlets/menu/categories', {
+        method: 'PATCH',
+        headers: await outletApiHeaders({ 'Content-Type': 'application/json' }),
+        credentials: 'include',
+        body: JSON.stringify({ id: editCategory.id, name }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        toast.error(json.error || 'Could not update category')
+        return
+      }
+      toast.success(`Category updated · ${formatSupplyActorStamp(actor.name)}`)
+      setEditCategory(null)
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('frontbill:outlet-menu-synced'))
+      }
+      await loadCategories()
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const confirmDeleteCategory = async () => {
+    if (!deleteCategory) return
+    setSaving(true)
+    try {
+      const res = await fetch(
+        `/api/outlets/menu/categories?id=${encodeURIComponent(deleteCategory.id)}`,
+        {
+          method: 'DELETE',
+          headers: await outletApiHeaders(),
+          credentials: 'include',
+        },
+      )
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        toast.error(json.error || 'Could not delete category')
+        return
+      }
+      toast.success(`Category deleted · ${formatSupplyActorStamp(actor.name)}`)
+      setDeleteCategory(null)
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('frontbill:outlet-menu-synced'))
+      }
       await loadCategories()
     } finally {
       setSaving(false)
@@ -234,7 +315,8 @@ export function FnbStoreWorkspace() {
 
   const assignCategory = async (fnbRawId: string, categoryId: string) => {
     const cat = categories.find((c) => c.id === categoryId)
-    const res = setFnbItemCategory(fnbRawId, categoryId === '__none__' ? '' : categoryId, cat?.name ?? '', actor)
+    const catName = cat ? toTitleCaseWords(cat.name) : ''
+    const res = setFnbItemCategory(fnbRawId, categoryId === '__none__' ? '' : categoryId, catName, actor)
     if ('error' in res) {
       toast.error(res.error)
       return
@@ -244,14 +326,14 @@ export function FnbStoreWorkspace() {
     if (item && bar && cat) {
       await syncBarItemToMainBarMenu({
         itemName: item.name,
-        categoryName: cat.name,
+        categoryName: catName,
         barStockId: bar.id,
         unitPrice: item.sellingPricePerPortion ?? 0,
       })
     }
     toast.success(
       cat
-        ? `${item?.name ?? 'Item'} → ${cat.name} · ${formatSupplyActorStamp(actor.name)}`
+        ? `${item?.name ?? 'Item'} → ${catName} · ${formatSupplyActorStamp(actor.name)}`
         : `Category cleared · ${formatSupplyActorStamp(actor.name)}`,
     )
   }
@@ -505,7 +587,9 @@ export function FnbStoreWorkspace() {
                               {item.name}
                               <span className="block text-[10px] text-muted-foreground font-normal">
                                 {item.unit}
-                                {item.drinkCategoryName ? ` · ${item.drinkCategoryName}` : ''}
+                                {item.drinkCategoryName
+                                  ? ` · ${toTitleCaseWords(item.drinkCategoryName)}`
+                                  : ''}
                               </span>
                             </TableCell>
                             <TableCell className="text-right tabular-nums">
@@ -596,17 +680,18 @@ export function FnbStoreWorkspace() {
               <CardTitle className="text-base">Drink categories</CardTitle>
               <CardDescription>
                 Categories are shared with the Main Bar menu tab (Wine, Soft Drink, Cocktail, …).
-                Created by F&amp;B, Admin, Manager, or Superadmin.
+                F&amp;B, Admin, Manager, or Superadmin can create, edit, and delete them. Each word is
+                capitalised.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
               {canManage && (
                 <div className="flex flex-wrap gap-2">
                   <Input
-                    placeholder="New category (e.g. Wine)"
+                    placeholder="New category (e.g. Soft Drink)"
                     className="max-w-xs"
                     value={newCatName}
-                    onChange={(e) => setNewCatName(e.target.value)}
+                    onChange={(e) => setNewCatName(titleCaseWhileTyping(e.target.value))}
                     onKeyDown={(e) => e.key === 'Enter' && void addCategory()}
                   />
                   <Button type="button" disabled={saving || !newCatName.trim()} onClick={() => void addCategory()}>
@@ -624,13 +709,40 @@ export function FnbStoreWorkspace() {
                   — or type your own.
                 </p>
               ) : (
-                <div className="flex flex-wrap gap-1.5">
+                <ul className="text-sm space-y-1 max-h-64 overflow-y-auto border rounded-md p-2">
                   {categories.map((c) => (
-                    <Badge key={c.id} variant="secondary">
-                      {c.name}
-                    </Badge>
+                    <li key={c.id} className="flex items-center justify-between gap-2 py-0.5">
+                      <span className="min-w-0 font-medium">{toTitleCaseWords(c.name)}</span>
+                      {canManage && (
+                        <span className="flex shrink-0 gap-0.5">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7"
+                            title="Edit category"
+                            onClick={() => {
+                              setEditCategory(c)
+                              setEditCatName(toTitleCaseWords(c.name))
+                            }}
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-destructive"
+                            title="Delete category"
+                            onClick={() => setDeleteCategory(c)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </span>
+                      )}
+                    </li>
                   ))}
-                </div>
+                </ul>
               )}
             </CardContent>
           </Card>
@@ -671,7 +783,7 @@ export function FnbStoreWorkspace() {
                                 <SelectItem value="__none__">Uncategorized</SelectItem>
                                 {categories.map((c) => (
                                   <SelectItem key={c.id} value={c.id}>
-                                    {c.name}
+                                    {toTitleCaseWords(c.name)}
                                   </SelectItem>
                                 ))}
                               </SelectContent>
@@ -687,6 +799,51 @@ export function FnbStoreWorkspace() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      <Dialog open={!!editCategory} onOpenChange={(o) => !o && setEditCategory(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Edit category</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-1">
+            <Label>Name</Label>
+            <Input
+              value={editCatName}
+              onChange={(e) => setEditCatName(titleCaseWhileTyping(e.target.value))}
+              onKeyDown={(e) => e.key === 'Enter' && void saveCategory()}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditCategory(null)}>
+              Cancel
+            </Button>
+            <Button onClick={() => void saveCategory()} disabled={saving || !editCatName.trim()}>
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog open={!!deleteCategory} onOpenChange={(o) => !o && setDeleteCategory(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete category?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Delete &quot;{deleteCategory ? toTitleCaseWords(deleteCategory.name) : ''}&quot;? Items in this
+              category become uncategorized. The same list is used on the Main Bar menu.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => void confirmDeleteCategory()}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
