@@ -55,6 +55,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Search, Minus, Plus, Loader2, Receipt, FileText } from 'lucide-react'
+import { toTitleCaseWords } from '@/lib/supply-chain/title-case'
 import { toast } from 'sonner'
 import { outletApiHeaders } from '@/lib/outlets/outlet-api-headers'
 import { PaymentAccountSelect } from '@/components/payments/payment-account-select'
@@ -113,6 +114,7 @@ export function OutletPos({
   const stockSource = outletStockSource(department)
   const storeControlledFnb = isStoreControlledFnbOutlet(department)
   const actor = { name: staffName ?? 'Staff', role: canonicalRoleKey(role) ?? 'staff' }
+  const isDrinkOutlet = department === 'main_bar' || department === 'pool_bar'
   const [search, setSearch] = useState('')
   const [categoryId, setCategoryId] = useState<string>('all')
   const [parentCategoryId, setParentCategoryId] = useState<string | null>(null)
@@ -153,8 +155,12 @@ export function OutletPos({
       ? categoryId
       : null
 
+  const showingAllRootItems = categoryId === 'all' && !parentCategoryId
   const hasMenuPicker =
-    search.trim().length > 0 || activeCategoryFilter != null || parentCategoryId != null
+    search.trim().length > 0 ||
+    activeCategoryFilter != null ||
+    parentCategoryId != null ||
+    showingAllRootItems
 
   const filteredItems = useMemo(() => {
     if (!hasMenuPicker) return []
@@ -167,6 +173,7 @@ export function OutletPos({
           return subIds.includes(it.category_id || '') || it.category_id === parentCategoryId
         }
         if (activeCategoryFilter) return it.category_id === activeCategoryFilter
+        if (showingAllRootItems) return true
         return false
       })
       .filter((it) => {
@@ -174,10 +181,35 @@ export function OutletPos({
         return it.name.toLowerCase().includes(q) || (it.sku || '').toLowerCase().includes(q)
       })
       .sort(compareOutletMenuByName)
-  }, [items, search, activeCategoryFilter, parentCategoryId, categoryId, subCategories, hasMenuPicker])
+  }, [
+    items,
+    search,
+    activeCategoryFilter,
+    parentCategoryId,
+    categoryId,
+    subCategories,
+    hasMenuPicker,
+    showingAllRootItems,
+  ])
 
   const groupedByCategory = useMemo(() => {
     if (!filteredItems.length) return []
+    if (showingAllRootItems) {
+      const groups: { cat: OutletMenuCategoryRow | null; items: typeof filteredItems }[] = []
+      for (const c of sortOutletRootCategories(categories)) {
+        const its = filteredItems.filter((it) => it.category_id === c.id)
+        if (its.length) groups.push({ cat: c, items: its })
+      }
+      const nested = categories.filter((c) => c.parent_id)
+      for (const c of nested) {
+        if (groups.some((g) => g.cat?.id === c.id)) continue
+        const its = filteredItems.filter((it) => it.category_id === c.id)
+        if (its.length) groups.push({ cat: c, items: its })
+      }
+      const uncat = filteredItems.filter((it) => !it.category_id)
+      if (uncat.length) groups.push({ cat: null, items: uncat })
+      return groups
+    }
     const activeCat =
       activeCategoryFilter != null
         ? categories.find((c) => c.id === activeCategoryFilter) ?? null
@@ -185,7 +217,7 @@ export function OutletPos({
           ? categories.find((c) => c.id === parentCategoryId) ?? null
           : null
     return [{ cat: activeCat, items: filteredItems }]
-  }, [filteredItems, categories, activeCategoryFilter, parentCategoryId])
+  }, [filteredItems, categories, activeCategoryFilter, parentCategoryId, showingAllRootItems])
 
   const cartItemsTotal = cart.reduce((s, l) => s + l.unitPrice * l.qty, 0)
   const parsedRoomServiceFee =
@@ -836,7 +868,12 @@ export function OutletPos({
         <div className="flex flex-wrap gap-2 items-center">
           <div className="relative flex-1 min-w-[180px]">
             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-            <Input className="pl-8" placeholder="Search menu…" value={search} onChange={(e) => setSearch(e.target.value)} />
+            <Input
+              className="pl-8"
+              placeholder={isDrinkOutlet ? 'Search drinks (e.g. Heineken)…' : 'Search menu…'}
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
           </div>
         </div>
 
@@ -866,7 +903,7 @@ export function OutletPos({
                   setCategoryId('all')
                 }}
               >
-                {c.name}
+                {toTitleCaseWords(c.name)}
               </Button>
             ))}
           </div>
@@ -886,7 +923,7 @@ export function OutletPos({
                 variant={categoryId === c.id ? 'secondary' : 'ghost'}
                 onClick={() => setCategoryId(c.id)}
               >
-                {c.name}
+                {toTitleCaseWords(c.name)}
               </Button>
             ))}
           </div>
@@ -899,7 +936,7 @@ export function OutletPos({
             </Button>
             {rootCategories.map((c) => (
               <Button key={c.id} type="button" size="sm" className="h-6 text-xs" variant={categoryId === c.id ? 'secondary' : 'ghost'} onClick={() => setCategoryId(c.id)}>
-                {c.name}
+                {toTitleCaseWords(c.name)}
               </Button>
             ))}
           </div>
@@ -909,14 +946,14 @@ export function OutletPos({
           <p className="text-xs text-muted-foreground rounded-md border bg-muted/30 px-2 py-1.5 mb-2">
             {department === 'restaurant'
               ? 'Restaurant menu is controlled by kitchen stock (store → batches → portions). Items at 0 are unavailable.'
-              : 'Main bar menu is controlled by bar stock (central store → issue to bar). Items at 0 are unavailable.'}
+              : 'Main Bar drinks come from stock transferred by F&B Store (Central Store → F&B Store → Main Bar). Items at 0 are unavailable.'}
           </p>
         )}
         {stockSource !== 'none' && !storeControlledFnb && (
           <p className="text-xs text-muted-foreground rounded-md border bg-muted/30 px-2 py-1.5 mb-2">
             {stockSource === 'kitchen'
               ? 'Food availability comes from kitchen stock (store → kitchen batches → portions).'
-              : 'Drink availability comes from bar stock (central store bar items issued to the bar).'}
+              : 'Drink availability comes from Main Bar stock after F&B Store transfers it.'}
           </p>
         )}
 
@@ -925,7 +962,7 @@ export function OutletPos({
             <section key={cat?.id ?? 'all'} className="mb-3">
               {cat && (
                 <div className="flex items-center justify-between mb-1.5 sticky top-0 bg-background/95 py-0.5 z-10">
-                  <h4 className="text-sm font-semibold">{cat.name}</h4>
+                  <h4 className="text-sm font-semibold">{toTitleCaseWords(cat.name)}</h4>
                   {cat.tag_label && (
                     <Badge variant="secondary" className="text-[9px] h-4 px-1">{cat.tag_label}</Badge>
                   )}
@@ -1060,12 +1097,16 @@ export function OutletPos({
           ))}
           {!hasMenuPicker && (
             <p className="text-center text-muted-foreground py-16 px-4 text-sm">
-              Pick a category or search for an item (e.g. fried rice). Items load on demand — not all at once.
+              {isDrinkOutlet
+                ? 'Pick a drink category or search for an item (e.g. Heineken). Tap All to list every drink on the menu.'
+                : 'Pick a category or search for an item (e.g. fried rice). Items load on demand — not all at once.'}
             </p>
           )}
           {hasMenuPicker && filteredItems.length === 0 && (
             <p className="text-center text-muted-foreground py-12 text-sm">
-              No matches — try another category or search term.
+              {isDrinkOutlet
+                ? 'No drinks in this view — try All, another category, or a search like Heineken.'
+                : 'No matches — try another category or search term.'}
             </p>
           )}
         </ScrollArea>
