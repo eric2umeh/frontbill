@@ -331,7 +331,11 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
   useEffect(() => {
     const onRaw = () => setRawStockTick((t) => t + 1)
     window.addEventListener('frontbill:kitchen-raw-stock', onRaw)
-    return () => window.removeEventListener('frontbill:kitchen-raw-stock', onRaw)
+    window.addEventListener('frontbill:supply-stock-changed', onRaw)
+    return () => {
+      window.removeEventListener('frontbill:kitchen-raw-stock', onRaw)
+      window.removeEventListener('frontbill:supply-stock-changed', onRaw)
+    }
   }, [])
 
   const kitchenStockUnitCost = (stockId: string): number => {
