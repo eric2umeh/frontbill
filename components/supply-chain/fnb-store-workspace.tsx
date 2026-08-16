@@ -21,7 +21,7 @@ import {
 } from '@/components/ui/select'
 import { toast } from 'sonner'
 import { PageHeader } from '@/components/layout/page-header'
-import { RESPONSIVE_HIDE_MD, RESPONSIVE_HIDE_LG } from '@/lib/ui/responsive-table'
+import { RESPONSIVE_HIDE_MD } from '@/lib/ui/responsive-table'
 import type { FnbDailySheetLine } from '@/lib/supply-chain/types'
 import type { OutletMenuCategoryRow } from '@/lib/outlets/types'
 import { titleCaseWhileTyping, toTitleCaseWords } from '@/lib/supply-chain/title-case'
@@ -437,7 +437,6 @@ export function FnbStoreWorkspace() {
                         <TableHead className="text-right">Unit price</TableHead>
                         <TableHead className={`text-right ${RESPONSIVE_HIDE_MD}`}>Amount</TableHead>
                         <TableHead className="text-right">Damage</TableHead>
-                        <TableHead className={`text-right ${RESPONSIVE_HIDE_LG}`}>To Main Bar</TableHead>
                         <TableHead className="text-right">Closing</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -527,9 +526,6 @@ export function FnbStoreWorkspace() {
                                   patchLine(line.itemId, { damage: numOrZero(e.target.value) })
                                 }
                               />
-                            </TableCell>
-                            <TableCell className={`text-right tabular-nums ${RESPONSIVE_HIDE_LG}`}>
-                              {line.toMainBar}
                             </TableCell>
                             <TableCell className="text-right tabular-nums font-medium">{closing}</TableCell>
                           </TableRow>
