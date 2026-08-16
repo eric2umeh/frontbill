@@ -39,7 +39,7 @@ import {
 } from '@/lib/outlets/seed-drink-categories'
 import { outletApiHeaders } from '@/lib/outlets/outlet-api-headers'
 import { PaginatedListShell } from '@/components/shared/paginated-list-shell'
-import { ClipboardList, FolderTree, Pencil, Plus, Trash2, Wine } from 'lucide-react'
+import { ClipboardList, Download, FolderTree, Pencil, Plus, Trash2, Wine } from 'lucide-react'
 import {
   Dialog,
   DialogContent,
@@ -61,6 +61,23 @@ import {
 function numOrZero(raw: string): number {
   const n = Number(raw)
   return Number.isFinite(n) && n > 0 ? n : 0
+}
+
+function csvCell(value: unknown): string {
+  const text = value == null ? '' : String(value)
+  if (/[",\n\r]/.test(text)) return `"${text.replace(/"/g, '""')}"`
+  return text
+}
+
+function downloadCsv(filename: string, rows: unknown[][]) {
+  const csv = rows.map((row) => row.map(csvCell).join(',')).join('\n')
+  const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
 }
 
 export function FnbStoreWorkspace() {
@@ -180,6 +197,57 @@ export function FnbStoreWorkspace() {
       return
     }
     toast.success(`Daily inventory saved · ${res.stamp}`)
+  }
+
+  const downloadDaily = () => {
+    if (dailyRows.length === 0) {
+      toast.error('Nothing to download yet')
+      return
+    }
+    const header = [
+      'Date',
+      'Item',
+      'Category',
+      'Unit',
+      'Opening',
+      'New',
+      'Total',
+      'Compliments',
+      'Compliment note',
+      'Qty sold',
+      'Unit price',
+      'Amount',
+      'Damage',
+      'Closing',
+    ]
+    const rows: unknown[][] = [header]
+    for (const line of dailyRows) {
+      const total = Math.max(0, line.opening) + Math.max(0, line.newQty)
+      const amount = fnbSheetAmount(line.soldQty, line.unitPrice)
+      rows.push([
+        ymd,
+        line.name,
+        line.category,
+        line.unit,
+        line.opening,
+        line.newQty,
+        total,
+        line.complimentary,
+        line.complimentaryNote ?? '',
+        line.soldQty,
+        line.unitPrice,
+        amount,
+        line.damage,
+        fnbSheetClosing(line),
+      ])
+    }
+    rows.push([])
+    rows.push(['Sales total', '', '', '', '', '', '', '', '', '', '', salesTotal, '', ''])
+    if (savedSheet) {
+      rows.push(['Last saved', formatSupplyActorStamp(savedSheet.savedBy, savedSheet.savedAt)])
+    }
+    downloadCsv(`frontbill-fnb-daily-inventory-${ymd}.csv`, rows)
+    toast.success(`Downloaded daily inventory for ${ymd}`)
   }
 
   const moveToBar = async (fnbRawId: string) => {
@@ -394,6 +462,17 @@ export function FnbStoreWorkspace() {
               <span className="text-sm tabular-nums text-muted-foreground">
                 Sales total {formatNaira(salesTotal)}
               </span>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="gap-1.5"
+                disabled={dailyRows.length === 0}
+                onClick={downloadDaily}
+              >
+                <Download className="h-4 w-4" />
+                Download
+              </Button>
               <Button size="sm" disabled={!canManage || lines.length === 0} onClick={saveDaily}>
                 Save daily sheet
               </Button>
