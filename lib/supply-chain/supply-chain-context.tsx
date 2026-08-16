@@ -140,6 +140,7 @@ function applyRemoteArray<T>(
 
 /** Skip applying a remote poll for a short window after this tab mutated stock. */
 let lastLocalSupplyMutationAt = 0;
+let liveSupplyInFlight = false;
 
 function markLocalSupplyMutation() {
   lastLocalSupplyMutationAt = Date.now();
@@ -841,17 +842,21 @@ function useSupplyChainImpl() {
 
     let cancelled = false;
 
-    const refreshLiveSupply = async (fromOtherTab = false) => {
+    const refreshLiveSupply = async (fromOtherTab = false, includeCatalog = fromOtherTab) => {
       if (
         !fromOtherTab &&
         Date.now() - lastLocalSupplyMutationAt < 2500
       ) {
         return;
       }
+      if (liveSupplyInFlight) return;
+      liveSupplyInFlight = true;
       try {
         const [snapshots, catalog] = await Promise.all([
           fetchSupplySnapshots(userId, organizationId || undefined),
-          fetchSupplyCatalog(userId, organizationId || undefined).catch(() => null),
+          includeCatalog
+            ? fetchSupplyCatalog(userId, organizationId || undefined).catch(() => null)
+            : Promise.resolve(null),
         ]);
         if (cancelled) return;
 
@@ -911,16 +916,18 @@ function useSupplyChainImpl() {
         }
       } catch {
         /* non-blocking */
+      } finally {
+        liveSupplyInFlight = false;
       }
     };
 
     const onVis = () => {
-      if (document.visibilityState === "visible") void refreshLiveSupply();
+      if (document.visibilityState === "visible") void refreshLiveSupply(false, true);
     };
 
-    const firstPoll = window.setTimeout(() => void refreshLiveSupply(), 1_500);
+    const firstPoll = window.setTimeout(() => void refreshLiveSupply(false, true), 1_500);
     document.addEventListener("visibilitychange", onVis);
-    const interval = window.setInterval(() => void refreshLiveSupply(), 8_000);
+    const interval = window.setInterval(() => void refreshLiveSupply(false, false), 15_000);
     const unsubscribeLive = subscribeSupplyLiveUpdates(() => {
       window.setTimeout(() => {
         if (!cancelled) void refreshLiveSupply(true);

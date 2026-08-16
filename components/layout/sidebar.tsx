@@ -593,7 +593,9 @@ export function Sidebar({ mobileOpen, onMobileClose }: SidebarProps = {}) {
       <Sheet open={mobileOpen} onOpenChange={onMobileClose}>
         <SheetContent side="left" className="p-0 w-64" aria-describedby={undefined}>
           <SheetTitle className="sr-only">Navigation Menu</SheetTitle>
-          <SidebarInner isMobile mobileOpen={mobileOpen} onMobileClose={onMobileClose} />
+          {mobileOpen ? (
+            <SidebarInner isMobile mobileOpen={mobileOpen} onMobileClose={onMobileClose} />
+          ) : null}
         </SheetContent>
       </Sheet>
     </Suspense>

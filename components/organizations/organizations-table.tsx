@@ -21,9 +21,9 @@ export function OrganizationsTable({ organizations }: OrganizationsTableProps) {
     {
       header: 'Name',
       accessor: 'name',
-      cell: (value, org) => (
+      cell: (org) => (
         <div>
-          <p className="font-medium">{value}</p>
+          <p className="font-medium">{org.name}</p>
           {org.contact_person && (
             <p className="text-xs text-muted-foreground">{org.contact_person}</p>
           )}
@@ -33,9 +33,9 @@ export function OrganizationsTable({ organizations }: OrganizationsTableProps) {
     {
       header: 'Type',
       accessor: 'type',
-      cell: (value) => (
-        <Badge className={typeColors[value]} variant="secondary">
-          {value.toUpperCase()}
+      cell: (org) => (
+        <Badge className={typeColors[org.type]} variant="secondary">
+          {org.type.toUpperCase()}
         </Badge>
       ),
       className: 'hidden md:table-cell',
@@ -43,9 +43,9 @@ export function OrganizationsTable({ organizations }: OrganizationsTableProps) {
     {
       header: 'Contact',
       accessor: 'phone',
-      cell: (value, org) => (
+      cell: (org) => (
         <div className="space-y-0.5 text-sm">
-          <p>{value}</p>
+          <p>{org.phone}</p>
           {org.email && (
             <p className="text-xs text-muted-foreground">{org.email}</p>
           )}
@@ -56,16 +56,16 @@ export function OrganizationsTable({ organizations }: OrganizationsTableProps) {
     {
       header: 'Outstanding',
       accessor: 'outstanding_balance',
-      cell: (value) => (
-        <span className={`font-semibold ${value > 0 ? 'text-red-600' : 'text-green-600'}`}>
-          {formatNaira(value)}
+      cell: (org) => (
+        <span className={`font-semibold ${org.outstanding_balance > 0 ? 'text-red-600' : 'text-green-600'}`}>
+          {formatNaira(org.outstanding_balance)}
         </span>
       ),
     },
     {
       header: 'Credit Limit',
       accessor: 'credit_limit',
-      cell: (value) => formatNaira(value),
+      cell: (org) => formatNaira(org.credit_limit),
       className: 'hidden xl:table-cell',
     },
   ]
