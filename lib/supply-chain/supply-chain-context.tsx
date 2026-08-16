@@ -117,11 +117,39 @@ import {
 } from "./kitchen-sync-merge";
 import { snapshotsPayloadForRole } from "./supply-snapshot-payload";
 import { dedupeBatchMaterials } from "./parse-csv-row";
+import { broadcastSupplyLiveUpdate, subscribeSupplyLiveUpdates } from "./supply-live-sync";
+
+function applyRemoteArray<T>(
+  setter: (updater: (prev: T[]) => T[]) => void,
+  remote: unknown,
+): boolean {
+  if (!Array.isArray(remote)) return false;
+  let changed = false;
+  setter((prev) => {
+    try {
+      if (JSON.stringify(prev) === JSON.stringify(remote)) return prev;
+    } catch {
+      changed = true;
+      return remote as T[];
+    }
+    changed = true;
+    return remote as T[];
+  });
+  return changed;
+}
+
+/** Skip applying a remote poll for a short window after this tab mutated stock. */
+let lastLocalSupplyMutationAt = 0;
+
+function markLocalSupplyMutation() {
+  lastLocalSupplyMutationAt = Date.now();
+}
 
 function notifyKitchenRawStockChanged() {
   if (typeof window !== "undefined") {
     window.dispatchEvent(new CustomEvent("frontbill:kitchen-raw-stock"));
     window.dispatchEvent(new CustomEvent("frontbill:supply-stock-changed"));
+    markLocalSupplyMutation();
   }
 }
 
@@ -129,6 +157,7 @@ function notifyBarStockChanged() {
   if (typeof window !== "undefined") {
     window.dispatchEvent(new CustomEvent("frontbill:bar-stock-changed"));
     window.dispatchEvent(new CustomEvent("frontbill:supply-stock-changed"));
+    markLocalSupplyMutation();
   }
 }
 
@@ -136,6 +165,7 @@ function notifyFnbRawStockChanged() {
   if (typeof window !== "undefined") {
     window.dispatchEvent(new CustomEvent("frontbill:fnb-raw-stock-changed"));
     window.dispatchEvent(new CustomEvent("frontbill:supply-stock-changed"));
+    markLocalSupplyMutation();
   }
 }
 
@@ -143,6 +173,7 @@ function notifyIssueOutLogChanged() {
   if (typeof window !== "undefined") {
     window.dispatchEvent(new CustomEvent("frontbill:issue-out-log-changed"));
     window.dispatchEvent(new CustomEvent("frontbill:supply-stock-changed"));
+    markLocalSupplyMutation();
   }
 }
 
@@ -150,6 +181,7 @@ function notifyFnbDailyChanged() {
   if (typeof window !== "undefined") {
     window.dispatchEvent(new CustomEvent("frontbill:fnb-daily-changed"));
     window.dispatchEvent(new CustomEvent("frontbill:supply-stock-changed"));
+    markLocalSupplyMutation();
   }
 }
 
@@ -541,11 +573,13 @@ function useSupplyChainImpl() {
     );
     try {
       await saveSupplySnapshots(userId, payload, orgIdRef.current || undefined);
+      broadcastSupplyLiveUpdate();
     } catch (err) {
       // One retry after a short delay (covers brief session refresh races).
       await new Promise((r) => setTimeout(r, 400));
       try {
         await saveSupplySnapshots(userId, payload, orgIdRef.current || undefined);
+        broadcastSupplyLiveUpdate();
       } catch (err2) {
         if (isRetryableSupplyError(err2)) {
           console.warn("[supply-chain] snapshot sync retryable:", err2);
@@ -801,19 +835,48 @@ function useSupplyChainImpl() {
     basket,
   ]);
 
-  /** Refresh kitchen production runs + batch standards across staff (chef ↔ admin). */
+  /** Pull live stock (and batch standards) so kitchen / F&B update without a full page refresh. */
   useEffect(() => {
     if (!useDbPersistence || !dbHydrated) return;
 
     let cancelled = false;
 
-    const refreshKitchenSnapshots = async () => {
+    const refreshLiveSupply = async (fromOtherTab = false) => {
+      if (
+        !fromOtherTab &&
+        Date.now() - lastLocalSupplyMutationAt < 2500
+      ) {
+        return;
+      }
       try {
-        const snapshots = await fetchSupplySnapshots(
-          userId,
-          organizationId || undefined,
-        );
+        const [snapshots, catalog] = await Promise.all([
+          fetchSupplySnapshots(userId, organizationId || undefined),
+          fetchSupplyCatalog(userId, organizationId || undefined).catch(() => null),
+        ]);
         if (cancelled) return;
+
+        let changed = false;
+        changed = applyRemoteArray(setKitchenRawStock, snapshots.kitchen_raw_stock) || changed;
+        changed = applyRemoteArray(setFnbRawStock, snapshots.fnb_raw_stock) || changed;
+        changed = applyRemoteArray(setBarStock, snapshots.bar_stock) || changed;
+        changed = applyRemoteArray(setKitchenStock, snapshots.kitchen_stock) || changed;
+        changed = applyRemoteArray(setIssueOutLog, snapshots.issue_out_log) || changed;
+        changed = applyRemoteArray(setFnbDailySheets, snapshots.fnb_daily_sheets) || changed;
+        changed = applyRemoteArray(setFnbMovements, snapshots.fnb_movements) || changed;
+
+        if (Array.isArray(catalog) && catalog.length > 0) {
+          const next = catalog.map(applyStoreItemDeptFields);
+          setStoreItems((prev) => {
+            try {
+              if (JSON.stringify(prev) === JSON.stringify(next)) return prev;
+            } catch {
+              changed = true;
+              return next;
+            }
+            changed = true;
+            return next;
+          });
+        }
 
         const remoteBatches = snapshots.batches;
         if (Array.isArray(remoteBatches)) {
@@ -823,6 +886,7 @@ function useSupplyChainImpl() {
               remoteBatches as ProductionBatch[],
             );
             if (JSON.stringify(prev) === JSON.stringify(merged)) return prev;
+            changed = true;
             return merged;
           });
         }
@@ -832,8 +896,18 @@ function useSupplyChainImpl() {
           setRecipes((prev) => {
             const merged = mergeRecipesFromRemote(prev, remoteRecipes as Recipe[]);
             if (JSON.stringify(prev) === JSON.stringify(merged)) return prev;
+            changed = true;
             return merged;
           });
+        }
+
+        if (changed && typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("frontbill:supply-stock-changed"));
+          window.dispatchEvent(new CustomEvent("frontbill:kitchen-raw-stock"));
+          window.dispatchEvent(new CustomEvent("frontbill:fnb-raw-stock-changed"));
+          window.dispatchEvent(new CustomEvent("frontbill:bar-stock-changed"));
+          window.dispatchEvent(new CustomEvent("frontbill:issue-out-log-changed"));
+          window.dispatchEvent(new CustomEvent("frontbill:fnb-daily-changed"));
         }
       } catch {
         /* non-blocking */
@@ -841,17 +915,24 @@ function useSupplyChainImpl() {
     };
 
     const onVis = () => {
-      if (document.visibilityState === "visible") void refreshKitchenSnapshots();
+      if (document.visibilityState === "visible") void refreshLiveSupply();
     };
 
-    void refreshKitchenSnapshots();
+    const firstPoll = window.setTimeout(() => void refreshLiveSupply(), 1_500);
     document.addEventListener("visibilitychange", onVis);
-    const interval = window.setInterval(refreshKitchenSnapshots, 30_000);
+    const interval = window.setInterval(() => void refreshLiveSupply(), 8_000);
+    const unsubscribeLive = subscribeSupplyLiveUpdates(() => {
+      window.setTimeout(() => {
+        if (!cancelled) void refreshLiveSupply(true);
+      }, 700);
+    });
 
     return () => {
       cancelled = true;
       document.removeEventListener("visibilitychange", onVis);
+      window.clearTimeout(firstPoll);
       window.clearInterval(interval);
+      unsubscribeLive();
     };
   }, [useDbPersistence, dbHydrated, userId, organizationId]);
 
@@ -2926,6 +3007,7 @@ function useSupplyChainImpl() {
         unitFactors: input.unitFactors,
       });
       setStoreItems((prev) => [item, ...prev]);
+      markLocalSupplyMutation();
       setActivityLog((a) =>
         log(a, "stock_received", actor, `Added store item: ${name}`, item.id),
       );
@@ -2940,6 +3022,7 @@ function useSupplyChainImpl() {
           })
           .finally(() => {
             catalogSyncSkipRef.current = false;
+            broadcastSupplyLiveUpdate();
           });
       }
       return { ok: true, item };
@@ -2998,6 +3081,7 @@ function useSupplyChainImpl() {
       setStoreItems((prev) =>
         prev.map((s) => (s.id === itemId ? nextItem : s)),
       );
+      markLocalSupplyMutation();
       setActivityLog((a) =>
         log(a, "stock_received", actor, `Updated store item: ${name}`, itemId),
       );
@@ -3019,6 +3103,7 @@ function useSupplyChainImpl() {
           })
           .finally(() => {
             catalogSyncSkipRef.current = false;
+            broadcastSupplyLiveUpdate();
           });
       }
       return { ok: true };
@@ -3032,6 +3117,7 @@ function useSupplyChainImpl() {
       if (!existing) return { error: "Store item not found" };
       setStoreItems((prev) => prev.filter((s) => s.id !== itemId));
       setBasket((prev) => prev.filter((b) => b.stockItemId !== itemId));
+      markLocalSupplyMutation();
       setActivityLog((a) =>
         log(
           a,
@@ -3051,6 +3137,7 @@ function useSupplyChainImpl() {
           })
           .finally(() => {
             catalogSyncSkipRef.current = false;
+            broadcastSupplyLiveUpdate();
           });
       }
       return { ok: true };
