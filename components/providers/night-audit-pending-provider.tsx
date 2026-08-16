@@ -8,6 +8,7 @@ import {
   type NightAuditPendingCounts,
 } from '@/lib/night-audit/pending-approval-counts'
 import { NightAuditPendingCountContext } from '@/hooks/use-night-audit-pending-counts'
+import { quietBrowserFetch } from '@/lib/utils/fetch-retry'
 
 const PENDING_COUNT_POLL_MS = 180_000
 
@@ -33,21 +34,18 @@ export function NightAuditPendingProvider({ children }: { children: React.ReactN
     let cancelled = false
 
     const load = async () => {
-      const controller = new AbortController()
-      const timer = setTimeout(() => controller.abort(), 8_000)
       try {
-        const res = await fetch(
+        const res = await quietBrowserFetch(
           `/api/night-audit/pending-counts?caller_id=${encodeURIComponent(userId)}`,
-          { credentials: 'include', signal: controller.signal },
+          { credentials: 'include' },
         )
+        if (!res) return
         const json = await res.json().catch(() => ({}))
         if (!cancelled && json.counts && typeof json.counts.total === 'number') {
           setCounts(json.counts as NightAuditPendingCounts)
         }
       } catch {
         if (!cancelled) setCounts(EMPTY_NIGHT_AUDIT_PENDING_COUNTS)
-      } finally {
-        clearTimeout(timer)
       }
     }
 

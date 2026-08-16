@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -21,7 +21,7 @@ export type ColumnResponsive = 'always' | 'md+' | 'lg+'
 export interface Column<T> {
   key: keyof T | string
   label: string
-  render?: (item: T) => React.ReactNode
+  render?: (item: T) => ReactNode
   responsive?: ColumnResponsive
   /** Keep visible when scrolling wide tables on phones (e.g. Actions). */
   stickyOnMobile?: boolean
@@ -55,7 +55,7 @@ interface EnhancedDataTableProps<T> {
    */
   controlledActiveFilters?: Record<string, string>
   onControlledActiveFiltersChange?: (next: Record<string, string>) => void
-  renderCard?: (item: T) => React.ReactNode
+  renderCard?: (item: T) => ReactNode
   itemsPerPage?: number
   dateField?: keyof T
   /**

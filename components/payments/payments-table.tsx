@@ -26,8 +26,12 @@ export function PaymentsTable({ payments }: PaymentsTableProps) {
       header: 'Reference',
       accessor: (payment) => (payment as any).reference_number || (payment as any).payment_reference || payment.id,
       className: 'hidden md:table-cell',
-      cell: (value) => (
-        <span className="font-mono text-sm">{value}</span>
+      cell: (payment) => (
+        <span className="font-mono text-sm">
+          {(payment as Payment & { reference_number?: string }).reference_number ||
+            payment.payment_reference ||
+            payment.id}
+        </span>
       ),
     },
     {
@@ -40,7 +44,7 @@ export function PaymentsTable({ payments }: PaymentsTableProps) {
         if (row.guest) return `${row.guest.first_name || ''} ${row.guest.last_name || ''}`.trim()
         return 'N/A'
       },
-      cell: (_, payment) => (
+      cell: (payment) => (
         <div>
           {(payment as any).organization ? (
             <>
@@ -66,24 +70,24 @@ export function PaymentsTable({ payments }: PaymentsTableProps) {
     {
       header: 'Amount',
       accessor: 'amount',
-      cell: (value) => (
-        <span className="font-semibold text-green-600 text-xs md:text-sm">{formatNaira(value)}</span>
+      cell: (payment) => (
+        <span className="font-semibold text-green-600 text-xs md:text-sm">{formatNaira(payment.amount)}</span>
       ),
     },
     {
       header: 'Method',
       accessor: 'payment_method',
       className: 'hidden md:table-cell',
-      cell: (value) => (
-        <Badge className={methodBadgeClass(String(value))} variant="secondary">
-          {String(value).toUpperCase()}
+      cell: (payment) => (
+        <Badge className={methodBadgeClass(String(payment.payment_method))} variant="secondary">
+          {String(payment.payment_method).toUpperCase()}
         </Badge>
       ),
     },
     {
       header: 'Date',
       accessor: 'payment_date',
-      cell: (value) => formatDateTime(value),
+      cell: (payment) => formatDateTime(payment.payment_date),
       className: 'hidden lg:table-cell',
     },
   ]
@@ -96,7 +100,7 @@ export function PaymentsTable({ payments }: PaymentsTableProps) {
       searchPlaceholder="Search reference, payer, amount…"
       searchMatch={(payment, query) => {
         const q = query.trim().toLowerCase()
-        const row = payment as Record<string, unknown>
+        const row = payment as unknown as Record<string, unknown>
         const ref = String(row.reference_number || row.payment_reference || payment.id)
         const org = (row.organization as { name?: string } | undefined)?.name ?? ''
         const guest =

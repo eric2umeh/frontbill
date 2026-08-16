@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import {
   Table,
   TableBody,
@@ -15,8 +15,8 @@ import { TableListControls } from '@/components/shared/table-list-controls'
 
 export interface Column<T> {
   header: string
-  accessor: keyof T | ((row: T) => React.ReactNode)
-  cell?: (value: unknown, row: T) => React.ReactNode
+  accessor: keyof T | ((row: T) => unknown)
+  cell?: (row: T) => ReactNode
   className?: string
 }
 
@@ -34,6 +34,13 @@ interface DataTableProps<T> {
   filterMatch?: (item: T, filterKey: string, filterValue: string) => boolean | undefined
   hideSearch?: boolean
   toolbarClassName?: string
+}
+
+function toCellNode(value: unknown): ReactNode {
+  if (value == null || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return value
+  }
+  return String(value)
 }
 
 export function DataTable<T extends { id: string }>({
@@ -66,11 +73,11 @@ export function DataTable<T extends { id: string }>({
 
   const showControls = !hideSearch || filters.length > 0 || data.length > pageSize
 
-  const getCellValue = (row: T, column: Column<T>) => {
+  const getCellValue = (row: T, column: Column<T>): ReactNode => {
     if (typeof column.accessor === 'function') {
-      return column.accessor(row)
+      return toCellNode(column.accessor(row))
     }
-    return row[column.accessor]
+    return toCellNode(row[column.accessor])
   }
 
   return (
@@ -125,14 +132,11 @@ export function DataTable<T extends { id: string }>({
                   onClick={() => onRowClick?.(row)}
                   className={cn(onRowClick && 'cursor-pointer hover:bg-muted/50')}
                 >
-                  {columns.map((column, index) => {
-                    const value = getCellValue(row, column)
-                    return (
-                      <TableCell key={index} className={column.className}>
-                        {column.cell ? column.cell(value, row) : (value as React.ReactNode)}
-                      </TableCell>
-                    )
-                  })}
+                  {columns.map((column, index) => (
+                    <TableCell key={index} className={column.className}>
+                      {column.cell ? column.cell(row) : getCellValue(row, column)}
+                    </TableCell>
+                  ))}
                 </TableRow>
               ))
             )}

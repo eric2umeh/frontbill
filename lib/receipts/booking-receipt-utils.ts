@@ -43,11 +43,11 @@ export function buildFolioContextLinesForReceipt(
   charges: Array<{
     id?: string;
     type?: string;
-    description?: string;
+    description?: string | null;
     amount?: number;
-    paymentStatus?: string;
-    paymentMethod?: string;
-    payment_method?: string;
+    paymentStatus?: string | null;
+    paymentMethod?: string | null;
+    payment_method?: string | null;
   }>,
 ): string[] {
   const types = new Set([
@@ -87,13 +87,14 @@ export function buildFolioContextLinesForReceipt(
   return lines.slice(-24);
 }
 
-export function filterPaymentLedgerTransactions(
-  txRows: Array<{
+export function filterPaymentLedgerTransactions<
+  T extends {
     transaction_id?: string | null;
     description?: string | null;
     status?: string | null;
-  }>,
-) {
+    received_by?: string | null;
+  },
+>(txRows: T[] | null | undefined): T[] {
   return (txRows || []).filter((t) => {
     const st = String(t.status || "").toLowerCase();
     if (st === "void" || st === "cancelled") return false;

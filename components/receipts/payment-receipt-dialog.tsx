@@ -40,7 +40,7 @@ type OrgProfile = PaymentReceiptBranding;
 
 type BookingLike = {
   folio_id?: string | null;
-  guests?: { name?: string | null };
+  guests?: { name?: string | null } | null;
   guestName?: string | null;
   rooms?: { room_number?: string | null } | null;
   /** Outstanding folio balance (when known). */
@@ -122,7 +122,7 @@ type PaymentReceiptDialogProps = {
   organization: OrgProfile | null;
   booking: BookingLike | null;
   charge: PaymentReceiptChargeRow | null;
-  currentUserName: string | null;
+  currentUserName: string | null | undefined;
   /** Listed on payment receipts: room, add-on, extension, etc. */
   folioContextLines?: string[] | null;
 };

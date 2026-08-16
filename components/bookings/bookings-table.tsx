@@ -30,14 +30,14 @@ export function BookingsTable({ bookings }: BookingsTableProps) {
     {
       header: 'Booking #',
       accessor: 'booking_number',
-      cell: (value) => (
-        <span className="font-mono text-sm">{value}</span>
+      cell: (booking) => (
+        <span className="font-mono text-sm">{booking.booking_number}</span>
       ),
     },
     {
       header: 'Guest',
       accessor: (booking) => booking.guest ? `${booking.guest.first_name} ${booking.guest.last_name}` : 'N/A',
-      cell: (_, booking) => (
+      cell: (booking) => (
         <div>
           <p className="font-medium">{booking.guest?.first_name} {booking.guest?.last_name}</p>
           {booking.organization && (
@@ -54,7 +54,7 @@ export function BookingsTable({ bookings }: BookingsTableProps) {
     {
       header: 'Check-in/out',
       accessor: (booking) => `${formatDate(booking.check_in)} - ${formatDate(booking.check_out)}`,
-      cell: (_, booking) => (
+      cell: (booking) => (
         <div className="text-sm">
           <p>{formatDate(booking.check_in)}</p>
           <p className="text-muted-foreground">{formatDate(booking.check_out)}</p>
@@ -65,9 +65,9 @@ export function BookingsTable({ bookings }: BookingsTableProps) {
     {
       header: 'Amount',
       accessor: 'total_amount',
-      cell: (value, booking) => (
+      cell: (booking) => (
         <div className="text-right">
-          <p className="font-semibold">{formatNaira(value)}</p>
+          <p className="font-semibold">{formatNaira(booking.total_amount)}</p>
           {booking.balance > 0 && (
             <p className="text-xs text-red-600">₦{booking.balance} due</p>
           )}
@@ -77,10 +77,10 @@ export function BookingsTable({ bookings }: BookingsTableProps) {
     {
       header: 'Status',
       accessor: 'status',
-      cell: (value, booking) => (
+      cell: (booking) => (
         <div className="space-y-1">
-          <Badge className={statusColors[value]} variant="secondary">
-            {value.replace('_', ' ')}
+          <Badge className={statusColors[booking.status]} variant="secondary">
+            {booking.status.replace('_', ' ')}
           </Badge>
           <Badge className={paymentColors[booking.payment_status]} variant="secondary">
             {booking.payment_status}

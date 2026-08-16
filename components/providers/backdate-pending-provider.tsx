@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { useAuth } from '@/lib/auth-context'
 import { hasPermission } from '@/lib/permissions'
 import { BackdatePendingCountContext } from '@/hooks/use-backdate-pending-count'
+import { quietBrowserFetch } from '@/lib/utils/fetch-retry'
 
 /** Single poll for sidebar + Night Audit badges (avoids duplicate hooks calling the same API). */
 const PENDING_COUNT_POLL_MS = 180_000
@@ -22,19 +23,16 @@ export function BackdatePendingProvider({ children }: { children: React.ReactNod
     let cancelled = false
 
     const load = async () => {
-      const controller = new AbortController()
-      const timer = setTimeout(() => controller.abort(), 8_000)
       try {
-        const res = await fetch(
+        const res = await quietBrowserFetch(
           `/api/backdate-requests/pending-count?caller_id=${encodeURIComponent(userId)}`,
-          { credentials: 'include', signal: controller.signal },
+          { credentials: 'include' },
         )
+        if (!res) return
         const json = await res.json().catch(() => ({}))
         if (!cancelled && typeof json.count === 'number') setCount(json.count)
       } catch {
         if (!cancelled) setCount(0)
-      } finally {
-        clearTimeout(timer)
       }
     }
 

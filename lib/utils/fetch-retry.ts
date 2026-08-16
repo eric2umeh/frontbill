@@ -51,3 +51,22 @@ export function networkFetchHint(detail: string): string | null {
   }
   return null
 }
+
+/**
+ * Layout/badge fetches: never abort (AbortError shows in the Next overlay as Failed to fetch).
+ * Returns null on transient network errors so Fast Refresh does not toast a crash.
+ */
+export async function quietBrowserFetch(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+): Promise<Response | null> {
+  try {
+    const { signal: _ignored, ...rest } = (init ?? {}) as RequestInit & {
+      signal?: AbortSignal
+    }
+    return await fetch(input, rest)
+  } catch (err) {
+    if (isTransientNetworkError(err)) return null
+    throw err
+  }
+}

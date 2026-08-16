@@ -29,6 +29,7 @@ import { formatNaira } from '@/lib/utils/currency'
 import { playNotificationBeep } from '@/lib/utils/play-notification-beep'
 import { addDays, formatDistanceToNow, setHours, setMinutes } from 'date-fns'
 import { BRAND_LOGO_SESSION_KEY } from '@/lib/branding/constants'
+import { isTransientNetworkError, quietBrowserFetch } from '@/lib/utils/fetch-retry'
 
 /** Supabase-backed notification slice (transactions, bookings, rooms, …) */
 const NOTIFICATION_CORE_POLL_MS = 60_000
@@ -83,6 +84,7 @@ export function Header({ user, onMenuClick }: HeaderProps) {
   const backdateDecidedNotificationsRef = useRef<Notification[]>([])
   const nightAuditPendingNotificationsRef = useRef<Notification[]>([])
   const supplyNotificationsRef = useRef<Notification[]>([])
+  const coreNotifInFlight = useRef(false)
   const roleKey = canonicalRoleKey(user.role) ?? ''
   const router = useRouter()
   const { organizationId } = useAuth()
@@ -141,6 +143,8 @@ export function Header({ user, onMenuClick }: HeaderProps) {
   const fetchCoreNotifications = useCallback(async () => {
     const supabase = createClient()
     if (!supabase || !organizationId) return
+    if (coreNotifInFlight.current) return
+    coreNotifInFlight.current = true
 
     try {
       const now = new Date()
@@ -355,7 +359,11 @@ export function Header({ user, onMenuClick }: HeaderProps) {
       ]
       mergeNotificationSlices()
     } catch (error) {
-      console.error('Error fetching notifications:', error)
+      if (!isTransientNetworkError(error)) {
+        console.warn('Error fetching notifications:', error instanceof Error ? error.message : error)
+      }
+    } finally {
+      coreNotifInFlight.current = false
     }
   }, [organizationId, readIds, user.id, user.role, mergeNotificationSlices])
 
@@ -365,15 +373,15 @@ export function Header({ user, onMenuClick }: HeaderProps) {
     try {
       const [backdateJson, pendingJson] = await Promise.all([
         user.id && user.id !== 'placeholder'
-          ? fetch(`/api/backdate-requests?caller_id=${user.id}`, { credentials: 'include' })
-              .then((r) => r.json())
+          ? quietBrowserFetch(`/api/backdate-requests?caller_id=${user.id}`, { credentials: 'include' })
+              .then((r) => (r ? r.json() : { requests: [] as unknown[] }))
               .catch(() => ({ requests: [] as unknown[] }))
           : Promise.resolve({ requests: [] as unknown[] }),
         user.id && user.id !== 'placeholder'
-          ? fetch(`/api/night-audit/pending-notifications?caller_id=${user.id}`, {
+          ? quietBrowserFetch(`/api/night-audit/pending-notifications?caller_id=${user.id}`, {
               credentials: 'include',
             })
-              .then((r) => r.json())
+              .then((r) => (r ? r.json() : { notifications: [] as unknown[] }))
               .catch(() => ({ notifications: [] as unknown[] }))
           : Promise.resolve({ notifications: [] as unknown[] }),
       ])
@@ -485,7 +493,12 @@ export function Header({ user, onMenuClick }: HeaderProps) {
 
       mergeNotificationSlices()
     } catch (error) {
-      console.error('Error fetching backdate notifications:', error)
+      if (!isTransientNetworkError(error)) {
+        console.warn(
+          'Error fetching backdate notifications:',
+          error instanceof Error ? error.message : error,
+        )
+      }
     }
   }, [organizationId, readIds, user.id, user.role, mergeNotificationSlices])
 

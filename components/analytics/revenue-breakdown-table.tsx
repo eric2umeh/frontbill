@@ -27,7 +27,7 @@ export function RevenueBreakdownTable({ payments }: RevenueBreakdownTableProps) 
     {
       header: 'Date',
       accessor: 'payment_date',
-      cell: (value) => formatDate(value),
+      cell: (payment) => formatDate(payment.payment_date),
     },
     {
       header: 'Payer',
@@ -36,7 +36,7 @@ export function RevenueBreakdownTable({ payments }: RevenueBreakdownTableProps) 
         if (payment.guest) return `${payment.guest.first_name} ${payment.guest.last_name}`
         return 'N/A'
       },
-      cell: (_, payment) => (
+      cell: (payment) => (
         <div>
           <p className="font-medium">
             {payment.organization?.name || 
@@ -51,7 +51,7 @@ export function RevenueBreakdownTable({ payments }: RevenueBreakdownTableProps) 
     {
       header: 'Guest/Booking',
       accessor: (payment) => payment.booking?.guest,
-      cell: (_, payment) => (
+      cell: (payment) => (
         <div className="text-sm">
           {payment.booking ? (
             <>
@@ -70,27 +70,30 @@ export function RevenueBreakdownTable({ payments }: RevenueBreakdownTableProps) 
     {
       header: 'Amount',
       accessor: 'amount',
-      cell: (value) => (
-        <span className="font-semibold">{formatNaira(value)}</span>
+      cell: (payment) => (
+        <span className="font-semibold">{formatNaira(payment.amount)}</span>
       ),
     },
     {
       header: 'Method',
       accessor: 'payment_method',
-      cell: (value) => (
-        <Badge className={methodBadgeClass(String(value))} variant="secondary">
-          {String(value).toUpperCase()}
+      cell: (payment) => (
+        <Badge className={methodBadgeClass(String(payment.payment_method))} variant="secondary">
+          {String(payment.payment_method).toUpperCase()}
         </Badge>
       ),
     },
     {
       header: 'Status',
       accessor: (payment) => payment.booking?.payment_status || 'completed',
-      cell: (value) => (
-        <Badge variant={value === 'paid' ? 'default' : 'secondary'}>
-          {value === 'paid' ? 'Fully Paid' : value === 'partial' ? 'Partial' : 'Pending'}
-        </Badge>
-      ),
+      cell: (payment) => {
+        const value = payment.booking?.payment_status || 'completed'
+        return (
+          <Badge variant={value === 'paid' ? 'default' : 'secondary'}>
+            {value === 'paid' ? 'Fully Paid' : value === 'partial' ? 'Partial' : 'Pending'}
+          </Badge>
+        )
+      },
       className: 'hidden md:table-cell',
     },
   ]

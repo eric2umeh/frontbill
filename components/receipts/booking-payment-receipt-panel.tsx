@@ -114,9 +114,10 @@ export function BookingPaymentReceiptPanel({
           .eq('booking_id', bookingId)
           .order('created_at', { ascending: true })
 
-        const chargeCreatorIds = (chargesData || [])
-          .map((c: { created_by?: string }) => c.created_by)
-          .filter(Boolean)
+        const chargeRows = (chargesData ?? []) as Array<{ created_by?: string | null }>
+        const chargeCreatorIds = chargeRows
+          .map((c) => c.created_by)
+          .filter((id: string | null | undefined): id is string => typeof id === 'string' && id.length > 0)
         const chargeCreatorMap = await fetchUserDisplayNameMap(chargeCreatorIds, userId)
 
         setFolioCharges(
@@ -169,10 +170,10 @@ export function BookingPaymentReceiptPanel({
       const receiverIds = [
         ...new Set(
           payLedgerRaw
-            .map((t: { received_by?: string | null }) => t.received_by)
-            .filter(Boolean),
+            .map((t) => t.received_by)
+            .filter((id): id is string => typeof id === 'string' && id.length > 0),
         ),
-      ] as string[]
+      ]
       const receiverMap =
         receiverIds.length > 0 ? await fetchUserDisplayNameMap(receiverIds, userId) : {}
 

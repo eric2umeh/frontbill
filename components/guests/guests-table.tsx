@@ -21,7 +21,7 @@ export function GuestsTable({ guests }: GuestsTableProps) {
     {
       header: 'Name',
       accessor: (guest) => `${guest.first_name} ${guest.last_name}`,
-      cell: (_, guest) => (
+      cell: (guest) => (
         <div className="cursor-pointer hover:text-primary" onClick={() => handleRowClick(guest)}>
           <p className="font-medium">{guest.first_name} {guest.last_name}</p>
           {guest.organization && (
@@ -33,7 +33,7 @@ export function GuestsTable({ guests }: GuestsTableProps) {
     {
       header: 'Contact',
       accessor: (guest) => guest.phone,
-      cell: (_, guest) => (
+      cell: (guest) => (
         <div className="space-y-1 cursor-pointer" onClick={() => handleRowClick(guest)}>
           <div className="flex items-center gap-1 text-sm">
             <Phone className="h-3 w-3 text-muted-foreground" />
@@ -51,9 +51,9 @@ export function GuestsTable({ guests }: GuestsTableProps) {
     {
       header: 'Nationality',
       accessor: 'nationality',
-      cell: (value, guest) => (
+      cell: (guest) => (
         <div className="cursor-pointer" onClick={() => handleRowClick(guest)}>
-          {value}
+          {guest.nationality}
         </div>
       ),
       className: 'hidden md:table-cell',
@@ -61,10 +61,10 @@ export function GuestsTable({ guests }: GuestsTableProps) {
     {
       header: 'Status',
       accessor: (guest) => guest.is_active,
-      cell: (value, guest) => (
+      cell: (guest) => (
         <div className="cursor-pointer" onClick={() => handleRowClick(guest)}>
-          <Badge variant={value ? 'default' : 'secondary'}>
-            {value ? 'Active' : 'Inactive'}
+          <Badge variant={guest.is_active ? 'default' : 'secondary'}>
+            {guest.is_active ? 'Active' : 'Inactive'}
           </Badge>
         </div>
       ),
