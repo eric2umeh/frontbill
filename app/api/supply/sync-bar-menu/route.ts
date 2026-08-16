@@ -3,6 +3,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { createClient } from '@/lib/supabase/server'
 import { hasPermission } from '@/lib/permissions'
 import { outletSlugify } from '@/lib/outlets/slug'
+import { barMenuUnitPriceForSync } from '@/lib/supply-chain/bar-menu-sync-price'
 import { toTitleCaseWords } from '@/lib/supply-chain/title-case'
 
 export async function POST(request: Request) {
@@ -79,7 +80,7 @@ export async function POST(request: Request) {
 
   const { data: existingItems } = await admin
     .from('outlet_menu_items')
-    .select('id, name, service_code')
+    .select('id, name, service_code, unit_price')
     .eq('organization_id', organizationId)
     .eq('department', department)
 
@@ -89,17 +90,19 @@ export async function POST(request: Request) {
     existingItems?.find((i) => i.name.trim().toLowerCase() === nameNorm)
 
   if (existing) {
+    const patch: Record<string, unknown> = {
+      name: itemName,
+      category_id: categoryId,
+      service_code: serviceCode,
+      is_active: true,
+      updated_by: user.id,
+      updated_at: new Date().toISOString(),
+    }
+    const nextPrice = barMenuUnitPriceForSync(unitPrice, Number(existing.unit_price))
+    if (nextPrice !== undefined) patch.unit_price = nextPrice
     const { data: updated, error: ue } = await admin
       .from('outlet_menu_items')
-      .update({
-        name: itemName,
-        category_id: categoryId,
-        unit_price: unitPrice,
-        service_code: serviceCode,
-        is_active: true,
-        updated_by: user.id,
-        updated_at: new Date().toISOString(),
-      })
+      .update(patch)
       .eq('id', existing.id)
       .select()
       .single()
