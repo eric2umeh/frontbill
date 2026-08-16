@@ -59,6 +59,7 @@ import {
   formatOutletStockQtyDisplay,
 } from '@/lib/outlets/outlet-supply-stock'
 import { seedDefaultDrinkCategories } from '@/lib/outlets/seed-drink-categories'
+import { titleCaseWhileTyping, toTitleCaseWords } from '@/lib/supply-chain/title-case'
 
 type Props = {
   department: OutletDepartmentKey
@@ -123,7 +124,7 @@ export function OutletMenuManager({ department, categories, items, canManage, on
     const groups: { id: string; name: string; items: typeof filteredItems }[] = []
     for (const c of sortedCategories) {
       const its = filteredItems.filter((it) => it.category_id === c.id)
-      if (its.length) groups.push({ id: c.id, name: c.name, items: its })
+      if (its.length) groups.push({ id: c.id, name: toTitleCaseWords(c.name), items: its })
     }
     const uncat = filteredItems.filter((it) => !it.category_id)
     if (uncat.length) groups.push({ id: '__uncategorized__', name: 'Uncategorized', items: uncat })
@@ -150,7 +151,7 @@ export function OutletMenuManager({ department, categories, items, canManage, on
 
   const openEditCategory = (c: OutletMenuCategoryRow) => {
     setEditCategory(c)
-    setEditCatName(c.name)
+    setEditCatName(toTitleCaseWords(c.name))
     setEditCatPriceEditable(!!c.price_editable)
   }
 
@@ -217,7 +218,7 @@ export function OutletMenuManager({ department, categories, items, canManage, on
         credentials: 'include',
         body: JSON.stringify({
           department,
-          name: newCatName.trim(),
+          name: toTitleCaseWords(newCatName),
           price_editable: newCatPriceEditable,
         }),
       })
@@ -245,7 +246,7 @@ export function OutletMenuManager({ department, categories, items, canManage, on
         credentials: 'include',
         body: JSON.stringify({
           id: editCategory.id,
-          name: editCatName.trim(),
+          name: toTitleCaseWords(editCatName),
           price_editable: editCatPriceEditable,
         }),
       })
@@ -480,7 +481,7 @@ export function OutletMenuManager({ department, categories, items, canManage, on
                 className="h-7 text-xs"
                 onClick={() => setItemCategoryFilter(c.id)}
               >
-                {c.parent_id ? `↳ ${c.name}` : c.name}
+                {c.parent_id ? `↳ ${toTitleCaseWords(c.name)}` : toTitleCaseWords(c.name)}
               </Button>
             ))}
           </div>
@@ -653,7 +654,7 @@ export function OutletMenuManager({ department, categories, items, canManage, on
             <CardTitle>Categories</CardTitle>
             <CardDescription>
               {drinkMenu
-                ? 'Group drinks (Wine, Soft Drink, Cocktail, Spirits, …). Same list as F&B Store. F&B, Admin, Manager, or Superadmin can create categories.'
+                ? 'Group drinks (Wine, Soft Drink, Cocktail, Spirits, …). Same list as F&B Store. F&B, Admin, Manager, or Superadmin can create, edit, and delete categories. Each word is capitalised.'
                 : 'Group items (e.g. Buffet, Banquets). Enable flexible POS price for categories where the cashier may change the amount per order only.'}
             </CardDescription>
           </CardHeader>
@@ -664,7 +665,7 @@ export function OutletMenuManager({ department, categories, items, canManage, on
                   <Input
                     placeholder="New category name"
                     value={newCatName}
-                    onChange={(e) => setNewCatName(e.target.value)}
+                    onChange={(e) => setNewCatName(titleCaseWhileTyping(e.target.value))}
                     onKeyDown={(e) => e.key === 'Enter' && void addCategory()}
                   />
                   <Button type="button" onClick={() => void addCategory()} disabled={saving}>
@@ -721,7 +722,7 @@ export function OutletMenuManager({ department, categories, items, canManage, on
                   <li key={c.id} className="flex items-center justify-between gap-2 py-0.5">
                     <span className="min-w-0">
                       {c.parent_id ? '↳ ' : ''}
-                      {c.name}
+                      {toTitleCaseWords(c.name)}
                       {c.price_editable ? (
                         <Badge variant="secondary" className="ml-1.5 text-[9px] h-4 px-1">
                           Flex price
@@ -782,7 +783,7 @@ export function OutletMenuManager({ department, categories, items, canManage, on
                     <SelectItem value="__none__">Uncategorized</SelectItem>
                     {sortedCategories.map((c) => (
                       <SelectItem key={c.id} value={c.id}>
-                        {c.parent_id ? `↳ ${c.name}` : c.name}
+                        {c.parent_id ? `↳ ${toTitleCaseWords(c.name)}` : toTitleCaseWords(c.name)}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -846,7 +847,10 @@ export function OutletMenuManager({ department, categories, items, canManage, on
           <div className="space-y-3">
             <div className="space-y-1">
               <Label>Name</Label>
-              <Input value={editCatName} onChange={(e) => setEditCatName(e.target.value)} />
+              <Input
+                value={editCatName}
+                onChange={(e) => setEditCatName(titleCaseWhileTyping(e.target.value))}
+              />
             </div>
             <div className="flex items-center gap-2 rounded-md border bg-muted/30 px-2 py-2">
               <Switch
@@ -899,7 +903,7 @@ export function OutletMenuManager({ department, categories, items, canManage, on
                   <SelectItem value="__none__">Uncategorized</SelectItem>
                   {sortedCategories.map((c) => (
                     <SelectItem key={c.id} value={c.id}>
-                      {c.parent_id ? `↳ ${c.name}` : c.name}
+                      {c.parent_id ? `↳ ${toTitleCaseWords(c.name)}` : toTitleCaseWords(c.name)}
                     </SelectItem>
                   ))}
                 </SelectContent>

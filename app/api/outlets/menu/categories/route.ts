@@ -3,6 +3,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { resolveOutletAuthed, resolveOutletMenuManage } from '@/lib/outlets/api-auth'
 import { canAccessOutletDepartment } from '@/lib/outlets/access'
 import { outletSlugify } from '@/lib/outlets/slug'
+import { toTitleCaseWords } from '@/lib/supply-chain/title-case'
 import { isOutletDepartmentKey } from '@/lib/outlets/departments'
 
 export async function GET(request: Request) {
@@ -31,7 +32,7 @@ export async function POST(request: Request) {
 
   const body = await request.json().catch(() => ({}))
   const department = body?.department as string
-  const name = String(body?.name || '').trim()
+  const name = toTitleCaseWords(String(body?.name || ''))
   if (!isOutletDepartmentKey(department) || !name) {
     return NextResponse.json({ error: 'department and name required' }, { status: 400 })
   }
@@ -88,7 +89,7 @@ export async function PATCH(request: Request) {
     updated_at: new Date().toISOString(),
   }
   if (body.name != null) {
-    const name = String(body.name).trim()
+    const name = toTitleCaseWords(String(body.name).trim())
     if (!name) return NextResponse.json({ error: 'name cannot be empty' }, { status: 400 })
     patch.name = name
     if (body.slug == null) patch.slug = outletSlugify(name)

@@ -3,6 +3,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { createClient } from '@/lib/supabase/server'
 import { hasPermission } from '@/lib/permissions'
 import { outletSlugify } from '@/lib/outlets/slug'
+import { toTitleCaseWords } from '@/lib/supply-chain/title-case'
 
 export async function POST(request: Request) {
   const cookieSb = await createClient()
@@ -33,7 +34,7 @@ export async function POST(request: Request) {
 
   const body = await request.json().catch(() => ({}))
   const itemName = String(body?.itemName || '').trim()
-  const categoryName = String(body?.categoryName || '').trim() || 'Beverages'
+  const categoryName = toTitleCaseWords(String(body?.categoryName || '').trim() || 'Beverages')
   const barStockId = String(body?.barStockId || '').trim()
   const unitPrice = Number(body?.unitPrice)
 
