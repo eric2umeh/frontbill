@@ -99,7 +99,8 @@ import type { StockShortageLine } from "@/lib/ui/stock-shortage-dialog";
 import { useAuth } from "@/lib/auth-context";
 import { canManageFnbStore, canManageKitchenBatchStandards, hasPermission } from "@/lib/permissions";
 import { isRetryableSupplyError } from "@/lib/utils/fetch-retry";
-import { isFnbStoreDestination, issueCreditsFnbStore, formatSupplyActorStamp } from "./fnb-store";
+import { isMainBarIssueDestination } from "@/lib/store/outlet-departments";
+import { formatSupplyActorStamp } from "./fnb-store";
 import {
   deleteSupplyCatalogItem,
   fetchSupplyCatalog,
@@ -109,15 +110,23 @@ import {
   syncSupplyCatalog,
   updateSupplyCatalogItem,
 } from "./supply-db-client";
-import { resolveSupplySnapshot } from "./snapshot-merge";
+import { mergeSnapshotRowsById, resolveSupplySnapshot } from "./snapshot-merge";
 import { mergePurchaseOrdersFromRemote, dedupePurchaseOrders } from "./po-sync-merge";
 import {
+  isProductionBatchDeleted,
   mergeProductionBatchesFromRemote,
   mergeRecipesFromRemote,
+  visibleProductionBatches,
 } from "./kitchen-sync-merge";
-import { snapshotsPayloadForRole } from "./supply-snapshot-payload";
+import { canReadSupplySnapshots, snapshotsPayloadForRole } from "./supply-snapshot-payload";
 import { dedupeBatchMaterials } from "./parse-csv-row";
 import { broadcastSupplyLiveUpdate, subscribeSupplyLiveUpdates } from "./supply-live-sync";
+import {
+  canonicalBarStockId,
+  mergeBarStockFromRemote,
+  normalizeBarStockRows,
+} from "./bar-stock-normalize";
+import { applyRetirementLinesToCatalog } from "./retirement-stock";
 
 function applyRemoteArray<T>(
   setter: (updater: (prev: T[]) => T[]) => void,
@@ -134,6 +143,49 @@ function applyRemoteArray<T>(
     }
     changed = true;
     return remote as T[];
+  });
+  return changed;
+}
+
+/** Merge remote stock rows by id — local wins on conflict (protects in-flight transfers). */
+function applyRemoteStockArray<T extends { id: string }>(
+  setter: (updater: (prev: T[]) => T[]) => void,
+  remote: unknown,
+): boolean {
+  if (!Array.isArray(remote)) return false;
+  let changed = false;
+  setter((prev) => {
+    const merged = mergeSnapshotRowsById(remote as T[], prev);
+    try {
+      if (JSON.stringify(prev) === JSON.stringify(merged)) return prev;
+    } catch {
+      changed = true;
+      return merged;
+    }
+    changed = true;
+    return merged;
+  });
+  return changed;
+}
+
+function applyRemoteBarStockArray(
+  setter: (updater: (prev: BarStockItem[]) => void) => void,
+  remote: unknown,
+): boolean {
+  if (!Array.isArray(remote)) return false;
+  let changed = false;
+  setter((prev) => {
+    const merged = normalizeBarStockRows(
+      mergeBarStockFromRemote(prev, remote as BarStockItem[]),
+    );
+    try {
+      if (JSON.stringify(prev) === JSON.stringify(merged)) return prev;
+    } catch {
+      changed = true;
+      return merged;
+    }
+    changed = true;
+    return merged;
   });
   return changed;
 }
@@ -522,6 +574,7 @@ function useSupplyChainImpl() {
   const issueOutLogRef = useRef(issueOutLog);
   const activityLogRef = useRef(activityLog);
   const pendingStoreItemsRef = useRef(pendingStoreItems);
+  const storeItemsRef = useRef(storeItems);
   useEffect(() => {
     recipesRef.current = recipes;
     kitchenStockRef.current = kitchenStock;
@@ -535,6 +588,7 @@ function useSupplyChainImpl() {
     issueOutLogRef.current = issueOutLog;
     activityLogRef.current = activityLog;
     pendingStoreItemsRef.current = pendingStoreItems;
+    storeItemsRef.current = storeItems;
   }, [
     recipes,
     kitchenStock,
@@ -548,6 +602,7 @@ function useSupplyChainImpl() {
     issueOutLog,
     activityLog,
     pendingStoreItems,
+    storeItems,
   ]);
 
   const persistSnapshotsNow = useCallback(async (): Promise<void> => {
@@ -572,6 +627,7 @@ function useSupplyChainImpl() {
       },
       role,
     );
+    if (Object.keys(payload).length === 0) return;
     try {
       await saveSupplySnapshots(userId, payload, orgIdRef.current || undefined);
       broadcastSupplyLiveUpdate();
@@ -584,6 +640,11 @@ function useSupplyChainImpl() {
       } catch (err2) {
         if (isRetryableSupplyError(err2)) {
           console.warn("[supply-chain] snapshot sync retryable:", err2);
+          return;
+        }
+        const msg = err2 instanceof Error ? err2.message : "";
+        if (/^forbidden$/i.test(msg.trim())) {
+          console.warn("[supply-chain] snapshot sync skipped: Forbidden");
           return;
         }
         console.error("[supply-chain] snapshot sync failed", err2);
@@ -615,6 +676,10 @@ function useSupplyChainImpl() {
   /** Load catalogue + JSON snapshots from Supabase when authenticated. */
   useEffect(() => {
     if (!useDbPersistence) return;
+    if (!canReadSupplySnapshots(role)) {
+      setDbHydrated(true);
+      return;
+    }
     let cancelled = false;
     catalogSyncSkipRef.current = true;
     snapshotSyncSkipRef.current = true;
@@ -622,8 +687,12 @@ function useSupplyChainImpl() {
     void (async () => {
       try {
         const [catalog, snapshots] = await Promise.all([
-          fetchSupplyCatalog(userId, organizationId || undefined),
-          fetchSupplySnapshots(userId, organizationId || undefined),
+          fetchSupplyCatalog(userId, organizationId || undefined).catch(
+            () => [] as StoreItem[],
+          ),
+          fetchSupplySnapshots(userId, organizationId || undefined).catch(
+            () => ({}),
+          ),
         ]);
         if (cancelled) return;
 
@@ -663,7 +732,14 @@ function useSupplyChainImpl() {
         const mergedBatches = resolveSupplySnapshot(localBatches, snapshots.batches);
         const mergedKitchenStock = resolveSupplySnapshot(localKitchenStock, snapshots.kitchen_stock);
         const mergedKitchenRaw = resolveSupplySnapshot(localKitchenRaw, snapshots.kitchen_raw_stock);
-        const mergedBarStock = resolveSupplySnapshot(localBarStock, snapshots.bar_stock);
+        const mergedBarStock = normalizeBarStockRows(
+          mergeBarStockFromRemote(
+            localBarStock,
+            Array.isArray(snapshots.bar_stock)
+              ? (snapshots.bar_stock as BarStockItem[])
+              : [],
+          ),
+        );
         const mergedFnbRaw = resolveSupplySnapshot(localFnbRaw, snapshots.fnb_raw_stock);
         const mergedFnbSheets = resolveSupplySnapshot(localFnbSheets, snapshots.fnb_daily_sheets);
         const mergedFnbMovements = resolveSupplySnapshot(localFnbMovements, snapshots.fnb_movements);
@@ -748,11 +824,14 @@ function useSupplyChainImpl() {
           toUpload.purchase_orders = mergedPurchaseOrders;
         }
         if (Object.keys(toUpload).length > 0) {
-          await saveSupplySnapshots(
-            userId,
-            snapshotsPayloadForRole(toUpload, role),
-            organizationId || undefined,
-          );
+          const rolePayload = snapshotsPayloadForRole(toUpload, role);
+          if (Object.keys(rolePayload).length > 0) {
+            await saveSupplySnapshots(
+              userId,
+              rolePayload,
+              organizationId || undefined,
+            ).catch(() => undefined);
+          }
         }
 
         removeAllPersistedSupplyKeys();
@@ -767,8 +846,8 @@ function useSupplyChainImpl() {
         if (localCatalog.length > 0) {
           setStoreItems(localCatalog);
         }
-        if (isRetryableSupplyError(err)) {
-          console.warn("[supply-chain] snapshot hydrate retryable:", message);
+        if (isRetryableSupplyError(err) || /^forbidden$/i.test(message.trim())) {
+          console.warn("[supply-chain] snapshot hydrate skipped:", message);
         } else {
           console.error("[supply-chain] failed to load from Supabase", err);
           toast.error(message);
@@ -811,6 +890,12 @@ function useSupplyChainImpl() {
   /** Debounced JSON snapshot sync — always read refs so a slow PUT cannot overwrite Clear. */
   useEffect(() => {
     if (!useDbPersistence || !dbHydrated || snapshotSyncSkipRef.current) return;
+    if (
+      !hasPermission(role, "supply:store") &&
+      !hasPermission(role, "supply:kitchen")
+    ) {
+      return;
+    }
     const timer = window.setTimeout(() => {
       void persistSnapshotsNow().catch(() => {
         /* toast handled inside persistSnapshotsNow */
@@ -834,19 +919,18 @@ function useSupplyChainImpl() {
     activityLog,
     pendingStoreItems,
     basket,
+    role,
   ]);
 
   /** Pull live stock (and batch standards) so kitchen / F&B update without a full page refresh. */
   useEffect(() => {
     if (!useDbPersistence || !dbHydrated) return;
+    if (!canReadSupplySnapshots(role)) return;
 
     let cancelled = false;
 
     const refreshLiveSupply = async (fromOtherTab = false, includeCatalog = fromOtherTab) => {
-      if (
-        !fromOtherTab &&
-        Date.now() - lastLocalSupplyMutationAt < 2500
-      ) {
+      if (Date.now() - lastLocalSupplyMutationAt < 4000) {
         return;
       }
       if (liveSupplyInFlight) return;
@@ -861,25 +945,29 @@ function useSupplyChainImpl() {
         if (cancelled) return;
 
         let changed = false;
-        changed = applyRemoteArray(setKitchenRawStock, snapshots.kitchen_raw_stock) || changed;
-        changed = applyRemoteArray(setFnbRawStock, snapshots.fnb_raw_stock) || changed;
-        changed = applyRemoteArray(setBarStock, snapshots.bar_stock) || changed;
-        changed = applyRemoteArray(setKitchenStock, snapshots.kitchen_stock) || changed;
+        changed = applyRemoteStockArray(setKitchenRawStock, snapshots.kitchen_raw_stock) || changed;
+        changed = applyRemoteStockArray(setFnbRawStock, snapshots.fnb_raw_stock) || changed;
+        changed = applyRemoteBarStockArray(setBarStock, snapshots.bar_stock) || changed;
+        changed = applyRemoteStockArray(setKitchenStock, snapshots.kitchen_stock) || changed;
         changed = applyRemoteArray(setIssueOutLog, snapshots.issue_out_log) || changed;
         changed = applyRemoteArray(setFnbDailySheets, snapshots.fnb_daily_sheets) || changed;
         changed = applyRemoteArray(setFnbMovements, snapshots.fnb_movements) || changed;
 
-        if (Array.isArray(catalog) && catalog.length > 0) {
-          const next = catalog.map(applyStoreItemDeptFields);
+        const skipCatalog =
+          Date.now() - lastLocalSupplyMutationAt < 12_000;
+        if (!skipCatalog && Array.isArray(catalog) && catalog.length > 0) {
+          const remote = catalog.map(applyStoreItemDeptFields);
           setStoreItems((prev) => {
+            const preferLocal = Date.now() - lastLocalSupplyMutationAt < 12_000;
+            if (preferLocal) return prev;
             try {
-              if (JSON.stringify(prev) === JSON.stringify(next)) return prev;
+              if (JSON.stringify(prev) === JSON.stringify(remote)) return prev;
             } catch {
               changed = true;
-              return next;
+              return remote;
             }
             changed = true;
-            return next;
+            return remote;
           });
         }
 
@@ -941,11 +1029,12 @@ function useSupplyChainImpl() {
       window.clearInterval(interval);
       unsubscribeLive();
     };
-  }, [useDbPersistence, dbHydrated, userId, organizationId]);
+  }, [useDbPersistence, dbHydrated, userId, organizationId, role]);
 
   /** Refresh PO list from org snapshot so accountant / purchaser see each other's decisions. */
   useEffect(() => {
     if (!useDbPersistence || !dbHydrated) return;
+    if (!canReadSupplySnapshots(role)) return;
 
     let cancelled = false;
 
@@ -981,7 +1070,7 @@ function useSupplyChainImpl() {
       document.removeEventListener("visibilitychange", onVis);
       window.clearInterval(interval);
     };
-  }, [useDbPersistence, dbHydrated, userId, organizationId]);
+  }, [useDbPersistence, dbHydrated, userId, organizationId, role]);
 
   /** Drop legacy demo kitchen seed (Peppered Chicken / Jollof / Egusi) once per browser. */
   useEffect(() => {
@@ -1889,6 +1978,7 @@ function useSupplyChainImpl() {
         purchaseOrdersRef.current = next;
         return next;
       });
+      if (approved) setWorkingPoId(null);
       setActivityLog((a) =>
         log(
           a,
@@ -1903,8 +1993,8 @@ function useSupplyChainImpl() {
         if (approved) {
           pushSupplyNotification({
             audience: ["purchasing", "store"],
-            title: `PO approved for market — ${po.poNumber}`,
-            body: `Cash disbursed (₦${po.cashDisbursed.toLocaleString()}). Ready for market purchase.`,
+            title: `PO approved — ${po.poNumber}`,
+            body: `Manager approved. Ready to buy at market, then retire from Purchasing.`,
             href: "/supply/purchasing",
           });
         } else {
@@ -1991,6 +2081,7 @@ function useSupplyChainImpl() {
       );
       const po = purchaseOrders.find((p) => p.id === poId);
       if (po && approved) {
+        setWorkingPoId(null);
         pushSupplyNotification({
           audience: ["purchasing", "store"],
           title: `PO approved (admin test) — ${po.poNumber}`,
@@ -2116,42 +2207,50 @@ function useSupplyChainImpl() {
 
   const applyRetirementToStock = useCallback(
     (po: PurchaseOrder, lines: RetirementLine[]) => {
-      setStoreItems((items) => {
-        const next = [...items];
-        for (const rl of lines) {
-          const notBought = rl.notBought === true || rl.removed === true;
-          if (notBought || rl.quantityBought <= 0) continue;
-          const pl = po.lines.find((l) => l.id === rl.lineId);
-          if (!pl) continue;
-          const idx = next.findIndex((s) => s.id === pl.stockItemId);
-          if (idx >= 0) {
-            const stockQty =
-              rl.stockQuantityBought ??
-              (pl.stockQuantityOrdered && pl.quantityOrdered > 0
-                ? (rl.quantityBought / pl.quantityOrdered) * pl.stockQuantityOrdered
-                : rl.quantityBought);
-            const stockUnitPrice =
-              rl.actualStockUnitPrice ??
-              (stockQty > 0 ? rl.totalPaid / stockQty : rl.actualPrice);
-            next[idx] = {
-              ...next[idx],
-              quantityInStore: next[idx].quantityInStore + stockQty,
-              lastPrice: stockUnitPrice,
-            };
+      const result = applyRetirementLinesToCatalog(
+        storeItemsRef.current,
+        po,
+        lines,
+      );
+      storeItemsRef.current = result.next;
+      setStoreItems(result.next);
+      markLocalSupplyMutation();
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("frontbill:supply-stock-changed"));
+      }
+      if (
+        useDbPersistence &&
+        hasPermission(role, "supply:store") &&
+        result.posted > 0
+      ) {
+        void syncSupplyCatalog(
+          userId,
+          result.next.map(applyStoreItemDeptFields),
+          orgIdRef.current || undefined,
+        ).catch((err) => {
+          if (isRetryableSupplyError(err)) {
+            console.warn("[supply-chain] retirement catalogue sync retryable:", err);
+            return;
           }
-        }
-        return next;
-      });
+          const message =
+            err instanceof Error
+              ? err.message
+              : "Failed to save retired stock to central store";
+          console.error("[supply-chain] retirement catalogue sync failed", err);
+          toast.error(message);
+        });
+      }
+      return result.posted;
     },
-    [],
+    [useDbPersistence, userId, role],
   );
 
   const submitRetirement = useCallback(
     (poId: string, lines: RetirementLine[], actor: Actor) => {
       const po = purchaseOrders.find((p) => p.id === poId);
       if (!po) return;
-      if (po.status === "retirement_pending_accountant") {
-        toast.error("This retirement is already awaiting accountant review");
+      if (po.status === "retired") {
+        toast.error("This purchase order is already retired");
         return;
       }
       const normalized = lines.map((l) => ({
@@ -2164,12 +2263,13 @@ function useSupplyChainImpl() {
       const refund = po.cashDisbursed - actualSpent;
       const nowIso = new Date().toISOString();
 
+      const posted = applyRetirementToStock(po, normalized);
       setPurchaseOrders((prev) => {
         const next = prev.map((p) =>
           p.id === poId
             ? {
                 ...p,
-                status: "retirement_pending_accountant" as const,
+                status: "retired" as const,
                 workflowUpdatedAt: nowIso,
                 retirement: {
                   actualSpent,
@@ -2179,6 +2279,8 @@ function useSupplyChainImpl() {
                   lines: normalized,
                   submittedAt: nowIso,
                   submittedBy: actor.name,
+                  reviewedAt: nowIso,
+                  reviewedBy: actor.name,
                 },
               }
             : p,
@@ -2186,24 +2288,34 @@ function useSupplyChainImpl() {
         purchaseOrdersRef.current = next;
         return next;
       });
+      setWorkingPoId(null);
       setActivityLog((a) =>
         log(
           a,
           "retirement_submitted",
           actor,
-          `Retirement submitted for accountant review — est. spend ₦${actualSpent.toLocaleString()}, refund ₦${refund.toLocaleString()}`,
+          `Retired at market — stock added to central store. Spend ₦${actualSpent.toLocaleString()}, refund ₦${refund.toLocaleString()}`,
           poId,
         ),
       );
       pushSupplyNotification({
-        audience: ["accountant"],
-        title: `Retirement submitted — ${po.poNumber}`,
-        body: `${actor.name} submitted market retirement (₦${actualSpent.toLocaleString()} spent)`,
-        href: "/supply/purchase-orders?tab=retirement",
+        audience: ["accountant", "manager"],
+        title: `PO retired — ${po.poNumber}`,
+        body: `${actor.name} retired this PO. Central store stock updated (₦${actualSpent.toLocaleString()} spent).`,
+        href: "/supply/purchasing?tab=history",
       });
+      if (posted > 0) {
+        toast.success(
+          `${posted} item${posted === 1 ? "" : "s"} added to Central Store stock`,
+        );
+      } else {
+        toast.error(
+          "Retirement saved, but no catalogue lines matched — stock was not increased",
+        );
+      }
       void persistSnapshotsNow();
     },
-    [purchaseOrders, persistSnapshotsNow],
+    [purchaseOrders, applyRetirementToStock, persistSnapshotsNow],
   );
 
   const accountantRetirementDecision = useCallback(
@@ -2261,7 +2373,7 @@ function useSupplyChainImpl() {
         return { ok: true };
       }
 
-      applyRetirementToStock(po, po.retirement.lines);
+      const posted = applyRetirementToStock(po, po.retirement.lines);
       setPurchaseOrders((prev) => {
         const next = prev.map((p) =>
           p.id === poId
@@ -2298,6 +2410,11 @@ function useSupplyChainImpl() {
         body: `Central store stock updated. Refund to cashier: ₦${(po.retirement?.refundToCashier ?? 0).toLocaleString()}.`,
         href: "/supply/purchasing",
       });
+      if (posted > 0) {
+        toast.success(
+          `${posted} item${posted === 1 ? "" : "s"} added to Central Store stock`,
+        );
+      }
       void persistSnapshotsNow();
       return { ok: true };
     },
@@ -2489,7 +2606,10 @@ function useSupplyChainImpl() {
       }
 
       const inProgress = batches.find(
-        (b) => b.recipeId === recipeId && b.status === "in_progress",
+        (b) =>
+          b.recipeId === recipeId &&
+          b.status === "in_progress" &&
+          !isProductionBatchDeleted(b),
       );
       if (inProgress) {
         return {
@@ -2901,7 +3021,9 @@ function useSupplyChainImpl() {
   const deleteInProgressBatch = useCallback(
     (batchId: string, actor: Actor): { ok: true } | { error: string } => {
       const batch = batches.find((b) => b.id === batchId);
-      if (!batch) return { error: "Production batch not found" };
+      if (!batch || isProductionBatchDeleted(batch)) {
+        return { error: "Production batch not found" };
+      }
       if (batch.status !== "in_progress") {
         return { error: "Only in-progress batches can be deleted" };
       }
@@ -2910,7 +3032,13 @@ function useSupplyChainImpl() {
         returnKitchenRawMaterials(batch.deductedMaterials);
       }
 
-      setBatches((prev) => prev.filter((b) => b.id !== batchId));
+      const nowIso = new Date().toISOString();
+      markLocalSupplyMutation();
+      setBatches((prev) =>
+        prev.map((b) =>
+          b.id === batchId ? { ...b, deletedAt: nowIso } : b,
+        ),
+      );
       setActivityLog((a) =>
         log(
           a,
@@ -3285,7 +3413,9 @@ function useSupplyChainImpl() {
       actor: Actor,
     ): { ok: true } | { error: string } => {
       const batch = batches.find((b) => b.id === batchId);
-      if (!batch) return { error: "Production batch not found" };
+      if (!batch || isProductionBatchDeleted(batch)) {
+        return { error: "Production batch not found" };
+      }
       if (batch.status !== "in_progress") {
         return { error: "This production run is already closed" };
       }
@@ -3569,10 +3699,8 @@ function useSupplyChainImpl() {
     ) => {
       if (qty <= 0) return { error: "Enter a quantity to issue" };
       const store = storeItems.find((s) => s.id === storeItemId);
-      if (!store || !isBarStoreDept(store.dept)) {
-        return {
-          error: "Only bar department store items can be issued to the bar",
-        };
+      if (!store) {
+        return { error: "Item not found" };
       }
       if (store.quantityInStore < qty) {
         return {
@@ -3589,16 +3717,32 @@ function useSupplyChainImpl() {
       );
 
       setBarStock((prev) => {
-        const idx = prev.findIndex((b) => b.storeItemId === storeItemId);
+        const next = normalizeBarStockRows(prev);
+        const canonicalId = canonicalBarStockId(storeItemId);
+        const idx = next.findIndex(
+          (b) => b.storeItemId === storeItemId || b.id === canonicalId,
+        );
         if (idx >= 0) {
-          return prev.map((b, i) =>
-            i === idx ? { ...b, quantityOnHand: b.quantityOnHand + qty } : b,
+          return normalizeBarStockRows(
+            next.map((b, i) =>
+              i === idx
+                ? {
+                    ...b,
+                    id: canonicalId,
+                    storeItemId,
+                    name: store.name,
+                    unit: store.unit,
+                    quantityOnHand: b.quantityOnHand + qty,
+                    unitsPerSale: Math.max(1, b.unitsPerSale || 1),
+                  }
+                : b,
+            ),
           );
         }
-        return [
-          ...prev,
+        return normalizeBarStockRows([
+          ...next,
           {
-            id: `bar-${storeItemId}`,
+            id: canonicalId,
             storeItemId,
             name: store.name,
             quantityOnHand: qty,
@@ -3606,7 +3750,7 @@ function useSupplyChainImpl() {
             unitsPerSale: 1,
             unit: store.unit,
           },
-        ];
+        ]);
       });
 
       const dest = opts?.destination?.trim() || "Main Bar";
@@ -3661,22 +3805,12 @@ function useSupplyChainImpl() {
   );
 
   function destinationCreditsBarStock(destination: string): boolean {
-    const d = destination.trim().toLowerCase();
-    return (
-      d === "main bar" ||
-      d === "beverages / mini-bar" ||
-      d === "swimming pool" ||
-      d.includes("bar")
-    );
+    return isMainBarIssueDestination(destination);
   }
 
   function destinationCreditsKitchenRaw(destination: string): boolean {
     const d = destination.trim().toLowerCase();
     return d === "kitchen" || d === "staff cafeteria" || d.includes("kitchen");
-  }
-
-  function destinationCreditsFnbRaw(destination: string): boolean {
-    return issueCreditsFnbStore(destination);
   }
 
   const issueFromStoreToDepartment = useCallback(
@@ -3708,13 +3842,9 @@ function useSupplyChainImpl() {
         };
       }
 
-      const toFnbStore = isFnbStoreDestination(dest);
+      const toMainBar = destinationCreditsBarStock(dest);
 
-      if (
-        isBarStoreDept(store.dept) &&
-        destinationCreditsBarStock(dest) &&
-        !toFnbStore
-      ) {
+      if (toMainBar) {
         const barRes = issueFromStoreToBar(storeItemId, qty, actor, {
           destination: dest,
           receivedBy,
@@ -3764,32 +3894,6 @@ function useSupplyChainImpl() {
           ),
         );
         notifyKitchenRawStockChanged();
-      }
-
-      if (
-        toFnbStore ||
-        (isBarStoreDept(store.dept) && destinationCreditsFnbRaw(dest))
-      ) {
-        setFnbRawStock((prev) => {
-          const idx = prev.findIndex((f) => f.storeItemId === storeItemId);
-          if (idx >= 0) {
-            return prev.map((f, i) =>
-              i === idx ? { ...f, quantityOnHand: f.quantityOnHand + qty } : f,
-            );
-          }
-          return [
-            ...prev,
-            {
-              id: `fnb-${storeItemId}`,
-              storeItemId,
-              name: store.name,
-              quantityOnHand: qty,
-              reorderLevel: store.reorderLevel,
-              unit: store.unit,
-            },
-          ];
-        });
-        notifyFnbRawStockChanged();
       }
 
       const displayUnit = opts?.issueUnit?.trim() || store.unit;
@@ -3910,9 +4014,10 @@ function useSupplyChainImpl() {
         );
         if ("error" in res) return res;
       }
+      void persistSnapshotsNow();
       return { ok: true, issued: lines.length };
     },
-    [issueFromStoreToDepartment, storeItems],
+    [issueFromStoreToDepartment, storeItems, persistSnapshotsNow],
   );
 
   const updateFnbRawSellingPrice = useCallback(
@@ -3997,7 +4102,7 @@ function useSupplyChainImpl() {
       actor: Actor,
       opts?: { notes?: string },
     ):
-      | { ok: true; barStockId: string; itemName: string; unit: string; unitPrice: number; categoryName: string }
+      | { ok: true; barStockId: string; itemName: string; unit: string; unitPrice: number; categoryName: string; categoryId: string | null }
       | { error: string } => {
       if (!canManageFnbStore(role)) {
         return {
@@ -4016,9 +4121,11 @@ function useSupplyChainImpl() {
         };
       }
 
-      const barStockId = `bar-${row.storeItemId}`;
+      const barStockId = canonicalBarStockId(row.storeItemId);
       const note = opts?.notes?.trim();
       const stamp = formatSupplyActorStamp(actor.name);
+
+      markLocalSupplyMutation();
 
       setFnbRawStock((prev) =>
         prev.map((f) =>
@@ -4029,14 +4136,26 @@ function useSupplyChainImpl() {
       );
 
       setBarStock((prev) => {
-        const idx = prev.findIndex((b) => b.storeItemId === row.storeItemId);
+        const next = normalizeBarStockRows(prev)
+        const idx = next.findIndex((b) => b.storeItemId === row.storeItemId)
         if (idx >= 0) {
-          return prev.map((b, i) =>
-            i === idx ? { ...b, quantityOnHand: b.quantityOnHand + qty } : b,
-          );
+          return normalizeBarStockRows(
+            next.map((b, i) =>
+              i === idx
+                ? {
+                    ...b,
+                    id: barStockId,
+                    name: row.name,
+                    unit: row.unit,
+                    quantityOnHand: b.quantityOnHand + qty,
+                    unitsPerSale: Math.max(1, b.unitsPerSale || 1),
+                  }
+                : b,
+            ),
+          )
         }
-        return [
-          ...prev,
+        return normalizeBarStockRows([
+          ...next,
           {
             id: barStockId,
             storeItemId: row.storeItemId,
@@ -4046,7 +4165,7 @@ function useSupplyChainImpl() {
             unitsPerSale: 1,
             unit: row.unit,
           },
-        ];
+        ])
       });
 
       const movement: FnbMovement = {
@@ -4085,6 +4204,7 @@ function useSupplyChainImpl() {
         unit: row.unit,
         unitPrice: row.sellingPricePerPortion ?? 0,
         categoryName: row.drinkCategoryName?.trim() || "Beverages",
+        categoryId: row.drinkCategoryId?.trim() || null,
       };
     },
     [fnbRawStock, role, schedulePersistSnapshots],
@@ -4467,6 +4587,10 @@ function useSupplyChainImpl() {
       lines: { item: OutletMenuItemRow; qty: number }[],
       actor: Actor,
     ) => {
+      let touchedBar = false;
+      let touchedKitchen = false;
+      markLocalSupplyMutation();
+
       for (const line of lines) {
         const link = resolveOutletItemStock(
           line.item,
@@ -4475,8 +4599,9 @@ function useSupplyChainImpl() {
           barStock,
         );
         if (!link.tracked || !link.stockId) continue;
-        const deduct = link.portionsPerSale * line.qty;
+        const deduct = Math.max(1, link.portionsPerSale) * line.qty;
         if (link.source === "kitchen") {
+          touchedKitchen = true;
           setKitchenStock((ks) =>
             ks.map((k) =>
               k.id === link.stockId
@@ -4491,6 +4616,7 @@ function useSupplyChainImpl() {
             ),
           );
         } else {
+          touchedBar = true;
           setBarStock((bs) =>
             bs.map((b) =>
               b.id === link.stockId
@@ -4511,8 +4637,11 @@ function useSupplyChainImpl() {
           `Outlet ${department} sale — stock deducted (kitchen / bar pipeline)`,
         ),
       );
+      if (touchedBar) notifyBarStockChanged();
+      if (touchedKitchen) notifyKitchenRawStockChanged();
+      if (touchedBar || touchedKitchen) schedulePersistSnapshots();
     },
-    [kitchenStock, barStock],
+    [kitchenStock, barStock, schedulePersistSnapshots],
   );
 
   const draftLines = useMemo(() => {
@@ -4560,7 +4689,9 @@ function useSupplyChainImpl() {
         .length,
       basketTotal: draftLines.reduce((s, b) => s + b.qtyToBuy * b.unitPrice, 0),
       basketCount: draftLines.length,
-      activeBatches: batches.filter((b) => b.status === "in_progress").length,
+      activeBatches: visibleProductionBatches(batches).filter(
+        (b) => b.status === "in_progress",
+      ).length,
       recipeCount: recipes.length,
       fnbAlerts: kitchenStock.filter(
         (k) => k.availablePortions <= k.reorderLevel,
@@ -4634,7 +4765,7 @@ function useSupplyChainImpl() {
     getOutletItemStock,
     validateOutletCart,
     deductOutletCart,
-    batches,
+    batches: visibleProductionBatches(batches),
     fnbMenu: fnbOrders,
     orders,
     openBatch,

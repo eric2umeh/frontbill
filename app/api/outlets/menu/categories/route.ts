@@ -5,6 +5,7 @@ import { canAccessOutletDepartment } from '@/lib/outlets/access'
 import { outletSlugify } from '@/lib/outlets/slug'
 import { toTitleCaseWords } from '@/lib/supply-chain/title-case'
 import { isOutletDepartmentKey } from '@/lib/outlets/departments'
+import { insertOutletMenuCategory, updateOutletMenuCategory } from '@/lib/outlets/menu-db-write'
 
 export async function GET(request: Request) {
   const department = new URL(request.url).searchParams.get('department') || ''
@@ -42,22 +43,18 @@ export async function POST(request: Request) {
 
   const admin = createAdminClient()
   const slug = String(body?.slug || outletSlugify(name))
-  const { data, error } = await admin
-    .from('outlet_menu_categories')
-    .insert({
-      organization_id: auth.ctx.organizationId,
-      department,
-      parent_id: body?.parent_id || null,
-      name,
-      slug,
-      sort_order: Number(body?.sort_order) || 0,
-      tag_label: body?.tag_label || null,
-      price_editable: body?.price_editable === true,
-      created_by: auth.ctx.userId,
-      updated_by: auth.ctx.userId,
-    })
-    .select()
-    .single()
+  const { data, error } = await insertOutletMenuCategory(admin, {
+    organization_id: auth.ctx.organizationId,
+    department,
+    parent_id: body?.parent_id || null,
+    name,
+    slug,
+    sort_order: Number(body?.sort_order) || 0,
+    tag_label: body?.tag_label || null,
+    price_editable: body?.price_editable === true,
+    created_by: auth.ctx.userId,
+    updated_by: auth.ctx.userId,
+  })
 
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
   return NextResponse.json({ category: data })
@@ -100,12 +97,7 @@ export async function PATCH(request: Request) {
   if (body.tag_label !== undefined) patch.tag_label = body.tag_label || null
   if (body.price_editable !== undefined) patch.price_editable = body.price_editable === true
 
-  const { data, error } = await admin
-    .from('outlet_menu_categories')
-    .update(patch)
-    .eq('id', id)
-    .select()
-    .single()
+  const { data, error } = await updateOutletMenuCategory(admin, id, patch)
 
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
   return NextResponse.json({ category: data })

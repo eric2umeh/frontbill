@@ -2,6 +2,7 @@ import type { OutletDepartmentKey } from '@/lib/outlets/departments'
 import { isStoreControlledFnbOutlet } from '@/lib/outlets/departments'
 import type { OutletMenuItemRow } from '@/lib/outlets/types'
 import type { BarStockItem, KitchenStockItem } from '@/lib/supply-chain/types'
+import { canonicalBarStockId } from '@/lib/supply-chain/bar-stock-normalize'
 
 export type OutletStockSource = 'kitchen' | 'bar' | 'none'
 
@@ -79,22 +80,26 @@ export function parseMenuStockLink(serviceCode: string | null | undefined): {
   }
 }
 
+function matchBarByName(itemName: string, barStock: BarStockItem[]): BarStockItem | undefined {
+  const target = normalizeName(itemName)
+  const exact = barStock.find((b) => normalizeName(b.name) === target)
+  if (exact) return exact
+  return barStock.find((b) => {
+    const bn = normalizeName(b.name)
+    return bn.includes(target) || target.includes(bn)
+  })
+}
+
 function matchKitchenByName(
   itemName: string,
   kitchenStock: KitchenStockItem[],
 ): KitchenStockItem | undefined {
   const target = normalizeName(itemName)
+  const exact = kitchenStock.find((k) => normalizeName(k.name) === target)
+  if (exact) return exact
   return kitchenStock.find((k) => {
     const kn = normalizeName(k.name)
     return kn === target || kn.includes(target) || target.includes(kn)
-  })
-}
-
-function matchBarByName(itemName: string, barStock: BarStockItem[]): BarStockItem | undefined {
-  const target = normalizeName(itemName)
-  return barStock.find((b) => {
-    const bn = normalizeName(b.name)
-    return bn === target || bn.includes(target) || target.includes(bn)
   })
 }
 
@@ -114,20 +119,38 @@ function kitchenLink(
   }
 }
 
+function findBarStockRow(stockId: string, barStock: BarStockItem[]): BarStockItem | undefined {
+  const id = stockId.trim()
+  if (!id) return undefined
+  const byId = barStock.find((b) => b.id === id)
+  if (byId) return byId
+  const storeItemId = id.startsWith('bar-') ? id.slice(4).trim() : id
+  if (storeItemId) {
+    return barStock.find((b) => b.storeItemId === storeItemId)
+  }
+  return undefined
+}
+
 function barLink(
   stockId: string,
   portionsPerSale: number,
   barStock: BarStockItem[],
 ): ResolvedOutletStockLink {
-  const row = barStock.find((b) => b.id === stockId)
+  const row = findBarStockRow(stockId, barStock)
+  const saleUnits = Math.max(1, portionsPerSale || row?.unitsPerSale || 1)
+  const resolvedId = row?.id ?? (stockId.trim() || '')
   return {
     source: 'bar',
-    stockId,
-    portionsPerSale,
+    stockId: resolvedId,
+    portionsPerSale: saleUnits,
     available: row?.quantityOnHand ?? 0,
     tracked: true,
     unit: row?.unit ?? 'bottle',
   }
+}
+
+function barStockHasId(stockId: string, barStock: BarStockItem[]): boolean {
+  return Boolean(findBarStockRow(stockId, barStock))
 }
 
 function unlinkedStockControlledLink(source: 'kitchen' | 'bar'): ResolvedOutletStockLink {
@@ -165,10 +188,8 @@ export function resolveOutletItemStock(
   if (parsed?.source === 'kitchen') {
     return kitchenLink(parsed.stockId, parsed.portionsPerSale, kitchenStock)
   }
-  if (parsed && parsed.source === source) {
-    return parsed.source === 'kitchen'
-      ? kitchenLink(parsed.stockId, parsed.portionsPerSale, kitchenStock)
-      : barLink(parsed.stockId, parsed.portionsPerSale, barStock)
+  if (parsed?.source === 'bar' && source === 'bar' && barStockHasId(parsed.stockId, barStock)) {
+    return barLink(parsed.stockId, parsed.portionsPerSale, barStock)
   }
 
   if (source === 'kitchen') {
@@ -209,11 +230,15 @@ export function resolveOutletItemStock(
   return {
     source: 'bar',
     stockId: row.id,
-    portionsPerSale: row.unitsPerSale,
+    portionsPerSale: Math.max(1, row.unitsPerSale || 1),
     available: row.quantityOnHand,
     tracked: true,
     unit: row.unit,
   }
+}
+
+export function barStockIdForStoreItem(storeItemId: string): string {
+  return canonicalBarStockId(storeItemId)
 }
 
 export function maxSellableQty(link: ResolvedOutletStockLink): number {

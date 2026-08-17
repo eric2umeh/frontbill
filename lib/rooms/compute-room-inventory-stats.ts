@@ -52,10 +52,11 @@ export function computeRoomInventoryStats(
 export function computeRoomInventoryStatsWithBookings(
   rooms: { status?: string | null }[],
   bookings: OccupyingBookingRow[],
+  todayYmd?: string,
 ): RoomInventoryStats {
   const base = computeRoomInventoryStats(rooms)
-  const stay: FrontOfficeStayStats = computeFrontOfficeStayStats(bookings)
-  const physicallyHeld = countPhysicallyHeldRooms(bookings)
+  const stay: FrontOfficeStayStats = computeFrontOfficeStayStats(bookings, todayYmd)
+  const physicallyHeld = countPhysicallyHeldRooms(bookings, todayYmd)
   const ooo = base.outOfOrder
   // Avail for check-in ≈ sellable rooms not held by Occ/Due and not OOO
   const availableForCheckin = Math.max(0, base.total - physicallyHeld - ooo)

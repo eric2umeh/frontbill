@@ -1,6 +1,9 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { applyRescheduleStay } from '@/lib/booking/apply-reschedule-stay'
-import { canRescheduleStay, canRescheduleStayBooking } from '@/lib/booking/can-reschedule-stay'
+import {
+  canFrontDeskApplyRescheduleStay,
+  canRescheduleStayBooking,
+} from '@/lib/booking/can-reschedule-stay'
 import { isStayCheckInConsideredBackdated } from '@/lib/hotel-date'
 import { notifyNightAuditRequestCreated } from '@/lib/night-audit/notify-request-created'
 import { isBookingCheckedOut } from '@/lib/utils/booking-checkout-ui'
@@ -188,6 +191,49 @@ export async function POST(request: Request) {
     if (booking.room_id) {
       const { data: roomRow } = await admin.from('rooms').select('room_number').eq('id', booking.room_id).maybeSingle()
       room_label = roomRow?.room_number ? `Room ${roomRow.room_number}` : null
+    }
+
+    const applyDirect =
+      canFrontDeskApplyRescheduleStay(callerProfile.role) && !is_backdate
+
+    if (applyDirect) {
+      const applyResult = await applyRescheduleStay(admin, {
+        organizationId: orgId,
+        bookingId: booking_id,
+        check_in,
+        check_out,
+        callerId: caller_id,
+        reason: String(reason).trim(),
+      })
+      if (!applyResult.ok) {
+        return NextResponse.json({ error: applyResult.error }, { status: applyResult.status })
+      }
+      const nowIso = new Date().toISOString()
+      const { data: inserted } = await admin
+        .from('reschedule_stay_requests')
+        .insert([
+          {
+            organization_id: orgId,
+            booking_id,
+            from_check_in: prevCi,
+            from_check_out: prevCo,
+            to_check_in: check_in,
+            to_check_out: check_out,
+            is_backdate: false,
+            folio_label: booking.folio_id || null,
+            guest_label,
+            room_label,
+            reason: String(reason).trim(),
+            requested_by: caller_id,
+            status: 'approved',
+            approved_by: caller_id,
+            decided_at: nowIso,
+            decision_note: 'Applied immediately by front desk (reservation date change)',
+          },
+        ])
+        .select()
+        .maybeSingle()
+      return NextResponse.json({ request: inserted ?? null, applied: true })
     }
 
     const { data: inserted, error: insErr } = await admin

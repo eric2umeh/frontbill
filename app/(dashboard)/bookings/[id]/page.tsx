@@ -51,6 +51,7 @@ import { RoomChangeRequestModal } from "@/components/bookings/room-change-reques
 import { RescheduleStayModal } from "@/components/bookings/reschedule-stay-modal";
 import { FolioAttachmentsPanel } from "@/components/folio/folio-attachments-panel";
 import {
+  canFrontDeskApplyRescheduleStay,
   canRequestRescheduleStay,
   canRescheduleStayBooking,
 } from "@/lib/booking/can-reschedule-stay";
@@ -1714,8 +1715,8 @@ export default function BookingDetailPage({
       <RescheduleStayModal
         open={rescheduleStayOpen}
         onClose={() => setRescheduleStayOpen(false)}
-        onSuccess={() => {
-          setRescheduleStayPending(true);
+        onSuccess={(result) => {
+          setRescheduleStayPending(!result?.applied);
           fetchBookingDetails(bookingId);
         }}
         userId={userId}
@@ -2306,11 +2307,17 @@ export default function BookingDetailPage({
               title={
                 rescheduleStayPending
                   ? "Move-dates request pending approval in Night Audit"
-                  : "Request new check-in / check-out dates"
+                  : canFrontDeskApplyRescheduleStay(role)
+                    ? "Change check-in / check-out dates"
+                    : "Request new check-in / check-out dates"
               }
             >
               <CalendarRange className="mr-2 h-4 w-4" />
-              {rescheduleStayPending ? "Move dates pending" : "Request move dates"}
+              {rescheduleStayPending
+                ? "Move dates pending"
+                : canFrontDeskApplyRescheduleStay(role)
+                  ? "Move dates"
+                  : "Request move dates"}
             </Button>
           )}
           {canManageFolio && (

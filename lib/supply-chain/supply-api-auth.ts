@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { canonicalRoleKey, hasPermission } from '@/lib/permissions'
+import { canReadSupplySnapshots } from '@/lib/supply-chain/supply-snapshot-payload'
 
 export type SupplyAuthed = {
   userId: string
@@ -181,6 +182,15 @@ export function requireSupplyKitchenOrStore(auth: SupplyAuthed): NextResponse | 
   ) {
     return null
   }
+  return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+}
+
+/** GET snapshots: store/kitchen plus outlet staff (Main Bar stock + issue log). */
+export function requireSupplySnapshotRead(auth: SupplyAuthed): NextResponse | null {
+  if (canReadSupplySnapshots(auth.role)) return null
+  // Authenticated hotel staff with a legacy/unmapped role — still allow GET.
+  // Writes stay locked by requireSupplyKitchenOrStore.
+  if (auth.orgId && auth.userId) return null
   return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 }
 

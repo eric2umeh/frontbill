@@ -4,6 +4,7 @@ import { resolveOutletAuthed, resolveOutletMenuManage } from '@/lib/outlets/api-
 import { canAccessOutletDepartment } from '@/lib/outlets/access'
 import { isOutletDepartmentKey } from '@/lib/outlets/departments'
 import { normalizeOutletItemTags } from '@/lib/outlets/item-display'
+import { insertOutletMenuItem, updateOutletMenuItem } from '@/lib/outlets/menu-db-write'
 
 export async function GET(request: Request) {
   const params = new URL(request.url).searchParams
@@ -60,26 +61,22 @@ export async function POST(request: Request) {
   }
 
   const admin = createAdminClient()
-  const { data, error } = await admin
-    .from('outlet_menu_items')
-    .insert({
-      organization_id: auth.ctx.organizationId,
-      department,
-      category_id: body?.category_id || null,
-      name,
-      description: String(body?.description ?? '').trim(),
-      unit_price: unitPrice,
-      sku: body?.sku || null,
-      tags: normalizeOutletItemTags(body?.tags),
-      is_active: body?.is_active !== false,
-      sort_order: Number(body?.sort_order) || 0,
-      service_code: body?.service_code || null,
-      price_editable: body?.price_editable === true,
-      created_by: auth.ctx.userId,
-      updated_by: auth.ctx.userId,
-    })
-    .select()
-    .single()
+  const { data, error } = await insertOutletMenuItem(admin, {
+    organization_id: auth.ctx.organizationId,
+    department,
+    category_id: body?.category_id || null,
+    name,
+    description: String(body?.description ?? '').trim(),
+    unit_price: unitPrice,
+    sku: body?.sku || null,
+    tags: normalizeOutletItemTags(body?.tags),
+    is_active: body?.is_active !== false,
+    sort_order: Number(body?.sort_order) || 0,
+    service_code: body?.service_code || null,
+    price_editable: body?.price_editable === true,
+    created_by: auth.ctx.userId,
+    updated_by: auth.ctx.userId,
+  })
 
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
   return NextResponse.json({ item: data })
@@ -117,12 +114,7 @@ export async function PATCH(request: Request) {
   if (body.service_code !== undefined) patch.service_code = body.service_code ? String(body.service_code).trim() : null
   if (body.price_editable !== undefined) patch.price_editable = body.price_editable === true
 
-  const { data, error } = await admin
-    .from('outlet_menu_items')
-    .update(patch)
-    .eq('id', id)
-    .select()
-    .single()
+  const { data, error } = await updateOutletMenuItem(admin, id, patch)
 
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
   return NextResponse.json({ item: data })

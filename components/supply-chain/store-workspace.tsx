@@ -17,7 +17,7 @@ import {
   canManageStoreCatalog,
   canSubmitStoreItemForApproval,
 } from '@/lib/permissions'
-import { issueOutletPickerOptions } from '@/lib/store/outlet-departments'
+import { issueOutletPickerOptions, isMainBarIssueDestination } from '@/lib/store/outlet-departments'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -55,6 +55,8 @@ import {
   sanitizeQuantityInput,
 } from '@/lib/supply-chain/measurement-units'
 import { handleSupplyActionError } from '@/lib/supply-chain/handle-supply-action-error'
+import { syncBarItemToMainBarMenu } from '@/lib/supply-chain/sync-bar-menu'
+import { canonicalBarStockId } from '@/lib/supply-chain/bar-stock-normalize'
 import {
   convertToStoreUnitsWithFactors,
   mergeUnitFactors,
@@ -523,7 +525,7 @@ export function StoreWorkspace() {
     })
   }
 
-  const handleCommitIssueCart = () => {
+  const handleCommitIssueCart = async () => {
     if (!issueDestination.trim()) {
       toast.error('Select a destination')
       return
@@ -533,23 +535,50 @@ export function StoreWorkspace() {
       return
     }
     setIssuingCart(true)
-    const res = issueOutCart(issueCart, issueDestination, actor, {
-      receivedBy: issueReceivedBy,
-      receivedById: issueReceivedById ?? undefined,
-      notes: issueNotes,
-    })
-    setIssuingCart(false)
-    if ('error' in res) {
-      handleSupplyActionError(res, {
-        title: 'Cannot issue — stock short',
-        fallbackMessage: 'The following central store items are short. Reduce quantities or receive stock first.',
+    const cartSnapshot = [...issueCart]
+    try {
+      const res = issueOutCart(issueCart, issueDestination, actor, {
+        receivedBy: issueReceivedBy,
+        receivedById: issueReceivedById ?? undefined,
+        notes: issueNotes,
       })
-      return
+      if ('error' in res) {
+        handleSupplyActionError(res, {
+          title: 'Cannot issue — stock short',
+          fallbackMessage: 'The following central store items are short. Reduce quantities or receive stock first.',
+        })
+        return
+      }
+      toast.success(`Issued ${res.issued} item(s) to ${issueDestination}`)
+      setIssueCart([])
+      setIssueQtyMap({})
+      setIssueUnitMap({})
+      if (isMainBarIssueDestination(issueDestination)) {
+        const syncResults = await Promise.all(
+          cartSnapshot.map((line) => {
+            const store = storeItems.find((s) => s.id === line.storeItemId)
+            const price = Number(store?.lastPrice)
+            return syncBarItemToMainBarMenu({
+              itemName: line.name,
+              categoryName: '',
+              barStockId: canonicalBarStockId(line.storeItemId),
+              unitPrice: Number.isFinite(price) && price >= 0 ? price : 0,
+            })
+          }),
+        )
+        const failed = syncResults.filter((r) => !r.ok)
+        if (failed.length) {
+          toast.error(
+            `Issued to Main Bar, but ${failed.length} menu item(s) did not appear: ${failed[0].ok === false ? failed[0].error : 'sync failed'}`,
+          )
+        } else if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('frontbill:outlet-menu-synced'))
+          window.dispatchEvent(new CustomEvent('frontbill:bar-stock-changed'))
+        }
+      }
+    } finally {
+      setIssuingCart(false)
     }
-    toast.success(`Issued ${res.issued} item(s) to ${issueDestination}`)
-    setIssueCart([])
-    setIssueQtyMap({})
-    setIssueUnitMap({})
   }
 
   const basketSidebar = (
@@ -1001,8 +1030,8 @@ export function StoreWorkspace() {
                 <h3 className="font-semibold text-sm">Issue out to department / outlet</h3>
                 <p className="text-xs text-muted-foreground mt-1">
                   Add quantities to the issue cart, review on the right, then issue in one step.
-                  Received by is required. Drinks go to <strong>F&amp;B Store</strong> first; F&amp;B
-                  then transfers them to Main Bar. Kitchen items go to Kitchen.
+                  Received by is required. Drinks go to <strong>Main Bar</strong> (same path as
+                  kitchen items going to Kitchen).
                 </p>
               </div>
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -1722,10 +1751,14 @@ export function StoreWorkspace() {
 
         <TabsContent value="history" className="mt-4 space-y-4">
           <p className="text-sm text-muted-foreground">
-            Accepted purchase orders (manager-approved and purchased). Click a PO to see every line
-            item.
+            Purchase orders after accountant and manager approval (read-only).
+            Lines and amounts stay as the manager approved — market retirement does not change this view.
           </p>
-          <PoHistoryPanel purchaseOrders={purchaseOrders} />
+          <PoHistoryPanel
+            purchaseOrders={purchaseOrders}
+            forceOrderLines
+            emptyMessage="No purchase orders in history yet. After accountant and manager approve, the exact approved PO appears here (read-only)."
+          />
         </TabsContent>
       </Tabs>
       )}

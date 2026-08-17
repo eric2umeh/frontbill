@@ -9,7 +9,7 @@ import {
 } from '@/lib/supply-chain/types'
 import { formatNaira } from '@/lib/utils/currency'
 import { Badge } from '@/components/ui/badge'
-import { AlertTriangle, Ban, Pencil } from 'lucide-react'
+import { Ban, Pencil, TrendingDown, TrendingUp } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { formatUnitLabel } from '@/lib/supply-chain/measurement-units'
 
@@ -73,10 +73,23 @@ export function RetirementLinesReview({
             <div className="min-w-0 flex-1 space-y-1">
               <p
                 className={cn(
-                  'font-medium',
+                  'font-medium flex items-center gap-1.5',
                   notBought && 'line-through text-muted-foreground decoration-2',
                 )}
               >
+                {!notBought && priceChanged && orig ? (
+                  Number(line.actualPrice) > Number(orig.unitPrice) ? (
+                    <TrendingUp
+                      className="h-3.5 w-3.5 shrink-0 text-red-600"
+                      aria-label="Price higher than PO"
+                    />
+                  ) : (
+                    <TrendingDown
+                      className="h-3.5 w-3.5 shrink-0 text-emerald-600"
+                      aria-label="Price lower than PO"
+                    />
+                  )
+                ) : null}
                 {line.name}
               </p>
               <p
@@ -110,9 +123,18 @@ export function RetirementLinesReview({
                 {priceChanged ? (
                   <Badge
                     variant="outline"
-                    className="border-amber-400 text-amber-950 bg-amber-100/80 gap-1"
+                    className={cn(
+                      'gap-1',
+                      orig && Number(line.actualPrice) > Number(orig.unitPrice)
+                        ? 'border-red-300 text-red-800 bg-red-50'
+                        : 'border-emerald-300 text-emerald-800 bg-emerald-50',
+                    )}
                   >
-                    <AlertTriangle className="h-3 w-3" />
+                    {orig && Number(line.actualPrice) > Number(orig.unitPrice) ? (
+                      <TrendingUp className="h-3 w-3" />
+                    ) : (
+                      <TrendingDown className="h-3 w-3" />
+                    )}
                     Price {formatNaira(orig?.unitPrice ?? line.poPrice)} →{' '}
                     {formatNaira(line.actualPrice)}
                   </Badge>

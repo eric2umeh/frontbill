@@ -1,5 +1,6 @@
 import { createBrowserClient } from '@supabase/ssr'
 import { supabaseConfig } from '@/lib/config'
+import { isTransientNetworkError, withFetchRetry } from '@/lib/utils/fetch-retry'
 
 export function createClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL || supabaseConfig.url
@@ -15,7 +16,11 @@ export function createClient() {
       global: {
         fetch: async (input, init) => {
           try {
-            return await fetch(input, init)
+            return await withFetchRetry(() => fetch(input, init), {
+              retries: 2,
+              baseDelayMs: 400,
+              retryIf: isTransientNetworkError,
+            })
           } catch (error) {
             if (process.env.NODE_ENV === 'development') {
               console.warn(

@@ -508,6 +508,8 @@ export interface ProductionBatch {
   /** Produced kitchen stock consumed by this batch. */
   deductedKitchenStock?: { kitchenStockId: string; quantity: number }[]
   kitchenStockId?: string
+  /** Soft-delete tombstone — kept in snapshots so cloud merge does not resurrect the batch. */
+  deletedAt?: string
   openedAt: string
   openedBy: string
   createdBy?: string

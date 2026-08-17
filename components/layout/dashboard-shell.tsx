@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useState } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import { Sidebar } from '@/components/layout/sidebar'
 import { Header } from '@/components/layout/header'
@@ -15,6 +15,7 @@ import {
 } from '@/lib/permissions'
 import { NightAuditPendingProvider } from '@/components/providers/night-audit-pending-provider'
 import { BRAND_LOGO_SESSION_KEY } from '@/lib/branding/constants'
+import { documentTitleForPath } from '@/lib/nav/document-title'
 import { getPostLoginPath } from '@/lib/utils/post-login-path'
 import { SupplyChainProvider } from '@/lib/supply-chain/supply-chain-context'
 import { SupplyPendingAlerts } from '@/components/supply-chain/supply-pending-alerts'
@@ -91,7 +92,7 @@ function canAccessPath(pathname: string, userRole: string): boolean {
     if (pathname.startsWith('/supply/store')) return hasPermission(userRole, 'supply:store')
     if (pathname.startsWith('/supply/kitchen')) return hasPermission(userRole, 'supply:kitchen')
     if (pathname.startsWith('/supply/fnb'))
-      return hasPermission(userRole, 'supply:fnb') || hasPermission(userRole, 'outlet:view')
+      return hasPermission(userRole, 'supply:fnb')
     if (pathname.startsWith('/supply/purchasing')) {
       return hasPermission(userRole, 'supply:purchasing')
     }
@@ -182,6 +183,10 @@ export function DashboardShell({
     }
   }, [pathname, router, user.role])
 
+  useLayoutEffect(() => {
+    document.title = documentTitleForPath(pathname)
+  }, [pathname])
+
   useEffect(() => {
     if (typeof window === 'undefined' || !user.organizationId) return
     try {
@@ -209,6 +214,7 @@ export function DashboardShell({
         setOrganizationLogoUrl,
       }}
     >
+      <title>{documentTitleForPath(pathname)}</title>
       <SupplyChainProvider>
         <SupplyPendingAlerts />
         <NightAuditPendingProvider>

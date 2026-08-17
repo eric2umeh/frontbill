@@ -96,7 +96,6 @@ export async function applyRescheduleStay(
       ...fields,
       notes,
       updated_at,
-      updated_by: callerId,
     })
     .eq('id', bookingId)
     .select('*')

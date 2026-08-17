@@ -433,11 +433,11 @@ export function OutletMenuManager({ department, categories, items, canManage, on
             <CardDescription>
               {storeControlledFnb
                 ? department === 'main_bar' || department === 'pool_bar'
-                  ? 'Qty from Main Bar stock after F&B Store transfers it (Central Store → F&B Store → here).'
+                  ? 'Qty from Main Bar stock after Central Store issues it (Issue Out → Main Bar).'
                   : 'Qty from kitchen/bar stock. Admin/Manager can kickstart quantities here until store supply updates them.'
                 : stockPipeline === 'kitchen'
                   ? 'Qty = kitchen portions (store → batch → prepared food).'
-                  : 'Qty = bar stock transferred from F&B Store (same path as kitchen → restaurant).'}
+                  : 'Qty = bar stock issued from Central Store (same path as kitchen → restaurant).'}
             </CardDescription>
           )}
         </CardHeader>
@@ -654,7 +654,7 @@ export function OutletMenuManager({ department, categories, items, canManage, on
             <CardTitle>Categories</CardTitle>
             <CardDescription>
               {drinkMenu
-                ? 'Group drinks (Wine, Soft Drink, Cocktail, Spirits, …). Same list as F&B Store. F&B, Admin, Manager, or Superadmin can create, edit, and delete categories. Each word is capitalised.'
+                ? 'Group drinks (Wine, Soft Drink, Cocktail, Spirits, …). F&B, Admin, Manager, or Superadmin can create, edit, and delete categories. Each word is capitalised.'
                 : 'Group items (e.g. Buffet, Banquets). Enable flexible POS price for categories where the cashier may change the amount per order only.'}
             </CardDescription>
           </CardHeader>

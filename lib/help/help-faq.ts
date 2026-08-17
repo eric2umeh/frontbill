@@ -117,7 +117,7 @@ export const HELP_FAQ: HelpFaqItem[] = [
     category: 'Bookings',
     question: 'What do Occ, Res, and Due mean on Bookings?',
     answer:
-      'Occ = checked-in guests staying past today. Res = reservations not checked in yet. Due = checkout today only (not old overdue folios). The three counts are unique (a due-out guest is not also in Occ). Default table lists Occ + Due today + today’s arrivals; due rows show a “Due out today” note.',
+      'Occ = checked-in guests staying past the hotel business date. Res = reservations not checked in yet. Due = checkout on the current business date (not old overdue folios). Due out appears after Front Desk runs Night Audit (the business date rolls forward). The three counts are unique. Default table lists Occ + Due + today’s arrivals; due rows show a “Due out today” note.',
     keywords: ['occ', 'res', 'due', 'occupied', 'reservation', 'stats'],
     aliases: ['what is occ', 'what is due', 'occupied count wrong', 'res stat'],
     topics: ['create_booking'],
@@ -192,7 +192,7 @@ export const HELP_FAQ: HelpFaqItem[] = [
     category: 'Bookings',
     question: 'How do I move / reschedule stay dates?',
     answer:
-      'Open the booking and use Move dates / reschedule. Some hotels require Night Audit approval before the new dates apply.',
+      'Open the reservation and use Move dates. Front desk can change reserved/confirmed dates immediately when a guest does not arrive (no admin wait). Backdated check-ins still go to Night Audit for approval.',
     keywords: ['move dates', 'reschedule', 'change dates'],
     aliases: ['change check in date', 'reschedule booking'],
     topics: ['create_booking', 'night_audit'],
@@ -634,7 +634,7 @@ export const HELP_FAQ: HelpFaqItem[] = [
     category: 'Supply & kitchen',
     question: 'What is Supply Chain for?',
     answer:
-      'Central Store (stock & raising POs), Purchase Orders (approvals & retirement review for Accountant / Manager / Admin), Purchasing (market buy & retire), and Supply Log. Kitchen and F&B Store are under Kitchen. Stock is added to Central Store only after retirement is accepted — not when a PO is approved.',
+      'Central Store (stock & raising POs), Purchase Orders (accountant then manager approval), Purchasing (market buy & retire), and Supply Log. Kitchen is under Kitchen. After manager approval a PO is History (read-only). Retiring from Purchasing adds stock to Central Store immediately.',
     keywords: ['supply', 'store', 'purchasing', 'inventory', 'po'],
     aliases: ['stock', 'purchase order', 'supply chain'],
     topics: ['supply'],
@@ -644,7 +644,7 @@ export const HELP_FAQ: HelpFaqItem[] = [
     category: 'Supply & kitchen',
     question: 'How do I use Central Store?',
     answer:
-      'Supply Chain → Central Store: add/edit items, Issue Out to departments, raise a draft purchase list and send to the accountant. Only one open PO at a time until it is retired. Approvals are under Supply Chain → Purchase Orders (not Expenses).',
+      'Supply Chain → Central Store: add/edit items, Issue Out to departments (including Main Bar), raise a draft purchase list and send to the accountant. After manager approval the PO is in History and cannot be edited. Retire at market from Purchasing to add stock.',
     keywords: ['central store', 'issue out', 'stock in', 'stock out'],
     aliases: ['issue out basket', 'store items', 'stock history'],
     topics: ['supply'],
@@ -694,9 +694,9 @@ export const HELP_FAQ: HelpFaqItem[] = [
   {
     id: 'kitchen',
     category: 'Supply & kitchen',
-    question: 'How do Kitchen and F&B Store work?',
+    question: 'How do Kitchen and Main Bar stock work?',
     answer:
-      'Kitchen and F&B Store track food & beverage inventory linked to outlets — finished/prep stock, recipes/batches, kitchen budget, and stock tickets. Supply Log shows activity.',
+      'Kitchen tracks food production (recipes, batches, raw stock). Main Bar drinks are issued from Central Store → Issue Out → Main Bar. F&B Store is temporarily paused.',
     keywords: ['kitchen', 'f&b', 'fnb', 'food', 'recipe', 'batch'],
     aliases: ['fnb store', 'kitchen store', 'production batch'],
     topics: ['supply', 'outlet'],

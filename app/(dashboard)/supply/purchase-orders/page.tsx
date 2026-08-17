@@ -66,8 +66,9 @@ function PurchaseOrdersPageContent() {
           Purchase orders
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Approve raised POs and review market retirements. Stock is added to Central
-          Store only after a retirement is accepted — not when a PO is approved.
+          Approve raised POs. After manager approval, POs move to Central Store History
+          (read-only). Store or purchaser retires at market from Purchasing — stock is added
+          immediately, with a notification to accountant, manager, admin, and superadmin.
         </p>
       </div>
 

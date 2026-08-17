@@ -224,6 +224,24 @@ export function hotelCalendarTodayYmd(
   return formatYMDInTimeZone(now, resolveHotelTimeZone(timeZone))
 }
 
+/** `organizations.business_date` when it is a valid YYYY-MM-DD. */
+export function parseOrgBusinessDateYmd(raw: unknown): string | null {
+  const s = String(raw ?? '').slice(0, 10)
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null
+}
+
+/**
+ * Front-office “today” for Occ / Due / Res.
+ * After Night Audit runs, org `business_date` rolls forward — Due out for the new
+ * business day appears then, not at calendar midnight.
+ */
+export function frontOfficeTodayYmd(
+  orgBusinessDate?: string | null,
+  timeZone: string = resolveHotelTimeZone(),
+): string {
+  return parseOrgBusinessDateYmd(orgBusinessDate) ?? hotelCalendarTodayYmd(undefined, timeZone)
+}
+
 /**
  * Business day being *closed* when night audit runs (hotel timezone).
  * Example: 7am on 16 May → closes 15 May; 11pm on 15 May → closes 15 May.

@@ -1,6 +1,6 @@
 /** Outlets / departments items can be issued or sold to — shown in store movements & reports. */
 export const OUTLET_DEPARTMENTS = [
-  'F&B Store',
+  'Main Bar',
   'Housekeeping',
   'Laundry',
   'Kitchen',
@@ -11,7 +11,7 @@ export type OutletDepartment = (typeof OUTLET_DEPARTMENTS)[number]
 
 /** Outlets highlighted in Store: switch context & issue totals (main stock still lives in central). */
 export const STORE_FOCUS_OUTLETS = [
-  'F&B Store',
+  'Main Bar',
   'Kitchen',
   'Housekeeping',
   'Laundry',
@@ -23,6 +23,16 @@ export const CENTRAL_STORE_VIEW = '__central_store__'
 
 export type StoreOutletContext = typeof CENTRAL_STORE_VIEW | string
 
+export function isMainBarIssueDestination(destination: string): boolean {
+  const d = destination.trim().toLowerCase()
+  return (
+    d === 'main bar' ||
+    d === 'main_bar' ||
+    d === 'bar' ||
+    d === 'beverages / mini-bar'
+  )
+}
+
 /** Issue / destination dropdown: focus outlets first, then any other departments (deduped). */
 export function issueOutletPickerOptions(): string[] {
   const seen = new Set<string>()
@@ -30,6 +40,7 @@ export function issueOutletPickerOptions(): string[] {
   for (const label of [...STORE_FOCUS_OUTLETS, ...OUTLET_DEPARTMENTS]) {
     const k = label.trim().toLowerCase()
     if (!k || seen.has(k)) continue
+    if (k.includes('f&b') || k === 'fnb store' || k === 'food & beverage') continue
     seen.add(k)
     out.push(label)
   }

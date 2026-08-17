@@ -29,6 +29,8 @@ import {
   type FolioRemarksAttachmentsValue,
 } from '@/components/folio/folio-remarks-attachments-field'
 import { persistFolioAttachments } from '@/lib/folio/persist-folio-attachments'
+import { useAuth } from '@/lib/auth-context'
+import { canFrontDeskApplyRescheduleStay } from '@/lib/booking/can-reschedule-stay'
 import { createClient } from '@/lib/supabase/client'
 
 export type RescheduleStayModalBooking = {
@@ -55,7 +57,7 @@ function toYmd(d: Date): string {
 interface RescheduleStayModalProps {
   open: boolean
   onClose: () => void
-  onSuccess: () => void | Promise<void>
+  onSuccess: (result?: { applied?: boolean }) => void | Promise<void>
   booking: RescheduleStayModalBooking | null
   userId: string | null | undefined
   organizationId?: string | null
@@ -69,6 +71,8 @@ export function RescheduleStayModal({
   userId,
   organizationId,
 }: RescheduleStayModalProps) {
+  const { role } = useAuth()
+  const applyDirect = canFrontDeskApplyRescheduleStay(role)
   const [checkIn, setCheckIn] = useState<Date | undefined>()
   const [checkOut, setCheckOut] = useState<Date | undefined>()
   const [reason, setReason] = useState('')
@@ -173,12 +177,18 @@ export function RescheduleStayModal({
           toast.warning(`Request sent but attachment failed: ${attachResult.error}`)
         }
       }
-      toast.success('Move-dates request sent for manager approval')
-      const { dispatchNightAuditPendingChanged } = await import(
-        '@/lib/utils/dispatch-night-audit-pending-changed'
+      toast.success(
+        data.applied
+          ? 'Stay dates updated'
+          : 'Move-dates request sent for manager approval',
       )
-      dispatchNightAuditPendingChanged()
-      await onSuccess()
+      if (!data.applied) {
+        const { dispatchNightAuditPendingChanged } = await import(
+          '@/lib/utils/dispatch-night-audit-pending-changed'
+        )
+        dispatchNightAuditPendingChanged()
+      }
+      await onSuccess({ applied: Boolean(data.applied) })
       onClose()
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Failed to submit request'
@@ -192,10 +202,11 @@ export function RescheduleStayModal({
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
       <DialogContent className={cn(dialogScrollableContentClass, 'sm:max-w-md')}>
         <DialogScrollableHeader>
-          <DialogTitle>Request move stay dates</DialogTitle>
+          <DialogTitle>{applyDirect ? 'Move stay dates' : 'Request move stay dates'}</DialogTitle>
           <DialogDescription>
-            Proposed dates are sent to a Manager, Administrator, or Superadmin for approval before the
-            folio and room hold are updated.
+            {applyDirect
+              ? 'Update the reservation check-in and check-out when the guest did not arrive on the reserved date. Changes apply immediately.'
+              : 'Proposed dates are sent to a Manager, Administrator, or Superadmin for approval before the folio and room hold are updated.'}
           </DialogDescription>
         </DialogScrollableHeader>
 
@@ -264,7 +275,7 @@ export function RescheduleStayModal({
             disabled={submitting}
             compact
             remarksLabel="Additional remarks (optional)"
-            remarksPlaceholder="Extra context for approvers…"
+            remarksPlaceholder={applyDirect ? 'Optional extra notes…' : 'Extra context for approvers…'}
           />
         </DialogScrollableBody>
 
@@ -289,6 +300,8 @@ export function RescheduleStayModal({
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 Submitting…
               </>
+            ) : applyDirect ? (
+              'Save dates'
             ) : (
               'Submit for approval'
             )}

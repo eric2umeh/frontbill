@@ -547,7 +547,7 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
     key: "store",
     label: "Store",
     description:
-      "Full supply chain for central store: catalogue (add items without approval), stock, issue-out, kitchen/F&B views, purchasing, PO approvals, and activity — plus profile/settings. No front-office menus.",
+      "Full supply chain for central store: catalogue, stock, issue-out, purchasing, and activity. No kitchen or front-office menus.",
     color:
       "bg-amber-100 text-amber-950 dark:bg-amber-950/30 dark:text-amber-100",
     permissions: [
@@ -561,8 +561,6 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
       "store:reports",
       "store:audit",
       "supply:store",
-      "supply:kitchen",
-      "supply:fnb",
       "supply:purchasing",
       "supply:approve_accountant",
       "supply:approve_manager",
@@ -804,7 +802,7 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
     key: "food_beverage",
     label: "Food & Beverage",
     description:
-      "Food & Beverage department: Restaurant, Main Bar, Pool Bar, and Banquets POS; F&B Store daily inventory; transfer stock to Main Bar; drink categories and outlet menus. No front desk, laundry, or gym.",
+      "Food & Beverage department: Restaurant, Main Bar, Pool Bar, and Banquets POS; drink categories and outlet menus. No central store, kitchen, or front desk.",
     color: "bg-rose-100 text-rose-900 dark:bg-rose-950/40 dark:text-rose-100",
     permissions: [
       "outlet:view",
@@ -812,10 +810,6 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
       "outlet:sell",
       "outlet:reports",
       "outlet:receipt",
-      "supply:fnb",
-      "supply:kitchen",
-      "supply:store",
-      "supply:activity",
       "settings:view",
     ],
   },
@@ -887,6 +881,8 @@ const PROFILE_ROLE_ALIASES: Record<string, RoleKey> = {
   food_and_beverage: "food_beverage",
   "food_&_beverage": "food_beverage",
   fnb: "food_beverage",
+  "f&b": "food_beverage",
+  f_b: "food_beverage",
   banquets_staff: "food_beverage",
   events_staff: "food_beverage",
   chef: "chef",
