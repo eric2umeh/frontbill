@@ -627,6 +627,7 @@ function useSupplyChainImpl() {
       },
       role,
     );
+    if (Object.keys(payload).length === 0) return;
     try {
       await saveSupplySnapshots(userId, payload, orgIdRef.current || undefined);
       broadcastSupplyLiveUpdate();
@@ -812,11 +813,14 @@ function useSupplyChainImpl() {
           toUpload.purchase_orders = mergedPurchaseOrders;
         }
         if (Object.keys(toUpload).length > 0) {
-          await saveSupplySnapshots(
-            userId,
-            snapshotsPayloadForRole(toUpload, role),
-            organizationId || undefined,
-          );
+          const rolePayload = snapshotsPayloadForRole(toUpload, role);
+          if (Object.keys(rolePayload).length > 0) {
+            await saveSupplySnapshots(
+              userId,
+              rolePayload,
+              organizationId || undefined,
+            );
+          }
         }
 
         removeAllPersistedSupplyKeys();
@@ -875,6 +879,12 @@ function useSupplyChainImpl() {
   /** Debounced JSON snapshot sync — always read refs so a slow PUT cannot overwrite Clear. */
   useEffect(() => {
     if (!useDbPersistence || !dbHydrated || snapshotSyncSkipRef.current) return;
+    if (
+      !hasPermission(role, "supply:store") &&
+      !hasPermission(role, "supply:kitchen")
+    ) {
+      return;
+    }
     const timer = window.setTimeout(() => {
       void persistSnapshotsNow().catch(() => {
         /* toast handled inside persistSnapshotsNow */
@@ -898,6 +908,7 @@ function useSupplyChainImpl() {
     activityLog,
     pendingStoreItems,
     basket,
+    role,
   ]);
 
   /** Pull live stock (and batch standards) so kitchen / F&B update without a full page refresh. */
