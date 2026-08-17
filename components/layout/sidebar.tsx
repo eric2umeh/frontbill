@@ -147,6 +147,17 @@ const NAV_SECTIONS: NavSection[] = [
   },
 ]
 
+function sectionVisibleForRole(sectionTitle: string, role: string | null): boolean {
+  const roleKey = canonicalRoleKey(role)
+  if (sectionTitle === 'Kitchen' && (roleKey === 'store' || roleKey === 'purchaser' || roleKey === 'food_beverage')) {
+    return false
+  }
+  if (sectionTitle === 'Supply Chain' && roleKey === 'food_beverage') {
+    return false
+  }
+  return true
+}
+
 function routeIsVisible(route: NavRoute | NavChild, role: string | null): boolean {
   const roleKey = canonicalRoleKey(role)
   if ('href' in route && route.href === '/dashboard' && roleKey === 'cashier') return false
@@ -240,6 +251,9 @@ const DROPDOWN_SECTIONS: Record<string, LucideIcon> = {
 function buildSections(role: string | null): NavSection[] {
   const compact = usesCompactNav(role)
   return NAV_SECTIONS.map((section) => {
+    if (!sectionVisibleForRole(section.title, role)) {
+      return { ...section, routes: [] }
+    }
     let routes = section.routes.filter((r) => routeIsVisible(r, role))
 
     const dropdownIcon = DROPDOWN_SECTIONS[section.title]
