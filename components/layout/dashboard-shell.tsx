@@ -15,6 +15,7 @@ import {
 } from '@/lib/permissions'
 import { NightAuditPendingProvider } from '@/components/providers/night-audit-pending-provider'
 import { BRAND_LOGO_SESSION_KEY } from '@/lib/branding/constants'
+import { documentTitleForPath } from '@/lib/nav/document-title'
 import { getPostLoginPath } from '@/lib/utils/post-login-path'
 import { SupplyChainProvider } from '@/lib/supply-chain/supply-chain-context'
 import { SupplyPendingAlerts } from '@/components/supply-chain/supply-pending-alerts'
@@ -181,6 +182,11 @@ export function DashboardShell({
       router.replace('/access-denied')
     }
   }, [pathname, router, user.role])
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return
+    document.title = documentTitleForPath(pathname)
+  }, [pathname])
 
   useEffect(() => {
     if (typeof window === 'undefined' || !user.organizationId) return
