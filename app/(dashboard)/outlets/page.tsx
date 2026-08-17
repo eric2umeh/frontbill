@@ -19,6 +19,7 @@ import {
   Receipt,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
+import { LoadingSpinner } from '@/components/loading-screen'
 
 const ICONS: Record<string, LucideIcon> = {
   utensils: Utensils,
@@ -37,6 +38,9 @@ const OUTLET_FEATURES = [
 
 export default function OutletsHubPage() {
   const { role } = useAuth()
+  if (!role) {
+    return <LoadingSpinner />
+  }
   if (!hasPermission(role, 'outlet:view')) {
     return <p className="text-muted-foreground p-6">You do not have access to outlets.</p>
   }
