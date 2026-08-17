@@ -184,6 +184,18 @@ export function requireSupplyKitchenOrStore(auth: SupplyAuthed): NextResponse | 
   return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 }
 
+/** GET snapshots: store/kitchen plus outlet staff (Main Bar stock + issue log). */
+export function requireSupplySnapshotRead(auth: SupplyAuthed): NextResponse | null {
+  if (!requireSupplyKitchenOrStore(auth)) return null
+  if (
+    hasPermission(auth.role, 'outlet:view') ||
+    hasPermission(auth.role, 'outlet:sell')
+  ) {
+    return null
+  }
+  return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+}
+
 export function isKitchenOnlySupplyRole(role: string): boolean {
   return hasPermission(role, 'supply:kitchen') && !hasPermission(role, 'supply:store')
 }
