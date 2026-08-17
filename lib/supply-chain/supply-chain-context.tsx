@@ -118,7 +118,7 @@ import {
   mergeRecipesFromRemote,
   visibleProductionBatches,
 } from "./kitchen-sync-merge";
-import { snapshotsPayloadForRole } from "./supply-snapshot-payload";
+import { canReadSupplySnapshots, snapshotsPayloadForRole } from "./supply-snapshot-payload";
 import { dedupeBatchMaterials } from "./parse-csv-row";
 import { broadcastSupplyLiveUpdate, subscribeSupplyLiveUpdates } from "./supply-live-sync";
 import {
@@ -642,6 +642,11 @@ function useSupplyChainImpl() {
           console.warn("[supply-chain] snapshot sync retryable:", err2);
           return;
         }
+        const msg = err2 instanceof Error ? err2.message : "";
+        if (/^forbidden$/i.test(msg.trim())) {
+          console.warn("[supply-chain] snapshot sync skipped: Forbidden");
+          return;
+        }
         console.error("[supply-chain] snapshot sync failed", err2);
         toast.error(
           err2 instanceof Error
@@ -671,6 +676,10 @@ function useSupplyChainImpl() {
   /** Load catalogue + JSON snapshots from Supabase when authenticated. */
   useEffect(() => {
     if (!useDbPersistence) return;
+    if (!canReadSupplySnapshots(role)) {
+      setDbHydrated(true);
+      return;
+    }
     let cancelled = false;
     catalogSyncSkipRef.current = true;
     snapshotSyncSkipRef.current = true;
@@ -681,7 +690,9 @@ function useSupplyChainImpl() {
           fetchSupplyCatalog(userId, organizationId || undefined).catch(
             () => [] as StoreItem[],
           ),
-          fetchSupplySnapshots(userId, organizationId || undefined),
+          fetchSupplySnapshots(userId, organizationId || undefined).catch(
+            () => ({}),
+          ),
         ]);
         if (cancelled) return;
 
@@ -819,7 +830,7 @@ function useSupplyChainImpl() {
               userId,
               rolePayload,
               organizationId || undefined,
-            );
+            ).catch(() => undefined);
           }
         }
 
@@ -835,8 +846,8 @@ function useSupplyChainImpl() {
         if (localCatalog.length > 0) {
           setStoreItems(localCatalog);
         }
-        if (isRetryableSupplyError(err)) {
-          console.warn("[supply-chain] snapshot hydrate retryable:", message);
+        if (isRetryableSupplyError(err) || /^forbidden$/i.test(message.trim())) {
+          console.warn("[supply-chain] snapshot hydrate skipped:", message);
         } else {
           console.error("[supply-chain] failed to load from Supabase", err);
           toast.error(message);
@@ -914,6 +925,7 @@ function useSupplyChainImpl() {
   /** Pull live stock (and batch standards) so kitchen / F&B update without a full page refresh. */
   useEffect(() => {
     if (!useDbPersistence || !dbHydrated) return;
+    if (!canReadSupplySnapshots(role)) return;
 
     let cancelled = false;
 
@@ -1017,11 +1029,12 @@ function useSupplyChainImpl() {
       window.clearInterval(interval);
       unsubscribeLive();
     };
-  }, [useDbPersistence, dbHydrated, userId, organizationId]);
+  }, [useDbPersistence, dbHydrated, userId, organizationId, role]);
 
   /** Refresh PO list from org snapshot so accountant / purchaser see each other's decisions. */
   useEffect(() => {
     if (!useDbPersistence || !dbHydrated) return;
+    if (!canReadSupplySnapshots(role)) return;
 
     let cancelled = false;
 
@@ -1057,7 +1070,7 @@ function useSupplyChainImpl() {
       document.removeEventListener("visibilitychange", onVis);
       window.clearInterval(interval);
     };
-  }, [useDbPersistence, dbHydrated, userId, organizationId]);
+  }, [useDbPersistence, dbHydrated, userId, organizationId, role]);
 
   /** Drop legacy demo kitchen seed (Peppered Chicken / Jollof / Egusi) once per browser. */
   useEffect(() => {
