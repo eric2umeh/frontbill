@@ -881,6 +881,8 @@ const PROFILE_ROLE_ALIASES: Record<string, RoleKey> = {
   food_and_beverage: "food_beverage",
   "food_&_beverage": "food_beverage",
   fnb: "food_beverage",
+  "f&b": "food_beverage",
+  f_b: "food_beverage",
   banquets_staff: "food_beverage",
   events_staff: "food_beverage",
   chef: "chef",
