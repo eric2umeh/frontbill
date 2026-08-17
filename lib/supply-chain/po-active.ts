@@ -9,7 +9,7 @@ import type {
 } from "./types";
 import { storeItemDepartments } from "./types";
 import { canonicalRoleKey } from "@/lib/permissions";
-import { resolvePoDisplayStatus } from "./po-format";
+import { isPurchaseOrderHistoryStatus, resolvePoDisplayStatus } from "./po-format";
 
 type LineActor = { name: string; role: string };
 
@@ -289,15 +289,16 @@ export function getActivePurchaseOrder(
     const focused = orders.find((p) => p.id === workingPoId);
     if (
       focused &&
-      focused.status !== "retired" &&
-      !isPurchaseOrderDeleted(focused)
+      !isPurchaseOrderDeleted(focused) &&
+      !isPurchaseOrderHistoryStatus(focused.status)
     ) {
       return focused;
     }
   }
 
   const candidates = orders.filter(
-    (p) => p.status !== "retired" && !isPurchaseOrderDeleted(p),
+    (p) =>
+      !isPurchaseOrderHistoryStatus(p.status) && !isPurchaseOrderDeleted(p),
   );
   if (!candidates.length) return undefined;
 
