@@ -52,7 +52,7 @@ export async function POST(request: Request) {
 
   const { data: categories } = await admin
     .from('outlet_menu_categories')
-    .select('id, name')
+    .select('id, name, slug')
     .eq('organization_id', organizationId)
     .eq('department', department)
 
@@ -76,8 +76,11 @@ export async function POST(request: Request) {
   }
   if (!categoryId && requestedCategoryName) {
     const categoryNorm = requestedCategoryName.toLowerCase()
+    const slug = outletSlugify(requestedCategoryName)
     categoryId =
-      categories?.find((c) => c.name.trim().toLowerCase() === categoryNorm)?.id ?? null
+      categories?.find((c) => c.name.trim().toLowerCase() === categoryNorm)?.id ??
+      categories?.find((c) => String(c.slug || '') === slug)?.id ??
+      null
   }
   if (!categoryId && existing?.category_id) {
     categoryId = String(existing.category_id)
@@ -85,21 +88,48 @@ export async function POST(request: Request) {
 
   if (!categoryId) {
     const categoryName = requestedCategoryName || 'Beverages'
-    const { data: created, error: ce } = await admin
-      .from('outlet_menu_categories')
-      .insert({
-        organization_id: organizationId,
-        department,
-        name: categoryName,
-        slug: outletSlugify(categoryName),
-        sort_order: 0,
-        created_by: user.id,
-        updated_by: user.id,
-      })
-      .select('id')
-      .single()
-    if (ce) return NextResponse.json({ error: ce.message }, { status: 400 })
-    categoryId = created.id
+    const slug = outletSlugify(categoryName)
+    const existingBySlug =
+      categories?.find((c) => String(c.slug || '') === slug)?.id ??
+      categories?.find((c) => c.name.trim().toLowerCase() === categoryName.toLowerCase())
+        ?.id ??
+      null
+    if (existingBySlug) {
+      categoryId = existingBySlug
+    } else {
+      const { data: created, error: ce } = await admin
+        .from('outlet_menu_categories')
+        .insert({
+          organization_id: organizationId,
+          department,
+          name: categoryName,
+          slug,
+          sort_order: 0,
+          created_by: user.id,
+          updated_by: user.id,
+        })
+        .select('id')
+        .single()
+      if (ce) {
+        const isDup =
+          ce.code === '23505' ||
+          /outlet_menu_categories_organization_id_department_slug/i.test(ce.message || '')
+        if (!isDup) return NextResponse.json({ error: ce.message }, { status: 400 })
+        const { data: raced } = await admin
+          .from('outlet_menu_categories')
+          .select('id')
+          .eq('organization_id', organizationId)
+          .eq('department', department)
+          .eq('slug', slug)
+          .maybeSingle()
+        if (!raced?.id) {
+          return NextResponse.json({ error: ce.message }, { status: 400 })
+        }
+        categoryId = raced.id
+      } else {
+        categoryId = created.id
+      }
+    }
   }
 
   const itemPayload = {
@@ -156,6 +186,29 @@ export async function POST(request: Request) {
     .select()
     .single()
 
-  if (ie) return NextResponse.json({ error: ie.message }, { status: 400 })
+  if (ie) {
+    const isDup =
+      ie.code === '23505' ||
+      /duplicate key|unique constraint/i.test(ie.message || '')
+    if (!isDup) return NextResponse.json({ error: ie.message }, { status: 400 })
+    const { data: racedItem } = await admin
+      .from('outlet_menu_items')
+      .select()
+      .eq('organization_id', organizationId)
+      .eq('department', department)
+      .eq('service_code', serviceCode)
+      .maybeSingle()
+    if (racedItem) {
+      const { data: updated, error: ue } = await admin
+        .from('outlet_menu_items')
+        .update(itemPayload)
+        .eq('id', racedItem.id)
+        .select()
+        .single()
+      if (ue) return NextResponse.json({ error: ue.message }, { status: 400 })
+      return NextResponse.json({ item: updated, categoryId, synced: 'updated' })
+    }
+    return NextResponse.json({ error: ie.message }, { status: 400 })
+  }
   return NextResponse.json({ item: created, categoryId, synced: 'created' })
 }
