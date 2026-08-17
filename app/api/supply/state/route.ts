@@ -3,6 +3,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import {
   isKitchenOnlySupplyRole,
   requireSupplyKitchenOrStore,
+  requireSupplySnapshotRead,
   resolveSupplyAuthedUser,
 } from '@/lib/supply-chain/supply-api-auth'
 import { SUPPLY_SNAPSHOT_KEYS, KITCHEN_WRITE_SNAPSHOT_KEYS, type SupplySnapshotKey } from '@/lib/supply-chain/supply-db-mappers'
@@ -38,7 +39,7 @@ export async function GET(request: Request) {
     const auth = await resolveSupplyAuthedUser(request, caller_id)
     if (auth instanceof NextResponse) return auth
 
-    const denied = requireSupplyKitchenOrStore(auth)
+    const denied = requireSupplySnapshotRead(auth)
     if (denied) return denied
 
     const admin = createAdminClient()
