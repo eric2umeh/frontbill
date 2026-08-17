@@ -5,8 +5,12 @@ import { normalizeSupplyDept, type PurchaseOrder } from "@/lib/supply-chain/type
 import { formatNaira } from "@/lib/utils/currency";
 import {
   formatPoRaisedAt,
+  getPoApprovedAmount,
   getPoHistoryLines,
+  getPoRetiredAmount,
+  getPoRetirementDelta,
   isPurchaseOrderHistoryStatus,
+  retirementLineChanged,
 } from "@/lib/supply-chain/po-format";
 import { poStatusBadge } from "@/components/supply-chain/po-approval-panel";
 import { PaginatedListShell } from "@/components/shared/paginated-list-shell";
@@ -16,6 +20,8 @@ import {
 } from "@/components/supply-chain/po-review-lines-panel";
 import { RetirementLinesReview } from "@/components/supply-chain/retirement-lines-review";
 import { ChevronDown, ChevronRight } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 
 export function PoHistoryPanel({
   purchaseOrders,
@@ -45,7 +51,8 @@ export function PoHistoryPanel({
   const statusOptions = useMemo(() => {
     const present = new Set(history.map((p) => p.status));
     const all = [
-      { value: "disbursed", label: "Disbursed" },
+      { value: "approved", label: "Approved" },
+      { value: "disbursed", label: "Approved — buy at market" },
       { value: "retirement_pending", label: "Retirement pending" },
       {
         value: "retirement_pending_accountant",
@@ -110,7 +117,7 @@ export function PoHistoryPanel({
       }}
       emptyMessage={
         emptyMessageProp ??
-        "No accepted purchase orders in history yet. POs appear here after manager approval and market purchase."
+        "No purchase orders in history yet. POs appear here after manager approval (read-only). Retired POs also show here after market retirement."
       }
     >
       {(pagePos, ctx) => (
@@ -145,6 +152,9 @@ export function PoHistoryPanel({
                             po.retirement?.actualSpent ?? po.totalAmount,
                           )}
                         </span>
+                        {po.retirement ? (
+                          <PoVarianceBadge po={po} />
+                        ) : null}
                       </div>
                       <p className="text-[13px] text-muted-foreground truncate">
                         Raised {formatPoRaisedAt(po.createdAt)} ·{" "}
@@ -169,8 +179,12 @@ export function PoHistoryPanel({
                         </>
                       )}
                     </p>
+                    {po.retirement ? <PoRetirementSummary po={po} /> : null}
                     {mode === "retirement" && po.retirement?.lines?.length ? (
-                      <RetirementLinesReview po={po} deptFilter={deptFilter} />
+                      <>
+                        <RetirementChangedLines po={po} />
+                        <RetirementLinesReview po={po} deptFilter={deptFilter} />
+                      </>
                     ) : (
                       <PoReviewLinesPanel
                         lines={po.lines}
@@ -189,5 +203,97 @@ export function PoHistoryPanel({
         </div>
       )}
     </PaginatedListShell>
+  );
+}
+
+function PoVarianceBadge({ po }: { po: PurchaseOrder }) {
+  const delta = getPoRetirementDelta(po);
+  if (!Number.isFinite(delta) || delta === 0) {
+    return (
+      <Badge variant="outline" className="text-[10px] h-5">
+        Even
+      </Badge>
+    );
+  }
+  if (delta > 0) {
+    return (
+      <Badge className="bg-red-100 text-red-800 text-[10px] h-5">
+        Debit {formatNaira(delta)}
+      </Badge>
+    );
+  }
+  return (
+    <Badge className="bg-emerald-100 text-emerald-800 text-[10px] h-5">
+      Credit {formatNaira(Math.abs(delta))}
+    </Badge>
+  );
+}
+
+function PoRetirementSummary({ po }: { po: PurchaseOrder }) {
+  const approved = getPoApprovedAmount(po);
+  const retired = getPoRetiredAmount(po);
+  const delta = getPoRetirementDelta(po);
+  return (
+    <div className="rounded-md border bg-background px-3 py-2 text-sm space-y-1">
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+        Amount summary
+      </p>
+      <div className="flex flex-wrap gap-x-4 gap-y-1 tabular-nums">
+        <span>Approved PO: <strong>{formatNaira(approved)}</strong></span>
+        <span>Retired: <strong>{formatNaira(retired)}</strong></span>
+        <span
+          className={cn(
+            "font-medium",
+            delta > 0 && "text-red-700",
+            delta < 0 && "text-emerald-700",
+          )}
+        >
+          Difference:{" "}
+          {delta === 0
+            ? formatNaira(0)
+            : delta > 0
+              ? `${formatNaira(delta)} debit`
+              : `${formatNaira(Math.abs(delta))} credit`}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function RetirementChangedLines({ po }: { po: PurchaseOrder }) {
+  const [open, setOpen] = useState(false);
+  const changed = (po.retirement?.lines ?? []).filter((line) =>
+    retirementLineChanged(po, line),
+  );
+  if (!changed.length) return null;
+  const changedPo = {
+    ...po,
+    retirement: po.retirement
+      ? { ...po.retirement, lines: changed }
+      : po.retirement,
+  };
+  return (
+    <div className="rounded-md border">
+      <button
+        type="button"
+        className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm hover:bg-muted/40"
+        onClick={() => setOpen((v) => !v)}
+      >
+        {open ? (
+          <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+        ) : (
+          <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+        )}
+        <span className="font-medium">
+          Changed lines ({changed.length})
+        </span>
+        <span className="text-xs text-muted-foreground">qty or amount vs approved PO</span>
+      </button>
+      {open ? (
+        <div className="border-t px-3 py-2">
+          <RetirementLinesReview po={changedPo} />
+        </div>
+      ) : null}
+    </div>
   );
 }
