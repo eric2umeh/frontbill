@@ -53,8 +53,13 @@ export function isPurchaseOrderHistoryStatus(status: string): boolean {
   ].includes(status);
 }
 
-/** Lines to show in PO history — retirement snapshot when available. */
-export function getPoHistoryLines(po: PurchaseOrder): {
+/** Lines to show in PO history.
+ * Store History always uses the manager-approved order (not market retirement).
+ */
+export function getPoHistoryLines(
+  po: PurchaseOrder,
+  opts?: { forceOrderLines?: boolean },
+): {
   mode: "order" | "retirement";
   lines: Array<{
     id: string;
@@ -70,6 +75,7 @@ export function getPoHistoryLines(po: PurchaseOrder): {
 } {
   const retirement = po.retirement?.lines;
   const useRetirement =
+    !opts?.forceOrderLines &&
     retirement?.length &&
     [
       "retirement_pending_accountant",
