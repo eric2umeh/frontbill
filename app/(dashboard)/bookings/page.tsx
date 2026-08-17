@@ -52,7 +52,7 @@ import {
   calendarPickerYmd,
   todayYmdHotel,
 } from "@/lib/utils/booking-in-house-dates";
-import { resolveHotelTimeZone } from "@/lib/hotel-date";
+import { frontOfficeTodayYmd, resolveHotelTimeZone } from "@/lib/hotel-date";
 import { cancelBookingReservation } from "@/lib/reservations/cancel-reservation";
 import { reconcileRoomStatusesClient } from "@/lib/rooms/reconcile-room-status-client";
 import {
@@ -277,6 +277,7 @@ export default function BookingsPage() {
   const [catalogLoading, setCatalogLoading] = useState(false);
   /** When set, table shows in-house guests for that hotel night (not arrivals-only). */
   const [stayDateYmd, setStayDateYmd] = useState<string | null>(null);
+  const [frontOfficeToday, setFrontOfficeToday] = useState(() => todayYmdHotel());
   const [roomStats, setRoomStats] = useState<{
     total: number;
     occupied: number;
@@ -293,8 +294,14 @@ export default function BookingsPage() {
       const supabase = createClient();
       if (!supabase) return;
       const checkoutTime = await fetchOrgCheckoutTime(supabase, organizationId);
+      const { data: orgRow } = await supabase
+        .from("organizations")
+        .select("business_date")
+        .eq("id", organizationId)
+        .maybeSingle();
       if (!cancelled) {
         setOrgCheckoutTime(checkoutTime);
+        setFrontOfficeToday(frontOfficeTodayYmd(orgRow?.business_date));
       }
     })();
     return () => {
@@ -307,7 +314,7 @@ export default function BookingsPage() {
     const supabase = createClient();
     if (!supabase) return;
     const tz = resolveHotelTimeZone();
-    const today = todayYmdHotel(tz);
+    const today = frontOfficeToday;
 
     await reconcileRoomStatusesClient();
 
@@ -354,7 +361,7 @@ export default function BookingsPage() {
       outOfOrder,
       dueOutToday: stay.dueOut,
     });
-  }, [organizationId]);
+  }, [organizationId, frontOfficeToday]);
 
   function groupBulkRows(rows: Booking[]) {
     const grouped = new Map<string, Booking[]>();
@@ -441,7 +448,7 @@ export default function BookingsPage() {
 
       const loadScope = async (statusKey: string) => {
         const tz = resolveHotelTimeZone();
-        const today = todayYmdHotel(tz);
+        const today = frontOfficeToday;
         const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000)
           .toISOString()
           .split("T")[0];
@@ -635,7 +642,7 @@ export default function BookingsPage() {
       window.setTimeout(() => void refreshRoomStats(), 400);
       endFetch();
     }
-  }, [organizationId, userId, refreshRoomStats, startFetch, endFetch]);
+  }, [organizationId, userId, refreshRoomStats, startFetch, endFetch, frontOfficeToday]);
 
   const fetchBookingsCatalog = useCallback(
     async (scopeKey: string) => {
@@ -665,7 +672,7 @@ export default function BookingsPage() {
             .limit(BOOKINGS_SCOPE_LIMIT);
 
           const tz = resolveHotelTimeZone();
-          const today = todayYmdHotel(tz);
+          const today = frontOfficeToday;
 
           if (scopeKey === "all") {
             query = query
@@ -778,7 +785,7 @@ export default function BookingsPage() {
 
           if (scopeKey === "due_out") {
             const tz = resolveHotelTimeZone();
-            const today = todayYmdHotel(tz);
+            const today = frontOfficeToday;
             bookingsWithUsers = bookingsWithUsers.filter(
               (b: any) => classifyFrontOfficeStay(b, today, tz) === "due_out",
             );
@@ -802,7 +809,7 @@ export default function BookingsPage() {
         setCatalogLoading(false);
       }
     },
-    [organizationId, userId],
+    [organizationId, userId, frontOfficeToday],
   );
 
   /** In-house / stayovers for a hotel night (daily book), including later checked-out guests. */
@@ -1402,7 +1409,7 @@ export default function BookingsPage() {
               </div>
               <div
                 className="inline-flex h-7 items-center gap-1 rounded-md border border-amber-200/80 bg-amber-50/50 px-1.5 text-[10px] font-medium leading-none shadow-sm"
-                title="Checkout today (due out) — not counted in Occ; also shown in the default list"
+                title="Checkout on the hotel business date (Due out appears after Night Audit rolls the date)"
               >
                 <CalendarClock
                   className="h-3 w-3 shrink-0 text-amber-700"
@@ -1518,7 +1525,7 @@ export default function BookingsPage() {
           if (key !== "status") return undefined;
           const r = row as Booking;
           const tz = resolveHotelTimeZone();
-          const today = todayYmdHotel(tz);
+          const today = frontOfficeToday;
           if (statusVal === "checked_in") {
             if (r.is_bulk && r.bulk_members?.length) {
               return r.bulk_members.some((m) =>
@@ -1582,7 +1589,7 @@ export default function BookingsPage() {
             render: (booking) => {
               const stayKind = classifyFrontOfficeStay(
                 booking,
-                todayYmdHotel(),
+                frontOfficeToday,
                 resolveHotelTimeZone(),
               );
               const isReservationRow = stayKind === "reserved";
