@@ -309,7 +309,21 @@ export function PurchasingWorkspace() {
           <StatCard label="Cash Disbursed" value={formatNaira(selected.cashDisbursed)} />
           <StatCard label="Actual Spent" value={formatNaira(actualSpent)} highlight />
           <StatCard label="Not bought" value={formatNaira(notBoughtTotal)} />
-          <StatCard label="Refund to Cashier" value={formatNaira(refund)} />
+          {refund < 0 ? (
+            <StatCard
+              label="Refund to Cashier"
+              value={formatNaira(Math.abs(refund))}
+              amountClassName="bg-red-500/15 text-red-800 dark:text-red-200"
+            />
+          ) : refund > 0 ? (
+            <StatCard
+              label="Cashier Return Cash"
+              value={formatNaira(refund)}
+              amountClassName="bg-emerald-500/15 text-emerald-800 dark:text-emerald-200"
+            />
+          ) : (
+            <StatCard label="Even" value={formatNaira(0)} />
+          )}
           <StatCard
             label="Price changes"
             value={String(
@@ -665,17 +679,23 @@ function StatCard({
   label,
   value,
   highlight,
+  amountClassName,
 }: {
   label: string;
   value: string;
   highlight?: boolean;
+  amountClassName?: string;
 }) {
   return (
     <div
       className={`rounded-xl border p-3 ${highlight ? "ring-2 ring-primary" : ""}`}
     >
       <p className="text-[10px] text-muted-foreground">{label}</p>
-      <p className="text-base font-bold tabular-nums mt-0.5">{value}</p>
+      <p
+        className={`text-base font-bold tabular-nums mt-0.5 rounded-md px-1.5 py-0.5 inline-block ${amountClassName ?? ""}`}
+      >
+        {value}
+      </p>
     </div>
   );
 }
