@@ -31,6 +31,7 @@ import {
 import { persistFolioAttachments } from '@/lib/folio/persist-folio-attachments'
 import { useAuth } from '@/lib/auth-context'
 import { canFrontDeskApplyRescheduleStay } from '@/lib/booking/can-reschedule-stay'
+import { createClient } from '@/lib/supabase/client'
 
 export type RescheduleStayModalBooking = {
   id: string
