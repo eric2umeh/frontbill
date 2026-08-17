@@ -299,8 +299,10 @@ export function RescheduleStayModal({
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 Submitting…
               </>
+            ) : applyDirect ? (
+              'Save dates'
             ) : (
-                {applyDirect ? 'Save dates' : 'Submit for approval'}
+              'Submit for approval'
             )}
           </Button>
         </DialogScrollableFooter>
