@@ -126,6 +126,7 @@ import {
   mergeBarStockFromRemote,
   normalizeBarStockRows,
 } from "./bar-stock-normalize";
+import { applyRetirementLinesToCatalog } from "./retirement-stock";
 
 function applyRemoteArray<T>(
   setter: (updater: (prev: T[]) => T[]) => void,
@@ -573,6 +574,7 @@ function useSupplyChainImpl() {
   const issueOutLogRef = useRef(issueOutLog);
   const activityLogRef = useRef(activityLog);
   const pendingStoreItemsRef = useRef(pendingStoreItems);
+  const storeItemsRef = useRef(storeItems);
   useEffect(() => {
     recipesRef.current = recipes;
     kitchenStockRef.current = kitchenStock;
@@ -586,6 +588,7 @@ function useSupplyChainImpl() {
     issueOutLogRef.current = issueOutLog;
     activityLogRef.current = activityLog;
     pendingStoreItemsRef.current = pendingStoreItems;
+    storeItemsRef.current = storeItems;
   }, [
     recipes,
     kitchenStock,
@@ -599,6 +602,7 @@ function useSupplyChainImpl() {
     issueOutLog,
     activityLog,
     pendingStoreItems,
+    storeItems,
   ]);
 
   const persistSnapshotsNow = useCallback(async (): Promise<void> => {
@@ -673,7 +677,9 @@ function useSupplyChainImpl() {
     void (async () => {
       try {
         const [catalog, snapshots] = await Promise.all([
-          fetchSupplyCatalog(userId, organizationId || undefined),
+          fetchSupplyCatalog(userId, organizationId || undefined).catch(
+            () => [] as StoreItem[],
+          ),
           fetchSupplySnapshots(userId, organizationId || undefined),
         ]);
         if (cancelled) return;
@@ -924,17 +930,21 @@ function useSupplyChainImpl() {
         changed = applyRemoteArray(setFnbDailySheets, snapshots.fnb_daily_sheets) || changed;
         changed = applyRemoteArray(setFnbMovements, snapshots.fnb_movements) || changed;
 
-        if (Array.isArray(catalog) && catalog.length > 0) {
-          const next = catalog.map(applyStoreItemDeptFields);
+        const skipCatalog =
+          Date.now() - lastLocalSupplyMutationAt < 12_000;
+        if (!skipCatalog && Array.isArray(catalog) && catalog.length > 0) {
+          const remote = catalog.map(applyStoreItemDeptFields);
           setStoreItems((prev) => {
+            const preferLocal = Date.now() - lastLocalSupplyMutationAt < 12_000;
+            if (preferLocal) return prev;
             try {
-              if (JSON.stringify(prev) === JSON.stringify(next)) return prev;
+              if (JSON.stringify(prev) === JSON.stringify(remote)) return prev;
             } catch {
               changed = true;
-              return next;
+              return remote;
             }
             changed = true;
-            return next;
+            return remote;
           });
         }
 
@@ -2173,34 +2183,42 @@ function useSupplyChainImpl() {
 
   const applyRetirementToStock = useCallback(
     (po: PurchaseOrder, lines: RetirementLine[]) => {
-      setStoreItems((items) => {
-        const next = [...items];
-        for (const rl of lines) {
-          const notBought = rl.notBought === true || rl.removed === true;
-          if (notBought || rl.quantityBought <= 0) continue;
-          const pl = po.lines.find((l) => l.id === rl.lineId);
-          if (!pl) continue;
-          const idx = next.findIndex((s) => s.id === pl.stockItemId);
-          if (idx >= 0) {
-            const stockQty =
-              rl.stockQuantityBought ??
-              (pl.stockQuantityOrdered && pl.quantityOrdered > 0
-                ? (rl.quantityBought / pl.quantityOrdered) * pl.stockQuantityOrdered
-                : rl.quantityBought);
-            const stockUnitPrice =
-              rl.actualStockUnitPrice ??
-              (stockQty > 0 ? rl.totalPaid / stockQty : rl.actualPrice);
-            next[idx] = {
-              ...next[idx],
-              quantityInStore: next[idx].quantityInStore + stockQty,
-              lastPrice: stockUnitPrice,
-            };
+      const result = applyRetirementLinesToCatalog(
+        storeItemsRef.current,
+        po,
+        lines,
+      );
+      storeItemsRef.current = result.next;
+      setStoreItems(result.next);
+      markLocalSupplyMutation();
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("frontbill:supply-stock-changed"));
+      }
+      if (
+        useDbPersistence &&
+        hasPermission(role, "supply:store") &&
+        result.posted > 0
+      ) {
+        void syncSupplyCatalog(
+          userId,
+          result.next.map(applyStoreItemDeptFields),
+          orgIdRef.current || undefined,
+        ).catch((err) => {
+          if (isRetryableSupplyError(err)) {
+            console.warn("[supply-chain] retirement catalogue sync retryable:", err);
+            return;
           }
-        }
-        return next;
-      });
+          const message =
+            err instanceof Error
+              ? err.message
+              : "Failed to save retired stock to central store";
+          console.error("[supply-chain] retirement catalogue sync failed", err);
+          toast.error(message);
+        });
+      }
+      return result.posted;
     },
-    [],
+    [useDbPersistence, userId, role],
   );
 
   const submitRetirement = useCallback(
@@ -2221,7 +2239,7 @@ function useSupplyChainImpl() {
       const refund = po.cashDisbursed - actualSpent;
       const nowIso = new Date().toISOString();
 
-      applyRetirementToStock(po, normalized);
+      const posted = applyRetirementToStock(po, normalized);
       setPurchaseOrders((prev) => {
         const next = prev.map((p) =>
           p.id === poId
@@ -2262,6 +2280,15 @@ function useSupplyChainImpl() {
         body: `${actor.name} retired this PO. Central store stock updated (₦${actualSpent.toLocaleString()} spent).`,
         href: "/supply/purchasing?tab=history",
       });
+      if (posted > 0) {
+        toast.success(
+          `${posted} item${posted === 1 ? "" : "s"} added to Central Store stock`,
+        );
+      } else {
+        toast.error(
+          "Retirement saved, but no catalogue lines matched — stock was not increased",
+        );
+      }
       void persistSnapshotsNow();
     },
     [purchaseOrders, applyRetirementToStock, persistSnapshotsNow],
@@ -2322,7 +2349,7 @@ function useSupplyChainImpl() {
         return { ok: true };
       }
 
-      applyRetirementToStock(po, po.retirement.lines);
+      const posted = applyRetirementToStock(po, po.retirement.lines);
       setPurchaseOrders((prev) => {
         const next = prev.map((p) =>
           p.id === poId
@@ -2359,6 +2386,11 @@ function useSupplyChainImpl() {
         body: `Central store stock updated. Refund to cashier: ₦${(po.retirement?.refundToCashier ?? 0).toLocaleString()}.`,
         href: "/supply/purchasing",
       });
+      if (posted > 0) {
+        toast.success(
+          `${posted} item${posted === 1 ? "" : "s"} added to Central Store stock`,
+        );
+      }
       void persistSnapshotsNow();
       return { ok: true };
     },
@@ -3958,9 +3990,10 @@ function useSupplyChainImpl() {
         );
         if ("error" in res) return res;
       }
+      void persistSnapshotsNow();
       return { ok: true, issued: lines.length };
     },
-    [issueFromStoreToDepartment, storeItems],
+    [issueFromStoreToDepartment, storeItems, persistSnapshotsNow],
   );
 
   const updateFnbRawSellingPrice = useCallback(
