@@ -20,6 +20,16 @@ import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import {
   poStatusBadge,
@@ -29,6 +39,7 @@ import { PoCommentBanner } from "@/components/supply-chain/po-comment-banner";
 import { PoHistoryPanel } from "@/components/supply-chain/po-history-panel";
 import {
   formatPoRaisedAt,
+  getPoApprovedAmount,
   isPurchasingRetireCandidate,
   isPurchasingRetirementInReview,
 } from "@/lib/supply-chain/po-format";
@@ -104,7 +115,8 @@ export function PurchasingWorkspace() {
   const [retireLines, setRetireLines] = useState<RetirementLine[]>([]);
   const [retireQtyText, setRetireQtyText] = useState<Record<string, string>>({});
   const [retirePriceText, setRetirePriceText] = useState<Record<string, string>>({});
-  const [tab, setTab] = useState("active");
+  const [tab, setTab] = useState(searchParams.get("tab") === "history" ? "history" : "active");
+  const [confirmRetireOpen, setConfirmRetireOpen] = useState(false);
 
   const retireCandidates = useMemo(
     () => purchaseOrders.filter((p) => isPurchasingRetireCandidate(p.status)),
@@ -443,17 +455,60 @@ export function PurchasingWorkspace() {
           )}
         </PaginatedListShell>
 
-        <Button
-          onClick={() => {
-            submitRetirement(selected.id, retireLines, actor);
-            playNotificationBeep();
-            toast.success("Retirement submitted — accountant will review in Supply Chain → Purchase Orders");
-            setSelectedId(null);
-            setTab("active");
-          }}
-        >
-          Submit retirement for accountant review
+        <Button onClick={() => setConfirmRetireOpen(true)}>
+          Confirm & retire — add stock to store
         </Button>
+        <AlertDialog open={confirmRetireOpen} onOpenChange={setConfirmRetireOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Retire {selected.poNumber}?</AlertDialogTitle>
+              <AlertDialogDescription asChild>
+                <div className="space-y-2 text-sm text-muted-foreground">
+                  <p>
+                    This adds bought items to Central Store stock immediately. Accountant approval
+                    is not required.
+                  </p>
+                  {(() => {
+                    const approvedAmt = getPoApprovedAmount(selected)
+                    const retiredAmt = retireLines
+                      .filter((l) => !(l.notBought || l.removed))
+                      .reduce((s, l) => s + l.totalPaid, 0)
+                    const delta = Math.round((retiredAmt - approvedAmt) * 100) / 100
+                    return (
+                      <ul className="rounded-md border bg-muted/40 px-3 py-2 space-y-1 text-foreground">
+                        <li>Approved PO: {formatNaira(approvedAmt)}</li>
+                        <li>Retired total: {formatNaira(retiredAmt)}</li>
+                        <li>
+                          Difference:{" "}
+                          {delta === 0
+                            ? formatNaira(0)
+                            : delta > 0
+                              ? `${formatNaira(delta)} debit (spent more)`
+                              : `${formatNaira(Math.abs(delta))} credit (spent less)`}
+                        </li>
+                      </ul>
+                    )
+                  })()}
+                </div>
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => {
+                  submitRetirement(selected.id, retireLines, actor);
+                  playNotificationBeep();
+                  toast.success("PO retired — stock added to Central Store");
+                  setConfirmRetireOpen(false);
+                  setSelectedId(null);
+                  setTab("history");
+                }}
+              >
+                Retire PO
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     );
   }
@@ -463,7 +518,7 @@ export function PurchasingWorkspace() {
       <div>
         <h1 className="text-2xl font-bold">Purchasing</h1>
         <p className="text-sm text-muted-foreground">
-          Market purchase, retirement, and your PO history. Stock updates when the accountant accepts retirement.
+          Market purchase and retirement. Retiring a PO adds items to Central Store immediately.
         </p>
       </div>
 
@@ -538,7 +593,7 @@ export function PurchasingWorkspace() {
               <div>
                 <h2 className="font-medium">Ready to retire at market</h2>
                 <p className="text-xs text-muted-foreground">
-                  POs with cash disbursed — record market purchase and submit retirement.
+                  POs with manager approval — record market purchase and retire. Stock is added when you retire.
                 </p>
               </div>
               {retireCandidates.length === 0 ? (
@@ -583,7 +638,7 @@ export function PurchasingWorkspace() {
               <div>
                 <h2 className="font-medium">Retired purchase orders</h2>
                 <p className="text-xs text-muted-foreground">
-                  Completed retirements — click a row to see what was bought, edited, or not purchased.
+                  Completed retirements — approved vs retired totals, with changed lines highlighted.
                 </p>
               </div>
               {canClearHistory && (
@@ -596,7 +651,7 @@ export function PurchasingWorkspace() {
             <PoHistoryPanel
               purchaseOrders={purchaseOrders}
               includeStatuses={["retired"]}
-              emptyMessage="No retired purchase orders yet. History appears here after accountant accepts your retirement."
+              emptyMessage="No retired purchase orders yet. History appears here after you retire a PO from Active."
               searchPlaceholder="Search retired PO number, date…"
             />
           </TabsContent>
