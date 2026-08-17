@@ -122,7 +122,7 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
           department === 'gym'
             ? 'POS · memberships & day passes (Menu tab) · orders · reports'
             : department === 'main_bar'
-              ? 'POS · drinks by category · stock from F&B Store · orders · reports'
+              ? 'POS · drinks by category · stock from Central Store · orders · reports'
               : 'POS · room charge · service fees · open & settled bills · reports'
         }
         backLink={

@@ -265,6 +265,7 @@ export function FnbStoreWorkspace() {
     const sync = await syncBarItemToMainBarMenu({
       itemName: res.itemName,
       categoryName: res.categoryName,
+      categoryId: res.categoryId,
       barStockId: res.barStockId,
       unitPrice: price,
     })
@@ -275,8 +276,11 @@ export function FnbStoreWorkspace() {
       return
     }
     toast.success(
-      `Moved ${qty} ${res.unit} ${res.itemName} to Main Bar · ${formatSupplyActorStamp(actor.name)}`,
+      `Moved ${qty} ${res.unit} ${res.itemName} to Main Bar${res.categoryName ? ` (${res.categoryName})` : ''} · ${formatSupplyActorStamp(actor.name)}`,
     )
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('frontbill:outlet-menu-synced'))
+    }
   }
 
   const addCategory = async () => {
@@ -391,13 +395,17 @@ export function FnbStoreWorkspace() {
     }
     const item = (fnbRawStock ?? []).find((f) => f.id === fnbRawId)
     const bar = item ? (barStock ?? []).find((b) => b.storeItemId === item.storeItemId) : undefined
-    if (item && bar && cat) {
+    if (item && cat) {
       await syncBarItemToMainBarMenu({
         itemName: item.name,
         categoryName: catName,
-        barStockId: bar.id,
+        categoryId: cat.id,
+        barStockId: bar?.id ?? `bar-${item.storeItemId}`,
         unitPrice: item.sellingPricePerPortion ?? 0,
       })
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('frontbill:outlet-menu-synced'))
+      }
     }
     toast.success(
       cat

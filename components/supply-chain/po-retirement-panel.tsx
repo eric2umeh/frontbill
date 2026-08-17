@@ -133,7 +133,8 @@ export function PoRetirementPanel() {
             ) : null}
           </h2>
           <p className="text-xs text-muted-foreground">
-            Retirements from Purchasing after market buy — accept to add stock; reject returns to purchaser.
+            New retirements add stock immediately from Purchasing. This list is only for older
+            submissions still waiting for accountant accept/reject.
           </p>
         </div>
         {pending.length === 0 ? (

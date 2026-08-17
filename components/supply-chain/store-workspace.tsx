@@ -17,7 +17,7 @@ import {
   canManageStoreCatalog,
   canSubmitStoreItemForApproval,
 } from '@/lib/permissions'
-import { issueOutletPickerOptions } from '@/lib/store/outlet-departments'
+import { issueOutletPickerOptions, isMainBarIssueDestination } from '@/lib/store/outlet-departments'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -55,6 +55,8 @@ import {
   sanitizeQuantityInput,
 } from '@/lib/supply-chain/measurement-units'
 import { handleSupplyActionError } from '@/lib/supply-chain/handle-supply-action-error'
+import { syncBarItemToMainBarMenu } from '@/lib/supply-chain/sync-bar-menu'
+import { canonicalBarStockId } from '@/lib/supply-chain/bar-stock-normalize'
 import {
   convertToStoreUnitsWithFactors,
   mergeUnitFactors,
@@ -547,6 +549,19 @@ export function StoreWorkspace() {
       return
     }
     toast.success(`Issued ${res.issued} item(s) to ${issueDestination}`)
+    if (isMainBarIssueDestination(issueDestination)) {
+      void Promise.all(
+        issueCart.map((line) => {
+          const store = storeItems.find((s) => s.id === line.storeItemId)
+          return syncBarItemToMainBarMenu({
+            itemName: line.name,
+            categoryName: '',
+            barStockId: canonicalBarStockId(line.storeItemId),
+            unitPrice: Math.max(0, store?.lastPrice ?? 0),
+          })
+        }),
+      )
+    }
     setIssueCart([])
     setIssueQtyMap({})
     setIssueUnitMap({})
@@ -1001,8 +1016,8 @@ export function StoreWorkspace() {
                 <h3 className="font-semibold text-sm">Issue out to department / outlet</h3>
                 <p className="text-xs text-muted-foreground mt-1">
                   Add quantities to the issue cart, review on the right, then issue in one step.
-                  Received by is required. Drinks go to <strong>F&amp;B Store</strong> first; F&amp;B
-                  then transfers them to Main Bar. Kitchen items go to Kitchen.
+                  Received by is required. Drinks go to <strong>Main Bar</strong> (same path as
+                  kitchen items going to Kitchen).
                 </p>
               </div>
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -1722,8 +1737,8 @@ export function StoreWorkspace() {
 
         <TabsContent value="history" className="mt-4 space-y-4">
           <p className="text-sm text-muted-foreground">
-            Accepted purchase orders (manager-approved and purchased). Click a PO to see every line
-            item.
+            Accepted purchase orders after manager approval (read-only — cannot be edited).
+            Retired POs also appear here with approved vs market amounts.
           </p>
           <PoHistoryPanel purchaseOrders={purchaseOrders} />
         </TabsContent>

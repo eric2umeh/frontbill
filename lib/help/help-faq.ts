@@ -634,7 +634,7 @@ export const HELP_FAQ: HelpFaqItem[] = [
     category: 'Supply & kitchen',
     question: 'What is Supply Chain for?',
     answer:
-      'Central Store (stock & raising POs), Purchase Orders (approvals & retirement review for Accountant / Manager / Admin), Purchasing (market buy & retire), and Supply Log. Kitchen and F&B Store are under Kitchen. Stock is added to Central Store only after retirement is accepted — not when a PO is approved.',
+      'Central Store (stock & raising POs), Purchase Orders (accountant then manager approval), Purchasing (market buy & retire), and Supply Log. Kitchen is under Kitchen. After manager approval a PO is History (read-only). Retiring from Purchasing adds stock to Central Store immediately.',
     keywords: ['supply', 'store', 'purchasing', 'inventory', 'po'],
     aliases: ['stock', 'purchase order', 'supply chain'],
     topics: ['supply'],
@@ -644,7 +644,7 @@ export const HELP_FAQ: HelpFaqItem[] = [
     category: 'Supply & kitchen',
     question: 'How do I use Central Store?',
     answer:
-      'Supply Chain → Central Store: add/edit items, Issue Out to departments, raise a draft purchase list and send to the accountant. Only one open PO at a time until it is retired. Approvals are under Supply Chain → Purchase Orders (not Expenses).',
+      'Supply Chain → Central Store: add/edit items, Issue Out to departments (including Main Bar), raise a draft purchase list and send to the accountant. After manager approval the PO is in History and cannot be edited. Retire at market from Purchasing to add stock.',
     keywords: ['central store', 'issue out', 'stock in', 'stock out'],
     aliases: ['issue out basket', 'store items', 'stock history'],
     topics: ['supply'],
@@ -694,9 +694,9 @@ export const HELP_FAQ: HelpFaqItem[] = [
   {
     id: 'kitchen',
     category: 'Supply & kitchen',
-    question: 'How do Kitchen and F&B Store work?',
+    question: 'How do Kitchen and Main Bar stock work?',
     answer:
-      'Kitchen and F&B Store track food & beverage inventory linked to outlets — finished/prep stock, recipes/batches, kitchen budget, and stock tickets. Supply Log shows activity.',
+      'Kitchen tracks food production (recipes, batches, raw stock). Main Bar drinks are issued from Central Store → Issue Out → Main Bar. F&B Store is temporarily paused.',
     keywords: ['kitchen', 'f&b', 'fnb', 'food', 'recipe', 'batch'],
     aliases: ['fnb store', 'kitchen store', 'production batch'],
     topics: ['supply', 'outlet'],

@@ -4,6 +4,7 @@ import { outletApiHeaders } from '@/lib/outlets/outlet-api-headers'
 export async function syncBarItemToMainBarMenu(input: {
   itemName: string
   categoryName: string
+  categoryId?: string | null
   barStockId: string
   unitPrice: number
 }): Promise<{ ok: true } | { ok: false; error: string }> {
@@ -15,6 +16,7 @@ export async function syncBarItemToMainBarMenu(input: {
       body: JSON.stringify({
         itemName: input.itemName,
         categoryName: input.categoryName,
+        categoryId: input.categoryId || undefined,
         barStockId: input.barStockId,
         unitPrice: input.unitPrice,
       }),
