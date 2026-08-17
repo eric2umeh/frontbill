@@ -91,7 +91,7 @@ function canAccessPath(pathname: string, userRole: string): boolean {
     if (pathname.startsWith('/supply/store')) return hasPermission(userRole, 'supply:store')
     if (pathname.startsWith('/supply/kitchen')) return hasPermission(userRole, 'supply:kitchen')
     if (pathname.startsWith('/supply/fnb'))
-      return hasPermission(userRole, 'supply:fnb') || hasPermission(userRole, 'outlet:view')
+      return hasPermission(userRole, 'supply:fnb')
     if (pathname.startsWith('/supply/purchasing')) {
       return hasPermission(userRole, 'supply:purchasing')
     }
