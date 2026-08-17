@@ -525,7 +525,7 @@ export function StoreWorkspace() {
     })
   }
 
-  const handleCommitIssueCart = () => {
+  const handleCommitIssueCart = async () => {
     if (!issueDestination.trim()) {
       toast.error('Select a destination')
       return
@@ -535,36 +535,50 @@ export function StoreWorkspace() {
       return
     }
     setIssuingCart(true)
-    const res = issueOutCart(issueCart, issueDestination, actor, {
-      receivedBy: issueReceivedBy,
-      receivedById: issueReceivedById ?? undefined,
-      notes: issueNotes,
-    })
-    setIssuingCart(false)
-    if ('error' in res) {
-      handleSupplyActionError(res, {
-        title: 'Cannot issue — stock short',
-        fallbackMessage: 'The following central store items are short. Reduce quantities or receive stock first.',
+    const cartSnapshot = [...issueCart]
+    try {
+      const res = issueOutCart(issueCart, issueDestination, actor, {
+        receivedBy: issueReceivedBy,
+        receivedById: issueReceivedById ?? undefined,
+        notes: issueNotes,
       })
-      return
+      if ('error' in res) {
+        handleSupplyActionError(res, {
+          title: 'Cannot issue — stock short',
+          fallbackMessage: 'The following central store items are short. Reduce quantities or receive stock first.',
+        })
+        return
+      }
+      toast.success(`Issued ${res.issued} item(s) to ${issueDestination}`)
+      setIssueCart([])
+      setIssueQtyMap({})
+      setIssueUnitMap({})
+      if (isMainBarIssueDestination(issueDestination)) {
+        const syncResults = await Promise.all(
+          cartSnapshot.map((line) => {
+            const store = storeItems.find((s) => s.id === line.storeItemId)
+            const price = Number(store?.lastPrice)
+            return syncBarItemToMainBarMenu({
+              itemName: line.name,
+              categoryName: '',
+              barStockId: canonicalBarStockId(line.storeItemId),
+              unitPrice: Number.isFinite(price) && price >= 0 ? price : 0,
+            })
+          }),
+        )
+        const failed = syncResults.filter((r) => !r.ok)
+        if (failed.length) {
+          toast.error(
+            `Issued to Main Bar, but ${failed.length} menu item(s) did not appear: ${failed[0].ok === false ? failed[0].error : 'sync failed'}`,
+          )
+        } else if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('frontbill:outlet-menu-synced'))
+          window.dispatchEvent(new CustomEvent('frontbill:bar-stock-changed'))
+        }
+      }
+    } finally {
+      setIssuingCart(false)
     }
-    toast.success(`Issued ${res.issued} item(s) to ${issueDestination}`)
-    if (isMainBarIssueDestination(issueDestination)) {
-      void Promise.all(
-        issueCart.map((line) => {
-          const store = storeItems.find((s) => s.id === line.storeItemId)
-          return syncBarItemToMainBarMenu({
-            itemName: line.name,
-            categoryName: '',
-            barStockId: canonicalBarStockId(line.storeItemId),
-            unitPrice: Math.max(0, store?.lastPrice ?? 0),
-          })
-        }),
-      )
-    }
-    setIssueCart([])
-    setIssueQtyMap({})
-    setIssueUnitMap({})
   }
 
   const basketSidebar = (
@@ -1737,10 +1751,14 @@ export function StoreWorkspace() {
 
         <TabsContent value="history" className="mt-4 space-y-4">
           <p className="text-sm text-muted-foreground">
-            Accepted purchase orders after manager approval (read-only — cannot be edited).
-            Retired POs also appear here with approved vs market amounts.
+            Purchase orders after accountant and manager approval (read-only).
+            Lines and amounts stay as the manager approved — market retirement does not change this view.
           </p>
-          <PoHistoryPanel purchaseOrders={purchaseOrders} />
+          <PoHistoryPanel
+            purchaseOrders={purchaseOrders}
+            forceOrderLines
+            emptyMessage="No purchase orders in history yet. After accountant and manager approve, the exact approved PO appears here (read-only)."
+          />
         </TabsContent>
       </Tabs>
       )}
