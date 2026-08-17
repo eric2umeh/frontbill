@@ -6,9 +6,15 @@ const EXACT: Record<string, string> = {
   '/dashboard': 'Dashboard',
   '/bookings': 'Bookings',
   '/reservations': 'Reservations',
+  '/reservations/events': 'Events',
   '/accounts': 'Guests',
+  '/guest-database': 'Guest database',
   '/organizations': 'Organizations',
   '/outlets': 'Outlets',
+  '/payments': 'Payments',
+  '/analytics': 'Analytics',
+  '/analytics/revenue': 'Revenue',
+  '/analytics/profitability': 'Profitability',
   '/transactions': 'Transactions',
   '/transactions/daily-book': 'Daily book',
   '/transactions/analytics': 'Analytics',
@@ -26,6 +32,7 @@ const EXACT: Record<string, string> = {
   '/rooms': 'Rooms',
   '/users-roles': 'Users & Roles',
   '/settings': 'Settings',
+  '/supply': 'Supply',
   '/supply/store': 'Central Store',
   '/supply/kitchen': 'Kitchen',
   '/supply/purchasing': 'Purchasing',
@@ -34,6 +41,7 @@ const EXACT: Record<string, string> = {
   '/supply/fnb': 'F&B Store',
   '/store': 'Store',
   '/store/requisitions': 'Requisitions',
+  '/bulk-bookings': 'Group booking',
 }
 
 const PREFIX: Array<[string, string]> = [
@@ -41,6 +49,7 @@ const PREFIX: Array<[string, string]> = [
   ['/bulk-bookings/', 'Group booking'],
   ['/reservations/', 'Reservation'],
   ['/accounts/', 'Guest'],
+  ['/guest-database/', 'Guest'],
   ['/organizations/', 'Organization'],
   ['/rooms/', 'Room'],
   ['/transactions/', 'Transactions'],
@@ -53,17 +62,21 @@ const PREFIX: Array<[string, string]> = [
   ['/store/', 'Store'],
 ]
 
-/** Tab / browser-history label for a dashboard path (Chrome long-press back). */
-export function documentTitleForPath(pathname: string): string {
+/** Segment used with the root metadata template (`%s · FrontBill`). */
+export function pageTitleSegmentForPath(pathname: string): string {
   const path = (pathname || '/').split('?')[0].replace(/\/+$/, '') || '/'
   if (path.startsWith('/outlets/')) {
     const key = path.slice('/outlets/'.length).split('/')[0]
-    const def = getOutletDepartment(key)
-    return `${def?.label ?? 'Outlet'} · ${TITLE_SUFFIX}`
+    return getOutletDepartment(key)?.label ?? 'Outlet'
   }
-  if (EXACT[path]) return `${EXACT[path]} · ${TITLE_SUFFIX}`
+  if (EXACT[path]) return EXACT[path]
   for (const [prefix, label] of PREFIX) {
-    if (path.startsWith(prefix)) return `${label} · ${TITLE_SUFFIX}`
+    if (path.startsWith(prefix)) return label
   }
-  return `Hotel Management · ${TITLE_SUFFIX}`
+  return 'Hotel Management'
+}
+
+/** Tab / browser-history label for a dashboard path (Chrome long-press back). */
+export function documentTitleForPath(pathname: string): string {
+  return `${pageTitleSegmentForPath(pathname)} · ${TITLE_SUFFIX}`
 }
