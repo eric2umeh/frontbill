@@ -45,6 +45,7 @@ export function formatPoRaisedAt(iso: string): string {
 /** POs that finished approval and left the store draft queue. */
 export function isPurchaseOrderHistoryStatus(status: string): boolean {
   return [
+    "approved",
     "disbursed",
     "retirement_pending",
     "retirement_pending_accountant",
@@ -156,12 +157,10 @@ export function isPurchasingRetireCandidate(status: string): boolean {
     "approved",
     "retirement_pending",
     "retirement_rejected",
-    // Do NOT include retirement_pending_accountant — store must wait for review
-    // (or edit again only after rejection).
   ].includes(status);
 }
 
-/** Retirement submitted — awaiting accountant sign-off. */
+/** Retirement submitted — awaiting accountant sign-off (legacy in-flight only). */
 export function isPurchasingRetirementInReview(status: string): boolean {
   return status === "retirement_pending_accountant";
 }
@@ -179,6 +178,40 @@ export function isPurchaseOrderInFlightStatus(status: string): boolean {
     "pending_manager",
     "accountant_rejected",
     "manager_rejected",
-    "approved",
   ].includes(status);
+}
+
+/** Manager-approved PO amount (cash disbursed / list total). */
+export function getPoApprovedAmount(po: PurchaseOrder): number {
+  const cash = Number(po.cashDisbursed)
+  if (Number.isFinite(cash) && cash > 0) return cash
+  return Number(po.totalAmount) || 0
+}
+
+/** Amount actually spent at market (retirement). */
+export function getPoRetiredAmount(po: PurchaseOrder): number {
+  if (po.retirement && Number.isFinite(po.retirement.actualSpent)) {
+    return po.retirement.actualSpent
+  }
+  return 0
+}
+
+/** Retired minus approved. Positive = spent more (debit). Negative = spent less (credit). */
+export function getPoRetirementDelta(po: PurchaseOrder): number {
+  return Math.round((getPoRetiredAmount(po) - getPoApprovedAmount(po)) * 100) / 100
+}
+
+export function retirementLineChanged(
+  po: PurchaseOrder,
+  line: RetirementLine,
+): boolean {
+  const orig = po.lines.find((l) => l.id === line.lineId)
+  const notBought = line.notBought === true || line.removed === true
+  if (notBought) return true
+  if (!orig) return false
+  return (
+    Number(line.quantityBought) !== Number(orig.quantityOrdered) ||
+    Number(line.actualPrice) !== Number(orig.unitPrice) ||
+    Number(line.totalPaid) !== Number(orig.lineTotal)
+  )
 }
