@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useState } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import { Sidebar } from '@/components/layout/sidebar'
 import { Header } from '@/components/layout/header'
@@ -183,8 +183,7 @@ export function DashboardShell({
     }
   }, [pathname, router, user.role])
 
-  useEffect(() => {
-    if (typeof document === 'undefined') return
+  useLayoutEffect(() => {
     document.title = documentTitleForPath(pathname)
   }, [pathname])
 
@@ -215,6 +214,7 @@ export function DashboardShell({
         setOrganizationLogoUrl,
       }}
     >
+      <title>{documentTitleForPath(pathname)}</title>
       <SupplyChainProvider>
         <SupplyPendingAlerts />
         <NightAuditPendingProvider>
