@@ -19,7 +19,7 @@ import {
 } from '@/lib/utils/booking-checkout-ui'
 import { fetchOrgCheckoutTime } from '@/lib/utils/org-checkout-policy'
 import { RescheduleStayModal } from '@/components/bookings/reschedule-stay-modal'
-import { canRequestRescheduleStay, canRescheduleStayBooking } from '@/lib/booking/can-reschedule-stay'
+import { canRequestRescheduleStay, canFrontDeskApplyRescheduleStay, canRescheduleStayBooking } from '@/lib/booking/can-reschedule-stay'
 import { PageLoadingState } from '@/components/loading-screen'
 import { formatNaira } from '@/lib/utils/currency'
 import { toast } from 'sonner'
@@ -612,8 +612,8 @@ export default function ReservationDetailPage({
       <RescheduleStayModal
         open={rescheduleOpen}
         onClose={() => setRescheduleOpen(false)}
-        onSuccess={() => {
-          setReschedulePending(true)
+        onSuccess={(result) => {
+          setReschedulePending(!result?.applied)
           loadReservation(rid)
         }}
         userId={userId}
@@ -667,11 +667,17 @@ export default function ReservationDetailPage({
               title={
                 reschedulePending
                   ? 'A move-dates request is pending approval in Night Audit'
-                  : 'Request new check-in / check-out dates'
+                  : canFrontDeskApplyRescheduleStay(role)
+                    ? 'Change check-in / check-out dates'
+                    : 'Request new check-in / check-out dates'
               }
             >
               <CalendarRange className="mr-2 h-4 w-4" />
-              {reschedulePending ? 'Move dates pending' : 'Request move dates'}
+              {reschedulePending
+                ? 'Move dates pending'
+                : canFrontDeskApplyRescheduleStay(role)
+                  ? 'Move dates'
+                  : 'Request move dates'}
             </Button>
           )}
           {showChargeExtend && (
