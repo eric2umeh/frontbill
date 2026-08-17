@@ -28,12 +28,15 @@ export function PoHistoryPanel({
   includeStatuses,
   emptyMessage: emptyMessageProp,
   searchPlaceholder: searchPlaceholderProp,
+  forceOrderLines = false,
 }: {
   purchaseOrders: PurchaseOrder[];
   /** When set, only these statuses are shown (overrides default store history filter). */
   includeStatuses?: PurchaseOrder["status"][];
   emptyMessage?: string;
   searchPlaceholder?: string;
+  /** Central Store History: always the manager-approved PO, never retirement edits. */
+  forceOrderLines?: boolean;
 }) {
   const history = purchaseOrders.filter((po) =>
     !po.deletedAt &&
@@ -124,9 +127,10 @@ export function PoHistoryPanel({
         <div className="space-y-1.5">
           {pagePos.map((po) => {
             const open = expandedId === po.id;
-            const { mode, lines } = getPoHistoryLines(po);
+            const { mode, lines } = getPoHistoryLines(po, { forceOrderLines });
             const boughtCount = lines.filter((l) => !l.notBought).length;
             const deptFilter = ctx.activeFilters.dept ?? "all";
+            const showRetirement = !forceOrderLines && mode === "retirement";
 
             return (
               <div key={po.id} className="rounded-md border overflow-hidden">
@@ -149,17 +153,19 @@ export function PoHistoryPanel({
                         {poStatusBadge(po)}
                         <span className="text-sm font-semibold tabular-nums">
                           {formatNaira(
-                            po.retirement?.actualSpent ?? po.totalAmount,
+                            forceOrderLines
+                              ? po.totalAmount || po.cashDisbursed
+                              : (po.retirement?.actualSpent ?? po.totalAmount),
                           )}
                         </span>
-                        {po.retirement ? (
+                        {!forceOrderLines && po.retirement ? (
                           <PoVarianceBadge po={po} />
                         ) : null}
                       </div>
                       <p className="text-[13px] text-muted-foreground truncate">
                         Raised {formatPoRaisedAt(po.createdAt)} ·{" "}
                         {po.createdByName} · {boughtCount}/{lines.length} lines
-                        {mode === "retirement" ? " (retirement)" : ""}
+                        {showRetirement ? " (retirement)" : forceOrderLines ? " (approved PO)" : ""}
                       </p>
                     </div>
                   </div>
@@ -171,7 +177,7 @@ export function PoHistoryPanel({
                   <div className="border-t bg-muted/20 px-3 py-2 space-y-2">
                     <p className="text-[13px] text-muted-foreground">
                       Procurement week: {po.weekLabel}
-                      {po.retirement && (
+                      {!forceOrderLines && po.retirement && (
                         <>
                           {" "}
                           · Retired{" "}
@@ -179,8 +185,10 @@ export function PoHistoryPanel({
                         </>
                       )}
                     </p>
-                    {po.retirement ? <PoRetirementSummary po={po} /> : null}
-                    {mode === "retirement" && po.retirement?.lines?.length ? (
+                    {!forceOrderLines && po.retirement ? (
+                      <PoRetirementSummary po={po} />
+                    ) : null}
+                    {showRetirement && po.retirement?.lines?.length ? (
                       <>
                         <RetirementChangedLines po={po} />
                         <RetirementLinesReview po={po} deptFilter={deptFilter} />
