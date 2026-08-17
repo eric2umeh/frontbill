@@ -34,7 +34,7 @@ export async function POST(request: Request) {
 
   const body = await request.json().catch(() => ({}))
   const itemName = String(body?.itemName || '').trim()
-  const categoryName = toTitleCaseWords(String(body?.categoryName || '').trim() || 'Beverages')
+  const categoryIdFromBody = String(body?.categoryId || '').trim()
   const barStockId = String(body?.barStockId || '').trim()
   const unitPrice = Number(body?.unitPrice)
 
@@ -48,6 +48,7 @@ export async function POST(request: Request) {
   const organizationId = profile.organization_id as string
   const department = 'main_bar'
   const serviceCode = `bar:${barStockId}`
+  const requestedCategoryName = toTitleCaseWords(String(body?.categoryName || '').trim())
 
   const { data: categories } = await admin
     .from('outlet_menu_categories')
@@ -55,11 +56,35 @@ export async function POST(request: Request) {
     .eq('organization_id', organizationId)
     .eq('department', department)
 
-  const categoryNorm = categoryName.toLowerCase()
-  let categoryId =
-    categories?.find((c) => c.name.trim().toLowerCase() === categoryNorm)?.id ?? null
+  const { data: existingItems } = await admin
+    .from('outlet_menu_items')
+    .select('id, name, service_code, category_id')
+    .eq('organization_id', organizationId)
+    .eq('department', department)
+
+  const nameNorm = itemName.toLowerCase()
+  const matchingByName =
+    existingItems?.filter((i) => i.name.trim().toLowerCase() === nameNorm) ?? []
+  const existing =
+    existingItems?.find((i) => i.service_code === serviceCode) ??
+    matchingByName[0]
+
+  let categoryId: string | null = null
+  if (categoryIdFromBody) {
+    categoryId =
+      categories?.find((c) => c.id === categoryIdFromBody)?.id ?? null
+  }
+  if (!categoryId && requestedCategoryName) {
+    const categoryNorm = requestedCategoryName.toLowerCase()
+    categoryId =
+      categories?.find((c) => c.name.trim().toLowerCase() === categoryNorm)?.id ?? null
+  }
+  if (!categoryId && existing?.category_id) {
+    categoryId = String(existing.category_id)
+  }
 
   if (!categoryId) {
+    const categoryName = requestedCategoryName || 'Beverages'
     const { data: created, error: ce } = await admin
       .from('outlet_menu_categories')
       .insert({
@@ -77,33 +102,39 @@ export async function POST(request: Request) {
     categoryId = created.id
   }
 
-  const { data: existingItems } = await admin
-    .from('outlet_menu_items')
-    .select('id, name, service_code')
-    .eq('organization_id', organizationId)
-    .eq('department', department)
-
-  const nameNorm = itemName.toLowerCase()
-  const existing =
-    existingItems?.find((i) => i.service_code === serviceCode) ??
-    existingItems?.find((i) => i.name.trim().toLowerCase() === nameNorm)
+  const itemPayload = {
+    name: itemName,
+    category_id: categoryId,
+    unit_price: unitPrice,
+    service_code: serviceCode,
+    is_active: true,
+    updated_by: user.id,
+    updated_at: new Date().toISOString(),
+  }
 
   if (existing) {
     const { data: updated, error: ue } = await admin
       .from('outlet_menu_items')
-      .update({
-        name: itemName,
-        category_id: categoryId,
-        unit_price: unitPrice,
-        service_code: serviceCode,
-        is_active: true,
-        updated_by: user.id,
-        updated_at: new Date().toISOString(),
-      })
+      .update(itemPayload)
       .eq('id', existing.id)
       .select()
       .single()
     if (ue) return NextResponse.json({ error: ue.message }, { status: 400 })
+
+    const duplicateIds = matchingByName
+      .map((i) => i.id)
+      .filter((id) => id !== existing.id)
+    if (duplicateIds.length) {
+      await admin
+        .from('outlet_menu_items')
+        .update({
+          is_active: false,
+          updated_by: user.id,
+          updated_at: new Date().toISOString(),
+        })
+        .in('id', duplicateIds)
+    }
+
     return NextResponse.json({ item: updated, categoryId, synced: 'updated' })
   }
 
