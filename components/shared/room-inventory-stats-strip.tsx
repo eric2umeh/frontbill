@@ -10,6 +10,7 @@ import {
 import { OCCUPYING_BOOKING_STATUSES } from '@/lib/rooms/room-occupancy'
 import { reconcileRoomStatusesClient } from '@/lib/rooms/reconcile-room-status-client'
 import { Bed, DoorOpen, AlertTriangle, Loader2, CalendarClock, CalendarDays } from 'lucide-react'
+import { frontOfficeTodayYmd } from '@/lib/hotel-date'
 import { cn } from '@/lib/utils'
 
 type Props = {
@@ -36,13 +37,18 @@ export function RoomInventoryStatsStrip({ className, refreshMs = 60_000 }: Props
     }
     await reconcileRoomStatusesClient()
 
-    const [{ data: rooms, error: roomErr }, { data: bookings, error: bookErr }] = await Promise.all([
+    const [{ data: rooms, error: roomErr }, { data: bookings, error: bookErr }, { data: orgRow }] = await Promise.all([
       supabase.from('rooms').select('status').eq('organization_id', organizationId),
       supabase
         .from('bookings')
         .select('id, room_id, status, check_in, check_out, folio_status')
         .eq('organization_id', organizationId)
         .in('status', [...OCCUPYING_BOOKING_STATUSES]),
+      supabase
+        .from('organizations')
+        .select('business_date')
+        .eq('id', organizationId)
+        .maybeSingle(),
     ])
 
     if (roomErr) {
@@ -53,7 +59,13 @@ export function RoomInventoryStatsStrip({ className, refreshMs = 60_000 }: Props
     if (bookErr) {
       console.warn('[room-inventory-stats] bookings', bookErr.message)
     }
-    setStats(computeRoomInventoryStatsWithBookings(rooms ?? [], bookings ?? []))
+    setStats(
+      computeRoomInventoryStatsWithBookings(
+        rooms ?? [],
+        bookings ?? [],
+        frontOfficeTodayYmd(orgRow?.business_date),
+      ),
+    )
     setLoading(false)
   }, [organizationId])
 
