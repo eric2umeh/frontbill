@@ -18,9 +18,10 @@ import { sortOutletMenuByName } from '@/lib/outlets/sort-outlet-menu'
 import { OutletDailyReportPanel } from '@/components/outlets/outlet-daily-report-panel'
 import { OutletOrderReceiptDialog, type OutletBillPrintKind } from '@/components/outlets/outlet-order-receipt-dialog'
 import { PageHeader } from '@/components/layout/page-header'
-import { ChevronLeft, ShoppingCart, UtensilsCrossed, ClipboardList, BarChart3 } from 'lucide-react'
+import { ChevronLeft, ShoppingCart, UtensilsCrossed, ClipboardList, BarChart3, Package } from 'lucide-react'
 import { toast } from 'sonner'
 import { RoomInventoryStatsStrip } from '@/components/shared/room-inventory-stats-strip'
+import { OutletStoreIssuesPanel } from '@/components/outlets/outlet-store-issues-panel'
 
 export function OutletWorkspace({ department }: { department: OutletDepartmentKey }) {
   const { organizationId, role, name: staffName } = useAuth()
@@ -39,9 +40,9 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
   const [receiptAutoPrint, setReceiptAutoPrint] = useState(false)
   const [receiptBillKind, setReceiptBillKind] = useState<OutletBillPrintKind>('auto')
 
-  const loadMenu = useCallback(async () => {
+  const loadMenu = useCallback(async (opts?: { silent?: boolean }) => {
     if (!organizationId) return
-    setLoading(true)
+    if (!opts?.silent) setLoading(true)
     try {
       const supabase = createClient()
       if (!supabase) return
@@ -78,26 +79,31 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
 
   useEffect(() => {
     const onCleared = () => {
-      void loadMenu()
+      void loadMenu({ silent: true })
     }
     const onSynced = () => {
-      if (department === 'restaurant' || department === 'main_bar') void loadMenu()
+      if (department === 'restaurant' || department === 'main_bar') void loadMenu({ silent: true })
     }
     const onSupply = () => {
-      void loadMenu()
+      void loadMenu({ silent: true })
+    }
+    const onBar = () => {
+      if (department === 'main_bar') void loadMenu({ silent: true })
     }
     window.addEventListener('frontbill:outlet-menu-cleared', onCleared)
     window.addEventListener('frontbill:outlet-menu-synced', onSynced)
     window.addEventListener('frontbill:supply-stock-changed', onSupply)
+    window.addEventListener('frontbill:bar-stock-changed', onBar)
     return () => {
       window.removeEventListener('frontbill:outlet-menu-cleared', onCleared)
       window.removeEventListener('frontbill:outlet-menu-synced', onSynced)
       window.removeEventListener('frontbill:supply-stock-changed', onSupply)
+      window.removeEventListener('frontbill:bar-stock-changed', onBar)
     }
   }, [department, loadMenu])
 
   if (!def) return null
-  if (loading) return <LoadingSpinner />
+  if (loading && items.length === 0 && categories.length === 0) return <LoadingSpinner />
 
   const canViewMenu = hasPermission(role, 'outlet:view')
   const canManageMenu = canManageOutletMenu(role)
@@ -144,6 +150,12 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
               Take order
             </TabsTrigger>
           )}
+          {department === 'main_bar' && canSell && (
+            <TabsTrigger value="from_store" className="gap-1 text-xs h-7 px-2.5">
+              <Package className="h-3.5 w-3.5" />
+              Items from Store
+            </TabsTrigger>
+          )}
           {canViewMenu && (
             <TabsTrigger value="menu" className="gap-1 text-xs h-7 px-2.5">
               <UtensilsCrossed className="h-3.5 w-3.5" />
@@ -175,6 +187,12 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
               onOrderBill={(order) => openReceipt(order, true, 'unsettled')}
               onOrderSettled={(order) => openReceipt(order, true, 'settled')}
             />
+          </TabsContent>
+        )}
+
+        {department === 'main_bar' && canSell && (
+          <TabsContent value="from_store" className="mt-2">
+            <OutletStoreIssuesPanel />
           </TabsContent>
         )}
 
