@@ -98,6 +98,22 @@ export function SupplyPendingAlerts() {
       }
 
       if (
+        po.status === 'retired' &&
+        (canPoAccountant || canPoManager || admin || roleKey === 'accountant')
+      ) {
+        seenRef.current.add(key)
+        playNotificationBeep()
+        toast.info(`PO retired — ${po.poNumber}`, {
+          description: `${po.retirement?.submittedBy ?? 'Store'} retired this PO. Central store stock was updated.`,
+          action: {
+            label: 'View history',
+            onClick: () => router.push('/supply/purchasing?tab=history'),
+          },
+        })
+        continue
+      }
+
+      if (
         po.status === 'retirement_pending_accountant' &&
         (canRetirement || admin)
       ) {
