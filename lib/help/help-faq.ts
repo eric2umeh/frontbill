@@ -117,7 +117,7 @@ export const HELP_FAQ: HelpFaqItem[] = [
     category: 'Bookings',
     question: 'What do Occ, Res, and Due mean on Bookings?',
     answer:
-      'Occ = checked-in guests staying past today. Res = reservations not checked in yet. Due = checkout today only (not old overdue folios). The three counts are unique (a due-out guest is not also in Occ). Default table lists Occ + Due today + today’s arrivals; due rows show a “Due out today” note.',
+      'Occ = checked-in guests staying past the hotel business date. Res = reservations not checked in yet. Due = checkout on the current business date (not old overdue folios). Due out appears after Front Desk runs Night Audit (the business date rolls forward). The three counts are unique. Default table lists Occ + Due + today’s arrivals; due rows show a “Due out today” note.',
     keywords: ['occ', 'res', 'due', 'occupied', 'reservation', 'stats'],
     aliases: ['what is occ', 'what is due', 'occupied count wrong', 'res stat'],
     topics: ['create_booking'],
@@ -192,7 +192,7 @@ export const HELP_FAQ: HelpFaqItem[] = [
     category: 'Bookings',
     question: 'How do I move / reschedule stay dates?',
     answer:
-      'Open the booking and use Move dates / reschedule. Some hotels require Night Audit approval before the new dates apply.',
+      'Open the reservation and use Move dates. Front desk can change reserved/confirmed dates immediately when a guest does not arrive (no admin wait). Backdated check-ins still go to Night Audit for approval.',
     keywords: ['move dates', 'reschedule', 'change dates'],
     aliases: ['change check in date', 'reschedule booking'],
     topics: ['create_booking', 'night_audit'],
