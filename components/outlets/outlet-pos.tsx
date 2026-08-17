@@ -34,6 +34,23 @@ import {
   sortOutletRootCategories,
   sortOutletSubCategories,
 } from '@/lib/outlets/sort-outlet-menu'
+import {
+  outletItemCategoryGroupKey,
+  outletItemMatchesCategory,
+} from '@/lib/outlets/category-match'
+
+function categoryGroupKey(
+  item: OutletMenuItemRow,
+  cats: OutletMenuCategoryRow[],
+): string {
+  try {
+    return outletItemCategoryGroupKey(item, cats)
+  } catch {
+    if (!item.category_id) return ''
+    const cat = cats.find((c) => c.id === item.category_id)
+    return String(cat?.name ?? '').trim().toLowerCase()
+  }
+}
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -172,7 +189,13 @@ export function OutletPos({
           const subIds = subCategories.map((s) => s.id)
           return subIds.includes(it.category_id || '') || it.category_id === parentCategoryId
         }
-        if (activeCategoryFilter) return it.category_id === activeCategoryFilter
+        if (activeCategoryFilter) {
+          try {
+            return outletItemMatchesCategory(it, activeCategoryFilter, categories)
+          } catch {
+            return it.category_id === activeCategoryFilter
+          }
+        }
         if (showingAllRootItems) return true
         return false
       })
@@ -190,23 +213,43 @@ export function OutletPos({
     subCategories,
     hasMenuPicker,
     showingAllRootItems,
+    categories,
   ])
 
   const groupedByCategory = useMemo(() => {
     if (!filteredItems.length) return []
     if (showingAllRootItems) {
       const groups: { cat: OutletMenuCategoryRow | null; items: typeof filteredItems }[] = []
+      const assigned = new Set<string>()
       for (const c of sortOutletRootCategories(categories)) {
-        const its = filteredItems.filter((it) => it.category_id === c.id)
-        if (its.length) groups.push({ cat: c, items: its })
+        const cKey = c.name.trim().toLowerCase()
+        const its = filteredItems.filter((it) => {
+          if (assigned.has(it.id)) return false
+          const key = categoryGroupKey(it, categories)
+          if (key && key === cKey) return true
+          return it.category_id === c.id
+        })
+        if (its.length) {
+          its.forEach((it) => assigned.add(it.id))
+          groups.push({ cat: c, items: its })
+        }
       }
       const nested = categories.filter((c) => c.parent_id)
       for (const c of nested) {
         if (groups.some((g) => g.cat?.id === c.id)) continue
-        const its = filteredItems.filter((it) => it.category_id === c.id)
-        if (its.length) groups.push({ cat: c, items: its })
+        const cKey = c.name.trim().toLowerCase()
+        const its = filteredItems.filter((it) => {
+          if (assigned.has(it.id)) return false
+          const key = categoryGroupKey(it, categories)
+          if (key && key === cKey) return true
+          return it.category_id === c.id
+        })
+        if (its.length) {
+          its.forEach((it) => assigned.add(it.id))
+          groups.push({ cat: c, items: its })
+        }
       }
-      const uncat = filteredItems.filter((it) => !it.category_id)
+      const uncat = filteredItems.filter((it) => !assigned.has(it.id))
       if (uncat.length) groups.push({ cat: null, items: uncat })
       return groups
     }
@@ -946,14 +989,14 @@ export function OutletPos({
           <p className="text-xs text-muted-foreground rounded-md border bg-muted/30 px-2 py-1.5 mb-2">
             {department === 'restaurant'
               ? 'Restaurant menu is controlled by kitchen stock (store → batches → portions). Items at 0 are unavailable.'
-              : 'Main Bar drinks come from stock transferred by F&B Store (Central Store → F&B Store → Main Bar). Items at 0 are unavailable.'}
+              : 'Main Bar drinks come from stock issued by Central Store. Items at 0 are unavailable.'}
           </p>
         )}
         {stockSource !== 'none' && !storeControlledFnb && (
           <p className="text-xs text-muted-foreground rounded-md border bg-muted/30 px-2 py-1.5 mb-2">
             {stockSource === 'kitchen'
               ? 'Food availability comes from kitchen stock (store → kitchen batches → portions).'
-              : 'Drink availability comes from Main Bar stock after F&B Store transfers it.'}
+              : 'Drink availability comes from Main Bar stock after Central Store issues it.'}
           </p>
         )}
 
