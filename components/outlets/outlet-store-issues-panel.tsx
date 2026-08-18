@@ -5,8 +5,12 @@ import { format, parseISO } from 'date-fns'
 import { Download } from 'lucide-react'
 import { toast } from 'sonner'
 import { useSupplyChain } from '@/lib/supply-chain/supply-chain-context'
-import { isMainBarIssueDestination } from '@/lib/store/outlet-departments'
-import { downloadMainBarIssueReport } from '@/lib/store/main-bar-issue-report'
+import {
+  isStoreIssueDestination,
+  storeIssueDestinationLabel,
+  type StoreIssueDestinationKey,
+} from '@/lib/store/outlet-departments'
+import { downloadStoreIssueReport } from '@/lib/store/main-bar-issue-report'
 import { formatUnitLabel } from '@/lib/supply-chain/measurement-units'
 import { hotelCalendarTodayYmd, formatYMDInTimeZone, resolveHotelTimeZone } from '@/lib/hotel-date'
 import { PaginatedListShell } from '@/components/shared/paginated-list-shell'
@@ -46,15 +50,20 @@ function formatIssuedTime(iso: string): string {
   }
 }
 
-export function OutletStoreIssuesPanel() {
+export function OutletStoreIssuesPanel({
+  destination = 'main_bar',
+}: {
+  destination?: StoreIssueDestinationKey
+}) {
   const { issueOutLog } = useSupplyChain()
   const todayYmd = hotelCalendarTodayYmd()
   const [dateFrom, setDateFrom] = useState(todayYmd)
   const [dateTo, setDateTo] = useState(todayYmd)
+  const destLabel = storeIssueDestinationLabel(destination)
 
   const rows = useMemo(() => {
     return (issueOutLog ?? [])
-      .filter((row) => isMainBarIssueDestination(row.destination))
+      .filter((row) => isStoreIssueDestination(row.destination, destination))
       .filter((row) => {
         const ymd = issuedYmd(row.issuedAt)
         if (!ymd) return true
@@ -62,7 +71,7 @@ export function OutletStoreIssuesPanel() {
         if (dateTo && ymd > dateTo) return false
         return true
       })
-  }, [issueOutLog, dateFrom, dateTo])
+  }, [issueOutLog, dateFrom, dateTo, destination])
 
   return (
     <div className="space-y-3">
@@ -96,8 +105,8 @@ export function OutletStoreIssuesPanel() {
           className="h-8 gap-1.5 ml-auto"
           disabled={rows.length === 0}
           onClick={() => {
-            downloadMainBarIssueReport(rows, { dateFrom, dateTo })
-            toast.success(`Downloaded ${rows.length} Main Bar issue(s) from store`)
+            downloadStoreIssueReport(rows, destination, { dateFrom, dateTo })
+            toast.success(`Downloaded ${rows.length} ${destLabel} issue(s) from store`)
           }}
         >
           <Download className="h-3.5 w-3.5" />
@@ -110,7 +119,7 @@ export function OutletStoreIssuesPanel() {
         pageSize={15}
         searchPlaceholder="Search item, received by…"
         searchKeys={['itemName', 'receivedBy', 'issuedBy']}
-        emptyMessage="No items issued from Central Store to Main Bar in this date range."
+        emptyMessage={`No items issued from Central Store to ${destLabel} in this date range.`}
       >
         {(pageRows) => (
           <Card>
