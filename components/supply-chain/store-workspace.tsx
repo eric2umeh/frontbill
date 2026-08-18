@@ -18,12 +18,16 @@ import {
   canSubmitStoreItemForApproval,
 } from '@/lib/permissions'
 import { issueOutletPickerOptions, isMainBarIssueDestination } from '@/lib/store/outlet-departments'
+import {
+  downloadMainBarIssueReport,
+  mainBarIssueOutRows,
+} from '@/lib/store/main-bar-issue-report'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { ArrowRightFromLine, History, Pencil, Trash2, AlertTriangle } from 'lucide-react'
+import { ArrowRightFromLine, Download, History, Pencil, Trash2, AlertTriangle } from 'lucide-react'
 import { OrgStaffSearchField } from '@/components/shared/org-staff-search-field'
 import {
   Select,
@@ -216,6 +220,11 @@ export function StoreWorkspace() {
     }
     return m
   }, [basket])
+
+  const mainBarIssueRows = useMemo(
+    () => mainBarIssueOutRows(issueOutLog),
+    [issueOutLog],
+  )
 
   const deptCatalogCounts = useMemo(() => {
     const c: Partial<Record<SupplyDept, number>> = {}
@@ -1332,8 +1341,24 @@ export function StoreWorkspace() {
         {canIssue && (
           <TabsContent value="issue_out_log" className="mt-4 space-y-3">
             <div className="rounded-xl border overflow-hidden">
-              <div className="border-b px-4 py-2 bg-muted/30 text-sm font-medium">
-                Issue out history
+              <div className="border-b px-4 py-2 bg-muted/30 flex flex-wrap items-center justify-between gap-2">
+                <div className="text-sm font-medium">Issue out history</div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 gap-1.5"
+                  disabled={mainBarIssueRows.length === 0}
+                  onClick={() => {
+                    downloadMainBarIssueReport(mainBarIssueRows)
+                    toast.success(
+                      `Downloaded ${mainBarIssueRows.length} item(s) issued to Main Bar`,
+                    )
+                  }}
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  Download Main Bar report
+                </Button>
               </div>
               {(issueOutLog ?? []).length === 0 ? (
                 <p className="text-sm text-muted-foreground p-6 text-center">
