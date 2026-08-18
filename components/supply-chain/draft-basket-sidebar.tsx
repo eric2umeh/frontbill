@@ -35,14 +35,16 @@ export function DraftBasketSidebar({
   const zeroPriceItems = basket.filter((b) => !(Number(b.unitPrice) > 0))
 
   return (
-    <div className="rounded-xl border bg-card p-3 h-fit sticky top-4 shadow-md space-y-2.5 overflow-hidden">
+    <div className="rounded-xl border bg-card p-3 h-fit lg:sticky lg:top-4 shadow-md flex flex-col gap-2.5 min-w-0 w-full">
       <div className="flex justify-between items-start gap-2 min-w-0">
         <div className="min-w-0">
           <h3 className="text-[15px] font-semibold leading-tight">Draft basket</h3>
           <p className="text-[13px] text-muted-foreground leading-snug">
             {readOnly
               ? 'Locked in this status'
-              : `${basket.length} item${basket.length === 1 ? '' : 's'} · dept totals below`}
+              : basket.length > 10
+                ? `${basket.length} items — search or use Prev/Next below to see all`
+                : `${basket.length} item${basket.length === 1 ? '' : 's'} · dept totals below`}
           </p>
         </div>
         {!readOnly && !hideClear && basket.length > 0 && (
@@ -98,15 +100,16 @@ export function DraftBasketSidebar({
           No items yet — enter quantities on Raise purchase request
         </p>
       ) : (
-        <div className="max-h-[560px] overflow-y-auto overflow-x-hidden -mx-0.5 px-0.5">
+        <div className="flex flex-col min-h-0 max-h-[min(70vh,720px)]">
           <PoReviewLinesPanel
             kind="basket"
             lines={basket}
             editable={!readOnly}
             onQtyChange={readOnly ? undefined : onQtyChange}
             onDelete={readOnly ? undefined : onRemove}
-            pageSize={8}
+            pageSize={10}
             compact
+            sidebarVariant
             title="Draft purchase list"
           />
         </div>

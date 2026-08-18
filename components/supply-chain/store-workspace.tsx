@@ -1433,7 +1433,7 @@ export function StoreWorkspace() {
               accountant rejects it or once the current PO is retired.
             </div>
           )}
-          <div className="grid gap-4 lg:grid-cols-[1fr_300px]">
+          <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(400px,440px)]">
             <div className="rounded-xl border">
               <div className="border-b px-4 py-2 text-sm text-muted-foreground">
                 Type a quantity to add to the active purchase list. Review and send from Purchase orders.
@@ -1588,17 +1588,17 @@ export function StoreWorkspace() {
                         })}
                       </div>
                       <div className="hidden md:block overflow-x-auto">
-                        <Table>
+                        <Table className="table-fixed w-full">
                           <TableHeader>
                             <TableRow>
-                              <TableHead>Item</TableHead>
-                              <TableHead className={RESPONSIVE_HIDE_MD}>Dept</TableHead>
-                              <TableHead className="text-right">In Store</TableHead>
-                              <TableHead className="text-right">Qty / unit</TableHead>
-                              <TableHead className={`text-right ${RESPONSIVE_HIDE_MD}`}>
+                              <TableHead className="w-[30%] px-2">Item</TableHead>
+                              <TableHead className={`w-[14%] px-2 ${RESPONSIVE_HIDE_MD}`}>Dept</TableHead>
+                              <TableHead className="w-[10%] px-2 text-right">In Store</TableHead>
+                              <TableHead className="w-[22%] px-2 text-right">Qty / unit</TableHead>
+                              <TableHead className={`w-[12%] px-2 text-right ${RESPONSIVE_HIDE_MD}`}>
                                 Unit Price
                               </TableHead>
-                              <TableHead className="text-right">Line total</TableHead>
+                              <TableHead className="w-[12%] px-2 text-right">Line total</TableHead>
                             </TableRow>
                           </TableHeader>
                           <TableBody>
@@ -1629,39 +1629,39 @@ export function StoreWorkspace() {
                                     inBasket && 'bg-sky-50/50 dark:bg-sky-950/20',
                                   )}
                                 >
-                                  <TableCell>
-                                    <div className="flex items-start gap-1.5">
+                                  <TableCell className="px-2 py-1.5">
+                                    <div className="flex items-start gap-1 min-w-0">
                                       {!(price > 0) && (
                                         <AlertTriangle
                                           className="h-3.5 w-3.5 shrink-0 mt-0.5 text-sky-700 dark:text-sky-300"
                                           aria-label="Unit price is ₦0"
                                         />
                                       )}
-                                      <span>
+                                      <span className="truncate text-sm">
                                         {item.name} ({unitLabel(item.unit)})
                                       </span>
                                     </div>
                                   </TableCell>
-                                  <TableCell className={RESPONSIVE_HIDE_MD}>
-                                    <div className="flex flex-wrap gap-1">
+                                  <TableCell className={`px-2 py-1.5 ${RESPONSIVE_HIDE_MD}`}>
+                                    <div className="flex flex-wrap gap-0.5">
                                       {storeItemDepartments(item).map((d) => (
-                                        <Badge key={d} variant="outline" className="text-[10px]">
+                                        <Badge key={d} variant="outline" className="text-[10px] px-1">
                                           {DEPT_LABELS[d]}
                                         </Badge>
                                       ))}
                                     </div>
                                   </TableCell>
-                                  <TableCell className="text-right">
+                                  <TableCell className="px-2 py-1.5 text-right">
                                     <span className={stockLevelNumberPillClass(level)}>
                                       {item.quantityInStore}
                                     </span>
                                   </TableCell>
-                                  <TableCell className="text-right">
+                                  <TableCell className="px-2 py-1.5 text-right">
                                     <div className="flex items-center justify-end gap-1">
                                       <Input
                                         inputMode="decimal"
                                         disabled={purchaseLocked}
-                                        className="h-8 w-20 text-right"
+                                        className="h-8 w-[4.25rem] text-right text-xs px-1.5"
                                         value={rawQty}
                                         onChange={(e) =>
                                           handlePurchaseQtyChange(item, e.target.value)
@@ -1708,13 +1708,13 @@ export function StoreWorkspace() {
                                       />
                                     )}
                                   </TableCell>
-                                  <TableCell className={`text-right ${RESPONSIVE_HIDE_MD}`}>
-                                    <div className="flex flex-wrap items-center justify-end gap-x-1.5 gap-y-0.5">
+                                  <TableCell className={`px-2 py-1.5 text-right ${RESPONSIVE_HIDE_MD}`}>
+                                    <div className="flex flex-wrap items-center justify-end gap-x-1 gap-y-0.5">
                                       <Input
                                         inputMode="decimal"
                                         disabled={purchaseLocked}
                                         data-raise-po-price="1"
-                                        className="h-8 w-24 text-right"
+                                        className="h-8 w-[5.5rem] text-right text-xs px-1.5"
                                         placeholder={formatNaira(defaultPurchasePrice)}
                                         value={purchasePriceMap[item.id] ?? ''}
                                         onChange={(e) =>
@@ -1750,7 +1750,7 @@ export function StoreWorkspace() {
                                       )}
                                     </div>
                                   </TableCell>
-                                  <TableCell className="text-right tabular-nums">
+                                  <TableCell className="px-2 py-1.5 text-right tabular-nums text-sm">
                                     {storeQty != null && storeQty > 0
                                       ? formatNaira(qty * price)
                                       : '—'}
