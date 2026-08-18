@@ -3,6 +3,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { createClient } from '@/lib/supabase/server'
 import { hasPermission } from '@/lib/permissions'
 import { outletSlugify } from '@/lib/outlets/slug'
+import { barMenuUnitPriceForSync } from '@/lib/supply-chain/bar-menu-sync-price'
 import { toTitleCaseWords } from '@/lib/supply-chain/title-case'
 
 export async function POST(request: Request) {
@@ -58,7 +59,7 @@ export async function POST(request: Request) {
 
   const { data: existingItems } = await admin
     .from('outlet_menu_items')
-    .select('id, name, service_code, category_id')
+    .select('id, name, service_code, category_id, unit_price')
     .eq('organization_id', organizationId)
     .eq('department', department)
 
@@ -132,10 +133,9 @@ export async function POST(request: Request) {
     }
   }
 
-  const itemPayload = {
+  const itemPayload: Record<string, unknown> = {
     name: itemName,
     category_id: categoryId,
-    unit_price: unitPrice,
     service_code: serviceCode,
     is_active: true,
     updated_by: user.id,
@@ -143,6 +143,8 @@ export async function POST(request: Request) {
   }
 
   if (existing) {
+    const nextPrice = barMenuUnitPriceForSync(unitPrice, Number(existing.unit_price))
+    if (nextPrice !== undefined) itemPayload.unit_price = nextPrice
     const { data: updated, error: ue } = await admin
       .from('outlet_menu_items')
       .update(itemPayload)
@@ -176,7 +178,7 @@ export async function POST(request: Request) {
       category_id: categoryId,
       name: itemName,
       description: '',
-      unit_price: unitPrice,
+      unit_price: barMenuUnitPriceForSync(unitPrice, null) ?? 0,
       service_code: serviceCode,
       is_active: true,
       sort_order: 0,
@@ -199,9 +201,12 @@ export async function POST(request: Request) {
       .eq('service_code', serviceCode)
       .maybeSingle()
     if (racedItem) {
+      const racePatch = { ...itemPayload }
+      const nextPrice = barMenuUnitPriceForSync(unitPrice, Number(racedItem.unit_price))
+      if (nextPrice !== undefined) racePatch.unit_price = nextPrice
       const { data: updated, error: ue } = await admin
         .from('outlet_menu_items')
-        .update(itemPayload)
+        .update(racePatch)
         .eq('id', racedItem.id)
         .select()
         .single()

@@ -555,16 +555,15 @@ export function StoreWorkspace() {
       setIssueUnitMap({})
       if (isMainBarIssueDestination(issueDestination)) {
         const syncResults = await Promise.all(
-          cartSnapshot.map((line) => {
-            const store = storeItems.find((s) => s.id === line.storeItemId)
-            const price = Number(store?.lastPrice)
-            return syncBarItemToMainBarMenu({
+          cartSnapshot.map((line) =>
+            syncBarItemToMainBarMenu({
               itemName: line.name,
               categoryName: '',
               barStockId: canonicalBarStockId(line.storeItemId),
-              unitPrice: Number.isFinite(price) && price >= 0 ? price : 0,
-            })
-          }),
+              // lastPrice is purchase cost, not a POS selling price
+              unitPrice: 0,
+            }),
+          )
         )
         const failed = syncResults.filter((r) => !r.ok)
         if (failed.length) {
