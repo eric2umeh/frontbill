@@ -14,6 +14,7 @@ import { useAuth } from "@/lib/auth-context";
 import { hasPermission } from "@/lib/permissions";
 import { Plus, Users, Loader2 } from "lucide-react";
 import { AddRoomModal } from "@/components/rooms/add-room-modal";
+import { HousekeepingStatusBadge } from "@/components/rooms/housekeeping-status-badge";
 import { toast } from "sonner";
 import { getUserDisplayName } from "@/lib/utils/user-display";
 import { fetchUserDisplayNameMap } from "@/lib/utils/fetch-user-display-names";
@@ -33,6 +34,7 @@ interface Room {
   max_occupancy: number;
   price_per_night: number;
   status: string;
+  housekeeping_status?: string | null;
   amenities: string[];
   created_by?: string;
   created_by_name?: string;
@@ -211,6 +213,9 @@ export default function RoomsPage() {
                 <MobileTableSubdetail>
                   <div>{room.room_type}</div>
                   <div className="capitalize">{room.status}</div>
+                  {room.housekeeping_status ? (
+                    <HousekeepingStatusBadge status={room.housekeeping_status} variant="both" />
+                  ) : null}
                 </MobileTableSubdetail>
               </div>
             ),
@@ -234,7 +239,7 @@ export default function RoomsPage() {
             responsive: "md+",
             render: (room) => (
               <div
-                className="cursor-pointer"
+                className="cursor-pointer flex flex-wrap items-center gap-1"
                 onClick={() => router.push(`/rooms/${room.id}`)}
               >
                 <Badge
@@ -243,6 +248,7 @@ export default function RoomsPage() {
                 >
                   {room.status}
                 </Badge>
+                <HousekeepingStatusBadge status={room.housekeeping_status} variant="both" />
               </div>
             ),
           },
