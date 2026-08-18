@@ -506,16 +506,16 @@ export default function BookingDetailPage({
                     ? chargeCreatorMap[charge.created_by] ||
                       getUserDisplayName(null, charge.created_by)
                     : "System";
-                  return {
-                    id: charge.id,
+        return {
+          id: charge.id,
                     date: charge.created_at?.split("T")[0],
-                    timestamp: charge.created_at,
-                    description: charge.description,
-                    amount: charge.amount,
-                    type: charge.charge_type,
-                    createdBy: creatorName,
-                    paymentStatus: charge.payment_status,
-                    paymentMethod: charge.payment_method,
+          timestamp: charge.created_at,
+          description: charge.description,
+          amount: charge.amount,
+          type: charge.charge_type,
+          createdBy: creatorName,
+          paymentStatus: charge.payment_status,
+          paymentMethod: charge.payment_method,
                   };
                 });
                 setFolioCharges(chargesWithCreator);
@@ -1515,7 +1515,7 @@ export default function BookingDetailPage({
       const method = String(
         c.paymentMethod ?? c.payment_method ?? "",
       ).toLowerCase();
-      return (
+    return (
         ["pending", "unpaid", "city_ledger", "partial"].includes(status) ||
         (method === "city_ledger" && status !== "paid") ||
         status === ""
@@ -2180,15 +2180,15 @@ export default function BookingDetailPage({
                 className="w-full sm:w-auto"
                 disabled={addChargeLoading}
               >
-                {addChargeLoading ? (
+              {addChargeLoading ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     Recording...
                   </>
-                ) : (
+              ) : (
                   "Record Payment"
-                )}
-              </Button>
+              )}
+            </Button>
             ) : (
               <Button
                 onClick={handleBookingAddCredit}
