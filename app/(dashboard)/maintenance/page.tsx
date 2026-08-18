@@ -22,6 +22,7 @@ import {
   Droplets, Flame, Wind, Package, AlertTriangle,
 } from 'lucide-react'
 import { RoomInventoryStatsStrip } from '@/components/shared/room-inventory-stats-strip'
+import { OutletStoreIssuesPanel } from '@/components/outlets/outlet-store-issues-panel'
 import { RoomStatusRemarksPanel } from '@/components/rooms/room-status-remarks-panel'
 import {
   fetchRoomStatusRemarksClient,
@@ -398,6 +399,10 @@ export default function MaintenancePage() {
         <TabsList>
           <TabsTrigger value="orders">Work Orders</TabsTrigger>
           <TabsTrigger value="rooms">Room Status</TabsTrigger>
+          <TabsTrigger value="from_store" className="gap-1.5">
+            <Package className="h-3.5 w-3.5" />
+            Items from Store
+          </TabsTrigger>
         </TabsList>
 
         {/* Work Orders Tab */}
@@ -573,6 +578,10 @@ export default function MaintenancePage() {
               )
             })}
           </div>
+        </TabsContent>
+
+        <TabsContent value="from_store" className="space-y-4">
+          <OutletStoreIssuesPanel destination="maintenance" />
         </TabsContent>
       </Tabs>
 

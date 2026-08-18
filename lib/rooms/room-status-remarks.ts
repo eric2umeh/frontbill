@@ -9,11 +9,11 @@ export type RoomStatusRemark = {
   taskStatus?: string | null
 }
 
-function isOutOfOrderStatusNote(notes: string): boolean {
-  return /out\s*of\s*order|out_of_order|Status → Out of Order/i.test(notes)
+function isHousekeepingStatusNote(notes: string): boolean {
+  return /HK Status →|Status →/i.test(notes)
 }
 
-/** Latest housekeeping / maintenance notes explaining why a room is OOO or under maintenance. */
+/** Latest housekeeping / maintenance notes explaining room status. */
 export async function fetchRoomStatusRemarks(
   supabase: SupabaseClient,
   organizationId: string,
@@ -32,10 +32,10 @@ export async function fetchRoomStatusRemarks(
 
   for (const row of hkRows ?? []) {
     const notes = String(row.notes || '').trim()
-    if (!notes || !isOutOfOrderStatusNote(notes)) continue
+    if (!notes || !isHousekeepingStatusNote(notes)) continue
     remarks.push({
       source: 'housekeeping',
-      title: 'Out of order remark',
+      title: 'Housekeeping status remark',
       text: notes,
       createdAt: row.created_at as string,
       createdBy: (row.created_by_name as string | null) ?? null,

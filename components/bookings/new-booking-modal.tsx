@@ -38,7 +38,7 @@ import { guestOrOrganizationNameTaken } from '@/lib/utils/guest-org-name-uniquen
 import { StayDateRangeFields } from '@/components/shared/stay-date-range-fields'
 import { useAuth } from '@/lib/auth-context'
 import { hasPermission } from '@/lib/permissions'
-import { BOOKING_MODAL_ROOMS_LIMIT, normalizeRoomsForBookingPickers } from '@/lib/utils/room-bookability'
+import { BOOKING_MODAL_ROOMS_LIMIT, normalizeRoomsForBookingPickers, roomNotBookableReason } from '@/lib/utils/room-bookability'
 import { Checkbox } from '@/components/ui/checkbox'
 import { insertFolioCharges } from '@/lib/utils/insert-folio-charges'
 import { applyPaymentToGuestCityLedger } from '@/lib/utils/guest-city-ledger'
@@ -215,7 +215,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
         counterpartyOrgs,
       ] = await Promise.all([
         supabase.from('guests').select('id, name, phone, email, address').eq('organization_id', orgId).order('name'),
-        supabase.from('rooms').select('id, room_number, room_type, price_per_night, status').eq('organization_id', orgId).order('room_number').limit(BOOKING_MODAL_ROOMS_LIMIT),
+        supabase.from('rooms').select('id, room_number, room_type, price_per_night, status, housekeeping_status').eq('organization_id', orgId).order('room_number').limit(BOOKING_MODAL_ROOMS_LIMIT),
         supabase.from('bookings').select('room_id, check_in, check_out').eq('organization_id', orgId).in('status', ['confirmed', 'reserved', 'checked_in']).limit(BOOKING_MODAL_ROOMS_LIMIT),
         supabase.from('city_ledger_accounts').select('id, account_name, account_type, contact_phone, balance').eq('organization_id', orgId).order('account_name'),
         loadCounterpartyOrganizations(supabase, orgId),
@@ -766,8 +766,12 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
         return
       }
       if (!selectedRoom) { toast.error('Room required'); return }
-      if (selectedRoom.status && String(selectedRoom.status).toLowerCase().trim() === 'maintenance') {
-        toast.error('Selected room is under maintenance — pick another')
+      const notBookable = roomNotBookableReason({
+        status: selectedRoom.status,
+        housekeeping_status: (selectedRoom as { housekeeping_status?: string | null }).housekeeping_status,
+      })
+      if (notBookable) {
+        toast.error(notBookable)
         return
       }
       if (paymentMethod === 'city_ledger' && !ledgerAccount) { toast.error('Select a ledger account'); return }

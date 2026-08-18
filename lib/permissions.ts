@@ -776,7 +776,7 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
     key: "housekeeping",
     label: "Housekeeper",
     description:
-      "Housekeeping board, room status updates with notes, and daily housekeeping reporting. Administrator, Superadmin, or Housekeeping may mark a room out of order; Occupied and Reserved are set from bookings only. No Bookings, Reservations, Store, dashboards, billing, or front-office edits.",
+      "Housekeeping board, floor room status (OOO, Occupied, Vacant, etc.), and daily reporting. Only Housekeepers may change room housekeeping status; all front-office roles can view it. No Bookings, Reservations, Store, dashboards, billing, or front-office edits.",
     color: "bg-teal-100 text-teal-800",
     permissions: [
       "housekeeping:view",
@@ -902,6 +902,8 @@ const PROFILE_ROLE_ALIASES: Record<string, RoleKey> = {
   cooks: "chef",
   laundry_staff: "laundry",
   gym_staff: "gym",
+  wellness: "gym",
+  wellness_staff: "gym",
   cash: "cashier",
   cashiers: "cashier",
   cashier_staff: "cashier",

@@ -5,6 +5,9 @@ import { useRouter, useParams } from 'next/navigation'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { HousekeepingStatusBadge } from '@/components/rooms/housekeeping-status-badge'
+import { HousekeepingStatusAttribution } from '@/components/rooms/housekeeping-status-attribution'
+import { housekeepingStatusLabel } from '@/lib/rooms/housekeeping-status'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -36,6 +39,9 @@ interface Room {
   max_occupancy: number
   price_per_night: number
   status: string
+  housekeeping_status?: string | null
+  housekeeping_status_updated_at?: string | null
+  housekeeping_status_updated_by_name?: string | null
   amenities: string[]
 }
 
@@ -498,9 +504,14 @@ export default function RoomDetailPage() {
                   <CardTitle className="text-3xl">Room {room.room_number}</CardTitle>
                   <p className="text-muted-foreground mt-1">{room.room_type}</p>
                 </div>
-                <Badge variant="outline" className={statusColors[room.status]}>
-                  {room.status}
-                </Badge>
+                <div className="flex flex-col items-end gap-1">
+                  <Badge variant="outline" className={statusColors[room.status]}>
+                    {room.status}
+                  </Badge>
+                  {room.housekeeping_status ? (
+                    <HousekeepingStatusBadge status={room.housekeeping_status} variant="both" />
+                  ) : null}
+                </div>
               </div>
             </CardHeader>
             <CardContent className="space-y-6">
@@ -527,8 +538,18 @@ export default function RoomDetailPage() {
                   <p className="font-semibold">{formatNaira(room.price_per_night)}</p>
                 </div>
                 <div className="space-y-2">
-                  <div className="text-sm text-muted-foreground">Status</div>
-                  <p className="font-semibold capitalize">{room.status}</p>
+                  <div className="text-sm text-muted-foreground">Housekeeping</div>
+                  <p className="font-semibold">
+                    {room.housekeeping_status
+                      ? housekeepingStatusLabel(room.housekeeping_status)
+                      : '—'}
+                  </p>
+                  {room.housekeeping_status ? (
+                    <HousekeepingStatusAttribution
+                      updatedAt={room.housekeeping_status_updated_at}
+                      updatedByName={room.housekeeping_status_updated_by_name}
+                    />
+                  ) : null}
                 </div>
               </div>
 

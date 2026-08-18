@@ -14,6 +14,9 @@ import { useAuth } from "@/lib/auth-context";
 import { hasPermission } from "@/lib/permissions";
 import { Plus, Users, Loader2 } from "lucide-react";
 import { AddRoomModal } from "@/components/rooms/add-room-modal";
+import { HousekeepingStatusBadge } from "@/components/rooms/housekeeping-status-badge";
+import { HousekeepingStatusAttribution } from "@/components/rooms/housekeeping-status-attribution";
+import { housekeepingStatusUpdatedTitle } from "@/lib/rooms/format-housekeeping-status-updated";
 import { toast } from "sonner";
 import { getUserDisplayName } from "@/lib/utils/user-display";
 import { fetchUserDisplayNameMap } from "@/lib/utils/fetch-user-display-names";
@@ -33,6 +36,9 @@ interface Room {
   max_occupancy: number;
   price_per_night: number;
   status: string;
+  housekeeping_status?: string | null;
+  housekeeping_status_updated_at?: string | null;
+  housekeeping_status_updated_by_name?: string | null;
   amenities: string[];
   created_by?: string;
   created_by_name?: string;
@@ -211,6 +217,22 @@ export default function RoomsPage() {
                 <MobileTableSubdetail>
                   <div>{room.room_type}</div>
                   <div className="capitalize">{room.status}</div>
+                  {room.housekeeping_status ? (
+                    <>
+                      <HousekeepingStatusBadge
+                        status={room.housekeeping_status}
+                        variant="both"
+                        title={housekeepingStatusUpdatedTitle({
+                          updatedAt: room.housekeeping_status_updated_at,
+                          updatedByName: room.housekeeping_status_updated_by_name,
+                        })}
+                      />
+                      <HousekeepingStatusAttribution
+                        updatedAt={room.housekeeping_status_updated_at}
+                        updatedByName={room.housekeeping_status_updated_by_name}
+                      />
+                    </>
+                  ) : null}
                 </MobileTableSubdetail>
               </div>
             ),
@@ -234,15 +256,31 @@ export default function RoomsPage() {
             responsive: "md+",
             render: (room) => (
               <div
-                className="cursor-pointer"
+                className="cursor-pointer flex flex-col gap-0.5"
                 onClick={() => router.push(`/rooms/${room.id}`)}
               >
-                <Badge
-                  variant="outline"
-                  className={`${statusColors[room.status]} max-md:text-[10px] px-1.5 py-0`}
-                >
-                  {room.status}
-                </Badge>
+                <div className="flex flex-wrap items-center gap-1">
+                  <Badge
+                    variant="outline"
+                    className={`${statusColors[room.status]} max-md:text-[10px] px-1.5 py-0`}
+                  >
+                    {room.status}
+                  </Badge>
+                  <HousekeepingStatusBadge
+                    status={room.housekeeping_status}
+                    variant="both"
+                    title={housekeepingStatusUpdatedTitle({
+                      updatedAt: room.housekeeping_status_updated_at,
+                      updatedByName: room.housekeeping_status_updated_by_name,
+                    })}
+                  />
+                </div>
+                {room.housekeeping_status ? (
+                  <HousekeepingStatusAttribution
+                    updatedAt={room.housekeeping_status_updated_at}
+                    updatedByName={room.housekeeping_status_updated_by_name}
+                  />
+                ) : null}
               </div>
             ),
           },

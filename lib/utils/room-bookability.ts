@@ -1,19 +1,67 @@
-/**
- * Rooms that are not in maintenance can be assigned when the calendar is free.
- * Housekeeping statuses (cleaning, occupied, reserved, available) must not hide
- * rooms from booking pickers — the Rooms menu and booking flow stay in sync.
- */
-export function isRoomAssignable(status: string | null | undefined): boolean {
-  return String(status ?? '').toLowerCase().trim() !== 'maintenance'
-}
+import {
+  housekeepingStatusLabel,
+  isHousekeepingStatusBlockingBookings,
+} from '@/lib/rooms/housekeeping-status'
 
 /** Supabase REST often caps rows (~1000); large hotels need an explicit ceiling. */
 export const BOOKING_MODAL_ROOMS_LIMIT = 20_000
 
 const DEFAULT_ROOM_TYPE_LABEL = 'Standard'
 
+const PMS_STATUSES_BLOCKING_BOOKINGS = new Set([
+  'maintenance',
+  'out_of_order',
+  'occupied',
+  'reserved',
+])
+
+export type RoomBookabilityInput = {
+  status?: string | null
+  housekeeping_status?: string | null
+}
+
+function normStatus(s: string | null | undefined): string {
+  return String(s ?? '')
+    .toLowerCase()
+    .trim()
+    .replace(/-/g, '_')
+}
+
 /**
- * After fetch: trim room_number, coerce blank room_type (legacy / bad imports), exclude maintenance only.
+ * Whether a room may appear in booking / reservation pickers.
+ * Blocked by PMS status (maintenance, OOO, occupied, reserved) or HK floor status
+ * (OOO, O, Compl, L/in, R/s, S/O).
+ */
+export function isRoomAssignable(
+  status: string | null | undefined,
+  housekeepingStatus?: string | null | undefined,
+): boolean {
+  const s = normStatus(status)
+  if (PMS_STATUSES_BLOCKING_BOOKINGS.has(s)) return false
+  if (isHousekeepingStatusBlockingBookings(housekeepingStatus)) return false
+  return true
+}
+
+export function isRoomBookable(room: RoomBookabilityInput): boolean {
+  return isRoomAssignable(room.status, room.housekeeping_status)
+}
+
+export function roomNotBookableReason(room: RoomBookabilityInput): string | null {
+  if (isRoomBookable(room)) return null
+  if (isHousekeepingStatusBlockingBookings(room.housekeeping_status)) {
+    const label = housekeepingStatusLabel(room.housekeeping_status)
+    return `Room is marked ${label} by housekeeping and cannot be booked or reserved.`
+  }
+  const s = normStatus(room.status)
+  if (s === 'maintenance') return 'Room is under maintenance and cannot be booked.'
+  if (s === 'out_of_order') return 'Room is out of order and cannot be booked.'
+  if (s === 'occupied') return 'Room is occupied and cannot be booked.'
+  if (s === 'reserved') return 'Room is reserved and cannot be booked.'
+  return 'Room is not available for booking.'
+}
+
+/**
+ * After fetch: trim room_number, coerce blank room_type, exclude non-bookable rooms.
  */
 export function normalizeRoomsForBookingPickers(roomData: unknown[] | null | undefined): Record<string, unknown>[] {
   if (!roomData?.length) return []
@@ -32,7 +80,9 @@ export function normalizeRoomsForBookingPickers(roomData: unknown[] | null | und
           ? String(numRaw).trim()
           : ''
     if (!room_number) continue
-    if (!isRoomAssignable(r.status as string | undefined)) continue
+    if (!isRoomAssignable(r.status as string | undefined, r.housekeeping_status as string | undefined)) {
+      continue
+    }
 
     const rt = String(r.room_type ?? '').replace(/\s+/g, ' ').trim()
     const room_type = rt || DEFAULT_ROOM_TYPE_LABEL

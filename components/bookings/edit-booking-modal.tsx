@@ -111,7 +111,7 @@ export function EditBookingModal({ open, onClose, booking, userId, onSaved }: Ed
         const supabase = createClient()
         const { data, error } = await supabase
           .from('rooms')
-          .select('id, room_number, room_type, status, organization_id')
+          .select('id, room_number, room_type, status, organization_id, housekeeping_status')
           .eq('organization_id', booking.organization_id)
           .order('room_number')
           .limit(BOOKING_MODAL_ROOMS_LIMIT)

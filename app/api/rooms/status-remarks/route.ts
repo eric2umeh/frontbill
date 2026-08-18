@@ -1,11 +1,11 @@
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { resolveRoomStatusAuthed } from '@/lib/rooms/room-status-auth'
+import { resolveRoomStatusReadAuthed } from '@/lib/rooms/room-status-auth'
 import { fetchRoomStatusRemarks } from '@/lib/rooms/room-status-remarks'
 
 export async function GET(request: Request) {
   try {
-    const auth = await resolveRoomStatusAuthed()
+    const auth = await resolveRoomStatusReadAuthed()
     if ('error' in auth) {
       return NextResponse.json({ error: auth.error }, { status: auth.status })
     }

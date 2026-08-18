@@ -16,6 +16,9 @@ import {
   type OccupyingBookingRow,
 } from "@/lib/rooms/room-occupancy";
 import { isTransientNetworkError, withFetchRetry } from "@/lib/utils/fetch-retry";
+import { HousekeepingStatusBadge } from "@/components/rooms/housekeeping-status-badge";
+import { getHousekeepingStatusDef } from "@/lib/rooms/housekeeping-status";
+import { housekeepingStatusUpdatedTitle } from "@/lib/rooms/format-housekeeping-status-updated";
 
 interface Room {
   id: string;
@@ -23,6 +26,9 @@ interface Room {
   type: string;
   floor: number;
   status: string;
+  housekeeping_status?: string | null;
+  housekeeping_status_updated_at?: string | null;
+  housekeeping_status_updated_by_name?: string | null;
 }
 
 const statusConfig = {
@@ -68,7 +74,7 @@ export function RoomStatusGrid() {
           const result = await Promise.all([
             supabase
               .from("rooms")
-              .select("id, room_number, room_type, status, organization_id")
+              .select("id, room_number, room_type, status, housekeeping_status, housekeeping_status_updated_at, housekeeping_status_updated_by_name, organization_id")
               .eq("organization_id", organizationId)
               .order("room_number", { ascending: true }),
             supabase
@@ -98,6 +104,9 @@ export function RoomStatusGrid() {
             return {
               ...room,
               status: computeEffectiveRoomStatus(room.status, occupying),
+              housekeeping_status: room.housekeeping_status as string | null | undefined,
+              housekeeping_status_updated_at: room.housekeeping_status_updated_at as string | null | undefined,
+              housekeeping_status_updated_by_name: room.housekeeping_status_updated_by_name as string | null | undefined,
             };
           })
           .sort((a: any, b: any) => {
@@ -155,6 +164,7 @@ export function RoomStatusGrid() {
               {rooms.map((room) => {
                 const config =
                   statusConfig[room.status as keyof typeof statusConfig];
+                const hk = getHousekeepingStatusDef(room.housekeeping_status);
                 return (
                   <div
                     key={room.id}
@@ -171,8 +181,8 @@ export function RoomStatusGrid() {
                               : "border-purple-200 bg-purple-50",
                     )}
                   >
-                    <div className="flex items-start justify-between">
-                      <div>
+                    <div className="flex items-start justify-between gap-1">
+                      <div className="min-w-0">
                         <p className="text-xs font-semibold leading-tight">
                           {room.room_number}
                         </p>
@@ -180,12 +190,24 @@ export function RoomStatusGrid() {
                           {room.room_type?.replace("_", " ") || "Standard"}
                         </p>
                       </div>
-                      <div
-                        className={cn("h-2 w-2 rounded-full", config?.color)}
-                      />
+                      <div className="flex flex-col items-end gap-0.5 shrink-0">
+                        <div
+                          className={cn("h-2 w-2 rounded-full", config?.color)}
+                        />
+                        {hk ? (
+                          <HousekeepingStatusBadge
+                            status={room.housekeeping_status}
+                            title={housekeepingStatusUpdatedTitle({
+                              updatedAt: room.housekeeping_status_updated_at,
+                              updatedByName: room.housekeeping_status_updated_by_name,
+                            })}
+                          />
+                        ) : null}
+                      </div>
                     </div>
                     <p className="mt-1 text-[10px] font-medium capitalize leading-tight">
                       {config?.label}
+                      {hk ? ` · ${hk.abbr}` : ""}
                     </p>
                   </div>
                 );

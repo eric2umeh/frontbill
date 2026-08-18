@@ -2,6 +2,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
 import { canonicalRoleKey, hasPermission } from '@/lib/permissions'
 import { notifyNightAuditRequestCreated } from '@/lib/night-audit/notify-request-created'
+import { roomNotBookableReason } from '@/lib/utils/room-bookability'
 
 const DECISION = ['approved', 'rejected'] as const
 
@@ -172,11 +173,22 @@ export async function POST(request: Request) {
 
     const { data: toRoom, error: toErr } = await admin
       .from('rooms')
-      .select('id, room_number, status, organization_id')
+      .select('id, room_number, status, organization_id, housekeeping_status')
       .eq('id', to_room_id)
       .single()
     if (toErr || !toRoom || toRoom.organization_id !== orgId) {
       return NextResponse.json({ error: 'Target room not found' }, { status: 400 })
+    }
+
+    const bookableReason = roomNotBookableReason({
+      status: String(toRoom.status),
+      housekeeping_status: (toRoom as { housekeeping_status?: string | null }).housekeeping_status,
+    })
+    if (bookableReason) {
+      return NextResponse.json(
+        { error: `Room ${toRoom.room_number}: ${bookableReason}` },
+        { status: 400 },
+      )
     }
 
     if (String(toRoom.status) !== 'available') {
@@ -343,11 +355,22 @@ export async function PATCH(request: Request) {
 
     const { data: toRoom, error: trErr } = await admin
       .from('rooms')
-      .select('id, room_number, status, organization_id')
+      .select('id, room_number, status, organization_id, housekeeping_status')
       .eq('id', row.to_room_id)
       .single()
     if (trErr || !toRoom || toRoom.organization_id !== row.organization_id) {
       return NextResponse.json({ error: 'Target room not found' }, { status: 400 })
+    }
+
+    const approveBookableReason = roomNotBookableReason({
+      status: String(toRoom.status),
+      housekeeping_status: (toRoom as { housekeeping_status?: string | null }).housekeeping_status,
+    })
+    if (approveBookableReason) {
+      return NextResponse.json(
+        { error: `Room ${toRoom.room_number}: ${approveBookableReason}` },
+        { status: 409 },
+      )
     }
 
     if (String(toRoom.status) !== 'available') {

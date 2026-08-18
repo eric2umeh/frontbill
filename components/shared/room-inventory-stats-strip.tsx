@@ -38,7 +38,7 @@ export function RoomInventoryStatsStrip({ className, refreshMs = 60_000 }: Props
     await reconcileRoomStatusesClient()
 
     const [{ data: rooms, error: roomErr }, { data: bookings, error: bookErr }, { data: orgRow }] = await Promise.all([
-      supabase.from('rooms').select('status').eq('organization_id', organizationId),
+      supabase.from('rooms').select('status, housekeeping_status').eq('organization_id', organizationId),
       supabase
         .from('bookings')
         .select('id, room_id, status, check_in, check_out, folio_status')

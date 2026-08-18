@@ -192,7 +192,7 @@ export function KitchenPurchasePanel() {
   }
 
   return (
-    <div className="grid lg:grid-cols-[1fr_320px] gap-4">
+    <div className="grid lg:grid-cols-[minmax(0,1fr)_minmax(400px,440px)] gap-3">
       <div className="space-y-3">
         {isRejected && po?.accountantComment ? (
           <PoCommentBanner
