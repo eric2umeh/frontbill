@@ -369,7 +369,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
       supabase.from('guests').select('id, name, phone, email').eq('organization_id', tenantId).order('name'),
       supabase
         .from('rooms')
-        .select('id, room_number, room_type, price_per_night, status')
+        .select('id, room_number, room_type, price_per_night, status, housekeeping_status')
         .eq('organization_id', tenantId)
         .order('room_number')
         .limit(BOOKING_MODAL_ROOMS_LIMIT),

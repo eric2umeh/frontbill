@@ -133,7 +133,7 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
 
       const [{ data: guestData }, { data: roomData }, { data: bookingData }] = await Promise.all([
         supabase.from('guests').select('id, name, phone').eq('organization_id', tenantId).order('name'),
-        supabase.from('rooms').select('id, room_number, room_type, price_per_night, status').eq('organization_id', tenantId).order('room_number').limit(BOOKING_MODAL_ROOMS_LIMIT),
+        supabase.from('rooms').select('id, room_number, room_type, price_per_night, status, housekeeping_status').eq('organization_id', tenantId).order('room_number').limit(BOOKING_MODAL_ROOMS_LIMIT),
         supabase.from('bookings').select('room_id, check_in, check_out').eq('organization_id', tenantId).in('status', ['confirmed', 'reserved', 'checked_in']).limit(BOOKING_MODAL_ROOMS_LIMIT),
       ])
 

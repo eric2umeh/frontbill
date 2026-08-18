@@ -93,6 +93,22 @@ export function housekeepingStatusAbbr(key: string | null | undefined): string {
   return getHousekeepingStatusDef(key)?.abbr ?? '—'
 }
 
+/** HK floor statuses that block new bookings / reservations (room hidden from pickers). */
+export const HOUSEKEEPING_STATUSES_BLOCKING_BOOKINGS: readonly HousekeepingStatusKey[] = [
+  'out_of_order',
+  'occupied',
+  'complimentary',
+  'long_stay',
+  'reservation',
+  'sleep_out',
+]
+
+export function isHousekeepingStatusBlockingBookings(key: string | null | undefined): boolean {
+  if (!key) return false
+  const norm = String(key).trim().toLowerCase().replace(/-/g, '_')
+  return (HOUSEKEEPING_STATUSES_BLOCKING_BOOKINGS as readonly string[]).includes(norm)
+}
+
 /** Sync PMS `rooms.status` when HK marks OOO so inventory / booking pickers respect it. */
 export function pmsStatusForHousekeepingStatus(hkStatus: HousekeepingStatusKey): string | null {
   if (hkStatus === 'out_of_order') return 'out_of_order'

@@ -34,7 +34,7 @@ import { syncLedgerOrgCounterpartiesToOrganizationsTable } from '@/lib/utils/syn
 import { formatPersonName, normalizeNameKey, titleCaseWhileTyping } from '@/lib/utils/name-format'
 import { guestOrOrganizationNameTaken } from '@/lib/utils/guest-org-name-uniqueness'
 import { StayDateRangeFields } from '@/components/shared/stay-date-range-fields'
-import { BOOKING_MODAL_ROOMS_LIMIT, isRoomAssignable, normalizeRoomsForBookingPickers } from '@/lib/utils/room-bookability'
+import { BOOKING_MODAL_ROOMS_LIMIT, isRoomAssignable, normalizeRoomsForBookingPickers, roomNotBookableReason } from '@/lib/utils/room-bookability'
 import { Checkbox } from '@/components/ui/checkbox'
 import { applyPaymentToGuestCityLedger } from '@/lib/utils/guest-city-ledger'
 import { insertFolioCharges } from '@/lib/utils/insert-folio-charges'
@@ -198,7 +198,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
 
       const [{ data: guestData }, { data: roomData }, { data: bookingData }, counterpartyOrgs] = await Promise.all([
         supabase.from('guests').select('id, name, phone, email, address').eq('organization_id', tenantId).order('name'),
-        supabase.from('rooms').select('id, room_number, room_type, price_per_night, status').eq('organization_id', tenantId).order('room_number').limit(BOOKING_MODAL_ROOMS_LIMIT),
+        supabase.from('rooms').select('id, room_number, room_type, price_per_night, status, housekeeping_status').eq('organization_id', tenantId).order('room_number').limit(BOOKING_MODAL_ROOMS_LIMIT),
         supabase.from('bookings').select('room_id, check_in, check_out').eq('organization_id', tenantId).in('status', ['confirmed', 'reserved', 'checked_in']).limit(BOOKING_MODAL_ROOMS_LIMIT),
         loadCounterpartyOrganizations(supabase, tenantId),
       ])
@@ -395,7 +395,9 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
         .filter(b => b.check_in < cout && b.check_out > cin)
         .map(b => b.room_id)
     )
-    return roomsOfType.filter((r) => isRoomAssignable(r.status) && !bookedRoomIds.has(r.id))
+    return roomsOfType.filter(
+      (r) => isRoomAssignable(r.status, r.housekeeping_status) && !bookedRoomIds.has(r.id),
+    )
   }
 
   const handleStayDatesChange = (from: Date, to: Date | undefined) => {
@@ -569,8 +571,12 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
       return
     }
     if (!selectedRoom) { toast.error('Room required'); return }
-    if (selectedRoom.status && String(selectedRoom.status).toLowerCase().trim() === 'maintenance') {
-      toast.error('Selected room is under maintenance — pick another')
+    const notBookable = roomNotBookableReason({
+      status: selectedRoom.status,
+      housekeeping_status: selectedRoom.housekeeping_status,
+    })
+    if (notBookable) {
+      toast.error(notBookable)
       return
     }
     if (!pendingHold && paymentStatus === 'partial' && depositAmount <= 0) {
@@ -809,7 +815,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
     const cin = toLocalDateStr(checkInDate)
     const cout = toLocalDateStr(checkOutDate)
     const bookedIds = new Set(allBookings.filter(b => b.check_in < cout && b.check_out > cin).map(b => b.room_id))
-    return isRoomAssignable(r.status) && !bookedIds.has(r.id)
+    return isRoomAssignable(r.status, r.housekeeping_status) && !bookedIds.has(r.id)
   })
 
   return (
