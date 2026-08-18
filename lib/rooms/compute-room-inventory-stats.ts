@@ -23,7 +23,7 @@ function normStatus(s: string | null | undefined): string {
 
 /** Count rooms by housekeeping/PMS status (view-only dashboard strip). */
 export function computeRoomInventoryStats(
-  rows: { status?: string | null }[],
+  rows: { status?: string | null; housekeeping_status?: string | null }[],
 ): Omit<RoomInventoryStats, 'dueOut' | 'reserved' | 'physicallyHeld'> & {
   dueOut?: number
   reserved?: number
@@ -33,9 +33,10 @@ export function computeRoomInventoryStats(
   let occupied = 0
   let outOfOrder = 0
   for (const r of rows) {
+    const hk = normStatus(r.housekeeping_status)
     const s = normStatus(r.status)
-    if (s === 'occupied') occupied += 1
-    else if (s === 'out_of_order') outOfOrder += 1
+    if (hk === 'out_of_order' || s === 'out_of_order') outOfOrder += 1
+    else if (s === 'occupied') occupied += 1
     else if (s === 'available') available += 1
   }
   return {
