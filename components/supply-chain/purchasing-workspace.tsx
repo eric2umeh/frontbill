@@ -12,8 +12,7 @@ import {
   normalizeSupplyDept,
 } from "@/lib/supply-chain/types";
 import { formatNaira } from "@/lib/utils/currency";
-import { canonicalRoleKey, canAddStoreItemDirect } from "@/lib/permissions";
-import { SupplyHistoryClearButton } from "@/components/supply-chain/supply-history-clear-button";
+import { canonicalRoleKey } from "@/lib/permissions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -240,8 +239,6 @@ export function PurchasingWorkspace() {
     name: name ?? "Staff",
     role: canonicalRoleKey(role) ?? "staff",
   };
-  const canClearHistory = canAddStoreItemDirect(role);
-
   if (
     selectedId &&
     selected &&
@@ -648,19 +645,11 @@ export function PurchasingWorkspace() {
           </TabsContent>
 
           <TabsContent value="history" className="mt-4 space-y-3">
-            <div className="flex flex-wrap items-start justify-between gap-2">
-              <div>
-                <h2 className="font-medium">Retired purchase orders</h2>
-                <p className="text-xs text-muted-foreground">
-                  Completed retirements — approved vs retired totals, with changed lines highlighted.
-                </p>
-              </div>
-              {canClearHistory && (
-                <SupplyHistoryClearButton
-                  actor={actor}
-                  description="Clears retired PO history, issue-out log, and supply activity log on this device."
-                />
-              )}
+            <div>
+              <h2 className="font-medium">Retired purchase orders</h2>
+              <p className="text-xs text-muted-foreground">
+                Completed retirements — approved vs retired totals, with changed lines highlighted.
+              </p>
             </div>
             <PoHistoryPanel
               purchaseOrders={purchaseOrders}
