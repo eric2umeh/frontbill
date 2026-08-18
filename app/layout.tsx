@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next'
 import { Geist, Geist_Mono } from 'next/font/google'
 import { Toaster } from 'sonner'
 import { LoginSuccessToast } from '@/components/auth/login-success-toast'
+import { PwaUpdatePrompt } from '@/components/pwa/pwa-update-prompt'
 
 import './globals.css'
 
@@ -50,6 +51,7 @@ export default function RootLayout({
         {children}
         <Toaster richColors position="top-right" />
         <LoginSuccessToast />
+        <PwaUpdatePrompt />
       </body>
     </html>
   )

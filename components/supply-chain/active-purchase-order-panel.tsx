@@ -16,6 +16,7 @@ import {
 } from '@/lib/supply-chain/po-active'
 import { resolvePoDisplayStatus } from '@/lib/supply-chain/po-format'
 import { useAuth } from '@/lib/auth-context'
+import { canRaisePurchaseRequest } from '@/lib/permissions'
 import { Badge } from '@/components/ui/badge'
 import { formatNaira } from '@/lib/utils/currency'
 import { Button } from '@/components/ui/button'
@@ -63,6 +64,7 @@ export function ActivePurchaseOrderPanel({ actor, storeItems }: Props) {
   const po = activePurchaseOrder
   const displayStatus = po ? resolvePoDisplayStatus(po) : undefined
   const canEdit = canEditStorePurchaseOrder(po)
+  const canRaise = canRaisePurchaseRequest(role)
   const canDelete = canDeleteStorePurchaseOrder(po, role)
   const awaitingAccountant =
     displayStatus === 'pending_accountant' || isPurchaseOrderAwaitingAccountant(po)
@@ -72,6 +74,7 @@ export function ActivePurchaseOrderPanel({ actor, storeItems }: Props) {
     displayStatus === 'accountant_rejected' || displayStatus === 'manager_rejected'
   const isPendingStore = displayStatus === 'pending_store'
   const linesEditable =
+    canRaise &&
     canEdit &&
     !awaitingAccountant &&
     (isDraft || isRejected || isPendingStore)
@@ -332,6 +335,7 @@ export function ActivePurchaseOrderPanel({ actor, storeItems }: Props) {
   }
 
   const showSend =
+    canRaise &&
     canEdit &&
     basket.length > 0 &&
     !awaitingAccountant &&

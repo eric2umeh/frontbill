@@ -140,7 +140,7 @@ export function DashboardShell({
     const onDashboard = pathname === '/dashboard' || pathname.startsWith('/dashboard/')
 
     if (onDashboard) {
-      if (rk === 'store' || rk === 'auditor') {
+      if (rk === 'store') {
         router.replace('/store')
         return
       }

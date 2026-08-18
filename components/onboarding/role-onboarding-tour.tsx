@@ -104,7 +104,10 @@ function tipsForRole(role: string | null | undefined): Tip[] {
   if (hasPermission(role, 'supply:kitchen')) {
     tips.push({
       title: 'Kitchen',
-      body: 'Kitchen stock, recipes/batches, and purchase lists that go to Central Store first.',
+      body:
+        rk === 'auditor'
+          ? 'View kitchen stock, recipes, and production records. Auditors cannot open a production batch.'
+          : 'Kitchen stock, recipes/batches, and purchase lists that go to Central Store first.',
       href: '/supply/kitchen',
       target: 'nav-kitchen',
     })
@@ -113,7 +116,10 @@ function tipsForRole(role: string | null | undefined): Tip[] {
   if (canAccessSupplyPurchaseOrdersMenu(role)) {
     tips.push({
       title: 'Purchase Orders',
-      body: 'Raise purchase requests, track active POs, and approve raised POs. Approved PO history stays read-only until retirement at market.',
+      body:
+        rk === 'auditor'
+          ? 'View raised and approved POs. Auditors cannot raise requests or change lines.'
+          : 'Raise purchase requests, track active POs, and approve raised POs. Approved PO history stays read-only until retirement at market.',
       href: '/supply/purchase-orders',
       target: 'nav-purchase-orders',
     })
@@ -122,7 +128,10 @@ function tipsForRole(role: string | null | undefined): Tip[] {
   if (hasPermission(role, 'supply:purchasing') && rk !== 'accountant') {
     tips.push({
       title: 'Retirement',
-      body: 'After disbursement, record the market buy and submit retirement for review.',
+      body:
+        rk === 'auditor'
+          ? 'View market retirements and retirement history. Auditors cannot retire a PO at market.'
+          : 'After disbursement, record the market buy and submit retirement for review.',
       href: '/supply/purchasing',
       target: 'nav-purchasing',
     })
@@ -131,7 +140,10 @@ function tipsForRole(role: string | null | undefined): Tip[] {
   if (canAccessExpenseMenu(role) && hasPermission(role, 'expenses:view')) {
     tips.push({
       title: 'Expenses',
-      body: 'Record operating expenses by category. Totals feed Monthly P&L and daily expenditure reports.',
+      body:
+        rk === 'auditor'
+          ? 'View operating expenses by category. Recording and editing is for accountant roles.'
+          : 'Record operating expenses by category. Totals feed Monthly P&L and daily expenditure reports.',
       href: '/expenses',
       target: 'nav-expenses',
     })

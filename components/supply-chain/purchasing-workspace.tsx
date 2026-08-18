@@ -11,7 +11,7 @@ import {
   normalizeSupplyDept,
 } from "@/lib/supply-chain/types";
 import { formatNaira } from "@/lib/utils/currency";
-import { canonicalRoleKey, canSupplyRetirementReview } from "@/lib/permissions";
+import { canonicalRoleKey, canSupplyRetirementReview, canSubmitMarketRetirement } from "@/lib/permissions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -60,9 +60,11 @@ function lineNotBought(line: RetirementLine) {
 function PurchasingRetireRow({
   po,
   onRetire,
+  canRetire = true,
 }: {
   po: PurchaseOrder;
   onRetire: () => void;
+  canRetire?: boolean;
 }) {
   const inReview = isPurchasingRetirementInReview(po.status);
   const rejected = po.status === "retirement_rejected";
@@ -95,10 +97,14 @@ function PurchasingRetireRow({
         <Button size="sm" className="shrink-0" variant="outline" disabled>
           In review
         </Button>
-      ) : (
+      ) : canRetire ? (
         <Button size="sm" className="shrink-0" onClick={onRetire}>
           {rejected ? "Edit retirement" : "Retire at market"}
         </Button>
+      ) : (
+        <Badge variant="outline" className="shrink-0 text-muted-foreground">
+          View only
+        </Badge>
       )}
     </div>
   );
@@ -138,6 +144,7 @@ export function PurchasingWorkspace() {
     Number.isFinite(n) && n > 0 ? String(n) : "";
 
   const initRetire = (poId: string) => {
+    if (!canSubmitMarketRetirement(role)) return;
     const po = purchaseOrders.find((p) => p.id === poId);
     if (!po) return;
     if (isPurchasingRetirementInReview(po.status)) {
@@ -240,6 +247,7 @@ export function PurchasingWorkspace() {
     role: canonicalRoleKey(role) ?? "staff",
   };
   const canRetirementReview = canSupplyRetirementReview(role);
+  const canRetireAtMarket = canSubmitMarketRetirement(role);
   if (
     selectedId &&
     selected &&
@@ -282,6 +290,7 @@ export function PurchasingWorkspace() {
   }
 
   if (
+    canRetireAtMarket &&
     selectedId &&
     selected &&
     isPurchasingRetireCandidate(selected.status)
@@ -590,6 +599,7 @@ export function PurchasingWorkspace() {
                         <PurchasingRetireRow
                           key={po.id}
                           po={po}
+                          canRetire={canRetireAtMarket}
                           onRetire={() => initRetire(po.id)}
                         />
                       ))}
@@ -633,6 +643,7 @@ export function PurchasingWorkspace() {
                         <PurchasingRetireRow
                           key={po.id}
                           po={po}
+                          canRetire={canRetireAtMarket}
                           onRetire={() => initRetire(po.id)}
                         />
                       ))}

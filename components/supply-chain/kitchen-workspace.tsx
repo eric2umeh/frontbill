@@ -7,7 +7,7 @@ import { useClientMounted } from '@/hooks/use-client-mounted'
 import { useAuth } from '@/lib/auth-context'
 import { useSupplyChain } from '@/lib/supply-chain/supply-chain-context'
 import { formatNaira } from '@/lib/utils/currency'
-import { canonicalRoleKey, canManageKitchenBatchStandards } from '@/lib/permissions'
+import { canonicalRoleKey, canManageKitchenBatchStandards, canOperateKitchenProduction, canRaisePurchaseRequest } from '@/lib/permissions'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -208,8 +208,12 @@ export function KitchenWorkspace() {
   const [tab, setTab] = useState('stock')
   useEffect(() => {
     const t = searchParams.get('tab')
+    if (t === 'purchase' && !canRaisePurchaseRequest(role)) {
+      setTab('stock')
+      return
+    }
     if (t) setTab(t)
-  }, [searchParams])
+  }, [searchParams, role])
   const [batchDialog, setBatchDialog] = useState<{ recipeId: string; defaultPortions: number } | null>(null)
   const [closeDialog, setCloseDialog] = useState<string | null>(null)
   const [budgetQty, setBudgetQty] = useState<Record<string, string>>({})
@@ -217,6 +221,8 @@ export function KitchenWorkspace() {
   const [plannedInput, setPlannedInput] = useState('')
   const actor = { name: name ?? 'Kitchen', role: canonicalRoleKey(role) ?? 'staff' }
   const canManageBatchStandards = canManageKitchenBatchStandards(role)
+  const canOpenProduction = canOperateKitchenProduction(role)
+  const canRaiseKitchenPo = canRaisePurchaseRequest(role)
 
   const recipeCategoryFilterOptions = useMemo(() => {
     const cats = [...new Set(recipes.map((r) => r.category).filter(Boolean))].sort((a, b) =>
@@ -303,13 +309,17 @@ export function KitchenWorkspace() {
           <TabsTrigger value="raw-stock">Raw from Store</TabsTrigger>
           <TabsTrigger value="production">Production Records</TabsTrigger>
           <TabsTrigger value="recipes">All Batches</TabsTrigger>
-          <TabsTrigger value="purchase">Raise Purchase Order</TabsTrigger>
+          {canRaiseKitchenPo && (
+            <TabsTrigger value="purchase">Raise Purchase Order</TabsTrigger>
+          )}
           <TabsTrigger value="budget">Budget</TabsTrigger>
         </TabsList>
 
+        {canRaiseKitchenPo && (
         <TabsContent value="purchase" className="mt-4">
           <KitchenPurchasePanel />
         </TabsContent>
+        )}
 
         <TabsContent value="raw-stock" className="mt-4 space-y-4">
         <div className="space-y-4">
@@ -583,7 +593,7 @@ export function KitchenWorkspace() {
                   <span className="text-red-600">{b.disposition.waste} Waste</span>
                 </p>
               )}
-              {b.status === 'in_progress' && (
+              {b.status === 'in_progress' && canOpenProduction && (
                 <div className="flex flex-wrap gap-2 justify-end">
                   <Button
                     size="sm"
@@ -769,6 +779,7 @@ export function KitchenWorkspace() {
                       </Button>
                     </>
                   )}
+                  {canOpenProduction && (
                   <Button
                     className="flex-1 min-w-[140px]"
                     variant="outline"
@@ -782,6 +793,7 @@ export function KitchenWorkspace() {
                   >
                     <Flame className="h-4 w-4 mr-2" /> Open batch
                   </Button>
+                  )}
                 </div>
               </div>
             )
