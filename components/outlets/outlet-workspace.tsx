@@ -34,7 +34,8 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
   const canSell = hasPermission(role, 'outlet:sell')
   const canReceipt = hasPermission(role, 'outlet:receipt')
   const canViewMenu = hasPermission(role, 'outlet:view')
-  const canViewFromStore = department === 'main_bar' && canViewMenu
+  const canViewFromStore =
+    (department === 'main_bar' || department === 'laundry') && canViewMenu
   const canViewFromKitchen = department === 'restaurant' && canViewMenu
   const [tab, setTab] = useState(
     canSell
@@ -138,7 +139,9 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
         description={
           department === 'gym'
             ? 'POS · memberships & day passes (Menu tab) · orders · reports'
-            : department === 'main_bar'
+            : department === 'laundry'
+              ? 'POS · guest laundry tickets · stock from Central Store · orders · reports'
+              : department === 'main_bar'
               ? 'POS · drinks by category · stock from Central Store · orders · reports'
               : 'POS · room charge · service fees · open & settled bills · reports'
         }
@@ -209,7 +212,9 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
 
         {canViewFromStore && (
           <TabsContent value="from_store" className="mt-2">
-            <OutletStoreIssuesPanel />
+            <OutletStoreIssuesPanel
+              destination={department === 'laundry' ? 'laundry' : 'main_bar'}
+            />
           </TabsContent>
         )}
 
