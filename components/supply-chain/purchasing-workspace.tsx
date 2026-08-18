@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo, useState, useCallback } from "react";
-import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { useSupplyChain } from "@/lib/supply-chain/supply-chain-context";
@@ -12,7 +11,7 @@ import {
   normalizeSupplyDept,
 } from "@/lib/supply-chain/types";
 import { formatNaira } from "@/lib/utils/currency";
-import { canonicalRoleKey } from "@/lib/permissions";
+import { canonicalRoleKey, canSupplyRetirementReview } from "@/lib/permissions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -36,6 +35,7 @@ import {
 import { PoDetailPanel } from "@/components/supply-chain/po-detail-card";
 import { PoCommentBanner } from "@/components/supply-chain/po-comment-banner";
 import { PoHistoryPanel } from "@/components/supply-chain/po-history-panel";
+import { PoRetirementPanel } from "@/components/supply-chain/po-retirement-panel";
 import {
   formatPoRaisedAt,
   getPoApprovedAmount,
@@ -239,6 +239,7 @@ export function PurchasingWorkspace() {
     name: name ?? "Staff",
     role: canonicalRoleKey(role) ?? "staff",
   };
+  const canRetirementReview = canSupplyRetirementReview(role);
   if (
     selectedId &&
     selected &&
@@ -247,7 +248,7 @@ export function PurchasingWorkspace() {
     return (
       <div className="space-y-6">
         <div>
-          <h1 className="text-2xl font-bold">Purchasing</h1>
+          <h1 className="text-2xl font-bold">Retirement</h1>
           <p className="text-sm text-muted-foreground">
             PO awaiting approval — line items below
           </p>
@@ -527,7 +528,7 @@ export function PurchasingWorkspace() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold">Purchasing</h1>
+        <h1 className="text-2xl font-bold">Retirement</h1>
         <p className="text-sm text-muted-foreground">
           Market purchase and retirement. Retiring a PO adds items to Central Store immediately.
         </p>
@@ -547,7 +548,7 @@ export function PurchasingWorkspace() {
               )}
             </TabsTrigger>
             <TabsTrigger value="history">
-              History
+              Retirement History
               {retiredCount > 0 && (
                 <Badge variant="secondary" className="ml-1.5 tabular-nums text-[10px]">
                   {retiredCount}
@@ -557,18 +558,16 @@ export function PurchasingWorkspace() {
           </TabsList>
 
           <TabsContent value="active" className="mt-4 space-y-6">
+            {canRetirementReview ? (
+              <PoRetirementPanel showAcceptedSection={false} />
+            ) : null}
+
             {submittedForReview.length > 0 && (
               <section className="space-y-3">
                 <div className="rounded-lg border border-violet-200 bg-violet-50/50 dark:bg-violet-950/20 p-3 text-sm text-muted-foreground">
                   {submittedForReview.length} retirement
-                  {submittedForReview.length === 1 ? "" : "s"} submitted — awaiting accountant at{" "}
-                  <Link
-                    href="/supply/purchase-orders?tab=retirement"
-                    className="underline font-medium text-foreground"
-                  >
-                    Supply Chain → Purchase Orders → Retirement
-                  </Link>
-                  . Retire at market stays locked until accept or reject.
+                  {submittedForReview.length === 1 ? "" : "s"} submitted — awaiting accountant review.
+                  Retire at market stays locked until accept or reject.
                 </div>
                 <PaginatedListShell
                   items={submittedForReview}
@@ -654,7 +653,7 @@ export function PurchasingWorkspace() {
             <PoHistoryPanel
               purchaseOrders={purchaseOrders}
               includeStatuses={["retired"]}
-              emptyMessage="No retired purchase orders yet. History appears here after you retire a PO from Active."
+              emptyMessage="No retired purchase orders yet. Retirement History appears here after you retire a PO from Active."
               searchPlaceholder="Search retired PO number, date…"
             />
           </TabsContent>

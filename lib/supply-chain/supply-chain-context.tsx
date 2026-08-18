@@ -1870,7 +1870,7 @@ function useSupplyChainImpl() {
         audience: ["store"],
         title: `Kitchen order — ${submitted.poNumber}`,
         body: `${actor.name} sent a kitchen purchase list (₦${total.toLocaleString()}) for store review`,
-        href: "/supply/store?tab=orders",
+        href: "/supply/purchase-orders?tab=orders",
       });
       void persistSnapshotsNow();
       return { po: submitted };
@@ -1939,7 +1939,7 @@ function useSupplyChainImpl() {
             audience: ["store"],
             title: `PO rejected — ${po.poNumber}`,
             body: comment || "Accountant rejected this purchase order. Edit and resend.",
-            href: "/supply/store?tab=orders",
+            href: "/supply/purchase-orders?tab=orders",
           });
           if (poOriginOf(po) === "kitchen") {
             pushSupplyNotification({
@@ -1994,7 +1994,7 @@ function useSupplyChainImpl() {
           pushSupplyNotification({
             audience: ["purchasing", "store"],
             title: `PO approved — ${po.poNumber}`,
-            body: `Manager approved. Ready to buy at market, then retire from Purchasing.`,
+            body: `Manager approved. Ready to buy at market, then retire from Retirement.`,
             href: "/supply/purchasing",
           });
         } else {
@@ -2002,7 +2002,7 @@ function useSupplyChainImpl() {
             audience: ["store", "accountant"],
             title: `PO rejected by manager — ${po.poNumber}`,
             body: comment || "Manager rejected this purchase order.",
-            href: "/supply/store?tab=orders",
+            href: "/supply/purchase-orders?tab=orders",
           });
         }
       }
@@ -2093,7 +2093,7 @@ function useSupplyChainImpl() {
           audience: ["store"],
           title: `PO rejected (admin test) — ${po.poNumber}`,
           body: comment,
-          href: "/supply/store?tab=orders",
+          href: "/supply/purchase-orders?tab=orders",
         });
         if (poOriginOf(po) === "kitchen") {
           pushSupplyNotification({

@@ -123,7 +123,7 @@ export function SupplyPendingAlerts() {
           description: `${po.retirement?.submittedBy ?? 'Purchaser'} submitted market retirement.`,
           action: {
             label: 'Review',
-            onClick: () => router.push('/supply/purchase-orders?tab=retirement'),
+            onClick: () => router.push('/supply/purchasing?tab=active'),
           },
         })
         continue
@@ -136,9 +136,9 @@ export function SupplyPendingAlerts() {
         seenRef.current.add(key)
         playNotificationBeep()
         toast.warning(`Retirement rejected — ${po.poNumber}`, {
-          description: po.retirementComment || 'Edit and resubmit from Purchasing.',
+          description: po.retirementComment || 'Edit and resubmit from Retirement.',
           action: {
-            label: 'Open Purchasing',
+            label: 'Open Retirement',
             onClick: () => router.push('/supply/purchasing'),
           },
         })

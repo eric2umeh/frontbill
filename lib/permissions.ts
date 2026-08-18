@@ -1006,19 +1006,31 @@ export function canSupplyRetirementReview(
 }
 
 /**
- * Sidebar → Supply Chain → Purchase Orders (approvals + retirement review).
- * Accountant / Manager / Admin / Superadmin / Auditor — not store or kitchen.
+ * Sidebar → Supply Chain → Purchase Orders (raise PO, active PO, history; PO Approvals for reviewers).
  */
 export function canAccessSupplyPurchaseOrdersMenu(
   userRole: string | null | undefined,
 ): boolean {
   const roleKey = canonicalRoleKey(userRole);
   return (
+    roleKey === "store" ||
+    roleKey === "purchaser" ||
     roleKey === "accountant" ||
     roleKey === "manager" ||
     roleKey === "admin" ||
     roleKey === "superadmin" ||
     roleKey === "auditor"
+  );
+}
+
+/** PO Approvals tab — accountant / manager / admin (not store, purchaser, or auditor). */
+export function canAccessPoApprovalsTab(
+  userRole: string | null | undefined,
+): boolean {
+  return (
+    canSupplyPoAccountantReview(userRole) ||
+    canSupplyPoManagerReview(userRole) ||
+    canAdminTestApproveSupplyPo(userRole)
   );
 }
 

@@ -35,7 +35,7 @@ const EXACT: Record<string, string> = {
   '/supply': 'Supply',
   '/supply/store': 'Central Store',
   '/supply/kitchen': 'Kitchen',
-  '/supply/purchasing': 'Purchasing',
+  '/supply/purchasing': 'Retirement',
   '/supply/purchase-orders': 'Purchase Orders',
   '/supply/activity': 'Supply Log',
   '/supply/fnb': 'F&B Store',
@@ -58,7 +58,7 @@ const PREFIX: Array<[string, string]> = [
   ['/night-audit/', 'Night Audit'],
   ['/supply/store', 'Central Store'],
   ['/supply/kitchen', 'Kitchen'],
-  ['/supply/purchasing', 'Purchasing'],
+  ['/supply/purchasing', 'Retirement'],
   ['/store/', 'Store'],
 ]
 

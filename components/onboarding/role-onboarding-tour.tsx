@@ -95,7 +95,7 @@ function tipsForRole(role: string | null | undefined): Tip[] {
   if (hasPermission(role, 'supply:store')) {
     tips.push({
       title: 'Central Store',
-      body: 'Stock levels, Issue Out, and raise purchase lists. Only one open PO at a time.',
+      body: 'Stock levels and Issue Out to departments. Raise purchase requests under Purchase Orders.',
       href: '/supply/store',
       target: 'nav-supply-store',
     })
@@ -113,7 +113,7 @@ function tipsForRole(role: string | null | undefined): Tip[] {
   if (canAccessSupplyPurchaseOrdersMenu(role)) {
     tips.push({
       title: 'Purchase Orders',
-      body: 'Approve raised POs and review market retirements. Stock updates only after retirement is accepted.',
+      body: 'Raise purchase requests, track active POs, and approve raised POs. Approved PO history stays read-only until retirement at market.',
       href: '/supply/purchase-orders',
       target: 'nav-purchase-orders',
     })
@@ -121,7 +121,7 @@ function tipsForRole(role: string | null | undefined): Tip[] {
 
   if (hasPermission(role, 'supply:purchasing') && rk !== 'accountant') {
     tips.push({
-      title: 'Purchasing',
+      title: 'Retirement',
       body: 'After disbursement, record the market buy and submit retirement for review.',
       href: '/supply/purchasing',
       target: 'nav-purchasing',
