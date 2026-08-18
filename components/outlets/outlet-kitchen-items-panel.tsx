@@ -5,9 +5,10 @@ import { format, parseISO } from 'date-fns'
 import { Download } from 'lucide-react'
 import { toast } from 'sonner'
 import { useSupplyChain } from '@/lib/supply-chain/supply-chain-context'
-import { isMainBarIssueDestination } from '@/lib/store/outlet-departments'
-import { downloadMainBarIssueReport } from '@/lib/store/main-bar-issue-report'
-import { formatUnitLabel } from '@/lib/supply-chain/measurement-units'
+import {
+  downloadKitchenToRestaurantReport,
+  kitchenToRestaurantRows,
+} from '@/lib/outlets/kitchen-to-restaurant-report'
 import { hotelCalendarTodayYmd, formatYMDInTimeZone, resolveHotelTimeZone } from '@/lib/hotel-date'
 import { PaginatedListShell } from '@/components/shared/paginated-list-shell'
 import { Button } from '@/components/ui/button'
@@ -46,26 +47,27 @@ function formatIssuedTime(iso: string): string {
   }
 }
 
-export function OutletStoreIssuesPanel() {
-  const { issueOutLog } = useSupplyChain()
+export function OutletKitchenItemsPanel() {
+  const { batches, recipes } = useSupplyChain()
   const todayYmd = hotelCalendarTodayYmd()
   const [dateFrom, setDateFrom] = useState(todayYmd)
   const [dateTo, setDateTo] = useState(todayYmd)
 
   const rows = useMemo(() => {
-    return (issueOutLog ?? [])
-      .filter((row) => isMainBarIssueDestination(row.destination))
-      .filter((row) => {
-        const ymd = issuedYmd(row.issuedAt)
-        if (!ymd) return true
-        if (dateFrom && ymd < dateFrom) return false
-        if (dateTo && ymd > dateTo) return false
-        return true
-      })
-  }, [issueOutLog, dateFrom, dateTo])
+    return kitchenToRestaurantRows(batches, recipes).filter((row) => {
+      const ymd = issuedYmd(row.at)
+      if (!ymd) return true
+      if (dateFrom && ymd < dateFrom) return false
+      if (dateTo && ymd > dateTo) return false
+      return true
+    })
+  }, [batches, recipes, dateFrom, dateTo])
 
   return (
     <div className="space-y-3">
+      <p className="text-xs text-muted-foreground">
+        Closed kitchen production that went to Restaurant (menu listing and sellable portions).
+      </p>
       <div className="flex flex-wrap items-center gap-2">
         <Input
           type="date"
@@ -96,8 +98,8 @@ export function OutletStoreIssuesPanel() {
           className="h-8 gap-1.5 ml-auto"
           disabled={rows.length === 0}
           onClick={() => {
-            downloadMainBarIssueReport(rows, { dateFrom, dateTo })
-            toast.success(`Downloaded ${rows.length} Main Bar issue(s) from store`)
+            downloadKitchenToRestaurantReport(rows, { dateFrom, dateTo })
+            toast.success(`Downloaded ${rows.length} kitchen item(s) to Restaurant`)
           }}
         >
           <Download className="h-3.5 w-3.5" />
@@ -108,27 +110,27 @@ export function OutletStoreIssuesPanel() {
       <PaginatedListShell
         items={rows}
         pageSize={15}
-        searchPlaceholder="Search item, received by…"
-        searchKeys={['itemName', 'receivedBy', 'issuedBy']}
-        emptyMessage="No items issued from Central Store to Main Bar in this date range."
+        searchPlaceholder="Search dish, category, chef…"
+        searchKeys={['itemName', 'category', 'producedBy']}
+        emptyMessage="No kitchen production sent to Restaurant in this date range."
       >
         {(pageRows) => (
           <Card>
             <CardContent className="p-0">
               <div className="md:hidden divide-y">
-                {pageRows.map((row, index) => (
-                  <div key={`${row.id}-${index}-m`} className="p-3 space-y-1">
+                {pageRows.map((row) => (
+                  <div key={`${row.id}-m`} className="p-3 space-y-1">
                     <div className="flex items-start justify-between gap-2">
                       <p className="font-medium text-sm">{row.itemName}</p>
                       <span className="text-sm tabular-nums shrink-0">
-                        {row.quantity} {formatUnitLabel(row.unit)}
+                        {row.sellableToRestaurant} {row.unit}
                       </span>
                     </div>
                     <p className="text-xs text-muted-foreground">
-                      Received by {row.receivedBy || '—'}
+                      {row.category || '—'} · {row.producedBy || '—'}
                     </p>
                     <p className="text-[10px] text-muted-foreground">
-                      {formatIssuedDate(row.issuedAt)} · {formatIssuedTime(row.issuedAt)}
+                      {formatIssuedDate(row.at)} · {formatIssuedTime(row.at)}
                     </p>
                   </div>
                 ))}
@@ -140,24 +142,26 @@ export function OutletStoreIssuesPanel() {
                       <TableHead>Date</TableHead>
                       <TableHead>Time</TableHead>
                       <TableHead>Item</TableHead>
-                      <TableHead>Qty issued</TableHead>
-                      <TableHead>Received by</TableHead>
+                      <TableHead>Category</TableHead>
+                      <TableHead>Sellable</TableHead>
+                      <TableHead>Produced by</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {pageRows.map((row, index) => (
-                      <TableRow key={`${row.id}-${index}`}>
+                    {pageRows.map((row) => (
+                      <TableRow key={row.id}>
                         <TableCell className="text-sm whitespace-nowrap">
-                          {formatIssuedDate(row.issuedAt)}
+                          {formatIssuedDate(row.at)}
                         </TableCell>
                         <TableCell className="text-sm tabular-nums whitespace-nowrap">
-                          {formatIssuedTime(row.issuedAt)}
+                          {formatIssuedTime(row.at)}
                         </TableCell>
                         <TableCell className="font-medium">{row.itemName}</TableCell>
+                        <TableCell>{row.category || '—'}</TableCell>
                         <TableCell className="tabular-nums">
-                          {row.quantity} {formatUnitLabel(row.unit)}
+                          {row.sellableToRestaurant} {row.unit}
                         </TableCell>
-                        <TableCell>{row.receivedBy || '—'}</TableCell>
+                        <TableCell>{row.producedBy || '—'}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>

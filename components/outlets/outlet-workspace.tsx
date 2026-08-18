@@ -18,10 +18,11 @@ import { sortOutletMenuByName } from '@/lib/outlets/sort-outlet-menu'
 import { OutletDailyReportPanel } from '@/components/outlets/outlet-daily-report-panel'
 import { OutletOrderReceiptDialog, type OutletBillPrintKind } from '@/components/outlets/outlet-order-receipt-dialog'
 import { PageHeader } from '@/components/layout/page-header'
-import { ChevronLeft, ShoppingCart, UtensilsCrossed, ClipboardList, BarChart3, Package } from 'lucide-react'
+import { ChevronLeft, ShoppingCart, UtensilsCrossed, ClipboardList, BarChart3, Package, ChefHat } from 'lucide-react'
 import { toast } from 'sonner'
 import { RoomInventoryStatsStrip } from '@/components/shared/room-inventory-stats-strip'
 import { OutletStoreIssuesPanel } from '@/components/outlets/outlet-store-issues-panel'
+import { OutletKitchenItemsPanel } from '@/components/outlets/outlet-kitchen-items-panel'
 
 export function OutletWorkspace({ department }: { department: OutletDepartmentKey }) {
   const { organizationId, role, name: staffName } = useAuth()
@@ -32,8 +33,19 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
   const [ordersRefresh, setOrdersRefresh] = useState(0)
   const canSell = hasPermission(role, 'outlet:sell')
   const canReceipt = hasPermission(role, 'outlet:receipt')
+  const canViewMenu = hasPermission(role, 'outlet:view')
+  const canViewFromStore = department === 'main_bar' && canViewMenu
+  const canViewFromKitchen = department === 'restaurant' && canViewMenu
   const [tab, setTab] = useState(
-    canSell ? 'sell' : canReceipt ? 'orders' : 'menu',
+    canSell
+      ? 'sell'
+      : canViewFromStore
+        ? 'from_store'
+        : canViewFromKitchen
+          ? 'from_kitchen'
+          : canReceipt
+            ? 'orders'
+            : 'menu',
   )
   const [receiptOrder, setReceiptOrder] = useState<OutletOrderRow | null>(null)
   const [receiptOpen, setReceiptOpen] = useState(false)
@@ -105,7 +117,6 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
   if (!def) return null
   if (loading && items.length === 0 && categories.length === 0) return <LoadingSpinner />
 
-  const canViewMenu = hasPermission(role, 'outlet:view')
   const canManageMenu = canManageOutletMenu(role)
   const canReports = hasPermission(role, 'outlet:reports')
   const canManageOrders = canManageOutletOrders(role)
@@ -150,10 +161,16 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
               Take order
             </TabsTrigger>
           )}
-          {department === 'main_bar' && canSell && (
+          {canViewFromStore && (
             <TabsTrigger value="from_store" className="gap-1 text-xs h-7 px-2.5">
               <Package className="h-3.5 w-3.5" />
               Items from Store
+            </TabsTrigger>
+          )}
+          {canViewFromKitchen && (
+            <TabsTrigger value="from_kitchen" className="gap-1 text-xs h-7 px-2.5">
+              <ChefHat className="h-3.5 w-3.5" />
+              Items from Kitchen
             </TabsTrigger>
           )}
           {canViewMenu && (
@@ -190,9 +207,15 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
           </TabsContent>
         )}
 
-        {department === 'main_bar' && canSell && (
+        {canViewFromStore && (
           <TabsContent value="from_store" className="mt-2">
             <OutletStoreIssuesPanel />
+          </TabsContent>
+        )}
+
+        {canViewFromKitchen && (
+          <TabsContent value="from_kitchen" className="mt-2">
+            <OutletKitchenItemsPanel />
           </TabsContent>
         )}
 

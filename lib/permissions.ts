@@ -588,9 +588,15 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
     key: "auditor",
     label: "Auditor",
     description:
-      "Internal audit: central store, kitchen & F&B stock views, outlet reports, movement summaries, and audit trails (read-only).",
+      "Internal audit: read-only front office (bookings, reservations, events, guests, rooms), central store, kitchen & F&B stock, outlet reports, movement summaries, and audit trails.",
     color: "bg-slate-200 text-slate-900 dark:bg-slate-800 dark:text-slate-100",
     permissions: [
+      "bookings:view",
+      "reservations:view",
+      "events:view",
+      "guests:view",
+      "organizations:view",
+      "rooms:view",
       "store:view",
       "store:requisition",
       "store:reports",
