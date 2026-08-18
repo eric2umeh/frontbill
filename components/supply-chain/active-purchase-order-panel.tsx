@@ -283,7 +283,7 @@ export function ActivePurchaseOrderPanel({ actor, storeItems }: Props) {
               {retirementInReview
                 ? 'You cannot retire again until the accountant accepts or rejects this submission.'
                 : displayStatus === 'retirement_rejected'
-                  ? 'Fix the retirement and resubmit from Purchasing.'
+                  ? 'Fix the retirement and resubmit from Retirement.'
                   : 'Cash is disbursed for purchasing. Retire at market when shopping is done.'}
             </p>
           </div>

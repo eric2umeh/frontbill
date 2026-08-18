@@ -180,7 +180,7 @@ function PoDecisionCard({
           {editable ? (
             <p className="text-[13px] text-muted-foreground mt-1">
               Edit or delete lines below. To add items, open{" "}
-              <Link href="/supply/store?tab=orders" className="underline text-primary">
+              <Link href="/supply/purchase-orders?tab=orders" className="underline text-primary">
                 Store → Purchase orders
               </Link>
               .
@@ -419,7 +419,7 @@ export function PoApprovalPanel({ compact }: { compact?: boolean }) {
           You can view pending POs here. Approvals are handled by users with
           accountant or manager permissions — open{" "}
           <Link href="/supply/purchasing" className="underline font-medium">
-            Purchasing
+            Retirement
           </Link>{" "}
           when assigned.
         </p>

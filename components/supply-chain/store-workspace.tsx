@@ -38,7 +38,6 @@ import {
 } from '@/components/ui/select'
 import { Label } from '@/components/ui/label'
 import { toast } from 'sonner'
-import { playNotificationBeep } from '@/lib/utils/play-notification-beep'
 import { PaginatedListShell } from '@/components/shared/paginated-list-shell'
 import {
   getStockLevel,
@@ -46,10 +45,6 @@ import {
   stockLevelNumberPillClass,
   stockLevelStatusLabel,
 } from '@/lib/supply-chain/stock-level-ui'
-import { DraftBasketSidebar } from '@/components/supply-chain/draft-basket-sidebar'
-import { PoHistoryPanel } from '@/components/supply-chain/po-history-panel'
-import { ActivePurchaseOrderPanel } from '@/components/supply-chain/active-purchase-order-panel'
-import { canEditStorePurchaseOrder, poOriginOf } from '@/lib/supply-chain/po-active'
 import { RESPONSIVE_HIDE_MD, RESPONSIVE_HIDE_LG } from '@/lib/ui/responsive-table'
 import {
   defaultUnitForStoreItem,
@@ -66,7 +61,6 @@ import {
   mergeUnitFactors,
   needsUnitFactor,
 } from '@/lib/supply-chain/unit-factor-storage'
-import { purchaseUnitPriceFromStorePrice } from '@/lib/supply-chain/purchase-unit-pricing'
 import { UnitSelect } from '@/components/supply-chain/unit-select'
 import { UnitConversionField } from '@/components/supply-chain/unit-conversion-field'
 import type { IssueOutCartLine, StoreItem } from '@/lib/supply-chain/types'
@@ -96,14 +90,6 @@ export function StoreWorkspace() {
   const { name, role, userId } = useAuth()
   const {
     storeItems,
-    basket,
-    setBasketLineQty,
-    removeFromBasket,
-    clearBasket,
-    sendBasketForApproval,
-    activePurchaseOrder,
-    purchaseOrders,
-    stats,
     pendingStoreItems,
     issueFromStoreToDepartment,
     issueOutCart,
@@ -117,65 +103,23 @@ export function StoreWorkspace() {
     rejectPendingStoreItem,
   } = useSupplyChain()
   const [dept, setDept] = useState<SupplyDept>('all')
-  const [qtyMap, setQtyMap] = useState<Record<string, string>>({})
   const [issueQtyMap, setIssueQtyMap] = useState<Record<string, string>>({})
   const [issueUnitMap, setIssueUnitMap] = useState<Record<string, string>>({})
-  const [purchaseUnitMap, setPurchaseUnitMap] = useState<Record<string, string>>({})
-  const [purchasePriceMap, setPurchasePriceMap] = useState<Record<string, string>>({})
   const [factorMap, setFactorMap] = useState<Record<string, Record<string, number>>>({})
-  const [raiseSeedSearch, setRaiseSeedSearch] = useState('')
-  const [focusRaiseItemId, setFocusRaiseItemId] = useState<string | null>(null)
   const mounted = useClientMounted()
   const [tab, setTab] = useState('stock')
 
   useEffect(() => {
     if (typeof window === 'undefined') return
     const t = new URLSearchParams(window.location.search).get('tab')
+    if (t === 'purchase' || t === 'orders' || t === 'history') {
+      window.location.replace(`/supply/purchase-orders?tab=${t}`)
+      return
+    }
     if (t) setTab(t)
   }, [])
 
-  useEffect(() => {
-    const onFocus = (e: Event) => {
-      const detail = (e as CustomEvent<{ stockItemId: string; name: string }>).detail
-      if (!detail?.stockItemId) return
-      setRaiseSeedSearch(detail.name)
-      setFocusRaiseItemId(detail.stockItemId)
-      setTab('purchase')
-    }
-    window.addEventListener('frontbill:focus-raise-po-item', onFocus)
-    return () => window.removeEventListener('frontbill:focus-raise-po-item', onFocus)
-  }, [])
 
-  useEffect(() => {
-    if (!focusRaiseItemId || tab !== 'purchase') return
-    const id = focusRaiseItemId
-    const timer = window.setTimeout(() => {
-      const candidates = Array.from(
-        document.querySelectorAll<HTMLElement>(`[data-raise-po-item="${id}"]`),
-      )
-      const row =
-        candidates.find((el) => el.getClientRects().length > 0) ?? candidates[0]
-      if (!row) return
-      row.scrollIntoView({ behavior: 'smooth', block: 'center' })
-      row.classList.add(
-        'ring-2',
-        'ring-sky-500',
-        'ring-offset-2',
-        'ring-offset-background',
-      )
-      window.setTimeout(() => {
-        row.classList.remove(
-          'ring-2',
-          'ring-sky-500',
-          'ring-offset-2',
-          'ring-offset-background',
-        )
-      }, 2200)
-      row.querySelector<HTMLInputElement>('input[data-raise-po-price="1"]')?.focus()
-      setFocusRaiseItemId(null)
-    }, 120)
-    return () => window.clearTimeout(timer)
-  }, [focusRaiseItemId, raiseSeedSearch, tab])
 
   const factorsFor = (item: StoreItem) =>
     factorMap[item.id] ?? mergeUnitFactors(item.id, item.unit, item.unitFactors)
@@ -196,13 +140,8 @@ export function StoreWorkspace() {
   const canSubmitItem = canSubmitStoreItemForApproval(role)
   const canApproveItems = canApproveStoreItems(role)
   const pendingApprovals = (pendingStoreItems ?? []).filter((p) => p.status === 'pending')
-  const purchaseLocked = Boolean(
-    activePurchaseOrder && !canEditStorePurchaseOrder(activePurchaseOrder),
-  )
-  /** Kitchen list at store — keep the draft visible until store sends to accountant. */
-  const kitchenAwaitingStore =
-    activePurchaseOrder?.status === 'pending_store' &&
-    poOriginOf(activePurchaseOrder) === 'kitchen'
+  const actor = { name: name ?? 'Store', role: canonicalRoleKey(role) ?? 'store' }
+  const unitLabel = (unit: string) => formatUnitLabel(unit)
 
   const filtered = useMemo(() => {
     const list =
@@ -211,20 +150,6 @@ export function StoreWorkspace() {
       a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true }),
     )
   }, [storeItems, dept])
-
-  const basketByDept = useMemo(() => {
-    const m = new Map<string, typeof basket>()
-    for (const b of basket) {
-      if (!m.has(b.dept)) m.set(b.dept, [])
-      m.get(b.dept)!.push(b)
-    }
-    return m
-  }, [basket])
-
-  const mainBarIssueRows = useMemo(
-    () => mainBarIssueOutRows(issueOutLog),
-    [issueOutLog],
-  )
 
   const deptCatalogCounts = useMemo(() => {
     const c: Partial<Record<SupplyDept, number>> = {}
@@ -236,23 +161,10 @@ export function StoreWorkspace() {
     return c
   }, [storeItems])
 
-  const actor = { name: name ?? 'Store', role: canonicalRoleKey(role) ?? 'store' }
-
-  const handleSendToAccountant = () => {
-    const res = sendBasketForApproval(actor)
-    if (res && typeof res === 'object' && 'error' in res) {
-      toast.error(String(res.error))
-      return
-    }
-    if (res && 'po' in res) {
-      playNotificationBeep()
-      toast.success(
-        `${res.po.poNumber} sent — kitchen + store draft lines are combined for accountant review`,
-      )
-    }
-  }
-
-  const unitLabel = (unit: string) => formatUnitLabel(unit)
+  const mainBarIssueRows = useMemo(
+    () => mainBarIssueOutRows(issueOutLog),
+    [issueOutLog],
+  )
 
   const commitStockQty = (item: StoreItem, raw: string) => {
     const qty = parseQuantityValue(raw)
@@ -268,241 +180,6 @@ export function StoreWorkspace() {
       return
     }
     toast.success(`Updated ${item.name} to ${qty} ${unitLabel(item.unit)}`)
-  }
-
-  // Keep raise-purchase qty/price fields aligned when committed PO lines change.
-  const poLinesSyncKey =
-    activePurchaseOrder?.lines
-      ?.map((l) => `${l.stockItemId}:${l.quantityOrdered}:${l.unitPrice}`)
-      .join('|') ?? ''
-
-  useEffect(() => {
-    const lines = activePurchaseOrder?.lines
-    if (!lines?.length) return
-    setQtyMap((prev) => {
-      const next = { ...prev }
-      let changed = false
-      for (const l of lines) {
-        const str = String(l.quantityOrdered)
-        if (next[l.stockItemId] !== str) {
-          next[l.stockItemId] = str
-          changed = true
-        }
-      }
-      return changed ? next : prev
-    })
-    setPurchaseUnitMap((prev) => {
-      const next = { ...prev }
-      let changed = false
-      for (const l of lines) {
-        if (l.unit && next[l.stockItemId] !== l.unit) {
-          next[l.stockItemId] = l.unit
-          changed = true
-        }
-      }
-      return changed ? next : prev
-    })
-    setPurchasePriceMap((prev) => {
-      const next = { ...prev }
-      let changed = false
-      for (const l of lines) {
-        if (Number.isFinite(l.unitPrice) && l.unitPrice > 0) {
-          const str = String(l.unitPrice)
-          if (next[l.stockItemId] !== str) {
-            next[l.stockItemId] = str
-            changed = true
-          }
-        }
-      }
-      return changed ? next : prev
-    })
-  }, [activePurchaseOrder?.id, poLinesSyncKey])
-
-  useEffect(() => {
-    setQtyMap((prev) => {
-      const next = { ...prev }
-      let changed = false
-      for (const b of basket) {
-        if (!(b.stockItemId in next)) {
-          next[b.stockItemId] = String(b.qtyToBuy)
-          changed = true
-        }
-      }
-      return changed ? next : prev
-    })
-    setPurchaseUnitMap((prev) => {
-      const next = { ...prev }
-      let changed = false
-      for (const b of basket) {
-        if (b.unit && !(b.stockItemId in next)) {
-          next[b.stockItemId] = b.unit
-          changed = true
-        }
-      }
-      return changed ? next : prev
-    })
-    setPurchasePriceMap((prev) => {
-      const next = { ...prev }
-      let changed = false
-      for (const b of basket) {
-        if (
-          Number.isFinite(b.unitPrice) &&
-          b.unitPrice > 0 &&
-          !(b.stockItemId in next)
-        ) {
-          next[b.stockItemId] = String(b.unitPrice)
-          changed = true
-        }
-      }
-      return changed ? next : prev
-    })
-  }, [basket])
-
-  const commitPurchaseQty = (
-    item: StoreItem,
-    raw: string,
-    unitOverride?: string,
-    priceOverride?: string,
-  ) => {
-    const trimmed = raw.trim()
-    const purchaseUnit = unitOverride ?? purchaseUnitMap[item.id] ?? defaultUnitForStoreItem(item.unit)
-    if (!trimmed) {
-      // Intentional clear (blur / Enter) — remove this line. Unmount blur is ignored
-      // via isConnected on the input. While typing, empty is not committed (see onChange).
-      if (basket.some((b) => b.stockItemId === item.id)) {
-        handleRemoveFromBasket(item.id)
-      } else {
-        setQtyMap((m) => {
-          const next = { ...m }
-          delete next[item.id]
-          return next
-        })
-      }
-      return
-    }
-    const qty = parseQuantityValue(trimmed)
-    if (qty <= 0) {
-      if (basket.some((b) => b.stockItemId === item.id)) {
-        handleRemoveFromBasket(item.id)
-      }
-      return
-    }
-    const storeQty = toStoreQty(item, qty, purchaseUnit)
-    if (storeQty == null) {
-      toast.error(`Set pack size for ${item.name} (${unitLabel(purchaseUnit)} per ${unitLabel(item.unit)})`)
-      return
-    }
-    const factors = factorsFor(item)
-    const defaultPurchasePrice = purchaseUnitPriceFromStorePrice(
-      item.lastPrice,
-      purchaseUnit,
-      item.unit,
-      factors,
-    )
-    const priceRaw =
-      priceOverride !== undefined ? priceOverride : (purchasePriceMap[item.id] ?? '')
-    const typedPrice = Number(priceRaw)
-    const purchaseUnitPrice =
-      Number.isFinite(typedPrice) && typedPrice > 0 ? typedPrice : defaultPurchasePrice
-    const storeUnitPrice = item.lastPrice
-    const err = setBasketLineQty(item, storeQty, storeUnitPrice, actor, {
-      purchaseUnit,
-      purchaseQty: qty,
-      purchaseUnitPrice,
-      storeQty,
-      storeUnitPrice,
-    })
-    if (err) toast.error(err)
-  }
-
-  const handlePurchaseQtyChange = (item: StoreItem, raw: string) => {
-    const cleaned = sanitizeQuantityInput(raw)
-    setQtyMap((m) => ({ ...m, [item.id]: cleaned }))
-    if (!purchaseUnitMap[item.id]) {
-      setPurchaseUnitMap((m) => ({
-        ...m,
-        [item.id]: defaultUnitForStoreItem(item.unit),
-      }))
-    }
-    // Keep the field blank while deleting — do not commit empty until blur/Enter.
-    if (!cleaned.trim()) return
-    if (isCompleteQuantityInput(cleaned)) {
-      commitPurchaseQty(item, cleaned)
-    }
-  }
-
-  const handleClearBasket = () => {
-    void (async () => {
-      const res = await clearBasket(actor)
-      if (res && 'error' in res) {
-        toast.error(res.error)
-        return
-      }
-      setQtyMap({})
-      setPurchaseUnitMap({})
-      setPurchasePriceMap({})
-      toast.success('Draft basket cleared')
-    })()
-  }
-
-  const handleRemoveFromBasket = (stockItemId: string) => {
-    const res = removeFromBasket(stockItemId, actor)
-    if (res && 'error' in res) {
-      toast.error(res.error)
-      return
-    }
-    setQtyMap((m) => {
-      const next = { ...m }
-      delete next[stockItemId]
-      return next
-    })
-    setPurchaseUnitMap((m) => {
-      const next = { ...m }
-      delete next[stockItemId]
-      return next
-    })
-    setPurchasePriceMap((m) => {
-      const next = { ...m }
-      delete next[stockItemId]
-      return next
-    })
-  }
-
-  const handleBasketQtyChange = (stockItemId: string, qty: number) => {
-    const item = storeItems.find((s) => s.id === stockItemId)
-    if (!item) return
-    if (qty <= 0) {
-      handleRemoveFromBasket(stockItemId)
-      return
-    }
-    setQtyMap((m) => ({ ...m, [stockItemId]: String(qty) }))
-    const existing = basket.find((b) => b.stockItemId === stockItemId)
-    const mappedPrice = Number(purchasePriceMap[stockItemId])
-    const storeQty =
-      existing?.storeQtyToBuy && existing.qtyToBuy > 0
-        ? (qty / existing.qtyToBuy) * existing.storeQtyToBuy
-        : qty
-    const purchaseUnitPrice =
-      (existing?.unitPrice && existing.unitPrice > 0
-        ? existing.unitPrice
-        : undefined) ??
-      (mappedPrice > 0 ? mappedPrice : undefined) ??
-      (item.lastPrice > 0 ? item.lastPrice : 0)
-    const storeUnitPrice =
-      (existing?.storeUnitPrice && existing.storeUnitPrice > 0
-        ? existing.storeUnitPrice
-        : undefined) ??
-      (storeQty > 0 && purchaseUnitPrice > 0
-        ? (qty * purchaseUnitPrice) / storeQty
-        : item.lastPrice)
-    const err = setBasketLineQty(item, storeQty, storeUnitPrice, actor, {
-      purchaseUnit: existing?.unit ?? item.unit,
-      purchaseQty: qty,
-      purchaseUnitPrice,
-      storeQty,
-      storeUnitPrice,
-    })
-    if (err) toast.error(err)
   }
 
   const addToIssueCart = (item: StoreItem, rawQty: string, unit?: string) => {
@@ -590,30 +267,12 @@ export function StoreWorkspace() {
     }
   }
 
-  const basketSidebar = (
-    <DraftBasketSidebar
-      basket={basket}
-      basketByDept={basketByDept}
-      total={stats.basketTotal}
-      readOnly={purchaseLocked}
-      hideClear={kitchenAwaitingStore}
-      onClear={handleClearBasket}
-      onRemove={handleRemoveFromBasket}
-      onQtyChange={handleBasketQtyChange}
-      sendLabel="Send to accountant"
-      onSend={
-        !purchaseLocked && basket.length > 0
-          ? handleSendToAccountant
-          : undefined
-      }
-    />
-  )
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold">Central Store</h1>
-        <p className="text-sm text-muted-foreground">Stock levels, dept purchase lists & master PO</p>
+        <p className="text-sm text-muted-foreground">Stock levels and Issue Out to departments</p>
       </div>
 
       {!mounted ? (
@@ -634,9 +293,6 @@ export function StoreWorkspace() {
               </TabsTrigger>
             </>
           )}
-          <TabsTrigger value="purchase">Raise Purchase Request</TabsTrigger>
-          <TabsTrigger value="orders">Purchase Orders</TabsTrigger>
-          <TabsTrigger value="history">History</TabsTrigger>
         </TabsList>
 
         <div className="mt-3 flex flex-wrap gap-x-3 gap-y-3 overflow-visible pt-3">
@@ -1426,365 +1082,6 @@ export function StoreWorkspace() {
           </TabsContent>
         )}
 
-        <TabsContent value="purchase" className="mt-4">
-          {purchaseLocked && (
-            <div className="rounded-lg border border-sky-200 bg-sky-50/50 dark:bg-sky-950/20 p-3 text-sm text-muted-foreground mb-4">
-              A purchase order is already in the approval pipeline. You can add items again after the
-              accountant rejects it or once the current PO is retired.
-            </div>
-          )}
-          <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(400px,440px)]">
-            <div className="rounded-xl border">
-              <div className="border-b px-4 py-2 text-sm text-muted-foreground">
-                Type a quantity to add to the active purchase list. Review and send from Purchase orders.
-              </div>
-              <div className="p-3">
-                <PaginatedListShell
-                  items={filtered}
-                  pageSize={15}
-                  resetKey={dept}
-                  seedSearch={raiseSeedSearch}
-                  searchPlaceholder="Search items to purchase…"
-                  searchKeys={['name']}
-                  emptyMessage="No items match your search."
-                >
-                  {(pageItems) => (
-                    <>
-                      <div className="md:hidden space-y-2">
-                        {pageItems.map((item) => {
-                          const rawQty = qtyMap[item.id] ?? ''
-                          const purchaseUnit =
-                            purchaseUnitMap[item.id] ?? defaultUnitForStoreItem(item.unit)
-                          const qty = parseQuantityValue(rawQty)
-                          const storeQty =
-                            qty > 0 ? toStoreQty(item, qty, purchaseUnit) : null
-                          const factors = factorsFor(item)
-                          const defaultPurchasePrice = purchaseUnitPriceFromStorePrice(
-                            item.lastPrice,
-                            purchaseUnit,
-                            item.unit,
-                            factors,
-                          )
-                          const price = Number(purchasePriceMap[item.id]) > 0
-                            ? Number(purchasePriceMap[item.id])
-                            : defaultPurchasePrice
-                          const level = getStockLevel(item.quantityInStore, item.reorderLevel)
-                          const inBasket = basket.some((b) => b.stockItemId === item.id)
-                          return (
-                            <div
-                              data-raise-po-item={item.id}
-                              key={item.id}
-                              className={cn(
-                                'rounded-lg border p-3 space-y-2 scroll-mt-24 transition-shadow',
-                                inBasket && 'bg-sky-50/50 dark:bg-sky-950/20',
-                              )}
-                            >
-                              <p className="font-medium text-sm">
-                                {!(price > 0) && (
-                                  <AlertTriangle
-                                    className="mr-1 inline h-3.5 w-3.5 -mt-0.5 text-sky-700 dark:text-sky-300"
-                                    aria-label="Unit price is ₦0"
-                                  />
-                                )}
-                                {item.name} ({unitLabel(item.unit)})
-                              </p>
-                              <div className="flex flex-wrap gap-1">
-                                {storeItemDepartments(item).map((d) => (
-                                  <Badge key={d} variant="outline" className="text-[10px]">
-                                    {DEPT_LABELS[d]}
-                                  </Badge>
-                                ))}
-                              </div>
-                              <div className="flex items-center justify-between text-sm">
-                                <span className="text-muted-foreground">In store</span>
-                                <span className={stockLevelNumberPillClass(level)}>
-                                  {item.quantityInStore}
-                                </span>
-                              </div>
-                              <div className="flex items-center justify-between gap-2">
-                                <div className="flex items-center gap-1">
-                                  <Input
-                                    inputMode="decimal"
-                                    disabled={purchaseLocked}
-                                    className="h-8 w-20 text-right"
-                                    value={rawQty}
-                                    onChange={(e) => handlePurchaseQtyChange(item, e.target.value)}
-                                    onBlur={(e) => {
-                                      if (!e.currentTarget.isConnected) return
-                                      commitPurchaseQty(item, e.target.value)
-                                    }}
-                                  />
-                                  <UnitSelect
-                                    storeUnit={item.unit}
-                                    itemName={item.name}
-                                    disabled={purchaseLocked}
-                                    value={purchaseUnit}
-                                    onChange={(u) => {
-                                      setPurchaseUnitMap((m) => ({ ...m, [item.id]: u }))
-                                      if (rawQty.trim()) commitPurchaseQty(item, rawQty, u)
-                                    }}
-                                  />
-                                </div>
-                                <Input
-                                  inputMode="decimal"
-                                  disabled={purchaseLocked}
-                                  data-raise-po-price="1"
-                                  className="h-8 w-24 text-right"
-                                  placeholder={`₦/${unitLabel(purchaseUnit)}`}
-                                  value={purchasePriceMap[item.id] ?? ''}
-                                  onChange={(e) =>
-                                    setPurchasePriceMap((m) => ({
-                                      ...m,
-                                      [item.id]: sanitizeQuantityInput(e.target.value),
-                                    }))
-                                  }
-                                  onBlur={(e) => {
-                                    if (!e.currentTarget.isConnected) return
-                                    if (rawQty.trim()) {
-                                      commitPurchaseQty(
-                                        item,
-                                        rawQty,
-                                        undefined,
-                                        e.target.value,
-                                      )
-                                    }
-                                  }}
-                                />
-                                {!(price > 0) && (
-                                  <span className="text-[10px] font-medium text-sky-800 dark:text-sky-200 whitespace-nowrap">
-                                    Warning: ₦0 unit price
-                                  </span>
-                                )}
-                                <span className="text-sm font-medium tabular-nums">
-                                  {storeQty != null && storeQty > 0
-                                    ? formatNaira(qty * price)
-                                    : '—'}
-                                </span>
-                              </div>
-                              {storeQty != null && storeQty > 0 && purchaseUnit !== item.unit && (
-                                <p className="text-[11px] text-muted-foreground">
-                                  Receives {storeQty} {unitLabel(item.unit)} into store
-                                  {price > 0
-                                    ? ` · ${formatNaira(item.lastPrice)}/${unitLabel(item.unit)} in store`
-                                    : ''}
-                                </p>
-                              )}
-                              {needsUnitFactor(purchaseUnit, item.unit, factorsFor(item)) && (
-                                <UnitConversionField
-                                  compact
-                                  storeItemId={item.id}
-                                  storeUnit={item.unit}
-                                  selectedUnit={purchaseUnit}
-                                  factors={factorsFor(item)}
-                                  onFactorsChange={(next) => {
-                                    setFactorMap((m) => ({ ...m, [item.id]: next }))
-                                    updateStoreItemDirect(item.id, { unitFactors: next }, actor)
-                                    if (rawQty.trim()) commitPurchaseQty(item, rawQty)
-                                  }}
-                                />
-                              )}
-                            </div>
-                          )
-                        })}
-                      </div>
-                      <div className="hidden md:block overflow-x-auto">
-                        <Table className="table-fixed w-full">
-                          <TableHeader>
-                            <TableRow>
-                              <TableHead className="w-[30%] px-2">Item</TableHead>
-                              <TableHead className={`w-[14%] px-2 ${RESPONSIVE_HIDE_MD}`}>Dept</TableHead>
-                              <TableHead className="w-[10%] px-2 text-right">In Store</TableHead>
-                              <TableHead className="w-[22%] px-2 text-right">Qty / unit</TableHead>
-                              <TableHead className={`w-[12%] px-2 text-right ${RESPONSIVE_HIDE_MD}`}>
-                                Unit Price
-                              </TableHead>
-                              <TableHead className="w-[12%] px-2 text-right">Line total</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {pageItems.map((item) => {
-                              const rawQty = qtyMap[item.id] ?? ''
-                              const purchaseUnit =
-                                purchaseUnitMap[item.id] ?? defaultUnitForStoreItem(item.unit)
-                              const qty = parseQuantityValue(rawQty)
-                              const storeQty =
-                                qty > 0 ? toStoreQty(item, qty, purchaseUnit) : null
-                              const defaultPurchasePrice = purchaseUnitPriceFromStorePrice(
-                                item.lastPrice,
-                                purchaseUnit,
-                                item.unit,
-                                factorsFor(item),
-                              )
-                              const price = Number(purchasePriceMap[item.id]) > 0
-                                ? Number(purchasePriceMap[item.id])
-                                : defaultPurchasePrice
-                              const level = getStockLevel(item.quantityInStore, item.reorderLevel)
-                              const inBasket = basket.some((b) => b.stockItemId === item.id)
-                              return (
-                                <TableRow
-                                  data-raise-po-item={item.id}
-                                  key={item.id}
-                                  className={cn(
-                                    'scroll-mt-24 transition-shadow',
-                                    inBasket && 'bg-sky-50/50 dark:bg-sky-950/20',
-                                  )}
-                                >
-                                  <TableCell className="px-2 py-1.5">
-                                    <div className="flex items-start gap-1 min-w-0">
-                                      {!(price > 0) && (
-                                        <AlertTriangle
-                                          className="h-3.5 w-3.5 shrink-0 mt-0.5 text-sky-700 dark:text-sky-300"
-                                          aria-label="Unit price is ₦0"
-                                        />
-                                      )}
-                                      <span className="truncate text-sm">
-                                        {item.name} ({unitLabel(item.unit)})
-                                      </span>
-                                    </div>
-                                  </TableCell>
-                                  <TableCell className={`px-2 py-1.5 ${RESPONSIVE_HIDE_MD}`}>
-                                    <div className="flex flex-wrap gap-0.5">
-                                      {storeItemDepartments(item).map((d) => (
-                                        <Badge key={d} variant="outline" className="text-[10px] px-1">
-                                          {DEPT_LABELS[d]}
-                                        </Badge>
-                                      ))}
-                                    </div>
-                                  </TableCell>
-                                  <TableCell className="px-2 py-1.5 text-right">
-                                    <span className={stockLevelNumberPillClass(level)}>
-                                      {item.quantityInStore}
-                                    </span>
-                                  </TableCell>
-                                  <TableCell className="px-2 py-1.5 text-right">
-                                    <div className="flex items-center justify-end gap-1">
-                                      <Input
-                                        inputMode="decimal"
-                                        disabled={purchaseLocked}
-                                        className="h-8 w-[4.25rem] text-right text-xs px-1.5"
-                                        value={rawQty}
-                                        onChange={(e) =>
-                                          handlePurchaseQtyChange(item, e.target.value)
-                                        }
-                                        onBlur={(e) => {
-                                          if (!e.currentTarget.isConnected) return
-                                          commitPurchaseQty(item, e.target.value)
-                                        }}
-                                        onKeyDown={(e) => {
-                                          if (e.key === 'Enter') {
-                                            e.currentTarget.blur()
-                                            commitPurchaseQty(item, e.currentTarget.value)
-                                          }
-                                        }}
-                                      />
-                                      <UnitSelect
-                                        storeUnit={item.unit}
-                                        itemName={item.name}
-                                        disabled={purchaseLocked}
-                                        value={purchaseUnit}
-                                        onChange={(u) => {
-                                          setPurchaseUnitMap((m) => ({ ...m, [item.id]: u }))
-                                          if (rawQty.trim()) commitPurchaseQty(item, rawQty, u)
-                                        }}
-                                      />
-                                    </div>
-                                    {storeQty != null && storeQty > 0 && purchaseUnit !== item.unit && (
-                                      <p className="mt-1 text-[10px] text-muted-foreground">
-                                        Receives {storeQty} {unitLabel(item.unit)}
-                                      </p>
-                                    )}
-                                    {needsUnitFactor(purchaseUnit, item.unit, factorsFor(item)) && (
-                                      <UnitConversionField
-                                        compact
-                                        storeItemId={item.id}
-                                        storeUnit={item.unit}
-                                        selectedUnit={purchaseUnit}
-                                        factors={factorsFor(item)}
-                                        onFactorsChange={(next) => {
-                                          setFactorMap((m) => ({ ...m, [item.id]: next }))
-                                          updateStoreItemDirect(item.id, { unitFactors: next }, actor)
-                                          if (rawQty.trim()) commitPurchaseQty(item, rawQty)
-                                        }}
-                                      />
-                                    )}
-                                  </TableCell>
-                                  <TableCell className={`px-2 py-1.5 text-right ${RESPONSIVE_HIDE_MD}`}>
-                                    <div className="flex flex-wrap items-center justify-end gap-x-1 gap-y-0.5">
-                                      <Input
-                                        inputMode="decimal"
-                                        disabled={purchaseLocked}
-                                        data-raise-po-price="1"
-                                        className="h-8 w-[5.5rem] text-right text-xs px-1.5"
-                                        placeholder={formatNaira(defaultPurchasePrice)}
-                                        value={purchasePriceMap[item.id] ?? ''}
-                                        onChange={(e) =>
-                                          setPurchasePriceMap((m) => ({
-                                            ...m,
-                                            [item.id]: sanitizeQuantityInput(e.target.value),
-                                          }))
-                                        }
-                                        onBlur={(e) => {
-                                          if (!e.currentTarget.isConnected) return
-                                          if (rawQty.trim()) {
-                                            commitPurchaseQty(
-                                              item,
-                                              rawQty,
-                                              undefined,
-                                              e.target.value,
-                                            )
-                                          }
-                                        }}
-                                      />
-                                      {!(price > 0) ? (
-                                        <span className="text-[10px] font-medium text-sky-800 dark:text-sky-200 whitespace-nowrap">
-                                          Warning: ₦0 unit price
-                                        </span>
-                                      ) : (
-                                        <span className="text-[10px] text-muted-foreground whitespace-nowrap">
-                                          {`per ${unitLabel(purchaseUnit)}${
-                                            storeQty != null && storeQty > 0
-                                              ? ` · ${formatNaira(item.lastPrice)}/${unitLabel(item.unit)} in store`
-                                              : ''
-                                          }`}
-                                        </span>
-                                      )}
-                                    </div>
-                                  </TableCell>
-                                  <TableCell className="px-2 py-1.5 text-right tabular-nums text-sm">
-                                    {storeQty != null && storeQty > 0
-                                      ? formatNaira(qty * price)
-                                      : '—'}
-                                  </TableCell>
-                                </TableRow>
-                              )
-                            })}
-                          </TableBody>
-                        </Table>
-                      </div>
-                    </>
-                  )}
-                </PaginatedListShell>
-              </div>
-            </div>
-            {basketSidebar}
-          </div>
-        </TabsContent>
-
-        <TabsContent value="orders" className="mt-4 space-y-4">
-          <ActivePurchaseOrderPanel actor={actor} storeItems={storeItems} />
-        </TabsContent>
-
-        <TabsContent value="history" className="mt-4 space-y-4">
-          <p className="text-sm text-muted-foreground">
-            Purchase orders after accountant and manager approval (read-only).
-            Lines and amounts stay as the manager approved — market retirement does not change this view.
-          </p>
-          <PoHistoryPanel
-            purchaseOrders={purchaseOrders}
-            forceOrderLines
-            emptyMessage="No purchase orders in history yet. After accountant and manager approve, the exact approved PO appears here (read-only)."
-          />
-        </TabsContent>
       </Tabs>
       )}
     </div>

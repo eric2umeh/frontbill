@@ -52,7 +52,7 @@ export function useSupplyPoPendingCounts(
 }
 
 export function supplyPoHrefForPendingCounts(counts: SupplyPoPendingCounts): string {
-  if (counts.retirements > 0) return '/supply/purchase-orders?tab=retirement'
+  if (counts.retirements > 0) return '/supply/purchasing?tab=active'
   if (counts.purchaseOrders > 0) return '/supply/purchase-orders?tab=approvals'
   return '/supply/purchase-orders'
 }

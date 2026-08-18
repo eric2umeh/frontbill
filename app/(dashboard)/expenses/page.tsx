@@ -55,7 +55,7 @@ function ExpensesPageContent() {
       return
     }
     if (tabParam === 'retirement') {
-      router.replace('/supply/purchase-orders?tab=retirement')
+      router.replace('/supply/purchasing?tab=active')
     }
   }, [tabParam, router])
 

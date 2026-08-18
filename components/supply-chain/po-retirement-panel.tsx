@@ -102,7 +102,12 @@ function RetirementReviewCard({
   )
 }
 
-export function PoRetirementPanel() {
+export function PoRetirementPanel({
+  showAcceptedSection = true,
+}: {
+  /** When false, only the awaiting-review queue is shown (e.g. embedded in Retirement → Active). */
+  showAcceptedSection?: boolean
+}) {
   const { name, role } = useAuth()
   const { purchaseOrders, accountantRetirementDecision } = useSupplyChain()
   const actor = {
@@ -206,6 +211,7 @@ export function PoRetirementPanel() {
         )}
       </section>
 
+      {showAcceptedSection ? (
       <section className="space-y-3">
         <div>
           <h2 className="text-sm font-semibold">Accepted retirements</h2>
@@ -220,6 +226,7 @@ export function PoRetirementPanel() {
           searchPlaceholder="Search retired PO number, date…"
         />
       </section>
+      ) : null}
     </div>
   )
 }
