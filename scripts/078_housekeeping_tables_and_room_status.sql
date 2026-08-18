@@ -106,6 +106,16 @@ ALTER TABLE public.rooms
 CREATE INDEX IF NOT EXISTS idx_rooms_hk_status ON public.rooms(organization_id, housekeeping_status)
   WHERE housekeeping_status IS NOT NULL;
 
+ALTER TABLE public.rooms
+  ADD COLUMN IF NOT EXISTS housekeeping_status_updated_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS housekeeping_status_updated_by UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS housekeeping_status_updated_by_name TEXT;
+
+COMMENT ON COLUMN public.rooms.housekeeping_status_updated_at IS
+  'When housekeeping floor status was last set.';
+COMMENT ON COLUMN public.rooms.housekeeping_status_updated_by_name IS
+  'Display name of housekeeper who last set floor status.';
+
 -- 3. RLS — org-scoped read/write for hotel staff
 ALTER TABLE public.housekeeping_tasks ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.housekeeping_reports ENABLE ROW LEVEL SECURITY;

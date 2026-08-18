@@ -11,6 +11,7 @@ import {
   getHousekeepingStatusDef,
   housekeepingStatusLabel,
 } from '@/lib/rooms/housekeeping-status'
+import { formatHousekeepingStatusUpdated } from '@/lib/rooms/format-housekeeping-status-updated'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -29,6 +30,7 @@ import {
 import { RoomInventoryStatsStrip } from '@/components/shared/room-inventory-stats-strip'
 import { OutletStoreIssuesPanel } from '@/components/outlets/outlet-store-issues-panel'
 import { RoomStatusRemarksPanel } from '@/components/rooms/room-status-remarks-panel'
+import { HousekeepingStatusAttribution } from '@/components/rooms/housekeeping-status-attribution'
 import { reconcileRoomStatusesClient } from '@/lib/rooms/reconcile-room-status-client'
 import {
   fetchRoomStatusRemarksClient,
@@ -67,6 +69,8 @@ interface Room {
   room_number: string
   status: string
   housekeeping_status: string | null
+  housekeeping_status_updated_at: string | null
+  housekeeping_status_updated_by_name: string | null
   room_type: string
 }
 
@@ -155,7 +159,7 @@ export default function HousekeepingPage() {
         .order('created_at', { ascending: false }),
       supabase
         .from('rooms')
-        .select('id, room_number, status, housekeeping_status, room_type')
+        .select('id, room_number, status, housekeeping_status, housekeeping_status_updated_at, housekeeping_status_updated_by_name, room_type')
         .eq('organization_id', organizationId)
         .order('room_number'),
       supabase
@@ -331,11 +335,28 @@ export default function HousekeepingPage() {
       })
       if (!result.ok) throw new Error(result.message)
 
-      toast.success(remark ? 'Room status and remark saved' : 'Room status updated')
+      toast.success(
+        remark
+          ? `Room status saved · ${formatHousekeepingStatusUpdated({
+              updatedAt: result.housekeeping_status_updated_at,
+              updatedByName: result.housekeeping_status_updated_by_name ?? currentUserName,
+            })}`
+          : formatHousekeepingStatusUpdated({
+              updatedAt: result.housekeeping_status_updated_at,
+              updatedByName: result.housekeeping_status_updated_by_name ?? currentUserName,
+            }) ?? 'Room status updated',
+      )
       setRooms((prev) =>
         prev.map((r) =>
           r.id === room.id
-            ? { ...r, housekeeping_status: result.housekeeping_status }
+            ? {
+                ...r,
+                housekeeping_status: result.housekeeping_status,
+                housekeeping_status_updated_at:
+                  result.housekeeping_status_updated_at ?? new Date().toISOString(),
+                housekeeping_status_updated_by_name:
+                  result.housekeeping_status_updated_by_name ?? currentUserName ?? null,
+              }
             : r,
         ),
       )
@@ -582,6 +603,12 @@ export default function HousekeepingPage() {
                         <span>{displayLabel}</span>
                       </div>
                     )}
+                    {room.housekeeping_status ? (
+                      <HousekeepingStatusAttribution
+                        updatedAt={room.housekeeping_status_updated_at}
+                        updatedByName={room.housekeeping_status_updated_by_name}
+                      />
+                    ) : null}
                   </CardContent>
                 </Card>
               )
@@ -728,6 +755,13 @@ export default function HousekeepingPage() {
           </DialogHeader>
           {statusChangeRoom && (
             <div className="space-y-4">
+              {statusChangeRoom.housekeeping_status ? (
+                <HousekeepingStatusAttribution
+                  updatedAt={statusChangeRoom.housekeeping_status_updated_at}
+                  updatedByName={statusChangeRoom.housekeeping_status_updated_by_name}
+                  className="text-xs"
+                />
+              ) : null}
               <RoomStatusRemarksPanel remarks={statusRemarks} loading={statusRemarksLoading} />
               <div className="grid grid-cols-2 gap-2">
                 {HOUSEKEEPING_STATUS_OPTIONS.map((opt) => (

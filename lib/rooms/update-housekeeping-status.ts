@@ -60,7 +60,15 @@ export async function applyHousekeepingStatusUpdate(
     remark?: string
     scheduledDate?: string
   },
-): Promise<{ ok: true; status: HousekeepingStatusKey } | { ok: false; message: string }> {
+): Promise<
+  | {
+      ok: true
+      status: HousekeepingStatusKey
+      updatedAt: string
+      updatedByName: string
+    }
+  | { ok: false; message: string }
+> {
   const now = new Date().toISOString()
   const scheduledDate = params.scheduledDate || now.slice(0, 10)
   const def = getHousekeepingStatusDef(params.newStatus)
@@ -85,6 +93,9 @@ export async function applyHousekeepingStatusUpdate(
   const roomNumber = String(room.room_number || params.roomNumber)
   const patch: Record<string, unknown> = {
     housekeeping_status: params.newStatus,
+    housekeeping_status_updated_at: now,
+    housekeeping_status_updated_by: params.userId,
+    housekeeping_status_updated_by_name: params.userName,
     updated_by: params.userId,
     updated_at: now,
   }
@@ -123,7 +134,12 @@ export async function applyHousekeepingStatusUpdate(
     scheduledDate,
   })
 
-  return { ok: true, status: params.newStatus }
+  return {
+    ok: true,
+    status: params.newStatus,
+    updatedAt: now,
+    updatedByName: params.userName,
+  }
 }
 
 export function parseHousekeepingStatusInput(raw: string): HousekeepingStatusKey | null {

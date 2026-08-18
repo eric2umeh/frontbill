@@ -43,7 +43,12 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: result.message }, { status: 400 })
     }
 
-    return NextResponse.json({ ok: true, housekeeping_status: result.status })
+    return NextResponse.json({
+      ok: true,
+      housekeeping_status: result.status,
+      housekeeping_status_updated_at: result.updatedAt,
+      housekeeping_status_updated_by_name: result.updatedByName,
+    })
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Could not update housekeeping status'
     console.error('[rooms/housekeeping-status]', error)

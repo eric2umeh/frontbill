@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { HousekeepingStatusBadge } from '@/components/rooms/housekeeping-status-badge'
+import { HousekeepingStatusAttribution } from '@/components/rooms/housekeeping-status-attribution'
 import { housekeepingStatusLabel } from '@/lib/rooms/housekeeping-status'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
@@ -39,6 +40,8 @@ interface Room {
   price_per_night: number
   status: string
   housekeeping_status?: string | null
+  housekeeping_status_updated_at?: string | null
+  housekeeping_status_updated_by_name?: string | null
   amenities: string[]
 }
 
@@ -541,6 +544,12 @@ export default function RoomDetailPage() {
                       ? housekeepingStatusLabel(room.housekeeping_status)
                       : '—'}
                   </p>
+                  {room.housekeeping_status ? (
+                    <HousekeepingStatusAttribution
+                      updatedAt={room.housekeeping_status_updated_at}
+                      updatedByName={room.housekeeping_status_updated_by_name}
+                    />
+                  ) : null}
                 </div>
               </div>
 
