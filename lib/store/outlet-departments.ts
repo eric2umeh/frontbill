@@ -24,13 +24,35 @@ export const CENTRAL_STORE_VIEW = '__central_store__'
 export type StoreOutletContext = typeof CENTRAL_STORE_VIEW | string
 
 export function isMainBarIssueDestination(destination: string): boolean {
-  const d = destination.trim().toLowerCase()
+  const d = destNorm(destination)
   return (
     d === 'main bar' ||
-    d === 'main_bar' ||
     d === 'bar' ||
     d === 'beverages / mini-bar'
   )
+}
+
+function destNorm(destination: string): string {
+  return destination.trim().toLowerCase().replace(/[_-]+/g, ' ').replace(/\s+/g, ' ')
+}
+
+export type StoreIssueDestinationKey = 'main_bar' | 'housekeeping' | 'laundry' | 'maintenance'
+
+export function storeIssueDestinationLabel(key: StoreIssueDestinationKey): string {
+  if (key === 'main_bar') return 'Main Bar'
+  if (key === 'housekeeping') return 'Housekeeping'
+  if (key === 'laundry') return 'Laundry'
+  return 'Maintenance'
+}
+
+export function isStoreIssueDestination(
+  destination: string,
+  key: StoreIssueDestinationKey,
+): boolean {
+  if (key === 'main_bar') return isMainBarIssueDestination(destination)
+  const d = destNorm(destination)
+  const label = storeIssueDestinationLabel(key).toLowerCase()
+  return d === label || d.startsWith(`${label} `)
 }
 
 /** Issue / destination dropdown: focus outlets first, then any other departments (deduped). */
