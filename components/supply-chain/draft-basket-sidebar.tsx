@@ -35,16 +35,16 @@ export function DraftBasketSidebar({
   const zeroPriceItems = basket.filter((b) => !(Number(b.unitPrice) > 0))
 
   return (
-    <div className="rounded-xl border bg-card p-3 h-fit lg:sticky lg:top-4 shadow-md flex flex-col gap-2.5 min-w-0 w-full">
-      <div className="flex justify-between items-start gap-2 min-w-0">
+    <div className="rounded-xl border bg-card p-3 shadow-md flex flex-col gap-2 min-w-0 w-full max-h-[min(85vh,780px)] overflow-hidden lg:sticky lg:top-4">
+      <div className="shrink-0 flex justify-between items-start gap-2 min-w-0">
         <div className="min-w-0">
           <h3 className="text-[15px] font-semibold leading-tight">Draft basket</h3>
           <p className="text-[13px] text-muted-foreground leading-snug">
             {readOnly
               ? 'Locked in this status'
-              : basket.length > 10
-                ? `${basket.length} items — search or use Prev/Next below to see all`
-                : `${basket.length} item${basket.length === 1 ? '' : 's'} · dept totals below`}
+              : basket.length > 8
+                ? `${basket.length} items · 8 per page — use search or Previous/Next`
+                : `${basket.length} item${basket.length === 1 ? '' : 's'}`}
           </p>
         </div>
         {!readOnly && !hideClear && basket.length > 0 && (
@@ -61,7 +61,7 @@ export function DraftBasketSidebar({
       </div>
 
       {zeroPriceItems.length > 0 && (
-        <div className="flex gap-2 rounded-md border border-sky-300 bg-sky-50 px-2.5 py-2 text-[12px] text-sky-950 dark:border-sky-700 dark:bg-sky-950/40 dark:text-sky-100">
+        <div className="shrink-0 flex gap-2 rounded-md border border-sky-300 bg-sky-50 px-2.5 py-2 text-[12px] text-sky-950 dark:border-sky-700 dark:bg-sky-950/40 dark:text-sky-100 max-h-24 overflow-y-auto">
           <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
           <div className="leading-snug min-w-0 space-y-1">
             <p>
@@ -96,18 +96,18 @@ export function DraftBasketSidebar({
       )}
 
       {!basket.length ? (
-        <p className="text-[13px] text-muted-foreground py-6 text-center leading-snug">
+        <p className="text-[13px] text-muted-foreground py-6 text-center leading-snug shrink-0">
           No items yet — enter quantities on Raise purchase request
         </p>
       ) : (
-        <div className="flex flex-col min-h-0 max-h-[min(70vh,720px)]">
+        <div className="flex-1 min-h-0 flex flex-col overflow-hidden border-t pt-2">
           <PoReviewLinesPanel
             kind="basket"
             lines={basket}
             editable={!readOnly}
             onQtyChange={readOnly ? undefined : onQtyChange}
             onDelete={readOnly ? undefined : onRemove}
-            pageSize={10}
+            pageSize={8}
             compact
             sidebarVariant
             title="Draft purchase list"
@@ -115,7 +115,7 @@ export function DraftBasketSidebar({
         </div>
       )}
 
-      <div className="border-t pt-2 space-y-1">
+      <div className="shrink-0 border-t pt-2 space-y-1 bg-card">
         <div className="flex justify-between items-center gap-2 min-w-0 text-[13px] text-muted-foreground">
           <span>Items</span>
           <span className="tabular-nums font-medium text-foreground">
@@ -132,7 +132,7 @@ export function DraftBasketSidebar({
 
       {onSend && !readOnly && (
         <Button
-          className="w-full h-9 text-[13px]"
+          className="w-full h-9 text-[13px] shrink-0"
           disabled={!basket.length}
           onClick={onSend}
         >

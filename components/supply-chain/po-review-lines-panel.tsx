@@ -140,34 +140,47 @@ function DeptSectionItems({
         }))
 
   return (
-    <div className={cn('space-y-2', compact && 'space-y-1.5')}>
-      <PoLinesTable rows={rows} compact={compact} showDept={false} />
-      {totalPages > 1 && (
-        prominentPagination ? (
-          <div className="rounded-lg border bg-muted/50 p-2.5 space-y-2 shrink-0">
+    <div
+      className={cn(
+        'flex flex-col min-h-0',
+        prominentPagination && 'flex-1 overflow-hidden',
+        !prominentPagination && (compact ? 'space-y-1.5' : 'space-y-2'),
+      )}
+    >
+      <div
+        className={cn(
+          prominentPagination && 'flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain',
+        )}
+      >
+        <PoLinesTable rows={rows} compact={compact} showDept={false} />
+      </div>
+      {totalPages > 1 &&
+        (prominentPagination ? (
+          <div className="rounded-lg border bg-muted/50 p-2.5 space-y-2 shrink-0 mt-2">
             <p className="text-xs font-medium text-center text-foreground leading-snug">
-              Items {start + 1}–{Math.min(start + pageSize, items.length)} of {items.length}
+              Page {safePage} of {totalPages} · items {start + 1}–
+              {Math.min(start + pageSize, items.length)} of {items.length}
             </p>
             <div className="flex items-center justify-center gap-2">
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
-                className="h-9 min-w-[4.5rem] gap-1 text-xs font-medium"
+                className="h-9 min-w-[5rem] gap-1 text-xs font-medium"
                 disabled={safePage <= 1}
                 onClick={() => setPage((p) => Math.max(1, p - 1))}
               >
                 <ChevronLeft className="h-4 w-4" />
-                Prev
+                Previous
               </Button>
-              <span className="text-sm font-semibold tabular-nums min-w-[3rem] text-center">
+              <span className="text-sm font-semibold tabular-nums min-w-[2.5rem] text-center">
                 {safePage}/{totalPages}
               </span>
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
-                className="h-9 min-w-[4.5rem] gap-1 text-xs font-medium"
+                className="h-9 min-w-[5rem] gap-1 text-xs font-medium"
                 disabled={safePage >= totalPages}
                 onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
               >
@@ -179,7 +192,7 @@ function DeptSectionItems({
         ) : (
           <div
             className={cn(
-              'flex items-center justify-between gap-1 text-muted-foreground',
+              'flex items-center justify-between gap-1 text-muted-foreground shrink-0',
               compact ? 'text-xs' : 'text-sm',
             )}
           >
@@ -212,8 +225,7 @@ function DeptSectionItems({
               </Button>
             </div>
           </div>
-        )
-      )}
+        ))}
     </div>
   )
 }
@@ -327,7 +339,12 @@ export function PoReviewLinesPanel(props: Props) {
   const externalLocked = Boolean(deptFilter && deptFilter !== 'all')
 
   return (
-    <div className={cn(compact ? 'space-y-2.5' : 'space-y-4', sidebarVariant && 'flex flex-col min-h-0')}>
+    <div
+      className={cn(
+        compact ? 'space-y-2.5' : 'space-y-4',
+        sidebarVariant && 'flex flex-col flex-1 min-h-0 overflow-hidden space-y-2',
+      )}
+    >
       {!compact && !sidebarVariant && (
         <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
           {heading}
@@ -344,14 +361,13 @@ export function PoReviewLinesPanel(props: Props) {
                 placeholder="Find item in basket…"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="h-10 pl-9 text-sm bg-background border-2"
+                className="h-9 pl-9 text-sm bg-background"
               />
             </div>
           </div>
           {deptSummaries.length > 0 ? (
-            <div className="rounded-md border bg-muted/30 px-2 py-1.5">
-              <p className="text-[10px] font-medium text-muted-foreground mb-1">By department</p>
-              <div className="flex flex-wrap gap-1 max-h-20 overflow-y-auto">
+            <div className="rounded-md border bg-muted/30 px-2 py-1 max-h-14 overflow-y-auto">
+              <div className="flex flex-wrap gap-1">
                 {deptSummaries.map((row) => {
                   const style = deptHeaderStyle(row.dept)
                   return (
@@ -360,7 +376,7 @@ export function PoReviewLinesPanel(props: Props) {
                       variant="outline"
                       className={cn('text-[10px] tabular-nums', style.badge)}
                     >
-                      {DEPT_LABELS[row.dept]} · {row.count} · {formatNaira(row.total)}
+                      {DEPT_LABELS[row.dept]} · {row.count}
                     </Badge>
                   )
                 })}
@@ -528,7 +544,7 @@ export function PoReviewLinesPanel(props: Props) {
           No items match this search or department filter.
         </p>
       ) : sidebarVariant ? (
-        <div className="flex flex-col gap-2 min-h-0">
+        <div className="flex flex-col flex-1 min-h-0 overflow-hidden gap-2">
           <DeptSectionItems
             kind={kind}
             items={filteredFlat}
