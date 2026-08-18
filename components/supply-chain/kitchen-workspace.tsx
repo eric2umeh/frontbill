@@ -79,18 +79,6 @@ function downloadCsv(filename: string, rows: unknown[][]) {
   URL.revokeObjectURL(url)
 }
 
-const RECIPE_DESCRIPTION_PREVIEW_LINES = 3
-
-function recipeDescriptionPreview(text: string, maxLines = RECIPE_DESCRIPTION_PREVIEW_LINES): string {
-  const lines = text
-    .trim()
-    .split(/\n+/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-  if (lines.length <= maxLines) return lines.join('\n')
-  return `${lines.slice(0, maxLines).join('\n')}…`
-}
-
 function downloadKitchenBatchCsv(recipes: Recipe[]) {
   const header = [
     'batch / menu name',
@@ -106,6 +94,7 @@ function downloadKitchenBatchCsv(recipes: Recipe[]) {
     'ingredient source',
     'optional',
     'line cost',
+    'recipe description',
   ]
   const rows: unknown[][] = [header]
 
@@ -126,6 +115,7 @@ function downloadKitchenBatchCsv(recipes: Recipe[]) {
         ingredient ? ingredient.source ?? 'raw' : '',
         ingredient?.optional ? 'yes' : '',
         ingredient ? ingredient.cost : '',
+        index === 0 ? recipe.description?.trim() || '' : '',
       ])
     })
   }
@@ -656,7 +646,7 @@ export function KitchenWorkspace() {
             items={recipes}
             pageSize={6}
             searchPlaceholder="Search batches…"
-            searchKeys={['name', 'category']}
+            searchKeys={['name', 'category', 'description']}
             filters={[
               ...(recipeCategoryFilterOptions.length
                 ? [
@@ -740,8 +730,8 @@ export function KitchenWorkspace() {
                     <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
                       Recipe description
                     </p>
-                    <p className="mt-1 whitespace-pre-wrap text-sm leading-snug text-muted-foreground">
-                      {recipeDescriptionPreview(r.description)}
+                    <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground">
+                      {r.description.trim()}
                     </p>
                   </div>
                 ) : null}
