@@ -18,9 +18,10 @@ import { toast } from 'sonner'
 import { format, parseISO } from 'date-fns'
 import {
   Sparkles, Search, Filter, CheckCircle2, Clock, AlertCircle,
-  User, Bed, CalendarDays, ClipboardList, RefreshCw, ChevronDown,
+  User, Bed, CalendarDays, ClipboardList, RefreshCw, ChevronDown, Package,
 } from 'lucide-react'
 import { RoomInventoryStatsStrip } from '@/components/shared/room-inventory-stats-strip'
+import { OutletStoreIssuesPanel } from '@/components/outlets/outlet-store-issues-panel'
 import { RoomStatusRemarksPanel } from '@/components/rooms/room-status-remarks-panel'
 import { reconcileRoomStatusesClient } from '@/lib/rooms/reconcile-room-status-client'
 import {
@@ -437,6 +438,10 @@ export default function HousekeepingPage() {
         <TabsList>
           <TabsTrigger value="tasks">Task Board</TabsTrigger>
           <TabsTrigger value="rooms">Room Status</TabsTrigger>
+          <TabsTrigger value="from_store" className="gap-1.5">
+            <Package className="h-3.5 w-3.5" />
+            Items from Store
+          </TabsTrigger>
         </TabsList>
 
         {/* Task Board */}
@@ -597,6 +602,10 @@ export default function HousekeepingPage() {
               )
             })}
           </div>
+        </TabsContent>
+
+        <TabsContent value="from_store" className="space-y-4">
+          <OutletStoreIssuesPanel destination="housekeeping" />
         </TabsContent>
       </Tabs>
 
