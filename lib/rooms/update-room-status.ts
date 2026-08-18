@@ -38,7 +38,7 @@ export function validateRoomStatusUpdate(params: {
     if (status === 'out_of_order' && !canSetOutOfOrderFromHousekeeping(params.role)) {
       return {
         ok: false,
-        message: 'Only Administrator, Superadmin, or Housekeeping can mark a room out of order.',
+        message: 'Only Housekeeping staff can mark a room out of order.',
       }
     }
     return { ok: true }
@@ -118,7 +118,14 @@ export async function applyRoomStatusUpdate(
     })
 
     if (hkError) {
-      return { ok: false, message: hkError.message }
+      const msg = hkError.message.toLowerCase()
+      const missing =
+        msg.includes('schema cache') ||
+        msg.includes('does not exist') ||
+        msg.includes('could not find the table')
+      if (!missing) {
+        console.warn('[rooms/update-status] housekeeping_tasks log failed:', hkError.message)
+      }
     }
   } else if (remark) {
     const { error: mtError } = await admin.from('maintenance_tasks').insert({
