@@ -4,7 +4,13 @@ import { useState, useEffect, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/lib/auth-context'
 import { LoadingSpinner } from '@/components/loading-screen'
-import { hasPermission, canonicalRoleKey } from '@/lib/permissions'
+import { hasPermission } from '@/lib/permissions'
+import { canUpdateHousekeepingRoomStatus } from '@/lib/rooms/housekeeping-status-auth'
+import {
+  HOUSEKEEPING_STATUS_OPTIONS,
+  getHousekeepingStatusDef,
+  housekeepingStatusLabel,
+} from '@/lib/rooms/housekeeping-status'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -26,7 +32,7 @@ import { RoomStatusRemarksPanel } from '@/components/rooms/room-status-remarks-p
 import { reconcileRoomStatusesClient } from '@/lib/rooms/reconcile-room-status-client'
 import {
   fetchRoomStatusRemarksClient,
-  patchRoomStatus,
+  patchHousekeepingStatus,
 } from '@/lib/rooms/update-room-status-client'
 import type { RoomStatusRemark } from '@/lib/rooms/room-status-remarks'
 
@@ -60,7 +66,13 @@ interface Room {
   id: string
   room_number: string
   status: string
+  housekeeping_status: string | null
   room_type: string
+}
+
+function isMissingTableError(message: string): boolean {
+  const m = message.toLowerCase()
+  return m.includes('schema cache') || m.includes('does not exist') || m.includes('could not find the table')
 }
 
 const TASK_TYPES = [
@@ -82,39 +94,12 @@ const PRIORITY_CONFIG: Record<TaskPriority, { label: string; color: string }> = 
   urgent: { label: 'Urgent', color: 'bg-red-100 text-red-700' },
 }
 
-const ROOM_STATUS_DISPLAY: Record<string, { label: string; color: string }> = {
-  available: { label: 'Available', color: 'bg-green-100 text-green-800' },
-  occupied: { label: 'Occupied', color: 'bg-blue-100 text-blue-800' },
-  cleaning: { label: 'Cleaning', color: 'bg-yellow-100 text-yellow-800' },
-  maintenance: { label: 'Maintenance', color: 'bg-red-100 text-red-800' },
-  reserved: { label: 'Reserved', color: 'bg-purple-100 text-purple-800' },
-  out_of_order: { label: 'Out of Order', color: 'bg-gray-200 text-gray-700' },
-}
-
-/** Statuses housekeeping may set from this screen (not Occupied / Reserved / Maintenance — those come from bookings or the maintenance team). */
-const HK_STATUS_PICKER_BASE: { value: string; label: string; color: string }[] = [
-  { value: 'available', label: 'Available', color: 'bg-green-100 text-green-800' },
-  { value: 'cleaning', label: 'Cleaning', color: 'bg-yellow-100 text-yellow-800' },
-]
-
-const HK_OUT_OF_ORDER_OPTION = {
-  value: 'out_of_order',
-  label: 'Out of Order',
-  color: 'bg-gray-200 text-gray-700',
-} as const
-
 export default function HousekeepingPage() {
   const { role, userId, organizationId, name: currentUserName } = useAuth()
   const canCreate = hasPermission(role, 'housekeeping:create')
   const canAssign = hasPermission(role, 'housekeeping:assign')
   const canReport = hasPermission(role, 'housekeeping:report')
-  const canUpdateRoomStatus = hasPermission(role, 'rooms:update_status')
-  const rk = canonicalRoleKey(role)
-  const canSetOutOfOrder = rk === 'superadmin' || rk === 'admin' || rk === 'housekeeping'
-
-  const housekeepingStatusPickerOptions = useMemo(() => {
-    return canSetOutOfOrder ? [...HK_STATUS_PICKER_BASE, HK_OUT_OF_ORDER_OPTION] : [...HK_STATUS_PICKER_BASE]
-  }, [canSetOutOfOrder])
+  const canEditHousekeepingStatus = canUpdateHousekeepingRoomStatus(role)
 
   const [tasks, setTasks] = useState<HousekeepingTask[]>([])
   const [rooms, setRooms] = useState<Room[]>([])
@@ -170,7 +155,7 @@ export default function HousekeepingPage() {
         .order('created_at', { ascending: false }),
       supabase
         .from('rooms')
-        .select('id, room_number, status, room_type')
+        .select('id, room_number, status, housekeeping_status, room_type')
         .eq('organization_id', organizationId)
         .order('room_number'),
       supabase
@@ -180,7 +165,16 @@ export default function HousekeepingPage() {
         .in('role', ['housekeeper', 'admin', 'manager']),
     ])
 
-    setTasks(tasksRes.data || [])
+    if (tasksRes.error) {
+      if (!isMissingTableError(tasksRes.error.message)) {
+        console.warn('[housekeeping] tasks load:', tasksRes.error.message)
+      }
+    }
+    if (roomsRes.error) {
+      toast.error(roomsRes.error.message)
+    }
+
+    setTasks(tasksRes.error ? [] : tasksRes.data || [])
     setRooms(roomsRes.data || [])
     setStaff(staffRes.data || [])
     setLoading(false)
@@ -230,7 +224,14 @@ export default function HousekeepingPage() {
         scheduled_date: taskForm.scheduled_date,
         status: 'pending',
       }])
-      if (error) throw error
+      if (error) {
+        if (isMissingTableError(error.message)) {
+          throw new Error(
+            'Housekeeping tasks table is not set up. Ask your administrator to run scripts/078_housekeeping_tables_and_room_status.sql in Supabase.',
+          )
+        }
+        throw error
+      }
       toast.success('Task created')
       setNewTaskOpen(false)
       setTaskForm({ room_id: '', task_type: 'Full Clean', priority: 'normal', notes: '', assigned_to: '', scheduled_date: format(new Date(), 'yyyy-MM-dd') })
@@ -240,31 +241,6 @@ export default function HousekeepingPage() {
     } finally {
       setSaving(false)
     }
-  }
-
-  const saveHousekeepingRemark = async (params: {
-    roomId: string
-    roomNumber: string
-    noteText: string
-    taskType: string
-    taskStatus?: TaskStatus
-  }) => {
-    if (!organizationId) throw new Error('Organization not loaded')
-    const supabase = createClient()
-    const { error } = await supabase.from('housekeeping_tasks').insert([{
-      organization_id: organizationId,
-      room_id: params.roomId,
-      room_number: params.roomNumber,
-      task_type: params.taskType,
-      priority: 'normal',
-      notes: params.noteText,
-      created_by: userId,
-      created_by_name: currentUserName,
-      scheduled_date: filterDate,
-      status: params.taskStatus ?? 'done',
-      completed_at: params.taskStatus === 'done' || !params.taskStatus ? new Date().toISOString() : null,
-    }])
-    if (error) throw error
   }
 
   const handleConfirmTaskStatus = async () => {
@@ -283,7 +259,14 @@ export default function HousekeepingPage() {
         patch.notes = task.notes ? `${task.notes}\n${prefix} ${remark}` : `${prefix} ${remark}`
       }
       const { error } = await supabase.from('housekeeping_tasks').update(patch).eq('id', task.id)
-      if (error) throw error
+      if (error) {
+        if (isMissingTableError(error.message)) {
+          throw new Error(
+            'Housekeeping tasks table is not set up. Ask your administrator to run scripts/078_housekeeping_tables_and_room_status.sql in Supabase.',
+          )
+        }
+        throw error
+      }
       toast.success(remark ? 'Status and remark saved' : 'Status updated')
       setTasks(prev =>
         prev.map(t =>
@@ -303,7 +286,7 @@ export default function HousekeepingPage() {
 
   const openRoomStatusModal = (room: Room) => {
     setStatusChangeRoom(room)
-    setPendingRoomStatus(room.status)
+    setPendingRoomStatus(room.housekeeping_status || null)
     setStatusComment('')
     setStatusRemarks([])
     setStatusRemarksLoading(true)
@@ -326,18 +309,8 @@ export default function HousekeepingPage() {
       toast.error('Select a room status')
       return
     }
-    const newStatus = pendingRoomStatus
-    const disallowed = ['occupied', 'reserved', 'maintenance']
-    if (disallowed.includes(newStatus)) {
-      toast.error('That status cannot be set from housekeeping. Use front desk or maintenance.')
-      return
-    }
-    if (newStatus === 'out_of_order' && !canSetOutOfOrder) {
-      toast.error('Only Administrator, Superadmin, or Housekeeping can mark a room out of order.')
-      return
-    }
-    if (!canUpdateRoomStatus) {
-      toast.error('You do not have permission to update room status.')
+    if (!canEditHousekeepingStatus) {
+      toast.error('Only Housekeeping staff can change room status.')
       return
     }
     if (!organizationId) {
@@ -349,18 +322,23 @@ export default function HousekeepingPage() {
     try {
       const room = statusChangeRoom
       const remark = statusComment.trim()
-      const result = await patchRoomStatus({
+      const result = await patchHousekeepingStatus({
         room_id: room.id,
         room_number: room.room_number,
-        status: newStatus,
-        source: 'housekeeping',
+        housekeeping_status: pendingRoomStatus,
         remark: remark || undefined,
         scheduled_date: filterDate,
       })
       if (!result.ok) throw new Error(result.message)
 
       toast.success(remark ? 'Room status and remark saved' : 'Room status updated')
-      setRooms((prev) => prev.map((r) => (r.id === room.id ? { ...r, status: newStatus } : r)))
+      setRooms((prev) =>
+        prev.map((r) =>
+          r.id === room.id
+            ? { ...r, housekeeping_status: result.housekeeping_status }
+            : r,
+        ),
+      )
       await fetchAll()
       closeRoomStatusModal()
     } catch (e: unknown) {
@@ -384,7 +362,14 @@ export default function HousekeepingPage() {
         issues: report.issues || null,
         rooms_cleaned: report.rooms_cleaned ? parseInt(report.rooms_cleaned) : null,
       }])
-      if (error) throw error
+      if (error) {
+        if (isMissingTableError(error.message)) {
+          throw new Error(
+            'Housekeeping tasks table is not set up. Ask your administrator to run scripts/078_housekeeping_tables_and_room_status.sql in Supabase.',
+          )
+        }
+        throw error
+      }
       toast.success('Daily report submitted')
       setReport({ summary: '', issues: '', rooms_cleaned: '' })
       setReportOpen(false)
@@ -559,18 +544,18 @@ export default function HousekeepingPage() {
         {/* Room Status Panel */}
         <TabsContent value="rooms" className="space-y-4">
           <p className="text-sm text-muted-foreground">
-            Occupied, Reserved, and Maintenance are controlled from bookings or the maintenance team. Out of order:
-            Administrator, Superadmin, or Housekeeping only.
+            Housekeeping floor statuses are visible to all staff with room access. Only Housekeepers
+            can change them here — abbreviations: OOO, O, V, Compl, L/in, R/s, C/O, S/O.
           </p>
           <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
             {rooms.map(room => {
-              const key = String(room.status || '')
-                .toLowerCase()
-                .replace(/-/g, '_')
-              const sc = ROOM_STATUS_DISPLAY[key] ?? {
-                label: room.status,
-                color: 'bg-gray-100 text-gray-600',
-              }
+              const hk = getHousekeepingStatusDef(room.housekeeping_status)
+              const displayLabel = hk
+                ? `${hk.label} (${hk.abbr})`
+                : room.housekeeping_status
+                  ? housekeepingStatusLabel(room.housekeeping_status)
+                  : 'Not set'
+              const displayColor = hk?.color ?? 'bg-muted text-muted-foreground border-border'
               return (
                 <Card key={room.id} className="hover:shadow-md transition-shadow">
                   <CardContent className="pt-4 pb-4 space-y-3">
@@ -581,20 +566,20 @@ export default function HousekeepingPage() {
                       </div>
                       <Bed className="h-5 w-5 text-muted-foreground" />
                     </div>
-                    {canUpdateRoomStatus ? (
+                    {canEditHousekeepingStatus ? (
                       <button
                         type="button"
                         onClick={() => openRoomStatusModal(room)}
-                        className={`w-full rounded-md px-3 py-1.5 text-xs font-medium flex items-center justify-between ${sc.color} hover:opacity-80 transition-opacity`}
+                        className={`w-full rounded-md px-3 py-1.5 text-xs font-medium flex items-center justify-between ${displayColor} hover:opacity-80 transition-opacity`}
                       >
-                        <span>{sc.label}</span>
+                        <span>{displayLabel}</span>
                         <ChevronDown className="h-3 w-3" />
                       </button>
                     ) : (
                       <div
-                        className={`w-full rounded-md px-3 py-1.5 text-xs font-medium flex items-center justify-between ${sc.color}`}
+                        className={`w-full rounded-md px-3 py-1.5 text-xs font-medium flex items-center justify-between ${displayColor}`}
                       >
-                        <span>{sc.label}</span>
+                        <span>{displayLabel}</span>
                       </div>
                     )}
                   </CardContent>
@@ -745,16 +730,18 @@ export default function HousekeepingPage() {
             <div className="space-y-4">
               <RoomStatusRemarksPanel remarks={statusRemarks} loading={statusRemarksLoading} />
               <div className="grid grid-cols-2 gap-2">
-                {housekeepingStatusPickerOptions.map((opt) => (
+                {HOUSEKEEPING_STATUS_OPTIONS.map((opt) => (
                   <button
-                    key={opt.value}
+                    key={opt.key}
                     type="button"
-                    onClick={() => setPendingRoomStatus(opt.value)}
-                    className={`rounded-lg px-4 py-3 text-sm font-medium text-left transition-all hover:scale-[1.02] active:scale-95 ${opt.color} ${pendingRoomStatus === opt.value ? 'ring-2 ring-offset-1 ring-primary' : ''}`}
+                    onClick={() => setPendingRoomStatus(opt.key)}
+                    className={`rounded-lg px-3 py-2.5 text-xs font-medium text-left transition-all hover:scale-[1.02] active:scale-95 ${opt.color} ${pendingRoomStatus === opt.key ? 'ring-2 ring-offset-1 ring-primary' : ''}`}
+                    title={opt.description}
                   >
-                    {opt.label}
-                    {statusChangeRoom.status === opt.value && (
-                      <span className="block text-xs font-normal opacity-70 mt-0.5">Current</span>
+                    <span className="block">{opt.label}</span>
+                    <span className="block text-[10px] font-normal opacity-80">{opt.abbr}</span>
+                    {statusChangeRoom.housekeeping_status === opt.key && (
+                      <span className="block text-[10px] font-normal opacity-70 mt-0.5">Current</span>
                     )}
                   </button>
                 ))}
