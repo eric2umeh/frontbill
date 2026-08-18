@@ -43,7 +43,6 @@ export function canPrivilegeMutateSupplyPo(
   return (
     key === "purchaser" ||
     key === "store" ||
-    key === "auditor" ||
     key === "admin" ||
     key === "superadmin" ||
     key === "accountant" ||

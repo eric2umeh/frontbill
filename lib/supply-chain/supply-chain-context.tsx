@@ -97,7 +97,7 @@ import {
 } from "./unit-factor-storage";
 import type { StockShortageLine } from "@/lib/ui/stock-shortage-dialog";
 import { useAuth } from "@/lib/auth-context";
-import { canManageFnbStore, canManageKitchenBatchStandards, hasPermission } from "@/lib/permissions";
+import { canManageFnbStore, canManageKitchenBatchStandards, canOperateKitchenProduction, canRaisePurchaseRequest, canSubmitMarketRetirement, hasPermission } from "@/lib/permissions";
 import { isRetryableSupplyError } from "@/lib/utils/fetch-retry";
 import { isMainBarIssueDestination } from "@/lib/store/outlet-departments";
 import { formatSupplyActorStamp } from "./fnb-store";
@@ -1263,6 +1263,10 @@ function useSupplyChainImpl() {
           poWorkspaceOrigin === "store"
             ? getStoreCartMutationTarget(prev, workingPoId)
             : getActivePurchaseOrder(prev, poWorkspaceOrigin, workingPoId);
+        if (!canRaisePurchaseRequest(actor.role)) {
+          err = "You do not have permission to raise or edit a purchase order.";
+          return prev;
+        }
         if (active && !canEditStorePurchaseOrder(active)) {
           err =
             "Cannot add items — this purchase order is locked in its current status.";
@@ -1616,6 +1620,9 @@ function useSupplyChainImpl() {
 
   const sendBasketForApproval = useCallback(
     (actor: Actor): { po: PurchaseOrder } | { error: string } => {
+      if (!canRaisePurchaseRequest(actor.role)) {
+        return { error: "You do not have permission to raise a purchase order." };
+      }
       const active = getActivePurchaseOrder(
         purchaseOrders,
         poWorkspaceOrigin,
@@ -1788,6 +1795,9 @@ function useSupplyChainImpl() {
   /** Chef / kitchen: send draft kitchen list to central store for review. */
   const sendKitchenOrderToStore = useCallback(
     (actor: Actor): { po: PurchaseOrder } | { error: string } => {
+      if (!canRaisePurchaseRequest(actor.role)) {
+        return { error: "You do not have permission to raise a purchase order." };
+      }
       const active = getActivePurchaseOrder(purchaseOrders, "kitchen", workingPoId);
       const lines = active?.lines ?? (poWorkspaceOrigin === "kitchen" ? basket : []);
       if (!lines.length) {
@@ -2247,6 +2257,10 @@ function useSupplyChainImpl() {
 
   const submitRetirement = useCallback(
     (poId: string, lines: RetirementLine[], actor: Actor) => {
+      if (!canSubmitMarketRetirement(actor.role)) {
+        toast.error("You do not have permission to retire a purchase order.");
+        return;
+      }
       const po = purchaseOrders.find((p) => p.id === poId);
       if (!po) return;
       if (po.status === "retired") {
@@ -2599,6 +2613,9 @@ function useSupplyChainImpl() {
       plannedPortions: number,
       actor: Actor,
     ): { ok: true; batch: ProductionBatch } | { error: string } => {
+      if (!canOperateKitchenProduction(actor.role)) {
+        return { error: "Auditor can view kitchen batches but cannot open a production run." };
+      }
       const recipe = recipes.find((r) => r.id === recipeId);
       if (!recipe) return { error: "Batch standard not found" };
       if (!Number.isFinite(plannedPortions) || plannedPortions <= 0) {
@@ -3020,6 +3037,9 @@ function useSupplyChainImpl() {
 
   const deleteInProgressBatch = useCallback(
     (batchId: string, actor: Actor): { ok: true } | { error: string } => {
+      if (!canOperateKitchenProduction(actor.role)) {
+        return { error: "You do not have permission to delete a production run." };
+      }
       const batch = batches.find((b) => b.id === batchId);
       if (!batch || isProductionBatchDeleted(batch)) {
         return { error: "Production batch not found" };
@@ -3412,6 +3432,9 @@ function useSupplyChainImpl() {
       },
       actor: Actor,
     ): { ok: true } | { error: string } => {
+      if (!canOperateKitchenProduction(actor.role)) {
+        return { error: "You do not have permission to close a production run." };
+      }
       const batch = batches.find((b) => b.id === batchId);
       if (!batch || isProductionBatchDeleted(batch)) {
         return { error: "Production batch not found" };

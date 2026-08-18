@@ -12,7 +12,6 @@ export function getPostLoginPath(role: string | null | undefined): string {
   if (rk === "housekeeping") return "/housekeeping";
   if (rk === "maintenance") return "/maintenance";
   if (rk === "staff") return "/bookings";
-  if (rk === "auditor") return "/supply/store";
   if (rk === "cashier") return "/outlets";
   return "/dashboard";
 }

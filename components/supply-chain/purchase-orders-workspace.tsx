@@ -8,6 +8,7 @@ import { useSupplyChain } from '@/lib/supply-chain/supply-chain-context'
 import {
   canAccessPoApprovalsTab,
   canAccessSupplyPurchaseOrdersMenu,
+  canRaisePurchaseRequest,
   canonicalRoleKey,
 } from '@/lib/permissions'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -23,12 +24,15 @@ type PoTab = (typeof TAB_VALUES)[number]
 function normalizeTab(
   raw: string | null,
   canApprove: boolean,
+  canRaise: boolean,
 ): PoTab {
-  if (raw === 'purchase' || raw === 'raise') return 'purchase'
+  if ((raw === 'purchase' || raw === 'raise') && canRaise) return 'purchase'
   if (raw === 'orders' || raw === 'active') return 'orders'
   if (raw === 'history') return 'history'
   if ((raw === 'approvals' || raw === 'purchase_orders') && canApprove) return 'approvals'
-  return 'purchase'
+  if (canRaise) return 'purchase'
+  if (canApprove) return 'approvals'
+  return 'orders'
 }
 
 export function PurchaseOrdersWorkspace() {
@@ -40,9 +44,10 @@ export function PurchaseOrdersWorkspace() {
 
   const menuOk = canAccessSupplyPurchaseOrdersMenu(role)
   const canApprove = menuOk && canAccessPoApprovalsTab(role)
+  const canRaise = menuOk && canRaisePurchaseRequest(role)
 
   const [activeTab, setActiveTab] = useState<PoTab>(() =>
-    normalizeTab(tabParam, canApprove),
+    normalizeTab(tabParam, canApprove, canRaise),
   )
 
   useEffect(() => {
@@ -52,8 +57,8 @@ export function PurchaseOrdersWorkspace() {
   }, [tabParam])
 
   useEffect(() => {
-    setActiveTab(normalizeTab(tabParam, canApprove))
-  }, [tabParam, canApprove])
+    setActiveTab(normalizeTab(tabParam, canApprove, canRaise))
+  }, [tabParam, canApprove, canRaise])
 
   const actor = { name: name ?? 'Store', role: canonicalRoleKey(role) ?? 'store' }
 
@@ -75,8 +80,9 @@ export function PurchaseOrdersWorkspace() {
       <div>
         <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Purchase orders</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Raise purchase requests, track active POs, and review approved orders. After manager
-          approval, POs appear in History (read-only) until retired at market from Retirement.
+          {canRaise
+            ? 'Raise purchase requests, track active POs, and review approved orders. After manager approval, POs appear in History (read-only) until retired at market from Retirement.'
+            : 'View purchase orders and approved PO history (read-only). Auditors cannot raise or change purchase requests.'}
         </p>
       </div>
 
@@ -86,10 +92,12 @@ export function PurchaseOrdersWorkspace() {
         className="w-full"
       >
         <TabsList className="mx-auto flex h-auto w-full max-w-4xl flex-wrap justify-center gap-1">
-          <TabsTrigger value="purchase" className="gap-1.5">
-            <ShoppingCart className="h-4 w-4" />
-            Raise Purchase Request
-          </TabsTrigger>
+          {canRaise && (
+            <TabsTrigger value="purchase" className="gap-1.5">
+              <ShoppingCart className="h-4 w-4" />
+              Raise Purchase Request
+            </TabsTrigger>
+          )}
           <TabsTrigger value="orders" className="gap-1.5">
             <ClipboardList className="h-4 w-4" />
             Purchase Orders
@@ -106,9 +114,11 @@ export function PurchaseOrdersWorkspace() {
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="purchase" className="mt-4">
-          <RaisePurchaseRequestPanel activeTab={activeTab} />
-        </TabsContent>
+        {canRaise && (
+          <TabsContent value="purchase" className="mt-4">
+            <RaisePurchaseRequestPanel activeTab={activeTab} />
+          </TabsContent>
+        )}
 
         <TabsContent value="orders" className="mt-4 space-y-4">
           <ActivePurchaseOrderPanel actor={actor} storeItems={storeItems} />

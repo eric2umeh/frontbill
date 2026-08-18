@@ -588,15 +588,29 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
     key: "auditor",
     label: "Auditor",
     description:
-      "Internal audit: read-only front office (bookings, reservations, events, guests, rooms), central store, kitchen & F&B stock, outlet reports, movement summaries, and audit trails.",
+      "Internal audit: view-only access to the same finance and operations screens accountants use (dashboard, transactions, reports, expenses, ledger, supply). Cannot record payments, raise purchase orders, approve POs, retire at market, or open kitchen production batches.",
     color: "bg-slate-200 text-slate-900 dark:bg-slate-800 dark:text-slate-100",
     permissions: [
+      "dashboard:view",
       "bookings:view",
       "reservations:view",
       "events:view",
       "guests:view",
       "organizations:view",
       "rooms:view",
+      "transactions:view",
+      "transactions:export",
+      "analytics:view",
+      "analytics:export",
+      "payments:view",
+      "cashback:view",
+      "reports:view",
+      "reports:export",
+      "expenses:view",
+      "ledger:view",
+      "reconciliation:view",
+      "night_audit:view",
+      "audit_trails:view",
       "store:view",
       "store:requisition",
       "store:reports",
@@ -608,8 +622,7 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
       "supply:activity",
       "outlet:view",
       "outlet:reports",
-      "night_audit:view",
-      "audit_trails:view",
+      "outlet:receipt",
       "settings:view",
     ],
   },
@@ -955,6 +968,7 @@ export const EXPENSE_MENU_ROLE_KEYS: readonly RoleKey[] = [
   "manager",
   "accountant",
   "cashier",
+  "auditor",
 ];
 
 export function canAccessExpenseMenu(
@@ -992,15 +1006,15 @@ export function canSupplyPoManagerReview(
   );
 }
 
-/** Market retirement review — accountant, auditor, administrator, superadmin, manager. */
+/** Market retirement review — accountant, administrator, superadmin, manager (not auditor). */
 export function canSupplyRetirementReview(
   userRole: string | null | undefined,
 ): boolean {
   const roleKey = canonicalRoleKey(userRole);
+  if (roleKey === "auditor") return false;
   return (
     hasPermission(userRole, "supply:approve_accountant") ||
     canAdminTestApproveSupplyPo(userRole) ||
-    roleKey === "auditor" ||
     roleKey === "manager"
   );
 }
@@ -1023,15 +1037,52 @@ export function canAccessSupplyPurchaseOrdersMenu(
   );
 }
 
-/** PO Approvals tab — accountant / manager / admin (not store, purchaser, or auditor). */
+/** PO Approvals tab — reviewers can decide; auditor may open the tab view-only. */
 export function canAccessPoApprovalsTab(
   userRole: string | null | undefined,
 ): boolean {
+  const roleKey = canonicalRoleKey(userRole);
+  if (roleKey === "auditor") return true;
   return (
     canSupplyPoAccountantReview(userRole) ||
     canSupplyPoManagerReview(userRole) ||
     canAdminTestApproveSupplyPo(userRole)
   );
+}
+
+/** Raise a draft PO (store, kitchen, purchaser). Auditor is view-only. */
+export function canRaisePurchaseRequest(
+  userRole: string | null | undefined,
+): boolean {
+  const roleKey = canonicalRoleKey(userRole);
+  if (!roleKey || roleKey === "auditor") return false;
+  return (
+    roleKey === "store" ||
+    roleKey === "purchaser" ||
+    roleKey === "chef" ||
+    roleKey === "admin" ||
+    roleKey === "superadmin" ||
+    roleKey === "manager" ||
+    roleKey === "accountant"
+  );
+}
+
+/** Retire an approved PO at market. Auditor is view-only. */
+export function canSubmitMarketRetirement(
+  userRole: string | null | undefined,
+): boolean {
+  const roleKey = canonicalRoleKey(userRole);
+  if (!roleKey || roleKey === "auditor") return false;
+  return hasPermission(userRole, "supply:purchasing");
+}
+
+/** Open / close / delete a kitchen production run. Auditor is view-only. */
+export function canOperateKitchenProduction(
+  userRole: string | null | undefined,
+): boolean {
+  const roleKey = canonicalRoleKey(userRole);
+  if (!roleKey || roleKey === "auditor") return false;
+  return hasPermission(userRole, "supply:kitchen");
 }
 
 export function canKickstartOutletStock(
