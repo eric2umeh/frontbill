@@ -2,11 +2,15 @@
 
 import { useMemo, useState } from 'react'
 import { format, parseISO } from 'date-fns'
+import { Download } from 'lucide-react'
+import { toast } from 'sonner'
 import { useSupplyChain } from '@/lib/supply-chain/supply-chain-context'
 import { isMainBarIssueDestination } from '@/lib/store/outlet-departments'
+import { downloadMainBarIssueReport } from '@/lib/store/main-bar-issue-report'
 import { formatUnitLabel } from '@/lib/supply-chain/measurement-units'
 import { hotelCalendarTodayYmd, formatYMDInTimeZone, resolveHotelTimeZone } from '@/lib/hotel-date'
 import { PaginatedListShell } from '@/components/shared/paginated-list-shell'
+import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent } from '@/components/ui/card'
 import {
@@ -85,6 +89,20 @@ export function OutletStoreIssuesPanel() {
               : `${format(parseISO(dateFrom), 'dd MMM yyyy')} – ${format(parseISO(dateTo), 'dd MMM yyyy')}`}
           </span>
         ) : null}
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-8 gap-1.5 ml-auto"
+          disabled={rows.length === 0}
+          onClick={() => {
+            downloadMainBarIssueReport(rows, { dateFrom, dateTo })
+            toast.success(`Downloaded ${rows.length} Main Bar issue(s) from store`)
+          }}
+        >
+          <Download className="h-3.5 w-3.5" />
+          Download report
+        </Button>
       </div>
 
       <PaginatedListShell
