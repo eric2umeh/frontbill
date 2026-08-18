@@ -1,5 +1,9 @@
 import { format } from 'date-fns'
-import { isMainBarIssueDestination } from '@/lib/store/outlet-departments'
+import {
+  isStoreIssueDestination,
+  storeIssueDestinationLabel,
+  type StoreIssueDestinationKey,
+} from '@/lib/store/outlet-departments'
 import { formatUnitLabel } from '@/lib/supply-chain/measurement-units'
 import type { IssueOutRecord } from '@/lib/supply-chain/types'
 
@@ -20,15 +24,24 @@ function downloadCsv(filename: string, rows: unknown[][]) {
   URL.revokeObjectURL(url)
 }
 
-export function mainBarIssueOutRows(log: IssueOutRecord[] | null | undefined): IssueOutRecord[] {
-  return (log ?? []).filter((row) => isMainBarIssueDestination(row.destination))
+export function storeIssueOutRows(
+  log: IssueOutRecord[] | null | undefined,
+  destination: StoreIssueDestinationKey,
+): IssueOutRecord[] {
+  return (log ?? []).filter((row) => isStoreIssueDestination(row.destination, destination))
 }
 
-/** CSV of Central Store issues to Main Bar (Excel-friendly UTF-8 BOM). */
-export function downloadMainBarIssueReport(
+export function mainBarIssueOutRows(log: IssueOutRecord[] | null | undefined): IssueOutRecord[] {
+  return storeIssueOutRows(log, 'main_bar')
+}
+
+/** CSV of Central Store issues to an outlet/department (Excel-friendly UTF-8 BOM). */
+export function downloadStoreIssueReport(
   rows: IssueOutRecord[],
+  destination: StoreIssueDestinationKey,
   opts?: { dateFrom?: string; dateTo?: string },
 ): void {
+  const label = storeIssueDestinationLabel(destination)
   const header = [
     'Date',
     'Time',
@@ -61,5 +74,13 @@ export function downloadMainBarIssueReport(
     from && to && from !== to
       ? `${from}_to_${to}`
       : from || to || format(new Date(), 'yyyy-MM-dd')
-  downloadCsv(`frontbill-main-bar-store-issues-${stamp}.csv`, [header, ...body])
+  const slug = label.toLowerCase().replace(/\s+/g, '-')
+  downloadCsv(`frontbill-${slug}-store-issues-${stamp}.csv`, [header, ...body])
+}
+
+export function downloadMainBarIssueReport(
+  rows: IssueOutRecord[],
+  opts?: { dateFrom?: string; dateTo?: string },
+): void {
+  downloadStoreIssueReport(rows, 'main_bar', opts)
 }
