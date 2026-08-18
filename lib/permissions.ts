@@ -902,6 +902,8 @@ const PROFILE_ROLE_ALIASES: Record<string, RoleKey> = {
   cooks: "chef",
   laundry_staff: "laundry",
   gym_staff: "gym",
+  wellness: "gym",
+  wellness_staff: "gym",
   cash: "cashier",
   cashiers: "cashier",
   cashier_staff: "cashier",
