@@ -55,6 +55,7 @@ export default function ReservationDetailPage({
   const { role, userId, organizationId, name: userName } = useAuth()
   const canManageFolio = role === 'superadmin' || role === 'admin' || role === 'front_desk'
   const canCancelReservation = hasPermission(role, 'reservations:delete')
+  const canCheckInReserved = hasPermission(role, 'bookings:checkin')
   const canMarkNoShow =
     hasPermission(role, 'reservations:edit') || hasPermission(role, 'bookings:edit')
   const [noShowDialogOpen, setNoShowDialogOpen] = useState(false)
@@ -702,18 +703,24 @@ export default function ReservationDetailPage({
               </Button>
             </>
           )}
-          <Button
-            variant="default"
-            size="sm"
-            onClick={handleCheckin}
-            disabled={actionLoading || checkInNotReached}
-            title={checkInNotReached ? `Check-in available from ${format(new Date(reservation!.check_in), 'dd MMM yyyy')}` : undefined}
-          >
-            <UserCheck className="mr-2 h-4 w-4" />
-            {checkInNotReached
-              ? `Check-in on ${format(new Date(reservation!.check_in), 'dd MMM')}`
-              : 'Check-in Guest'}
-          </Button>
+          {canCheckInReserved && (
+            <Button
+              variant="default"
+              size="sm"
+              onClick={handleCheckin}
+              disabled={actionLoading || checkInNotReached}
+              title={
+                checkInNotReached
+                  ? `Check-in available from ${format(new Date(reservation!.check_in), 'dd MMM yyyy')}`
+                  : undefined
+              }
+            >
+              <UserCheck className="mr-2 h-4 w-4" />
+              {checkInNotReached
+                ? `Check-in on ${format(new Date(reservation!.check_in), 'dd MMM')}`
+                : 'Check-in Guest'}
+            </Button>
+          )}
           {canMarkNoShow && isNoShowEligibleStatus(reservation?.status) && (
             <Button
               variant="outline"
