@@ -23,6 +23,7 @@ import { toast } from 'sonner'
 import { RoomInventoryStatsStrip } from '@/components/shared/room-inventory-stats-strip'
 import { OutletStoreIssuesPanel } from '@/components/outlets/outlet-store-issues-panel'
 import { OutletKitchenItemsPanel } from '@/components/outlets/outlet-kitchen-items-panel'
+import { storeIssueDestinationForOutletDepartment } from '@/lib/store/outlet-departments'
 
 export function OutletWorkspace({ department }: { department: OutletDepartmentKey }) {
   const { organizationId, role, name: staffName } = useAuth()
@@ -34,8 +35,8 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
   const canSell = hasPermission(role, 'outlet:sell')
   const canReceipt = hasPermission(role, 'outlet:receipt')
   const canViewMenu = hasPermission(role, 'outlet:view')
-  const canViewFromStore =
-    (department === 'main_bar' || department === 'laundry') && canViewMenu
+  const storeIssueDestination = storeIssueDestinationForOutletDepartment(department)
+  const canViewFromStore = storeIssueDestination != null && canViewMenu
   const canViewFromKitchen = department === 'restaurant' && canViewMenu
   const [tab, setTab] = useState(
     canSell
@@ -138,7 +139,7 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
         title={def.label}
         description={
           department === 'gym'
-            ? 'POS · memberships & day passes (Menu tab) · orders · reports'
+            ? 'POS · memberships & day passes · stock from Central Store · orders · reports'
             : department === 'laundry'
               ? 'POS · guest laundry tickets · stock from Central Store · orders · reports'
               : department === 'main_bar'
@@ -212,9 +213,7 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
 
         {canViewFromStore && (
           <TabsContent value="from_store" className="mt-2">
-            <OutletStoreIssuesPanel
-              destination={department === 'laundry' ? 'laundry' : 'main_bar'}
-            />
+            <OutletStoreIssuesPanel destination={storeIssueDestination!} />
           </TabsContent>
         )}
 
