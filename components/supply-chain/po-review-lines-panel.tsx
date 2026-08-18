@@ -290,6 +290,10 @@ export function PoReviewLinesPanel(props: Props) {
       if (deptFilter && deptFilter !== 'all') {
         if (line.dept !== normalizeSupplyDept(deptFilter)) return false
       }
+      // Draft-basket sidebar: tap a department chip to show only its lines
+      if (sidebarVariant && highlightDept) {
+        if (line.dept !== highlightDept) return false
+      }
       if (!q) return true
       return (
         line.name.toLowerCase().includes(q) ||
@@ -312,12 +316,16 @@ export function PoReviewLinesPanel(props: Props) {
       })
     }
     return groups
-  }, [normalized, search, deptFilter])
+  }, [normalized, search, deptFilter, sidebarVariant, highlightDept])
 
   const filteredFlat = useMemo(
     () => filteredGrouped.flatMap((g) => g.items),
     [filteredGrouped],
   )
+
+  const toggleSidebarDeptFilter = (dept: Exclude<SupplyDept, 'all'>) => {
+    setHighlightDept((prev) => (prev === dept ? null : dept))
+  }
 
   const scrollToDept = (dept: string) => {
     setHighlightDept(dept)
@@ -366,21 +374,72 @@ export function PoReviewLinesPanel(props: Props) {
             </div>
           </div>
           {deptSummaries.length > 0 ? (
-            <div className="rounded-md border bg-muted/30 px-2 py-1 max-h-14 overflow-y-auto">
-              <div className="flex flex-wrap gap-1">
+            <div className="rounded-md border bg-background overflow-hidden">
+              <div className="flex items-center justify-between gap-2 border-b bg-muted/40 px-2 py-1.5">
+                <p className="text-[11px] font-medium text-muted-foreground leading-snug">
+                  {highlightDept
+                    ? `Showing ${DEPT_LABELS[highlightDept as SupplyDept] ?? highlightDept} — tap again for all`
+                    : 'Tap a department to filter items'}
+                </p>
+                {highlightDept ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 shrink-0 px-1.5 text-[10px]"
+                    onClick={() => setHighlightDept(null)}
+                  >
+                    Show all
+                  </Button>
+                ) : null}
+              </div>
+              <ul className="divide-y max-h-28 overflow-y-auto overscroll-contain">
                 {deptSummaries.map((row) => {
+                  const active = highlightDept === row.dept
                   const style = deptHeaderStyle(row.dept)
+                  const locked = externalLocked && !active
                   return (
-                    <Badge
-                      key={row.dept}
-                      variant="outline"
-                      className={cn('text-[10px] tabular-nums', style.badge)}
-                    >
-                      {DEPT_LABELS[row.dept]} · {row.count}
-                    </Badge>
+                    <li key={row.dept}>
+                      <button
+                        type="button"
+                        disabled={locked}
+                        onClick={() => toggleSidebarDeptFilter(row.dept)}
+                        className={cn(
+                          'w-full flex items-center justify-between gap-2 text-left transition-colors border-l-4 min-w-0 px-2 py-1.5 text-[12px]',
+                          style.header,
+                          active
+                            ? 'ring-1 ring-inset ring-foreground/20 font-medium'
+                            : 'opacity-95 hover:opacity-100',
+                          locked && 'opacity-40 cursor-not-allowed',
+                        )}
+                      >
+                        <span className="flex items-center gap-1.5 min-w-0 overflow-hidden">
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              'shrink-0 border truncate max-w-[8.5rem] text-[10px] px-1.5 py-0',
+                              style.badge,
+                            )}
+                          >
+                            {DEPT_LABELS[row.dept]}
+                          </Badge>
+                          <span className="text-[11px] text-muted-foreground tabular-nums shrink-0">
+                            {row.count} item{row.count === 1 ? '' : 's'}
+                          </span>
+                        </span>
+                        <span
+                          className={cn(
+                            'font-medium tabular-nums shrink-0 whitespace-nowrap text-[11px]',
+                            style.accent,
+                          )}
+                        >
+                          {formatNaira(row.total)}
+                        </span>
+                      </button>
+                    </li>
                   )
                 })}
-              </div>
+              </ul>
             </div>
           ) : null}
         </div>
@@ -546,6 +605,7 @@ export function PoReviewLinesPanel(props: Props) {
       ) : sidebarVariant ? (
         <div className="flex flex-col flex-1 min-h-0 overflow-hidden gap-2">
           <DeptSectionItems
+            key={`${highlightDept ?? 'all'}-${search.trim()}`}
             kind={kind}
             items={filteredFlat}
             editable={editable}
