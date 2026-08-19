@@ -93,14 +93,13 @@ export function housekeepingStatusAbbr(key: string | null | undefined): string {
   return getHousekeepingStatusDef(key)?.abbr ?? '—'
 }
 
-/** HK floor statuses that block new bookings / reservations (room hidden from pickers). */
+/**
+ * HK floor statuses that hide a room from booking / reservation pickers.
+ * Occupied, reserved, complimentary, long-stay, and sleep-out are live occupancy
+ * and must stay visible so future (non-overlapping) dates can still be sold.
+ */
 export const HOUSEKEEPING_STATUSES_BLOCKING_BOOKINGS: readonly HousekeepingStatusKey[] = [
   'out_of_order',
-  'occupied',
-  'complimentary',
-  'long_stay',
-  'reservation',
-  'sleep_out',
 ]
 
 export function isHousekeepingStatusBlockingBookings(key: string | null | undefined): boolean {

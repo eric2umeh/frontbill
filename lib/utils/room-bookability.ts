@@ -8,11 +8,10 @@ export const BOOKING_MODAL_ROOMS_LIMIT = 20_000
 
 const DEFAULT_ROOM_TYPE_LABEL = 'Standard'
 
+/** Inventory blocks only. Occupied/reserved are current occupancy — date overlap handles those. */
 const PMS_STATUSES_BLOCKING_BOOKINGS = new Set([
   'maintenance',
   'out_of_order',
-  'occupied',
-  'reserved',
 ])
 
 export type RoomBookabilityInput = {
@@ -29,8 +28,9 @@ function normStatus(s: string | null | undefined): string {
 
 /**
  * Whether a room may appear in booking / reservation pickers.
- * Blocked by PMS status (maintenance, OOO, occupied, reserved) or HK floor status
- * (OOO, O, Compl, L/in, R/s, S/O).
+ * Blocked only by inventory holds (maintenance, out of order). Occupied and
+ * reserved rooms stay in the list so future non-overlapping stays can be sold;
+ * callers still exclude date conflicts from active bookings.
  */
 export function isRoomAssignable(
   status: string | null | undefined,
@@ -55,8 +55,6 @@ export function roomNotBookableReason(room: RoomBookabilityInput): string | null
   const s = normStatus(room.status)
   if (s === 'maintenance') return 'Room is under maintenance and cannot be booked.'
   if (s === 'out_of_order') return 'Room is out of order and cannot be booked.'
-  if (s === 'occupied') return 'Room is occupied and cannot be booked.'
-  if (s === 'reserved') return 'Room is reserved and cannot be booked.'
   return 'Room is not available for booking.'
 }
 
