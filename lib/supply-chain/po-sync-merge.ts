@@ -1,4 +1,5 @@
 import type { PurchaseOrder, PoStatus } from '@/lib/supply-chain/types'
+import { ensurePoApprovalFreeze } from '@/lib/supply-chain/po-format'
 
 /** Higher = further along the PO workflow (prefer when merging local vs remote). */
 const PO_STATUS_RANK: Record<PoStatus, number> = {
@@ -153,9 +154,9 @@ export function dedupePurchaseOrders(orders: PurchaseOrder[]): PurchaseOrder[] {
     byId.set(po.id, existing ? preferPurchaseOrder(existing, po) : po)
   }
 
-  return [...byId.values()].sort((a, b) =>
-    b.createdAt.localeCompare(a.createdAt),
-  )
+  return [...byId.values()]
+    .map((po) => ensurePoApprovalFreeze(po))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
 }
 
 /**
