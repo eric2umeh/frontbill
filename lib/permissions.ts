@@ -1006,15 +1006,18 @@ export function canSupplyPoManagerReview(
   );
 }
 
-/** Final retirement review — accountant, administrator, superadmin, manager, auditor. */
+/** Final retirement review — accountant, manager, admin, superadmin, auditor only (not store/purchaser). */
 export function canSupplyRetirementReview(
   userRole: string | null | undefined,
 ): boolean {
   const roleKey = canonicalRoleKey(userRole);
+  if (!roleKey || roleKey === "store" || roleKey === "purchaser") return false;
   return (
     roleKey === "auditor" ||
     roleKey === "manager" ||
-    hasPermission(userRole, "supply:approve_accountant") ||
+    roleKey === "accountant" ||
+    roleKey === "admin" ||
+    roleKey === "superadmin" ||
     canAdminTestApproveSupplyPo(userRole)
   );
 }
