@@ -217,7 +217,15 @@ export function PurchasingWorkspace() {
     for (const l of po.lines) {
       const remaining = remainingQtyForPoLine(po, l.id);
       const already = stockedQtyForPoLine(po, l.id);
+      const stockedRows = (po.retirement?.lines ?? []).filter(
+        (r) =>
+          r.lineId === l.id &&
+          Boolean(r.stockedAt) &&
+          !(r.notBought || r.removed),
+      );
+      const lastStocked = stockedRows[stockedRows.length - 1];
       if (remaining <= 0 && already > 0) {
+        const postedPrice = lastStocked?.actualPrice ?? l.unitPrice;
         lines.push({
           lineId: l.id,
           name: l.name,
@@ -228,15 +236,16 @@ export function PurchasingWorkspace() {
           quantityBought: already,
           stockQuantityBought: l.stockQuantityOrdered,
           poPrice: l.unitPrice,
-          actualPrice: l.unitPrice,
-          actualStockUnitPrice: l.stockUnitPrice,
-          totalPaid: already * l.unitPrice,
+          actualPrice: postedPrice,
+          actualStockUnitPrice:
+            lastStocked?.actualStockUnitPrice ?? l.stockUnitPrice,
+          totalPaid: stockedRows.reduce((s, r) => s + (Number(r.totalPaid) || 0), 0),
           notBought: false,
           stockItemId: l.stockItemId,
           dept: normalizeSupplyDept(l.dept),
           alreadyStocked: true,
           remainingCap: 0,
-          stockedAt: po.retirement?.lines.find((r) => r.lineId === l.id)?.stockedAt,
+          stockedAt: lastStocked?.stockedAt,
         });
         continue;
       }
@@ -458,6 +467,7 @@ export function PurchasingWorkspace() {
       stockItemId: l.stockItemId,
       dept: l.dept,
     }));
+    const stampedIds = new Set(payload.map((l) => l.lineId));
     const res = submitAddToStock(selected.id, payload, actor);
     if (res && "error" in res) {
       toast.error(res.error);
@@ -468,11 +478,52 @@ export function PurchasingWorkspace() {
       toast.success(
         res.posted > 0
           ? `${res.posted} item(s) added to Central Store — sent to Retirement review`
-          : "Submitted for retirement review",
+          : "Submitted for retirement review — check Central Store if stock did not increase",
       );
     }
+    // Lock submitted lines in the UI immediately (Already in stock).
+    setWorkLines((prev) =>
+      prev.map((l) => {
+        if (!stampedIds.has(l.lineId)) return l;
+        if (l.newlyAdded) {
+          return {
+            ...l,
+            alreadyStocked: true,
+            remainingCap: 0,
+            stockedAt: new Date().toISOString(),
+          };
+        }
+        const rem = Math.max(
+          0,
+          (l.remainingCap ?? l.quantityOrdered) - l.quantityBought,
+        );
+        if (rem <= 0) {
+          return {
+            ...l,
+            alreadyStocked: true,
+            remainingCap: 0,
+            quantityBought: l.quantityOrdered,
+            totalPaid: l.quantityOrdered * l.actualPrice,
+            stockedAt: new Date().toISOString(),
+          };
+        }
+        return {
+          ...l,
+          alreadyStocked: false,
+          remainingCap: rem,
+          quantityBought: rem,
+          stockQuantityBought:
+            l.stockQuantityOrdered && l.quantityOrdered > 0
+              ? (rem / l.quantityOrdered) * l.stockQuantityOrdered
+              : rem,
+          totalPaid: rem * l.actualPrice,
+        };
+      }),
+    );
+    setSelectedIds({});
     setConfirmOpen(false);
     setSelectedId(null);
+    setWorkLines([]);
     setTab("retirement");
   };
 
@@ -746,6 +797,37 @@ export function PurchasingWorkspace() {
                         </div>
                       </div>
                     )}
+                    {line.alreadyStocked && !notBought && (
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 items-end pl-6 opacity-80">
+                        <div>
+                          <p className="text-[10px] text-muted-foreground mb-0.5">
+                            Qty in stock
+                          </p>
+                          <p className="tabular-nums">
+                            {line.quantityBought} {line.unit ?? ""}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] text-muted-foreground mb-0.5">
+                            Posted price
+                          </p>
+                          <p className="tabular-nums">{formatNaira(line.actualPrice)}</p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] text-muted-foreground mb-0.5">
+                            Total posted
+                          </p>
+                          <p className="font-medium tabular-nums">
+                            {formatNaira(line.totalPaid)}
+                          </p>
+                        </div>
+                        <div className="flex items-end">
+                          <Badge variant="secondary" className="text-[10px]">
+                            Uneditable
+                          </Badge>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -849,8 +931,8 @@ export function PurchasingWorkspace() {
               <div>
                 <h2 className="font-medium">Ready to add to stock</h2>
                 <p className="text-xs text-muted-foreground">
-                  Approved POs — select items as they arrive from market and post them to Central
-                  Store without waiting for final retirement.
+                  Approved POs — store, purchaser, or accountant can select items as they arrive and
+                  post them to Central Store. Submitted lines become Already in stock (uneditable).
                 </p>
               </div>
               {activeCandidates.length === 0 ? (
@@ -896,9 +978,10 @@ export function PurchasingWorkspace() {
             <div>
               <h2 className="font-medium">Retirement review</h2>
               <p className="text-xs text-muted-foreground">
-                Review Add-to-stock submissions. Accept moves the PO to History. Stock was already
-                updated when items were submitted from Active.
-              </p>
+                  Review Add-to-stock submissions (accountant / manager). Accept closes the PO to
+                  History. Reject returns it to Active so more items can be added — stock already
+                  posted is not removed.
+                </p>
             </div>
             {canRetirementReview ? (
               <PoRetirementPanel showAcceptedSection={false} />
