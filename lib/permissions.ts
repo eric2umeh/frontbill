@@ -1006,16 +1006,16 @@ export function canSupplyPoManagerReview(
   );
 }
 
-/** Market retirement review — accountant, administrator, superadmin, manager (not auditor). */
+/** Final retirement review — accountant, administrator, superadmin, manager, auditor. */
 export function canSupplyRetirementReview(
   userRole: string | null | undefined,
 ): boolean {
   const roleKey = canonicalRoleKey(userRole);
-  if (roleKey === "auditor") return false;
   return (
+    roleKey === "auditor" ||
+    roleKey === "manager" ||
     hasPermission(userRole, "supply:approve_accountant") ||
-    canAdminTestApproveSupplyPo(userRole) ||
-    roleKey === "manager"
+    canAdminTestApproveSupplyPo(userRole)
   );
 }
 
@@ -1067,13 +1067,27 @@ export function canRaisePurchaseRequest(
   );
 }
 
+/** Add purchased items to Central Store (Active tab). Includes auditor (view+add for audit ops). */
+export function canAddPurchasedToStock(
+  userRole: string | null | undefined,
+): boolean {
+  const roleKey = canonicalRoleKey(userRole);
+  return (
+    roleKey === "store" ||
+    roleKey === "purchaser" ||
+    roleKey === "auditor" ||
+    roleKey === "accountant" ||
+    roleKey === "manager" ||
+    roleKey === "admin" ||
+    roleKey === "superadmin"
+  );
+}
+
 /** Retire an approved PO at market. Auditor is view-only. */
 export function canSubmitMarketRetirement(
   userRole: string | null | undefined,
 ): boolean {
-  const roleKey = canonicalRoleKey(userRole);
-  if (!roleKey || roleKey === "auditor") return false;
-  return hasPermission(userRole, "supply:purchasing");
+  return canAddPurchasedToStock(userRole);
 }
 
 /** Open / close / delete a kitchen production run. Auditor is view-only. */
