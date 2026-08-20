@@ -44,8 +44,8 @@ function RetirementReviewCard({
         <div>
           <p className="font-medium">{po.poNumber}</p>
           <p className="text-sm text-muted-foreground">
-            Submitted by {r?.submittedBy} · Est. spend {formatNaira(r?.actualSpent ?? 0)} · Refund{' '}
-            {formatNaira(r?.refundToCashier ?? 0)}
+            Submitted by {r?.submittedBy} · Est. spend {formatNaira(r?.actualSpent ?? 0)} · Refund
+            purchaser {formatNaira(r?.refundToCashier ?? 0)}
           </p>
           {r?.submittedAt ? (
             <p className="text-xs text-muted-foreground">
@@ -80,7 +80,7 @@ function RetirementReviewCard({
                 setComment('')
               }}
             >
-              Accept retirement & update stock
+              Accept retirement
             </Button>
             <Button
               size="sm"
@@ -91,7 +91,7 @@ function RetirementReviewCard({
                 setComment('')
               }}
             >
-              Reject — send to Purchasing
+              Reject — return to Active
             </Button>
           </div>
         </>
@@ -138,8 +138,8 @@ export function PoRetirementPanel({
             ) : null}
           </h2>
           <p className="text-xs text-muted-foreground">
-            New retirements add stock immediately from Purchasing. This list is only for older
-            submissions still waiting for accountant accept/reject.
+            Items were already added to Central Store from Active → Add to stock. Accept to move
+            the PO to History, or reject with a comment so the team can continue adding items.
           </p>
         </div>
         {pending.length === 0 ? (
@@ -199,8 +199,8 @@ export function PoRetirementPanel({
                       else
                         toast.success(
                           approved
-                            ? 'Retirement approved — stock updated'
-                            : 'Retirement sent back to Purchasing',
+                            ? 'Retirement accepted — moved to History'
+                            : 'Returned to Active for more Add to stock',
                         )
                     }}
                   />
