@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -340,7 +341,11 @@ export function PurchasingWorkspace() {
   const selectedWorkLines = useMemo(
     () =>
       workLines.filter(
-        (l) => selectedIds[l.lineId] && !l.alreadyStocked && l.quantityBought > 0,
+        (l) =>
+          selectedIds[l.lineId] &&
+          !l.alreadyStocked &&
+          !(l.notBought || l.removed) &&
+          l.quantityBought > 0,
       ),
     [workLines, selectedIds],
   );
@@ -589,20 +594,27 @@ export function PurchasingWorkspace() {
             <div className="space-y-2">
               {pageItems.map((line) => {
                 const checked = Boolean(selectedIds[line.lineId]);
+                const notBought = line.notBought === true || line.removed === true;
                 return (
                   <div
                     key={line.lineId}
                     className={cn(
                       "rounded-lg border p-3 text-sm space-y-2",
                       line.newlyAdded &&
+                        !notBought &&
                         "border-emerald-400 bg-emerald-50/70 dark:bg-emerald-950/25",
                       line.alreadyStocked && "opacity-70 bg-muted/30",
-                      checked && !line.alreadyStocked && "ring-1 ring-primary/40",
+                      notBought &&
+                        "border-red-200 bg-red-50/70 dark:bg-red-950/20 opacity-90",
+                      checked &&
+                        !line.alreadyStocked &&
+                        !notBought &&
+                        "ring-1 ring-primary/40",
                     )}
                   >
                     <div className="flex flex-wrap items-start justify-between gap-2">
                       <div className="flex items-start gap-2 min-w-0">
-                        {!line.alreadyStocked ? (
+                        {!line.alreadyStocked && !notBought ? (
                           <Checkbox
                             checked={checked}
                             onCheckedChange={(v) =>
@@ -617,7 +629,15 @@ export function PurchasingWorkspace() {
                           <div className="w-4" />
                         )}
                         <div className="min-w-0">
-                          <p className="font-medium">{line.name}</p>
+                          <p
+                            className={cn(
+                              "font-medium",
+                              notBought &&
+                                "line-through decoration-2 text-muted-foreground",
+                            )}
+                          >
+                            {line.name}
+                          </p>
                           <p className="text-[10px] text-muted-foreground">
                             {DEPT_LABELS[line.dept] ?? line.dept}
                             {line.remainingCap != null && !line.alreadyStocked
@@ -625,7 +645,7 @@ export function PurchasingWorkspace() {
                               : ""}
                           </p>
                           <div className="flex flex-wrap gap-1 mt-1">
-                            {line.newlyAdded ? (
+                            {line.newlyAdded && !notBought ? (
                               <Badge className="bg-emerald-600 text-white text-[10px]">
                                 Newly added item
                               </Badge>
@@ -635,39 +655,50 @@ export function PurchasingWorkspace() {
                                 Already in stock
                               </Badge>
                             ) : null}
+                            {notBought ? (
+                              <Badge className="bg-red-100 text-red-900">
+                                Not bought / removed
+                              </Badge>
+                            ) : null}
                           </div>
                         </div>
                       </div>
                       {!line.alreadyStocked ? (
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="ghost"
-                          className="h-7 text-xs text-muted-foreground"
-                          onClick={() => {
-                            if (line.newlyAdded) {
+                        <div className="flex items-center gap-2 shrink-0">
+                          <Label
+                            htmlFor={`bought-${line.lineId}`}
+                            className="text-xs"
+                          >
+                            Bought
+                          </Label>
+                          <Switch
+                            id={`bought-${line.lineId}`}
+                            checked={!notBought}
+                            onCheckedChange={(bought) => {
                               setWorkLines((prev) =>
-                                prev.filter((l) => l.lineId !== line.lineId),
-                              )
-                              setSelectedIds((m) => {
-                                const next = { ...m }
-                                delete next[line.lineId]
-                                return next
-                              })
-                            } else {
-                              setSelectedIds((m) => ({
-                                ...m,
-                                [line.lineId]: false,
-                              }))
-                            }
-                          }}
-                        >
-                          {line.newlyAdded ? "Remove" : "Deselect"}
-                        </Button>
+                                prev.map((l) =>
+                                  l.lineId === line.lineId
+                                    ? {
+                                        ...l,
+                                        notBought: !bought,
+                                        removed: !bought,
+                                      }
+                                    : l,
+                                ),
+                              );
+                              if (!bought) {
+                                setSelectedIds((m) => ({
+                                  ...m,
+                                  [line.lineId]: false,
+                                }));
+                              }
+                            }}
+                          />
+                        </div>
                       ) : null}
                     </div>
 
-                    {!line.alreadyStocked && (
+                    {!line.alreadyStocked && !notBought && (
                       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 items-end pl-6">
                         <div>
                           <p className="text-[10px] text-muted-foreground mb-0.5">
@@ -707,7 +738,7 @@ export function PurchasingWorkspace() {
                         </div>
                         <div>
                           <p className="text-[10px] text-muted-foreground mb-0.5">
-                            Line total
+                            Total paid
                           </p>
                           <p className="font-medium tabular-nums">
                             {formatNaira(line.totalPaid)}
