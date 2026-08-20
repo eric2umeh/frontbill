@@ -1,4 +1,10 @@
-import type { PurchaseOrder, PoStatus } from '@/lib/supply-chain/types'
+import type {
+  AddToStockBatch,
+  PurchaseOrder,
+  PoStatus,
+  RetirementLine,
+  RetirementRecord,
+} from '@/lib/supply-chain/types'
 import { ensurePoApprovalFreeze } from '@/lib/supply-chain/po-format'
 
 /** Higher = further along the PO workflow (prefer when merging local vs remote). */
@@ -61,6 +67,148 @@ function poLineCount(po: PurchaseOrder): number {
   return Array.isArray(po.lines) ? po.lines.length : 0
 }
 
+function stockedRetirementCount(po: PurchaseOrder | undefined): number {
+  if (!po?.retirement?.lines?.length) return 0
+  return po.retirement.lines.filter(
+    (l) => Boolean(l.stockedAt) && !(l.notBought || l.removed),
+  ).length
+}
+
+function retirementLineKey(l: RetirementLine): string {
+  return [
+    l.lineId,
+    l.stockedAt ?? '',
+    String(l.quantityBought),
+    String(l.actualPrice),
+    l.newlyAdded ? '1' : '0',
+  ].join('|')
+}
+
+/** Union retirement lines / batches so a stale disbursed copy cannot erase Add-to-stock. */
+export function mergeRetirementRecords(
+  a?: RetirementRecord,
+  b?: RetirementRecord,
+): RetirementRecord | undefined {
+  if (!a && !b) return undefined
+  if (!a) return b
+  if (!b) return a
+
+  const byKey = new Map<string, RetirementLine>()
+  for (const line of [...(a.lines ?? []), ...(b.lines ?? [])]) {
+    const key = retirementLineKey(line)
+    const existing = byKey.get(key)
+    if (!existing) {
+      byKey.set(key, line)
+      continue
+    }
+    // Prefer the copy that was actually posted to stock.
+    if (line.stockedAt && !existing.stockedAt) byKey.set(key, line)
+  }
+
+  const batchesById = new Map<string, AddToStockBatch>()
+  for (const batch of [...(a.batches ?? []), ...(b.batches ?? [])]) {
+    if (!batch?.id) continue
+    if (!batchesById.has(batch.id)) batchesById.set(batch.id, batch)
+  }
+
+  const lines = [...byKey.values()]
+  const actualSpent = lines
+    .filter((l) => !(l.notBought || l.removed))
+    .reduce((s, l) => s + (Number(l.totalPaid) || 0), 0)
+  const priceChanges = lines.filter(
+    (l) => !(l.notBought || l.removed) && l.poPrice !== l.actualPrice,
+  ).length
+
+  const aSub = a.submittedAt ? Date.parse(a.submittedAt) : 0
+  const bSub = b.submittedAt ? Date.parse(b.submittedAt) : 0
+  const newerSubmit = aSub >= bSub ? a : b
+  const aRev = a.reviewedAt ? Date.parse(a.reviewedAt) : 0
+  const bRev = b.reviewedAt ? Date.parse(b.reviewedAt) : 0
+  const newerReview = aRev >= bRev ? a : b
+
+  return {
+    actualSpent,
+    refundToCashier: 0, // recomputed by callers when needed; keep cash side on PO
+    priceChanges,
+    lines,
+    batches: [...batchesById.values()],
+    submittedAt: newerSubmit.submittedAt || a.submittedAt || b.submittedAt,
+    submittedBy: newerSubmit.submittedBy || a.submittedBy || b.submittedBy,
+    accountantComment:
+      newerReview.accountantComment ?? a.accountantComment ?? b.accountantComment,
+    reviewedAt: newerReview.reviewedAt ?? a.reviewedAt ?? b.reviewedAt,
+    reviewedBy: newerReview.reviewedBy ?? a.reviewedBy ?? b.reviewedBy,
+  }
+}
+
+/**
+ * After picking a winner, keep any stocked Add-to-stock progress from either copy
+ * and heal status if a bare disbursed snapshot would otherwise wipe the review queue.
+ */
+function enrichWithRetirementProgress(
+  winner: PurchaseOrder,
+  other: PurchaseOrder,
+): PurchaseOrder {
+  const mergedRetirement = mergeRetirementRecords(winner.retirement, other.retirement)
+  if (!mergedRetirement?.lines?.length) return winner
+
+  const cash =
+    Number(winner.cashDisbursed) > 0
+      ? Number(winner.cashDisbursed)
+      : Number(other.cashDisbursed) || Number(winner.totalAmount) || 0
+  const refund = cash - mergedRetirement.actualSpent
+  const retirement: RetirementRecord = {
+    ...mergedRetirement,
+    refundToCashier: refund,
+  }
+
+  const hasStocked = retirement.lines.some(
+    (l) => Boolean(l.stockedAt) && !(l.notBought || l.removed),
+  )
+
+  let status = winner.status
+  if (hasStocked) {
+    if (status === 'disbursed' || status === 'approved' || status === 'retirement_pending') {
+      // Promote so History/review and Already-in-stock survive a stale overwrite.
+      if (other.status === 'retired' || winner.status === 'retired') {
+        status = 'retired'
+      } else if (
+        other.status === 'retirement_rejected' ||
+        winner.status === 'retirement_rejected'
+      ) {
+        // Keep rejected if that side is newer; else pending review.
+        const otherRev = other.retirement?.reviewedAt
+          ? Date.parse(other.retirement.reviewedAt)
+          : 0
+        const winRev = winner.retirement?.reviewedAt
+          ? Date.parse(winner.retirement.reviewedAt)
+          : 0
+        status =
+          other.status === 'retirement_rejected' && otherRev >= winRev
+            ? 'retirement_rejected'
+            : winner.status === 'retirement_rejected'
+              ? 'retirement_rejected'
+              : 'retirement_pending_accountant'
+      } else {
+        status = 'retirement_pending_accountant'
+      }
+    }
+  }
+
+  const workflowUpdatedAt =
+    poWorkflowTime(winner) >= poWorkflowTime(other)
+      ? winner.workflowUpdatedAt || other.workflowUpdatedAt
+      : other.workflowUpdatedAt || winner.workflowUpdatedAt
+
+  return {
+    ...winner,
+    status,
+    workflowUpdatedAt,
+    retirement,
+    cashDisbursed: cash > 0 ? cash : winner.cashDisbursed,
+  }
+}
+
 /** True when a newer retirement submit should beat an older accountant reject. */
 function retirementResubmitBeatsReject(
   pending: PurchaseOrder,
@@ -81,6 +229,33 @@ function retirementResubmitBeatsReject(
   )
 }
 
+function pickByWorkflowAndRank(a: PurchaseOrder, b: PurchaseOrder): PurchaseOrder {
+  const at = poWorkflowTime(a)
+  const bt = poWorkflowTime(b)
+  if (at !== bt) return at > bt ? a : b
+
+  if (a.status === 'accountant_rejected' && b.status === 'pending_accountant') return a
+  if (b.status === 'accountant_rejected' && a.status === 'pending_accountant') return b
+  if (a.status === 'manager_rejected' && b.status === 'pending_manager') return a
+  if (b.status === 'manager_rejected' && a.status === 'pending_manager') return b
+
+  const ar = poRank(a)
+  const br = poRank(b)
+  if (ar !== br) return ar > br ? a : b
+
+  const aContent = poLinesContentTime(a)
+  const bContent = poLinesContentTime(b)
+  if (aContent !== bContent) return aContent > bContent ? a : b
+
+  const aLines = poLineCount(a)
+  const bLines = poLineCount(b)
+  if (aLines === 0 && bLines > 0) return b
+  if (bLines === 0 && aLines > 0) return a
+  if (aLines !== bLines) return aLines > bLines ? a : b
+
+  return poTieBreaker(a) >= poTieBreaker(b) ? a : b
+}
+
 /**
  * Pick the newer / more authoritative PO when two copies conflict.
  * Reject must beat the pending stage it left unless a later resend advances the clock.
@@ -96,49 +271,39 @@ export function preferPurchaseOrder(
   const bDel = Number.isFinite(bDelRaw) ? bDelRaw : 0
   if (aDel || bDel) {
     if (aDel !== bDel) return aDel > bDel ? a : b
-    // Same clock (or only one tombstone): never resurrect a deleted PO from a live copy.
     if (a.deletedAt && !b.deletedAt) return a
     if (b.deletedAt && !a.deletedAt) return b
   }
 
-  // Retirement reject vs pending: reject wins unless store resubmitted after the reject.
-  // Do this before generic workflow clocks — remote pending often keeps an older
-  // workflowUpdatedAt that can otherwise resurrect the review queue after refresh.
   if (a.status === 'retirement_rejected' && b.status === 'retirement_pending_accountant') {
-    return retirementResubmitBeatsReject(b, a) ? b : a
+    const chosen = retirementResubmitBeatsReject(b, a) ? b : a
+    return enrichWithRetirementProgress(chosen, chosen === a ? b : a)
   }
   if (b.status === 'retirement_rejected' && a.status === 'retirement_pending_accountant') {
-    return retirementResubmitBeatsReject(a, b) ? a : b
+    const chosen = retirementResubmitBeatsReject(a, b) ? a : b
+    return enrichWithRetirementProgress(chosen, chosen === a ? b : a)
   }
 
-  const at = poWorkflowTime(a)
-  const bt = poWorkflowTime(b)
-  if (at !== bt) return at > bt ? a : b
+  // Never let a bare disbursed/approved snapshot erase stocked Add-to-stock progress.
+  const aStocked = stockedRetirementCount(a)
+  const bStocked = stockedRetirementCount(b)
+  if (aStocked !== bStocked) {
+    const richer = aStocked > bStocked ? a : b
+    const leaner = aStocked > bStocked ? b : a
+    // Retired always wins over in-flight add-to-stock when its clock is newer.
+    if (leaner.status === 'retired' && poWorkflowTime(leaner) >= poWorkflowTime(richer)) {
+      return enrichWithRetirementProgress(leaner, richer)
+    }
+    const chosen = pickByWorkflowAndRank(richer, leaner)
+    // If pick somehow chose the leaner disbursed copy, still force richer progress in.
+    return enrichWithRetirementProgress(
+      stockedRetirementCount(chosen) >= stockedRetirementCount(richer) ? chosen : richer,
+      leaner,
+    )
+  }
 
-  // Same clock: never let pending_* resurrect over a rejection of that stage
-  if (a.status === 'accountant_rejected' && b.status === 'pending_accountant') return a
-  if (b.status === 'accountant_rejected' && a.status === 'pending_accountant') return b
-  if (a.status === 'manager_rejected' && b.status === 'pending_manager') return a
-  if (b.status === 'manager_rejected' && a.status === 'pending_manager') return b
-
-  const ar = poRank(a)
-  const br = poRank(b)
-  if (ar !== br) return ar > br ? a : b
-
-  // Prefer newer line edits / clears before treating "empty vs filled".
-  // Intentional Clear stamps linesLastEditedAt so empty can beat a stale filled copy.
-  const aContent = poLinesContentTime(a)
-  const bContent = poLinesContentTime(b)
-  if (aContent !== bContent) return aContent > bContent ? a : b
-
-  // Same content clock: never let an empty/stale copy erase a filled draft cart.
-  const aLines = poLineCount(a)
-  const bLines = poLineCount(b)
-  if (aLines === 0 && bLines > 0) return b
-  if (bLines === 0 && aLines > 0) return a
-  if (aLines !== bLines) return aLines > bLines ? a : b
-
-  return poTieBreaker(a) >= poTieBreaker(b) ? a : b
+  const chosen = pickByWorkflowAndRank(a, b)
+  return enrichWithRetirementProgress(chosen, chosen === a ? b : a)
 }
 
 /**
@@ -176,7 +341,6 @@ export function mergePurchaseOrdersFromRemote(
     const l = localById.get(id)
     const r = remoteById.get(id)
     if (!l) {
-      // Remote-only: keep unless it is already a tombstone we can drop later.
       if (r) merged.push(r)
       continue
     }
