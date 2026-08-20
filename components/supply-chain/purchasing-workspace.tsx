@@ -350,10 +350,37 @@ export function PurchasingWorkspace() {
     [selectedWorkLines],
   );
 
-  const refundPreview = selected
-    ? selected.cashDisbursed -
-      ((selected.retirement?.actualSpent ?? 0) + selectedSpend)
-    : 0;
+  /** Form totals like the previous retire UI — all remaining lines on the page, not only the checkbox selection. */
+  const alreadyStockedSpend = selected?.retirement?.actualSpent ?? 0;
+  const formActualSpend = useMemo(
+    () =>
+      workLines
+        .filter((l) => !l.alreadyStocked && !(l.notBought || l.removed))
+        .reduce((s, l) => s + l.totalPaid, 0),
+    [workLines],
+  );
+  const actualSpent = alreadyStockedSpend + formActualSpend;
+  const notBoughtTotal = useMemo(
+    () =>
+      workLines
+        .filter((l) => !l.alreadyStocked && (l.notBought || l.removed))
+        .reduce(
+          (s, l) => s + l.poPrice * (l.remainingCap ?? l.quantityOrdered),
+          0,
+        ),
+    [workLines],
+  );
+  const refund = selected ? selected.cashDisbursed - actualSpent : 0;
+  const priceChangeCount = useMemo(
+    () =>
+      workLines.filter(
+        (l) =>
+          !l.alreadyStocked &&
+          !(l.notBought || l.removed) &&
+          l.poPrice !== l.actualPrice,
+      ).length,
+    [workLines],
+  );
 
   const handleExtraPicks = (picks: ExtraStockPick[]) => {
     const additions: WorkLine[] = picks.map((p) => {
@@ -503,32 +530,30 @@ export function PurchasingWorkspace() {
           />
         )}
 
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
           <StatCard label="Cash Disbursed" value={formatNaira(selected.cashDisbursed)} />
           <StatCard
-            label="Already stocked spend"
-            value={formatNaira(selected.retirement?.actualSpent ?? 0)}
-          />
-          <StatCard
-            label="This selection"
-            value={formatNaira(selectedSpend)}
+            label="Actual Spent"
+            value={formatNaira(actualSpent)}
             highlight
           />
-          {refundPreview < 0 ? (
+          <StatCard label="Not bought" value={formatNaira(notBoughtTotal)} />
+          {refund < 0 ? (
             <StatCard
               label="Refund Purchaser"
-              value={formatNaira(Math.abs(refundPreview))}
+              value={formatNaira(Math.abs(refund))}
               amountClassName="bg-red-500/15 text-red-800 dark:text-red-200"
             />
-          ) : refundPreview > 0 ? (
+          ) : refund > 0 ? (
             <StatCard
               label="Return Excess Cash"
-              value={formatNaira(refundPreview)}
+              value={formatNaira(refund)}
               amountClassName="bg-emerald-500/15 text-emerald-800 dark:text-emerald-200"
             />
           ) : (
-            <StatCard label="Cash even" value={formatNaira(0)} />
+            <StatCard label="Even" value={formatNaira(0)} />
           )}
+          <StatCard label="Price changes" value={String(priceChangeCount)} />
         </div>
 
         <PaginatedListShell
