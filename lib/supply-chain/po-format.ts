@@ -49,8 +49,74 @@ export function isPurchaseOrderHistoryStatus(status: string): boolean {
     "disbursed",
     "retirement_pending",
     "retirement_pending_accountant",
+    "retirement_rejected",
     "retired",
   ].includes(status);
+}
+
+/**
+ * Purchase Orders → History: manager-approved (and later market stages).
+ * Uses display status + approval freeze so a sync-healed PO is never hidden.
+ */
+export function isPurchaseOrderInPoMenuHistory(po: PurchaseOrder): boolean {
+  if (po.deletedAt) return false;
+  const display = resolvePoDisplayStatus(po);
+  if (display === "manager_rejected" || display === "accountant_rejected") {
+    return false;
+  }
+  if (isPurchaseOrderHistoryStatus(display) || isPurchaseOrderHistoryStatus(po.status)) {
+    return true;
+  }
+  // Approval freeze / stamp before status catches up on another tab.
+  return Boolean(po.approvedLines?.length || po.approvedAt);
+}
+
+/** Sort key for History — newest manager approval first. */
+export function poHistorySortTime(po: PurchaseOrder): number {
+  const stamps = [
+    po.approvedAt,
+    po.managerDecidedAt,
+    po.workflowUpdatedAt,
+    po.createdAt,
+  ];
+  let max = 0;
+  for (const s of stamps) {
+    if (!s) continue;
+    const n = Date.parse(s);
+    if (Number.isFinite(n) && n > max) max = n;
+  }
+  return max;
+}
+
+/**
+ * Ensure manager-approved POs have a frozen line snapshot (heals older records).
+ */
+export function ensurePoApprovalFreeze(po: PurchaseOrder): PurchaseOrder {
+  if (po.deletedAt) return po;
+  if (!isPurchaseOrderInPoMenuHistory(po)) return po;
+  if (po.approvedLines?.length) {
+    if (po.approvedAt) return po;
+    return {
+      ...po,
+      approvedAt:
+        po.managerDecidedAt || po.workflowUpdatedAt || po.createdAt,
+    };
+  }
+  if (!po.lines?.length) return po;
+  return {
+    ...po,
+    approvedLines: po.lines.map((l) => ({ ...l })),
+    approvedAt:
+      po.approvedAt ||
+      po.managerDecidedAt ||
+      po.workflowUpdatedAt ||
+      po.createdAt,
+    cashDisbursed:
+      Number(po.cashDisbursed) > 0
+        ? po.cashDisbursed
+        : Number(po.totalAmount) ||
+          po.lines.reduce((s, l) => s + (Number(l.lineTotal) || 0), 0),
+  };
 }
 
 /** Lines to show in PO history.
@@ -105,9 +171,14 @@ export function getPoHistoryLines(
     };
   }
 
+  const orderLines =
+    opts?.forceOrderLines && po.approvedLines?.length
+      ? po.approvedLines
+      : po.lines;
+
   return {
     mode: "order",
-    lines: po.lines.map((line) => ({
+    lines: orderLines.map((line) => ({
       id: line.id,
       stockItemId: line.stockItemId,
       name: line.name,
@@ -142,7 +213,6 @@ export function resolvePoDisplayStatus(po: PurchaseOrder): PurchaseOrder["status
   }
 
   if (po.retirement?.lines?.length) {
-    if (status === "retired") return "retired";
     if (po.retirement.reviewedAt) {
       return po.retirementComment || po.retirement.accountantComment
         ? "retirement_rejected"
