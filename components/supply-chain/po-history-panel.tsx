@@ -162,21 +162,18 @@ export function PoHistoryPanel({
                           <PoVarianceBadge po={po} />
                         ) : null}
                       </div>
-                      <p className="text-[13px] text-muted-foreground truncate">
+                      <p className="text-[13px] text-muted-foreground">
                         Raised {formatPoRaisedAt(po.createdAt)} ·{" "}
                         {po.createdByName} · {boughtCount}/{lines.length} lines
                         {showRetirement ? " (retirement)" : forceOrderLines ? " (approved PO)" : ""}
                       </p>
                     </div>
                   </div>
-                  <span className="text-[13px] text-muted-foreground hidden sm:inline max-w-[140px] truncate">
-                    {po.weekLabel}
-                  </span>
                 </button>
                 {open && (
                   <div className="border-t bg-muted/20 px-3 py-2 space-y-2">
                     <p className="text-[13px] text-muted-foreground">
-                      Procurement week: {po.weekLabel}
+                      Raised {formatPoRaisedAt(po.createdAt)}
                       {!forceOrderLines && po.retirement && (
                         <>
                           {" "}
