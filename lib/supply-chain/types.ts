@@ -385,6 +385,22 @@ export interface RetirementLine {
   removed?: boolean
   /** When false, item was not purchased at market (shown with *). Default true = bought. */
   notBought?: boolean
+  /** Bought at market but not on the original PO. */
+  newlyAdded?: boolean
+  /** Catalogue id — required for newly added lines; optional for PO lines. */
+  stockItemId?: string
+  dept?: Exclude<SupplyDept, 'all'>
+  /** When this line was posted to Central Store (partial Add to stock). */
+  stockedAt?: string
+  stockedBy?: string
+}
+
+export interface AddToStockBatch {
+  id: string
+  submittedAt: string
+  submittedBy: string
+  lineIds: string[]
+  actualSpent: number
 }
 
 export interface RetirementRecord {
@@ -392,6 +408,8 @@ export interface RetirementRecord {
   refundToCashier: number
   priceChanges: number
   lines: RetirementLine[]
+  /** Partial Add-to-stock submissions that accumulate on this PO. */
+  batches?: AddToStockBatch[]
   submittedAt: string
   submittedBy: string
   accountantComment?: string
