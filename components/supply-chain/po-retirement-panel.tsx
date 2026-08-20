@@ -91,12 +91,17 @@ function RetirementReviewCard({
                 setComment('')
               }}
             >
-              Reject — return to Active
+              Reject — return to Active (stock stays)
             </Button>
           </div>
+          <p className="text-[11px] text-muted-foreground">
+            Reject does not undo Central Store quantities or prices already posted.
+          </p>
         </>
       ) : (
-        <p className="text-xs text-muted-foreground">Waiting for accountant review.</p>
+        <p className="text-xs text-muted-foreground">
+          Waiting for accountant or manager to accept or reject this retirement.
+        </p>
       )}
     </div>
   )
@@ -138,8 +143,11 @@ export function PoRetirementPanel({
             ) : null}
           </h2>
           <p className="text-xs text-muted-foreground">
-            Items were already added to Central Store from Active → Add to stock. Accept to move
-            the PO to History, or reject with a comment so the team can continue adding items.
+            Stock was already posted to Central Store when items were submitted from Active.
+            <br />
+            <strong>Accept</strong> closes the PO and moves it to Retirement History.
+            <strong> Reject</strong> only sends the PO back to Active so more items can be added —
+            it does not remove stock already posted.
           </p>
         </div>
         {pending.length === 0 ? (
@@ -200,7 +208,7 @@ export function PoRetirementPanel({
                         toast.success(
                           approved
                             ? 'Retirement accepted — moved to History'
-                            : 'Returned to Active for more Add to stock',
+                            : 'Returned to Active. Stock already posted was not removed.',
                         )
                     }}
                   />
