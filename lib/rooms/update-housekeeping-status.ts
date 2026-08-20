@@ -2,9 +2,15 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import {
   getHousekeepingStatusDef,
   isHousekeepingStatusKey,
-  pmsStatusForHousekeepingStatus,
+  pmsStatusPatchForHousekeepingChange,
   type HousekeepingStatusKey,
 } from '@/lib/rooms/housekeeping-status'
+import {
+  OCCUPYING_BOOKING_STATUSES,
+  pickOccupyingBooking,
+  roomStatusFromOccupyingBooking,
+  type OccupyingBookingRow,
+} from '@/lib/rooms/room-occupancy'
 
 function isMissingTableError(message: string): boolean {
   const m = message.toLowerCase()
@@ -91,6 +97,29 @@ export async function applyHousekeepingStatusUpdate(
   }
 
   const roomNumber = String(room.room_number || params.roomNumber)
+  const currentPms = String(room.status || '')
+  const leavingOutOfOrder =
+    params.newStatus !== 'out_of_order' &&
+    currentPms.toLowerCase().replace(/-/g, '_') === 'out_of_order'
+
+  let occupyingPmsStatus: 'occupied' | 'reserved' | null = null
+  let occupancyKnown = !leavingOutOfOrder
+  if (leavingOutOfOrder) {
+    const { data: bookingRows, error: bookingErr } = await admin
+      .from('bookings')
+      .select('id, room_id, status, check_in, check_out, folio_status')
+      .eq('organization_id', params.organizationId)
+      .eq('room_id', params.roomId)
+      .in('status', [...OCCUPYING_BOOKING_STATUSES])
+    if (bookingErr) {
+      console.warn('[housekeeping-status] occupancy lookup failed:', bookingErr.message)
+    } else {
+      occupancyKnown = true
+      const occupying = pickOccupyingBooking((bookingRows ?? []) as OccupyingBookingRow[])
+      occupyingPmsStatus = occupying ? roomStatusFromOccupyingBooking(occupying) : null
+    }
+  }
+
   const patch: Record<string, unknown> = {
     housekeeping_status: params.newStatus,
     housekeeping_status_updated_at: now,
@@ -100,7 +129,13 @@ export async function applyHousekeepingStatusUpdate(
     updated_at: now,
   }
 
-  const syncedPms = pmsStatusForHousekeepingStatus(params.newStatus)
+  const syncedPms = occupancyKnown
+    ? pmsStatusPatchForHousekeepingChange({
+        hkStatus: params.newStatus,
+        currentPmsStatus: currentPms,
+        occupyingPmsStatus,
+      })
+    : null
   if (syncedPms) {
     patch.status = syncedPms
   }

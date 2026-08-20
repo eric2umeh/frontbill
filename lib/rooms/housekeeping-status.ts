@@ -109,11 +109,36 @@ export function isHousekeepingStatusBlockingBookings(key: string | null | undefi
   return (HOUSEKEEPING_STATUSES_BLOCKING_BOOKINGS as readonly string[]).includes(norm)
 }
 
-/** Sync PMS `rooms.status` when HK marks OOO so inventory / booking pickers respect it. */
+function normPmsStatus(s: string | null | undefined): string {
+  return String(s ?? '')
+    .toLowerCase()
+    .trim()
+    .replace(/-/g, '_')
+}
+
+/**
+ * Sync PMS `rooms.status` from HK floor status.
+ * Only OOO may rewrite front-office occupancy. Vacant / occupied / reservation are
+ * housekeeping labels — they must not flip a live stay to available or lock a vacant
+ * room as occupied/reserved.
+ */
 export function pmsStatusForHousekeepingStatus(hkStatus: HousekeepingStatusKey): string | null {
   if (hkStatus === 'out_of_order') return 'out_of_order'
-  if (hkStatus === 'vacant') return 'available'
-  if (hkStatus === 'occupied') return 'occupied'
-  if (hkStatus === 'reservation') return 'reserved'
+  return null
+}
+
+/**
+ * PMS `rooms.status` to write for an HK floor-status change, or null to leave occupancy alone.
+ * Clearing OOO restores occupied/reserved from the active folio, otherwise available.
+ */
+export function pmsStatusPatchForHousekeepingChange(params: {
+  hkStatus: HousekeepingStatusKey
+  currentPmsStatus: string | null | undefined
+  occupyingPmsStatus?: 'occupied' | 'reserved' | null
+}): string | null {
+  if (params.hkStatus === 'out_of_order') return 'out_of_order'
+  if (normPmsStatus(params.currentPmsStatus) === 'out_of_order') {
+    return params.occupyingPmsStatus ?? 'available'
+  }
   return null
 }
