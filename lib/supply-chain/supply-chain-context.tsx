@@ -97,7 +97,7 @@ import {
 } from "./unit-factor-storage";
 import type { StockShortageLine } from "@/lib/ui/stock-shortage-dialog";
 import { useAuth } from "@/lib/auth-context";
-import { canManageFnbStore, canManageKitchenBatchStandards, canOperateKitchenProduction, canRaisePurchaseRequest, canSubmitMarketRetirement, canAddPurchasedToStock, hasPermission } from "@/lib/permissions";
+import { canManageFnbStore, canManageKitchenBatchStandards, canOperateKitchenProduction, canRaisePurchaseRequest, canSubmitMarketRetirement, canAddPurchasedToStock, canSupplyRetirementReview, hasPermission } from "@/lib/permissions";
 import { isRetryableSupplyError } from "@/lib/utils/fetch-retry";
 import { isMainBarIssueDestination } from "@/lib/store/outlet-departments";
 import { formatSupplyActorStamp } from "./fnb-store";
@@ -1040,6 +1040,8 @@ function useSupplyChainImpl() {
 
     const refreshPurchaseOrders = async () => {
       try {
+        // Don't clobber a just-submitted Add-to-stock / retirement decision with a stale GET.
+        if (Date.now() - lastLocalSupplyMutationAt < 12_000) return;
         const snapshots = await fetchSupplySnapshots(
           userId,
           organizationId || undefined,
@@ -2288,7 +2290,7 @@ function useSupplyChainImpl() {
       poId: string,
       lines: RetirementLine[],
       actor: Actor,
-    ): { ok: true; posted: number } | { error: string } => {
+    ): { ok: true; posted: number; stampedLineIds: string[] } | { error: string } => {
       if (!canAddPurchasedToStock(actor.role)) {
         return { error: "You do not have permission to add items to stock." };
       }
@@ -2315,6 +2317,7 @@ function useSupplyChainImpl() {
       }));
       const batchSpend = stamped.reduce((s, l) => s + l.totalPaid, 0);
       const posted = applyRetirementToStock(po, stamped);
+      markLocalSupplyMutation();
 
       setPurchaseOrders((prev) => {
         const next = prev.map((p) => {
@@ -2344,9 +2347,9 @@ function useSupplyChainImpl() {
               ).length,
               lines: mergedLines,
               batches: [...(p.retirement?.batches ?? []), batch],
-              submittedAt: p.retirement?.submittedAt ?? nowIso,
-              submittedBy: p.retirement?.submittedBy ?? actor.name,
-              accountantComment: p.retirement?.accountantComment,
+              submittedAt: nowIso,
+              submittedBy: actor.name,
+              accountantComment: undefined,
               reviewedAt: undefined,
               reviewedBy: undefined,
             },
@@ -2372,7 +2375,7 @@ function useSupplyChainImpl() {
         href: "/supply/purchasing?tab=retirement",
       });
       void persistSnapshotsNow();
-      return { ok: true, posted };
+      return { ok: true as const, posted, stampedLineIds: stamped.map((l) => l.lineId) };
     },
     [purchaseOrders, applyRetirementToStock, persistSnapshotsNow],
   );
@@ -2406,6 +2409,12 @@ function useSupplyChainImpl() {
       comment: string,
       actor: Actor,
     ): { ok: true } | { error: string } => {
+      if (!canSupplyRetirementReview(actor.role)) {
+        return {
+          error:
+            "Only accountant, manager, or administrator can accept or reject retirement.",
+        };
+      }
       const po = purchaseOrders.find((p) => p.id === poId);
       if (!po?.retirement) return { error: "Retirement not found" };
       if (po.status !== "retirement_pending_accountant") {
@@ -2413,6 +2422,7 @@ function useSupplyChainImpl() {
       }
 
       const nowIso = new Date().toISOString();
+      markLocalSupplyMutation();
 
       if (!approved) {
         setPurchaseOrders((prev) => {
@@ -2447,7 +2457,9 @@ function useSupplyChainImpl() {
         pushSupplyNotification({
           audience: ["purchasing", "store"],
           title: `Retirement rejected — ${po.poNumber}`,
-          body: comment || "Retirement was rejected. Continue Add to stock or adjust.",
+          body:
+            (comment || "Returned to Active for more Add to stock.") +
+            " Stock already posted was not removed.",
           href: "/supply/purchasing?tab=active",
         });
         void persistSnapshotsNow();
