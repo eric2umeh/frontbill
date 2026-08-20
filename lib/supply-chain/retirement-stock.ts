@@ -28,7 +28,7 @@ export function applyRetirementLinesToCatalog(
       rl.actualStockUnitPrice ??
       (stockQty > 0 ? rl.totalPaid / stockQty : rl.actualPrice)
 
-    const stockId = pl?.stockItemId?.trim() || ''
+    const stockId = rl.stockItemId?.trim() || pl?.stockItemId?.trim() || ''
     let idx = stockId ? next.findIndex((s) => s.id === stockId) : -1
     if (idx < 0) {
       const key = nameKey(pl?.name || rl.name)
@@ -49,7 +49,11 @@ export function applyRetirementLinesToCatalog(
       stockId ||
       `st-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
     const unit = pl?.storeUnit || pl?.unit || rl.storeUnit || rl.unit || 'pcs'
-    const dept = pl?.dept ? normalizeSupplyDept(pl.dept) : 'restaurant'
+    const dept = rl.dept
+      ? normalizeSupplyDept(rl.dept)
+      : pl?.dept
+        ? normalizeSupplyDept(pl.dept)
+        : 'restaurant'
     const price = Number.isFinite(stockUnitPrice) ? stockUnitPrice : 0
     next.push(
       applyStoreItemDeptFields({
