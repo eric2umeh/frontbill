@@ -287,7 +287,7 @@ export function ActivePurchaseOrderPanel({ actor, storeItems }: Props) {
                 ? 'You cannot retire again until the accountant accepts or rejects this submission.'
                 : displayStatus === 'retirement_rejected'
                   ? 'Fix the retirement and resubmit from Retirement.'
-                  : 'Cash is disbursed for purchasing. Retire at market when shopping is done.'}
+                  : 'Cash is disbursed. Add purchased items to stock from Retirement → Active.'}
             </p>
           </div>
         ) : inApprovalPipeline ? (
@@ -317,10 +317,10 @@ export function ActivePurchaseOrderPanel({ actor, storeItems }: Props) {
               </Badge>
             ) : approvedForMarket ? (
               <Button asChild variant="outline" size="sm">
-                <Link href={`/supply/purchasing?po=${po.id}`}>
+                <Link href={`/supply/purchasing?po=${po.id}&tab=active`}>
                   {displayStatus === 'retirement_rejected'
-                    ? 'Edit retirement'
-                    : 'Retire at market'}
+                    ? 'Continue Add to stock'
+                    : 'Add to stock'}
                 </Link>
               </Button>
             ) : (
