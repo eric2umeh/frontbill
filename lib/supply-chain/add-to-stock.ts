@@ -6,9 +6,16 @@ function lineNotBought(line: RetirementLine) {
 
 /** Qty already posted to Central Store for a PO line (sum of stocked retirement rows). */
 export function stockedQtyForPoLine(po: PurchaseOrder, lineId: string): number {
-  return (po.retirement?.lines ?? [])
-    .filter((l) => l.lineId === lineId && !lineNotBought(l) && Boolean(l.stockedAt))
-    .reduce((s, l) => s + (Number(l.quantityBought) || 0), 0)
+  const seen = new Set<string>()
+  let total = 0
+  for (const l of po.retirement?.lines ?? []) {
+    if (l.lineId !== lineId || lineNotBought(l) || !l.stockedAt) continue
+    const key = `${l.stockedAt}|${l.quantityBought}|${l.actualPrice}|${l.newlyAdded ? 1 : 0}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    total += Number(l.quantityBought) || 0
+  }
+  return total
 }
 
 /** Remaining purchase qty that can still be added to stock for an original PO line. */
