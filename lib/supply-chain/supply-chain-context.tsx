@@ -1972,18 +1972,38 @@ function useSupplyChainImpl() {
     (poId: string, approved: boolean, comment: string, actor: Actor) => {
       const nowIso = new Date().toISOString();
       setPurchaseOrders((prev) => {
-        const next = prev.map((po) =>
-          po.id === poId
-            ? {
+        const next = dedupePurchaseOrders(
+          prev.map((po) => {
+            if (po.id !== poId) return po;
+            if (!approved) {
+              return {
                 ...po,
-                status: approved ? "disbursed" : "manager_rejected",
+                status: "manager_rejected" as const,
                 managerComment: comment,
                 managerDecidedBy: actor.name,
                 managerDecidedRole: actor.role,
                 managerDecidedAt: nowIso,
                 workflowUpdatedAt: nowIso,
-              }
-            : po,
+              };
+            }
+            const frozenLines = po.lines.map((l) => ({ ...l }));
+            const total =
+              Number(po.totalAmount) ||
+              frozenLines.reduce((s, l) => s + (Number(l.lineTotal) || 0), 0);
+            return {
+              ...po,
+              status: "disbursed" as const,
+              managerComment: comment,
+              managerDecidedBy: actor.name,
+              managerDecidedRole: actor.role,
+              managerDecidedAt: nowIso,
+              approvedAt: nowIso,
+              approvedLines: frozenLines,
+              cashDisbursed: total,
+              totalAmount: total,
+              workflowUpdatedAt: nowIso,
+            };
+          }),
         );
         purchaseOrdersRef.current = next;
         return next;
@@ -2004,8 +2024,8 @@ function useSupplyChainImpl() {
           pushSupplyNotification({
             audience: ["purchasing", "store"],
             title: `PO approved — ${po.poNumber}`,
-            body: `Manager approved. Ready to buy at market, then retire from Retirement.`,
-            href: "/supply/purchasing",
+            body: `Manager approved. Listed in Purchase Orders → History (read-only). Ready to buy at market from Retirement.`,
+            href: "/supply/purchase-orders?tab=history",
           });
         } else {
           pushSupplyNotification({
@@ -2043,6 +2063,10 @@ function useSupplyChainImpl() {
           )
             return po;
           if (approved) {
+            const frozenLines = po.lines.map((l) => ({ ...l }));
+            const total =
+              Number(po.totalAmount) ||
+              frozenLines.reduce((s, l) => s + (Number(l.lineTotal) || 0), 0);
             return {
               ...po,
               status: "disbursed" as const,
@@ -2053,6 +2077,10 @@ function useSupplyChainImpl() {
               managerDecidedBy: actor.name,
               managerDecidedRole: actor.role,
               managerDecidedAt: nowIso,
+              approvedAt: nowIso,
+              approvedLines: frozenLines,
+              cashDisbursed: total,
+              totalAmount: total,
               workflowUpdatedAt: nowIso,
             };
           }
@@ -2095,8 +2123,8 @@ function useSupplyChainImpl() {
         pushSupplyNotification({
           audience: ["purchasing", "store"],
           title: `PO approved (admin test) — ${po.poNumber}`,
-          body: comment,
-          href: "/supply/purchasing",
+          body: comment || "Listed in Purchase Orders → History (read-only).",
+          href: "/supply/purchase-orders?tab=history",
         });
       } else if (po && !approved) {
         pushSupplyNotification({
