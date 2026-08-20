@@ -9,7 +9,7 @@ import type {
 } from "./types";
 import { storeItemDepartments } from "./types";
 import { canonicalRoleKey } from "@/lib/permissions";
-import { isPurchaseOrderHistoryStatus, resolvePoDisplayStatus } from "./po-format";
+import { isPurchaseOrderHistoryStatus, isPurchaseOrderInPoMenuHistory, resolvePoDisplayStatus } from "./po-format";
 
 type LineActor = { name: string; role: string };
 
@@ -55,6 +55,15 @@ export function canPrivilegeMutateSupplyPo(
  * Privileged roles may edit while awaiting accountant / store review.
  * Chef may only edit kitchen draft / accountant_rejected.
  */
+/** Manager-approved PO lines are frozen — History must stay immutable. */
+export function isPurchaseOrderLineLocked(
+  po: PurchaseOrder | undefined | null,
+): boolean {
+  if (!po) return false;
+  if (po.approvedLines?.length || po.approvedAt) return true;
+  return isPurchaseOrderHistoryStatus(resolvePoDisplayStatus(po));
+}
+
 export function canMutatePurchaseOrder(
   po: PurchaseOrder | undefined,
   userRole: string | null | undefined,
@@ -67,6 +76,9 @@ export function canMutatePurchaseOrder(
       hasStoreRaiseRole(userRole)
     );
   }
+
+  // Once manager approved, PO lines never change (retirement uses its own rows).
+  if (isPurchaseOrderLineLocked(po)) return false;
 
   const origin = poOriginOf(po);
 
@@ -87,8 +99,6 @@ export function canMutatePurchaseOrder(
       "accountant_rejected",
       "manager_rejected",
       "pending_manager",
-      "retirement_pending_accountant",
-      "retirement_rejected",
     ].includes(po.status);
   }
 
@@ -98,8 +108,7 @@ export function canMutatePurchaseOrder(
       po.status === "draft" ||
       po.status === "accountant_rejected" ||
       po.status === "manager_rejected" ||
-      po.status === "pending_store" ||
-      po.status === "retirement_rejected"
+      po.status === "pending_store"
     );
   }
 
@@ -120,12 +129,12 @@ export function canEditStorePurchaseOrder(
 ): boolean {
   if (!po) return true;
   if (isPurchaseOrderDeleted(po)) return false;
+  if (isPurchaseOrderLineLocked(po)) return false;
   return (
     po.status === "draft" ||
     po.status === "accountant_rejected" ||
     po.status === "manager_rejected" ||
-    po.status === "pending_store" ||
-    po.status === "retirement_rejected"
+    po.status === "pending_store"
   );
 }
 
@@ -135,11 +144,11 @@ export function canDeleteStorePurchaseOrder(
   userRole?: string | null,
 ): boolean {
   if (!po || isPurchaseOrderDeleted(po)) return false;
+  if (isPurchaseOrderLineLocked(po)) return false;
   const deletable = [
     "draft",
     "accountant_rejected",
     "manager_rejected",
-    "retirement_rejected",
   ].includes(po.status);
   if (!deletable) return false;
   if (userRole != null) return canMutatePurchaseOrder(po, userRole);
@@ -289,7 +298,7 @@ export function getActivePurchaseOrder(
     if (
       focused &&
       !isPurchaseOrderDeleted(focused) &&
-      !isPurchaseOrderHistoryStatus(focused.status)
+      !isPurchaseOrderInPoMenuHistory(focused)
     ) {
       return focused;
     }
@@ -297,7 +306,7 @@ export function getActivePurchaseOrder(
 
   const candidates = orders.filter(
     (p) =>
-      !isPurchaseOrderHistoryStatus(p.status) && !isPurchaseOrderDeleted(p),
+      !isPurchaseOrderInPoMenuHistory(p) && !isPurchaseOrderDeleted(p),
   );
   if (!candidates.length) return undefined;
 
