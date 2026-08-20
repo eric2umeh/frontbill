@@ -346,6 +346,13 @@ export interface PurchaseOrder {
   deletedBy?: string
   cashDisbursed: number
   lines: PoLine[]
+  /**
+   * Frozen copy of lines at manager approval — Purchase Orders → History always
+   * shows this (never market / retirement edits). Set once; never mutated.
+   */
+  approvedLines?: PoLine[]
+  /** When manager (or admin test) approved for market — used to sort History. */
+  approvedAt?: string
   totalAmount: number
   accountantComment?: string
   /** Who last accepted/rejected at accountant (or admin test) stage. */
