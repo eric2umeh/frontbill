@@ -9,7 +9,8 @@ import {
   getPoHistoryLines,
   getPoRetiredAmount,
   getPoRetirementDelta,
-  isPurchaseOrderHistoryStatus,
+  isPurchaseOrderInPoMenuHistory,
+  poHistorySortTime,
   retirementLineChanged,
 } from "@/lib/supply-chain/po-format";
 import { poStatusBadge } from "@/components/supply-chain/po-approval-panel";
@@ -38,12 +39,14 @@ export function PoHistoryPanel({
   /** Central Store History: always the manager-approved PO, never retirement edits. */
   forceOrderLines?: boolean;
 }) {
-  const history = purchaseOrders.filter((po) =>
-    !po.deletedAt &&
-    (includeStatuses
-      ? includeStatuses.includes(po.status)
-      : isPurchaseOrderHistoryStatus(po.status)),
-  );
+  const history = useMemo(() => {
+    const rows = purchaseOrders.filter((po) =>
+      includeStatuses
+        ? !po.deletedAt && includeStatuses.includes(po.status)
+        : isPurchaseOrderInPoMenuHistory(po),
+    );
+    return [...rows].sort((a, b) => poHistorySortTime(b) - poHistorySortTime(a));
+  }, [purchaseOrders, includeStatuses]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const deptFilterOptions = useMemo(
@@ -120,7 +123,7 @@ export function PoHistoryPanel({
       }}
       emptyMessage={
         emptyMessageProp ??
-        "No purchase orders in history yet. POs appear here after manager approval (read-only). Retired POs also show here after market retirement."
+        "No purchase orders in history yet. After manager approval, the exact approved PO appears here immediately (read-only) and stays permanently."
       }
     >
       {(pagePos, ctx) => (
@@ -154,7 +157,7 @@ export function PoHistoryPanel({
                         <span className="text-sm font-semibold tabular-nums">
                           {formatNaira(
                             forceOrderLines
-                              ? po.totalAmount || po.cashDisbursed
+                              ? getPoApprovedAmount(po)
                               : (po.retirement?.actualSpent ?? po.totalAmount),
                           )}
                         </span>
@@ -192,12 +195,20 @@ export function PoHistoryPanel({
                       </>
                     ) : (
                       <PoReviewLinesPanel
-                        lines={po.lines}
+                        lines={
+                          forceOrderLines && po.approvedLines?.length
+                            ? po.approvedLines
+                            : po.lines
+                        }
                         pageSize={10}
                         showDept
                         compact
                         deptFilter={deptFilter}
-                        title={`Order lines (${po.lines.length})`}
+                        title={`Order lines (${
+                          forceOrderLines && po.approvedLines?.length
+                            ? po.approvedLines.length
+                            : po.lines.length
+                        })`}
                       />
                     )}
                   </div>
