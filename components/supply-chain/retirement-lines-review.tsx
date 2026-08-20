@@ -29,17 +29,19 @@ export function RetirementLinesReview({
     return rLines
       .map((line) => {
         const orig = po.lines.find((l) => l.id === line.lineId)
-        const dept = normalizeSupplyDept(orig?.dept ?? 'kitchen')
+        const dept = normalizeSupplyDept(line.dept ?? orig?.dept ?? 'kitchen')
         const notBought = lineNotBought(line)
+        const newlyAdded = line.newlyAdded === true
         const qtyChanged =
           !notBought &&
+          !newlyAdded &&
           orig != null &&
           Number(line.quantityBought) !== Number(orig.quantityOrdered)
         const priceChanged =
           !notBought &&
           orig != null &&
           Number(line.actualPrice) !== Number(orig.unitPrice)
-        return { line, orig, dept, notBought, qtyChanged, priceChanged }
+        return { line, orig, dept, notBought, qtyChanged, priceChanged, newlyAdded }
       })
       .filter((row) => {
         if (!deptFilter || deptFilter === 'all') return true
@@ -57,14 +59,17 @@ export function RetirementLinesReview({
 
   return (
     <ul className="space-y-2">
-      {rows.map(({ line, orig, dept, notBought, qtyChanged, priceChanged }) => (
+      {rows.map(({ line, orig, dept, notBought, qtyChanged, priceChanged, newlyAdded }) => (
         <li
-          key={line.lineId}
+          key={`${line.lineId}-${line.stockedAt ?? 'x'}`}
           className={cn(
             'rounded-md border px-3 py-2.5 text-sm',
+            newlyAdded &&
+              'border-emerald-400 bg-emerald-50/70 dark:bg-emerald-950/25 dark:border-emerald-800',
             notBought &&
               'border-red-200 bg-red-50/60 dark:bg-red-950/25 dark:border-red-900',
             !notBought &&
+              !newlyAdded &&
               (qtyChanged || priceChanged) &&
               'border-amber-300 bg-amber-50/70 dark:bg-amber-950/30 dark:border-amber-800',
           )}
@@ -104,6 +109,11 @@ export function RetirementLinesReview({
                   : null}
               </p>
               <div className="flex flex-wrap gap-1.5 pt-0.5">
+                {newlyAdded ? (
+                  <Badge className="bg-emerald-600 text-white text-[10px]">
+                    Newly added item
+                  </Badge>
+                ) : null}
                 {notBought ? (
                   <Badge className="bg-red-100 text-red-900 gap-1">
                     <Ban className="h-3 w-3" />
