@@ -131,6 +131,7 @@ import {
   applyRetirementBatchDecision,
   hasPendingRetirementReview,
   poHasRemainingAddToStockLines,
+  remainingQtyForPoLine,
 } from "./add-to-stock";
 
 function applyRemoteArray<T>(
@@ -2410,9 +2411,38 @@ function useSupplyChainImpl() {
         return { error: "Select at least one item with quantity to add to stock." };
       }
 
+      // Never re-post beyond remaining — already stocked qty stays locked.
+      const capped: RetirementLine[] = [];
+      for (const l of batchLines) {
+        if (l.newlyAdded) {
+          capped.push(l);
+          continue;
+        }
+        const rem = remainingQtyForPoLine(po, l.lineId);
+        if (rem <= 0) {
+          return {
+            error: `${l.name} is already in stock and cannot be edited or posted again.`,
+          };
+        }
+        const qty = Math.min(Number(l.quantityBought) || 0, rem);
+        if (qty <= 0) continue;
+        capped.push({
+          ...l,
+          quantityBought: qty,
+          totalPaid: qty * (Number(l.actualPrice) || 0),
+          stockQuantityBought:
+            l.stockQuantityOrdered && l.quantityOrdered > 0
+              ? (qty / l.quantityOrdered) * l.stockQuantityOrdered
+              : l.stockQuantityBought ?? qty,
+        });
+      }
+      if (!capped.length) {
+        return { error: "Select at least one item with remaining quantity to add to stock." };
+      }
+
       const nowIso = new Date().toISOString();
       const batchId = `ats-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
-      const stamped = batchLines.map((l) => ({
+      const stamped = capped.map((l) => ({
         ...l,
         stockedAt: nowIso,
         stockedBy: actor.name,
