@@ -14,7 +14,7 @@ import {
 } from '@/lib/permissions'
 import { isRetirementReviewCandidate } from '@/lib/supply-chain/add-to-stock'
 
-/** Pending PO approvals + retirement reviews for Supply Chain → Purchase Orders. */
+/** Split pending queues: PO Approvals vs Retirement review (separate nav badges). */
 export type SupplyPoPendingCounts = {
   total: number
   purchaseOrders: number
@@ -52,10 +52,18 @@ export function useSupplyPoPendingCounts(
   }, [purchaseOrders, role])
 }
 
+/** Purchase Orders menu only — never send users to Retirement. */
 export function supplyPoHrefForPendingCounts(counts: SupplyPoPendingCounts): string {
-  if (counts.retirements > 0) return '/supply/purchasing?tab=active'
   if (counts.purchaseOrders > 0) return '/supply/purchase-orders?tab=approvals'
   return '/supply/purchase-orders'
+}
+
+/** Retirement menu — review queue for accountant / auditor / admin / manager. */
+export function supplyRetirementHrefForPendingCounts(
+  counts: SupplyPoPendingCounts,
+): string {
+  if (counts.retirements > 0) return '/supply/purchasing?tab=retirement'
+  return '/supply/purchasing'
 }
 
 /** @deprecated Use useSupplyPoPendingCounts — PO queue moved out of Expenses. */
