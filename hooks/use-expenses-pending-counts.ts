@@ -12,6 +12,7 @@ import {
   canSupplyPoManagerReview,
   canSupplyRetirementReview,
 } from '@/lib/permissions'
+import { isRetirementReviewCandidate } from '@/lib/supply-chain/add-to-stock'
 
 /** Pending PO approvals + retirement reviews for Supply Chain → Purchase Orders. */
 export type SupplyPoPendingCounts = {
@@ -39,7 +40,7 @@ export function useSupplyPoPendingCounts(
 
     if (canSupplyRetirementReview(role) || admin) {
       retirements = purchaseOrders.filter(
-        (p) => !p.deletedAt && p.status === 'retirement_pending_accountant',
+        (p) => !p.deletedAt && isRetirementReviewCandidate(p),
       ).length
     }
 
