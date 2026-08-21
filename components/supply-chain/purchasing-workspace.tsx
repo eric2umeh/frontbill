@@ -56,6 +56,7 @@ import {
   isSubmittedAddToStockLine,
   poHasRemainingAddToStockLines,
   remainingQtyForPoLine,
+  stockedQtyForPoLine,
 } from "@/lib/supply-chain/add-to-stock";
 import {
   parseQuantityValue,
@@ -181,6 +182,7 @@ export function PurchasingWorkspace() {
     return "active";
   });
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [bulkConfirmOpen, setBulkConfirmOpen] = useState(false);
   const [extraOpen, setExtraOpen] = useState(false);
 
   const actor = {
@@ -241,10 +243,59 @@ export function PurchasingWorkspace() {
 
     const lines: WorkLine[] = [];
     for (const l of po.lines) {
-      // Bought or not-bought submit closes the line — do not show it again on Add to stock.
-      if (isPoLineSubmittedToStock(po, l.id)) continue;
+      const submitted = isPoLineSubmittedToStock(po, l.id);
+      const already = stockedQtyForPoLine(po, l.id);
+      const decisionRows = (po.retirement?.lines ?? []).filter(
+        (r) => r.lineId === l.id && isSubmittedAddToStockLine(r),
+      );
+      const lastDecision = decisionRows[decisionRows.length - 1];
+      const wasNotBought = Boolean(
+        lastDecision &&
+          (lastDecision.notBought === true || lastDecision.removed === true),
+      );
+      const stockedRows = decisionRows.filter((r) => isPostedStockLine(r));
+      const lastStocked = stockedRows[stockedRows.length - 1];
 
-      // Not yet submitted — editable; user may raise or lower qty/price, then submit ends it.
+      // Submitted (bought or not bought) → listed read-only, never editable again.
+      if (submitted) {
+        const postedPrice = lastStocked?.actualPrice ?? l.unitPrice;
+        lines.push({
+          lineId: l.id,
+          workKey: `${l.id}__stocked`,
+          name: l.name,
+          unit: l.unit,
+          storeUnit: l.storeUnit,
+          quantityOrdered: l.quantityOrdered,
+          stockQuantityOrdered: l.stockQuantityOrdered,
+          quantityBought: wasNotBought
+            ? 0
+            : already > 0
+              ? already
+              : lastStocked?.quantityBought ?? 0,
+          stockQuantityBought: wasNotBought
+            ? 0
+            : lastStocked?.stockQuantityBought ?? l.stockQuantityOrdered,
+          poPrice: l.unitPrice,
+          actualPrice: wasNotBought ? l.unitPrice : postedPrice,
+          actualStockUnitPrice:
+            lastStocked?.actualStockUnitPrice ?? l.stockUnitPrice,
+          totalPaid: wasNotBought
+            ? 0
+            : stockedRows.reduce((s, r) => s + (Number(r.totalPaid) || 0), 0),
+          notBought: wasNotBought,
+          removed: wasNotBought,
+          stockItemId: l.stockItemId,
+          dept: normalizeSupplyDept(l.dept),
+          alreadyStocked: true,
+          remainingCap: 0,
+          stockedAt: lastDecision?.stockedAt,
+          reviewStatus: lastDecision?.reviewStatus,
+          batchId: lastDecision?.batchId,
+        });
+        continue;
+      }
+
+      // Open — selectable + editable until submit.
       const defaultQty = remainingQtyForPoLine(po, l.id);
       lines.push({
         lineId: l.id,
@@ -267,24 +318,25 @@ export function PurchasingWorkspace() {
         stockItemId: l.stockItemId,
         dept: normalizeSupplyDept(l.dept),
         alreadyStocked: false,
-        // No max — increase or decrease vs PO ordered is allowed until submit.
         remainingCap: null,
       });
     }
 
-    // Carry newly-added draft rows that were not yet stocked
     for (const rl of po.retirement?.lines ?? []) {
       if (!rl.newlyAdded) continue;
-      if (isSubmittedAddToStockLine(rl)) continue;
       if (lines.some((x) => x.lineId === rl.lineId)) continue;
+      const closed = isSubmittedAddToStockLine(rl);
       lines.push({
         ...rl,
-        workKey: `${rl.lineId}__new`,
+        workKey: `${rl.lineId}__${closed ? "stocked" : "new"}`,
         dept: normalizeSupplyDept(rl.dept ?? "restaurant"),
-        alreadyStocked: false,
-        remainingCap: null,
+        alreadyStocked: closed,
+        remainingCap: closed ? 0 : null,
       });
     }
+
+    // Open (editable) first, then closed read-only rows.
+    lines.sort((a, b) => Number(a.alreadyStocked) - Number(b.alreadyStocked));
 
     setWorkLines(lines);
     const qty: Record<string, string> = {};
@@ -406,6 +458,22 @@ export function PurchasingWorkspace() {
     [workLines],
   );
 
+  const openBoughtLines = useMemo(
+    () =>
+      workLines.filter(
+        (l) =>
+          !l.alreadyStocked &&
+          !(l.notBought || l.removed) &&
+          l.quantityBought > 0,
+      ),
+    [workLines],
+  );
+
+  const bulkSpend = useMemo(
+    () => openBoughtLines.reduce((s, l) => s + l.totalPaid, 0),
+    [openBoughtLines],
+  );
+
   const handleExtraPicks = (picks: ExtraStockPick[]) => {
     const additions: WorkLine[] = picks.map((p) => {
       const lineId = `new-${p.stockItemId}-${Date.now().toString(36)}-${Math.random()
@@ -454,16 +522,19 @@ export function PurchasingWorkspace() {
     );
   };
 
-  const submitSelected = () => {
+  const runSubmitPayload = (
+    bought: WorkLine[],
+    notBought: WorkLine[],
+  ) => {
     if (!selected || !canAddStock) return;
-    if (!selectedWorkLines.length && !notBoughtToClose.length) {
+    if (!bought.length && !notBought.length) {
       toast.error(
         "Select at least one item to add to stock, or mark items as not bought",
       );
       return;
     }
     const payload: RetirementLine[] = [
-      ...selectedWorkLines.map((l) => ({
+      ...bought.map((l) => ({
         lineId: l.lineId,
         name: l.name,
         unit: l.unit,
@@ -481,7 +552,7 @@ export function PurchasingWorkspace() {
         stockItemId: l.stockItemId,
         dept: l.dept,
       })),
-      ...notBoughtToClose.map((l) => ({
+      ...notBought.map((l) => ({
         lineId: l.lineId,
         name: l.name,
         unit: l.unit,
@@ -509,7 +580,7 @@ export function PurchasingWorkspace() {
     }
     playNotificationBeep();
     if (res && "posted" in res) {
-      const notBoughtCount = notBoughtToClose.length;
+      const notBoughtCount = notBought.length;
       toast.success(
         res.posted > 0
           ? canRetirementReview
@@ -520,7 +591,6 @@ export function PurchasingWorkspace() {
             : "Submitted for retirement review — check Central Store if stock did not increase",
       );
     }
-    // Lock submitted lines immediately — one submit ends edit for that item.
     setWorkLines((prev) =>
       prev.map((l) => {
         if (!stampedIds.has(l.lineId)) return l;
@@ -537,10 +607,18 @@ export function PurchasingWorkspace() {
     );
     setSelectedIds({});
     setConfirmOpen(false);
+    setBulkConfirmOpen(false);
     setSelectedId(null);
     setWorkLines([]);
-    // Only reviewers land on Retirement; store/purchaser stay on Active.
     setTab(canRetirementReview ? "retirement" : "active");
+  };
+
+  const submitSelected = () => {
+    runSubmitPayload(selectedWorkLines, notBoughtToClose);
+  };
+
+  const submitBulkAll = () => {
+    runSubmitPayload(openBoughtLines, notBoughtToClose);
   };
 
   if (
@@ -655,7 +733,7 @@ export function PurchasingWorkspace() {
             if (!value || value === "all") return true;
             return line.dept === normalizeSupplyDept(value);
           }}
-          emptyMessage="No lines left to add — all original items are already in stock."
+          emptyMessage="No lines on this PO."
         >
           {(pageItems) => (
             <div className="space-y-2">
@@ -681,19 +759,21 @@ export function PurchasingWorkspace() {
                   >
                     <div className="flex flex-wrap items-start justify-between gap-2">
                       <div className="flex items-start gap-2 min-w-0">
-                        {!line.alreadyStocked && !notBought ? (
+                        {!line.alreadyStocked ? (
                           <Checkbox
                             checked={checked}
+                            disabled={notBought}
                             onCheckedChange={(v) =>
                               setSelectedIds((m) => ({
                                 ...m,
                                 [line.workKey]: v === true,
                               }))
                             }
-                            className="mt-1"
+                            className="mt-1 h-4 w-4 shrink-0"
+                            aria-label={`Select ${line.name}`}
                           />
                         ) : (
-                          <div className="w-4" />
+                          <div className="w-4 shrink-0" />
                         )}
                         <div className="min-w-0">
                           <p
@@ -707,6 +787,9 @@ export function PurchasingWorkspace() {
                           </p>
                           <p className="text-[10px] text-muted-foreground">
                             {DEPT_LABELS[line.dept] ?? line.dept}
+                            {!line.alreadyStocked && !notBought
+                              ? " · tick to submit this item"
+                              : ""}
                           </p>
                           <div className="flex flex-wrap gap-1 mt-1">
                             {line.newlyAdded && !notBought ? (
@@ -714,7 +797,7 @@ export function PurchasingWorkspace() {
                                 Newly added item
                               </Badge>
                             ) : null}
-                            {line.alreadyStocked ? (
+                            {line.alreadyStocked && !notBought ? (
                               <Badge variant="secondary" className="text-[10px]">
                                 Already in stock
                               </Badge>
@@ -722,6 +805,11 @@ export function PurchasingWorkspace() {
                             {notBought ? (
                               <Badge className="bg-red-100 text-red-900">
                                 Not bought / removed
+                              </Badge>
+                            ) : null}
+                            {line.alreadyStocked ? (
+                              <Badge variant="outline" className="text-[10px]">
+                                Uneditable
                               </Badge>
                             ) : null}
                           </div>
@@ -841,6 +929,13 @@ export function PurchasingWorkspace() {
                         </div>
                       </div>
                     )}
+                    {line.alreadyStocked && notBought && (
+                      <div className="pl-6 opacity-80">
+                        <p className="text-xs text-muted-foreground">
+                          Marked not bought — closed for Add to stock (review only).
+                        </p>
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -848,28 +943,45 @@ export function PurchasingWorkspace() {
           )}
         </PaginatedListShell>
 
-        {selectedWorkLines.length > 0 || notBoughtToClose.length > 0 ? (
-          <div className="sticky bottom-3 z-10 rounded-xl border bg-background/95 backdrop-blur p-3 shadow-lg flex flex-wrap items-center justify-between gap-3">
-            <p className="text-sm">
-              {selectedWorkLines.length > 0 ? (
-                <>
-                  <span className="font-semibold">{selectedWorkLines.length}</span>{" "}
-                  selected · {formatNaira(selectedSpend)}
-                </>
-              ) : (
-                <span className="font-semibold">No stock items selected</span>
-              )}
-              {notBoughtToClose.length > 0 ? (
-                <>
-                  {selectedWorkLines.length > 0 ? " · " : null}
-                  <span className="font-semibold">{notBoughtToClose.length}</span>{" "}
-                  not bought
-                </>
-              ) : null}
-            </p>
-            <Button onClick={() => setConfirmOpen(true)}>
-              Submit
-            </Button>
+        {canAddStock && (openBoughtLines.length > 0 || notBoughtToClose.length > 0) ? (
+          <div className="sticky bottom-3 z-10 rounded-xl border bg-background/95 backdrop-blur p-3 shadow-lg space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="text-sm text-muted-foreground">
+                Tick items to submit one by one, or retire all open lines at once.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  variant="outline"
+                  disabled={
+                    selectedWorkLines.length === 0 && notBoughtToClose.length === 0
+                  }
+                  onClick={() => setConfirmOpen(true)}
+                >
+                  Submit selected
+                  {selectedWorkLines.length > 0
+                    ? ` (${selectedWorkLines.length})`
+                    : notBoughtToClose.length > 0
+                      ? ` (${notBoughtToClose.length} not bought)`
+                      : ""}
+                </Button>
+                <Button
+                  disabled={
+                    openBoughtLines.length === 0 && notBoughtToClose.length === 0
+                  }
+                  onClick={() => setBulkConfirmOpen(true)}
+                >
+                  Confirm & retire — add stock to store
+                </Button>
+              </div>
+            </div>
+            {selectedWorkLines.length > 0 ? (
+              <p className="text-xs text-muted-foreground">
+                Selected: {selectedWorkLines.length} · {formatNaira(selectedSpend)}
+                {notBoughtToClose.length > 0
+                  ? ` · ${notBoughtToClose.length} not bought`
+                  : ""}
+              </p>
+            ) : null}
           </div>
         ) : null}
 
@@ -878,19 +990,18 @@ export function PurchasingWorkspace() {
             <AlertDialogHeader>
               <AlertDialogTitle>
                 {selectedWorkLines.length > 0
-                  ? `Add ${selectedWorkLines.length} item(s) to stock?`
+                  ? `Add ${selectedWorkLines.length} selected item(s) to stock?`
                   : `Submit ${notBoughtToClose.length} not-bought item(s)?`}
               </AlertDialogTitle>
               <AlertDialogDescription asChild>
                 <div className="space-y-2 text-sm text-muted-foreground">
                   <p>
-                    {canRetirementReview
-                      ? "Bought items go into Central Store now. Not-bought items go to Retirement review only (no stock). Qty, price, and not-bought are final — those items cannot be edited again. Other items on this PO can still be added later."
-                      : "Bought items go into Central Store and are sent for accountant review. Not-bought items are included in that review (no stock). Qty, price, and not-bought are final — those items cannot be edited again. Other items on this PO can still be added later."}
+                    Only ticked items (plus any marked not bought) are submitted.
+                    Other open items stay on Add to stock for later.
                   </p>
                   <ul className="rounded-md border bg-muted/40 px-3 py-2 space-y-1 text-foreground">
                     <li>Approved PO: {formatNaira(getPoApprovedAmount(selected))}</li>
-                    <li>This batch (bought): {formatNaira(selectedSpend)}</li>
+                    <li>This selection (bought): {formatNaira(selectedSpend)}</li>
                     {notBoughtToClose.length > 0 ? (
                       <li>Not bought: {notBoughtToClose.length} item(s)</li>
                     ) : null}
@@ -901,7 +1012,41 @@ export function PurchasingWorkspace() {
             <AlertDialogFooter>
               <AlertDialogCancel>Cancel</AlertDialogCancel>
               <AlertDialogAction onClick={submitSelected}>
-                Submit
+                Submit selected
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        <AlertDialog open={bulkConfirmOpen} onOpenChange={setBulkConfirmOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                Confirm & retire — add stock to store?
+              </AlertDialogTitle>
+              <AlertDialogDescription asChild>
+                <div className="space-y-2 text-sm text-muted-foreground">
+                  <p>
+                    Submits every open item on this PO (bought into Central Store,
+                    not-bought for review only). Submitted lines cannot be edited
+                    again.
+                  </p>
+                  <ul className="rounded-md border bg-muted/40 px-3 py-2 space-y-1 text-foreground">
+                    <li>Approved PO: {formatNaira(getPoApprovedAmount(selected))}</li>
+                    <li>
+                      Bought lines: {openBoughtLines.length} · {formatNaira(bulkSpend)}
+                    </li>
+                    {notBoughtToClose.length > 0 ? (
+                      <li>Not bought: {notBoughtToClose.length} item(s)</li>
+                    ) : null}
+                  </ul>
+                </div>
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={submitBulkAll}>
+                Confirm & retire — add stock to store
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
