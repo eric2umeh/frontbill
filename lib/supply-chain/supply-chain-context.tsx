@@ -127,6 +127,11 @@ import {
   normalizeBarStockRows,
 } from "./bar-stock-normalize";
 import { applyRetirementLinesToCatalog } from "./retirement-stock";
+import {
+  applyRetirementBatchDecision,
+  hasPendingRetirementReview,
+  poHasRemainingAddToStockLines,
+} from "./add-to-stock";
 
 function applyRemoteArray<T>(
   setter: (updater: (prev: T[]) => T[]) => void,
@@ -2310,10 +2315,13 @@ function useSupplyChainImpl() {
       }
 
       const nowIso = new Date().toISOString();
+      const batchId = `ats-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
       const stamped = batchLines.map((l) => ({
         ...l,
         stockedAt: nowIso,
         stockedBy: actor.name,
+        batchId,
+        reviewStatus: "pending_review" as const,
       }));
       const batchSpend = stamped.reduce((s, l) => s + l.totalPaid, 0);
       const posted = applyRetirementToStock(po, stamped);
@@ -2329,11 +2337,12 @@ function useSupplyChainImpl() {
             .reduce((s, l) => s + l.totalPaid, 0);
           const refund = p.cashDisbursed - actualSpent;
           const batch = {
-            id: `ats-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+            id: batchId,
             submittedAt: nowIso,
             submittedBy: actor.name,
             lineIds: stamped.map((l) => l.lineId),
             actualSpent: batchSpend,
+            status: "pending_review" as const,
           };
           return {
             ...p,
@@ -2349,7 +2358,7 @@ function useSupplyChainImpl() {
               batches: [...(p.retirement?.batches ?? []), batch],
               submittedAt: nowIso,
               submittedBy: actor.name,
-              accountantComment: undefined,
+              accountantComment: p.retirement?.accountantComment,
               reviewedAt: undefined,
               reviewedBy: undefined,
             },
@@ -2417,64 +2426,36 @@ function useSupplyChainImpl() {
       }
       const po = purchaseOrders.find((p) => p.id === poId);
       if (!po?.retirement) return { error: "Retirement not found" };
-      if (po.status !== "retirement_pending_accountant") {
-        return { error: "This PO is not awaiting retirement review" };
+      if (!hasPendingRetirementReview(po)) {
+        return { error: "There are no Add-to-stock items awaiting review" };
       }
 
       const nowIso = new Date().toISOString();
       markLocalSupplyMutation();
 
-      if (!approved) {
-        setPurchaseOrders((prev) => {
-          const next = prev.map((p) =>
-            p.id === poId
-              ? {
-                  ...p,
-                  status: "retirement_rejected" as const,
-                  retirementComment: comment,
-                  workflowUpdatedAt: nowIso,
-                  retirement: {
-                    ...p.retirement!,
-                    accountantComment: comment,
-                    reviewedAt: nowIso,
-                    reviewedBy: actor.name,
-                  },
-                }
-              : p,
-          );
-          purchaseOrdersRef.current = next;
-          return next;
-        });
-        setActivityLog((a) =>
-          log(
-            a,
-            "retirement_submitted",
-            actor,
-            `Retirement rejected: ${comment}`,
-            poId,
-          ),
-        );
-        pushSupplyNotification({
-          audience: ["purchasing", "store"],
-          title: `Retirement rejected — ${po.poNumber}`,
-          body:
-            (comment || "Returned to Active for more Add to stock.") +
-            " Stock already posted was not removed.",
-          href: "/supply/purchasing?tab=active",
-        });
-        void persistSnapshotsNow();
-        return { ok: true };
-      }
+      const { lines: nextLines, batches: nextBatches, status: nextStatus } =
+        applyRetirementBatchDecision(po, approved, comment, actor.name, nowIso);
 
-      // Stock was already posted on Add to stock — only apply legacy lines missing stockedAt.
-      const legacyToApply = (po.retirement.lines ?? []).filter(
+      const actualSpent = nextLines
+        .filter((l) => !(l.notBought || l.removed))
+        .reduce((s, l) => s + (Number(l.totalPaid) || 0), 0);
+      const refund = po.cashDisbursed - actualSpent;
+      const remaining = poHasRemainingAddToStockLines({
+        ...po,
+        retirement: { ...po.retirement, lines: nextLines, batches: nextBatches },
+      });
+
+      // Stock was already posted on Add to stock — only apply legacy lines missing stockedAt
+      // among the batch being decided (should be rare).
+      const legacyToApply = nextLines.filter(
         (l) =>
           !(l.notBought || l.removed) &&
           !l.stockedAt &&
-          l.quantityBought > 0,
+          l.quantityBought > 0 &&
+          l.reviewStatus === (approved ? "accepted" : "rejected"),
       );
       const posted =
-        legacyToApply.length > 0
+        approved && legacyToApply.length > 0
           ? applyRetirementToStock(po, legacyToApply)
           : 0;
 
@@ -2483,14 +2464,24 @@ function useSupplyChainImpl() {
           p.id === poId
             ? {
                 ...p,
-                status: "retired" as const,
+                status: nextStatus,
                 retirementComment: comment,
                 workflowUpdatedAt: nowIso,
                 retirement: {
                   ...p.retirement!,
+                  actualSpent,
+                  refundToCashier: refund,
+                  priceChanges: nextLines.filter(
+                    (l) =>
+                      !(l.notBought || l.removed) && l.poPrice !== l.actualPrice,
+                  ).length,
+                  lines: nextLines,
+                  batches: nextBatches,
                   accountantComment: comment,
                   reviewedAt: nowIso,
                   reviewedBy: actor.name,
+                  submittedAt: p.retirement?.submittedAt ?? nowIso,
+                  submittedBy: p.retirement?.submittedBy ?? actor.name,
                 },
               }
             : p,
@@ -2498,29 +2489,63 @@ function useSupplyChainImpl() {
         purchaseOrdersRef.current = next;
         return next;
       });
-      setBasket([]);
+
+      if (approved && nextStatus === "retired") {
+        setBasket([]);
+      }
+
       setActivityLog((a) =>
         log(
           a,
           "retirement_submitted",
           actor,
-          `Retirement accepted — moved to History. ${comment}`,
+          approved
+            ? remaining
+              ? `Retirement batch accepted — remaining items stay on Add to stock. ${comment}`
+              : `Retirement accepted — PO complete / History. ${comment}`
+            : `Retirement batch rejected — returned to Active. ${comment}`,
           poId,
         ),
       );
-      pushSupplyNotification({
-        audience: ["store", "purchasing", "cashier"],
-        title: `Retirement complete — ${po.poNumber}`,
-        body: `Refund purchaser: ₦${(po.retirement?.refundToCashier ?? 0).toLocaleString()}.`,
-        href: "/supply/purchasing?tab=history",
-      });
-      if (posted > 0) {
-        toast.success(
-          `${posted} item${posted === 1 ? "" : "s"} added to Central Store stock`,
-        );
+
+      if (approved) {
+        pushSupplyNotification({
+          audience: ["store", "purchasing", "cashier"],
+          title: remaining
+            ? `Batch accepted — ${po.poNumber}`
+            : `Retirement complete — ${po.poNumber}`,
+          body: remaining
+            ? `Accepted stocked items only. Remaining lines stay on Add to stock.`
+            : `Refund purchaser: ₦${refund.toLocaleString()}.`,
+          href: remaining
+            ? "/supply/purchasing?tab=active"
+            : "/supply/purchasing?tab=history",
+        });
+        if (posted > 0) {
+          toast.success(
+            `${posted} item${posted === 1 ? "" : "s"} added to Central Store stock`,
+          );
+        } else if (remaining) {
+          toast.success(
+            "Accepted stocked items only — remaining items stay on Add to stock",
+          );
+        } else {
+          toast.success("Retirement accepted — PO moved to History");
+        }
       } else {
-        toast.success("Retirement accepted — PO moved to History");
+        pushSupplyNotification({
+          audience: ["purchasing", "store"],
+          title: `Retirement rejected — ${po.poNumber}`,
+          body:
+            (comment || "Returned to Active for more Add to stock.") +
+            " Stock already posted was not removed. Unstocked items remain on Active.",
+          href: "/supply/purchasing?tab=active",
+        });
+        toast.success(
+          "Returned to Active. Unstocked items remain; stock already posted was not removed.",
+        );
       }
+
       void persistSnapshotsNow();
       return { ok: true };
     },
