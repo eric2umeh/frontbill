@@ -53,9 +53,9 @@ import {
   isPostedStockLine,
   isPoLineSubmittedToStock,
   isRetirementReviewCandidate,
+  isSubmittedAddToStockLine,
   poHasRemainingAddToStockLines,
   remainingQtyForPoLine,
-  stockedQtyForPoLine,
 } from "@/lib/supply-chain/add-to-stock";
 import {
   parseQuantityValue,
@@ -241,43 +241,8 @@ export function PurchasingWorkspace() {
 
     const lines: WorkLine[] = [];
     for (const l of po.lines) {
-      const submitted = isPoLineSubmittedToStock(po, l.id);
-      const already = stockedQtyForPoLine(po, l.id);
-      const stockedRows = (po.retirement?.lines ?? []).filter(
-        (r) => r.lineId === l.id && isPostedStockLine(r),
-      );
-      const lastStocked = stockedRows[stockedRows.length - 1];
-
-      // Submitted once → locked forever (submitted qty/price are final).
-      if (submitted) {
-        const postedPrice = lastStocked?.actualPrice ?? l.unitPrice;
-        lines.push({
-          lineId: l.id,
-          workKey: `${l.id}__stocked`,
-          name: l.name,
-          unit: l.unit,
-          storeUnit: l.storeUnit,
-          quantityOrdered: l.quantityOrdered,
-          stockQuantityOrdered: l.stockQuantityOrdered,
-          quantityBought: already > 0 ? already : lastStocked?.quantityBought ?? 0,
-          stockQuantityBought:
-            lastStocked?.stockQuantityBought ?? l.stockQuantityOrdered,
-          poPrice: l.unitPrice,
-          actualPrice: postedPrice,
-          actualStockUnitPrice:
-            lastStocked?.actualStockUnitPrice ?? l.stockUnitPrice,
-          totalPaid: stockedRows.reduce((s, r) => s + (Number(r.totalPaid) || 0), 0),
-          notBought: false,
-          stockItemId: l.stockItemId,
-          dept: normalizeSupplyDept(l.dept),
-          alreadyStocked: true,
-          remainingCap: 0,
-          stockedAt: lastStocked?.stockedAt,
-          reviewStatus: lastStocked?.reviewStatus,
-          batchId: lastStocked?.batchId,
-        });
-        continue;
-      }
+      // Bought or not-bought submit closes the line — do not show it again on Add to stock.
+      if (isPoLineSubmittedToStock(po, l.id)) continue;
 
       // Not yet submitted — editable; user may raise or lower qty/price, then submit ends it.
       const defaultQty = remainingQtyForPoLine(po, l.id);
@@ -308,16 +273,16 @@ export function PurchasingWorkspace() {
     }
 
     // Carry newly-added draft rows that were not yet stocked
-    // Plus show already-stocked newly added as read-only
     for (const rl of po.retirement?.lines ?? []) {
       if (!rl.newlyAdded) continue;
+      if (isSubmittedAddToStockLine(rl)) continue;
       if (lines.some((x) => x.lineId === rl.lineId)) continue;
       lines.push({
         ...rl,
-        workKey: `${rl.lineId}__${isPostedStockLine(rl) ? "stocked" : "new"}`,
+        workKey: `${rl.lineId}__new`,
         dept: normalizeSupplyDept(rl.dept ?? "restaurant"),
-        alreadyStocked: isPostedStockLine(rl),
-        remainingCap: isPostedStockLine(rl) ? 0 : null,
+        alreadyStocked: false,
+        remainingCap: null,
       });
     }
 
@@ -391,6 +356,17 @@ export function PurchasingWorkspace() {
           l.quantityBought > 0,
       ),
     [workLines, selectedIds],
+  );
+
+  const notBoughtToClose = useMemo(
+    () =>
+      workLines.filter(
+        (l) =>
+          !l.alreadyStocked &&
+          !l.newlyAdded &&
+          (l.notBought === true || l.removed === true),
+      ),
+    [workLines],
   );
 
   const selectedSpend = useMemo(
@@ -480,28 +456,51 @@ export function PurchasingWorkspace() {
 
   const submitSelected = () => {
     if (!selected || !canAddStock) return;
-    if (!selectedWorkLines.length) {
-      toast.error("Select at least one item to add to stock");
+    if (!selectedWorkLines.length && !notBoughtToClose.length) {
+      toast.error(
+        "Select at least one item to add to stock, or mark items as not bought",
+      );
       return;
     }
-    const payload: RetirementLine[] = selectedWorkLines.map((l) => ({
-      lineId: l.lineId,
-      name: l.name,
-      unit: l.unit,
-      storeUnit: l.storeUnit,
-      quantityOrdered: l.quantityOrdered,
-      stockQuantityOrdered: l.stockQuantityOrdered,
-      quantityBought: l.quantityBought,
-      stockQuantityBought: l.stockQuantityBought,
-      poPrice: l.poPrice,
-      actualPrice: l.actualPrice,
-      actualStockUnitPrice: l.actualStockUnitPrice,
-      totalPaid: l.totalPaid,
-      notBought: false,
-      newlyAdded: l.newlyAdded,
-      stockItemId: l.stockItemId,
-      dept: l.dept,
-    }));
+    const payload: RetirementLine[] = [
+      ...selectedWorkLines.map((l) => ({
+        lineId: l.lineId,
+        name: l.name,
+        unit: l.unit,
+        storeUnit: l.storeUnit,
+        quantityOrdered: l.quantityOrdered,
+        stockQuantityOrdered: l.stockQuantityOrdered,
+        quantityBought: l.quantityBought,
+        stockQuantityBought: l.stockQuantityBought,
+        poPrice: l.poPrice,
+        actualPrice: l.actualPrice,
+        actualStockUnitPrice: l.actualStockUnitPrice,
+        totalPaid: l.totalPaid,
+        notBought: false,
+        newlyAdded: l.newlyAdded,
+        stockItemId: l.stockItemId,
+        dept: l.dept,
+      })),
+      ...notBoughtToClose.map((l) => ({
+        lineId: l.lineId,
+        name: l.name,
+        unit: l.unit,
+        storeUnit: l.storeUnit,
+        quantityOrdered: l.quantityOrdered,
+        stockQuantityOrdered: l.stockQuantityOrdered,
+        quantityBought: 0,
+        stockQuantityBought: 0,
+        poPrice: l.poPrice,
+        actualPrice: l.poPrice,
+        actualStockUnitPrice: l.actualStockUnitPrice,
+        totalPaid: 0,
+        notBought: true,
+        removed: true,
+        newlyAdded: l.newlyAdded,
+        stockItemId: l.stockItemId,
+        dept: l.dept,
+      })),
+    ];
     const stampedIds = new Set(payload.map((l) => l.lineId));
     const res = submitAddToStock(selected.id, payload, actor);
     if (res && "error" in res) {
@@ -510,13 +509,16 @@ export function PurchasingWorkspace() {
     }
     playNotificationBeep();
     if (res && "posted" in res) {
-        toast.success(
-          res.posted > 0
-            ? canRetirementReview
-              ? `${res.posted} item(s) added to Central Store — open Retirement to review`
-              : `${res.posted} item(s) added to Central Store — sent for accountant review`
+      const notBoughtCount = notBoughtToClose.length;
+      toast.success(
+        res.posted > 0
+          ? canRetirementReview
+            ? `${res.posted} item(s) added to Central Store${notBoughtCount ? ` · ${notBoughtCount} not bought` : ""} — open Retirement to review`
+            : `${res.posted} item(s) added to Central Store${notBoughtCount ? ` · ${notBoughtCount} not bought` : ""} — sent for accountant review`
+          : notBoughtCount > 0
+            ? `${notBoughtCount} item(s) marked not bought — sent for review`
             : "Submitted for retirement review — check Central Store if stock did not increase",
-        );
+      );
     }
     // Lock submitted lines immediately — one submit ends edit for that item.
     setWorkLines((prev) =>
@@ -846,14 +848,27 @@ export function PurchasingWorkspace() {
           )}
         </PaginatedListShell>
 
-        {selectedWorkLines.length > 0 ? (
+        {selectedWorkLines.length > 0 || notBoughtToClose.length > 0 ? (
           <div className="sticky bottom-3 z-10 rounded-xl border bg-background/95 backdrop-blur p-3 shadow-lg flex flex-wrap items-center justify-between gap-3">
             <p className="text-sm">
-              <span className="font-semibold">{selectedWorkLines.length}</span> selected ·{" "}
-              {formatNaira(selectedSpend)}
+              {selectedWorkLines.length > 0 ? (
+                <>
+                  <span className="font-semibold">{selectedWorkLines.length}</span>{" "}
+                  selected · {formatNaira(selectedSpend)}
+                </>
+              ) : (
+                <span className="font-semibold">No stock items selected</span>
+              )}
+              {notBoughtToClose.length > 0 ? (
+                <>
+                  {selectedWorkLines.length > 0 ? " · " : null}
+                  <span className="font-semibold">{notBoughtToClose.length}</span>{" "}
+                  not bought
+                </>
+              ) : null}
             </p>
             <Button onClick={() => setConfirmOpen(true)}>
-              Submit selected items
+              Submit
             </Button>
           </div>
         ) : null}
@@ -862,18 +877,23 @@ export function PurchasingWorkspace() {
           <AlertDialogContent>
             <AlertDialogHeader>
               <AlertDialogTitle>
-                Add {selectedWorkLines.length} item(s) to stock?
+                {selectedWorkLines.length > 0
+                  ? `Add ${selectedWorkLines.length} item(s) to stock?`
+                  : `Submit ${notBoughtToClose.length} not-bought item(s)?`}
               </AlertDialogTitle>
               <AlertDialogDescription asChild>
                 <div className="space-y-2 text-sm text-muted-foreground">
                   <p>
                     {canRetirementReview
-                      ? "Selected items go into Central Store now. Qty and price you set are final for those items — they cannot be edited again. Other items on this PO can still be added later."
-                      : "Selected items go into Central Store now and are sent for accountant review. Qty and price you set are final for those items — they cannot be edited again. Other items on this PO can still be added later."}
+                      ? "Bought items go into Central Store now. Not-bought items go to Retirement review only (no stock). Qty, price, and not-bought are final — those items cannot be edited again. Other items on this PO can still be added later."
+                      : "Bought items go into Central Store and are sent for accountant review. Not-bought items are included in that review (no stock). Qty, price, and not-bought are final — those items cannot be edited again. Other items on this PO can still be added later."}
                   </p>
                   <ul className="rounded-md border bg-muted/40 px-3 py-2 space-y-1 text-foreground">
                     <li>Approved PO: {formatNaira(getPoApprovedAmount(selected))}</li>
-                    <li>This batch: {formatNaira(selectedSpend)}</li>
+                    <li>This batch (bought): {formatNaira(selectedSpend)}</li>
+                    {notBoughtToClose.length > 0 ? (
+                      <li>Not bought: {notBoughtToClose.length} item(s)</li>
+                    ) : null}
                   </ul>
                 </div>
               </AlertDialogDescription>
@@ -881,7 +901,7 @@ export function PurchasingWorkspace() {
             <AlertDialogFooter>
               <AlertDialogCancel>Cancel</AlertDialogCancel>
               <AlertDialogAction onClick={submitSelected}>
-                Add to stock
+                Submit
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
