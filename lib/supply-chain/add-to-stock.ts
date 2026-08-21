@@ -25,13 +25,32 @@ function lineReviewStatus(
   return 'pending_review'
 }
 
+/** True when a retirement row was posted via Add to stock (not a draft). */
+export function isPostedStockLine(line: RetirementLine): boolean {
+  if (lineNotBought(line)) return false
+  if (!(Number(line.quantityBought) > 0)) return false
+  return (
+    Boolean(line.stockedAt) ||
+    Boolean(line.batchId) ||
+    line.reviewStatus === 'pending_review' ||
+    line.reviewStatus === 'accepted' ||
+    line.reviewStatus === 'rejected'
+  )
+}
+
 /** Qty already posted to Central Store for a PO line (sum of stocked retirement rows). */
 export function stockedQtyForPoLine(po: PurchaseOrder, lineId: string): number {
   const seen = new Set<string>()
   let total = 0
   for (const l of po.retirement?.lines ?? []) {
-    if (l.lineId !== lineId || lineNotBought(l) || !l.stockedAt) continue
-    const key = `${l.stockedAt}|${l.quantityBought}|${l.actualPrice}|${l.newlyAdded ? 1 : 0}`
+    if (l.lineId !== lineId || !isPostedStockLine(l)) continue
+    const key = [
+      l.batchId ?? '',
+      l.stockedAt ?? '',
+      String(l.quantityBought),
+      String(l.actualPrice),
+      l.newlyAdded ? '1' : '0',
+    ].join('|')
     if (seen.has(key)) continue
     seen.add(key)
     total += Number(l.quantityBought) || 0
@@ -95,7 +114,7 @@ export function pendingReviewLines(po: PurchaseOrder): RetirementLine[] {
   )
 
   return (po.retirement?.lines ?? []).filter((l) => {
-    if (lineNotBought(l) || !l.stockedAt) return false
+    if (!isPostedStockLine(l)) return false
     if (l.batchId) {
       if (pendingBatchIds.size > 0) return pendingBatchIds.has(l.batchId)
       return lineReviewStatus(l) === 'pending_review'
