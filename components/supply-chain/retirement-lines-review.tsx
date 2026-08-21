@@ -20,12 +20,17 @@ function lineNotBought(line: RetirementLine) {
 export function RetirementLinesReview({
   po,
   deptFilter = 'all',
+  lines: linesOverride,
+  emptyMessage = 'No retirement lines to show.',
 }: {
   po: PurchaseOrder
   deptFilter?: string
+  /** When set, only these lines are shown (e.g. pending review batch). */
+  lines?: RetirementLine[]
+  emptyMessage?: string
 }) {
   const rows = useMemo(() => {
-    const rLines = po.retirement?.lines ?? []
+    const rLines = linesOverride ?? po.retirement?.lines ?? []
     return rLines
       .map((line) => {
         const orig = po.lines.find((l) => l.id === line.lineId)
@@ -47,12 +52,12 @@ export function RetirementLinesReview({
         if (!deptFilter || deptFilter === 'all') return true
         return row.dept === normalizeSupplyDept(deptFilter)
       })
-  }, [po, deptFilter])
+  }, [po, deptFilter, linesOverride])
 
   if (!rows.length) {
     return (
       <p className="text-sm text-muted-foreground text-center py-4">
-        No retirement lines to show.
+        {emptyMessage}
       </p>
     )
   }
