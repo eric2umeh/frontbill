@@ -6,6 +6,7 @@ import type {
   RetirementRecord,
 } from '@/lib/supply-chain/types'
 import { ensurePoApprovalFreeze } from '@/lib/supply-chain/po-format'
+import { hasPendingRetirementReview } from '@/lib/supply-chain/add-to-stock'
 
 /** Higher = further along the PO workflow (prefer when merging local vs remote). */
 const PO_STATUS_RANK: Record<PoStatus, number> = {
@@ -93,6 +94,23 @@ export function mergeRetirementRecords(
   if (!a) return b
   if (!b) return a
 
+  const batchesById = new Map<string, AddToStockBatch>()
+  for (const batch of [...(a.batches ?? []), ...(b.batches ?? [])]) {
+    if (!batch?.id) continue
+    const existing = batchesById.get(batch.id)
+    if (!existing) {
+      batchesById.set(batch.id, batch)
+      continue
+    }
+    const rank = (s?: string) =>
+      s === 'accepted' ? 3 : s === 'rejected' ? 2 : s === 'pending_review' ? 1 : 0
+    batchesById.set(
+      batch.id,
+      rank(batch.status) >= rank(existing.status) ? batch : existing,
+    )
+  }
+
+  // Also prefer accepted/rejected reviewStatus on lines
   const byKey = new Map<string, RetirementLine>()
   for (const line of [...(a.lines ?? []), ...(b.lines ?? [])]) {
     const key = retirementLineKey(line)
@@ -101,14 +119,15 @@ export function mergeRetirementRecords(
       byKey.set(key, line)
       continue
     }
-    // Prefer the copy that was actually posted to stock.
-    if (line.stockedAt && !existing.stockedAt) byKey.set(key, line)
-  }
-
-  const batchesById = new Map<string, AddToStockBatch>()
-  for (const batch of [...(a.batches ?? []), ...(b.batches ?? [])]) {
-    if (!batch?.id) continue
-    if (!batchesById.has(batch.id)) batchesById.set(batch.id, batch)
+    const prefer =
+      line.stockedAt && !existing.stockedAt
+        ? line
+        : (line.reviewStatus === 'accepted' || line.reviewStatus === 'rejected') &&
+            existing.reviewStatus !== 'accepted' &&
+            existing.reviewStatus !== 'rejected'
+          ? line
+          : existing
+    byKey.set(key, prefer)
   }
 
   const lines = [...byKey.values()]
@@ -165,35 +184,35 @@ function enrichWithRetirementProgress(
   const hasStocked = retirement.lines.some(
     (l) => Boolean(l.stockedAt) && !(l.notBought || l.removed),
   )
+  const probe: PurchaseOrder = { ...winner, retirement }
+  const needsReview = hasPendingRetirementReview(probe)
 
   let status = winner.status
-  if (hasStocked) {
-    if (status === 'disbursed' || status === 'approved' || status === 'retirement_pending') {
-      // Promote so History/review and Already-in-stock survive a stale overwrite.
-      if (other.status === 'retired' || winner.status === 'retired') {
-        status = 'retired'
-      } else if (
-        other.status === 'retirement_rejected' ||
-        winner.status === 'retirement_rejected'
-      ) {
-        // Keep rejected if that side is newer; else pending review.
-        const otherRev = other.retirement?.reviewedAt
-          ? Date.parse(other.retirement.reviewedAt)
-          : 0
-        const winRev = winner.retirement?.reviewedAt
-          ? Date.parse(winner.retirement.reviewedAt)
-          : 0
-        status =
-          other.status === 'retirement_rejected' && otherRev >= winRev
-            ? 'retirement_rejected'
-            : winner.status === 'retirement_rejected'
-              ? 'retirement_rejected'
-              : 'retirement_pending_accountant'
-      } else {
-        status = 'retirement_pending_accountant'
-      }
+  // Never demote a completed retirement.
+  if (winner.status === 'retired' || other.status === 'retired') {
+    if (poWorkflowTime(winner) >= poWorkflowTime(other) && winner.status === 'retired') {
+      status = 'retired'
+    } else if (other.status === 'retired' && poWorkflowTime(other) >= poWorkflowTime(winner)) {
+      status = 'retired'
+    }
+  } else if (needsReview) {
+    // Only force the review queue when something is still pending Accept/Reject.
+    if (
+      status === 'disbursed' ||
+      status === 'approved' ||
+      status === 'retirement_pending' ||
+      status === 'retirement_rejected'
+    ) {
+      status = 'retirement_pending_accountant'
+    }
+  } else if (hasStocked && status === 'retirement_pending_accountant') {
+    // Stale pending with no pending batches — keep winner status if it already left review.
+    if (other.status === 'disbursed' || other.status === 'retirement_rejected') {
+      status = other.status
     }
   }
+
+  // Ignore unused hasStocked-only promotion that used to wipe partial-accept Active POs.
 
   const workflowUpdatedAt =
     poWorkflowTime(winner) >= poWorkflowTime(other)
