@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { useClientMounted } from '@/hooks/use-client-mounted'
 import { useAuth } from '@/lib/auth-context'
@@ -11,6 +11,7 @@ import {
   canRaisePurchaseRequest,
   canonicalRoleKey,
 } from '@/lib/permissions'
+import { isPurchaseOrderInPoMenuHistory } from '@/lib/supply-chain/po-format'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { RaisePurchaseRequestPanel } from '@/components/supply-chain/raise-purchase-request-panel'
 import { ActivePurchaseOrderPanel } from '@/components/supply-chain/active-purchase-order-panel'
@@ -52,7 +53,7 @@ export function PurchaseOrdersWorkspace() {
 
   useEffect(() => {
     if (tabParam === 'retirement') {
-      window.location.replace('/supply/purchasing?tab=active')
+      window.location.replace('/supply/purchasing?tab=retirement')
     }
   }, [tabParam])
 
@@ -61,6 +62,11 @@ export function PurchaseOrdersWorkspace() {
   }, [tabParam, canApprove, canRaise])
 
   const actor = { name: name ?? 'Store', role: canonicalRoleKey(role) ?? 'store' }
+
+  const historyCount = useMemo(
+    () => purchaseOrders.filter((p) => isPurchaseOrderInPoMenuHistory(p)).length,
+    [purchaseOrders],
+  )
 
   if (!menuOk) {
     return (
@@ -81,7 +87,7 @@ export function PurchaseOrdersWorkspace() {
         <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Purchase orders</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           {canRaise
-            ? 'Raise purchase requests, track active POs, and review approved orders. After manager approval, POs appear in History (read-only) until retired at market from Retirement.'
+            ? 'Raise purchase requests, track active POs, and review approved orders. After manager approval, POs appear in History immediately (read-only) and stay there permanently.'
             : 'View purchase orders and approved PO history (read-only). Auditors cannot raise or change purchase requests.'}
         </p>
       </div>
@@ -111,6 +117,11 @@ export function PurchaseOrdersWorkspace() {
           <TabsTrigger value="history" className="gap-1.5">
             <History className="h-4 w-4" />
             History
+            {historyCount > 0 && (
+              <span className="ml-0.5 rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary tabular-nums">
+                {historyCount}
+              </span>
+            )}
           </TabsTrigger>
         </TabsList>
 
@@ -132,13 +143,14 @@ export function PurchaseOrdersWorkspace() {
 
         <TabsContent value="history" className="mt-4 space-y-4">
           <p className="text-sm text-muted-foreground">
-            Purchase orders after accountant and manager approval (read-only). Lines and amounts
-            stay as the manager approved — market retirement does not change this view.
+            Manager-approved purchase orders appear here immediately and stay permanently
+            (read-only). Lines and amounts stay exactly as approved — market retirement does
+            not change this view.
           </p>
           <PoHistoryPanel
             purchaseOrders={purchaseOrders}
             forceOrderLines
-            emptyMessage="No purchase orders in history yet. After accountant and manager approve, the exact approved PO appears here (read-only)."
+            emptyMessage="No purchase orders in history yet. After manager approval, the exact approved PO appears here immediately (read-only)."
           />
         </TabsContent>
       </Tabs>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useCallback } from "react";
+import { useMemo, useState, useCallback, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { useSupplyChain } from "@/lib/supply-chain/supply-chain-context";
@@ -11,10 +11,15 @@ import {
   normalizeSupplyDept,
 } from "@/lib/supply-chain/types";
 import { formatNaira } from "@/lib/utils/currency";
-import { canonicalRoleKey, canSupplyRetirementReview, canSubmitMarketRetirement } from "@/lib/permissions";
+import {
+  canonicalRoleKey,
+  canSupplyRetirementReview,
+  canAddPurchasedToStock,
+} from "@/lib/permissions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -29,19 +34,30 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
-import {
-  poStatusBadge,
-} from "@/components/supply-chain/po-approval-panel";
+import { poStatusBadge } from "@/components/supply-chain/po-approval-panel";
 import { PoDetailPanel } from "@/components/supply-chain/po-detail-card";
 import { PoCommentBanner } from "@/components/supply-chain/po-comment-banner";
 import { PoHistoryPanel } from "@/components/supply-chain/po-history-panel";
 import { PoRetirementPanel } from "@/components/supply-chain/po-retirement-panel";
 import {
+  AddExtraStockItemsModal,
+  type ExtraStockPick,
+} from "@/components/supply-chain/add-extra-stock-items-modal";
+import {
   formatPoRaisedAt,
   getPoApprovedAmount,
-  isPurchasingRetireCandidate,
-  isPurchasingRetirementInReview,
 } from "@/lib/supply-chain/po-format";
+import {
+  hasPendingRetirementReview,
+  isAddToStockCandidate,
+  isPostedStockLine,
+  isPoLineSubmittedToStock,
+  isRetirementReviewCandidate,
+  isSubmittedAddToStockLine,
+  poHasRemainingAddToStockLines,
+  remainingQtyForPoLine,
+  stockedQtyForPoLine,
+} from "@/lib/supply-chain/add-to-stock";
 import {
   parseQuantityValue,
   sanitizeQuantityInput,
@@ -49,25 +65,37 @@ import {
 import { useClientMounted } from "@/hooks/use-client-mounted";
 import { playNotificationBeep } from "@/lib/utils/play-notification-beep";
 import { PaginatedListShell } from "@/components/shared/paginated-list-shell";
+import { PackagePlus } from "lucide-react";
+import { cn } from "@/lib/utils";
 
-const RETIRE_QTY_INPUT_CLASS =
+const QTY_INPUT_CLASS =
   "h-8 tabular-nums [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none";
 
-function lineNotBought(line: RetirementLine) {
-  return line.notBought === true || line.removed === true;
-}
+type WorkLine = RetirementLine & {
+  dept: Exclude<SupplyDept, "all">;
+  alreadyStocked: boolean;
+  remainingCap: number | null;
+  /** Stable UI key — stocked vs remaining rows can share the same PO lineId. */
+  workKey: string;
+};
 
 function PurchasingRetireRow({
   po,
-  onRetire,
-  canRetire = true,
+  onOpen,
+  canAct = true,
+  actionLabel = "Add to stock",
 }: {
   po: PurchaseOrder;
-  onRetire: () => void;
-  canRetire?: boolean;
+  onOpen: () => void;
+  canAct?: boolean;
+  actionLabel?: string;
 }) {
-  const inReview = isPurchasingRetirementInReview(po.status);
+  const inReview = hasPendingRetirementReview(po);
   const rejected = po.status === "retirement_rejected";
+  const stockedCount = (po.retirement?.lines ?? []).filter((l) =>
+    isPostedStockLine(l),
+  ).length;
+  const remaining = poHasRemainingAddToStockLines(po);
   return (
     <div className="flex flex-wrap justify-between items-center rounded-md border px-3 py-2 gap-2">
       <div className="min-w-0 flex-1">
@@ -81,25 +109,27 @@ function PurchasingRetireRow({
         <p className="text-xs text-muted-foreground truncate">
           Raised {formatPoRaisedAt(po.createdAt)} · {po.createdByName} ·{" "}
           {po.lines.length} line{po.lines.length === 1 ? "" : "s"}
+          {stockedCount > 0 ? ` · ${stockedCount} already in stock` : ""}
         </p>
         {rejected && (
           <Badge variant="outline" className="mt-1 text-red-700 border-red-200">
-            Retirement rejected — adjust & resubmit
+            Retirement rejected — continue Add to stock
           </Badge>
         )}
         {inReview && (
           <Badge variant="outline" className="mt-1 text-violet-800 border-violet-200">
-            Awaiting accountant — retire locked
+            Sent for accountant review
           </Badge>
         )}
+        {remaining && stockedCount > 0 ? (
+          <Badge variant="outline" className="mt-1">
+            More items to add
+          </Badge>
+        ) : null}
       </div>
-      {inReview ? (
-        <Button size="sm" className="shrink-0" variant="outline" disabled>
-          In review
-        </Button>
-      ) : canRetire ? (
-        <Button size="sm" className="shrink-0" onClick={onRetire}>
-          {rejected ? "Edit retirement" : "Retire at market"}
+      {canAct ? (
+        <Button size="sm" className="shrink-0" onClick={onOpen}>
+          {actionLabel}
         </Button>
       ) : (
         <Badge variant="outline" className="shrink-0 text-muted-foreground">
@@ -110,26 +140,89 @@ function PurchasingRetireRow({
   );
 }
 
+function StatCard({
+  label,
+  value,
+  highlight,
+  amountClassName,
+}: {
+  label: string;
+  value: string;
+  highlight?: boolean;
+  amountClassName?: string;
+}) {
+  return (
+    <div className={`rounded-xl border p-3 ${highlight ? "ring-2 ring-primary" : ""}`}>
+      <p className="text-[10px] text-muted-foreground">{label}</p>
+      <p
+        className={`text-base font-bold tabular-nums mt-0.5 rounded-md px-1.5 py-0.5 inline-block ${amountClassName ?? ""}`}
+      >
+        {value}
+      </p>
+    </div>
+  );
+}
+
 export function PurchasingWorkspace() {
   const mounted = useClientMounted();
   const { name, role } = useAuth();
   const searchParams = useSearchParams();
   const poParam = searchParams.get("po");
-  const { purchaseOrders, submitRetirement } = useSupplyChain();
+  const { purchaseOrders, storeItems, submitAddToStock } = useSupplyChain();
   const [selectedId, setSelectedId] = useState<string | null>(poParam);
-  const [retireLines, setRetireLines] = useState<RetirementLine[]>([]);
-  const [retireQtyText, setRetireQtyText] = useState<Record<string, string>>({});
-  const [retirePriceText, setRetirePriceText] = useState<Record<string, string>>({});
-  const [tab, setTab] = useState(searchParams.get("tab") === "history" ? "history" : "active");
-  const [confirmRetireOpen, setConfirmRetireOpen] = useState(false);
+  const [workLines, setWorkLines] = useState<WorkLine[]>([]);
+  const [qtyText, setQtyText] = useState<Record<string, string>>({});
+  const [priceText, setPriceText] = useState<Record<string, string>>({});
+  const [selectedIds, setSelectedIds] = useState<Record<string, boolean>>({});
+  const [tab, setTab] = useState(() => {
+    const t = searchParams.get("tab");
+    if (t === "history" || t === "active") return t;
+    // retirement tab is reviewers-only; default Active for store/purchaser
+    if (t === "retirement") return "active";
+    return "active";
+  });
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [bulkConfirmOpen, setBulkConfirmOpen] = useState(false);
+  const [extraOpen, setExtraOpen] = useState(false);
 
-  const retireCandidates = useMemo(
-    () => purchaseOrders.filter((p) => isPurchasingRetireCandidate(p.status)),
+  const actor = {
+    name: name ?? "Staff",
+    role: canonicalRoleKey(role) ?? "staff",
+  };
+  const canAddStock = canAddPurchasedToStock(role);
+  const canRetirementReview = canSupplyRetirementReview(role);
+
+  useEffect(() => {
+    const t = searchParams.get("tab");
+    if (t === "history" || t === "active") {
+      setTab(t);
+      return;
+    }
+    if (t === "retirement") {
+      setTab(canRetirementReview ? "retirement" : "active");
+    }
+  }, [searchParams, canRetirementReview]);
+
+  // Store/purchaser must never sit on the Retirement review tab.
+  useEffect(() => {
+    if (!canRetirementReview && tab === "retirement") setTab("active");
+  }, [canRetirementReview, tab]);
+
+  const retirementQueue = useMemo(
+    () =>
+      purchaseOrders.filter((p) => isRetirementReviewCandidate(p)),
     [purchaseOrders],
   );
 
-  const submittedForReview = useMemo(
-    () => purchaseOrders.filter((p) => p.status === "retirement_pending_accountant"),
+  const activeCandidates = useMemo(
+    () =>
+      purchaseOrders.filter(
+        (p) =>
+          !p.deletedAt &&
+          p.status !== "retired" &&
+          isAddToStockCandidate(p.status) &&
+          poHasRemainingAddToStockLines(p),
+      ),
     [purchaseOrders],
   );
 
@@ -143,76 +236,154 @@ export function PurchasingWorkspace() {
   const formatQtyDisplay = (n: number) =>
     Number.isFinite(n) && n > 0 ? String(n) : "";
 
-  const initRetire = (poId: string) => {
-    if (!canSubmitMarketRetirement(role)) return;
+  const initAddToStock = (poId: string) => {
     const po = purchaseOrders.find((p) => p.id === poId);
     if (!po) return;
-    if (isPurchasingRetirementInReview(po.status)) {
-      toast.message("Retirement is awaiting accountant review — wait for accept or reject");
-      return;
-    }
     setSelectedId(poId);
-    let lines: RetirementLine[];
-    if (po.retirement?.lines?.length && po.status === "retirement_rejected") {
-      lines = po.retirement.lines.map((l) => ({ ...l }));
-    } else {
-      lines = po.lines.map((l) => ({
+
+    const lines: WorkLine[] = [];
+    for (const l of po.lines) {
+      const submitted = isPoLineSubmittedToStock(po, l.id);
+      const already = stockedQtyForPoLine(po, l.id);
+      const decisionRows = (po.retirement?.lines ?? []).filter(
+        (r) => r.lineId === l.id && isSubmittedAddToStockLine(r),
+      );
+      const lastDecision = decisionRows[decisionRows.length - 1];
+      const wasNotBought = Boolean(
+        lastDecision &&
+          (lastDecision.notBought === true || lastDecision.removed === true),
+      );
+      const stockedRows = decisionRows.filter((r) => isPostedStockLine(r));
+      const lastStocked = stockedRows[stockedRows.length - 1];
+
+      // Submitted (bought or not bought) → listed read-only, never editable again.
+      if (submitted) {
+        const postedPrice = lastStocked?.actualPrice ?? l.unitPrice;
+        lines.push({
+          lineId: l.id,
+          workKey: `${l.id}__stocked`,
+          name: l.name,
+          unit: l.unit,
+          storeUnit: l.storeUnit,
+          quantityOrdered: l.quantityOrdered,
+          stockQuantityOrdered: l.stockQuantityOrdered,
+          quantityBought: wasNotBought
+            ? 0
+            : already > 0
+              ? already
+              : lastStocked?.quantityBought ?? 0,
+          stockQuantityBought: wasNotBought
+            ? 0
+            : lastStocked?.stockQuantityBought ?? l.stockQuantityOrdered,
+          poPrice: l.unitPrice,
+          actualPrice: wasNotBought ? l.unitPrice : postedPrice,
+          actualStockUnitPrice:
+            lastStocked?.actualStockUnitPrice ?? l.stockUnitPrice,
+          totalPaid: wasNotBought
+            ? 0
+            : stockedRows.reduce((s, r) => s + (Number(r.totalPaid) || 0), 0),
+          notBought: wasNotBought,
+          removed: wasNotBought,
+          stockItemId: l.stockItemId,
+          dept: normalizeSupplyDept(l.dept),
+          alreadyStocked: true,
+          remainingCap: 0,
+          stockedAt: lastDecision?.stockedAt,
+          reviewStatus: lastDecision?.reviewStatus,
+          batchId: lastDecision?.batchId,
+        });
+        continue;
+      }
+
+      // Open — selectable + editable until submit.
+      const defaultQty = remainingQtyForPoLine(po, l.id);
+      lines.push({
         lineId: l.id,
+        workKey: `${l.id}__open`,
         name: l.name,
         unit: l.unit,
         storeUnit: l.storeUnit,
         quantityOrdered: l.quantityOrdered,
         stockQuantityOrdered: l.stockQuantityOrdered,
-        quantityBought: l.quantityOrdered,
-        stockQuantityBought: l.stockQuantityOrdered,
+        quantityBought: defaultQty,
+        stockQuantityBought:
+          l.stockQuantityOrdered && l.quantityOrdered > 0
+            ? (defaultQty / l.quantityOrdered) * l.stockQuantityOrdered
+            : defaultQty,
         poPrice: l.unitPrice,
         actualPrice: l.unitPrice,
         actualStockUnitPrice: l.stockUnitPrice,
-        totalPaid: l.quantityOrdered * l.unitPrice,
+        totalPaid: defaultQty * l.unitPrice,
         notBought: false,
-      }));
+        stockItemId: l.stockItemId,
+        dept: normalizeSupplyDept(l.dept),
+        alreadyStocked: false,
+        remainingCap: null,
+      });
     }
-    setRetireLines(lines);
+
+    for (const rl of po.retirement?.lines ?? []) {
+      if (!rl.newlyAdded) continue;
+      if (lines.some((x) => x.lineId === rl.lineId)) continue;
+      const closed = isSubmittedAddToStockLine(rl);
+      lines.push({
+        ...rl,
+        workKey: `${rl.lineId}__${closed ? "stocked" : "new"}`,
+        dept: normalizeSupplyDept(rl.dept ?? "restaurant"),
+        alreadyStocked: closed,
+        remainingCap: closed ? 0 : null,
+      });
+    }
+
+    // Open (editable) first, then closed read-only rows.
+    lines.sort((a, b) => Number(a.alreadyStocked) - Number(b.alreadyStocked));
+
+    setWorkLines(lines);
     const qty: Record<string, string> = {};
     const price: Record<string, string> = {};
+    const sel: Record<string, boolean> = {};
     for (const l of lines) {
-      qty[l.lineId] = formatQtyDisplay(l.quantityBought);
-      price[l.lineId] = formatQtyDisplay(l.actualPrice);
+      if (l.alreadyStocked) continue;
+      qty[l.workKey] = formatQtyDisplay(l.quantityBought);
+      price[l.workKey] = formatQtyDisplay(l.actualPrice);
     }
-    setRetireQtyText(qty);
-    setRetirePriceText(price);
+    setQtyText(qty);
+    setPriceText(price);
+    setSelectedIds(sel);
   };
 
-  const updateRetireQty = useCallback((lineId: string, raw: string) => {
+  const updateQty = useCallback((workKey: string, raw: string) => {
     const cleaned = sanitizeQuantityInput(raw);
-    setRetireQtyText((prev) => ({ ...prev, [lineId]: cleaned }));
+    setQtyText((prev) => ({ ...prev, [workKey]: cleaned }));
     const q = parseQuantityValue(cleaned);
-    setRetireLines((prev) =>
+    setWorkLines((prev) =>
       prev.map((l) => {
-        if (l.lineId !== lineId) return l;
+        if (l.workKey !== workKey || l.alreadyStocked) return l;
+        const capped =
+          l.remainingCap != null ? Math.min(q, l.remainingCap) : q;
         const stockQty =
           l.stockQuantityOrdered && l.quantityOrdered > 0
-            ? (q / l.quantityOrdered) * l.stockQuantityOrdered
-            : q;
+            ? (capped / l.quantityOrdered) * l.stockQuantityOrdered
+            : capped;
         return {
           ...l,
-          quantityBought: q,
+          quantityBought: capped,
           stockQuantityBought: stockQty,
           actualStockUnitPrice:
-            stockQty > 0 ? (q * l.actualPrice) / stockQty : l.actualPrice,
-          totalPaid: q * l.actualPrice,
+            stockQty > 0 ? (capped * l.actualPrice) / stockQty : l.actualPrice,
+          totalPaid: capped * l.actualPrice,
         };
       }),
     );
   }, []);
 
-  const updateRetirePrice = useCallback((lineId: string, raw: string) => {
+  const updatePrice = useCallback((workKey: string, raw: string) => {
     const cleaned = sanitizeQuantityInput(raw);
-    setRetirePriceText((prev) => ({ ...prev, [lineId]: cleaned }));
+    setPriceText((prev) => ({ ...prev, [workKey]: cleaned }));
     const p = parseQuantityValue(cleaned);
-    setRetireLines((prev) =>
+    setWorkLines((prev) =>
       prev.map((l) =>
-        l.lineId === lineId
+        l.workKey === workKey && !l.alreadyStocked
           ? {
               ...l,
               actualPrice: p,
@@ -227,27 +398,237 @@ export function PurchasingWorkspace() {
     );
   }, []);
 
-  const actualSpent = useMemo(
+  const selectedWorkLines = useMemo(
     () =>
-      retireLines
-        .filter((l) => !lineNotBought(l))
-        .reduce((s, l) => s + l.totalPaid, 0),
-    [retireLines],
+      workLines.filter(
+        (l) =>
+          selectedIds[l.workKey] &&
+          !l.alreadyStocked &&
+          !(l.notBought || l.removed) &&
+          l.quantityBought > 0,
+      ),
+    [workLines, selectedIds],
   );
+
+  const notBoughtToClose = useMemo(
+    () =>
+      workLines.filter(
+        (l) =>
+          !l.alreadyStocked &&
+          !l.newlyAdded &&
+          (l.notBought === true || l.removed === true),
+      ),
+    [workLines],
+  );
+
+  const selectedSpend = useMemo(
+    () => selectedWorkLines.reduce((s, l) => s + l.totalPaid, 0),
+    [selectedWorkLines],
+  );
+
+  /** Form totals like the previous retire UI — all remaining lines on the page, not only the checkbox selection. */
+  const alreadyStockedSpend = selected?.retirement?.actualSpent ?? 0;
+  const formActualSpend = useMemo(
+    () =>
+      workLines
+        .filter((l) => !l.alreadyStocked && !(l.notBought || l.removed))
+        .reduce((s, l) => s + l.totalPaid, 0),
+    [workLines],
+  );
+  const actualSpent = alreadyStockedSpend + formActualSpend;
   const notBoughtTotal = useMemo(
     () =>
-      retireLines
-        .filter((l) => lineNotBought(l))
-        .reduce((s, l) => s + l.poPrice * l.quantityOrdered, 0),
-    [retireLines],
+      workLines
+        .filter((l) => !l.alreadyStocked && (l.notBought || l.removed))
+        .reduce(
+          (s, l) => s + l.poPrice * (l.remainingCap ?? l.quantityOrdered),
+          0,
+        ),
+    [workLines],
   );
   const refund = selected ? selected.cashDisbursed - actualSpent : 0;
-  const actor = {
-    name: name ?? "Staff",
-    role: canonicalRoleKey(role) ?? "staff",
+  const priceChangeCount = useMemo(
+    () =>
+      workLines.filter(
+        (l) =>
+          !l.alreadyStocked &&
+          !(l.notBought || l.removed) &&
+          l.poPrice !== l.actualPrice,
+      ).length,
+    [workLines],
+  );
+
+  const openBoughtLines = useMemo(
+    () =>
+      workLines.filter(
+        (l) =>
+          !l.alreadyStocked &&
+          !(l.notBought || l.removed) &&
+          l.quantityBought > 0,
+      ),
+    [workLines],
+  );
+
+  const bulkSpend = useMemo(
+    () => openBoughtLines.reduce((s, l) => s + l.totalPaid, 0),
+    [openBoughtLines],
+  );
+
+  const handleExtraPicks = (picks: ExtraStockPick[]) => {
+    const additions: WorkLine[] = picks.map((p) => {
+      const lineId = `new-${p.stockItemId}-${Date.now().toString(36)}-${Math.random()
+        .toString(36)
+        .slice(2, 5)}`;
+      return {
+        lineId,
+        workKey: `${lineId}__new`,
+        name: p.name,
+        unit: p.unit,
+        storeUnit: p.storeUnit,
+        quantityOrdered: p.qty,
+        stockQuantityOrdered: p.qty,
+        quantityBought: p.qty,
+        stockQuantityBought: p.qty,
+        poPrice: p.unitPrice,
+        actualPrice: p.unitPrice,
+        actualStockUnitPrice: p.unitPrice,
+        totalPaid: p.qty * p.unitPrice,
+        notBought: false,
+        newlyAdded: true,
+        stockItemId: p.stockItemId,
+        dept: p.dept,
+        alreadyStocked: false,
+        remainingCap: null,
+      };
+    });
+    setWorkLines((prev) => [...additions, ...prev]);
+    setQtyText((prev) => {
+      const next = { ...prev };
+      for (const a of additions) next[a.workKey] = formatQtyDisplay(a.quantityBought);
+      return next;
+    });
+    setPriceText((prev) => {
+      const next = { ...prev };
+      for (const a of additions) next[a.workKey] = formatQtyDisplay(a.actualPrice);
+      return next;
+    });
+    setSelectedIds((prev) => {
+      const next = { ...prev };
+      for (const a of additions) next[a.workKey] = true;
+      return next;
+    });
+    toast.success(
+      `${additions.length} newly added item${additions.length === 1 ? "" : "s"} ready — submit when selected`,
+    );
   };
-  const canRetirementReview = canSupplyRetirementReview(role);
-  const canRetireAtMarket = canSubmitMarketRetirement(role);
+
+  const runSubmitPayload = (
+    bought: WorkLine[],
+    notBought: WorkLine[],
+  ) => {
+    if (!selected || !canAddStock) return;
+    if (!bought.length && !notBought.length) {
+      toast.error(
+        "Select at least one item to add to stock, or mark items as not bought",
+      );
+      return;
+    }
+    const payload: RetirementLine[] = [
+      ...bought.map((l) => ({
+        lineId: l.lineId,
+        name: l.name,
+        unit: l.unit,
+        storeUnit: l.storeUnit,
+        quantityOrdered: l.quantityOrdered,
+        stockQuantityOrdered: l.stockQuantityOrdered,
+        quantityBought: l.quantityBought,
+        stockQuantityBought: l.stockQuantityBought,
+        poPrice: l.poPrice,
+        actualPrice: l.actualPrice,
+        actualStockUnitPrice: l.actualStockUnitPrice,
+        totalPaid: l.totalPaid,
+        notBought: false,
+        newlyAdded: l.newlyAdded,
+        stockItemId: l.stockItemId,
+        dept: l.dept,
+      })),
+      ...notBought.map((l) => ({
+        lineId: l.lineId,
+        name: l.name,
+        unit: l.unit,
+        storeUnit: l.storeUnit,
+        quantityOrdered: l.quantityOrdered,
+        stockQuantityOrdered: l.stockQuantityOrdered,
+        quantityBought: 0,
+        stockQuantityBought: 0,
+        poPrice: l.poPrice,
+        actualPrice: l.poPrice,
+        actualStockUnitPrice: l.actualStockUnitPrice,
+        totalPaid: 0,
+        notBought: true,
+        removed: true,
+        newlyAdded: l.newlyAdded,
+        stockItemId: l.stockItemId,
+        dept: l.dept,
+      })),
+    ];
+    const stampedIds = new Set(payload.map((l) => l.lineId));
+    const res = submitAddToStock(selected.id, payload, actor);
+    if (res && "error" in res) {
+      toast.error(res.error);
+      return;
+    }
+    playNotificationBeep();
+    if (res && "posted" in res) {
+      const notBoughtCount = notBought.length;
+      toast.success(
+        res.posted > 0
+          ? canRetirementReview
+            ? `${res.posted} item(s) added to Central Store${notBoughtCount ? ` · ${notBoughtCount} not bought` : ""} — open Retirement to review`
+            : `${res.posted} item(s) added to Central Store${notBoughtCount ? ` · ${notBoughtCount} not bought` : ""} — waiting for accountant review`
+          : notBoughtCount > 0
+            ? canRetirementReview
+              ? `${notBoughtCount} item(s) marked not bought — open Retirement to review`
+              : `${notBoughtCount} item(s) marked not bought — waiting for accountant review`
+            : "Submitted — waiting for accountant review",
+      );
+    }
+    setWorkLines((prev) =>
+      prev.map((l) => {
+        if (!stampedIds.has(l.lineId)) return l;
+        return {
+          ...l,
+          alreadyStocked: true,
+          remainingCap: 0,
+          stockedAt: new Date().toISOString(),
+          workKey: l.workKey.includes("__")
+            ? `${l.lineId}__stocked`
+            : l.workKey,
+        };
+      }),
+    );
+    setSelectedIds({});
+    setConfirmOpen(false);
+    setBulkConfirmOpen(false);
+    setWorkLines([]);
+    // Never send store/purchaser to Retirement review UI.
+    if (canRetirementReview) {
+      setSelectedId(null);
+      setTab("retirement");
+    } else {
+      setSelectedId(null);
+      setTab("active");
+    }
+  };
+
+  const submitSelected = () => {
+    runSubmitPayload(selectedWorkLines, notBoughtToClose);
+  };
+
+  const submitBulkAll = () => {
+    runSubmitPayload(openBoughtLines, notBoughtToClose);
+  };
+
   if (
     selectedId &&
     selected &&
@@ -267,46 +648,41 @@ export function PurchasingWorkspace() {
   }
 
   if (
+    canAddStock &&
     selectedId &&
     selected &&
-    isPurchasingRetirementInReview(selected.status)
+    isAddToStockCandidate(selected.status)
   ) {
     return (
       <div className="space-y-6">
-        <Button variant="ghost" onClick={() => setSelectedId(null)}>
-          ← Back to PO list
-        </Button>
-        <div className="rounded-lg border border-violet-200 bg-violet-50/70 dark:bg-violet-950/30 px-3 py-2.5 space-y-1">
-          <p className="text-sm font-semibold text-violet-900">
-            Retirement awaiting accountant — retire locked
-          </p>
-          <p className="text-xs text-violet-800/90">
-            You can edit again only if the accountant rejects this submission.
-          </p>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0 space-y-1">
+            <Button variant="ghost" className="-ml-2" onClick={() => setSelectedId(null)}>
+              ← Back to list
+            </Button>
+            <h2 className="text-xl font-semibold">
+              Add to Store — {selected.poNumber} (
+              {formatPoRaisedAt(selected.createdAt)})
+            </h2>
+            <p className="text-sm text-muted-foreground">
+              Select items ready today, adjust qty/price, then submit. Remaining lines can be
+              added later — they accumulate on the same Retirement row.
+            </p>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            className="gap-1.5 shrink-0"
+            onClick={() => setExtraOpen(true)}
+          >
+            <PackagePlus className="h-4 w-4" />
+            Add items not on PO
+          </Button>
         </div>
-        <PoDetailPanel po={selected} onBack={() => setSelectedId(null)} />
-      </div>
-    );
-  }
-
-  if (
-    canRetireAtMarket &&
-    selectedId &&
-    selected &&
-    isPurchasingRetireCandidate(selected.status)
-  ) {
-    return (
-      <div className="space-y-6">
-        <Button variant="ghost" onClick={() => setSelectedId(null)}>
-          ← Back to PO list
-        </Button>
-        <h2 className="text-xl font-semibold">
-          Retire — {selected.poNumber} ({formatPoRaisedAt(selected.createdAt)})
-        </h2>
 
         {selected.retirementComment && selected.status === "retirement_rejected" && (
           <PoCommentBanner
-            label="Accountant — retirement rejected"
+            label="Retirement rejected"
             comment={selected.retirementComment}
             variant="reject"
           />
@@ -314,50 +690,41 @@ export function PurchasingWorkspace() {
 
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
           <StatCard label="Cash Disbursed" value={formatNaira(selected.cashDisbursed)} />
-          <StatCard label="Actual Spent" value={formatNaira(actualSpent)} highlight />
+          <StatCard
+            label="Actual Spent"
+            value={formatNaira(actualSpent)}
+            highlight
+          />
           <StatCard label="Not bought" value={formatNaira(notBoughtTotal)} />
           {refund < 0 ? (
             <StatCard
-              label="Refund to Cashier"
+              label="Refund Purchaser"
               value={formatNaira(Math.abs(refund))}
               amountClassName="bg-red-500/15 text-red-800 dark:text-red-200"
             />
           ) : refund > 0 ? (
             <StatCard
-              label="Cashier Return Cash"
+              label="Return Excess Cash"
               value={formatNaira(refund)}
               amountClassName="bg-emerald-500/15 text-emerald-800 dark:text-emerald-200"
             />
           ) : (
             <StatCard label="Even" value={formatNaira(0)} />
           )}
-          <StatCard
-            label="Price changes"
-            value={String(
-              retireLines.filter((l) => !lineNotBought(l) && l.poPrice !== l.actualPrice)
-                .length,
-            )}
-          />
+          <StatCard label="Price changes" value={String(priceChangeCount)} />
         </div>
 
         <PaginatedListShell
-          items={retireLines.map((line) => {
-            const poLine = selected.lines.find((l) => l.id === line.lineId);
-            return {
-              ...line,
-              dept: normalizeSupplyDept(poLine?.dept ?? "kitchen"),
-            };
-          })}
-          pageSize={8}
-          searchPlaceholder="Search retirement items…"
+          items={workLines}
+          pageSize={10}
+          searchPlaceholder="Search items…"
           searchMatch={(line, query) => {
             const q = query.trim().toLowerCase();
             if (!q) return true;
-            const dept = normalizeSupplyDept(line.dept);
             return (
               line.name.toLowerCase().includes(q) ||
               (line.unit ?? "").toLowerCase().includes(q) ||
-              (DEPT_LABELS[dept] ?? dept).toLowerCase().includes(q)
+              (DEPT_LABELS[line.dept] ?? line.dept).toLowerCase().includes(q)
             );
           }}
           filters={[
@@ -365,108 +732,216 @@ export function PurchasingWorkspace() {
               key: "dept",
               label: "Department",
               options: STORE_DEPT_PICKER_OPTIONS_SORTED.filter((d) =>
-                selected.lines.some((l) => normalizeSupplyDept(l.dept) === d),
-              ).map((d) => ({
-                value: d,
-                label: DEPT_LABELS[d],
-              })),
+                workLines.some((l) => l.dept === d),
+              ).map((d) => ({ value: d, label: DEPT_LABELS[d] })),
             },
           ]}
           filterMatch={(line, key, value) => {
             if (key !== "dept") return undefined;
             if (!value || value === "all") return true;
-            return normalizeSupplyDept(line.dept) === normalizeSupplyDept(value);
+            return line.dept === normalizeSupplyDept(value);
           }}
-          emptyMessage="No retirement lines match."
+          emptyMessage="No lines on this PO."
         >
           {(pageItems) => (
             <div className="space-y-2">
               {pageItems.map((line) => {
-                const notBought = lineNotBought(line);
+                const checked = Boolean(selectedIds[line.workKey]);
+                const notBought = line.notBought === true || line.removed === true;
                 return (
                   <div
-                    key={line.lineId}
-                    className={`rounded-lg border p-3 text-sm space-y-2 ${
-                      notBought
-                        ? "border-red-200 bg-red-50/70 dark:bg-red-950/20 opacity-90"
-                        : ""
-                    }`}
+                    key={line.workKey}
+                    className={cn(
+                      "rounded-lg border p-3 text-sm space-y-2",
+                      line.newlyAdded &&
+                        !notBought &&
+                        "border-emerald-400 bg-emerald-50/70 dark:bg-emerald-950/25",
+                      line.alreadyStocked && "opacity-70 bg-muted/30",
+                      notBought &&
+                        "border-red-200 bg-red-50/70 dark:bg-red-950/20 opacity-90",
+                      checked &&
+                        !line.alreadyStocked &&
+                        !notBought &&
+                        "ring-1 ring-primary/40",
+                    )}
                   >
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div>
-                        <p className={`font-medium ${notBought ? "line-through decoration-2 text-muted-foreground" : ""}`}>
-                          {line.name}
-                        </p>
-                        <p className="text-[10px] text-muted-foreground">
-                          {DEPT_LABELS[line.dept] ?? line.dept}
-                        </p>
-                        {notBought ? (
-                          <Badge className="mt-1 bg-red-100 text-red-900">Not bought / removed</Badge>
-                        ) : null}
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div className="flex items-start gap-2 min-w-0">
+                        {!line.alreadyStocked ? (
+                          <Checkbox
+                            checked={checked}
+                            disabled={notBought}
+                            onCheckedChange={(v) =>
+                              setSelectedIds((m) => ({
+                                ...m,
+                                [line.workKey]: v === true,
+                              }))
+                            }
+                            className="mt-1 h-4 w-4 shrink-0"
+                            aria-label={`Select ${line.name}`}
+                          />
+                        ) : (
+                          <div className="w-4 shrink-0" />
+                        )}
+                        <div className="min-w-0">
+                          <p
+                            className={cn(
+                              "font-medium",
+                              notBought &&
+                                "line-through decoration-2 text-muted-foreground",
+                            )}
+                          >
+                            {line.name}
+                          </p>
+                          <p className="text-[10px] text-muted-foreground">
+                            {DEPT_LABELS[line.dept] ?? line.dept}
+                            {!line.alreadyStocked && !notBought
+                              ? " · tick to submit this item"
+                              : ""}
+                          </p>
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {line.newlyAdded && !notBought ? (
+                              <Badge className="bg-emerald-600 text-white text-[10px]">
+                                Newly added item
+                              </Badge>
+                            ) : null}
+                            {line.alreadyStocked && !notBought ? (
+                              <Badge variant="secondary" className="text-[10px]">
+                                Already in stock
+                              </Badge>
+                            ) : null}
+                            {notBought ? (
+                              <Badge className="bg-red-100 text-red-900">
+                                Not bought / removed
+                              </Badge>
+                            ) : null}
+                            {line.alreadyStocked ? (
+                              <Badge variant="outline" className="text-[10px]">
+                                Uneditable
+                              </Badge>
+                            ) : null}
+                          </div>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <Label htmlFor={`bought-${line.lineId}`} className="text-xs">
-                          Bought
-                        </Label>
-                        <Switch
-                          id={`bought-${line.lineId}`}
-                          checked={!notBought}
-                          onCheckedChange={(bought) =>
-                            setRetireLines((prev) =>
-                              prev.map((l) =>
-                                l.lineId === line.lineId
-                                  ? { ...l, notBought: !bought, removed: !bought }
-                                  : l,
-                              ),
-                            )
-                          }
-                        />
-                      </div>
+                      {!line.alreadyStocked ? (
+                        <div className="flex items-center gap-2 shrink-0">
+                          <Label
+                            htmlFor={`bought-${line.workKey}`}
+                            className="text-xs"
+                          >
+                            Bought
+                          </Label>
+                          <Switch
+                            id={`bought-${line.workKey}`}
+                            checked={!notBought}
+                            onCheckedChange={(bought) => {
+                              setWorkLines((prev) =>
+                                prev.map((l) =>
+                                  l.workKey === line.workKey
+                                    ? {
+                                        ...l,
+                                        notBought: !bought,
+                                        removed: !bought,
+                                      }
+                                    : l,
+                                ),
+                              );
+                              if (!bought) {
+                                setSelectedIds((m) => ({
+                                  ...m,
+                                  [line.workKey]: false,
+                                }));
+                              }
+                            }}
+                          />
+                        </div>
+                      ) : null}
                     </div>
-                    {!notBought && (
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 items-end">
+
+                    {!line.alreadyStocked && !notBought && (
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 items-end pl-6">
                         <div>
-                          <p className="text-[10px] text-muted-foreground mb-0.5">Ordered</p>
+                          <p className="text-[10px] text-muted-foreground mb-0.5">
+                            {line.newlyAdded ? "Qty" : "Ordered"}
+                          </p>
                           <p className="tabular-nums">
                             {line.quantityOrdered} {line.unit ?? ""}
-                            {line.stockQuantityOrdered != null &&
-                            line.storeUnit &&
-                            line.storeUnit !== line.unit ? (
-                              <span className="block text-[10px] text-muted-foreground">
-                                Expected in store: {line.stockQuantityOrdered}{" "}
-                                {line.storeUnit}
-                              </span>
-                            ) : null}
                           </p>
                         </div>
                         <div>
-                          <p className="text-[10px] text-muted-foreground mb-0.5">Bought qty</p>
+                          <Label className="text-[10px] text-muted-foreground">
+                            Add qty
+                          </Label>
                           <Input
                             inputMode="decimal"
-                            className={RETIRE_QTY_INPUT_CLASS}
-                            placeholder="0"
-                            value={retireQtyText[line.lineId] ?? ""}
-                            onChange={(e) => updateRetireQty(line.lineId, e.target.value)}
-                          />
-                        </div>
-                        <div>
-                          <p className="text-[10px] text-muted-foreground mb-0.5">Actual price</p>
-                          <Input
-                            inputMode="decimal"
-                            className={RETIRE_QTY_INPUT_CLASS}
-                            placeholder="0"
-                            value={retirePriceText[line.lineId] ?? ""}
-                            onChange={(e) =>
-                              updateRetirePrice(line.lineId, e.target.value)
+                            className={QTY_INPUT_CLASS}
+                            value={qtyText[line.workKey] ?? ""}
+                            onChange={(e) => updateQty(line.workKey, e.target.value)}
+                            onFocus={() =>
+                              setSelectedIds((m) => ({ ...m, [line.workKey]: true }))
                             }
                           />
                         </div>
                         <div>
-                          <p className="text-[10px] text-muted-foreground mb-0.5">Total paid</p>
+                          <Label className="text-[10px] text-muted-foreground">
+                            Actual price
+                          </Label>
+                          <Input
+                            inputMode="decimal"
+                            className={QTY_INPUT_CLASS}
+                            value={priceText[line.workKey] ?? ""}
+                            onChange={(e) => updatePrice(line.workKey, e.target.value)}
+                            onFocus={() =>
+                              setSelectedIds((m) => ({ ...m, [line.workKey]: true }))
+                            }
+                          />
+                        </div>
+                        <div>
+                          <p className="text-[10px] text-muted-foreground mb-0.5">
+                            Total paid
+                          </p>
                           <p className="font-medium tabular-nums">
                             {formatNaira(line.totalPaid)}
                           </p>
                         </div>
+                      </div>
+                    )}
+                    {line.alreadyStocked && !notBought && (
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 items-end pl-6 opacity-80">
+                        <div>
+                          <p className="text-[10px] text-muted-foreground mb-0.5">
+                            Qty in stock
+                          </p>
+                          <p className="tabular-nums">
+                            {line.quantityBought} {line.unit ?? ""}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] text-muted-foreground mb-0.5">
+                            Posted price
+                          </p>
+                          <p className="tabular-nums">{formatNaira(line.actualPrice)}</p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] text-muted-foreground mb-0.5">
+                            Total posted
+                          </p>
+                          <p className="font-medium tabular-nums">
+                            {formatNaira(line.totalPaid)}
+                          </p>
+                        </div>
+                        <div className="flex items-end">
+                          <Badge variant="secondary" className="text-[10px]">
+                            Uneditable
+                          </Badge>
+                        </div>
+                      </div>
+                    )}
+                    {line.alreadyStocked && notBought && (
+                      <div className="pl-6 opacity-80">
+                        <p className="text-xs text-muted-foreground">
+                          Marked not bought — closed for Add to stock (review only).
+                        </p>
                       </div>
                     )}
                   </div>
@@ -476,60 +951,118 @@ export function PurchasingWorkspace() {
           )}
         </PaginatedListShell>
 
-        <Button onClick={() => setConfirmRetireOpen(true)}>
-          Confirm & retire — add stock to store
-        </Button>
-        <AlertDialog open={confirmRetireOpen} onOpenChange={setConfirmRetireOpen}>
+        {canAddStock && (openBoughtLines.length > 0 || notBoughtToClose.length > 0) ? (
+          <div className="sticky bottom-3 z-10 rounded-xl border bg-background/95 backdrop-blur p-3 shadow-lg space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="text-sm text-muted-foreground">
+                {selectedWorkLines.length > 0
+                  ? "Submit only the items you ticked. Other open items stay for later."
+                  : "Tick items to submit a selection, or retire every open line at once."}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {selectedWorkLines.length > 0 ? (
+                  <Button onClick={() => setConfirmOpen(true)}>
+                    Submit selected ({selectedWorkLines.length})
+                    {notBoughtToClose.length > 0
+                      ? ` · ${notBoughtToClose.length} not bought`
+                      : ""}
+                  </Button>
+                ) : (
+                  <Button
+                    disabled={
+                      openBoughtLines.length === 0 && notBoughtToClose.length === 0
+                    }
+                    onClick={() => setBulkConfirmOpen(true)}
+                  >
+                    Confirm & retire — add stock to store
+                  </Button>
+                )}
+              </div>
+            </div>
+            {selectedWorkLines.length > 0 ? (
+              <p className="text-xs text-muted-foreground">
+                Selected: {selectedWorkLines.length} · {formatNaira(selectedSpend)}
+                {notBoughtToClose.length > 0
+                  ? ` · ${notBoughtToClose.length} not bought will be included`
+                  : ""}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+
+        <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
           <AlertDialogContent>
             <AlertDialogHeader>
-              <AlertDialogTitle>Retire {selected.poNumber}?</AlertDialogTitle>
+              <AlertDialogTitle>
+                {selectedWorkLines.length > 0
+                  ? `Add ${selectedWorkLines.length} selected item(s) to stock?`
+                  : `Submit ${notBoughtToClose.length} not-bought item(s)?`}
+              </AlertDialogTitle>
               <AlertDialogDescription asChild>
                 <div className="space-y-2 text-sm text-muted-foreground">
                   <p>
-                    This adds bought items to Central Store stock immediately. Accountant approval
-                    is not required.
+                    Only ticked items (plus any marked not bought) are submitted.
+                    Other open items stay on Add to stock for later.
                   </p>
-                  {(() => {
-                    const approvedAmt = getPoApprovedAmount(selected)
-                    const retiredAmt = retireLines
-                      .filter((l) => !(l.notBought || l.removed))
-                      .reduce((s, l) => s + l.totalPaid, 0)
-                    const delta = Math.round((retiredAmt - approvedAmt) * 100) / 100
-                    return (
-                      <ul className="rounded-md border bg-muted/40 px-3 py-2 space-y-1 text-foreground">
-                        <li>Approved PO: {formatNaira(approvedAmt)}</li>
-                        <li>Retired total: {formatNaira(retiredAmt)}</li>
-                        <li>
-                          Difference:{" "}
-                          {delta === 0
-                            ? formatNaira(0)
-                            : delta > 0
-                              ? `${formatNaira(delta)} debit (spent more)`
-                              : `${formatNaira(Math.abs(delta))} credit (spent less)`}
-                        </li>
-                      </ul>
-                    )
-                  })()}
+                  <ul className="rounded-md border bg-muted/40 px-3 py-2 space-y-1 text-foreground">
+                    <li>Approved PO: {formatNaira(getPoApprovedAmount(selected))}</li>
+                    <li>This selection (bought): {formatNaira(selectedSpend)}</li>
+                    {notBoughtToClose.length > 0 ? (
+                      <li>Not bought: {notBoughtToClose.length} item(s)</li>
+                    ) : null}
+                  </ul>
                 </div>
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
               <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction
-                onClick={() => {
-                  submitRetirement(selected.id, retireLines, actor);
-                  playNotificationBeep();
-                  toast.success("PO retired — stock added to Central Store");
-                  setConfirmRetireOpen(false);
-                  setSelectedId(null);
-                  setTab("history");
-                }}
-              >
-                Retire PO
+              <AlertDialogAction onClick={submitSelected}>
+                Submit selected
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+
+        <AlertDialog open={bulkConfirmOpen} onOpenChange={setBulkConfirmOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                Confirm & retire — add stock to store?
+              </AlertDialogTitle>
+              <AlertDialogDescription asChild>
+                <div className="space-y-2 text-sm text-muted-foreground">
+                  <p>
+                    Submits every open item on this PO (bought into Central Store,
+                    not-bought for review only). Submitted lines cannot be edited
+                    again.
+                  </p>
+                  <ul className="rounded-md border bg-muted/40 px-3 py-2 space-y-1 text-foreground">
+                    <li>Approved PO: {formatNaira(getPoApprovedAmount(selected))}</li>
+                    <li>
+                      Bought lines: {openBoughtLines.length} · {formatNaira(bulkSpend)}
+                    </li>
+                    {notBoughtToClose.length > 0 ? (
+                      <li>Not bought: {notBoughtToClose.length} item(s)</li>
+                    ) : null}
+                  </ul>
+                </div>
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={submitBulkAll}>
+                Confirm & retire — add stock to store
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        <AddExtraStockItemsModal
+          open={extraOpen}
+          onOpenChange={setExtraOpen}
+          storeItems={storeItems}
+          onAdd={handleExtraPicks}
+        />
       </div>
     );
   }
@@ -539,7 +1072,9 @@ export function PurchasingWorkspace() {
       <div>
         <h1 className="text-2xl font-bold">Retirement</h1>
         <p className="text-sm text-muted-foreground">
-          Market purchase and retirement. Retiring a PO adds items to Central Store immediately.
+          {canRetirementReview
+            ? "Active: add items to Central Store (change qty/price as needed — submit locks that item). Retirement: review those adds. History: completed POs."
+            : "Active: add items to Central Store (change qty/price as needed — submit locks that item). Submitted items go for accountant review. History: completed POs."}
         </p>
       </div>
 
@@ -547,17 +1082,27 @@ export function PurchasingWorkspace() {
         <div className="h-24 rounded-lg bg-muted/40 animate-pulse" />
       ) : (
         <Tabs value={tab} onValueChange={setTab}>
-          <TabsList className="flex h-auto flex-wrap">
+          <TabsList className="flex h-auto flex-wrap justify-center gap-1 mx-auto w-full max-w-3xl">
             <TabsTrigger value="active">
               Active
-              {retireCandidates.length > 0 && (
+              {activeCandidates.length > 0 && (
                 <Badge variant="secondary" className="ml-1.5 tabular-nums text-[10px]">
-                  {retireCandidates.length}
+                  {activeCandidates.length}
                 </Badge>
               )}
             </TabsTrigger>
+            {canRetirementReview && (
+              <TabsTrigger value="retirement">
+                Retirement
+                {retirementQueue.length > 0 && (
+                  <Badge variant="secondary" className="ml-1.5 tabular-nums text-[10px]">
+                    {retirementQueue.length}
+                  </Badge>
+                )}
+              </TabsTrigger>
+            )}
             <TabsTrigger value="history">
-              Retirement History
+              History
               {retiredCount > 0 && (
                 <Badge variant="secondary" className="ml-1.5 tabular-nums text-[10px]">
                   {retiredCount}
@@ -567,62 +1112,22 @@ export function PurchasingWorkspace() {
           </TabsList>
 
           <TabsContent value="active" className="mt-4 space-y-6">
-            {canRetirementReview ? (
-              <PoRetirementPanel showAcceptedSection={false} />
-            ) : null}
-
-            {submittedForReview.length > 0 && (
-              <section className="space-y-3">
-                <div className="rounded-lg border border-violet-200 bg-violet-50/50 dark:bg-violet-950/20 p-3 text-sm text-muted-foreground">
-                  {submittedForReview.length} retirement
-                  {submittedForReview.length === 1 ? "" : "s"} submitted — awaiting accountant review.
-                  Retire at market stays locked until accept or reject.
-                </div>
-                <PaginatedListShell
-                  items={submittedForReview}
-                  pageSize={8}
-                  searchPlaceholder="Search submitted retirement…"
-                  searchMatch={(po, query) => {
-                    const q = query.trim().toLowerCase();
-                    if (!q) return true;
-                    return (
-                      po.poNumber.toLowerCase().includes(q) ||
-                      po.createdByName.toLowerCase().includes(q) ||
-                      (po.retirement?.submittedBy ?? "").toLowerCase().includes(q)
-                    );
-                  }}
-                  emptyMessage="No retirements awaiting accountant."
-                >
-                  {(pageItems) => (
-                    <div className="space-y-2">
-                      {pageItems.map((po) => (
-                        <PurchasingRetireRow
-                          key={po.id}
-                          po={po}
-                          canRetire={canRetireAtMarket}
-                          onRetire={() => initRetire(po.id)}
-                        />
-                      ))}
-                    </div>
-                  )}
-                </PaginatedListShell>
-              </section>
-            )}
-
             <section className="space-y-3">
               <div>
-                <h2 className="font-medium">Ready to retire at market</h2>
+                <h2 className="font-medium">Ready to add to stock</h2>
                 <p className="text-xs text-muted-foreground">
-                  POs with manager approval — record market purchase and retire. Stock is added when you retire.
+                  Approved POs — change qty or price as needed, then submit. Each submitted
+                  item locks forever (Already in stock). Other items on the same PO can still
+                  be added later.
                 </p>
               </div>
-              {retireCandidates.length === 0 ? (
+              {activeCandidates.length === 0 ? (
                 <p className="text-sm text-muted-foreground rounded-md border border-dashed px-3 py-6 text-center">
-                  No POs ready for retirement. Complete accountant and manager approvals first.
+                  No POs ready. Complete accountant and manager approvals first.
                 </p>
               ) : (
                 <PaginatedListShell
-                  items={retireCandidates}
+                  items={activeCandidates}
                   pageSize={8}
                   searchPlaceholder="Search PO number, raiser…"
                   searchMatch={(po, query) => {
@@ -635,7 +1140,7 @@ export function PurchasingWorkspace() {
                       po.lines.some((l) => l.name.toLowerCase().includes(q))
                     );
                   }}
-                  emptyMessage="No POs ready for retirement."
+                  emptyMessage="No POs ready for Add to stock."
                 >
                   {(pageItems) => (
                     <div className="space-y-2">
@@ -643,8 +1148,9 @@ export function PurchasingWorkspace() {
                         <PurchasingRetireRow
                           key={po.id}
                           po={po}
-                          canRetire={canRetireAtMarket}
-                          onRetire={() => initRetire(po.id)}
+                          canAct={canAddStock}
+                          actionLabel="Add to stock"
+                          onOpen={() => initAddToStock(po.id)}
                         />
                       ))}
                     </div>
@@ -654,47 +1160,35 @@ export function PurchasingWorkspace() {
             </section>
           </TabsContent>
 
+          {canRetirementReview && (
+          <TabsContent value="retirement" className="mt-4 space-y-4">
+            <div>
+              <h2 className="font-medium">Retirement review</h2>
+              <p className="text-xs text-muted-foreground">
+                  Review only items already submitted from Add to stock. Accept closes that batch;
+                  lines not yet added stay on Active. Reject does not remove stock already posted.
+                </p>
+            </div>
+            <PoRetirementPanel showAcceptedSection={false} />
+          </TabsContent>
+          )}
+
           <TabsContent value="history" className="mt-4 space-y-3">
             <div>
-              <h2 className="font-medium">Retired purchase orders</h2>
+              <h2 className="font-medium">History</h2>
               <p className="text-xs text-muted-foreground">
-                Completed retirements — approved vs retired totals, with changed lines highlighted.
+                Completed retirements — final record after review.
               </p>
             </div>
             <PoHistoryPanel
               purchaseOrders={purchaseOrders}
               includeStatuses={["retired"]}
-              emptyMessage="No retired purchase orders yet. Retirement History appears here after you retire a PO from Active."
+              emptyMessage="No retired purchase orders yet. History appears after Retirement is accepted."
               searchPlaceholder="Search retired PO number, date…"
             />
           </TabsContent>
         </Tabs>
       )}
-    </div>
-  );
-}
-
-function StatCard({
-  label,
-  value,
-  highlight,
-  amountClassName,
-}: {
-  label: string;
-  value: string;
-  highlight?: boolean;
-  amountClassName?: string;
-}) {
-  return (
-    <div
-      className={`rounded-xl border p-3 ${highlight ? "ring-2 ring-primary" : ""}`}
-    >
-      <p className="text-[10px] text-muted-foreground">{label}</p>
-      <p
-        className={`text-base font-bold tabular-nums mt-0.5 rounded-md px-1.5 py-0.5 inline-block ${amountClassName ?? ""}`}
-      >
-        {value}
-      </p>
     </div>
   );
 }

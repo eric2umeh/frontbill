@@ -562,8 +562,6 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
       "store:audit",
       "supply:store",
       "supply:purchasing",
-      "supply:approve_accountant",
-      "supply:approve_manager",
       "supply:activity",
       "settings:view",
     ],
@@ -978,44 +976,58 @@ export function canAccessExpenseMenu(
   return roleKey != null && EXPENSE_MENU_ROLE_KEYS.includes(roleKey);
 }
 
-/** Testing override: Administrator / Superadmin / Store may review POs without a dedicated accountant/manager login. */
+/** Testing override: Administrator / Superadmin may review POs without a dedicated accountant/manager login. */
 export function canAdminTestApproveSupplyPo(
   userRole: string | null | undefined,
 ): boolean {
   const roleKey = canonicalRoleKey(userRole);
-  return (
-    roleKey === "admin" || roleKey === "superadmin" || roleKey === "store"
-  );
+  return roleKey === "admin" || roleKey === "superadmin";
 }
 
+/** Accountant-stage PO accept/reject — not store or purchaser. */
 export function canSupplyPoAccountantReview(
   userRole: string | null | undefined,
 ): boolean {
+  const roleKey = canonicalRoleKey(userRole);
+  if (!roleKey || roleKey === "store" || roleKey === "purchaser") return false;
   return (
+    roleKey === "accountant" ||
+    roleKey === "manager" ||
+    roleKey === "admin" ||
+    roleKey === "superadmin" ||
     hasPermission(userRole, "supply:approve_accountant") ||
     canAdminTestApproveSupplyPo(userRole)
   );
 }
 
+/** Manager-stage PO accept/reject — not store or purchaser. */
 export function canSupplyPoManagerReview(
   userRole: string | null | undefined,
 ): boolean {
+  const roleKey = canonicalRoleKey(userRole);
+  if (!roleKey || roleKey === "store" || roleKey === "purchaser") return false;
   return (
+    roleKey === "manager" ||
+    roleKey === "admin" ||
+    roleKey === "superadmin" ||
     hasPermission(userRole, "supply:approve_manager") ||
     canAdminTestApproveSupplyPo(userRole)
   );
 }
 
-/** Market retirement review — accountant, administrator, superadmin, manager (not auditor). */
+/** Final retirement review — accountant, manager, admin, superadmin, auditor only (not store/purchaser). */
 export function canSupplyRetirementReview(
   userRole: string | null | undefined,
 ): boolean {
   const roleKey = canonicalRoleKey(userRole);
-  if (roleKey === "auditor") return false;
+  if (!roleKey || roleKey === "store" || roleKey === "purchaser") return false;
   return (
-    hasPermission(userRole, "supply:approve_accountant") ||
-    canAdminTestApproveSupplyPo(userRole) ||
-    roleKey === "manager"
+    roleKey === "auditor" ||
+    roleKey === "manager" ||
+    roleKey === "accountant" ||
+    roleKey === "admin" ||
+    roleKey === "superadmin" ||
+    canAdminTestApproveSupplyPo(userRole)
   );
 }
 
@@ -1037,11 +1049,12 @@ export function canAccessSupplyPurchaseOrdersMenu(
   );
 }
 
-/** PO Approvals tab — reviewers can decide; auditor may open the tab view-only. */
+/** PO Approvals tab — reviewers can decide; auditor may open the tab view-only. Store/purchaser never. */
 export function canAccessPoApprovalsTab(
   userRole: string | null | undefined,
 ): boolean {
   const roleKey = canonicalRoleKey(userRole);
+  if (!roleKey || roleKey === "store" || roleKey === "purchaser") return false;
   if (roleKey === "auditor") return true;
   return (
     canSupplyPoAccountantReview(userRole) ||
@@ -1067,13 +1080,27 @@ export function canRaisePurchaseRequest(
   );
 }
 
+/** Add purchased items to Central Store (Active tab). Includes auditor (view+add for audit ops). */
+export function canAddPurchasedToStock(
+  userRole: string | null | undefined,
+): boolean {
+  const roleKey = canonicalRoleKey(userRole);
+  return (
+    roleKey === "store" ||
+    roleKey === "purchaser" ||
+    roleKey === "auditor" ||
+    roleKey === "accountant" ||
+    roleKey === "manager" ||
+    roleKey === "admin" ||
+    roleKey === "superadmin"
+  );
+}
+
 /** Retire an approved PO at market. Auditor is view-only. */
 export function canSubmitMarketRetirement(
   userRole: string | null | undefined,
 ): boolean {
-  const roleKey = canonicalRoleKey(userRole);
-  if (!roleKey || roleKey === "auditor") return false;
-  return hasPermission(userRole, "supply:purchasing");
+  return canAddPurchasedToStock(userRole);
 }
 
 /** Open / close / delete a kitchen production run. Auditor is view-only. */

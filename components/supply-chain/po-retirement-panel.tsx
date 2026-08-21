@@ -23,6 +23,11 @@ import { poStatusBadge } from '@/components/supply-chain/po-approval-panel'
 import { PaginatedListShell } from '@/components/shared/paginated-list-shell'
 import { poDepartmentFilterOptions } from '@/components/supply-chain/po-review-lines-panel'
 import { RetirementLinesReview } from '@/components/supply-chain/retirement-lines-review'
+import {
+  isRetirementReviewCandidate,
+  pendingReviewLines,
+  poHasRemainingAddToStockLines,
+} from '@/lib/supply-chain/add-to-stock'
 
 function RetirementReviewCard({
   po,
@@ -36,7 +41,19 @@ function RetirementReviewCard({
   deptFilter?: string
 }) {
   const [comment, setComment] = useState('')
-  const r = po.retirement
+  const pendingLines = useMemo(() => pendingReviewLines(po), [po])
+  const pendingSpend = pendingLines.reduce(
+    (s, l) => s + (Number(l.totalPaid) || 0),
+    0,
+  )
+  const remainingOnActive = poHasRemainingAddToStockLines(po)
+  const pendingBatch = po.retirement?.batches?.find(
+    (b) => (b.status ?? 'pending_review') === 'pending_review',
+  )
+  const submittedBy =
+    pendingBatch?.submittedBy ?? po.retirement?.submittedBy
+  const submittedAt =
+    pendingBatch?.submittedAt ?? po.retirement?.submittedAt
 
   return (
     <div className="rounded-lg border p-4 space-y-3">
@@ -44,25 +61,35 @@ function RetirementReviewCard({
         <div>
           <p className="font-medium">{po.poNumber}</p>
           <p className="text-sm text-muted-foreground">
-            Submitted by {r?.submittedBy} · Est. spend {formatNaira(r?.actualSpent ?? 0)} · Refund{' '}
-            {formatNaira(r?.refundToCashier ?? 0)}
+            Submitted by {submittedBy ?? 'Staff'} · This batch{' '}
+            {formatNaira(pendingSpend)} · {pendingLines.length} item
+            {pendingLines.length === 1 ? '' : 's'} to review
           </p>
-          {r?.submittedAt ? (
+          {submittedAt ? (
             <p className="text-xs text-muted-foreground">
-              Submitted {formatPoRaisedAt(r.submittedAt)}
+              Submitted {formatPoRaisedAt(submittedAt)}
+            </p>
+          ) : null}
+          {remainingOnActive ? (
+            <p className="text-xs text-amber-800 dark:text-amber-200 mt-1">
+              Other PO lines still remain on Add to stock — Accept only closes this
+              batch, not the whole PO.
             </p>
           ) : null}
         </div>
         {poStatusBadge(po)}
       </div>
-      {(po.retirement?.lines?.length ?? 0) > 0 ? (
-        <div className="rounded-md border bg-muted/20 p-3 space-y-2">
-          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-            Retirement lines ({po.retirement?.lines.length})
-          </p>
-          <RetirementLinesReview po={po} deptFilter={deptFilter} />
-        </div>
-      ) : null}
+      <div className="rounded-md border bg-muted/20 p-3 space-y-2">
+        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+          Items added to stock (review only these) ({pendingLines.length})
+        </p>
+        <RetirementLinesReview
+          po={po}
+          lines={pendingLines}
+          deptFilter={deptFilter}
+          emptyMessage="No pending Add-to-stock items for this PO."
+        />
+      </div>
       {canReview ? (
         <>
           <Textarea
@@ -74,29 +101,35 @@ function RetirementReviewCard({
           <div className="flex flex-wrap gap-2">
             <Button
               size="sm"
-              disabled={!comment.trim()}
+              disabled={!comment.trim() || pendingLines.length === 0}
               onClick={() => {
                 onDecide(true, comment.trim())
                 setComment('')
               }}
             >
-              Accept retirement & update stock
+              Accept this batch
             </Button>
             <Button
               size="sm"
               variant="destructive"
-              disabled={!comment.trim()}
+              disabled={!comment.trim() || pendingLines.length === 0}
               onClick={() => {
                 onDecide(false, comment.trim())
                 setComment('')
               }}
             >
-              Reject — send to Purchasing
+              Reject this batch (stock stays)
             </Button>
           </div>
+          <p className="text-[11px] text-muted-foreground">
+            Accept/Reject applies only to items already submitted from Add to stock.
+            Unstocked PO lines stay on Active. Reject does not undo Central Store posts.
+          </p>
         </>
       ) : (
-        <p className="text-xs text-muted-foreground">Waiting for accountant review.</p>
+        <p className="text-xs text-muted-foreground">
+          Waiting for accountant or manager to accept or reject this batch.
+        </p>
       )}
     </div>
   )
@@ -115,7 +148,7 @@ export function PoRetirementPanel({
     role: canonicalRoleKey(role) ?? 'staff',
   }
 
-  const pending = purchaseOrders.filter((p) => p.status === 'retirement_pending_accountant')
+  const pending = purchaseOrders.filter((p) => isRetirementReviewCandidate(p))
   const accepted = purchaseOrders.filter((p) => p.status === 'retired')
   const canReview = canSupplyRetirementReview(role)
   const adminTester = canAdminTestApproveSupplyPo(role)
@@ -138,8 +171,8 @@ export function PoRetirementPanel({
             ) : null}
           </h2>
           <p className="text-xs text-muted-foreground">
-            New retirements add stock immediately from Purchasing. This list is only for older
-            submissions still waiting for accountant accept/reject.
+            Review only items that store/purchaser already added to Central Store.
+            Accept closes that batch; other PO lines not yet submitted stay on Active → Add to stock.
           </p>
         </div>
         {pending.length === 0 ? (
@@ -176,7 +209,11 @@ export function PoRetirementPanel({
               if (key !== 'dept') return undefined
               if (!value || value === 'all') return true
               const want = normalizeSupplyDept(value)
-              return po.lines.some((l) => normalizeSupplyDept(l.dept) === want)
+              return (
+                pendingReviewLines(po).some(
+                  (l) => normalizeSupplyDept(l.dept ?? 'kitchen') === want,
+                ) || po.lines.some((l) => normalizeSupplyDept(l.dept) === want)
+              )
             }}
             emptyMessage="No retirements match this search or filter."
           >
@@ -196,12 +233,6 @@ export function PoRetirementPanel({
                         actor,
                       )
                       if ('error' in res) toast.error(res.error)
-                      else
-                        toast.success(
-                          approved
-                            ? 'Retirement approved — stock updated'
-                            : 'Retirement sent back to Purchasing',
-                        )
                     }}
                   />
                 ))}
@@ -212,20 +243,20 @@ export function PoRetirementPanel({
       </section>
 
       {showAcceptedSection ? (
-      <section className="space-y-3">
-        <div>
-          <h2 className="text-sm font-semibold">Accepted retirements</h2>
-          <p className="text-xs text-muted-foreground">
-            Completed market retirements — stock has been updated in central store.
-          </p>
-        </div>
-        <PoHistoryPanel
-          purchaseOrders={accepted}
-          includeStatuses={['retired']}
-          emptyMessage="No accepted retirements yet."
-          searchPlaceholder="Search retired PO number, date…"
-        />
-      </section>
+        <section className="space-y-3">
+          <div>
+            <h2 className="text-sm font-semibold">Accepted retirements</h2>
+            <p className="text-xs text-muted-foreground">
+              Fully completed POs — every ordered line was stocked and accepted.
+            </p>
+          </div>
+          <PoHistoryPanel
+            purchaseOrders={accepted}
+            includeStatuses={['retired']}
+            emptyMessage="No accepted retirements yet."
+            searchPlaceholder="Search retired PO number, date…"
+          />
+        </section>
       ) : null}
     </div>
   )

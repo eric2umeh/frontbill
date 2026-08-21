@@ -37,6 +37,20 @@ export function snapshotsPayloadForRole(
   role: string | null | undefined,
 ): Partial<Record<SupplySnapshotKey, unknown>> {
   if (hasPermission(role, 'supply:store')) return all
+  // PO reviewers must sync purchase_orders after approve/reject even without store catalogue write.
+  if (
+    hasPermission(role, 'supply:approve_accountant') ||
+    hasPermission(role, 'supply:approve_manager') ||
+    hasPermission(role, 'supply:purchasing')
+  ) {
+    const out: Partial<Record<SupplySnapshotKey, unknown>> = {}
+    if ('purchase_orders' in all) out.purchase_orders = all.purchase_orders
+    if ('activity_log' in all) out.activity_log = all.activity_log
+    if (hasPermission(role, 'supply:purchasing') && 'basket' in all) {
+      out.basket = all.basket
+    }
+    return out
+  }
   if (!hasPermission(role, 'supply:kitchen')) return {}
 
   const out: Partial<Record<SupplySnapshotKey, unknown>> = {}

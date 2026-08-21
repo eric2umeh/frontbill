@@ -346,6 +346,13 @@ export interface PurchaseOrder {
   deletedBy?: string
   cashDisbursed: number
   lines: PoLine[]
+  /**
+   * Frozen copy of lines at manager approval — Purchase Orders → History always
+   * shows this (never market / retirement edits). Set once; never mutated.
+   */
+  approvedLines?: PoLine[]
+  /** When manager (or admin test) approved for market — used to sort History. */
+  approvedAt?: string
   totalAmount: number
   accountantComment?: string
   /** Who last accepted/rejected at accountant (or admin test) stage. */
@@ -385,6 +392,31 @@ export interface RetirementLine {
   removed?: boolean
   /** When false, item was not purchased at market (shown with *). Default true = bought. */
   notBought?: boolean
+  /** Bought at market but not on the original PO. */
+  newlyAdded?: boolean
+  /** Catalogue id — required for newly added lines; optional for PO lines. */
+  stockItemId?: string
+  dept?: Exclude<SupplyDept, 'all'>
+  /** When this line was posted to Central Store (partial Add to stock). */
+  stockedAt?: string
+  stockedBy?: string
+  /** Which Add-to-stock batch posted this row. */
+  batchId?: string
+  /** Accountant/manager decision for this posted row (defaults to pending when stocked). */
+  reviewStatus?: 'pending_review' | 'accepted' | 'rejected'
+}
+
+export interface AddToStockBatch {
+  id: string
+  submittedAt: string
+  submittedBy: string
+  lineIds: string[]
+  actualSpent: number
+  /** Accountant/manager decision for this Add-to-stock submission only. */
+  status?: 'pending_review' | 'accepted' | 'rejected'
+  reviewedAt?: string
+  reviewedBy?: string
+  reviewComment?: string
 }
 
 export interface RetirementRecord {
@@ -392,6 +424,8 @@ export interface RetirementRecord {
   refundToCashier: number
   priceChanges: number
   lines: RetirementLine[]
+  /** Partial Add-to-stock submissions that accumulate on this PO. */
+  batches?: AddToStockBatch[]
   submittedAt: string
   submittedBy: string
   accountantComment?: string

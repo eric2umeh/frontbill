@@ -108,10 +108,10 @@ function PoDecisionCard({
 
   const title =
     stage === "admin_test"
-      ? "Store / Admin — accept or reject with comment"
+      ? "Admin — accept or reject with comment (one step to market)"
       : stage === "accountant"
-        ? "Accountant review — accept or reject with comment"
-        : "Manager review — accept or reject with comment";
+        ? "Accountant review — accept forwards to manager; reject returns to store"
+        : "Manager review — accept releases for market; reject returns to store";
 
   const editable = Boolean(canEditLines && onLineQtyChange);
 
@@ -328,7 +328,7 @@ export function PoApprovalPanel({ compact }: { compact?: boolean }) {
               <PoDecisionCard
                 key={po.id}
                 po={po}
-                stage="accountant"
+                stage={canManager ? "manager" : "accountant"}
                 canEditLines
                 onLineQtyChange={(id, qty) => handleLineQty(po.id, id, qty)}
                 onLineDelete={(id) => handleLineDelete(po.id, id)}
@@ -336,7 +336,9 @@ export function PoApprovalPanel({ compact }: { compact?: boolean }) {
                   accountantDecision(po.id, approved, comment, actor);
                   toast.success(
                     approved
-                      ? "Forwarded to manager for approval"
+                      ? canManager
+                        ? "Approved — released for market (Purchase Orders → History)"
+                        : "Forwarded to manager for approval"
                       : "PO rejected — returned to store for editing",
                   );
                 }}
