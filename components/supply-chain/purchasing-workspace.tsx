@@ -46,11 +46,12 @@ import {
 import {
   formatPoRaisedAt,
   getPoApprovedAmount,
-  isPurchasingRetirementInReview,
 } from "@/lib/supply-chain/po-format";
 import {
+  hasPendingRetirementReview,
   isAddToStockCandidate,
   isRetirementReviewCandidate,
+  poHasRemainingAddToStockLines,
   remainingQtyForPoLine,
   stockedQtyForPoLine,
 } from "@/lib/supply-chain/add-to-stock";
@@ -84,11 +85,12 @@ function PurchasingRetireRow({
   canAct?: boolean;
   actionLabel?: string;
 }) {
-  const inReview = isPurchasingRetirementInReview(po.status);
+  const inReview = hasPendingRetirementReview(po);
   const rejected = po.status === "retirement_rejected";
   const stockedCount = (po.retirement?.lines ?? []).filter(
     (l) => l.stockedAt && !(l.notBought || l.removed),
   ).length;
+  const remaining = poHasRemainingAddToStockLines(po);
   return (
     <div className="flex flex-wrap justify-between items-center rounded-md border px-3 py-2 gap-2">
       <div className="min-w-0 flex-1">
@@ -114,6 +116,11 @@ function PurchasingRetireRow({
             Awaiting retirement review
           </Badge>
         )}
+        {remaining && stockedCount > 0 ? (
+          <Badge variant="outline" className="mt-1">
+            Partial — more to add
+          </Badge>
+        ) : null}
       </div>
       {canAct ? (
         <Button size="sm" className="shrink-0" onClick={onOpen}>
@@ -182,18 +189,19 @@ export function PurchasingWorkspace() {
   const canAddStock = canAddPurchasedToStock(role);
   const canRetirementReview = canSupplyRetirementReview(role);
 
-  const activeCandidates = useMemo(
+  const retirementQueue = useMemo(
     () =>
-      purchaseOrders.filter(
-        (p) => !p.deletedAt && isAddToStockCandidate(p.status) && p.status !== "retired",
-      ),
+      purchaseOrders.filter((p) => isRetirementReviewCandidate(p)),
     [purchaseOrders],
   );
 
-  const retirementQueue = useMemo(
+  const activeCandidates = useMemo(
     () =>
       purchaseOrders.filter(
-        (p) => !p.deletedAt && isRetirementReviewCandidate(p.status),
+        (p) =>
+          !p.deletedAt &&
+          p.status !== "retired" &&
+          isAddToStockCandidate(p.status),
       ),
     [purchaseOrders],
   );
@@ -978,9 +986,8 @@ export function PurchasingWorkspace() {
             <div>
               <h2 className="font-medium">Retirement review</h2>
               <p className="text-xs text-muted-foreground">
-                  Review Add-to-stock submissions (accountant / manager). Accept closes the PO to
-                  History. Reject returns it to Active so more items can be added — stock already
-                  posted is not removed.
+                  Review only items already submitted from Add to stock. Accept closes that batch;
+                  lines not yet added stay on Active. Reject does not remove stock already posted.
                 </p>
             </div>
             {canRetirementReview ? (
