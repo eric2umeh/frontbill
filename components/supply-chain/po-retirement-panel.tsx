@@ -172,7 +172,7 @@ export function PoRetirementPanel({
           </h2>
           <p className="text-xs text-muted-foreground">
             Review only items that store/purchaser already added to Central Store.
-            Accept closes that batch; any lines not yet added stay on Active → Add to stock.
+            Accept closes that batch; other PO lines not yet submitted stay on Active → Add to stock.
           </p>
         </div>
         {pending.length === 0 ? (
