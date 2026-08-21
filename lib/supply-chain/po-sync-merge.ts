@@ -71,7 +71,14 @@ function poLineCount(po: PurchaseOrder): number {
 function stockedRetirementCount(po: PurchaseOrder | undefined): number {
   if (!po?.retirement?.lines?.length) return 0
   return po.retirement.lines.filter(
-    (l) => Boolean(l.stockedAt) && !(l.notBought || l.removed),
+    (l) =>
+      !(l.notBought || l.removed) &&
+      (Boolean(l.stockedAt) ||
+        Boolean(l.batchId) ||
+        l.reviewStatus === 'pending_review' ||
+        l.reviewStatus === 'accepted' ||
+        l.reviewStatus === 'rejected') &&
+      Number(l.quantityBought) > 0,
   ).length
 }
 
@@ -181,8 +188,10 @@ function enrichWithRetirementProgress(
     refundToCashier: refund,
   }
 
-  const hasStocked = retirement.lines.some(
-    (l) => Boolean(l.stockedAt) && !(l.notBought || l.removed),
+  const hasStocked = retirement.lines.some((l) =>
+    Boolean(l.stockedAt || l.batchId || l.reviewStatus) &&
+    !(l.notBought || l.removed) &&
+    Number(l.quantityBought) > 0,
   )
   const probe: PurchaseOrder = { ...winner, retirement }
   const needsReview = hasPendingRetirementReview(probe)
