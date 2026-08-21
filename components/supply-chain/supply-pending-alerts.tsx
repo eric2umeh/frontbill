@@ -123,7 +123,7 @@ export function SupplyPendingAlerts() {
           description: `${po.retirement?.submittedBy ?? 'Purchaser'} submitted market retirement.`,
           action: {
             label: 'Review',
-            onClick: () => router.push('/supply/purchasing?tab=active'),
+            onClick: () => router.push('/supply/purchasing?tab=retirement'),
           },
         })
         continue
