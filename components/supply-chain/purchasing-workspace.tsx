@@ -50,6 +50,7 @@ import {
 import {
   hasPendingRetirementReview,
   isAddToStockCandidate,
+  isPostedStockLine,
   isRetirementReviewCandidate,
   poHasRemainingAddToStockLines,
   remainingQtyForPoLine,
@@ -72,6 +73,8 @@ type WorkLine = RetirementLine & {
   dept: Exclude<SupplyDept, "all">;
   alreadyStocked: boolean;
   remainingCap: number | null;
+  /** Stable UI key — stocked vs remaining rows can share the same PO lineId. */
+  workKey: string;
 };
 
 function PurchasingRetireRow({
@@ -87,8 +90,8 @@ function PurchasingRetireRow({
 }) {
   const inReview = hasPendingRetirementReview(po);
   const rejected = po.status === "retirement_rejected";
-  const stockedCount = (po.retirement?.lines ?? []).filter(
-    (l) => l.stockedAt && !(l.notBought || l.removed),
+  const stockedCount = (po.retirement?.lines ?? []).filter((l) =>
+    isPostedStockLine(l),
   ).length;
   const remaining = poHasRemainingAddToStockLines(po);
   return (
@@ -214,7 +217,8 @@ export function PurchasingWorkspace() {
         (p) =>
           !p.deletedAt &&
           p.status !== "retired" &&
-          isAddToStockCandidate(p.status),
+          isAddToStockCandidate(p.status) &&
+          poHasRemainingAddToStockLines(p),
       ),
     [purchaseOrders],
   );
@@ -239,16 +243,16 @@ export function PurchasingWorkspace() {
       const remaining = remainingQtyForPoLine(po, l.id);
       const already = stockedQtyForPoLine(po, l.id);
       const stockedRows = (po.retirement?.lines ?? []).filter(
-        (r) =>
-          r.lineId === l.id &&
-          Boolean(r.stockedAt) &&
-          !(r.notBought || r.removed),
+        (r) => r.lineId === l.id && isPostedStockLine(r),
       );
       const lastStocked = stockedRows[stockedRows.length - 1];
-      if (remaining <= 0 && already > 0) {
+
+      // Always show posted qty as locked — never re-open it for edit.
+      if (already > 0) {
         const postedPrice = lastStocked?.actualPrice ?? l.unitPrice;
         lines.push({
           lineId: l.id,
+          workKey: `${l.id}__stocked`,
           name: l.name,
           unit: l.unit,
           storeUnit: l.storeUnit,
@@ -267,32 +271,37 @@ export function PurchasingWorkspace() {
           alreadyStocked: true,
           remainingCap: 0,
           stockedAt: lastStocked?.stockedAt,
+          reviewStatus: lastStocked?.reviewStatus,
+          batchId: lastStocked?.batchId,
         });
-        continue;
       }
-      if (remaining <= 0) continue;
-      lines.push({
-        lineId: l.id,
-        name: l.name,
-        unit: l.unit,
-        storeUnit: l.storeUnit,
-        quantityOrdered: l.quantityOrdered,
-        stockQuantityOrdered: l.stockQuantityOrdered,
-        quantityBought: remaining,
-        stockQuantityBought:
-          l.stockQuantityOrdered && l.quantityOrdered > 0
-            ? (remaining / l.quantityOrdered) * l.stockQuantityOrdered
-            : remaining,
-        poPrice: l.unitPrice,
-        actualPrice: l.unitPrice,
-        actualStockUnitPrice: l.stockUnitPrice,
-        totalPaid: remaining * l.unitPrice,
-        notBought: false,
-        stockItemId: l.stockItemId,
-        dept: normalizeSupplyDept(l.dept),
-        alreadyStocked: false,
-        remainingCap: remaining,
-      });
+
+      // Only remaining unordered qty is editable (fresh defaults — not last posted price/qty).
+      if (remaining > 0) {
+        lines.push({
+          lineId: l.id,
+          workKey: `${l.id}__remain`,
+          name: l.name,
+          unit: l.unit,
+          storeUnit: l.storeUnit,
+          quantityOrdered: l.quantityOrdered,
+          stockQuantityOrdered: l.stockQuantityOrdered,
+          quantityBought: remaining,
+          stockQuantityBought:
+            l.stockQuantityOrdered && l.quantityOrdered > 0
+              ? (remaining / l.quantityOrdered) * l.stockQuantityOrdered
+              : remaining,
+          poPrice: l.unitPrice,
+          actualPrice: l.unitPrice,
+          actualStockUnitPrice: l.stockUnitPrice,
+          totalPaid: remaining * l.unitPrice,
+          notBought: false,
+          stockItemId: l.stockItemId,
+          dept: normalizeSupplyDept(l.dept),
+          alreadyStocked: false,
+          remainingCap: remaining,
+        });
+      }
     }
 
     // Carry newly-added draft rows that were not yet stocked (shouldn't exist in retirement yet)
@@ -302,9 +311,10 @@ export function PurchasingWorkspace() {
       if (lines.some((x) => x.lineId === rl.lineId)) continue;
       lines.push({
         ...rl,
+        workKey: `${rl.lineId}__${rl.stockedAt ? "stocked" : "new"}`,
         dept: normalizeSupplyDept(rl.dept ?? "restaurant"),
-        alreadyStocked: Boolean(rl.stockedAt),
-        remainingCap: rl.stockedAt ? 0 : null,
+        alreadyStocked: Boolean(rl.stockedAt) || isPostedStockLine(rl),
+        remainingCap: rl.stockedAt || isPostedStockLine(rl) ? 0 : null,
       });
     }
 
@@ -314,21 +324,21 @@ export function PurchasingWorkspace() {
     const sel: Record<string, boolean> = {};
     for (const l of lines) {
       if (l.alreadyStocked) continue;
-      qty[l.lineId] = formatQtyDisplay(l.quantityBought);
-      price[l.lineId] = formatQtyDisplay(l.actualPrice);
+      qty[l.workKey] = formatQtyDisplay(l.quantityBought);
+      price[l.workKey] = formatQtyDisplay(l.actualPrice);
     }
     setQtyText(qty);
     setPriceText(price);
     setSelectedIds(sel);
   };
 
-  const updateQty = useCallback((lineId: string, raw: string) => {
+  const updateQty = useCallback((workKey: string, raw: string) => {
     const cleaned = sanitizeQuantityInput(raw);
-    setQtyText((prev) => ({ ...prev, [lineId]: cleaned }));
+    setQtyText((prev) => ({ ...prev, [workKey]: cleaned }));
     const q = parseQuantityValue(cleaned);
     setWorkLines((prev) =>
       prev.map((l) => {
-        if (l.lineId !== lineId || l.alreadyStocked) return l;
+        if (l.workKey !== workKey || l.alreadyStocked) return l;
         const capped =
           l.remainingCap != null ? Math.min(q, l.remainingCap) : q;
         const stockQty =
@@ -347,13 +357,13 @@ export function PurchasingWorkspace() {
     );
   }, []);
 
-  const updatePrice = useCallback((lineId: string, raw: string) => {
+  const updatePrice = useCallback((workKey: string, raw: string) => {
     const cleaned = sanitizeQuantityInput(raw);
-    setPriceText((prev) => ({ ...prev, [lineId]: cleaned }));
+    setPriceText((prev) => ({ ...prev, [workKey]: cleaned }));
     const p = parseQuantityValue(cleaned);
     setWorkLines((prev) =>
       prev.map((l) =>
-        l.lineId === lineId && !l.alreadyStocked
+        l.workKey === workKey && !l.alreadyStocked
           ? {
               ...l,
               actualPrice: p,
@@ -372,7 +382,7 @@ export function PurchasingWorkspace() {
     () =>
       workLines.filter(
         (l) =>
-          selectedIds[l.lineId] &&
+          selectedIds[l.workKey] &&
           !l.alreadyStocked &&
           !(l.notBought || l.removed) &&
           l.quantityBought > 0,
@@ -424,6 +434,7 @@ export function PurchasingWorkspace() {
         .slice(2, 5)}`;
       return {
         lineId,
+        workKey: `${lineId}__new`,
         name: p.name,
         unit: p.unit,
         storeUnit: p.storeUnit,
@@ -446,17 +457,17 @@ export function PurchasingWorkspace() {
     setWorkLines((prev) => [...additions, ...prev]);
     setQtyText((prev) => {
       const next = { ...prev };
-      for (const a of additions) next[a.lineId] = formatQtyDisplay(a.quantityBought);
+      for (const a of additions) next[a.workKey] = formatQtyDisplay(a.quantityBought);
       return next;
     });
     setPriceText((prev) => {
       const next = { ...prev };
-      for (const a of additions) next[a.lineId] = formatQtyDisplay(a.actualPrice);
+      for (const a of additions) next[a.workKey] = formatQtyDisplay(a.actualPrice);
       return next;
     });
     setSelectedIds((prev) => {
       const next = { ...prev };
-      for (const a of additions) next[a.lineId] = true;
+      for (const a of additions) next[a.workKey] = true;
       return next;
     });
     toast.success(
@@ -668,11 +679,11 @@ export function PurchasingWorkspace() {
           {(pageItems) => (
             <div className="space-y-2">
               {pageItems.map((line) => {
-                const checked = Boolean(selectedIds[line.lineId]);
+                const checked = Boolean(selectedIds[line.workKey]);
                 const notBought = line.notBought === true || line.removed === true;
                 return (
                   <div
-                    key={line.lineId}
+                    key={line.workKey}
                     className={cn(
                       "rounded-lg border p-3 text-sm space-y-2",
                       line.newlyAdded &&
@@ -695,7 +706,7 @@ export function PurchasingWorkspace() {
                             onCheckedChange={(v) =>
                               setSelectedIds((m) => ({
                                 ...m,
-                                [line.lineId]: v === true,
+                                [line.workKey]: v === true,
                               }))
                             }
                             className="mt-1"
@@ -730,6 +741,13 @@ export function PurchasingWorkspace() {
                                 Already in stock
                               </Badge>
                             ) : null}
+                            {!line.alreadyStocked &&
+                            line.remainingCap != null &&
+                            line.remainingCap < line.quantityOrdered ? (
+                              <Badge variant="outline" className="text-[10px]">
+                                Remaining only
+                              </Badge>
+                            ) : null}
                             {notBought ? (
                               <Badge className="bg-red-100 text-red-900">
                                 Not bought / removed
@@ -741,18 +759,18 @@ export function PurchasingWorkspace() {
                       {!line.alreadyStocked ? (
                         <div className="flex items-center gap-2 shrink-0">
                           <Label
-                            htmlFor={`bought-${line.lineId}`}
+                            htmlFor={`bought-${line.workKey}`}
                             className="text-xs"
                           >
                             Bought
                           </Label>
                           <Switch
-                            id={`bought-${line.lineId}`}
+                            id={`bought-${line.workKey}`}
                             checked={!notBought}
                             onCheckedChange={(bought) => {
                               setWorkLines((prev) =>
                                 prev.map((l) =>
-                                  l.lineId === line.lineId
+                                  l.workKey === line.workKey
                                     ? {
                                         ...l,
                                         notBought: !bought,
@@ -764,7 +782,7 @@ export function PurchasingWorkspace() {
                               if (!bought) {
                                 setSelectedIds((m) => ({
                                   ...m,
-                                  [line.lineId]: false,
+                                  [line.workKey]: false,
                                 }));
                               }
                             }}
@@ -790,10 +808,10 @@ export function PurchasingWorkspace() {
                           <Input
                             inputMode="decimal"
                             className={QTY_INPUT_CLASS}
-                            value={qtyText[line.lineId] ?? ""}
-                            onChange={(e) => updateQty(line.lineId, e.target.value)}
+                            value={qtyText[line.workKey] ?? ""}
+                            onChange={(e) => updateQty(line.workKey, e.target.value)}
                             onFocus={() =>
-                              setSelectedIds((m) => ({ ...m, [line.lineId]: true }))
+                              setSelectedIds((m) => ({ ...m, [line.workKey]: true }))
                             }
                           />
                         </div>
@@ -804,10 +822,10 @@ export function PurchasingWorkspace() {
                           <Input
                             inputMode="decimal"
                             className={QTY_INPUT_CLASS}
-                            value={priceText[line.lineId] ?? ""}
-                            onChange={(e) => updatePrice(line.lineId, e.target.value)}
+                            value={priceText[line.workKey] ?? ""}
+                            onChange={(e) => updatePrice(line.workKey, e.target.value)}
                             onFocus={() =>
-                              setSelectedIds((m) => ({ ...m, [line.lineId]: true }))
+                              setSelectedIds((m) => ({ ...m, [line.workKey]: true }))
                             }
                           />
                         </div>
