@@ -51,6 +51,7 @@ import {
   hasPendingRetirementReview,
   isAddToStockCandidate,
   isPostedStockLine,
+  isPoLineSubmittedToStock,
   isRetirementReviewCandidate,
   poHasRemainingAddToStockLines,
   remainingQtyForPoLine,
@@ -121,7 +122,7 @@ function PurchasingRetireRow({
         )}
         {remaining && stockedCount > 0 ? (
           <Badge variant="outline" className="mt-1">
-            Partial — more to add
+            More items to add
           </Badge>
         ) : null}
       </div>
@@ -240,15 +241,15 @@ export function PurchasingWorkspace() {
 
     const lines: WorkLine[] = [];
     for (const l of po.lines) {
-      const remaining = remainingQtyForPoLine(po, l.id);
+      const submitted = isPoLineSubmittedToStock(po, l.id);
       const already = stockedQtyForPoLine(po, l.id);
       const stockedRows = (po.retirement?.lines ?? []).filter(
         (r) => r.lineId === l.id && isPostedStockLine(r),
       );
       const lastStocked = stockedRows[stockedRows.length - 1];
 
-      // Always show posted qty as locked — never re-open it for edit.
-      if (already > 0) {
+      // Submitted once → locked forever (submitted qty/price are final).
+      if (submitted) {
         const postedPrice = lastStocked?.actualPrice ?? l.unitPrice;
         lines.push({
           lineId: l.id,
@@ -258,8 +259,9 @@ export function PurchasingWorkspace() {
           storeUnit: l.storeUnit,
           quantityOrdered: l.quantityOrdered,
           stockQuantityOrdered: l.stockQuantityOrdered,
-          quantityBought: already,
-          stockQuantityBought: l.stockQuantityOrdered,
+          quantityBought: already > 0 ? already : lastStocked?.quantityBought ?? 0,
+          stockQuantityBought:
+            lastStocked?.stockQuantityBought ?? l.stockQuantityOrdered,
           poPrice: l.unitPrice,
           actualPrice: postedPrice,
           actualStockUnitPrice:
@@ -274,47 +276,48 @@ export function PurchasingWorkspace() {
           reviewStatus: lastStocked?.reviewStatus,
           batchId: lastStocked?.batchId,
         });
+        continue;
       }
 
-      // Only remaining unordered qty is editable (fresh defaults — not last posted price/qty).
-      if (remaining > 0) {
-        lines.push({
-          lineId: l.id,
-          workKey: `${l.id}__remain`,
-          name: l.name,
-          unit: l.unit,
-          storeUnit: l.storeUnit,
-          quantityOrdered: l.quantityOrdered,
-          stockQuantityOrdered: l.stockQuantityOrdered,
-          quantityBought: remaining,
-          stockQuantityBought:
-            l.stockQuantityOrdered && l.quantityOrdered > 0
-              ? (remaining / l.quantityOrdered) * l.stockQuantityOrdered
-              : remaining,
-          poPrice: l.unitPrice,
-          actualPrice: l.unitPrice,
-          actualStockUnitPrice: l.stockUnitPrice,
-          totalPaid: remaining * l.unitPrice,
-          notBought: false,
-          stockItemId: l.stockItemId,
-          dept: normalizeSupplyDept(l.dept),
-          alreadyStocked: false,
-          remainingCap: remaining,
-        });
-      }
+      // Not yet submitted — editable; user may raise or lower qty/price, then submit ends it.
+      const defaultQty = remainingQtyForPoLine(po, l.id);
+      lines.push({
+        lineId: l.id,
+        workKey: `${l.id}__open`,
+        name: l.name,
+        unit: l.unit,
+        storeUnit: l.storeUnit,
+        quantityOrdered: l.quantityOrdered,
+        stockQuantityOrdered: l.stockQuantityOrdered,
+        quantityBought: defaultQty,
+        stockQuantityBought:
+          l.stockQuantityOrdered && l.quantityOrdered > 0
+            ? (defaultQty / l.quantityOrdered) * l.stockQuantityOrdered
+            : defaultQty,
+        poPrice: l.unitPrice,
+        actualPrice: l.unitPrice,
+        actualStockUnitPrice: l.stockUnitPrice,
+        totalPaid: defaultQty * l.unitPrice,
+        notBought: false,
+        stockItemId: l.stockItemId,
+        dept: normalizeSupplyDept(l.dept),
+        alreadyStocked: false,
+        // No max — increase or decrease vs PO ordered is allowed until submit.
+        remainingCap: null,
+      });
     }
 
-    // Carry newly-added draft rows that were not yet stocked (shouldn't exist in retirement yet)
+    // Carry newly-added draft rows that were not yet stocked
     // Plus show already-stocked newly added as read-only
     for (const rl of po.retirement?.lines ?? []) {
       if (!rl.newlyAdded) continue;
       if (lines.some((x) => x.lineId === rl.lineId)) continue;
       lines.push({
         ...rl,
-        workKey: `${rl.lineId}__${rl.stockedAt ? "stocked" : "new"}`,
+        workKey: `${rl.lineId}__${isPostedStockLine(rl) ? "stocked" : "new"}`,
         dept: normalizeSupplyDept(rl.dept ?? "restaurant"),
-        alreadyStocked: Boolean(rl.stockedAt) || isPostedStockLine(rl),
-        remainingCap: rl.stockedAt || isPostedStockLine(rl) ? 0 : null,
+        alreadyStocked: isPostedStockLine(rl),
+        remainingCap: isPostedStockLine(rl) ? 0 : null,
       });
     }
 
@@ -515,42 +518,18 @@ export function PurchasingWorkspace() {
             : "Submitted for retirement review — check Central Store if stock did not increase",
         );
     }
-    // Lock submitted lines in the UI immediately (Already in stock).
+    // Lock submitted lines immediately — one submit ends edit for that item.
     setWorkLines((prev) =>
       prev.map((l) => {
         if (!stampedIds.has(l.lineId)) return l;
-        if (l.newlyAdded) {
-          return {
-            ...l,
-            alreadyStocked: true,
-            remainingCap: 0,
-            stockedAt: new Date().toISOString(),
-          };
-        }
-        const rem = Math.max(
-          0,
-          (l.remainingCap ?? l.quantityOrdered) - l.quantityBought,
-        );
-        if (rem <= 0) {
-          return {
-            ...l,
-            alreadyStocked: true,
-            remainingCap: 0,
-            quantityBought: l.quantityOrdered,
-            totalPaid: l.quantityOrdered * l.actualPrice,
-            stockedAt: new Date().toISOString(),
-          };
-        }
         return {
           ...l,
-          alreadyStocked: false,
-          remainingCap: rem,
-          quantityBought: rem,
-          stockQuantityBought:
-            l.stockQuantityOrdered && l.quantityOrdered > 0
-              ? (rem / l.quantityOrdered) * l.stockQuantityOrdered
-              : rem,
-          totalPaid: rem * l.actualPrice,
+          alreadyStocked: true,
+          remainingCap: 0,
+          stockedAt: new Date().toISOString(),
+          workKey: l.workKey.includes("__")
+            ? `${l.lineId}__stocked`
+            : l.workKey,
         };
       }),
     );
@@ -726,9 +705,6 @@ export function PurchasingWorkspace() {
                           </p>
                           <p className="text-[10px] text-muted-foreground">
                             {DEPT_LABELS[line.dept] ?? line.dept}
-                            {line.remainingCap != null && !line.alreadyStocked
-                              ? ` · remaining ${line.remainingCap} ${line.unit ?? ""}`
-                              : ""}
                           </p>
                           <div className="flex flex-wrap gap-1 mt-1">
                             {line.newlyAdded && !notBought ? (
@@ -739,13 +715,6 @@ export function PurchasingWorkspace() {
                             {line.alreadyStocked ? (
                               <Badge variant="secondary" className="text-[10px]">
                                 Already in stock
-                              </Badge>
-                            ) : null}
-                            {!line.alreadyStocked &&
-                            line.remainingCap != null &&
-                            line.remainingCap < line.quantityOrdered ? (
-                              <Badge variant="outline" className="text-[10px]">
-                                Remaining only
                               </Badge>
                             ) : null}
                             {notBought ? (
@@ -899,8 +868,8 @@ export function PurchasingWorkspace() {
                 <div className="space-y-2 text-sm text-muted-foreground">
                   <p>
                     {canRetirementReview
-                      ? "Selected items go into Central Store now and appear under the Retirement tab for review. You can add more lines from this PO later."
-                      : "Selected items go into Central Store now and are sent for accountant review. You can add more lines from this PO later."}
+                      ? "Selected items go into Central Store now. Qty and price you set are final for those items — they cannot be edited again. Other items on this PO can still be added later."
+                      : "Selected items go into Central Store now and are sent for accountant review. Qty and price you set are final for those items — they cannot be edited again. Other items on this PO can still be added later."}
                   </p>
                   <ul className="rounded-md border bg-muted/40 px-3 py-2 space-y-1 text-foreground">
                     <li>Approved PO: {formatNaira(getPoApprovedAmount(selected))}</li>
@@ -934,8 +903,8 @@ export function PurchasingWorkspace() {
         <h1 className="text-2xl font-bold">Retirement</h1>
         <p className="text-sm text-muted-foreground">
           {canRetirementReview
-            ? "Active: add purchased items to Central Store (partial OK). Retirement: review those adds. History: completed POs."
-            : "Active: add purchased items to Central Store (partial OK). Submitted items go for accountant review. History: completed POs."}
+            ? "Active: add items to Central Store (change qty/price as needed — submit locks that item). Retirement: review those adds. History: completed POs."
+            : "Active: add items to Central Store (change qty/price as needed — submit locks that item). Submitted items go for accountant review. History: completed POs."}
         </p>
       </div>
 
@@ -977,8 +946,9 @@ export function PurchasingWorkspace() {
               <div>
                 <h2 className="font-medium">Ready to add to stock</h2>
                 <p className="text-xs text-muted-foreground">
-                  Approved POs — store, purchaser, or accountant can select items as they arrive and
-                  post them to Central Store. Submitted lines become Already in stock (uneditable).
+                  Approved POs — change qty or price as needed, then submit. Each submitted
+                  item locks forever (Already in stock). Other items on the same PO can still
+                  be added later.
                 </p>
               </div>
               {activeCandidates.length === 0 ? (
