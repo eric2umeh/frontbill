@@ -25,10 +25,18 @@ function lineReviewStatus(
   return 'pending_review'
 }
 
-/** True when a retirement row was posted via Add to stock (not a draft). */
+/** True when a retirement row was posted to Central Store (bought qty > 0). */
 export function isPostedStockLine(line: RetirementLine): boolean {
   if (lineNotBought(line)) return false
   if (!(Number(line.quantityBought) > 0)) return false
+  return isSubmittedAddToStockLine(line)
+}
+
+/**
+ * True when a retirement row was finalized in an Add-to-stock submit
+ * (bought into store OR marked not bought — both close the PO line).
+ */
+export function isSubmittedAddToStockLine(line: RetirementLine): boolean {
   return (
     Boolean(line.stockedAt) ||
     Boolean(line.batchId) ||
@@ -59,15 +67,15 @@ export function stockedQtyForPoLine(po: PurchaseOrder, lineId: string): number {
 }
 
 /**
- * True when this original PO line was already submitted in Add to stock.
- * One submit closes the line forever (qty/price changes are final).
+ * True when this original PO line was already submitted in Add to stock
+ * (including marked not bought). One submit closes the line forever.
  */
 export function isPoLineSubmittedToStock(
   po: PurchaseOrder,
   lineId: string,
 ): boolean {
   return (po.retirement?.lines ?? []).some(
-    (l) => l.lineId === lineId && isPostedStockLine(l),
+    (l) => l.lineId === lineId && isSubmittedAddToStockLine(l),
   )
 }
 
@@ -122,7 +130,7 @@ export function pendingReviewBatches(po: PurchaseOrder): AddToStockBatch[] {
   ]
 }
 
-/** Stocked retirement rows awaiting Accept/Reject (not the whole PO). */
+/** Retirement rows awaiting Accept/Reject (bought + not-bought closes). */
 export function pendingReviewLines(po: PurchaseOrder): RetirementLine[] {
   const batches = po.retirement?.batches ?? []
   const pendingBatchIds = new Set(
@@ -130,12 +138,11 @@ export function pendingReviewLines(po: PurchaseOrder): RetirementLine[] {
   )
 
   return (po.retirement?.lines ?? []).filter((l) => {
-    if (!isPostedStockLine(l)) return false
+    if (!isSubmittedAddToStockLine(l)) return false
     if (l.batchId) {
       if (pendingBatchIds.size > 0) return pendingBatchIds.has(l.batchId)
       return lineReviewStatus(l) === 'pending_review'
     }
-    // No batchId: pending until explicitly accepted/rejected.
     return lineReviewStatus(l) === 'pending_review'
   })
 }
@@ -236,7 +243,7 @@ export function applyRetirementBatchDecision(
   )
 
   const nextLines = prevLines.map((l) => {
-    if (lineNotBought(l) || !l.stockedAt) return l
+    if (!isSubmittedAddToStockLine(l)) return l
     if (l.reviewStatus === 'accepted' || l.reviewStatus === 'rejected') return l
     if (l.batchId && pendingIds.has(l.batchId)) {
       return {
