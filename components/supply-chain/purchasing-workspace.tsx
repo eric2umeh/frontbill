@@ -113,7 +113,7 @@ function PurchasingRetireRow({
         )}
         {inReview && (
           <Badge variant="outline" className="mt-1 text-violet-800 border-violet-200">
-            Awaiting retirement review
+            Sent for accountant review
           </Badge>
         )}
         {remaining && stockedCount > 0 ? (
@@ -171,16 +171,13 @@ export function PurchasingWorkspace() {
   const [selectedIds, setSelectedIds] = useState<Record<string, boolean>>({});
   const [tab, setTab] = useState(() => {
     const t = searchParams.get("tab");
-    if (t === "history" || t === "retirement" || t === "active") return t;
+    if (t === "history" || t === "active") return t;
+    // retirement tab is reviewers-only; default Active for store/purchaser
+    if (t === "retirement") return "active";
     return "active";
   });
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [extraOpen, setExtraOpen] = useState(false);
-
-  useEffect(() => {
-    const t = searchParams.get("tab");
-    if (t === "history" || t === "retirement" || t === "active") setTab(t);
-  }, [searchParams]);
 
   const actor = {
     name: name ?? "Staff",
@@ -188,6 +185,22 @@ export function PurchasingWorkspace() {
   };
   const canAddStock = canAddPurchasedToStock(role);
   const canRetirementReview = canSupplyRetirementReview(role);
+
+  useEffect(() => {
+    const t = searchParams.get("tab");
+    if (t === "history" || t === "active") {
+      setTab(t);
+      return;
+    }
+    if (t === "retirement") {
+      setTab(canRetirementReview ? "retirement" : "active");
+    }
+  }, [searchParams, canRetirementReview]);
+
+  // Store/purchaser must never sit on the Retirement review tab.
+  useEffect(() => {
+    if (!canRetirementReview && tab === "retirement") setTab("active");
+  }, [canRetirementReview, tab]);
 
   const retirementQueue = useMemo(
     () =>
@@ -483,11 +496,13 @@ export function PurchasingWorkspace() {
     }
     playNotificationBeep();
     if (res && "posted" in res) {
-      toast.success(
-        res.posted > 0
-          ? `${res.posted} item(s) added to Central Store — sent to Retirement review`
-          : "Submitted for retirement review — check Central Store if stock did not increase",
-      );
+        toast.success(
+          res.posted > 0
+            ? canRetirementReview
+              ? `${res.posted} item(s) added to Central Store — open Retirement to review`
+              : `${res.posted} item(s) added to Central Store — sent for accountant review`
+            : "Submitted for retirement review — check Central Store if stock did not increase",
+        );
     }
     // Lock submitted lines in the UI immediately (Already in stock).
     setWorkLines((prev) =>
@@ -532,7 +547,8 @@ export function PurchasingWorkspace() {
     setConfirmOpen(false);
     setSelectedId(null);
     setWorkLines([]);
-    setTab("retirement");
+    // Only reviewers land on Retirement; store/purchaser stay on Active.
+    setTab(canRetirementReview ? "retirement" : "active");
   };
 
   if (
@@ -864,8 +880,9 @@ export function PurchasingWorkspace() {
               <AlertDialogDescription asChild>
                 <div className="space-y-2 text-sm text-muted-foreground">
                   <p>
-                    Selected items go into Central Store now and appear under the Retirement tab
-                    for review. You can add more lines from this PO later.
+                    {canRetirementReview
+                      ? "Selected items go into Central Store now and appear under the Retirement tab for review. You can add more lines from this PO later."
+                      : "Selected items go into Central Store now and are sent for accountant review. You can add more lines from this PO later."}
                   </p>
                   <ul className="rounded-md border bg-muted/40 px-3 py-2 space-y-1 text-foreground">
                     <li>Approved PO: {formatNaira(getPoApprovedAmount(selected))}</li>
@@ -898,8 +915,9 @@ export function PurchasingWorkspace() {
       <div>
         <h1 className="text-2xl font-bold">Retirement</h1>
         <p className="text-sm text-muted-foreground">
-          Active: add purchased items to Central Store (partial OK). Retirement: review those
-          adds. History: completed POs.
+          {canRetirementReview
+            ? "Active: add purchased items to Central Store (partial OK). Retirement: review those adds. History: completed POs."
+            : "Active: add purchased items to Central Store (partial OK). Submitted items go for accountant review. History: completed POs."}
         </p>
       </div>
 
@@ -916,14 +934,16 @@ export function PurchasingWorkspace() {
                 </Badge>
               )}
             </TabsTrigger>
-            <TabsTrigger value="retirement">
-              Retirement
-              {retirementQueue.length > 0 && (
-                <Badge variant="secondary" className="ml-1.5 tabular-nums text-[10px]">
-                  {retirementQueue.length}
-                </Badge>
-              )}
-            </TabsTrigger>
+            {canRetirementReview && (
+              <TabsTrigger value="retirement">
+                Retirement
+                {retirementQueue.length > 0 && (
+                  <Badge variant="secondary" className="ml-1.5 tabular-nums text-[10px]">
+                    {retirementQueue.length}
+                  </Badge>
+                )}
+              </TabsTrigger>
+            )}
             <TabsTrigger value="history">
               History
               {retiredCount > 0 && (
@@ -982,6 +1002,7 @@ export function PurchasingWorkspace() {
             </section>
           </TabsContent>
 
+          {canRetirementReview && (
           <TabsContent value="retirement" className="mt-4 space-y-4">
             <div>
               <h2 className="font-medium">Retirement review</h2>
@@ -990,43 +1011,9 @@ export function PurchasingWorkspace() {
                   lines not yet added stay on Active. Reject does not remove stock already posted.
                 </p>
             </div>
-            {canRetirementReview ? (
-              <PoRetirementPanel showAcceptedSection={false} />
-            ) : retirementQueue.length === 0 ? (
-              <p className="text-sm text-muted-foreground rounded-md border border-dashed px-3 py-6 text-center">
-                No retirements awaiting review.
-              </p>
-            ) : (
-              <PaginatedListShell
-                items={retirementQueue}
-                pageSize={8}
-                searchPlaceholder="Search PO…"
-                searchMatch={(po, query) => {
-                  const q = query.trim().toLowerCase();
-                  if (!q) return true;
-                  return (
-                    po.poNumber.toLowerCase().includes(q) ||
-                    (po.retirement?.submittedBy ?? "").toLowerCase().includes(q)
-                  );
-                }}
-                emptyMessage="No retirements awaiting review."
-              >
-                {(pageItems) => (
-                  <div className="space-y-2">
-                    {pageItems.map((po) => (
-                      <PurchasingRetireRow
-                        key={po.id}
-                        po={po}
-                        canAct={canAddStock}
-                        actionLabel="Continue Add to stock"
-                        onOpen={() => initAddToStock(po.id)}
-                      />
-                    ))}
-                  </div>
-                )}
-              </PaginatedListShell>
-            )}
+            <PoRetirementPanel showAcceptedSection={false} />
           </TabsContent>
+          )}
 
           <TabsContent value="history" className="mt-4 space-y-3">
             <div>
