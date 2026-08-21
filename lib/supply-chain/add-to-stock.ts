@@ -58,16 +58,32 @@ export function stockedQtyForPoLine(po: PurchaseOrder, lineId: string): number {
   return total
 }
 
-/** Remaining purchase qty that can still be added to stock for an original PO line. */
-export function remainingQtyForPoLine(po: PurchaseOrder, lineId: string): number {
-  const ordered =
-    po.lines.find((l) => l.id === lineId)?.quantityOrdered ?? 0
-  return Math.max(0, ordered - stockedQtyForPoLine(po, lineId))
+/**
+ * True when this original PO line was already submitted in Add to stock.
+ * One submit closes the line forever (qty/price changes are final).
+ */
+export function isPoLineSubmittedToStock(
+  po: PurchaseOrder,
+  lineId: string,
+): boolean {
+  return (po.retirement?.lines ?? []).some(
+    (l) => l.lineId === lineId && isPostedStockLine(l),
+  )
 }
 
-/** True when this PO still has original lines that can be added to stock. */
+/**
+ * Qty still available to add for an original PO line.
+ * After any Add-to-stock submit for that line → 0 (no further edits).
+ * Before submit → ordered qty (UI default; user may raise or lower on submit).
+ */
+export function remainingQtyForPoLine(po: PurchaseOrder, lineId: string): number {
+  if (isPoLineSubmittedToStock(po, lineId)) return 0
+  return po.lines.find((l) => l.id === lineId)?.quantityOrdered ?? 0
+}
+
+/** True when this PO still has original lines that have never been added to stock. */
 export function poHasRemainingAddToStockLines(po: PurchaseOrder): boolean {
-  return po.lines.some((l) => remainingQtyForPoLine(po, l.id) > 0)
+  return po.lines.some((l) => !isPoLineSubmittedToStock(po, l.id))
 }
 
 /** Active tab: approved/disbursed POs still open for Add to stock (including partial). */
