@@ -1045,8 +1045,8 @@ function useSupplyChainImpl() {
 
     const refreshPurchaseOrders = async () => {
       try {
-        // Don't clobber a just-submitted Add-to-stock / retirement decision with a stale GET.
-        if (Date.now() - lastLocalSupplyMutationAt < 12_000) return;
+        // Don't clobber a just-made PO approve / Add-to-stock with a stale GET (slow network).
+        if (Date.now() - lastLocalSupplyMutationAt < 45_000) return;
         const snapshots = await fetchSupplySnapshots(
           userId,
           organizationId || undefined,
@@ -1915,39 +1915,87 @@ function useSupplyChainImpl() {
         return;
       }
       const nowIso = new Date().toISOString();
+      markLocalSupplyMutation();
+
+      // Manager/admin with both review rights: one approve releases for market (no second click).
+      const fullApprove =
+        approved && canSupplyPoManagerReview(actor.role);
+
       if (approved) setBasket([]);
       setPurchaseOrders((prev) => {
         const next = dedupePurchaseOrders(
-          prev.map((po) =>
-            po.id === poId
-              ? {
-                  ...po,
-                  status: approved ? "pending_manager" : "accountant_rejected",
-                  accountantComment: comment,
-                  accountantDecidedBy: actor.name,
-                  accountantDecidedRole: actor.role,
-                  accountantDecidedAt: nowIso,
-                  workflowUpdatedAt: nowIso,
-                }
-              : po,
-          ),
+          prev.map((po) => {
+            if (po.id !== poId) return po;
+            if (!approved) {
+              return {
+                ...po,
+                status: "accountant_rejected" as const,
+                accountantComment: comment,
+                accountantDecidedBy: actor.name,
+                accountantDecidedRole: actor.role,
+                accountantDecidedAt: nowIso,
+                workflowUpdatedAt: nowIso,
+              };
+            }
+            if (fullApprove) {
+              const frozenLines = po.lines.map((l) => ({ ...l }));
+              const total =
+                Number(po.totalAmount) ||
+                frozenLines.reduce((s, l) => s + (Number(l.lineTotal) || 0), 0);
+              return {
+                ...po,
+                status: "disbursed" as const,
+                accountantComment: comment,
+                accountantDecidedBy: actor.name,
+                accountantDecidedRole: actor.role,
+                accountantDecidedAt: nowIso,
+                managerComment: comment,
+                managerDecidedBy: actor.name,
+                managerDecidedRole: actor.role,
+                managerDecidedAt: nowIso,
+                approvedAt: nowIso,
+                approvedLines: frozenLines,
+                cashDisbursed: total,
+                totalAmount: total,
+                workflowUpdatedAt: nowIso,
+              };
+            }
+            return {
+              ...po,
+              status: "pending_manager" as const,
+              accountantComment: comment,
+              accountantDecidedBy: actor.name,
+              accountantDecidedRole: actor.role,
+              accountantDecidedAt: nowIso,
+              workflowUpdatedAt: nowIso,
+            };
+          }),
         );
         purchaseOrdersRef.current = next;
         return next;
       });
-      if (!approved) setWorkingPoId(null);
+      if (!approved || fullApprove) setWorkingPoId(null);
       setActivityLog((a) =>
         log(
           a,
-          "po_accountant_decision",
+          fullApprove ? "po_manager_decision" : "po_accountant_decision",
           actor,
-          `Accountant ${approved ? "approved" : "rejected"} PO: ${comment}`,
+          fullApprove
+            ? `Manager approved PO for market: ${comment}`
+            : `Accountant ${approved ? "approved" : "rejected"} PO: ${comment}`,
           poId,
         ),
       );
       const po = purchaseOrders.find((p) => p.id === poId);
       if (po) {
-        if (approved) {
+        if (fullApprove) {
+          pushSupplyNotification({
+            audience: ["purchasing", "store"],
+            title: `PO approved — ${po.poNumber}`,
+            body: `Approved for market. Listed in Purchase Orders → History (read-only).`,
+            href: "/supply/purchase-orders?tab=history",
+          });
+        } else if (approved) {
           pushSupplyNotification({
             audience: ["manager"],
             title: `PO awaiting manager — ${po.poNumber}`,
@@ -1955,7 +2003,6 @@ function useSupplyChainImpl() {
             href: "/supply/purchase-orders?tab=approvals",
           });
         } else {
-          // Rejected lists return to store for edit/resend; kitchen is also notified.
           pushSupplyNotification({
             audience: ["store"],
             title: `PO rejected — ${po.poNumber}`,
@@ -1986,18 +2033,50 @@ function useSupplyChainImpl() {
         return;
       }
       const nowIso = new Date().toISOString();
+      markLocalSupplyMutation();
+      if (approved) setBasket([]);
       setPurchaseOrders((prev) => {
         const next = dedupePurchaseOrders(
           prev.map((po) => {
             if (po.id !== poId) return po;
+            // Allow manager to finalize from accountant queue or manager queue.
+            if (
+              po.status !== "pending_manager" &&
+              po.status !== "pending_accountant"
+            ) {
+              return po;
+            }
             if (!approved) {
               return {
                 ...po,
-                status: "manager_rejected" as const,
-                managerComment: comment,
-                managerDecidedBy: actor.name,
-                managerDecidedRole: actor.role,
-                managerDecidedAt: nowIso,
+                status:
+                  po.status === "pending_accountant"
+                    ? ("accountant_rejected" as const)
+                    : ("manager_rejected" as const),
+                accountantComment:
+                  po.status === "pending_accountant"
+                    ? comment
+                    : po.accountantComment,
+                accountantDecidedBy:
+                  po.status === "pending_accountant"
+                    ? actor.name
+                    : po.accountantDecidedBy,
+                accountantDecidedRole:
+                  po.status === "pending_accountant"
+                    ? actor.role
+                    : po.accountantDecidedRole,
+                accountantDecidedAt:
+                  po.status === "pending_accountant"
+                    ? nowIso
+                    : po.accountantDecidedAt,
+                managerComment:
+                  po.status === "pending_manager" ? comment : po.managerComment,
+                managerDecidedBy:
+                  po.status === "pending_manager" ? actor.name : po.managerDecidedBy,
+                managerDecidedRole:
+                  po.status === "pending_manager" ? actor.role : po.managerDecidedRole,
+                managerDecidedAt:
+                  po.status === "pending_manager" ? nowIso : po.managerDecidedAt,
                 workflowUpdatedAt: nowIso,
               };
             }
@@ -2008,6 +2087,10 @@ function useSupplyChainImpl() {
             return {
               ...po,
               status: "disbursed" as const,
+              accountantComment: po.accountantComment || comment,
+              accountantDecidedBy: po.accountantDecidedBy || actor.name,
+              accountantDecidedRole: po.accountantDecidedRole || actor.role,
+              accountantDecidedAt: po.accountantDecidedAt || nowIso,
               managerComment: comment,
               managerDecidedBy: actor.name,
               managerDecidedRole: actor.role,
@@ -2063,6 +2146,7 @@ function useSupplyChainImpl() {
         toast.error("Only administrator can use one-step PO approve/reject.");
         return;
       }
+      markLocalSupplyMutation();
       const target = purchaseOrders.find((p) => p.id === poId);
       if (
         approved &&
