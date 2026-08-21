@@ -97,7 +97,7 @@ import {
 } from "./unit-factor-storage";
 import type { StockShortageLine } from "@/lib/ui/stock-shortage-dialog";
 import { useAuth } from "@/lib/auth-context";
-import { canManageFnbStore, canManageKitchenBatchStandards, canOperateKitchenProduction, canRaisePurchaseRequest, canSubmitMarketRetirement, canAddPurchasedToStock, canSupplyRetirementReview, hasPermission } from "@/lib/permissions";
+import { canManageFnbStore, canManageKitchenBatchStandards, canOperateKitchenProduction, canRaisePurchaseRequest, canSubmitMarketRetirement, canAddPurchasedToStock, canSupplyRetirementReview, canSupplyPoAccountantReview, canSupplyPoManagerReview, canAdminTestApproveSupplyPo, hasPermission } from "@/lib/permissions";
 import { isRetryableSupplyError } from "@/lib/utils/fetch-retry";
 import { isMainBarIssueDestination } from "@/lib/store/outlet-departments";
 import { formatSupplyActorStamp } from "./fnb-store";
@@ -1910,6 +1910,10 @@ function useSupplyChainImpl() {
 
   const accountantDecision = useCallback(
     (poId: string, approved: boolean, comment: string, actor: Actor) => {
+      if (!canSupplyPoAccountantReview(actor.role)) {
+        toast.error("Store and purchaser cannot accept or reject purchase orders.");
+        return;
+      }
       const nowIso = new Date().toISOString();
       if (approved) setBasket([]);
       setPurchaseOrders((prev) => {
@@ -1977,6 +1981,10 @@ function useSupplyChainImpl() {
 
   const managerDecision = useCallback(
     (poId: string, approved: boolean, comment: string, actor: Actor) => {
+      if (!canSupplyPoManagerReview(actor.role)) {
+        toast.error("Store and purchaser cannot accept or reject purchase orders.");
+        return;
+      }
       const nowIso = new Date().toISOString();
       setPurchaseOrders((prev) => {
         const next = dedupePurchaseOrders(
@@ -2051,6 +2059,10 @@ function useSupplyChainImpl() {
   /** Testing: admin approves or rejects a raised PO in one step (skips accountant → manager chain). */
   const adminTestPoDecision = useCallback(
     (poId: string, approved: boolean, comment: string, actor: Actor) => {
+      if (!canAdminTestApproveSupplyPo(actor.role)) {
+        toast.error("Only administrator can use one-step PO approve/reject.");
+        return;
+      }
       const target = purchaseOrders.find((p) => p.id === poId);
       if (
         approved &&
