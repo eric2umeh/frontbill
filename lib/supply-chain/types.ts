@@ -400,6 +400,10 @@ export interface RetirementLine {
   /** When this line was posted to Central Store (partial Add to stock). */
   stockedAt?: string
   stockedBy?: string
+  /** Which Add-to-stock batch posted this row. */
+  batchId?: string
+  /** Accountant/manager decision for this posted row (defaults to pending when stocked). */
+  reviewStatus?: 'pending_review' | 'accepted' | 'rejected'
 }
 
 export interface AddToStockBatch {
@@ -408,6 +412,11 @@ export interface AddToStockBatch {
   submittedBy: string
   lineIds: string[]
   actualSpent: number
+  /** Accountant/manager decision for this Add-to-stock submission only. */
+  status?: 'pending_review' | 'accepted' | 'rejected'
+  reviewedAt?: string
+  reviewedBy?: string
+  reviewComment?: string
 }
 
 export interface RetirementRecord {
