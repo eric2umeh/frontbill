@@ -130,8 +130,8 @@ import { applyRetirementLinesToCatalog } from "./retirement-stock";
 import {
   applyRetirementBatchDecision,
   hasPendingRetirementReview,
+  isPoLineSubmittedToStock,
   poHasRemainingAddToStockLines,
-  remainingQtyForPoLine,
 } from "./add-to-stock";
 
 function applyRemoteArray<T>(
@@ -2411,33 +2411,33 @@ function useSupplyChainImpl() {
         return { error: "Select at least one item with quantity to add to stock." };
       }
 
-      // Never re-post beyond remaining — already stocked qty stays locked.
+      // One submit closes each PO line — no re-edit / re-post (qty/price are final).
       const capped: RetirementLine[] = [];
       for (const l of batchLines) {
         if (l.newlyAdded) {
           capped.push(l);
           continue;
         }
-        const rem = remainingQtyForPoLine(po, l.lineId);
-        if (rem <= 0) {
+        if (isPoLineSubmittedToStock(po, l.lineId)) {
           return {
-            error: `${l.name} is already in stock and cannot be edited or posted again.`,
+            error: `${l.name} was already added to stock and cannot be edited again.`,
           };
         }
-        const qty = Math.min(Number(l.quantityBought) || 0, rem);
+        const qty = Number(l.quantityBought) || 0;
         if (qty <= 0) continue;
         capped.push({
           ...l,
           quantityBought: qty,
           totalPaid: qty * (Number(l.actualPrice) || 0),
           stockQuantityBought:
-            l.stockQuantityOrdered && l.quantityOrdered > 0
+            l.stockQuantityBought ??
+            (l.stockQuantityOrdered && l.quantityOrdered > 0
               ? (qty / l.quantityOrdered) * l.stockQuantityOrdered
-              : l.stockQuantityBought ?? qty,
+              : qty),
         });
       }
       if (!capped.length) {
-        return { error: "Select at least one item with remaining quantity to add to stock." };
+        return { error: "Select at least one item with quantity to add to stock." };
       }
 
       const nowIso = new Date().toISOString();
@@ -2627,7 +2627,7 @@ function useSupplyChainImpl() {
           actor,
           approved
             ? remaining
-              ? `Retirement batch accepted — remaining items stay on Add to stock. ${comment}`
+              ? `Retirement batch accepted — other unsubmitted items stay on Add to stock. ${comment}`
               : `Retirement accepted — PO complete / History. ${comment}`
             : `Retirement batch rejected — returned to Active. ${comment}`,
           poId,
@@ -2641,7 +2641,7 @@ function useSupplyChainImpl() {
             ? `Batch accepted — ${po.poNumber}`
             : `Retirement complete — ${po.poNumber}`,
           body: remaining
-            ? `Accepted stocked items only. Remaining lines stay on Add to stock.`
+            ? `Accepted submitted items. Other items not yet added stay on Add to stock.`
             : `Refund purchaser: ₦${refund.toLocaleString()}.`,
           href: remaining
             ? "/supply/purchasing?tab=active"
@@ -2653,7 +2653,7 @@ function useSupplyChainImpl() {
           );
         } else if (remaining) {
           toast.success(
-            "Accepted stocked items only — remaining items stay on Add to stock",
+            "Accepted — other items not yet submitted stay on Add to stock",
           );
         } else {
           toast.success("Retirement accepted — PO moved to History");
