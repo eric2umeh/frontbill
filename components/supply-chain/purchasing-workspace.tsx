@@ -585,10 +585,12 @@ export function PurchasingWorkspace() {
         res.posted > 0
           ? canRetirementReview
             ? `${res.posted} item(s) added to Central Store${notBoughtCount ? ` · ${notBoughtCount} not bought` : ""} — open Retirement to review`
-            : `${res.posted} item(s) added to Central Store${notBoughtCount ? ` · ${notBoughtCount} not bought` : ""} — sent for accountant review`
+            : `${res.posted} item(s) added to Central Store${notBoughtCount ? ` · ${notBoughtCount} not bought` : ""} — waiting for accountant review`
           : notBoughtCount > 0
-            ? `${notBoughtCount} item(s) marked not bought — sent for review`
-            : "Submitted for retirement review — check Central Store if stock did not increase",
+            ? canRetirementReview
+              ? `${notBoughtCount} item(s) marked not bought — open Retirement to review`
+              : `${notBoughtCount} item(s) marked not bought — waiting for accountant review`
+            : "Submitted — waiting for accountant review",
       );
     }
     setWorkLines((prev) =>
@@ -608,9 +610,15 @@ export function PurchasingWorkspace() {
     setSelectedIds({});
     setConfirmOpen(false);
     setBulkConfirmOpen(false);
-    setSelectedId(null);
     setWorkLines([]);
-    setTab(canRetirementReview ? "retirement" : "active");
+    // Never send store/purchaser to Retirement review UI.
+    if (canRetirementReview) {
+      setSelectedId(null);
+      setTab("retirement");
+    } else {
+      setSelectedId(null);
+      setTab("active");
+    }
   };
 
   const submitSelected = () => {
@@ -947,38 +955,35 @@ export function PurchasingWorkspace() {
           <div className="sticky bottom-3 z-10 rounded-xl border bg-background/95 backdrop-blur p-3 shadow-lg space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <p className="text-sm text-muted-foreground">
-                Tick items to submit one by one, or retire all open lines at once.
+                {selectedWorkLines.length > 0
+                  ? "Submit only the items you ticked. Other open items stay for later."
+                  : "Tick items to submit a selection, or retire every open line at once."}
               </p>
               <div className="flex flex-wrap gap-2">
-                <Button
-                  variant="outline"
-                  disabled={
-                    selectedWorkLines.length === 0 && notBoughtToClose.length === 0
-                  }
-                  onClick={() => setConfirmOpen(true)}
-                >
-                  Submit selected
-                  {selectedWorkLines.length > 0
-                    ? ` (${selectedWorkLines.length})`
-                    : notBoughtToClose.length > 0
-                      ? ` (${notBoughtToClose.length} not bought)`
+                {selectedWorkLines.length > 0 ? (
+                  <Button onClick={() => setConfirmOpen(true)}>
+                    Submit selected ({selectedWorkLines.length})
+                    {notBoughtToClose.length > 0
+                      ? ` · ${notBoughtToClose.length} not bought`
                       : ""}
-                </Button>
-                <Button
-                  disabled={
-                    openBoughtLines.length === 0 && notBoughtToClose.length === 0
-                  }
-                  onClick={() => setBulkConfirmOpen(true)}
-                >
-                  Confirm & retire — add stock to store
-                </Button>
+                  </Button>
+                ) : (
+                  <Button
+                    disabled={
+                      openBoughtLines.length === 0 && notBoughtToClose.length === 0
+                    }
+                    onClick={() => setBulkConfirmOpen(true)}
+                  >
+                    Confirm & retire — add stock to store
+                  </Button>
+                )}
               </div>
             </div>
             {selectedWorkLines.length > 0 ? (
               <p className="text-xs text-muted-foreground">
                 Selected: {selectedWorkLines.length} · {formatNaira(selectedSpend)}
                 {notBoughtToClose.length > 0
-                  ? ` · ${notBoughtToClose.length} not bought`
+                  ? ` · ${notBoughtToClose.length} not bought will be included`
                   : ""}
               </p>
             ) : null}
