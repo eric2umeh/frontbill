@@ -48,7 +48,8 @@ import type { LucideIcon } from 'lucide-react'
 import { useNightAuditPendingCounts } from '@/hooks/use-night-audit-pending-counts'
 import { nightAuditHrefForPendingCounts } from '@/lib/night-audit/pending-approval-counts'
 import {
-  expensesHrefForPendingCounts,
+  supplyPoHrefForPendingCounts,
+  supplyRetirementHrefForPendingCounts,
   useExpensesPendingCounts,
 } from '@/hooks/use-expenses-pending-counts'
 import { tourTargetAttr } from '@/components/onboarding/role-onboarding-tour'
@@ -291,21 +292,29 @@ function SidebarInner({ mobileOpen, onMobileClose, isMobile = false }: SidebarPr
       ? nightAuditHrefForPendingCounts(nightAuditPending)
       : '/night-audit'
   const expensesPending = useExpensesPendingCounts(role)
-  const pendingSupplyPoTotal = expensesPending.total
+  const pendingPoApprovals = expensesPending.purchaseOrders
+  const pendingRetirements = expensesPending.retirements
   const supplyPoHref =
-    pendingSupplyPoTotal > 0
-      ? expensesHrefForPendingCounts(expensesPending)
+    pendingPoApprovals > 0
+      ? supplyPoHrefForPendingCounts(expensesPending)
       : '/supply/purchase-orders'
+  const supplyRetirementHref =
+    pendingRetirements > 0
+      ? supplyRetirementHrefForPendingCounts(expensesPending)
+      : '/supply/purchasing'
 
   const navHref = (path: string) => {
     if (path === '/night-audit') return nightAuditHref
     if (path === '/supply/purchase-orders') return supplyPoHref
+    if (path === '/supply/purchasing') return supplyRetirementHref
     return path
   }
 
   const pendingNavCount = (path: string) => {
     if (path === '/night-audit') return pendingNightAuditTotal
-    if (path === '/supply/purchase-orders') return pendingSupplyPoTotal
+    // Keep queues separate: PO Approvals ≠ Retirement review
+    if (path === '/supply/purchase-orders') return pendingPoApprovals
+    if (path === '/supply/purchasing') return pendingRetirements
     return 0
   }
 
