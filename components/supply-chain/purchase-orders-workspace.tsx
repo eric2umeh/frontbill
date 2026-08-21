@@ -53,7 +53,7 @@ export function PurchaseOrdersWorkspace() {
 
   useEffect(() => {
     if (tabParam === 'retirement') {
-      window.location.replace('/supply/purchasing?tab=active')
+      window.location.replace('/supply/purchasing?tab=retirement')
     }
   }, [tabParam])
 
