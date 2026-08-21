@@ -2401,19 +2401,26 @@ function useSupplyChainImpl() {
       if (po.status === "retired") {
         return { error: "This purchase order is already retired" };
       }
-      const batchLines = lines
-        .map((l) => ({
-          ...l,
-          notBought: l.notBought ?? l.removed ?? false,
-        }))
-        .filter((l) => !l.notBought && l.quantityBought > 0);
-      if (!batchLines.length) {
-        return { error: "Select at least one item with quantity to add to stock." };
+      const normalized = lines.map((l) => ({
+        ...l,
+        notBought: l.notBought ?? l.removed ?? false,
+        removed: l.notBought ?? l.removed ?? false,
+      }));
+
+      const boughtLines = normalized.filter(
+        (l) => !l.notBought && l.quantityBought > 0,
+      );
+      const notBoughtLines = normalized.filter((l) => l.notBought);
+      if (!boughtLines.length && !notBoughtLines.length) {
+        return {
+          error:
+            "Select at least one item to add to stock, or mark items as not bought.",
+        };
       }
 
-      // One submit closes each PO line — no re-edit / re-post (qty/price are final).
+      // One submit closes each PO line — no re-edit / re-post (qty/price / not-bought are final).
       const capped: RetirementLine[] = [];
-      for (const l of batchLines) {
+      for (const l of boughtLines) {
         if (l.newlyAdded) {
           capped.push(l);
           continue;
@@ -2436,8 +2443,30 @@ function useSupplyChainImpl() {
               : qty),
         });
       }
+      for (const l of notBoughtLines) {
+        if (l.newlyAdded) {
+          // Newly added + not bought: skip (never existed on PO).
+          continue;
+        }
+        if (isPoLineSubmittedToStock(po, l.lineId)) {
+          return {
+            error: `${l.name} was already submitted and cannot be edited again.`,
+          };
+        }
+        capped.push({
+          ...l,
+          notBought: true,
+          removed: true,
+          quantityBought: 0,
+          stockQuantityBought: 0,
+          totalPaid: 0,
+        });
+      }
       if (!capped.length) {
-        return { error: "Select at least one item with quantity to add to stock." };
+        return {
+          error:
+            "Select at least one item to add to stock, or mark items as not bought.",
+        };
       }
 
       const nowIso = new Date().toISOString();
@@ -2449,8 +2478,11 @@ function useSupplyChainImpl() {
         batchId,
         reviewStatus: "pending_review" as const,
       }));
-      const batchSpend = stamped.reduce((s, l) => s + l.totalPaid, 0);
-      const posted = applyRetirementToStock(po, stamped);
+      const stockToPost = stamped.filter(
+        (l) => !l.notBought && !(l.removed) && l.quantityBought > 0,
+      );
+      const batchSpend = stockToPost.reduce((s, l) => s + l.totalPaid, 0);
+      const posted = applyRetirementToStock(po, stockToPost);
       markLocalSupplyMutation();
 
       setPurchaseOrders((prev) => {
