@@ -249,10 +249,7 @@ function retirementResubmitBeatsReject(
 }
 
 function pickByWorkflowAndRank(a: PurchaseOrder, b: PurchaseOrder): PurchaseOrder {
-  const at = poWorkflowTime(a)
-  const bt = poWorkflowTime(b)
-  if (at !== bt) return at > bt ? a : b
-
+  // Same-stage reject must beat the pending it left (even though reject rank is lower).
   if (a.status === 'accountant_rejected' && b.status === 'pending_accountant') return a
   if (b.status === 'accountant_rejected' && a.status === 'pending_accountant') return b
   if (a.status === 'manager_rejected' && b.status === 'pending_manager') return a
@@ -260,7 +257,13 @@ function pickByWorkflowAndRank(a: PurchaseOrder, b: PurchaseOrder): PurchaseOrde
 
   const ar = poRank(a)
   const br = poRank(b)
+  // Prefer further-along approval status. Never revive "awaiting accountant" over
+  // pending_manager / disbursed just because a stale poll has a newer clock (slow network).
   if (ar !== br) return ar > br ? a : b
+
+  const at = poWorkflowTime(a)
+  const bt = poWorkflowTime(b)
+  if (at !== bt) return at > bt ? a : b
 
   const aContent = poLinesContentTime(a)
   const bContent = poLinesContentTime(b)
