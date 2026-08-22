@@ -319,8 +319,8 @@ export function PoApprovalPanel({ compact }: { compact?: boolean }) {
                   adminTestPoDecision(po.id, approved, comment, actor);
                   toast.success(
                     approved
-                      ? "PO accepted — released for market purchase (admin test)"
-                      : "PO rejected — returned to store (admin test)",
+                      ? "PO approved — in History and Purchasing → Active for retirement"
+                      : "PO rejected — returned to store for editing",
                   );
                 }}
               />
@@ -337,7 +337,7 @@ export function PoApprovalPanel({ compact }: { compact?: boolean }) {
                   toast.success(
                     approved
                       ? canManager
-                        ? "Approved — released for market (Purchase Orders → History)"
+                        ? "Approved — in History and Purchasing → Active for retirement"
                         : "Forwarded to manager for approval"
                       : "PO rejected — returned to store for editing",
                   );
@@ -379,8 +379,8 @@ export function PoApprovalPanel({ compact }: { compact?: boolean }) {
                   adminTestPoDecision(po.id, approved, comment, actor);
                   toast.success(
                     approved
-                      ? "PO accepted — released for market purchase (admin test)"
-                      : "PO rejected (admin test)",
+                      ? "PO approved — in History and Purchasing → Active for retirement"
+                      : "PO rejected — returned to store for editing",
                   );
                 }}
               />
@@ -393,7 +393,7 @@ export function PoApprovalPanel({ compact }: { compact?: boolean }) {
                   managerDecision(po.id, approved, comment, actor);
                   toast.success(
                     approved
-                      ? "Approved — cash released for market purchase"
+                      ? "Approved — in History and Purchasing → Active for retirement"
                       : "PO rejected by manager",
                   );
                 }}
