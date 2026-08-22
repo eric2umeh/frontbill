@@ -173,12 +173,13 @@ export function StoreEditItemDialog({ item, open, onOpenChange, onSave }: Props)
             <Label className="text-xs">In store qty</Label>
             <Input
               inputMode="decimal"
-              className="mt-0.5"
+              className="mt-0.5 bg-muted/50"
               value={qty}
-              onChange={(e) => setQty(e.target.value)}
+              readOnly
+              disabled
             />
             <p className="text-[10px] text-muted-foreground mt-1">
-              Shared across all selected departments ({formatUnitLabel(unit)}).
+              Updated only via Add to stock (approved PO → retirement).
             </p>
           </div>
           <div>
@@ -261,7 +262,6 @@ export function StoreEditItemDialog({ item, open, onOpenChange, onSave }: Props)
                 reorderLevel: Number(reorder) || 0,
                 lastPrice,
                 benchmarkPrice,
-                quantityInStore: Math.max(0, Number(qty) || 0),
                 kitchenCategory: selected.includes('kitchen') ? kitchenCategory : undefined,
                 unitFactors,
               })
