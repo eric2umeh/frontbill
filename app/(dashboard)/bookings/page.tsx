@@ -55,6 +55,7 @@ import {
 import { frontOfficeTodayYmd, resolveHotelTimeZone } from "@/lib/hotel-date";
 import { cancelBookingReservation } from "@/lib/reservations/cancel-reservation";
 import { reconcileRoomStatusesClient } from "@/lib/rooms/reconcile-room-status-client";
+import { roomHousekeepingPatchAfterCheckout } from "@/lib/rooms/sync-housekeeping-status";
 import {
   classifyFrontOfficeStay,
   computeFrontOfficeStayStats,
@@ -1185,7 +1186,7 @@ export default function BookingsPage() {
         if (booking.room_id) {
           await supabase
             .from("rooms")
-            .update({ status: "available" })
+            .update(roomHousekeepingPatchAfterCheckout())
             .eq("id", booking.room_id);
         }
         await reconcileRoomStatusesClient();
@@ -1221,7 +1222,7 @@ export default function BookingsPage() {
         if (m.room_id) {
           await supabase
             .from("rooms")
-            .update({ status: "available" })
+            .update(roomHousekeepingPatchAfterCheckout())
             .eq("id", m.room_id);
         }
       }
