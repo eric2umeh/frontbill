@@ -17,6 +17,7 @@ import {
   DEFAULT_ORG_CHECKOUT_TIME,
   hideChargeExtendInBookingsTable,
 } from '@/lib/utils/booking-checkout-ui'
+import { roomHousekeepingPatchForInHouse } from '@/lib/rooms/sync-housekeeping-status'
 import { fetchOrgCheckoutTime } from '@/lib/utils/org-checkout-policy'
 import { RescheduleStayModal } from '@/components/bookings/reschedule-stay-modal'
 import { canRequestRescheduleStay, canFrontDeskApplyRescheduleStay, canRescheduleStayBooking } from '@/lib/booking/can-reschedule-stay'
@@ -219,7 +220,7 @@ export default function ReservationDetailPage({
                   if (reservation?.rooms?.id) {
                     await supabase
                       .from('rooms')
-                      .update({ status: 'occupied' })
+                      .update(roomHousekeepingPatchForInHouse('checked_in'))
                       .eq('id', reservation.rooms.id)
                   }
                   toast.success('Guest checked in successfully')
