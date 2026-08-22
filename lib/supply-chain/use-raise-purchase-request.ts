@@ -10,7 +10,12 @@ import {
   storeItemMatchesDept,
   type SupplyDept,
 } from '@/lib/supply-chain/types'
-import { canonicalRoleKey } from '@/lib/permissions'
+import {
+  canonicalRoleKey,
+  canRaisePurchaseRequest,
+  poDraftSubmitButtonLabel,
+  poDraftSubmitSuccessMessage,
+} from '@/lib/permissions'
 import {
   canEditStorePurchaseOrder,
   poOriginOf,
@@ -368,9 +373,7 @@ export function useRaisePurchaseRequest(activeTab: string) {
       if (res && 'po' in res) {
         resetCatalogQtyInputs()
         playNotificationBeep()
-        toast.success(
-          `${res.po.poNumber} sent — kitchen + store draft lines are combined for accountant review`,
-        )
+        toast.success(poDraftSubmitSuccessMessage(res.po.poNumber, role))
       }
     })()
   }
@@ -401,6 +404,7 @@ export function useRaisePurchaseRequest(activeTab: string) {
     handleRemoveFromBasket,
     handleBasketQtyChange,
     handleSendToAccountant,
+    poSubmitLabel: poDraftSubmitButtonLabel(role),
     updateStoreItemDirect,
     setFactorMap,
     setPurchaseUnitMap,
