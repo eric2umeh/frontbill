@@ -1,5 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { insertFolioCharges } from '@/lib/utils/insert-folio-charges'
+import { markRoomHousekeepingCheckout } from '@/lib/rooms/sync-housekeeping-status'
 import { NextResponse } from 'next/server'
 
 /**
@@ -274,7 +275,9 @@ export async function GET(request: Request) {
   }
 
   if (roomIds.length > 0) {
-    await supabase.from('rooms').update({ status: 'available' }).in('id', roomIds)
+    for (const roomId of roomIds) {
+      await markRoomHousekeepingCheckout(supabase, roomId)
+    }
   }
 
   console.log(
