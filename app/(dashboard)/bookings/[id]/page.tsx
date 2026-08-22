@@ -90,6 +90,7 @@ import {
 } from "@/lib/cashback/cashback-eligibility";
 import { createClient } from "@/lib/supabase/client";
 import { reconcileRoomStatusesClient } from "@/lib/rooms/reconcile-room-status-client";
+import { roomHousekeepingPatchAfterCheckout } from "@/lib/rooms/sync-housekeeping-status";
 import { useAuth } from "@/lib/auth-context";
 import { canonicalRoleKey, hasPermission } from "@/lib/permissions";
 import { getUserDisplayName } from "@/lib/utils/user-display";
@@ -1641,8 +1642,8 @@ export default function BookingDetailPage({
               Room {booking.rooms?.room_number}
             </p>
             <p className="mt-1">
-              The room will be set to available and this folio will be marked
-              checked out.
+              The room will be marked Check-out for housekeeping and this folio
+              will be marked checked out.
             </p>
           </>
         }
@@ -1673,7 +1674,7 @@ export default function BookingDetailPage({
             if (booking.room_id) {
               await supabase
                 .from("rooms")
-                .update({ status: "available" })
+                .update(roomHousekeepingPatchAfterCheckout())
                 .eq("id", booking.room_id);
             }
             await reconcileRoomStatusesClient();
