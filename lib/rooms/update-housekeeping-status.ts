@@ -5,6 +5,13 @@ import {
   pmsStatusForHousekeepingStatus,
   type HousekeepingStatusKey,
 } from '@/lib/rooms/housekeeping-status'
+import {
+  housekeeperTransitionError,
+  isHousekeeperTransitionAllowed,
+} from '@/lib/rooms/housekeeping-status-transitions'
+import {
+  shouldEnforceHousekeeperTransitions,
+} from '@/lib/rooms/housekeeping-status-auth'
 
 function isMissingTableError(message: string): boolean {
   const m = message.toLowerCase()
@@ -59,6 +66,7 @@ export async function applyHousekeepingStatusUpdate(
     userName: string
     remark?: string
     scheduledDate?: string
+    role?: string
   },
 ): Promise<
   | {
@@ -78,7 +86,7 @@ export async function applyHousekeepingStatusUpdate(
 
   const { data: room, error: roomFetchError } = await admin
     .from('rooms')
-    .select('id, room_number, status, organization_id')
+    .select('id, room_number, status, organization_id, housekeeping_status')
     .eq('id', params.roomId)
     .eq('organization_id', params.organizationId)
     .maybeSingle()
@@ -88,6 +96,20 @@ export async function applyHousekeepingStatusUpdate(
   }
   if (!room) {
     return { ok: false, message: 'Room not found' }
+  }
+
+  const currentHk = (room as { housekeeping_status?: string | null }).housekeeping_status
+  const enforceTransitions = params.role
+    ? shouldEnforceHousekeeperTransitions(params.role)
+    : true
+  if (
+    enforceTransitions &&
+    !isHousekeeperTransitionAllowed(currentHk, params.newStatus)
+  ) {
+    return {
+      ok: false,
+      message: housekeeperTransitionError(currentHk, params.newStatus),
+    }
   }
 
   const roomNumber = String(room.room_number || params.roomNumber)
