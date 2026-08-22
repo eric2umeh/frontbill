@@ -94,6 +94,7 @@ function PoDecisionCard({
   testingAdmin,
   canEditLines,
   onLineQtyChange,
+  onLinePriceChange,
   onLineDelete,
 }: {
   po: PurchaseOrder;
@@ -102,6 +103,7 @@ function PoDecisionCard({
   testingAdmin?: boolean;
   canEditLines?: boolean;
   onLineQtyChange?: (stockItemId: string, qty: number) => void;
+  onLinePriceChange?: (stockItemId: string, price: number) => void;
   onLineDelete?: (stockItemId: string) => void;
 }) {
   const [comment, setComment] = useState("");
@@ -170,13 +172,14 @@ function PoDecisionCard({
             <p className="text-[13px] font-medium text-foreground">
               {formatPoDecisionStamp(po)}
             </p>
-          ) : null}
-          <p className="text-[13px] text-muted-foreground">
-            Created {formatPoRaisedAt(po.createdAt)}
-            {po.sentToAccountantAt
-              ? ` · Sent to accountant ${formatPoRaisedAt(po.sentToAccountantAt)}`
-              : ""}
-          </p>
+          ) : (
+            <p className="text-[13px] text-muted-foreground">
+              Created {formatPoRaisedAt(po.createdAt)}
+              {po.sentToAccountantAt
+                ? ` · Sent ${formatPoRaisedAt(po.sentToAccountantAt)}`
+                : ""}
+            </p>
+          )}
           {editable ? (
             <p className="text-[13px] text-muted-foreground mt-1">
               Edit or delete lines below. To add items, open{" "}
@@ -214,13 +217,16 @@ function PoDecisionCard({
             lines={po.lines}
             editable={editable}
             onQtyChange={editable ? onLineQtyChange : undefined}
+            onPriceChange={editable ? onLinePriceChange : undefined}
             onDelete={editable ? onLineDelete : undefined}
             pageSize={10}
+            compact
+            hideDeptSummary
           />
         </div>
       )}
       <Textarea
-        placeholder="Comment required for accept or reject…"
+        placeholder="Optional comment for accept or reject…"
         value={comment}
         onChange={(e) => setComment(e.target.value)}
         rows={2}
@@ -228,7 +234,6 @@ function PoDecisionCard({
       <div className="flex flex-wrap gap-2">
         <Button
           size="sm"
-          disabled={!comment.trim()}
           onClick={() => {
             onDecide(true, comment.trim());
             setComment("");
@@ -243,7 +248,6 @@ function PoDecisionCard({
         <Button
           size="sm"
           variant="destructive"
-          disabled={!comment.trim()}
           onClick={() => {
             onDecide(false, comment.trim());
             setComment("");
@@ -285,6 +289,19 @@ export function PoApprovalPanel({ compact }: { compact?: boolean }) {
     if (err) toast.error(err);
     else toast.success("Line removed");
   };
+  const handleLinePrice = (poId: string, stockItemId: string, price: number) => {
+    const po = purchaseOrders.find((p) => p.id === poId);
+    const line = po?.lines.find((l) => l.stockItemId === stockItemId);
+    if (!line) return;
+    const err = mutatePurchaseOrderLine?.(
+      poId,
+      stockItemId,
+      line.quantityOrdered,
+      price,
+      actor,
+    );
+    if (err) toast.error(err);
+  };
 
   if (
     !pendingAccountant.length &&
@@ -314,6 +331,7 @@ export function PoApprovalPanel({ compact }: { compact?: boolean }) {
                 testingAdmin
                 canEditLines
                 onLineQtyChange={(id, qty) => handleLineQty(po.id, id, qty)}
+                onLinePriceChange={(id, price) => handleLinePrice(po.id, id, price)}
                 onLineDelete={(id) => handleLineDelete(po.id, id)}
                 onDecide={(approved, comment) => {
                   adminTestPoDecision(po.id, approved, comment, actor);
@@ -331,6 +349,7 @@ export function PoApprovalPanel({ compact }: { compact?: boolean }) {
                 stage={canManager ? "manager" : "accountant"}
                 canEditLines
                 onLineQtyChange={(id, qty) => handleLineQty(po.id, id, qty)}
+                onLinePriceChange={(id, price) => handleLinePrice(po.id, id, price)}
                 onLineDelete={(id) => handleLineDelete(po.id, id)}
                 onDecide={(approved, comment) => {
                   accountantDecision(po.id, approved, comment, actor);
