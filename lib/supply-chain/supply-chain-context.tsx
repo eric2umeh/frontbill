@@ -97,7 +97,7 @@ import {
 } from "./unit-factor-storage";
 import type { StockShortageLine } from "@/lib/ui/stock-shortage-dialog";
 import { useAuth } from "@/lib/auth-context";
-import { canManageFnbStore, canManageKitchenBatchStandards, canOperateKitchenProduction, canRaisePurchaseRequest, canSubmitMarketRetirement, canAddPurchasedToStock, canSupplyRetirementReview, canSupplyPoAccountantReview, canSupplyPoManagerReview, canAdminTestApproveSupplyPo, hasPermission } from "@/lib/permissions";
+import { canManageFnbStore, canManageKitchenBatchStandards, canOperateKitchenProduction, canRaisePurchaseRequest, canSubmitMarketRetirement, canAddPurchasedToStock, canSupplyRetirementReview, canSupplyPoAccountantReview, canSupplyPoManagerReview, canAdminTestApproveSupplyPo, canonicalRoleKey, hasPermission } from "@/lib/permissions";
 import { isRetryableSupplyError } from "@/lib/utils/fetch-retry";
 import { isMainBarIssueDestination } from "@/lib/store/outlet-departments";
 import { formatSupplyActorStamp } from "./fnb-store";
@@ -112,6 +112,7 @@ import {
 } from "./supply-db-client";
 import { mergeSnapshotRowsById, resolveSupplySnapshot } from "./snapshot-merge";
 import { mergeIssueOutLogFromRemote } from "@/lib/store/issue-out-log-utils";
+import { issuedQtyForStoreItem } from "@/lib/supply-chain/retirement-review-utils";
 import { mergePurchaseOrdersFromRemote, dedupePurchaseOrders } from "./po-sync-merge";
 import {
   isProductionBatchDeleted,
@@ -132,6 +133,7 @@ import {
   applyRetirementBatchDecision,
   hasPendingRetirementReview,
   isPoLineSubmittedToStock,
+  isSubmittedAddToStockLine,
   poHasRemainingAddToStockLines,
 } from "./add-to-stock";
 
@@ -1949,8 +1951,12 @@ function useSupplyChainImpl() {
       markLocalSupplyMutation();
 
       // Manager/admin with both review rights: one approve releases for market (no second click).
+      const roleKey = canonicalRoleKey(actor.role);
       const fullApprove =
         approved && canSupplyPoManagerReview(actor.role);
+      const adminFastTrack =
+        approved &&
+        (roleKey === "admin" || roleKey === "superadmin");
 
       if (approved) setBasket([]);
       setPurchaseOrders((prev) => {
@@ -1968,7 +1974,7 @@ function useSupplyChainImpl() {
                 workflowUpdatedAt: nowIso,
               };
             }
-            if (fullApprove) {
+            if (fullApprove || adminFastTrack) {
               const frozenLines = po.lines.map((l) => ({ ...l }));
               const total =
                 Number(po.totalAmount) ||
@@ -2005,26 +2011,26 @@ function useSupplyChainImpl() {
         purchaseOrdersRef.current = next;
         return next;
       });
-      if (!approved || fullApprove) setWorkingPoId(null);
+      if (!approved || fullApprove || adminFastTrack) setWorkingPoId(null);
       setActivityLog((a) =>
         log(
           a,
-          fullApprove ? "po_manager_decision" : "po_accountant_decision",
+          fullApprove || adminFastTrack ? "po_manager_decision" : "po_accountant_decision",
           actor,
-          fullApprove
-            ? `Manager approved PO for market: ${comment}`
-            : `Accountant ${approved ? "approved" : "rejected"} PO: ${comment}`,
+          fullApprove || adminFastTrack
+            ? `Manager approved PO for market: ${comment || "(no comment)"}`
+            : `Accountant ${approved ? "approved" : "rejected"} PO: ${comment || "(no comment)"}`,
           poId,
         ),
       );
       const po = purchaseOrders.find((p) => p.id === poId);
       if (po) {
-        if (fullApprove) {
+        if (fullApprove || adminFastTrack) {
           pushSupplyNotification({
             audience: ["purchasing", "store"],
             title: `PO approved — ${po.poNumber}`,
-            body: `Approved for market. Listed in Purchase Orders → History (read-only).`,
-            href: "/supply/purchase-orders?tab=history",
+            body: `Approved for market. Add to stock from Retirement → Active.`,
+            href: "/supply/purchasing?tab=active",
           });
         } else if (approved) {
           pushSupplyNotification({
@@ -2153,8 +2159,8 @@ function useSupplyChainImpl() {
           pushSupplyNotification({
             audience: ["purchasing", "store"],
             title: `PO approved — ${po.poNumber}`,
-            body: `Manager approved. Listed in Purchase Orders → History (read-only). Ready to buy at market from Retirement.`,
-            href: "/supply/purchase-orders?tab=history",
+            body: `Manager approved. Ready to buy at market — Retirement → Active.`,
+            href: "/supply/purchasing?tab=active",
           });
         } else {
           pushSupplyNotification({
@@ -2257,8 +2263,8 @@ function useSupplyChainImpl() {
         pushSupplyNotification({
           audience: ["purchasing", "store"],
           title: `PO approved (admin test) — ${po.poNumber}`,
-          body: comment || "Listed in Purchase Orders → History (read-only).",
-          href: "/supply/purchase-orders?tab=history",
+          body: comment || "Ready for market — Retirement → Active.",
+          href: "/supply/purchasing?tab=active",
         });
       } else if (po && !approved) {
         pushSupplyNotification({
@@ -2689,9 +2695,9 @@ function useSupplyChainImpl() {
           actor,
           approved
             ? remaining
-              ? `Retirement batch accepted — other unsubmitted items stay on Add to stock. ${comment}`
-              : `Retirement accepted — PO complete / History. ${comment}`
-            : `Retirement batch rejected — returned to Active. ${comment}`,
+              ? `Retirement batch accepted — other unsubmitted items stay on Add to stock.${comment ? ` ${comment}` : ""}`
+              : `Retirement accepted — PO complete / History.${comment ? ` ${comment}` : ""}`
+            : `Retirement batch rejected — returned to Active.${comment ? ` ${comment}` : ""}`,
           poId,
         ),
       );
@@ -2738,6 +2744,196 @@ function useSupplyChainImpl() {
       return { ok: true };
     },
     [purchaseOrders, applyRetirementToStock, persistSnapshotsNow],
+  );
+
+  const correctRetirementLineDuringReview = useCallback(
+    (
+      poId: string,
+      lineId: string,
+      patch: { quantityBought?: number; actualPrice?: number },
+      actor: Actor,
+    ): { ok: true; warning?: string } | { error: string } => {
+      if (!canSupplyRetirementReview(actor.role)) {
+        return { error: "Only reviewers can correct Add-to-stock lines." };
+      }
+      const po = purchaseOrders.find((p) => p.id === poId);
+      if (!po?.retirement) return { error: "Retirement not found" };
+
+      const line = po.retirement.lines.find(
+        (l) =>
+          l.lineId === lineId &&
+          l.reviewStatus !== "accepted" &&
+          l.reviewStatus !== "rejected" &&
+          isSubmittedAddToStockLine(l),
+      );
+      if (!line || line.notBought || line.removed) {
+        return { error: "Line is not open for correction" };
+      }
+
+      const pl = po.lines.find((l) => l.id === lineId);
+      const stockItemId =
+        line.stockItemId?.trim() || pl?.stockItemId?.trim() || "";
+      const nowIso = new Date().toISOString();
+      const corrections = [...(line.corrections ?? [])];
+      let warning: string | undefined;
+
+      const prevQty = Number(line.quantityBought) || 0;
+      const prevPrice = Number(line.actualPrice) || 0;
+      const nextQty =
+        patch.quantityBought != null && Number.isFinite(patch.quantityBought)
+          ? Math.max(0, patch.quantityBought)
+          : prevQty;
+      const nextPrice =
+        patch.actualPrice != null && Number.isFinite(patch.actualPrice)
+          ? Math.max(0, patch.actualPrice)
+          : prevPrice;
+
+      const prevStockQty =
+        line.stockQuantityBought ??
+        (pl?.stockQuantityOrdered && pl.quantityOrdered > 0
+          ? (prevQty / pl.quantityOrdered) * pl.stockQuantityOrdered
+          : prevQty);
+      const nextStockQty =
+        pl?.stockQuantityOrdered && pl.quantityOrdered > 0
+          ? (nextQty / pl.quantityOrdered) * pl.stockQuantityOrdered
+          : nextQty;
+      const deltaStock = nextStockQty - prevStockQty;
+
+      if (deltaStock < 0 && stockItemId) {
+        const issued = issuedQtyForStoreItem(
+          issueOutLogRef.current,
+          stockItemId,
+          line.stockedAt,
+        );
+        if (nextStockQty < issued) {
+          return {
+            error: `${line.name}: ${issued} ${line.unit ?? ""} already issued out — cannot reduce below that.`,
+          };
+        }
+        const storeRow = storeItemsRef.current.find((s) => s.id === stockItemId);
+        if (storeRow && storeRow.quantityInStore + deltaStock < 0) {
+          return {
+            error: `${line.name}: only ${storeRow.quantityInStore} left in Central Store — cannot reduce by ${Math.abs(deltaStock).toFixed(2)}.`,
+          };
+        }
+        if (issued > 0) {
+          warning = `${line.name}: ${issued} already issued since Add to stock. Stock adjusted where possible.`;
+        }
+      }
+
+      const totalPaid = nextQty * nextPrice;
+      const nextStockUnitPrice =
+        nextStockQty > 0 ? totalPaid / nextStockQty : nextPrice;
+
+      if (patch.quantityBought != null && nextQty !== prevQty) {
+        corrections.push({
+          at: nowIso,
+          by: actor.name,
+          role: actor.role,
+          field: "qty",
+          from: prevQty,
+          to: nextQty,
+          issuedQtyWarning: warning,
+        });
+      }
+      if (patch.actualPrice != null && nextPrice !== prevPrice) {
+        corrections.push({
+          at: nowIso,
+          by: actor.name,
+          role: actor.role,
+          field: "price",
+          from: prevPrice,
+          to: nextPrice,
+        });
+      }
+
+      if (!corrections.length) return { ok: true };
+
+      markLocalSupplyMutation();
+
+      if (deltaStock !== 0 && stockItemId) {
+        setStoreItems((prev) => {
+          const next = prev.map((s) =>
+            s.id === stockItemId
+              ? {
+                  ...s,
+                  quantityInStore: Math.max(0, s.quantityInStore + deltaStock),
+                  lastPrice: nextStockUnitPrice,
+                }
+              : s,
+          );
+          storeItemsRef.current = next;
+          return next;
+        });
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("frontbill:supply-stock-changed"));
+        }
+      } else if (patch.actualPrice != null && stockItemId) {
+        setStoreItems((prev) => {
+          const next = prev.map((s) =>
+            s.id === stockItemId ? { ...s, lastPrice: nextStockUnitPrice } : s,
+          );
+          storeItemsRef.current = next;
+          return next;
+        });
+      }
+
+      setPurchaseOrders((prev) => {
+        const next = prev.map((p) => {
+          if (p.id !== poId || !p.retirement) return p;
+          const lines = p.retirement.lines.map((l) =>
+            l.lineId === lineId &&
+            l.stockedAt === line.stockedAt &&
+            l.batchId === line.batchId
+              ? {
+                  ...l,
+                  quantityBought: nextQty,
+                  stockQuantityBought: nextStockQty,
+                  actualPrice: nextPrice,
+                  actualStockUnitPrice: nextStockUnitPrice,
+                  totalPaid,
+                  corrections,
+                }
+              : l,
+          );
+          const actualSpent = lines
+            .filter((l) => !(l.notBought || l.removed))
+            .reduce((s, l) => s + (Number(l.totalPaid) || 0), 0);
+          return {
+            ...p,
+            workflowUpdatedAt: nowIso,
+            retirement: {
+              ...p.retirement,
+              lines,
+              actualSpent,
+            },
+          };
+        });
+        purchaseOrdersRef.current = next;
+        return next;
+      });
+
+      setActivityLog((a) =>
+        log(
+          a,
+          "retirement_submitted",
+          actor,
+          `Corrected ${line.name} during retirement review (qty/price). ${warning ?? ""}`.trim(),
+          poId,
+        ),
+      );
+
+      pushSupplyNotification({
+        audience: ["store", "purchasing"],
+        title: `Retirement corrected — ${po.poNumber}`,
+        body: `${actor.name} adjusted ${line.name} qty/price during review.${warning ? ` ${warning}` : ""}`,
+        href: "/supply/purchasing?tab=active",
+      });
+
+      void persistSnapshotsNow();
+      return { ok: true, warning };
+    },
+    [purchaseOrders, persistSnapshotsNow],
   );
 
   const deleteActivePurchaseOrder = useCallback(
@@ -5062,6 +5258,7 @@ function useSupplyChainImpl() {
     submitAddToStock,
     submitRetirement,
     accountantRetirementDecision,
+    correctRetirementLineDuringReview,
     deleteActivePurchaseOrder,
     recipes,
     kitchenStock,
@@ -5200,6 +5397,9 @@ export function useSupplyChain() {
       (() => ({ error: "Supply chain not ready — refresh the page" })),
     accountantRetirementDecision:
       ctx.accountantRetirementDecision ??
+      (() => ({ error: "Supply chain not ready — refresh the page" })),
+    correctRetirementLineDuringReview:
+      ctx.correctRetirementLineDuringReview ??
       (() => ({ error: "Supply chain not ready — refresh the page" })),
     submitAddToStock:
       ctx.submitAddToStock ??
