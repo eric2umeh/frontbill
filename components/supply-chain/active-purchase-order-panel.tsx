@@ -163,6 +163,33 @@ export function ActivePurchaseOrderPanel({ actor, storeItems }: Props) {
     if (err) toast.error(err)
   }
 
+  const handlePriceChange = (stockItemId: string, price: number) => {
+    const item = storeItems.find((s) => s.id === stockItemId)
+    if (!item) return
+    const existing = basket.find((line) => line.stockItemId === stockItemId)
+    const poLine = po?.lines.find((l) => l.stockItemId === stockItemId)
+    const qty =
+      existing?.qtyToBuy ??
+      poLine?.quantityOrdered ??
+      0
+    const storeQty =
+      existing?.storeQtyToBuy && existing.qtyToBuy > 0
+        ? (qty / existing.qtyToBuy) * existing.storeQtyToBuy
+        : poLine?.stockQuantityOrdered && poLine.quantityOrdered > 0
+          ? (qty / poLine.quantityOrdered) * poLine.stockQuantityOrdered
+          : qty
+    const storeUnitPrice =
+      storeQty > 0 && price > 0 ? (qty * price) / storeQty : item.lastPrice
+    const err = setBasketLineQty(item, storeQty, storeUnitPrice, actor, {
+      purchaseUnit: existing?.unit ?? poLine?.unit ?? item.unit,
+      purchaseQty: qty,
+      purchaseUnitPrice: price,
+      storeQty,
+      storeUnitPrice,
+    })
+    if (err) toast.error(err)
+  }
+
   const handleRemoveLine = (stockItemId: string) => {
     const res = removeFromBasket(stockItemId)
     if (res && typeof res === 'object' && 'error' in res) toast.error(String(res.error))
@@ -404,9 +431,10 @@ export function ActivePurchaseOrderPanel({ actor, storeItems }: Props) {
             lines={basket}
             editable={linesEditable}
             onQtyChange={linesEditable ? handleQtyChange : undefined}
+            onPriceChange={linesEditable ? handlePriceChange : undefined}
             onDelete={linesEditable ? handleRemoveLine : undefined}
             compact
-            showDept
+            hideDeptSummary
             pageSize={10}
             title={`Draft lines (${basket.length} · ${formatNaira(stats.basketTotal)})`}
           />
