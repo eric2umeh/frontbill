@@ -39,6 +39,7 @@ import { PoDetailPanel } from "@/components/supply-chain/po-detail-card";
 import { PoCommentBanner } from "@/components/supply-chain/po-comment-banner";
 import { PoHistoryPanel } from "@/components/supply-chain/po-history-panel";
 import { PoRetirementPanel } from "@/components/supply-chain/po-retirement-panel";
+import { listRetirementReviewHistory } from "@/lib/supply-chain/retirement-review-utils";
 import {
   AddExtraStockItemsModal,
   type ExtraStockPick,
@@ -227,7 +228,11 @@ export function PurchasingWorkspace() {
   );
 
   const retiredCount = useMemo(
-    () => purchaseOrders.filter((p) => p.status === "retired").length,
+    () => listRetirementReviewHistory(purchaseOrders).length,
+    [purchaseOrders],
+  );
+  const retirementHistory = useMemo(
+    () => listRetirementReviewHistory(purchaseOrders),
     [purchaseOrders],
   );
 
@@ -1177,14 +1182,13 @@ export function PurchasingWorkspace() {
             <div>
               <h2 className="font-medium">History</h2>
               <p className="text-xs text-muted-foreground">
-                Completed retirements — final record after review.
+                Accepted and rejected retirement batches — full audit trail.
               </p>
             </div>
             <PoHistoryPanel
-              purchaseOrders={purchaseOrders}
-              includeStatuses={["retired"]}
-              emptyMessage="No retired purchase orders yet. History appears after Retirement is accepted."
-              searchPlaceholder="Search retired PO number, date…"
+              purchaseOrders={retirementHistory}
+              emptyMessage="No retirement reviews yet. Accept or reject batches to record them here."
+              searchPlaceholder="Search PO number, date…"
             />
           </TabsContent>
         </Tabs>
