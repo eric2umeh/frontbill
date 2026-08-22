@@ -787,7 +787,7 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
     key: "housekeeping",
     label: "Housekeeper",
     description:
-      "Housekeeping board, floor room status (OOO, Occupied, Vacant, etc.), and daily reporting. Only Housekeepers may change room housekeeping status; all front-office roles can view it. No Bookings, Reservations, Store, dashboards, billing, or front-office edits.",
+      "Housekeeping board, floor room status (OOO, Occupied, Vacant, etc.), front desk room/reservation report, and daily reporting. Housekeepers follow the checkout workflow; Admin/Superadmin may set any floor status. No Bookings, Reservations, Store, dashboards, billing, or front-office edits.",
     color: "bg-teal-100 text-teal-800",
     permissions: [
       "housekeeping:view",
