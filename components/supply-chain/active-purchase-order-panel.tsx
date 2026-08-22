@@ -16,7 +16,7 @@ import {
 } from '@/lib/supply-chain/po-active'
 import { resolvePoDisplayStatus } from '@/lib/supply-chain/po-format'
 import { useAuth } from '@/lib/auth-context'
-import { canRaisePurchaseRequest } from '@/lib/permissions'
+import { canRaisePurchaseRequest, canDirectDisbursePurchaseOrder, poDraftSubmitButtonLabel, poDraftSubmitSuccessMessage } from '@/lib/permissions'
 import { Badge } from '@/components/ui/badge'
 import { formatNaira } from '@/lib/utils/currency'
 import { Button } from '@/components/ui/button'
@@ -25,7 +25,7 @@ import { PoDetailCard } from '@/components/supply-chain/po-detail-card'
 import { PoCommentBanner } from '@/components/supply-chain/po-comment-banner'
 import { poStatusBadge } from '@/components/supply-chain/po-approval-panel'
 import { toast } from 'sonner'
-import { Send, Trash2 } from 'lucide-react'
+import { Send, Trash2, Eraser } from 'lucide-react'
 import Link from 'next/link'
 import type { StoreItem } from '@/lib/supply-chain/types'
 import { playNotificationBeep } from '@/lib/utils/play-notification-beep'
@@ -57,10 +57,13 @@ export function ActivePurchaseOrderPanel({ actor, storeItems }: Props) {
     removeFromBasket,
     sendBasketForApproval,
     deleteActivePurchaseOrder,
+    clearBasket,
     selectWorkingPurchaseOrder,
     kitchenOrdersAtStore,
   } = useSupplyChain()
 
+  const poSubmitLabel = poDraftSubmitButtonLabel(role)
+  const directDisburse = canDirectDisbursePurchaseOrder(role)
   const po = activePurchaseOrder
   const displayStatus = po ? resolvePoDisplayStatus(po) : undefined
   const canEdit = canEditStorePurchaseOrder(po)
@@ -73,6 +76,7 @@ export function ActivePurchaseOrderPanel({ actor, storeItems }: Props) {
   const isRejected =
     displayStatus === 'accountant_rejected' || displayStatus === 'manager_rejected'
   const isPendingStore = displayStatus === 'pending_store'
+  const canClear = canRaise && basket.length > 0 && !awaitingAccountant
   const linesEditable =
     canRaise &&
     canEdit &&
@@ -116,14 +120,14 @@ export function ActivePurchaseOrderPanel({ actor, storeItems }: Props) {
   ])
 
   const handleSend = () => {
-    const res = sendBasketForApproval(actor)
-    if ('error' in res) toast.error(res.error)
-    else {
-      playNotificationBeep()
-      toast.success(
-        `${res.po.poNumber} sent — kitchen + store draft lines are combined for accountant review under Purchase Orders`,
-      )
-    }
+    void (async () => {
+      const res = await sendBasketForApproval(actor)
+      if ('error' in res) toast.error(res.error)
+      else {
+        playNotificationBeep()
+        toast.success(poDraftSubmitSuccessMessage(res.po.poNumber, role))
+      }
+    })()
   }
 
   const handleQtyChange = (stockItemId: string, qty: number) => {
@@ -161,15 +165,52 @@ export function ActivePurchaseOrderPanel({ actor, storeItems }: Props) {
     if (err) toast.error(err)
   }
 
+  const handlePriceChange = (stockItemId: string, price: number) => {
+    const item = storeItems.find((s) => s.id === stockItemId)
+    if (!item) return
+    const existing = basket.find((line) => line.stockItemId === stockItemId)
+    const poLine = po?.lines.find((l) => l.stockItemId === stockItemId)
+    const qty =
+      existing?.qtyToBuy ??
+      poLine?.quantityOrdered ??
+      0
+    const storeQty =
+      existing?.storeQtyToBuy && existing.qtyToBuy > 0
+        ? (qty / existing.qtyToBuy) * existing.storeQtyToBuy
+        : poLine?.stockQuantityOrdered && poLine.quantityOrdered > 0
+          ? (qty / poLine.quantityOrdered) * poLine.stockQuantityOrdered
+          : qty
+    const storeUnitPrice =
+      storeQty > 0 && price > 0 ? (qty * price) / storeQty : item.lastPrice
+    const err = setBasketLineQty(item, storeQty, storeUnitPrice, actor, {
+      purchaseUnit: existing?.unit ?? poLine?.unit ?? item.unit,
+      purchaseQty: qty,
+      purchaseUnitPrice: price,
+      storeQty,
+      storeUnitPrice,
+    })
+    if (err) toast.error(err)
+  }
+
   const handleRemoveLine = (stockItemId: string) => {
     const res = removeFromBasket(stockItemId)
     if (res && typeof res === 'object' && 'error' in res) toast.error(String(res.error))
   }
 
   const handleDeletePo = () => {
-    const res = deleteActivePurchaseOrder(actor)
-    if ('error' in res) toast.error(res.error)
-    else toast.success('Purchase order deleted')
+    void (async () => {
+      const res = await deleteActivePurchaseOrder(actor)
+      if ('error' in res) toast.error(res.error)
+      else toast.success('Purchase order deleted')
+    })()
+  }
+
+  const handleClearPo = () => {
+    void (async () => {
+      const res = await clearBasket(actor)
+      if (res && 'error' in res) toast.error(res.error)
+      else toast.success('Draft basket cleared')
+    })()
   }
 
   if (!po) {
@@ -372,6 +413,55 @@ export function ActivePurchaseOrderPanel({ actor, storeItems }: Props) {
         {stats.basketTotal > 0 ? (
           <p className="text-sm font-semibold tabular-nums">{formatNaira(stats.basketTotal)}</p>
         ) : null}
+        {(canClear || canDelete) && (
+          <div className="flex flex-wrap gap-2 shrink-0">
+            {canClear && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="text-destructive border-destructive/30 hover:bg-destructive/5"
+                onClick={handleClearPo}
+              >
+                <Eraser className="h-3.5 w-3.5 mr-1" />
+                Clear basket
+              </Button>
+            )}
+            {canDelete && (
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="text-destructive border-destructive/30 hover:bg-destructive/5"
+                  >
+                    <Trash2 className="h-3.5 w-3.5 mr-1" />
+                    Delete PO
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Delete this purchase order?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This removes all lines and data for {po.poNumber}. You can start a fresh PO
+                      from Raise purchase request.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction
+                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                      onClick={handleDeletePo}
+                    >
+                      Delete entire PO
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            )}
+          </div>
+        )}
       </div>
       <p className="px-4 pt-2 text-[13px] text-muted-foreground">{formatPoActorStamp(po)}</p>
       {formatPoLinesEditStamp(po) ? (
@@ -402,9 +492,10 @@ export function ActivePurchaseOrderPanel({ actor, storeItems }: Props) {
             lines={basket}
             editable={linesEditable}
             onQtyChange={linesEditable ? handleQtyChange : undefined}
+            onPriceChange={linesEditable ? handlePriceChange : undefined}
             onDelete={linesEditable ? handleRemoveLine : undefined}
             compact
-            showDept
+            hideDeptSummary
             pageSize={10}
             title={`Draft lines (${basket.length} · ${formatNaira(stats.basketTotal)})`}
           />
@@ -418,12 +509,30 @@ export function ActivePurchaseOrderPanel({ actor, storeItems }: Props) {
             : isPendingStore
               ? 'Kitchen order at store — review this draft list (same as Raise purchase), edit if needed, then Send to accountant.'
               : isDraft
-                ? 'Adjust quantities here or on Raise purchase request, then send to accountant.'
+                ? directDisburse
+                  ? 'Adjust quantities here or on Raise purchase request, then approve for market.'
+                  : 'Adjust quantities here or on Raise purchase request, then send to accountant.'
                 : isRejected
-                  ? 'Rejected — edit quantities directly, then send again.'
-                  : 'Update lines, then send to accountant again.'}
+                  ? directDisburse
+                    ? 'Rejected — edit quantities directly, then approve again.'
+                    : 'Rejected — edit quantities directly, then send again.'
+                  : directDisburse
+                    ? 'Update lines, then approve again.'
+                    : 'Update lines, then send to accountant again.'}
         </p>
         <div className="flex flex-wrap gap-2">
+          {canClear && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="text-destructive border-destructive/30 hover:bg-destructive/5"
+              onClick={handleClearPo}
+            >
+              <Eraser className="h-3.5 w-3.5 mr-1" />
+              Clear basket
+            </Button>
+          )}
           {canDelete && (
             <AlertDialog>
               <AlertDialogTrigger asChild>
@@ -455,7 +564,7 @@ export function ActivePurchaseOrderPanel({ actor, storeItems }: Props) {
           {showSend && (
             <Button type="button" size="sm" onClick={handleSend}>
               <Send className="h-3.5 w-3.5 mr-1" />
-              Send to accountant
+              {poSubmitLabel}
             </Button>
           )}
         </div>

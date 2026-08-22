@@ -25,7 +25,7 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Loader2 } from "lucide-react";
-import { toast } from "sonner";
+import { roomHousekeepingPatchForInHouse } from "@/lib/rooms/sync-housekeeping-status";
 import { formatPersonName, normalizeNameKey } from "@/lib/utils/name-format";
 import { guestOrOrganizationNameTaken } from "@/lib/utils/guest-org-name-uniqueness";
 
@@ -262,7 +262,7 @@ export function ReserveCheckInModal({
 
       await supabase
         .from("rooms")
-        .update({ status: "occupied", updated_at: new Date().toISOString() })
+        .update(roomHousekeepingPatchForInHouse("checked_in"))
         .eq("id", selectedRoomId);
 
       toast.success("Guest checked in");

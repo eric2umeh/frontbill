@@ -280,6 +280,11 @@ function pickByWorkflowAndRank(a: PurchaseOrder, b: PurchaseOrder): PurchaseOrde
 
   const aLines = poLineCount(a)
   const bLines = poLineCount(b)
+  // Explicit clear / tombstone beats a stale cart with more lines when clocks tie.
+  const aCleared = Boolean(a.deletedAt) || (aLines === 0 && Boolean(a.linesLastEditedAt))
+  const bCleared = Boolean(b.deletedAt) || (bLines === 0 && Boolean(b.linesLastEditedAt))
+  if (aCleared && !bCleared && aLines === 0 && bLines > 0) return a
+  if (bCleared && !aCleared && bLines === 0 && aLines > 0) return b
   if (aLines === 0 && bLines > 0) return b
   if (bLines === 0 && aLines > 0) return a
   if (aLines !== bLines) return aLines > bLines ? a : b

@@ -9,6 +9,14 @@ import { priceVariancePct } from '@/lib/supply-chain/calculations'
 import { DeptPill } from '@/lib/supply-chain/supply-ui'
 import { formatNaira } from '@/lib/utils/currency'
 import { cn } from '@/lib/utils'
+import { hotelCalendarTodayYmd } from '@/lib/hotel-date'
+import {
+  computeIssueOutDailyStats,
+  downloadIssueOutLogReport,
+  downloadStockLevelsReport,
+  filterIssueOutLog,
+  formatIssueDateRangeLabel,
+} from '@/lib/store/issue-out-log-utils'
 import {
   canonicalRoleKey,
   canAddStoreItemDirect,
@@ -16,12 +24,9 @@ import {
   canIssueStockFromStore,
   canManageStoreCatalog,
   canSubmitStoreItemForApproval,
+  canViewIssueOutLog,
 } from '@/lib/permissions'
 import { issueOutletPickerOptions, isMainBarIssueDestination } from '@/lib/store/outlet-departments'
-import {
-  downloadMainBarIssueReport,
-  mainBarIssueOutRows,
-} from '@/lib/store/main-bar-issue-report'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -83,9 +88,6 @@ const DEPTS: SupplyDept[] = ['all', ...STORE_DEPT_PICKER_OPTIONS]
 
 const ISSUE_DESTINATIONS = issueOutletPickerOptions()
 
-const numberInputValue = (value: number | null | undefined) =>
-  value != null && Number(value) !== 0 ? String(value) : ''
-
 export function StoreWorkspace() {
   const { name, role, userId } = useAuth()
   const {
@@ -133,8 +135,12 @@ export function StoreWorkspace() {
   const [issueCart, setIssueCart] = useState<IssueOutCartLine[]>([])
   const [issuingCart, setIssuingCart] = useState(false)
   const [editItem, setEditItem] = useState<StoreItem | null>(null)
-  const [stockQtyMap, setStockQtyMap] = useState<Record<string, string>>({})
+  const todayYmd = hotelCalendarTodayYmd()
+  const [issueLogDateFrom, setIssueLogDateFrom] = useState(todayYmd)
+  const [issueLogDateTo, setIssueLogDateTo] = useState(todayYmd)
+  const [stockReportDate, setStockReportDate] = useState(todayYmd)
   const canIssue = canIssueStockFromStore(role)
+  const canViewLog = canViewIssueOutLog(role)
   const canAddDirect = canAddStoreItemDirect(role)
   const canManageCatalog = canManageStoreCatalog(role)
   const canSubmitItem = canSubmitStoreItemForApproval(role)
@@ -161,26 +167,23 @@ export function StoreWorkspace() {
     return c
   }, [storeItems])
 
-  const mainBarIssueRows = useMemo(
-    () => mainBarIssueOutRows(issueOutLog),
-    [issueOutLog],
+  const filteredIssueLog = useMemo(
+    () =>
+      filterIssueOutLog(issueOutLog, {
+        dept,
+        storeItems,
+        dateFrom: issueLogDateFrom,
+        dateTo: issueLogDateTo,
+      }),
+    [issueOutLog, dept, storeItems, issueLogDateFrom, issueLogDateTo],
   )
 
-  const commitStockQty = (item: StoreItem, raw: string) => {
-    const qty = parseQuantityValue(raw)
-    if (qty < 0) {
-      toast.error('Enter a valid quantity')
-      setStockQtyMap((m) => ({ ...m, [item.id]: String(item.quantityInStore) }))
-      return
-    }
-    const res = updateStoreItemDirect(item.id, { quantityInStore: qty }, actor)
-    if ('error' in res) {
-      toast.error(res.error)
-      setStockQtyMap((m) => ({ ...m, [item.id]: String(item.quantityInStore) }))
-      return
-    }
-    toast.success(`Updated ${item.name} to ${qty} ${unitLabel(item.unit)}`)
-  }
+  const issueLogStats = useMemo(
+    () => computeIssueOutDailyStats(filteredIssueLog, storeItems),
+    [filteredIssueLog, storeItems],
+  )
+
+  const deptLabel = DEPT_LABELS[dept] ?? dept
 
   const addToIssueCart = (item: StoreItem, rawQty: string, unit?: string) => {
     const issueUnit = unit ?? issueUnitMap[item.id] ?? defaultUnitForStoreItem(item.unit)
@@ -282,30 +285,39 @@ export function StoreWorkspace() {
         <TabsList className="flex h-auto flex-wrap">
           <TabsTrigger value="stock">Stock Levels</TabsTrigger>
           {canIssue && (
-            <>
-              <TabsTrigger value="issue_out" className="gap-1.5">
-                <ArrowRightFromLine className="h-3.5 w-3.5" />
-                Issue Out
-              </TabsTrigger>
-              <TabsTrigger value="issue_out_log" className="gap-1.5">
-                <History className="h-3.5 w-3.5" />
-                Issue Out Log
-              </TabsTrigger>
-            </>
+            <TabsTrigger value="issue_out" className="gap-1.5">
+              <ArrowRightFromLine className="h-3.5 w-3.5" />
+              Issue Out
+            </TabsTrigger>
+          )}
+          {canViewLog && (
+            <TabsTrigger value="issue_out_log" className="gap-1.5">
+              <History className="h-3.5 w-3.5" />
+              Issue Out Log
+            </TabsTrigger>
           )}
         </TabsList>
 
-        <div className="mt-3 flex flex-wrap gap-x-3 gap-y-3 overflow-visible pt-3">
-          {DEPTS.map((d) => (
-            <DeptPill
-              key={d}
-              dept={d}
-              label={DEPT_LABELS[d]}
-              active={dept === d}
-              count={d === 'all' ? storeItems.length : deptCatalogCounts[d]}
-              onClick={() => setDept(d)}
-            />
-          ))}
+        <div className="mt-3 space-y-2">
+          <div className="flex flex-wrap gap-x-3 gap-y-3 overflow-visible pt-1">
+            {DEPTS.map((d) => (
+              <DeptPill
+                key={d}
+                dept={d}
+                label={DEPT_LABELS[d]}
+                active={dept === d}
+                count={d === 'all' ? storeItems.length : deptCatalogCounts[d]}
+                onClick={() => setDept(d)}
+              />
+            ))}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {tab === 'issue_out_log'
+              ? 'Filters issue-out history by item department (and destination when it matches).'
+              : tab === 'stock'
+                ? 'Filters stock catalogue by department.'
+                : 'Filters items available to issue by department.'}
+          </p>
         </div>
 
         <TabsContent value="stock" className="mt-4 space-y-4">
@@ -400,16 +412,41 @@ export function StoreWorkspace() {
           <div className="rounded-xl border overflow-hidden">
             <div className="border-b px-4 py-2 bg-muted/30 flex flex-wrap items-center justify-between gap-2">
               <span className="text-sm font-medium">All Stock Items</span>
-              <span className="text-[11px] text-muted-foreground flex flex-wrap gap-2">
-                <span className="text-red-700 font-medium">Red = out (0)</span>
-                <span className="text-amber-700 font-medium">Amber = low (at/below reorder)</span>
-                <span className="text-emerald-700">Green = OK</span>
-              </span>
+              <div className="flex flex-wrap items-center gap-2">
+                <Input
+                  type="date"
+                  className="h-8 w-[132px] text-xs"
+                  title="Report date"
+                  value={stockReportDate}
+                  onChange={(e) => setStockReportDate(e.target.value)}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 gap-1.5"
+                  disabled={filtered.length === 0}
+                  onClick={() => {
+                    downloadStockLevelsReport(filtered, {
+                      deptLabel,
+                      dateYmd: stockReportDate,
+                    })
+                    toast.success(`Downloaded ${deptLabel} stock report`)
+                  }}
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  Download report
+                </Button>
+              </div>
+            </div>
+            <div className="border-b px-4 py-2 bg-muted/10 text-[11px] text-muted-foreground">
+              Qty in store is updated only via Add to stock (approved PO → retirement). Manual edits are disabled.
             </div>
             <div className="p-3">
               <PaginatedListShell
                 items={filtered}
                 pageSize={15}
+                resetKey={`${dept}-${tab}`}
                 searchPlaceholder="Search items…"
                 searchKeys={['name', 'dept']}
                 filters={[
@@ -456,27 +493,9 @@ export function StoreWorkspace() {
                             </div>
                             <div className="flex items-center justify-between gap-2">
                               <span className="text-xs text-muted-foreground">In store</span>
-                              {canManageCatalog ? (
-                                <Input
-                                  inputMode="decimal"
-                                  className="h-8 w-28 text-right tabular-nums"
-                                  value={stockQtyMap[item.id] ?? numberInputValue(item.quantityInStore)}
-                                  onChange={(e) =>
-                                    setStockQtyMap((m) => ({
-                                      ...m,
-                                      [item.id]: sanitizeQuantityInput(e.target.value),
-                                    }))
-                                  }
-                                  onBlur={(e) => commitStockQty(item, e.target.value)}
-                                  onKeyDown={(e) => {
-                                    if (e.key === 'Enter') e.currentTarget.blur()
-                                  }}
-                                />
-                              ) : (
-                                <span className={stockLevelNumberPillClass(level)}>
-                                  {item.quantityInStore} {unitLabel(item.unit)}
-                                </span>
-                              )}
+                              <span className={stockLevelNumberPillClass(level)}>
+                                {item.quantityInStore} {unitLabel(item.unit)}
+                              </span>
                             </div>
                             {canManageCatalog && (
                               <div className="flex justify-end gap-1 border-t pt-2">
@@ -565,31 +584,9 @@ export function StoreWorkspace() {
                                   </div>
                                 </TableCell>
                                 <TableCell className="text-right">
-                                  {canManageCatalog ? (
-                                    <Input
-                                      inputMode="decimal"
-                                      className="h-8 w-24 ml-auto text-right tabular-nums"
-                                      value={
-                                        stockQtyMap[item.id] ?? numberInputValue(item.quantityInStore)
-                                      }
-                                      onChange={(e) =>
-                                        setStockQtyMap((m) => ({
-                                          ...m,
-                                          [item.id]: sanitizeQuantityInput(e.target.value),
-                                        }))
-                                      }
-                                      onBlur={(e) => commitStockQty(item, e.target.value)}
-                                      onKeyDown={(e) => {
-                                        if (e.key === 'Enter') {
-                                          e.currentTarget.blur()
-                                        }
-                                      }}
-                                    />
-                                  ) : (
-                                    <span className={stockLevelNumberPillClass(level)}>
-                                      {item.quantityInStore} {unitLabel(item.unit)}
-                                    </span>
-                                  )}
+                                  <span className={stockLevelNumberPillClass(level)}>
+                                    {item.quantityInStore} {unitLabel(item.unit)}
+                                  </span>
                                 </TableCell>
                                 <TableCell className={`text-right tabular-nums ${RESPONSIVE_HIDE_LG}`}>
                                   {item.reorderLevel}
@@ -761,6 +758,7 @@ export function StoreWorkspace() {
                 <PaginatedListShell
                   items={filtered}
                   pageSize={15}
+                  resetKey={`${dept}-${tab}`}
                   searchPlaceholder="Search items to issue…"
                   searchKeys={['name', 'dept']}
                   emptyMessage="No items match your filters."
@@ -994,90 +992,175 @@ export function StoreWorkspace() {
           </TabsContent>
         )}
 
-        {canIssue && (
+        {canViewLog && (
           <TabsContent value="issue_out_log" className="mt-4 space-y-3">
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div className="rounded-xl border p-3 bg-muted/20">
+                <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                  Issues (filtered)
+                </p>
+                <p className="text-2xl font-semibold tabular-nums">{issueLogStats.issueCount}</p>
+              </div>
+              <div className="rounded-xl border p-3 bg-muted/20">
+                <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                  Item lines
+                </p>
+                <p className="text-2xl font-semibold tabular-nums">{issueLogStats.lineCount}</p>
+              </div>
+              <div className="rounded-xl border p-3 bg-primary/5">
+                <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                  Est. spend (qty × last price)
+                </p>
+                <p className="text-2xl font-semibold tabular-nums">
+                  {formatNaira(issueLogStats.totalAmount)}
+                </p>
+              </div>
+            </div>
+
             <div className="rounded-xl border overflow-hidden">
               <div className="border-b px-4 py-2 bg-muted/30 flex flex-wrap items-center justify-between gap-2">
                 <div className="text-sm font-medium">Issue out history</div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-8 gap-1.5"
-                  disabled={mainBarIssueRows.length === 0}
-                  onClick={() => {
-                    downloadMainBarIssueReport(mainBarIssueRows)
-                    toast.success(
-                      `Downloaded ${mainBarIssueRows.length} item(s) issued to Main Bar`,
+                <div className="flex flex-wrap items-center gap-2">
+                  <Input
+                    type="date"
+                    className="h-8 w-[132px] text-xs"
+                    title="From date"
+                    value={issueLogDateFrom}
+                    onChange={(e) => setIssueLogDateFrom(e.target.value)}
+                  />
+                  <span className="text-muted-foreground text-xs">–</span>
+                  <Input
+                    type="date"
+                    className="h-8 w-[132px] text-xs"
+                    title="To date"
+                    value={issueLogDateTo}
+                    onChange={(e) => setIssueLogDateTo(e.target.value)}
+                  />
+                  {issueLogDateFrom && issueLogDateTo ? (
+                    <span className="text-xs text-muted-foreground hidden sm:inline">
+                      {formatIssueDateRangeLabel(issueLogDateFrom, issueLogDateTo)}
+                    </span>
+                  ) : null}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-8 gap-1.5"
+                    disabled={filteredIssueLog.length === 0}
+                    onClick={() => {
+                      downloadIssueOutLogReport(filteredIssueLog, storeItems, {
+                        deptLabel,
+                        dateFrom: issueLogDateFrom,
+                        dateTo: issueLogDateTo,
+                      })
+                      toast.success(
+                        `Downloaded ${filteredIssueLog.length} issue(s) for ${deptLabel}`,
+                      )
+                    }}
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    Download report
+                  </Button>
+                </div>
+              </div>
+              <div className="p-3">
+                <PaginatedListShell
+                  items={filteredIssueLog}
+                  pageSize={15}
+                  resetKey={`${dept}-${issueLogDateFrom}-${issueLogDateTo}`}
+                  searchPlaceholder="Search item, destination, received by…"
+                  searchMatch={(row, query) => {
+                    const q = query.trim().toLowerCase()
+                    if (!q) return true
+                    return (
+                      row.itemName.toLowerCase().includes(q) ||
+                      row.destination.toLowerCase().includes(q) ||
+                      (row.receivedBy ?? '').toLowerCase().includes(q) ||
+                      (row.issuedBy ?? '').toLowerCase().includes(q)
                     )
                   }}
+                  emptyMessage="No issue-out records match department, date, or search."
                 >
-                  <Download className="h-3.5 w-3.5" />
-                  Download Main Bar report
-                </Button>
-              </div>
-              {(issueOutLog ?? []).length === 0 ? (
-                <p className="text-sm text-muted-foreground p-6 text-center">
-                  No items issued out yet. Transfers from the Issue Out tab appear here.
-                </p>
-              ) : (
-                <>
-                  <div className="md:hidden divide-y">
-                    {(issueOutLog ?? []).map((row, index) => (
-                      <div key={`${row.id}-${index}-m`} className="p-3 space-y-1">
-                        <div className="flex items-start justify-between gap-2">
-                          <p className="font-medium text-sm">{row.itemName}</p>
-                          <span className="text-sm tabular-nums shrink-0">
-                            {row.quantity} {unitLabel(row.unit)}
-                          </span>
-                        </div>
-                        <p className="text-xs text-muted-foreground">{row.destination}</p>
-                        <p className="text-[10px] text-muted-foreground">
-                          {new Date(row.issuedAt).toLocaleString()}
-                        </p>
+                  {(pageItems) => (
+                    <>
+                      <div className="md:hidden space-y-2">
+                        {pageItems.map((row) => {
+                          const item = storeItems.find((s) => s.id === row.storeItemId)
+                          const unitPrice = Number(item?.lastPrice) || 0
+                          const lineValue = row.quantity * unitPrice
+                          return (
+                            <div key={row.id} className="rounded-lg border p-3 space-y-1">
+                              <div className="flex items-start justify-between gap-2">
+                                <p className="font-medium text-sm">{row.itemName}</p>
+                                <span className="text-sm tabular-nums shrink-0">
+                                  {row.quantity} {unitLabel(row.unit)}
+                                </span>
+                              </div>
+                              <p className="text-xs text-muted-foreground">{row.destination}</p>
+                              <p className="text-xs tabular-nums">
+                                {formatNaira(lineValue)}{' '}
+                                <span className="text-muted-foreground">
+                                  @ {formatNaira(unitPrice)}
+                                </span>
+                              </p>
+                              <p className="text-[10px] text-muted-foreground">
+                                {new Date(row.issuedAt).toLocaleString()}
+                              </p>
+                            </div>
+                          )
+                        })}
                       </div>
-                    ))}
-                  </div>
-                  <div className="hidden md:block overflow-x-auto">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead className={RESPONSIVE_HIDE_LG}>When</TableHead>
-                          <TableHead>Item</TableHead>
-                          <TableHead>Qty</TableHead>
-                          <TableHead>Destination</TableHead>
-                          <TableHead className={RESPONSIVE_HIDE_MD}>Received by</TableHead>
-                          <TableHead className={RESPONSIVE_HIDE_LG}>Issued by</TableHead>
-                          <TableHead className={RESPONSIVE_HIDE_LG}>Notes</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {(issueOutLog ?? []).map((row, index) => (
-                          <TableRow key={`${row.id}-${index}`}>
-                            <TableCell className={`text-xs whitespace-nowrap ${RESPONSIVE_HIDE_LG}`}>
-                              {new Date(row.issuedAt).toLocaleString()}
-                            </TableCell>
-                            <TableCell className="font-medium">{row.itemName}</TableCell>
-                            <TableCell>
-                              {row.quantity} {unitLabel(row.unit)}
-                            </TableCell>
-                            <TableCell>{row.destination}</TableCell>
-                            <TableCell className={RESPONSIVE_HIDE_MD}>
-                              {row.receivedBy || '—'}
-                            </TableCell>
-                            <TableCell className={RESPONSIVE_HIDE_LG}>{row.issuedBy}</TableCell>
-                            <TableCell
-                              className={`text-xs text-muted-foreground max-w-[160px] truncate ${RESPONSIVE_HIDE_LG}`}
-                            >
-                              {row.notes || '—'}
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                </>
-              )}
+                      <div className="hidden md:block overflow-x-auto">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead className={RESPONSIVE_HIDE_LG}>When</TableHead>
+                              <TableHead>Item</TableHead>
+                              <TableHead>Qty</TableHead>
+                              <TableHead className={RESPONSIVE_HIDE_MD}>Value</TableHead>
+                              <TableHead>Destination</TableHead>
+                              <TableHead className={RESPONSIVE_HIDE_MD}>Received by</TableHead>
+                              <TableHead className={RESPONSIVE_HIDE_LG}>Issued by</TableHead>
+                              <TableHead className={RESPONSIVE_HIDE_LG}>Notes</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {pageItems.map((row) => {
+                              const item = storeItems.find((s) => s.id === row.storeItemId)
+                              const unitPrice = Number(item?.lastPrice) || 0
+                              const lineValue = row.quantity * unitPrice
+                              return (
+                                <TableRow key={row.id}>
+                                  <TableCell className={`text-xs whitespace-nowrap ${RESPONSIVE_HIDE_LG}`}>
+                                    {new Date(row.issuedAt).toLocaleString()}
+                                  </TableCell>
+                                  <TableCell className="font-medium">{row.itemName}</TableCell>
+                                  <TableCell>
+                                    {row.quantity} {unitLabel(row.unit)}
+                                  </TableCell>
+                                  <TableCell className={`tabular-nums ${RESPONSIVE_HIDE_MD}`}>
+                                    {formatNaira(lineValue)}
+                                  </TableCell>
+                                  <TableCell>{row.destination}</TableCell>
+                                  <TableCell className={RESPONSIVE_HIDE_MD}>
+                                    {row.receivedBy || '—'}
+                                  </TableCell>
+                                  <TableCell className={RESPONSIVE_HIDE_LG}>{row.issuedBy}</TableCell>
+                                  <TableCell
+                                    className={`text-xs text-muted-foreground max-w-[160px] truncate ${RESPONSIVE_HIDE_LG}`}
+                                  >
+                                    {row.notes || '—'}
+                                  </TableCell>
+                                </TableRow>
+                              )
+                            })}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    </>
+                  )}
+                </PaginatedListShell>
+              </div>
             </div>
           </TabsContent>
         )}

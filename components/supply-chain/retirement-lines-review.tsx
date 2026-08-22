@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import {
   DEPT_LABELS,
   normalizeSupplyDept,
@@ -9,12 +9,42 @@ import {
 } from '@/lib/supply-chain/types'
 import { formatNaira } from '@/lib/utils/currency'
 import { Badge } from '@/components/ui/badge'
+import { Input } from '@/components/ui/input'
 import { Ban, Pencil, TrendingDown, TrendingUp } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { formatUnitLabel } from '@/lib/supply-chain/measurement-units'
+import {
+  formatUnitLabel,
+  parseQuantityValue,
+  sanitizeQuantityInput,
+} from '@/lib/supply-chain/measurement-units'
 
 function lineNotBought(line: RetirementLine) {
   return line.notBought === true || line.removed === true
+}
+
+function CorrectInput({
+  value,
+  onCommit,
+  className,
+}: {
+  value: number
+  onCommit: (v: number) => void
+  className?: string
+}) {
+  const [draft, setDraft] = useState(String(value))
+  return (
+    <Input
+      inputMode="decimal"
+      className={cn('h-7 w-16 text-right tabular-nums text-xs', className)}
+      value={draft}
+      onChange={(e) => setDraft(sanitizeQuantityInput(e.target.value))}
+      onBlur={() => {
+        const n = parseQuantityValue(draft)
+        if (Number.isFinite(n) && n >= 0 && n !== value) onCommit(n)
+        else setDraft(String(value))
+      }}
+    />
+  )
 }
 
 export function RetirementLinesReview({
@@ -22,12 +52,19 @@ export function RetirementLinesReview({
   deptFilter = 'all',
   lines: linesOverride,
   emptyMessage = 'No retirement lines to show.',
+  compact = false,
+  editable = false,
+  onQtyCorrect,
+  onPriceCorrect,
 }: {
   po: PurchaseOrder
   deptFilter?: string
-  /** When set, only these lines are shown (e.g. pending review batch). */
   lines?: RetirementLine[]
   emptyMessage?: string
+  compact?: boolean
+  editable?: boolean
+  onQtyCorrect?: (lineId: string, qty: number) => void
+  onPriceCorrect?: (lineId: string, price: number) => void
 }) {
   const rows = useMemo(() => {
     const rLines = linesOverride ?? po.retirement?.lines ?? []
@@ -56,19 +93,20 @@ export function RetirementLinesReview({
 
   if (!rows.length) {
     return (
-      <p className="text-sm text-muted-foreground text-center py-4">
+      <p className={cn('text-muted-foreground text-center py-3', compact ? 'text-xs' : 'text-sm')}>
         {emptyMessage}
       </p>
     )
   }
 
   return (
-    <ul className="space-y-2">
+    <ul className={cn(compact ? 'space-y-1' : 'space-y-2')}>
       {rows.map(({ line, orig, dept, notBought, qtyChanged, priceChanged, newlyAdded }) => (
         <li
-          key={`${line.lineId}-${line.stockedAt ?? 'x'}`}
+          key={`${line.lineId}-${line.stockedAt ?? 'x'}-${line.batchId ?? ''}`}
           className={cn(
-            'rounded-md border px-3 py-2.5 text-sm',
+            'rounded-md border text-sm',
+            compact ? 'px-2 py-1.5 text-xs' : 'px-3 py-2.5',
             newlyAdded &&
               'border-emerald-400 bg-emerald-50/70 dark:bg-emerald-950/25 dark:border-emerald-800',
             notBought &&
@@ -79,112 +117,87 @@ export function RetirementLinesReview({
               'border-amber-300 bg-amber-50/70 dark:bg-amber-950/30 dark:border-amber-800',
           )}
         >
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
-            <div className="min-w-0 flex-1 space-y-1">
+          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+            <div className="min-w-0 flex-1">
               <p
                 className={cn(
-                  'font-medium flex items-center gap-1.5',
+                  'font-medium truncate',
                   notBought && 'line-through text-muted-foreground decoration-2',
                 )}
               >
-                {!notBought && priceChanged && orig ? (
-                  Number(line.actualPrice) > Number(orig.unitPrice) ? (
-                    <TrendingUp
-                      className="h-3.5 w-3.5 shrink-0 text-red-600"
-                      aria-label="Price higher than PO"
-                    />
-                  ) : (
-                    <TrendingDown
-                      className="h-3.5 w-3.5 shrink-0 text-emerald-600"
-                      aria-label="Price lower than PO"
-                    />
-                  )
-                ) : null}
                 {line.name}
+                <span className="text-muted-foreground font-normal ml-1">
+                  · {DEPT_LABELS[dept] ?? dept}
+                </span>
               </p>
-              <p
-                className={cn(
-                  'text-[11px] text-muted-foreground',
-                  notBought && 'line-through',
-                )}
-              >
-                {DEPT_LABELS[dept] ?? dept}
-                {orig
-                  ? ` · Ordered ${orig.quantityOrdered} ${formatUnitLabel(orig.unit)} @ ${formatNaira(orig.unitPrice)}`
-                  : null}
-              </p>
-              <div className="flex flex-wrap gap-1.5 pt-0.5">
-                {newlyAdded ? (
-                  <Badge className="bg-emerald-600 text-white text-[10px]">
-                    Newly added item
-                  </Badge>
-                ) : null}
-                {notBought ? (
-                  <Badge className="bg-red-100 text-red-900 gap-1">
-                    <Ban className="h-3 w-3" />
-                    Not bought / removed
-                  </Badge>
-                ) : null}
-                {qtyChanged ? (
-                  <Badge
-                    variant="outline"
-                    className="border-amber-400 text-amber-950 bg-amber-100/80 gap-1"
-                  >
-                    <Pencil className="h-3 w-3" />
-                    Qty {orig?.quantityOrdered} → {line.quantityBought}{' '}
-                    {formatUnitLabel(line.unit ?? orig?.unit ?? '')}
-                  </Badge>
-                ) : null}
-                {priceChanged ? (
-                  <Badge
-                    variant="outline"
-                    className={cn(
-                      'gap-1',
-                      orig && Number(line.actualPrice) > Number(orig.unitPrice)
-                        ? 'border-red-300 text-red-800 bg-red-50'
-                        : 'border-emerald-300 text-emerald-800 bg-emerald-50',
-                    )}
-                  >
-                    {orig && Number(line.actualPrice) > Number(orig.unitPrice) ? (
-                      <TrendingUp className="h-3 w-3" />
-                    ) : (
-                      <TrendingDown className="h-3 w-3" />
-                    )}
-                    Price {formatNaira(orig?.unitPrice ?? line.poPrice)} →{' '}
-                    {formatNaira(line.actualPrice)}
-                  </Badge>
-                ) : null}
-              </div>
+              {!compact && orig ? (
+                <p className={cn('text-[11px] text-muted-foreground', notBought && 'line-through')}>
+                  Ordered {orig.quantityOrdered} @ {formatNaira(orig.unitPrice)}
+                </p>
+              ) : null}
+              {!compact ? (
+                <div className="flex flex-wrap gap-1 pt-0.5">
+                  {newlyAdded ? (
+                    <Badge className="bg-emerald-600 text-white text-[10px]">New</Badge>
+                  ) : null}
+                  {notBought ? (
+                    <Badge className="bg-red-100 text-red-900 gap-1 text-[10px]">
+                      <Ban className="h-3 w-3" />
+                      Not bought
+                    </Badge>
+                  ) : null}
+                  {qtyChanged ? (
+                    <Badge variant="outline" className="text-[10px] border-amber-400">
+                      Qty Δ
+                    </Badge>
+                  ) : null}
+                  {priceChanged ? (
+                    <Badge variant="outline" className="text-[10px]">
+                      Price Δ
+                    </Badge>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
             <div
               className={cn(
-                'shrink-0 tabular-nums',
-                // Laptop+: qty · unit price · total on one line (less empty middle).
-                'sm:flex sm:flex-row sm:items-baseline sm:gap-3 sm:text-right',
-                // Mobile: stacked.
-                'flex flex-col gap-0.5 text-left sm:text-right',
+                'shrink-0 tabular-nums flex items-center gap-2',
                 notBought && 'line-through text-muted-foreground',
               )}
             >
               {!notBought ? (
                 <>
-                  <span className="whitespace-nowrap">
-                    {line.quantityBought} {formatUnitLabel(line.unit ?? '')}
-                  </span>
-                  <span className="text-xs text-muted-foreground whitespace-nowrap">
-                    {formatNaira(line.actualPrice)} each
-                  </span>
-                  <span className="font-semibold whitespace-nowrap">
-                    {formatNaira(line.totalPaid)}
-                  </span>
+                  {editable && onQtyCorrect ? (
+                    <CorrectInput
+                      value={line.quantityBought}
+                      onCommit={(v) => onQtyCorrect(line.lineId, v)}
+                    />
+                  ) : (
+                    <span>
+                      {line.quantityBought} {formatUnitLabel(line.unit ?? '')}
+                    </span>
+                  )}
+                  {editable && onPriceCorrect ? (
+                    <CorrectInput
+                      value={line.actualPrice}
+                      onCommit={(v) => onPriceCorrect(line.lineId, v)}
+                      className="w-20"
+                    />
+                  ) : (
+                    <span className="text-muted-foreground">@ {formatNaira(line.actualPrice)}</span>
+                  )}
+                  <span className="font-semibold">{formatNaira(line.totalPaid)}</span>
                 </>
               ) : (
-                <span className="text-xs font-medium text-red-800 no-underline">
-                  ₦0
-                </span>
+                <span className="text-xs font-medium text-red-800 no-underline">₦0</span>
               )}
             </div>
           </div>
+          {line.corrections?.length ? (
+            <p className="text-[10px] text-amber-800 dark:text-amber-200 mt-1">
+              Corrected by {line.corrections[line.corrections.length - 1]?.by}
+            </p>
+          ) : null}
         </li>
       ))}
     </ul>

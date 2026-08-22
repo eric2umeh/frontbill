@@ -125,12 +125,12 @@ export function PoDetailCard({
             />
           )}
           {historyLines.mode === "retirement" && po.retirement?.lines?.length ? (
-            <RetirementLinesReview po={po} />
+            <RetirementLinesReview po={po} compact />
           ) : (
             <PoReviewLinesPanel
               lines={po.lines}
               compact
-              showDept
+              hideDeptSummary
               pageSize={10}
             />
           )}

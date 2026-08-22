@@ -37,6 +37,7 @@ export async function PATCH(request: Request) {
       userName: auth.ctx.userName,
       remark: remark || undefined,
       scheduledDate,
+      role: auth.ctx.role,
     })
 
     if (!result.ok) {

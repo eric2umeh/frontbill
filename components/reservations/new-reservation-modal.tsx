@@ -54,6 +54,7 @@ import {
 } from '@/lib/cashback/cashback-client'
 import { paymentMethodEarnsCashback } from '@/lib/cashback/cashback-config'
 import { isGuestBookingCashbackEligible } from '@/lib/cashback/cashback-eligibility'
+import { roomHousekeepingPatchForInHouse } from '@/lib/rooms/sync-housekeeping-status'
 import { roomStatusForBookingStatus } from '@/lib/rooms/room-occupancy'
 import { buildBackdateDedupeKey } from '@/lib/backdate/dedupe-key'
 import { isStayCheckInConsideredBackdated, minSelectableCheckInYmdHotel, isLateNightCheckInGraceWindow, lateCheckInGraceWindowLabel, defaultStayCheckInYmdHotel, parseHotelYmdToLocalDate } from '@/lib/hotel-date'
@@ -654,9 +655,9 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
       if (be) throw be
 
       await supabase.from('rooms').update({
+        ...roomHousekeepingPatchForInHouse('reserved'),
         status: roomStatusForBookingStatus('reserved', toLocalDateStr(checkInDate)),
         updated_by: currentUserId,
-        updated_at: new Date().toISOString(),
       }).eq('id', selectedRoom.id)
 
       // Insert folio charge (this is what the Transactions page reads from)

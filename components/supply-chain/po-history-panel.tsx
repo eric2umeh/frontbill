@@ -175,23 +175,13 @@ export function PoHistoryPanel({
                 </button>
                 {open && (
                   <div className="border-t bg-muted/20 px-3 py-2 space-y-2">
-                    <p className="text-[13px] text-muted-foreground">
-                      Raised {formatPoRaisedAt(po.createdAt)}
-                      {!forceOrderLines && po.retirement && (
-                        <>
-                          {" "}
-                          · Retired{" "}
-                          {new Date(po.retirement.submittedAt).toLocaleString()}
-                        </>
-                      )}
-                    </p>
                     {!forceOrderLines && po.retirement ? (
                       <PoRetirementSummary po={po} />
                     ) : null}
                     {showRetirement && po.retirement?.lines?.length ? (
                       <>
                         <RetirementChangedLines po={po} />
-                        <RetirementLinesReview po={po} deptFilter={deptFilter} />
+                        <RetirementLinesReview po={po} deptFilter={deptFilter} compact />
                       </>
                     ) : (
                       <PoReviewLinesPanel
@@ -201,8 +191,8 @@ export function PoHistoryPanel({
                             : po.lines
                         }
                         pageSize={10}
-                        showDept
                         compact
+                        hideDeptSummary
                         deptFilter={deptFilter}
                         title={`Order lines (${
                           forceOrderLines && po.approvedLines?.length

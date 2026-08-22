@@ -41,9 +41,29 @@ async function parseJson(res: Response) {
   if (res.status === 499) {
     throw new Error('terminated')
   }
-  const body = await res.json().catch(() => ({}))
+  const text = await res.text()
+  let body: unknown = {}
+  if (text.trim()) {
+    try {
+      body = JSON.parse(text) as unknown
+    } catch {
+      if (!res.ok) {
+        if (res.status === 502 || res.status === 503 || res.status === 504) {
+          throw new Error(`Server temporarily unavailable (${res.status})`)
+        }
+        throw new Error(res.statusText || `Request failed (${res.status})`)
+      }
+    }
+  }
   if (!res.ok) {
-    throw errorFromBody(body, res.status === 401 ? 'Unauthorized' : 'Request failed')
+    throw errorFromBody(
+      body,
+      res.status === 401
+        ? 'Unauthorized'
+        : res.status === 502 || res.status === 503 || res.status === 504
+          ? `Server temporarily unavailable (${res.status})`
+          : `Request failed (${res.status})`,
+    )
   }
   return body
 }
@@ -148,11 +168,17 @@ export async function saveSupplySnapshots(
   snapshots: Partial<Record<SupplySnapshotKey, unknown>>,
   organizationId?: string,
 ): Promise<void> {
-  await supplyJson('/api/supply/state', {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(authBody(userId, organizationId, { snapshots })),
-  })
+  await withFetchRetry(
+    async () =>
+      parseJson(
+        await supplyRequest('/api/supply/state', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(authBody(userId, organizationId, { snapshots })),
+        }),
+      ),
+    { retries: 4, baseDelayMs: 800, retryIf: isRetryableSupplyError },
+  )
 }
 
 export async function syncSupplyCatalog(

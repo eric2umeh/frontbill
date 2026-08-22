@@ -404,6 +404,18 @@ export interface RetirementLine {
   batchId?: string
   /** Accountant/manager decision for this posted row (defaults to pending when stocked). */
   reviewStatus?: 'pending_review' | 'accepted' | 'rejected'
+  /** Corrections applied during retirement review (qty/price). */
+  corrections?: RetirementLineCorrection[]
+}
+
+export interface RetirementLineCorrection {
+  at: string
+  by: string
+  role: string
+  field: 'qty' | 'price'
+  from: number
+  to: number
+  issuedQtyWarning?: string
 }
 
 export interface AddToStockBatch {

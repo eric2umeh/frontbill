@@ -69,6 +69,7 @@ import {
 } from '@/lib/cashback/cashback-client'
 import { paymentMethodEarnsCashback } from '@/lib/cashback/cashback-config'
 import { isGuestBookingCashbackEligible } from '@/lib/cashback/cashback-eligibility'
+import { roomHousekeepingPatchForInHouse } from '@/lib/rooms/sync-housekeeping-status'
 import { roomStatusForBookingStatus } from '@/lib/rooms/room-occupancy'
 
 interface NewBookingModalProps {
@@ -886,9 +887,9 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
       await supabase
         .from('rooms')
         .update({
+          ...roomHousekeepingPatchForInHouse(booking.status),
           status: roomStatusForBookingStatus(booking.status, checkInYmd),
           updated_by: user?.id,
-          updated_at: new Date().toISOString(),
         })
         .eq('id', selectedRoom.id)
 

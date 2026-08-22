@@ -45,7 +45,6 @@ export function RaisePurchaseRequestPanel({ activeTab }: Props) {
     basket,
     stats,
     purchaseLocked,
-    kitchenAwaitingStore,
     raiseSeedSearch,
     factorsFor,
     toStoreQty,
@@ -56,7 +55,9 @@ export function RaisePurchaseRequestPanel({ activeTab }: Props) {
     handleClearBasket,
     handleRemoveFromBasket,
     handleBasketQtyChange,
+    handleBasketPriceChange,
     handleSendToAccountant,
+    poSubmitLabel,
     updateStoreItemDirect,
     setFactorMap,
     setPurchaseUnitMap,
@@ -69,11 +70,11 @@ export function RaisePurchaseRequestPanel({ activeTab }: Props) {
       basket={basket}
       total={stats.basketTotal}
       readOnly={purchaseLocked}
-      hideClear={kitchenAwaitingStore}
       onClear={handleClearBasket}
       onRemove={handleRemoveFromBasket}
       onQtyChange={handleBasketQtyChange}
-      sendLabel="Send to accountant"
+      onPriceChange={handleBasketPriceChange}
+      sendLabel={poSubmitLabel}
       onSend={
         !purchaseLocked && basket.length > 0 ? handleSendToAccountant : undefined
       }
@@ -403,8 +404,8 @@ export function RaisePurchaseRequestPanel({ activeTab }: Props) {
                                         }}
                                       />
                                       {!(price > 0) ? (
-                                        <span className="text-[10px] font-medium text-sky-800 dark:text-sky-200 whitespace-nowrap">
-                                          Warning: ₦0 unit price
+                                        <span className="text-[10px] font-medium text-amber-800 dark:text-amber-200 whitespace-nowrap">
+                                          Set price
                                         </span>
                                       ) : (
                                         <span className="text-[10px] text-muted-foreground whitespace-nowrap">
