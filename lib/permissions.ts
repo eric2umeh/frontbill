@@ -1202,6 +1202,18 @@ export function canIssueStockFromStore(
   );
 }
 
+/** Central Store → Issue Out Log tab (read-only history for finance / audit). */
+export function canViewIssueOutLog(
+  userRole: string | null | undefined,
+): boolean {
+  if (canIssueStockFromStore(userRole)) return true;
+  const roleKey = canonicalRoleKey(userRole);
+  return (
+    (roleKey === "accountant" || roleKey === "auditor") &&
+    hasPermission(userRole, "supply:store")
+  );
+}
+
 export function hasPermission(
   userRole: string | null | undefined,
   permission: Permission,
