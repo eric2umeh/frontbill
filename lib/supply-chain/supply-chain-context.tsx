@@ -97,7 +97,7 @@ import {
 } from "./unit-factor-storage";
 import type { StockShortageLine } from "@/lib/ui/stock-shortage-dialog";
 import { useAuth } from "@/lib/auth-context";
-import { canManageFnbStore, canManageKitchenBatchStandards, canOperateKitchenProduction, canRaisePurchaseRequest, canSubmitMarketRetirement, canAddPurchasedToStock, canSupplyRetirementReview, canSupplyPoAccountantReview, canSupplyPoManagerReview, canAdminTestApproveSupplyPo, hasPermission } from "@/lib/permissions";
+import { canManageFnbStore, canManageKitchenBatchStandards, canOperateKitchenProduction, canRaisePurchaseRequest, canSubmitMarketRetirement, canAddPurchasedToStock, canSupplyRetirementReview, canSupplyPoAccountantReview, canSupplyPoManagerReview, canAdminTestApproveSupplyPo, canDirectDisbursePurchaseOrder, hasPermission } from "@/lib/permissions";
 import { isRetryableSupplyError } from "@/lib/utils/fetch-retry";
 import { isMainBarIssueDestination } from "@/lib/store/outlet-departments";
 import { formatSupplyActorStamp } from "./fnb-store";
@@ -1824,18 +1824,28 @@ function useSupplyChainImpl() {
       const { total, lines: recalcLines } = recalcPoTotals(poLines);
       const now = new Date();
       const nowIso = now.toISOString();
-      const submitted: PurchaseOrder = active
+      const directDisburse = canDirectDisbursePurchaseOrder(actor.role);
+      const frozenLines = recalcLines.map((l) => ({ ...l }));
+      const poOrigin =
+        companions.length > 0 || (active && poOriginOf(active) === "store")
+          ? "store"
+          : active
+            ? poOriginOf(active)
+            : "store";
+      const directDisburseFields: Partial<PurchaseOrder> = directDisburse
         ? {
-            ...active,
-            // Combined send is store-driven for accountant routing / stamps.
-            origin:
-              companions.length > 0 || poOriginOf(active) === "store"
-                ? "store"
-                : poOriginOf(active),
+            status: "disbursed",
+            accountantDecidedBy: actor.name,
+            accountantDecidedRole: actor.role,
+            accountantDecidedAt: nowIso,
+            managerDecidedBy: actor.name,
+            managerDecidedRole: actor.role,
+            managerDecidedAt: nowIso,
+            approvedAt: nowIso,
+            approvedLines: frozenLines,
+          }
+        : {
             status: "pending_accountant",
-            lines: recalcLines,
-            totalAmount: total,
-            cashDisbursed: total,
             accountantComment: undefined,
             accountantDecidedBy: undefined,
             accountantDecidedRole: undefined,
@@ -1844,6 +1854,15 @@ function useSupplyChainImpl() {
             managerDecidedBy: undefined,
             managerDecidedRole: undefined,
             managerDecidedAt: undefined,
+          };
+      const submitted: PurchaseOrder = active
+        ? {
+            ...active,
+            origin: poOrigin,
+            ...directDisburseFields,
+            lines: recalcLines,
+            totalAmount: total,
+            cashDisbursed: total,
             sentToAccountantAt: nowIso,
             sentToAccountantBy: actor.name,
             workflowUpdatedAt: nowIso,
@@ -1852,7 +1871,7 @@ function useSupplyChainImpl() {
             id: uid("po"),
             poNumber: formatPurchaseOrderNumber(now),
             weekLabel: formatPurchaseWeekLabel(now),
-            status: "pending_accountant",
+            ...directDisburseFields,
             origin: "store",
             createdBy: actor.name,
             createdByName: actor.name,
@@ -1888,7 +1907,7 @@ function useSupplyChainImpl() {
       });
       setBasket([]);
       basketRef.current = [];
-      setWorkingPoId(submitted.id);
+      setWorkingPoId(directDisburse ? null : submitted.id);
       markLocalSupplyMutation();
       const mergedNote =
         companions.length > 0
@@ -1897,9 +1916,11 @@ function useSupplyChainImpl() {
       setActivityLog((a) =>
         log(
           a,
-          "po_submitted",
+          directDisburse ? "po_manager_decision" : "po_submitted",
           actor,
-          `Sent ${submitted.poNumber}${mergedNote} — ₦${total.toLocaleString()} to accountant for approval`,
+          directDisburse
+            ? `Approved ${submitted.poNumber}${mergedNote} for market (₦${total.toLocaleString()})`
+            : `Sent ${submitted.poNumber}${mergedNote} — ₦${total.toLocaleString()} to accountant for approval`,
           submitted.id,
         ),
       );
@@ -1909,12 +1930,21 @@ function useSupplyChainImpl() {
           : poOriginOf(submitted) === "kitchen"
             ? " (kitchen order)"
             : "";
-      pushSupplyNotification({
-        audience: ["accountant", "manager"],
-        title: `PO raised — ${submitted.poNumber}`,
-        body: `${actor.name} sent ${submitted.poNumber}${originNote} (₦${total.toLocaleString()}) for approval`,
-        href: "/supply/purchase-orders?tab=approvals",
-      });
+      if (directDisburse) {
+        pushSupplyNotification({
+          audience: ["purchasing", "store"],
+          title: `PO approved — ${submitted.poNumber}`,
+          body: `${actor.name} approved ${submitted.poNumber}${originNote} (₦${total.toLocaleString()}) — retire at market from Purchasing → Active.`,
+          href: "/supply/purchasing?tab=active",
+        });
+      } else {
+        pushSupplyNotification({
+          audience: ["accountant", "manager"],
+          title: `PO raised — ${submitted.poNumber}`,
+          body: `${actor.name} sent ${submitted.poNumber}${originNote} (₦${total.toLocaleString()}) for approval`,
+          href: "/supply/purchase-orders?tab=approvals",
+        });
+      }
       try {
         await persistPoBasketSnapshot({ required: true });
       } catch {
@@ -2127,8 +2157,8 @@ function useSupplyChainImpl() {
           pushSupplyNotification({
             audience: ["purchasing", "store"],
             title: `PO approved — ${po.poNumber}`,
-            body: `Approved for market. Listed in Purchase Orders → History (read-only).`,
-            href: "/supply/purchase-orders?tab=history",
+            body: `Approved for market. Retire from Purchasing → Active.`,
+            href: "/supply/purchasing?tab=active",
           });
         } else if (approved) {
           pushSupplyNotification({
@@ -2257,8 +2287,8 @@ function useSupplyChainImpl() {
           pushSupplyNotification({
             audience: ["purchasing", "store"],
             title: `PO approved — ${po.poNumber}`,
-            body: `Manager approved. Listed in Purchase Orders → History (read-only). Ready to buy at market from Retirement.`,
-            href: "/supply/purchase-orders?tab=history",
+            body: `Manager approved. Retire at market from Purchasing → Active.`,
+            href: "/supply/purchasing?tab=active",
           });
         } else {
           pushSupplyNotification({
@@ -2361,8 +2391,8 @@ function useSupplyChainImpl() {
         pushSupplyNotification({
           audience: ["purchasing", "store"],
           title: `PO approved (admin test) — ${po.poNumber}`,
-          body: comment || "Listed in Purchase Orders → History (read-only).",
-          href: "/supply/purchase-orders?tab=history",
+          body: comment || "Listed in History. Retire at market from Purchasing → Active.",
+          href: "/supply/purchasing?tab=active",
         });
       } else if (po && !approved) {
         pushSupplyNotification({
