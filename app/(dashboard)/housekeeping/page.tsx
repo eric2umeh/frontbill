@@ -11,6 +11,7 @@ import {
   getHousekeepingStatusDef,
   housekeepingStatusLabel,
 } from '@/lib/rooms/housekeeping-status'
+import { housekeeperAllowedNextStatuses } from '@/lib/rooms/housekeeping-status-transitions'
 import { formatHousekeepingStatusUpdated } from '@/lib/rooms/format-housekeeping-status-updated'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -290,7 +291,7 @@ export default function HousekeepingPage() {
 
   const openRoomStatusModal = (room: Room) => {
     setStatusChangeRoom(room)
-    setPendingRoomStatus(room.housekeeping_status || null)
+    setPendingRoomStatus(null)
     setStatusComment('')
     setStatusRemarks([])
     setStatusRemarksLoading(true)
@@ -299,6 +300,12 @@ export default function HousekeepingPage() {
       .catch(() => setStatusRemarks([]))
       .finally(() => setStatusRemarksLoading(false))
   }
+
+  const allowedRoomStatusTargets = useMemo(() => {
+    if (!statusChangeRoom) return []
+    const keys = housekeeperAllowedNextStatuses(statusChangeRoom.housekeeping_status)
+    return HOUSEKEEPING_STATUS_OPTIONS.filter((opt) => keys.includes(opt.key))
+  }, [statusChangeRoom])
 
   const closeRoomStatusModal = () => {
     setStatusChangeRoom(null)
@@ -310,7 +317,16 @@ export default function HousekeepingPage() {
 
   const handleConfirmRoomStatusChange = async () => {
     if (!statusChangeRoom || !pendingRoomStatus) {
-      toast.error('Select a room status')
+      toast.error('Select the next room status')
+      return
+    }
+    if (pendingRoomStatus === statusChangeRoom.housekeeping_status) {
+      toast.error('Choose a different status from the current one')
+      return
+    }
+    const allowed = housekeeperAllowedNextStatuses(statusChangeRoom.housekeeping_status)
+    if (!allowed.includes(pendingRoomStatus as (typeof allowed)[number])) {
+      toast.error('That status change is not allowed for housekeeping')
       return
     }
     if (!canEditHousekeepingStatus) {
@@ -763,23 +779,39 @@ export default function HousekeepingPage() {
                 />
               ) : null}
               <RoomStatusRemarksPanel remarks={statusRemarks} loading={statusRemarksLoading} />
-              <div className="grid grid-cols-2 gap-2">
-                {HOUSEKEEPING_STATUS_OPTIONS.map((opt) => (
-                  <button
-                    key={opt.key}
-                    type="button"
-                    onClick={() => setPendingRoomStatus(opt.key)}
-                    className={`rounded-lg px-3 py-2.5 text-xs font-medium text-left transition-all hover:scale-[1.02] active:scale-95 ${opt.color} ${pendingRoomStatus === opt.key ? 'ring-2 ring-offset-1 ring-primary' : ''}`}
-                    title={opt.description}
-                  >
-                    <span className="block">{opt.label}</span>
-                    <span className="block text-[10px] font-normal opacity-80">{opt.abbr}</span>
-                    {statusChangeRoom.housekeeping_status === opt.key && (
-                      <span className="block text-[10px] font-normal opacity-70 mt-0.5">Current</span>
-                    )}
-                  </button>
-                ))}
-              </div>
+              {statusChangeRoom.housekeeping_status ? (
+                <p className="text-xs text-muted-foreground">
+                  Current:{' '}
+                  <span className="font-medium">
+                    {housekeepingStatusLabel(statusChangeRoom.housekeeping_status)}
+                  </span>
+                </p>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  No housekeeping status yet — wait for front desk checkout.
+                </p>
+              )}
+              {allowedRoomStatusTargets.length === 0 ? (
+                <p className="text-sm text-muted-foreground rounded-md border border-dashed p-3">
+                  No status changes available. Occupied, reservation, and other front-desk
+                  statuses are updated by the system after checkout or check-in.
+                </p>
+              ) : (
+                <div className="grid grid-cols-2 gap-2">
+                  {allowedRoomStatusTargets.map((opt) => (
+                    <button
+                      key={opt.key}
+                      type="button"
+                      onClick={() => setPendingRoomStatus(opt.key)}
+                      className={`rounded-lg px-3 py-2.5 text-xs font-medium text-left transition-all hover:scale-[1.02] active:scale-95 ${opt.color} ${pendingRoomStatus === opt.key ? 'ring-2 ring-offset-1 ring-primary' : ''}`}
+                      title={opt.description}
+                    >
+                      <span className="block">{opt.label}</span>
+                      <span className="block text-[10px] font-normal opacity-80">{opt.abbr}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
               <div className="space-y-2">
                 <Label>Remark / comment</Label>
                 <Textarea
@@ -798,7 +830,7 @@ export default function HousekeepingPage() {
             <Button variant="outline" onClick={closeRoomStatusModal} disabled={roomStatusSaving}>
               Cancel
             </Button>
-            <Button onClick={() => void handleConfirmRoomStatusChange()} disabled={roomStatusSaving || !pendingRoomStatus}>
+            <Button onClick={() => void handleConfirmRoomStatusChange()} disabled={roomStatusSaving || !pendingRoomStatus || allowedRoomStatusTargets.length === 0}>
               {roomStatusSaving ? 'Saving…' : 'Update status'}
             </Button>
           </DialogFooter>
