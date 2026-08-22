@@ -24,27 +24,36 @@ import { PaginatedListShell } from '@/components/shared/paginated-list-shell'
 import { poDepartmentFilterOptions } from '@/components/supply-chain/po-review-lines-panel'
 import { RetirementLinesReview } from '@/components/supply-chain/retirement-lines-review'
 import {
+  computeRetirementBatchStats,
+  downloadRetirementReviewReport,
+} from '@/lib/supply-chain/retirement-review-utils'
+import {
   isRetirementReviewCandidate,
   pendingReviewLines,
   poHasRemainingAddToStockLines,
 } from '@/lib/supply-chain/add-to-stock'
+import { Download } from 'lucide-react'
 
 function RetirementReviewCard({
   po,
   canReview,
   onDecide,
+  onCorrectQty,
+  onCorrectPrice,
   deptFilter = 'all',
 }: {
   po: PurchaseOrder
   canReview: boolean
   onDecide: (approved: boolean, comment: string) => void
+  onCorrectQty: (lineId: string, qty: number) => void
+  onCorrectPrice: (lineId: string, price: number) => void
   deptFilter?: string
 }) {
   const [comment, setComment] = useState('')
   const pendingLines = useMemo(() => pendingReviewLines(po), [po])
-  const pendingSpend = pendingLines.reduce(
-    (s, l) => s + (Number(l.totalPaid) || 0),
-    0,
+  const stats = useMemo(
+    () => computeRetirementBatchStats(po, pendingLines),
+    [po, pendingLines],
   )
   const remainingOnActive = poHasRemainingAddToStockLines(po)
   const pendingBatch = po.retirement?.batches?.find(
@@ -56,52 +65,99 @@ function RetirementReviewCard({
     pendingBatch?.submittedAt ?? po.retirement?.submittedAt
 
   return (
-    <div className="rounded-lg border p-4 space-y-3">
+    <div className="rounded-lg border p-3 space-y-2">
       <div className="flex flex-wrap justify-between gap-2">
-        <div>
-          <p className="font-medium">{po.poNumber}</p>
-          <p className="text-sm text-muted-foreground">
-            Submitted by {submittedBy ?? 'Staff'} · This batch{' '}
-            {formatNaira(pendingSpend)} · {pendingLines.length} item
-            {pendingLines.length === 1 ? '' : 's'} to review
+        <div className="min-w-0">
+          <p className="font-medium text-sm">{po.poNumber}</p>
+          <p className="text-xs text-muted-foreground">
+            {submittedBy ?? 'Staff'}
+            {submittedAt ? ` · ${formatPoRaisedAt(submittedAt)}` : ''}
+            {' · '}
+            {pendingLines.length} item{pendingLines.length === 1 ? '' : 's'}
           </p>
-          {submittedAt ? (
-            <p className="text-xs text-muted-foreground">
-              Submitted {formatPoRaisedAt(submittedAt)}
-            </p>
-          ) : null}
           {remainingOnActive ? (
-            <p className="text-xs text-amber-800 dark:text-amber-200 mt-1">
-              Other PO lines still remain on Add to stock — Accept only closes this
-              batch, not the whole PO.
+            <p className="text-[11px] text-amber-800 dark:text-amber-200 mt-0.5">
+              Other lines still on Active — Accept closes this batch only.
             </p>
           ) : null}
         </div>
         {poStatusBadge(po)}
       </div>
-      <div className="rounded-md border bg-muted/20 p-3 space-y-2">
-        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-          Items added to stock (review only these) ({pendingLines.length})
-        </p>
+
+      <div className="grid gap-2 grid-cols-2 sm:grid-cols-4">
+        <div className="rounded-md border px-2 py-1.5 bg-muted/20">
+          <p className="text-[10px] uppercase text-muted-foreground">Batch spend</p>
+          <p className="text-sm font-semibold tabular-nums">{formatNaira(stats.batchSpend)}</p>
+        </div>
+        <div className="rounded-md border px-2 py-1.5 bg-muted/20">
+          <p className="text-[10px] uppercase text-muted-foreground">Qty / price Δ</p>
+          <p className="text-sm font-semibold tabular-nums">
+            {stats.qtyChangedCount} / {stats.priceChangedCount}
+          </p>
+        </div>
+        <div className="rounded-md border px-2 py-1.5 bg-muted/20">
+          <p className="text-[10px] uppercase text-muted-foreground">Bought / skipped</p>
+          <p className="text-sm font-semibold tabular-nums">
+            {stats.boughtCount} / {stats.notBoughtCount}
+          </p>
+        </div>
+        <div className="rounded-md border px-2 py-1.5 bg-primary/5">
+          <p className="text-[10px] uppercase text-muted-foreground">Refund / credit</p>
+          <p className="text-sm font-semibold tabular-nums">
+            {formatNaira(Math.abs(stats.refundOrCredit))}
+            {stats.refundOrCredit !== 0 ? (
+              <span className="text-[10px] font-normal ml-1">
+                {stats.refundOrCredit > 0 ? 'credit' : 'debit'}
+              </span>
+            ) : null}
+          </p>
+        </div>
+      </div>
+
+      <div className="rounded-md border bg-muted/20 p-2">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
+          <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+            Items in this batch
+          </p>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-7 gap-1 text-xs"
+            disabled={!pendingLines.length}
+            onClick={() => {
+              downloadRetirementReviewReport(po, pendingLines, {})
+              toast.success('Downloaded retirement review report')
+            }}
+          >
+            <Download className="h-3.5 w-3.5" />
+            Download
+          </Button>
+        </div>
         <RetirementLinesReview
           po={po}
           lines={pendingLines}
           deptFilter={deptFilter}
+          compact
+          editable={canReview}
+          onQtyCorrect={canReview ? onCorrectQty : undefined}
+          onPriceCorrect={canReview ? onCorrectPrice : undefined}
           emptyMessage="No pending Add-to-stock items for this PO."
         />
       </div>
       {canReview ? (
         <>
           <Textarea
-            placeholder="Comment required for accept or reject…"
+            placeholder="Optional comment for accept or reject…"
             value={comment}
             onChange={(e) => setComment(e.target.value)}
             rows={2}
+            className="text-sm min-h-[52px]"
           />
           <div className="flex flex-wrap gap-2">
             <Button
               size="sm"
-              disabled={!comment.trim() || pendingLines.length === 0}
+              disabled={pendingLines.length === 0}
               onClick={() => {
                 onDecide(true, comment.trim())
                 setComment('')
@@ -112,18 +168,18 @@ function RetirementReviewCard({
             <Button
               size="sm"
               variant="destructive"
-              disabled={!comment.trim() || pendingLines.length === 0}
+              disabled={pendingLines.length === 0}
               onClick={() => {
                 onDecide(false, comment.trim())
                 setComment('')
               }}
             >
-              Reject this batch (stock stays)
+              Reject this batch
             </Button>
           </div>
-          <p className="text-[11px] text-muted-foreground">
-            Accept/Reject applies only to items already submitted from Add to stock.
-            Unstocked PO lines stay on Active. Reject does not undo Central Store posts.
+          <p className="text-[10px] text-muted-foreground">
+            Reviewers may correct qty or price inline — store/purchaser get an alert. Accept/Reject
+            is stored in History.
           </p>
         </>
       ) : (
@@ -138,11 +194,14 @@ function RetirementReviewCard({
 export function PoRetirementPanel({
   showAcceptedSection = true,
 }: {
-  /** When false, only the awaiting-review queue is shown (e.g. embedded in Retirement → Active). */
   showAcceptedSection?: boolean
 }) {
   const { name, role } = useAuth()
-  const { purchaseOrders, accountantRetirementDecision } = useSupplyChain()
+  const {
+    purchaseOrders,
+    accountantRetirementDecision,
+    correctRetirementLineDuringReview,
+  } = useSupplyChain()
   const actor = {
     name: name ?? 'Staff',
     role: canonicalRoleKey(role) ?? 'staff',
@@ -158,6 +217,21 @@ export function PoRetirementPanel({
     [pending],
   )
 
+  const handleCorrect =
+    (poId: string, field: 'qty' | 'price') => (lineId: string, value: number) => {
+      const res = correctRetirementLineDuringReview(
+        poId,
+        lineId,
+        field === 'qty' ? { quantityBought: value } : { actualPrice: value },
+        actor,
+      )
+      if ('error' in res) toast.error(res.error)
+      else {
+        toast.success('Updated stock from correction')
+        if (res.warning) toast.warning(res.warning)
+      }
+    }
+
   return (
     <div className="space-y-6">
       <section className="space-y-3">
@@ -171,8 +245,8 @@ export function PoRetirementPanel({
             ) : null}
           </h2>
           <p className="text-xs text-muted-foreground">
-            Review only items that store/purchaser already added to Central Store.
-            Accept closes that batch; other PO lines not yet submitted stay on Active → Add to stock.
+            Review Add-to-stock submissions. Correct qty/price if store made mistakes — stock updates
+            immediately and store/purchaser are notified.
           </p>
         </div>
         {pending.length === 0 ? (
@@ -225,6 +299,8 @@ export function PoRetirementPanel({
                     po={po}
                     deptFilter={ctx.activeFilters.dept ?? 'all'}
                     canReview={canReview || adminTester}
+                    onCorrectQty={handleCorrect(po.id, 'qty')}
+                    onCorrectPrice={handleCorrect(po.id, 'price')}
                     onDecide={(approved, comment) => {
                       const res = accountantRetirementDecision(
                         po.id,
