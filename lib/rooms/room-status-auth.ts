@@ -113,7 +113,7 @@ export async function resolveHousekeepingStatusWriteAuthed(): Promise<
   const role = String(profile.role || '')
   if (!canUpdateHousekeepingRoomStatus(role)) {
     return {
-      error: 'Only Housekeeping staff can change room housekeeping status.',
+      error: 'You do not have permission to change room housekeeping status.',
       status: 403,
     }
   }
