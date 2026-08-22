@@ -5,6 +5,12 @@ import type { BasketLine } from '@/lib/supply-chain/types'
 import { formatNaira } from '@/lib/utils/currency'
 import { AlertTriangle, Send } from 'lucide-react'
 import { PoReviewLinesPanel } from '@/components/supply-chain/po-review-lines-panel'
+import {
+  isZeroPoUnitPrice,
+  zeroPriceRowClass,
+  zeroPriceTextClass,
+} from '@/lib/supply-chain/retirement-review-utils'
+import { cn } from '@/lib/utils'
 
 type Props = {
   basket: BasketLine[]
@@ -15,6 +21,7 @@ type Props = {
   onClear: () => void
   onRemove: (stockItemId: string) => void
   onQtyChange: (stockItemId: string, qty: number) => void
+  onPriceChange?: (stockItemId: string, price: number) => void
   onSend?: () => void
   sendLabel?: string
   /** Hide Clear when the list must stay until Send (e.g. kitchen → store). */
@@ -28,11 +35,12 @@ export function DraftBasketSidebar({
   onClear,
   onRemove,
   onQtyChange,
+  onPriceChange,
   onSend,
   sendLabel = 'Send for approval',
   hideClear = false,
 }: Props) {
-  const zeroPriceItems = basket.filter((b) => !(Number(b.unitPrice) > 0))
+  const zeroPriceItems = basket.filter((b) => isZeroPoUnitPrice(b.unitPrice))
 
   return (
     <div className="rounded-xl border bg-card p-3 shadow-md flex flex-col gap-2 min-w-0 w-full max-h-[min(85vh,780px)] overflow-hidden lg:sticky lg:top-4">
@@ -61,13 +69,13 @@ export function DraftBasketSidebar({
       </div>
 
       {zeroPriceItems.length > 0 && (
-        <div className="shrink-0 flex gap-2 rounded-md border border-sky-300 bg-sky-50 px-2.5 py-2 text-[12px] text-sky-950 dark:border-sky-700 dark:bg-sky-950/40 dark:text-sky-100 max-h-24 overflow-y-auto">
+        <div className={cn('shrink-0 flex gap-2 rounded-md border px-2.5 py-2 text-[12px] max-h-24 overflow-y-auto', zeroPriceRowClass(), zeroPriceTextClass())}>
           <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
           <div className="leading-snug min-w-0 space-y-1">
             <p>
-              <span className="font-semibold">₦0 price</span>
+              <span className="font-semibold">Missing or ₦0 price</span>
               {' — '}
-              set a unit price before sending if this is not intentional:
+              set unit price before sending:
             </p>
             <p className="flex flex-wrap gap-x-1.5 gap-y-1">
               {zeroPriceItems.map((item, i) => (
@@ -106,6 +114,7 @@ export function DraftBasketSidebar({
             lines={basket}
             editable={!readOnly}
             onQtyChange={readOnly ? undefined : onQtyChange}
+            onPriceChange={readOnly ? undefined : onPriceChange}
             onDelete={readOnly ? undefined : onRemove}
             pageSize={8}
             compact
