@@ -21,15 +21,24 @@ import {
 } from '@/components/ui/dialog'
 import { Eye, AlertTriangle } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import {
+  isZeroPoUnitPrice,
+  zeroPriceRowClass,
+  zeroPriceTextClass,
+} from '@/lib/supply-chain/retirement-review-utils'
 
 const PO_QTY_INPUT_CLASS =
   'h-8 ml-auto text-right tabular-nums [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none'
+
+const PO_PRICE_INPUT_CLASS =
+  'h-8 text-right tabular-nums text-[12px] [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none'
 
 type BasketRow = {
   kind: 'basket'
   line: BasketLine
   editable?: boolean
   onQtyChange?: (stockItemId: string, qty: number) => void
+  onPriceChange?: (stockItemId: string, price: number) => void
   onDelete?: (stockItemId: string) => void
 }
 
@@ -38,6 +47,7 @@ type PoRow = {
   line: PoLine
   editable?: boolean
   onQtyChange?: (stockItemId: string, qty: number) => void
+  onPriceChange?: (stockItemId: string, price: number) => void
   onDelete?: (stockItemId: string) => void
 }
 
@@ -142,6 +152,60 @@ function QtyDraftInput({
   )
 }
 
+function PriceDraftInput({
+  stockItemId,
+  committedPrice,
+  onCommit,
+  className,
+}: {
+  stockItemId: string
+  committedPrice: number
+  onCommit: (stockItemId: string, price: number) => void
+  className?: string
+}) {
+  const [draft, setDraft] = useState(
+    committedPrice > 0 ? String(committedPrice) : '',
+  )
+
+  useEffect(() => {
+    setDraft(committedPrice > 0 ? String(committedPrice) : '')
+  }, [committedPrice, stockItemId])
+
+  const commit = () => {
+    const trimmed = draft.trim()
+    if (!trimmed) {
+      setDraft(committedPrice > 0 ? String(committedPrice) : '')
+      return
+    }
+    const price = parseQuantityValue(trimmed)
+    if (!Number.isFinite(price) || price < 0) {
+      setDraft(committedPrice > 0 ? String(committedPrice) : '')
+      return
+    }
+    if (price !== committedPrice) onCommit(stockItemId, price)
+  }
+
+  return (
+    <Input
+      inputMode="decimal"
+      min={0}
+      className={cn(className, isZeroPoUnitPrice(parseQuantityValue(draft) || committedPrice) && zeroPriceTextClass())}
+      value={draft}
+      onChange={(e) => setDraft(sanitizeQuantityInput(e.target.value))}
+      onBlur={(e) => {
+        if (!e.currentTarget.isConnected) return
+        commit()
+      }}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault()
+          ;(e.target as HTMLInputElement).blur()
+        }
+      }}
+    />
+  )
+}
+
 export function PoLinesTable({ rows, showDept = true, compact = false }: Props) {
   const [detailRow, setDetailRow] = useState<BasketRow | PoRow | null>(null)
 
@@ -162,19 +226,37 @@ export function PoLinesTable({ rows, showDept = true, compact = false }: Props) 
             const qty = line.qtyToBuy
             const total = line.qtyToBuy * line.unitPrice
             const stamp = formatPoLineEditorStamp(line)
+            const zeroPrice = isZeroPoUnitPrice(line.unitPrice)
             return (
               <li
                 key={line.stockItemId}
-                className="flex flex-col gap-0.5 rounded-md border px-2 py-1.5 min-w-0"
+                className={cn(
+                  'flex flex-col gap-0.5 rounded-md border px-2 py-1.5 min-w-0',
+                  zeroPrice && zeroPriceRowClass(),
+                )}
               >
                 <div className="flex items-center gap-1.5 min-w-0">
                   <p className="min-w-0 flex-1 text-[12px] font-medium leading-none truncate">
+                    {zeroPrice ? (
+                      <AlertTriangle
+                        className={cn('inline h-3 w-3 mr-0.5', zeroPriceTextClass())}
+                        aria-hidden
+                      />
+                    ) : null}
                     {line.name}
                     <span className="text-muted-foreground font-normal">
                       {' '}
                       ({formatUnitLabel(line.unit)})
                     </span>
                   </p>
+                  {row.editable && row.onPriceChange ? (
+                    <PriceDraftInput
+                      stockItemId={line.stockItemId}
+                      committedPrice={line.unitPrice}
+                      onCommit={row.onPriceChange}
+                      className="h-7 w-[4.25rem] shrink-0 px-1"
+                    />
+                  ) : null}
                   {row.editable && row.onQtyChange ? (
                     <QtyDraftInput
                       stockItemId={line.stockItemId}
@@ -480,6 +562,7 @@ export function PoLinesTable({ rows, showDept = true, compact = false }: Props) 
                   compact={compact}
                   editable={Boolean(row.editable && row.onQtyChange)}
                   onQtyChange={row.onQtyChange}
+                  onPriceChange={row.onPriceChange}
                   onDelete={row.onDelete}
                 />
               )
@@ -568,6 +651,7 @@ function EditableBasketTableRow({
   compact,
   editable,
   onQtyChange,
+  onPriceChange,
   onDelete,
 }: {
   line: BasketLine
@@ -575,6 +659,7 @@ function EditableBasketTableRow({
   compact: boolean
   editable: boolean
   onQtyChange?: (stockItemId: string, qty: number) => void
+  onPriceChange?: (stockItemId: string, price: number) => void
   onDelete?: (stockItemId: string) => void
 }) {
   const [draft, setDraft] = useState(String(l.qtyToBuy))
@@ -602,15 +687,15 @@ function EditableBasketTableRow({
 
   const liveQty = effectiveDraftQty(draft, l.qtyToBuy)
   const liveTotal = liveQty * (Number.isFinite(l.unitPrice) ? l.unitPrice : 0)
-  const zeroPrice = !(Number(l.unitPrice) > 0)
+  const zeroPrice = isZeroPoUnitPrice(l.unitPrice)
 
   return (
-    <tr className="border-b last:border-0 text-[13px]">
+    <tr className={cn('border-b last:border-0 text-[13px]', zeroPrice && zeroPriceRowClass())}>
       <td className="py-2 pr-2 font-medium text-[13px]">
         <span className="inline-flex items-start gap-1.5">
           {zeroPrice && (
             <AlertTriangle
-              className="h-3.5 w-3.5 shrink-0 mt-0.5 text-sky-700 dark:text-sky-300"
+              className={cn('h-3.5 w-3.5 shrink-0 mt-0.5', zeroPriceTextClass())}
               aria-label="Unit price is ₦0"
             />
           )}
@@ -660,20 +745,24 @@ function EditableBasketTableRow({
         )}
       </td>
       {!compact && (
-        <td
-          className={cn(
-            'py-2 text-right tabular-nums text-[13px]',
-            zeroPrice && 'font-semibold text-sky-800 dark:text-sky-200',
+        <td className={cn('py-2 text-right tabular-nums text-[13px]', zeroPrice && zeroPriceTextClass())}>
+          {editable && onPriceChange ? (
+            <PriceDraftInput
+              stockItemId={l.stockItemId}
+              committedPrice={l.unitPrice}
+              onCommit={onPriceChange}
+              className={`w-[5.5rem] ml-auto ${PO_PRICE_INPUT_CLASS}`}
+            />
+          ) : (
+            <span className="inline-flex flex-wrap items-baseline justify-end gap-x-1.5 gap-y-0.5">
+              <span>{formatNaira(l.unitPrice)}</span>
+              {zeroPrice && (
+                <span className={cn('text-[10px] font-medium whitespace-nowrap', zeroPriceTextClass())}>
+                  Set price
+                </span>
+              )}
+            </span>
           )}
-        >
-          <span className="inline-flex flex-wrap items-baseline justify-end gap-x-1.5 gap-y-0.5">
-            <span>{formatNaira(l.unitPrice)}</span>
-            {zeroPrice && (
-              <span className="text-[10px] font-medium text-sky-800 dark:text-sky-200 whitespace-nowrap">
-                Warning: ₦0 unit price
-              </span>
-            )}
-          </span>
         </td>
       )}
       <td className="py-2 text-right tabular-nums font-medium text-[13px] whitespace-nowrap">
@@ -702,6 +791,7 @@ function EditablePoTableRow({
   compact,
   editable,
   onQtyChange,
+  onPriceChange,
   onDelete,
 }: {
   line: PoLine
@@ -709,6 +799,7 @@ function EditablePoTableRow({
   compact: boolean
   editable: boolean
   onQtyChange?: (stockItemId: string, qty: number) => void
+  onPriceChange?: (stockItemId: string, price: number) => void
   onDelete?: (stockItemId: string) => void
 }) {
   const [draft, setDraft] = useState(String(l.quantityOrdered))
@@ -736,7 +827,7 @@ function EditablePoTableRow({
 
   const liveQty = effectiveDraftQty(draft, l.quantityOrdered)
   const liveTotal = liveQty * (Number.isFinite(l.unitPrice) ? l.unitPrice : 0)
-  const zeroPrice = !(Number(l.unitPrice) > 0)
+  const zeroPrice = isZeroPoUnitPrice(l.unitPrice)
   const removed = l.notBought === true
 
   return (
@@ -744,6 +835,7 @@ function EditablePoTableRow({
       className={cn(
         'border-b last:border-0 text-[13px]',
         removed && 'bg-red-50/70 dark:bg-red-950/20',
+        !removed && zeroPrice && zeroPriceRowClass(),
       )}
     >
       <td
@@ -755,7 +847,7 @@ function EditablePoTableRow({
         <span className="inline-flex items-start gap-1.5">
           {zeroPrice && !removed && (
             <AlertTriangle
-              className="h-3.5 w-3.5 shrink-0 mt-0.5 text-sky-700 dark:text-sky-300"
+              className={cn('h-3.5 w-3.5 shrink-0 mt-0.5', zeroPriceTextClass())}
               aria-label="Unit price is ₦0"
             />
           )}
@@ -820,20 +912,24 @@ function EditablePoTableRow({
         )}
       </td>
       {!compact && (
-        <td
-          className={cn(
-            'py-2 text-right tabular-nums text-[13px]',
-            zeroPrice && 'font-semibold text-sky-800 dark:text-sky-200',
+        <td className={cn('py-2 text-right tabular-nums text-[13px]', zeroPrice && !removed && zeroPriceTextClass())}>
+          {editable && onPriceChange ? (
+            <PriceDraftInput
+              stockItemId={l.stockItemId}
+              committedPrice={l.unitPrice}
+              onCommit={onPriceChange}
+              className={`w-[5.5rem] ml-auto ${PO_PRICE_INPUT_CLASS}`}
+            />
+          ) : (
+            <span className="inline-flex flex-wrap items-baseline justify-end gap-x-1.5 gap-y-0.5">
+              <span>{formatNaira(l.unitPrice)}</span>
+              {zeroPrice && !removed && (
+                <span className={cn('text-[10px] font-medium whitespace-nowrap', zeroPriceTextClass())}>
+                  Set price
+                </span>
+              )}
+            </span>
           )}
-        >
-          <span className="inline-flex flex-wrap items-baseline justify-end gap-x-1.5 gap-y-0.5">
-            <span>{formatNaira(l.unitPrice)}</span>
-            {zeroPrice && (
-              <span className="text-[10px] font-medium text-sky-800 dark:text-sky-200 whitespace-nowrap">
-                Warning: ₦0 unit price
-              </span>
-            )}
-          </span>
         </td>
       )}
       <td className="py-2 text-right tabular-nums font-medium text-[13px] whitespace-nowrap">
