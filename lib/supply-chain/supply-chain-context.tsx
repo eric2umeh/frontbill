@@ -111,6 +111,7 @@ import {
   updateSupplyCatalogItem,
 } from "./supply-db-client";
 import { mergeSnapshotRowsById, resolveSupplySnapshot } from "./snapshot-merge";
+import { mergeIssueOutLogFromRemote } from "@/lib/store/issue-out-log-utils";
 import { mergePurchaseOrdersFromRemote, dedupePurchaseOrders } from "./po-sync-merge";
 import {
   isProductionBatchDeleted,
@@ -133,6 +134,26 @@ import {
   isPoLineSubmittedToStock,
   poHasRemainingAddToStockLines,
 } from "./add-to-stock";
+
+function applyRemoteIssueOutLogArray(
+  setter: (updater: (prev: IssueOutRecord[]) => IssueOutRecord[]) => void,
+  remote: unknown,
+): boolean {
+  if (!Array.isArray(remote)) return false;
+  let changed = false;
+  setter((prev) => {
+    const merged = mergeIssueOutLogFromRemote(prev, remote as IssueOutRecord[]);
+    try {
+      if (JSON.stringify(prev) === JSON.stringify(merged)) return prev;
+    } catch {
+      changed = true;
+      return merged;
+    }
+    changed = true;
+    return merged;
+  });
+  return changed;
+}
 
 function applyRemoteArray<T>(
   setter: (updater: (prev: T[]) => T[]) => void,
@@ -864,8 +885,17 @@ function useSupplyChainImpl() {
         if (mergedPurchaseOrders.length) {
           setPurchaseOrders(mergedPurchaseOrders);
         }
-        if (Array.isArray(snapshots.issue_out_log) && snapshots.issue_out_log.length) {
-          setIssueOutLog(snapshots.issue_out_log as IssueOutRecord[]);
+        if (Array.isArray(snapshots.issue_out_log)) {
+          const localLog = loadPersistedStock<IssueOutRecord>(
+            ISSUE_OUT_LOG_STORAGE_KEY,
+            EMPTY_ISSUE_OUT_LOG,
+          );
+          setIssueOutLog(
+            mergeIssueOutLogFromRemote(
+              localLog,
+              snapshots.issue_out_log as IssueOutRecord[],
+            ),
+          );
         }
         if (Array.isArray(snapshots.pending_items) && snapshots.pending_items.length) {
           setPendingStoreItems(snapshots.pending_items as PendingStoreItem[]);
@@ -1065,7 +1095,7 @@ function useSupplyChainImpl() {
         changed = applyRemoteStockArray(setFnbRawStock, snapshots.fnb_raw_stock) || changed;
         changed = applyRemoteBarStockArray(setBarStock, snapshots.bar_stock) || changed;
         changed = applyRemoteStockArray(setKitchenStock, snapshots.kitchen_stock) || changed;
-        changed = applyRemoteArray(setIssueOutLog, snapshots.issue_out_log) || changed;
+        changed = applyRemoteIssueOutLogArray(setIssueOutLog, snapshots.issue_out_log) || changed;
         changed = applyRemoteArray(setFnbDailySheets, snapshots.fnb_daily_sheets) || changed;
         changed = applyRemoteArray(setFnbMovements, snapshots.fnb_movements) || changed;
 
@@ -3655,10 +3685,8 @@ function useSupplyChainImpl() {
         ...restInput,
         name,
         unit: input.unit?.trim() || existing.unit,
-        quantityInStore:
-          input.quantityInStore != null
-            ? Math.max(0, input.quantityInStore)
-            : existing.quantityInStore,
+        // On-hand qty only changes via Add to stock / issue-out — never manual edit.
+        quantityInStore: existing.quantityInStore,
         reorderLevel:
           input.reorderLevel != null
             ? Math.max(0, input.reorderLevel)
