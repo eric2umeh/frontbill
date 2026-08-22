@@ -57,6 +57,7 @@ export function RaisePurchaseRequestPanel({ activeTab }: Props) {
     handleRemoveFromBasket,
     handleBasketQtyChange,
     handleSendToAccountant,
+    poSubmitLabel,
     updateStoreItemDirect,
     setFactorMap,
     setPurchaseUnitMap,
@@ -73,7 +74,7 @@ export function RaisePurchaseRequestPanel({ activeTab }: Props) {
       onClear={handleClearBasket}
       onRemove={handleRemoveFromBasket}
       onQtyChange={handleBasketQtyChange}
-      sendLabel="Send to accountant"
+      sendLabel={poSubmitLabel}
       onSend={
         !purchaseLocked && basket.length > 0 ? handleSendToAccountant : undefined
       }
