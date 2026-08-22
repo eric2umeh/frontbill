@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/lib/auth-context'
 import { LoadingSpinner } from '@/components/loading-screen'
 import { hasPermission } from '@/lib/permissions'
-import { canUpdateHousekeepingRoomStatus } from '@/lib/rooms/housekeeping-status-auth'
+import { canUpdateHousekeepingRoomStatus, canAdminOverrideHousekeepingStatus } from '@/lib/rooms/housekeeping-status-auth'
 import {
   HOUSEKEEPING_STATUS_OPTIONS,
   getHousekeepingStatusDef,
@@ -37,7 +37,7 @@ import {
   fetchRoomStatusRemarksClient,
   patchHousekeepingStatus,
 } from '@/lib/rooms/update-room-status-client'
-import type { RoomStatusRemark } from '@/lib/rooms/room-status-remarks'
+import { HousekeepingFloorReportPanel } from '@/components/housekeeping/housekeeping-floor-report-panel'
 
 type TaskStatus = 'pending' | 'in_progress' | 'done' | 'skipped'
 type TaskPriority = 'low' | 'normal' | 'high' | 'urgent'
@@ -105,6 +105,7 @@ export default function HousekeepingPage() {
   const canAssign = hasPermission(role, 'housekeeping:assign')
   const canReport = hasPermission(role, 'housekeeping:report')
   const canEditHousekeepingStatus = canUpdateHousekeepingRoomStatus(role)
+  const isAdminHkOverride = canAdminOverrideHousekeepingStatus(role)
 
   const [tasks, setTasks] = useState<HousekeepingTask[]>([])
   const [rooms, setRooms] = useState<Room[]>([])
@@ -303,9 +304,12 @@ export default function HousekeepingPage() {
 
   const allowedRoomStatusTargets = useMemo(() => {
     if (!statusChangeRoom) return []
+    if (isAdminHkOverride) {
+      return HOUSEKEEPING_STATUS_OPTIONS
+    }
     const keys = housekeeperAllowedNextStatuses(statusChangeRoom.housekeeping_status)
     return HOUSEKEEPING_STATUS_OPTIONS.filter((opt) => keys.includes(opt.key))
-  }, [statusChangeRoom])
+  }, [statusChangeRoom, isAdminHkOverride])
 
   const closeRoomStatusModal = () => {
     setStatusChangeRoom(null)
@@ -324,13 +328,15 @@ export default function HousekeepingPage() {
       toast.error('Choose a different status from the current one')
       return
     }
-    const allowed = housekeeperAllowedNextStatuses(statusChangeRoom.housekeeping_status)
-    if (!allowed.includes(pendingRoomStatus as (typeof allowed)[number])) {
-      toast.error('That status change is not allowed for housekeeping')
-      return
+    if (!isAdminHkOverride) {
+      const allowed = housekeeperAllowedNextStatuses(statusChangeRoom.housekeeping_status)
+      if (!allowed.includes(pendingRoomStatus as (typeof allowed)[number])) {
+        toast.error('That status change is not allowed for housekeeping')
+        return
+      }
     }
     if (!canEditHousekeepingStatus) {
-      toast.error('Only Housekeeping staff can change room status.')
+      toast.error('You do not have permission to change room status.')
       return
     }
     if (!organizationId) {
@@ -460,6 +466,10 @@ export default function HousekeepingPage() {
         <TabsList>
           <TabsTrigger value="tasks">Task Board</TabsTrigger>
           <TabsTrigger value="rooms">Room Status</TabsTrigger>
+          <TabsTrigger value="front_desk_report" className="gap-1.5">
+            <ClipboardList className="h-3.5 w-3.5" />
+            Front Desk Report
+          </TabsTrigger>
           <TabsTrigger value="from_store" className="gap-1.5">
             <Package className="h-3.5 w-3.5" />
             Items from Store
@@ -581,8 +591,10 @@ export default function HousekeepingPage() {
         {/* Room Status Panel */}
         <TabsContent value="rooms" className="space-y-4">
           <p className="text-sm text-muted-foreground">
-            Housekeeping floor statuses are visible to all staff with room access. Only Housekeepers
-            can change them here — abbreviations: OOO, O, V, Compl, L/in, R/s, C/O, S/O.
+            Housekeeping floor statuses are visible to all staff with room access.
+            {isAdminHkOverride
+              ? ' As Admin you may set any floor status. Housekeepers follow the checkout → vacant/OOO workflow.'
+              : ' Only Housekeepers can change them here — abbreviations: OOO, O, V, Compl, L/in, R/s, C/O, S/O.'}
           </p>
           <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
             {rooms.map(room => {
@@ -630,6 +642,10 @@ export default function HousekeepingPage() {
               )
             })}
           </div>
+        </TabsContent>
+
+        <TabsContent value="front_desk_report" className="space-y-4">
+          <HousekeepingFloorReportPanel />
         </TabsContent>
 
         <TabsContent value="from_store" className="space-y-4">
@@ -793,8 +809,9 @@ export default function HousekeepingPage() {
               )}
               {allowedRoomStatusTargets.length === 0 ? (
                 <p className="text-sm text-muted-foreground rounded-md border border-dashed p-3">
-                  No status changes available. Occupied, reservation, and other front-desk
-                  statuses are updated by the system after checkout or check-in.
+                  {isAdminHkOverride
+                    ? 'Select a new floor status below.'
+                    : 'No status changes available. Occupied, reservation, and other front-desk statuses are updated by the system after checkout or check-in.'}
                 </p>
               ) : (
                 <div className="grid grid-cols-2 gap-2">
@@ -803,11 +820,15 @@ export default function HousekeepingPage() {
                       key={opt.key}
                       type="button"
                       onClick={() => setPendingRoomStatus(opt.key)}
-                      className={`rounded-lg px-3 py-2.5 text-xs font-medium text-left transition-all hover:scale-[1.02] active:scale-95 ${opt.color} ${pendingRoomStatus === opt.key ? 'ring-2 ring-offset-1 ring-primary' : ''}`}
+                      className={`rounded-lg px-3 py-2.5 text-xs font-medium text-left transition-all hover:scale-[1.02] active:scale-95 ${opt.color} ${pendingRoomStatus === opt.key ? 'ring-2 ring-offset-1 ring-primary' : ''} ${statusChangeRoom.housekeeping_status === opt.key ? 'opacity-60' : ''}`}
                       title={opt.description}
+                      disabled={statusChangeRoom.housekeeping_status === opt.key}
                     >
                       <span className="block">{opt.label}</span>
                       <span className="block text-[10px] font-normal opacity-80">{opt.abbr}</span>
+                      {statusChangeRoom.housekeeping_status === opt.key && (
+                        <span className="block text-[10px] font-normal opacity-70 mt-0.5">Current</span>
+                      )}
                     </button>
                   ))}
                 </div>
