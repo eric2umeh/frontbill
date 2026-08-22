@@ -30,7 +30,7 @@ function normStatus(s: string | null | undefined): string {
 /**
  * Whether a room may appear in booking / reservation pickers.
  * Blocked by PMS status (maintenance, OOO, occupied, reserved) or HK floor status
- * (OOO, O, Compl, L/in, R/s, S/O).
+ * (OOO, O, Compl, L/in, R/s, C/O, S/O).
  */
 export function isRoomAssignable(
   status: string | null | undefined,
