@@ -9,8 +9,13 @@ function errorMessage(err: unknown): string {
 /** True for browser/network failures that often succeed on retry. */
 export function isTransientNetworkError(err: unknown): boolean {
   const msg = errorMessage(err)
-  return /failed to fetch|network error|networkrequestfailed|econnreset|etimedout|load failed|terminated|aborted|aborterror|the operation was aborted/i.test(
-    msg,
+  return (
+    /failed to fetch|network error|networkrequestfailed|econnreset|etimedout|load failed|terminated|aborted|aborterror|the operation was aborted/i.test(
+      msg,
+    ) ||
+    /\b502\b|\b503\b|\b504\b|bad gateway|service unavailable|server temporarily unavailable/i.test(
+      msg,
+    )
   )
 }
 
