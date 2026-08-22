@@ -11,7 +11,11 @@ import {
   type SupplyDept,
 } from '@/lib/supply-chain/types'
 import { canonicalRoleKey } from '@/lib/permissions'
-import { canEditStorePurchaseOrder, poOriginOf } from '@/lib/supply-chain/po-active'
+import {
+  canEditStorePurchaseOrder,
+  poOriginOf,
+  showsStoreDraftPurchaseList,
+} from '@/lib/supply-chain/po-active'
 import { toast } from 'sonner'
 import { playNotificationBeep } from '@/lib/utils/play-notification-beep'
 import {
@@ -134,55 +138,50 @@ export function useRaisePurchaseRequest(activeTab: string) {
       ?.map((l) => `${l.stockItemId}:${l.quantityOrdered}:${l.unitPrice}`)
       .join('|') ?? ''
 
-  useEffect(() => {
-    const lines = activePurchaseOrder?.lines
-    if (!lines?.length) return
-    setQtyMap((prev) => {
-      const next = { ...prev }
-      let changed = false
-      for (const l of lines) {
-        const str = String(l.quantityOrdered)
-        if (next[l.stockItemId] !== str) {
-          next[l.stockItemId] = str
-          changed = true
-        }
-      }
-      return changed ? next : prev
-    })
-    setPurchaseUnitMap((prev) => {
-      const next = { ...prev }
-      let changed = false
-      for (const l of lines) {
-        if (l.unit && next[l.stockItemId] !== l.unit) {
-          next[l.stockItemId] = l.unit
-          changed = true
-        }
-      }
-      return changed ? next : prev
-    })
-    setPurchasePriceMap((prev) => {
-      const next = { ...prev }
-      let changed = false
-      for (const l of lines) {
-        if (Number.isFinite(l.unitPrice) && l.unitPrice > 0) {
-          const str = String(l.unitPrice)
-          if (next[l.stockItemId] !== str) {
-            next[l.stockItemId] = str
-            changed = true
-          }
-        }
-      }
-      return changed ? next : prev
-    })
-  }, [activePurchaseOrder?.id, poLinesSyncKey])
+  const resetCatalogQtyInputs = () => {
+    setQtyMap({})
+    setPurchaseUnitMap({})
+    setPurchasePriceMap({})
+  }
 
   useEffect(() => {
+    const draftPo =
+      activePurchaseOrder && showsStoreDraftPurchaseList(activePurchaseOrder)
+        ? activePurchaseOrder
+        : undefined
+    const lines = draftPo?.lines
+
+    if (!lines?.length) {
+      if (basket.length === 0) {
+        resetCatalogQtyInputs()
+      }
+      return
+    }
+
+    const nextQty: Record<string, string> = {}
+    const nextUnit: Record<string, string> = {}
+    const nextPrice: Record<string, string> = {}
+    for (const l of lines) {
+      nextQty[l.stockItemId] = String(l.quantityOrdered)
+      if (l.unit) nextUnit[l.stockItemId] = l.unit
+      if (Number.isFinite(l.unitPrice) && l.unitPrice > 0) {
+        nextPrice[l.stockItemId] = String(l.unitPrice)
+      }
+    }
+    setQtyMap(nextQty)
+    setPurchaseUnitMap(nextUnit)
+    setPurchasePriceMap(nextPrice)
+  }, [activePurchaseOrder?.id, activePurchaseOrder?.status, poLinesSyncKey, basket.length])
+
+  useEffect(() => {
+    if (!basket.length) return
     setQtyMap((prev) => {
       const next = { ...prev }
       let changed = false
       for (const b of basket) {
-        if (!(b.stockItemId in next)) {
-          next[b.stockItemId] = String(b.qtyToBuy)
+        const str = String(b.qtyToBuy)
+        if (next[b.stockItemId] !== str) {
+          next[b.stockItemId] = str
           changed = true
         }
       }
@@ -192,7 +191,7 @@ export function useRaisePurchaseRequest(activeTab: string) {
       const next = { ...prev }
       let changed = false
       for (const b of basket) {
-        if (b.unit && !(b.stockItemId in next)) {
+        if (b.unit && next[b.stockItemId] !== b.unit) {
           next[b.stockItemId] = b.unit
           changed = true
         }
@@ -206,7 +205,7 @@ export function useRaisePurchaseRequest(activeTab: string) {
         if (
           Number.isFinite(b.unitPrice) &&
           b.unitPrice > 0 &&
-          !(b.stockItemId in next)
+          next[b.stockItemId] !== String(b.unitPrice)
         ) {
           next[b.stockItemId] = String(b.unitPrice)
           changed = true
@@ -310,15 +309,14 @@ export function useRaisePurchaseRequest(activeTab: string) {
   }
 
   const handleClearBasket = () => {
+    resetCatalogQtyInputs()
     void (async () => {
       const res = await clearBasket(actor)
       if (res && 'error' in res) {
         toast.error(res.error)
         return
       }
-      setQtyMap({})
-      setPurchaseUnitMap({})
-      setPurchasePriceMap({})
+      resetCatalogQtyInputs()
       toast.success('Draft basket cleared')
     })()
   }
@@ -361,17 +359,20 @@ export function useRaisePurchaseRequest(activeTab: string) {
   }
 
   const handleSendToAccountant = () => {
-    const res = sendBasketForApproval(actor)
-    if (res && typeof res === 'object' && 'error' in res) {
-      toast.error(String(res.error))
-      return
-    }
-    if (res && 'po' in res) {
-      playNotificationBeep()
-      toast.success(
-        `${res.po.poNumber} sent — kitchen + store draft lines are combined for accountant review`,
-      )
-    }
+    void (async () => {
+      const res = await sendBasketForApproval(actor)
+      if (res && typeof res === 'object' && 'error' in res) {
+        toast.error(String(res.error))
+        return
+      }
+      if (res && 'po' in res) {
+        resetCatalogQtyInputs()
+        playNotificationBeep()
+        toast.success(
+          `${res.po.poNumber} sent — kitchen + store draft lines are combined for accountant review`,
+        )
+      }
+    })()
   }
 
   return {
