@@ -19,7 +19,7 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { addDays, differenceInCalendarDays, format } from 'date-fns'
 import { X } from 'lucide-react'
-import { formatNaira } from '@/lib/utils/currency'
+import { roomHousekeepingPatchForInHouse } from '@/lib/rooms/sync-housekeeping-status'
 import { toast } from 'sonner'
 import { searchCounterpartyOrganizations } from '@/lib/utils/search-counterparty-organizations'
 import { syncLedgerOrgCounterpartiesToOrganizationsTable } from '@/lib/utils/sync-ledger-org-counterparties-to-organizations'
@@ -422,7 +422,10 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
         }
       }
 
-      await supabase.from('rooms').update({ status: 'occupied', updated_by: user?.id, updated_at: new Date().toISOString() }).eq('id', selectedRoom.id)
+      await supabase.from('rooms').update({
+        ...roomHousekeepingPatchForInHouse('checked_in'),
+        updated_by: user?.id,
+      }).eq('id', selectedRoom.id)
 
       const { error: folioErr } = await insertFolioCharges(supabase, [{
         booking_id: booking.id,
