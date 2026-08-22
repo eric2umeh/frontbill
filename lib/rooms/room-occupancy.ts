@@ -5,6 +5,7 @@ import {
   todayYmdHotel,
   bookingYmdHotel,
 } from "@/lib/utils/booking-in-house-dates";
+import { syncHousekeepingStatusesForOrganization } from "@/lib/rooms/sync-housekeeping-status";
 
 export const OCCUPYING_BOOKING_STATUSES = [
   "checked_in",
@@ -69,9 +70,13 @@ export function roomStatusFromOccupyingBooking(
 export function deriveRoomStatusFromOccupying(
   occupying: Pick<OccupyingBookingRow, "status" | "check_in"> | null,
   currentStatus: string | null | undefined,
+  housekeepingStatus?: string | null | undefined,
 ): string | null {
   const cur = normStatus(currentStatus);
+  const hk = normStatus(housekeepingStatus);
   if (cur === "maintenance" || cur === "out_of_order") return null;
+  if (hk === "out_of_order") return null;
+  if (hk === "checkout" || cur === "cleaning") return null;
 
   if (!occupying) {
     if (cur === "occupied" || cur === "reserved") return "available";
@@ -119,6 +124,7 @@ export type ReconcileRoomStatusesResult = {
   freed: number;
   markedOccupied: number;
   markedReserved: number;
+  housekeepingSynced: number;
 };
 
 /**
@@ -133,13 +139,14 @@ export async function reconcileRoomStatusesForOrganization(
     freed: 0,
     markedOccupied: 0,
     markedReserved: 0,
+    housekeepingSynced: 0,
   };
 
   const [{ data: rooms, error: roomErr }, { data: bookings, error: bookErr }] =
     await Promise.all([
       supabase
         .from("rooms")
-        .select("id, status")
+        .select("id, status, housekeeping_status")
         .eq("organization_id", organizationId),
       supabase
         .from("bookings")
@@ -162,7 +169,11 @@ export async function reconcileRoomStatusesForOrganization(
 
   for (const room of rooms ?? []) {
     const occupying = pickOccupyingBooking(byRoom.get(room.id) ?? []);
-    const next = deriveRoomStatusFromOccupying(occupying, room.status);
+    const next = deriveRoomStatusFromOccupying(
+      occupying,
+      room.status,
+      (room as { housekeeping_status?: string | null }).housekeeping_status,
+    );
     if (!next || normStatus(next) === normStatus(room.status)) continue;
 
     const { error } = await supabase
@@ -179,6 +190,16 @@ export async function reconcileRoomStatusesForOrganization(
     if (next === "available") result.freed += 1;
     else if (next === "occupied") result.markedOccupied += 1;
     else if (next === "reserved") result.markedReserved += 1;
+  }
+
+  try {
+    result.housekeepingSynced = await syncHousekeepingStatusesForOrganization(
+      supabase,
+      organizationId,
+      (bookings ?? []) as OccupyingBookingRow[],
+    );
+  } catch (e) {
+    console.warn("[reconcileRoomStatuses] housekeeping sync", e);
   }
 
   return result;
