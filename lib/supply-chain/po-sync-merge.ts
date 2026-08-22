@@ -82,14 +82,64 @@ function stockedRetirementCount(po: PurchaseOrder | undefined): number {
   ).length
 }
 
+/**
+ * Identity of one Add-to-stock submit row.
+ * Qty/price must NOT be in the key — reviewers correct those in place, and the
+ * server PUT merges incoming vs stored snapshots. A content key treated the
+ * correction as a second line and doubled actualSpent / refund.
+ */
 function retirementLineKey(l: RetirementLine): string {
-  return [
-    l.lineId,
-    l.stockedAt ?? '',
-    String(l.quantityBought),
-    String(l.actualPrice),
-    l.newlyAdded ? '1' : '0',
-  ].join('|')
+  const added = l.newlyAdded ? '1' : '0'
+  if (l.stockedAt) return `${l.lineId}|${l.stockedAt}|${added}`
+  if (l.batchId) return `${l.lineId}|batch:${l.batchId}|${added}`
+  return `${l.lineId}|${l.quantityBought}|${l.actualPrice}|${added}`
+}
+
+function reviewStatusRank(status?: RetirementLine['reviewStatus']): number {
+  if (status === 'accepted') return 3
+  if (status === 'rejected') return 2
+  if (status === 'pending_review') return 1
+  return 0
+}
+
+function lastCorrectionAt(line: RetirementLine): number {
+  let max = 0
+  for (const c of line.corrections ?? []) {
+    const t = Date.parse(c.at) || 0
+    if (t > max) max = t
+  }
+  return max
+}
+
+function preferRetirementLine(
+  existing: RetirementLine,
+  incoming: RetirementLine,
+): RetirementLine {
+  const ir = reviewStatusRank(incoming.reviewStatus)
+  const er = reviewStatusRank(existing.reviewStatus)
+  if (ir !== er) return ir > er ? incoming : existing
+
+  const ic = lastCorrectionAt(incoming)
+  const ec = lastCorrectionAt(existing)
+  if (ic !== ec) return ic > ec ? incoming : existing
+
+  const inCount = incoming.corrections?.length ?? 0
+  const exCount = existing.corrections?.length ?? 0
+  if (inCount !== exCount) return inCount > exCount ? incoming : existing
+
+  if (incoming.stockedAt && !existing.stockedAt) return incoming
+  if (existing.stockedAt && !incoming.stockedAt) return existing
+  return existing
+}
+
+function collapseRetirementLines(lines: RetirementLine[]): RetirementLine[] {
+  const byKey = new Map<string, RetirementLine>()
+  for (const line of lines) {
+    const key = retirementLineKey(line)
+    const existing = byKey.get(key)
+    byKey.set(key, existing ? preferRetirementLine(existing, line) : line)
+  }
+  return [...byKey.values()]
 }
 
 /** Union retirement lines / batches so a stale disbursed copy cannot erase Add-to-stock. */
@@ -98,8 +148,8 @@ export function mergeRetirementRecords(
   b?: RetirementRecord,
 ): RetirementRecord | undefined {
   if (!a && !b) return undefined
-  if (!a) return b
-  if (!b) return a
+  if (!a) return collapseRetirementRecord(b)
+  if (!b) return collapseRetirementRecord(a)
 
   const batchesById = new Map<string, AddToStockBatch>()
   for (const batch of [...(a.batches ?? []), ...(b.batches ?? [])]) {
@@ -117,27 +167,7 @@ export function mergeRetirementRecords(
     )
   }
 
-  // Also prefer accepted/rejected reviewStatus on lines
-  const byKey = new Map<string, RetirementLine>()
-  for (const line of [...(a.lines ?? []), ...(b.lines ?? [])]) {
-    const key = retirementLineKey(line)
-    const existing = byKey.get(key)
-    if (!existing) {
-      byKey.set(key, line)
-      continue
-    }
-    const prefer =
-      line.stockedAt && !existing.stockedAt
-        ? line
-        : (line.reviewStatus === 'accepted' || line.reviewStatus === 'rejected') &&
-            existing.reviewStatus !== 'accepted' &&
-            existing.reviewStatus !== 'rejected'
-          ? line
-          : existing
-    byKey.set(key, prefer)
-  }
-
-  const lines = [...byKey.values()]
+  const lines = collapseRetirementLines([...(a.lines ?? []), ...(b.lines ?? [])])
   const actualSpent = lines
     .filter((l) => !(l.notBought || l.removed))
     .reduce((s, l) => s + (Number(l.totalPaid) || 0), 0)
@@ -164,6 +194,32 @@ export function mergeRetirementRecords(
       newerReview.accountantComment ?? a.accountantComment ?? b.accountantComment,
     reviewedAt: newerReview.reviewedAt ?? a.reviewedAt ?? b.reviewedAt,
     reviewedBy: newerReview.reviewedBy ?? a.reviewedBy ?? b.reviewedBy,
+  }
+}
+
+function collapseRetirementRecord(record: RetirementRecord): RetirementRecord {
+  const lines = collapseRetirementLines(record.lines ?? [])
+  if (lines.length === (record.lines?.length ?? 0)) return record
+  const actualSpent = lines
+    .filter((l) => !(l.notBought || l.removed))
+    .reduce((s, l) => s + (Number(l.totalPaid) || 0), 0)
+  const priceChanges = lines.filter(
+    (l) => !(l.notBought || l.removed) && l.poPrice !== l.actualPrice,
+  ).length
+  return { ...record, lines, actualSpent, priceChanges }
+}
+
+function withCollapsedRetirement(po: PurchaseOrder): PurchaseOrder {
+  if (!po.retirement?.lines?.length) return po
+  const retirement = collapseRetirementRecord(po.retirement)
+  if (retirement === po.retirement) return po
+  return {
+    ...po,
+    retirement: {
+      ...retirement,
+      refundToCashier:
+        (Number(po.cashDisbursed) || 0) - retirement.actualSpent,
+    },
   }
 }
 
@@ -351,7 +407,7 @@ export function dedupePurchaseOrders(orders: PurchaseOrder[]): PurchaseOrder[] {
   }
 
   return [...byId.values()]
-    .map((po) => ensurePoApprovalFreeze(po))
+    .map((po) => ensurePoApprovalFreeze(withCollapsedRetirement(po)))
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
 }
 

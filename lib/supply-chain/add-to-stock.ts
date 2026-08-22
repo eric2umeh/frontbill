@@ -46,23 +46,33 @@ export function isSubmittedAddToStockLine(line: RetirementLine): boolean {
   )
 }
 
+function postedRowIdentity(l: RetirementLine): string {
+  const added = l.newlyAdded ? '1' : '0'
+  if (l.stockedAt) return `${l.stockedAt}|${added}`
+  if (l.batchId) return `batch:${l.batchId}|${added}`
+  return `${l.quantityBought}|${l.actualPrice}|${added}`
+}
+
+function preferPostedRow(existing: RetirementLine, incoming: RetirementLine): RetirementLine {
+  const inCount = incoming.corrections?.length ?? 0
+  const exCount = existing.corrections?.length ?? 0
+  if (inCount !== exCount) return inCount > exCount ? incoming : existing
+  const last = (row: RetirementLine) =>
+    (row.corrections ?? []).reduce((max, c) => Math.max(max, Date.parse(c.at) || 0), 0)
+  return last(incoming) > last(existing) ? incoming : existing
+}
+
 /** Qty already posted to Central Store for a PO line (sum of stocked retirement rows). */
 export function stockedQtyForPoLine(po: PurchaseOrder, lineId: string): number {
-  const seen = new Set<string>()
-  let total = 0
+  const byKey = new Map<string, RetirementLine>()
   for (const l of po.retirement?.lines ?? []) {
     if (l.lineId !== lineId || !isPostedStockLine(l)) continue
-    const key = [
-      l.batchId ?? '',
-      l.stockedAt ?? '',
-      String(l.quantityBought),
-      String(l.actualPrice),
-      l.newlyAdded ? '1' : '0',
-    ].join('|')
-    if (seen.has(key)) continue
-    seen.add(key)
-    total += Number(l.quantityBought) || 0
+    const key = postedRowIdentity(l)
+    const existing = byKey.get(key)
+    byKey.set(key, existing ? preferPostedRow(existing, l) : l)
   }
+  let total = 0
+  for (const l of byKey.values()) total += Number(l.quantityBought) || 0
   return total
 }
 
