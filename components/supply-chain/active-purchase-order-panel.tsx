@@ -116,14 +116,16 @@ export function ActivePurchaseOrderPanel({ actor, storeItems }: Props) {
   ])
 
   const handleSend = () => {
-    const res = sendBasketForApproval(actor)
-    if ('error' in res) toast.error(res.error)
-    else {
-      playNotificationBeep()
-      toast.success(
-        `${res.po.poNumber} sent — kitchen + store draft lines are combined for accountant review under Purchase Orders`,
-      )
-    }
+    void (async () => {
+      const res = await sendBasketForApproval(actor)
+      if ('error' in res) toast.error(res.error)
+      else {
+        playNotificationBeep()
+        toast.success(
+          `${res.po.poNumber} sent — kitchen + store draft lines are combined for accountant review under Purchase Orders`,
+        )
+      }
+    })()
   }
 
   const handleQtyChange = (stockItemId: string, qty: number) => {
