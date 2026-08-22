@@ -16,7 +16,7 @@ import {
 } from '@/lib/supply-chain/po-active'
 import { resolvePoDisplayStatus } from '@/lib/supply-chain/po-format'
 import { useAuth } from '@/lib/auth-context'
-import { canRaisePurchaseRequest } from '@/lib/permissions'
+import { canRaisePurchaseRequest, canDirectDisbursePurchaseOrder, poDraftSubmitButtonLabel, poDraftSubmitSuccessMessage } from '@/lib/permissions'
 import { Badge } from '@/components/ui/badge'
 import { formatNaira } from '@/lib/utils/currency'
 import { Button } from '@/components/ui/button'
@@ -61,6 +61,8 @@ export function ActivePurchaseOrderPanel({ actor, storeItems }: Props) {
     kitchenOrdersAtStore,
   } = useSupplyChain()
 
+  const poSubmitLabel = poDraftSubmitButtonLabel(role)
+  const directDisburse = canDirectDisbursePurchaseOrder(role)
   const po = activePurchaseOrder
   const displayStatus = po ? resolvePoDisplayStatus(po) : undefined
   const canEdit = canEditStorePurchaseOrder(po)
@@ -121,9 +123,7 @@ export function ActivePurchaseOrderPanel({ actor, storeItems }: Props) {
       if ('error' in res) toast.error(res.error)
       else {
         playNotificationBeep()
-        toast.success(
-          `${res.po.poNumber} sent — kitchen + store draft lines are combined for accountant review under Purchase Orders`,
-        )
+        toast.success(poDraftSubmitSuccessMessage(res.po.poNumber, role))
       }
     })()
   }
@@ -420,10 +420,16 @@ export function ActivePurchaseOrderPanel({ actor, storeItems }: Props) {
             : isPendingStore
               ? 'Kitchen order at store — review this draft list (same as Raise purchase), edit if needed, then Send to accountant.'
               : isDraft
-                ? 'Adjust quantities here or on Raise purchase request, then send to accountant.'
+                ? directDisburse
+                  ? 'Adjust quantities here or on Raise purchase request, then approve for market.'
+                  : 'Adjust quantities here or on Raise purchase request, then send to accountant.'
                 : isRejected
-                  ? 'Rejected — edit quantities directly, then send again.'
-                  : 'Update lines, then send to accountant again.'}
+                  ? directDisburse
+                    ? 'Rejected — edit quantities directly, then approve again.'
+                    : 'Rejected — edit quantities directly, then send again.'
+                  : directDisburse
+                    ? 'Update lines, then approve again.'
+                    : 'Update lines, then send to accountant again.'}
         </p>
         <div className="flex flex-wrap gap-2">
           {canDelete && (
@@ -457,7 +463,7 @@ export function ActivePurchaseOrderPanel({ actor, storeItems }: Props) {
           {showSend && (
             <Button type="button" size="sm" onClick={handleSend}>
               <Send className="h-3.5 w-3.5 mr-1" />
-              Send to accountant
+              {poSubmitLabel}
             </Button>
           )}
         </div>
