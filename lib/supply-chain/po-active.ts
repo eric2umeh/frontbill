@@ -130,11 +130,12 @@ export function canEditStorePurchaseOrder(
   if (!po) return true;
   if (isPurchaseOrderDeleted(po)) return false;
   if (isPurchaseOrderLineLocked(po)) return false;
+  const status = resolvePoDisplayStatus(po);
   return (
-    po.status === "draft" ||
-    po.status === "accountant_rejected" ||
-    po.status === "manager_rejected" ||
-    po.status === "pending_store"
+    status === "draft" ||
+    status === "accountant_rejected" ||
+    status === "manager_rejected" ||
+    status === "pending_store"
   );
 }
 
@@ -145,11 +146,14 @@ export function canDeleteStorePurchaseOrder(
 ): boolean {
   if (!po || isPurchaseOrderDeleted(po)) return false;
   if (isPurchaseOrderLineLocked(po)) return false;
+  const status = resolvePoDisplayStatus(po);
   const deletable = [
     "draft",
+    "pending_store",
     "accountant_rejected",
     "manager_rejected",
-  ].includes(po.status);
+    "retirement_rejected",
+  ].includes(status);
   if (!deletable) return false;
   if (userRole != null) return canMutatePurchaseOrder(po, userRole);
   return true;
@@ -180,6 +184,38 @@ export function showsStoreDraftPurchaseList(
     status === "pending_store" ||
     status === "accountant_rejected" ||
     status === "manager_rejected"
+  );
+}
+
+/** Whether PO lines should repopulate the shared org basket (never auto-fill kitchen inbox). */
+export function shouldMirrorPoLinesToBasket(
+  po: PurchaseOrder | undefined,
+  opts: { workspaceOrigin: PoOrigin; workingPoId: string | null },
+): boolean {
+  if (!po || isPurchaseOrderDeleted(po)) return false;
+  if (!showsStoreDraftPurchaseList(po)) return false;
+  if (
+    opts.workspaceOrigin === "kitchen" &&
+    poOriginOf(po) !== "kitchen"
+  ) {
+    return false;
+  }
+  const origin = poOriginOf(po);
+  if (origin === "kitchen") {
+    return opts.workingPoId === po.id;
+  }
+  if (origin === "store" && opts.workspaceOrigin === "store") {
+    return opts.workingPoId === po.id || opts.workingPoId === null;
+  }
+  return opts.workingPoId === po.id;
+}
+
+export function hasEditableDraftPurchaseLines(orders: PurchaseOrder[]): boolean {
+  return orders.some(
+    (p) =>
+      !isPurchaseOrderDeleted(p) &&
+      showsStoreDraftPurchaseList(p) &&
+      (p.lines?.length ?? 0) > 0,
   );
 }
 
@@ -325,11 +361,6 @@ export function getActivePurchaseOrder(
     )[0];
   }
 
-  const atAccountant = candidates.filter((p) => p.status === "pending_accountant");
-  if (atAccountant.length) {
-    return [...atAccountant].sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
-  }
-
   const storeDraft = candidates.filter(
     (p) =>
       poOriginOf(p) === "store" &&
@@ -337,10 +368,24 @@ export function getActivePurchaseOrder(
         p.status === "accountant_rejected" ||
         p.status === "manager_rejected"),
   );
-  // Concurrent kitchen + store: keep the store cart when it already has lines.
+  // Editable store draft with lines wins over pending_accountant (Clear / Raise PO cart).
   const storeWithLines = storeDraft.filter((p) => p.lines.length > 0);
   if (storeWithLines.length) {
     return [...storeWithLines].sort((a, b) =>
+      (b.workflowUpdatedAt || b.createdAt).localeCompare(
+        a.workflowUpdatedAt || a.createdAt,
+      ),
+    )[0];
+  }
+
+  const atAccountant = candidates.filter((p) => p.status === "pending_accountant");
+  if (atAccountant.length) {
+    return [...atAccountant].sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+  }
+
+  // Empty store draft shells (no lines yet)
+  if (storeDraft.length) {
+    return [...storeDraft].sort((a, b) =>
       (b.workflowUpdatedAt || b.createdAt).localeCompare(
         a.workflowUpdatedAt || a.createdAt,
       ),
@@ -360,14 +405,6 @@ export function getActivePurchaseOrder(
     return [...kitchenAtStore].sort((a, b) =>
       (b.workflowUpdatedAt || b.sentToStoreAt || b.createdAt).localeCompare(
         a.workflowUpdatedAt || a.sentToStoreAt || a.createdAt,
-      ),
-    )[0];
-  }
-
-  if (storeDraft.length) {
-    return [...storeDraft].sort((a, b) =>
-      (b.workflowUpdatedAt || b.createdAt).localeCompare(
-        a.workflowUpdatedAt || a.createdAt,
       ),
     )[0];
   }

@@ -68,11 +68,13 @@ import {
 import {
   appendPoLineEdits,
   basketLineToPoLine,
+  canDeleteStorePurchaseOrder,
   canEditStorePurchaseOrder,
   canMutatePurchaseOrder,
   getActivePurchaseOrder,
   getStoreCartMutationTarget,
   companionPurchaseOrdersForStoreSend,
+  hasEditableDraftPurchaseLines,
   isPurchaseOrderAwaitingAccountant,
   isPurchaseOrderDeleted,
   listKitchenOrdersAtStore,
@@ -83,6 +85,7 @@ import {
   poOriginOf,
   recalcPoTotals,
   showsStoreDraftPurchaseList,
+  shouldMirrorPoLinesToBasket,
   stampPoLineEdit,
   storeItemToPoLine,
   visiblePurchaseOrders,
@@ -224,6 +227,8 @@ let lastLocalSupplyMutationAt = 0;
 let liveSupplyInFlight = false;
 /** Serializes PO/basket PUTs so a slow full snapshot cannot overwrite a fresh clear/send. */
 let poBasketPutChain: Promise<void> = Promise.resolve();
+/** Bumped on clear/send so stale debounced PO PUTs cannot restore the cart after refresh. */
+let poBasketSyncGeneration = 0;
 
 function markLocalSupplyMutation() {
   lastLocalSupplyMutationAt = Date.now();
@@ -688,8 +693,18 @@ function useSupplyChainImpl() {
 
   /** Small PUT for PO + basket only — avoids 502/timeouts from uploading the full org snapshot. */
   const persistPoBasketSnapshot = useCallback(
-    async (opts?: { required?: boolean }): Promise<void> => {
+    async (opts?: {
+      required?: boolean;
+      /** When set, skip if a newer clear/send superseded this save. */
+      generation?: number;
+    }): Promise<void> => {
       const run = async (): Promise<void> => {
+        if (
+          opts?.generation != null &&
+          opts.generation !== poBasketSyncGeneration
+        ) {
+          return;
+        }
         if (!useDbPersistence) {
           if (opts?.required) {
             throw new Error("Cloud sync is unavailable — sign in again and retry.");
@@ -704,6 +719,7 @@ function useSupplyChainImpl() {
           }
           return;
         }
+        markLocalSupplyMutation();
         const payload = snapshotsPayloadForRole(
           {
             purchase_orders: purchaseOrdersRef.current,
@@ -718,7 +734,12 @@ function useSupplyChainImpl() {
           }
           return;
         }
-        markLocalSupplyMutation();
+        if (
+          opts?.generation != null &&
+          opts.generation !== poBasketSyncGeneration
+        ) {
+          return;
+        }
         try {
           await saveSupplySnapshots(userId, payload, orgIdRef.current || undefined);
           broadcastSupplyLiveUpdate();
@@ -887,6 +908,26 @@ function useSupplyChainImpl() {
         if (mergedPurchaseOrders.length) {
           setPurchaseOrders(mergedPurchaseOrders);
         }
+        // Basket follows editable draft PO lines; stale org basket JSON cannot resurrect a clear.
+        if (hasPermission(role, "supply:store")) {
+          const cartPo =
+            getStoreCartMutationTarget(mergedPurchaseOrders, null) ??
+            getActivePurchaseOrder(mergedPurchaseOrders, "store", null);
+          if (
+            cartPo &&
+            shouldMirrorPoLinesToBasket(cartPo, {
+              workspaceOrigin: "store",
+              workingPoId: null,
+            }) &&
+            cartPo.lines.length
+          ) {
+            setBasket(poLinesToBasketLines(cartPo.lines));
+          } else if (!hasEditableDraftPurchaseLines(mergedPurchaseOrders)) {
+            setBasket([]);
+          } else if (Array.isArray(snapshots.basket)) {
+            setBasket(snapshots.basket as BasketLine[]);
+          }
+        }
         if (Array.isArray(snapshots.issue_out_log)) {
           const localLog = loadPersistedStock<IssueOutRecord>(
             ISSUE_OUT_LOG_STORAGE_KEY,
@@ -901,11 +942,6 @@ function useSupplyChainImpl() {
         }
         if (Array.isArray(snapshots.pending_items) && snapshots.pending_items.length) {
           setPendingStoreItems(snapshots.pending_items as PendingStoreItem[]);
-        }
-        // Org basket is the store cart — never hydrate it for kitchen-only chefs
-        // (it was resurrecting a "cleared" kitchen draft after hard refresh).
-        if (hasPermission(role, "supply:store") && Array.isArray(snapshots.basket)) {
-          setBasket(snapshots.basket as BasketLine[]);
         }
 
         if (catalog.length === 0 && localCatalog.length > 0 && hasPermission(role, "supply:store")) {
@@ -1055,7 +1091,7 @@ function useSupplyChainImpl() {
       return;
     }
     const timer = window.setTimeout(() => {
-      void persistPoBasketSnapshot().catch(() => {
+      void persistPoBasketSnapshot({ generation: poBasketSyncGeneration }).catch(() => {
         /* toast handled inside persistPoBasketSnapshot when required */
       });
     }, 900);
@@ -1330,15 +1366,12 @@ function useSupplyChainImpl() {
 
   const basketMigratedRef = useRef(false);
 
-  // Mirror basket only when the focused PO identity/status changes — not on every
-  // new `lines` array reference from remote merge (that was wiping a long draft cart).
+  // Mirror basket only when the user is focused on this PO — never auto-fill kitchen
+  // inbox after a store clear (that was resurrecting lines seconds after Clear).
   useEffect(() => {
     if (!activePurchaseOrder) {
-      if (poWorkspaceOrigin === "kitchen") setBasket([]);
       return;
     }
-    // During hard refresh, origin briefly defaults to store and would copy a store
-    // (or kitchen-at-store) PO into the shared basket — then chef UI shows it again.
     if (
       poWorkspaceOrigin === "kitchen" &&
       poOriginOf(activePurchaseOrder) !== "kitchen"
@@ -1348,6 +1381,14 @@ function useSupplyChainImpl() {
     }
     if (!showsStoreDraftPurchaseList(activePurchaseOrder)) {
       setBasket([]);
+      return;
+    }
+    if (
+      !shouldMirrorPoLinesToBasket(activePurchaseOrder, {
+        workspaceOrigin: poWorkspaceOrigin,
+        workingPoId,
+      })
+    ) {
       return;
     }
     if (activePurchaseOrder.lines.length) {
@@ -1360,6 +1401,7 @@ function useSupplyChainImpl() {
     activePurchaseOrder?.status,
     activePurchaseOrder?.origin,
     poWorkspaceOrigin,
+    workingPoId,
   ]);
 
   useEffect(() => {
@@ -1586,10 +1628,16 @@ function useSupplyChainImpl() {
     async (
       actor?: Actor,
     ): Promise<{ ok: true } | { error: string }> => {
-      const resolveTarget = (orders: PurchaseOrder[]) =>
-        poWorkspaceOrigin === "store"
-          ? getStoreCartMutationTarget(orders, workingPoId)
-          : getActivePurchaseOrder(orders, poWorkspaceOrigin, workingPoId);
+      const resolveTarget = (orders: PurchaseOrder[]) => {
+        const cart =
+          poWorkspaceOrigin === "store"
+            ? getStoreCartMutationTarget(orders, workingPoId)
+            : undefined;
+        return (
+          cart ??
+          getActivePurchaseOrder(orders, poWorkspaceOrigin, workingPoId)
+        );
+      };
       const active = resolveTarget(purchaseOrders);
       if (active && !canEditStorePurchaseOrder(active)) {
         return {
@@ -1645,34 +1693,38 @@ function useSupplyChainImpl() {
               : p,
           );
         } else {
-          next = prev.map((p) =>
-            storeClearable(p)
-              ? {
-                  ...p,
-                  deletedAt: nowIso,
-                  deletedBy: who.name,
-                  workflowUpdatedAt: nowIso,
-                  linesLastEditedAt: nowIso,
-                  linesLastEditedBy: who.name,
-                  linesLastEditedRole: who.role,
-                  lines: [],
-                  totalAmount: 0,
-                  cashDisbursed: 0,
-                  lineEdits: [
-                    {
-                      at: nowIso,
-                      by: who.name,
-                      role: who.role,
-                      action: "removed" as const,
-                      stockItemId: "*",
-                      name: "All lines",
-                      detail: "cleared draft basket",
-                    },
-                    ...(p.lineEdits ?? []),
-                  ].slice(0, 40),
-                }
-              : p,
-          );
+          next = prev.map((p) => {
+            const clearThis =
+              (active &&
+                p.id === active.id &&
+                canEditStorePurchaseOrder(active)) ||
+              storeClearable(p);
+            if (!clearThis) return p;
+            return {
+              ...p,
+              deletedAt: nowIso,
+              deletedBy: who.name,
+              workflowUpdatedAt: nowIso,
+              linesLastEditedAt: nowIso,
+              linesLastEditedBy: who.name,
+              linesLastEditedRole: who.role,
+              lines: [],
+              totalAmount: 0,
+              cashDisbursed: 0,
+              lineEdits: [
+                {
+                  at: nowIso,
+                  by: who.name,
+                  role: who.role,
+                  action: "removed" as const,
+                  stockItemId: "*",
+                  name: "All lines",
+                  detail: "cleared draft basket",
+                },
+                ...(p.lineEdits ?? []),
+              ].slice(0, 40),
+            };
+          });
         }
         purchaseOrdersRef.current = next;
         return next;
@@ -1681,8 +1733,9 @@ function useSupplyChainImpl() {
       basketRef.current = [];
       setWorkingPoId(null);
       markLocalSupplyMutation();
+      const generation = ++poBasketSyncGeneration;
       try {
-        await persistPoBasketSnapshot({ required: true });
+        await persistPoBasketSnapshot({ required: true, generation });
         return { ok: true };
       } catch {
         return {
@@ -1941,6 +1994,7 @@ function useSupplyChainImpl() {
       basketRef.current = [];
       setWorkingPoId(directDisburse ? null : submitted.id);
       markLocalSupplyMutation();
+      const generation = ++poBasketSyncGeneration;
       const mergedNote =
         companions.length > 0
           ? ` (combined with ${companions.map((c) => c.poNumber).join(", ")})`
@@ -1978,7 +2032,7 @@ function useSupplyChainImpl() {
         });
       }
       try {
-        await persistPoBasketSnapshot({ required: true });
+        await persistPoBasketSnapshot({ required: true, generation });
       } catch {
         return {
           error:
@@ -3104,24 +3158,17 @@ function useSupplyChainImpl() {
   );
 
   const deleteActivePurchaseOrder = useCallback(
-    (actor: Actor): { ok: true } | { error: string } => {
+    async (actor: Actor): Promise<{ ok: true } | { error: string }> => {
       const po = getActivePurchaseOrder(
         purchaseOrders,
         poWorkspaceOrigin,
         workingPoId,
       );
       if (!po) return { error: "No active purchase order to delete" };
-      if (
-        ![
-          "draft",
-          "accountant_rejected",
-          "manager_rejected",
-          "retirement_rejected",
-        ].includes(po.status)
-      ) {
+      if (!canDeleteStorePurchaseOrder(po, actor.role)) {
         return {
           error:
-            "Only draft or rejected POs can be deleted (not ones already sent for approval)",
+            "This purchase order cannot be deleted in its current status or for your role.",
         };
       }
       const nowIso = new Date().toISOString();
@@ -3146,6 +3193,8 @@ function useSupplyChainImpl() {
       setBasket([]);
       basketRef.current = [];
       setWorkingPoId(null);
+      markLocalSupplyMutation();
+      const generation = ++poBasketSyncGeneration;
       setActivityLog((a) =>
         log(
           a,
@@ -3155,8 +3204,15 @@ function useSupplyChainImpl() {
           po.id,
         ),
       );
-      void persistPoBasketSnapshot();
-      return { ok: true };
+      try {
+        await persistPoBasketSnapshot({ required: true, generation });
+        return { ok: true };
+      } catch {
+        return {
+          error:
+            "Deleted on this screen but cloud sync failed — wait a moment and try again before refreshing",
+        };
+      }
     },
     [purchaseOrders, poWorkspaceOrigin, workingPoId, persistPoBasketSnapshot],
   );
@@ -5350,6 +5406,17 @@ function useSupplyChainImpl() {
         return poLinesToBasketLines(kitchenPo.lines);
       }
       return [];
+    }
+
+    // Store workspace: mirror the PO the cart mutators actually edit.
+    const cartPo =
+      getStoreCartMutationTarget(purchaseOrders, workingPoId) ??
+      activePurchaseOrder;
+    if (cartPo && showsStoreDraftPurchaseList(cartPo)) {
+      if (cartPo.lines.length) {
+        return poLinesToBasketLines(cartPo.lines);
+      }
+      if (basket.length) return basket;
     }
     if (
       activePurchaseOrder &&

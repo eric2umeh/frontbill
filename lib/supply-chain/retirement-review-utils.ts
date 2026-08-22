@@ -133,8 +133,17 @@ export function downloadRetirementReviewReport(
   opts: { batchLabel?: string },
 ) {
   const stats = computeRetirementBatchStats(po, lines)
-  const header =
-    'Item,Dept,Ordered qty,Bought qty,PO price,Actual price,Total paid,Status,Notes'
+  const header = [
+    'Item',
+    'Dept',
+    'Ordered qty',
+    'Bought qty',
+    'PO price',
+    'Actual price',
+    'Total paid',
+    'Status',
+    'Notes',
+  ]
   const body = lines.map((line) => {
     const orig = po.lines.find((l) => l.id === line.lineId)
     const notBought = line.notBought || line.removed
@@ -160,21 +169,19 @@ export function downloadRetirementReviewReport(
       notBought ? 'not bought' : 'bought',
       notes.join('; '),
     ]
-      .map((c) => `"${String(c).replace(/"/g, '""')}"`)
-      .join(',')
   })
 
-  const summary = [
-    '',
-    `"Summary","","","","","","","",""`,
-    `"PO","${po.poNumber}","","","","","","",""`,
-    `"Batch spend","","","","","","${stats.batchSpend}","",""`,
-    `"Approved PO","","","","","","${stats.approvedPoAmount}","",""`,
-    `"Refund/credit to purchaser","","","","","","${stats.refundOrCredit}","",""`,
-    `"Lines reviewed","","${stats.lineCount}","","","","","",""`,
-    `"Bought / not bought","","${stats.boughtCount} / ${stats.notBoughtCount}","","","","","",""`,
-    `"Qty variants","","${stats.qtyChangedCount}","","","","","",""`,
-    `"Price variants","","${stats.priceChangedCount}","","","","","",""`,
+  const summary: unknown[][] = [
+    [],
+    ['Summary', '', '', '', '', '', '', '', ''],
+    ['PO', po.poNumber, '', '', '', '', '', '', ''],
+    ['Batch spend', '', '', '', '', '', stats.batchSpend, '', ''],
+    ['Approved PO', '', '', '', '', '', stats.approvedPoAmount, '', ''],
+    ['Refund/credit to purchaser', '', '', '', '', '', stats.refundOrCredit, '', ''],
+    ['Lines reviewed', '', stats.lineCount, '', '', '', '', '', ''],
+    ['Bought / not bought', '', `${stats.boughtCount} / ${stats.notBoughtCount}`, '', '', '', '', '', ''],
+    ['Qty variants', '', stats.qtyChangedCount, '', '', '', '', '', ''],
+    ['Price variants', '', stats.priceChangedCount, '', '', '', '', '', ''],
   ]
 
   const slug = po.poNumber.replace(/[^\w-]+/g, '-').toLowerCase()

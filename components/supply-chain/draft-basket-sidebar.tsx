@@ -55,12 +55,12 @@ export function DraftBasketSidebar({
                 : `${basket.length} item${basket.length === 1 ? '' : 's'}`}
           </p>
         </div>
-        {!readOnly && !hideClear && basket.length > 0 && (
+        {basket.length > 0 && (
           <Button
             type="button"
-            variant="ghost"
+            variant="outline"
             size="sm"
-            className="h-8 shrink-0 px-2 text-[13px]"
+            className="h-8 shrink-0 px-2.5 text-[13px] text-destructive border-destructive/30 hover:bg-destructive/5"
             onClick={onClear}
           >
             Clear
@@ -139,15 +139,26 @@ export function DraftBasketSidebar({
         </div>
       </div>
 
-      {onSend && !readOnly && (
-        <Button
-          className="w-full h-9 text-[13px] shrink-0"
-          disabled={!basket.length}
-          onClick={onSend}
-        >
-          <Send className="h-3.5 w-3.5 mr-1.5" />
-          {sendLabel}
-        </Button>
+      {basket.length > 0 && (
+        <div className="shrink-0 flex flex-wrap gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            className="flex-1 min-w-[7rem] h-9 text-[13px] text-destructive border-destructive/30 hover:bg-destructive/5"
+            onClick={onClear}
+          >
+            Clear basket
+          </Button>
+          {onSend && !readOnly && (
+            <Button
+              className="flex-1 min-w-[7rem] h-9 text-[13px]"
+              onClick={onSend}
+            >
+              <Send className="h-3.5 w-3.5 mr-1.5" />
+              {sendLabel}
+            </Button>
+          )}
+        </div>
       )}
     </div>
   )

@@ -108,7 +108,13 @@ export async function PUT(request: Request) {
         const remote = Array.isArray(existingRow?.data)
           ? (existingRow.data as PurchaseOrder[])
           : []
+        // Incoming first — client tombstones / sends beat stale server drafts on merge.
         data = mergePurchaseOrdersFromRemote(data as PurchaseOrder[], remote)
+      }
+
+      // Empty basket from client always wins (clear basket / post-send must stick).
+      if (key === 'basket' && Array.isArray(data) && data.length === 0) {
+        data = []
       }
 
       const { error } = await admin.from('supply_chain_snapshots').upsert(

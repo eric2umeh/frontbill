@@ -45,7 +45,6 @@ export function RaisePurchaseRequestPanel({ activeTab }: Props) {
     basket,
     stats,
     purchaseLocked,
-    kitchenAwaitingStore,
     raiseSeedSearch,
     factorsFor,
     toStoreQty,
@@ -71,7 +70,6 @@ export function RaisePurchaseRequestPanel({ activeTab }: Props) {
       basket={basket}
       total={stats.basketTotal}
       readOnly={purchaseLocked}
-      hideClear={kitchenAwaitingStore}
       onClear={handleClearBasket}
       onRemove={handleRemoveFromBasket}
       onQtyChange={handleBasketQtyChange}

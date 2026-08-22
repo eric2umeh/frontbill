@@ -24,6 +24,7 @@ import {
   canIssueStockFromStore,
   canManageStoreCatalog,
   canSubmitStoreItemForApproval,
+  canViewIssueOutLog,
 } from '@/lib/permissions'
 import { issueOutletPickerOptions, isMainBarIssueDestination } from '@/lib/store/outlet-departments'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -139,6 +140,7 @@ export function StoreWorkspace() {
   const [issueLogDateTo, setIssueLogDateTo] = useState(todayYmd)
   const [stockReportDate, setStockReportDate] = useState(todayYmd)
   const canIssue = canIssueStockFromStore(role)
+  const canViewLog = canViewIssueOutLog(role)
   const canAddDirect = canAddStoreItemDirect(role)
   const canManageCatalog = canManageStoreCatalog(role)
   const canSubmitItem = canSubmitStoreItemForApproval(role)
@@ -283,16 +285,16 @@ export function StoreWorkspace() {
         <TabsList className="flex h-auto flex-wrap">
           <TabsTrigger value="stock">Stock Levels</TabsTrigger>
           {canIssue && (
-            <>
-              <TabsTrigger value="issue_out" className="gap-1.5">
-                <ArrowRightFromLine className="h-3.5 w-3.5" />
-                Issue Out
-              </TabsTrigger>
-              <TabsTrigger value="issue_out_log" className="gap-1.5">
-                <History className="h-3.5 w-3.5" />
-                Issue Out Log
-              </TabsTrigger>
-            </>
+            <TabsTrigger value="issue_out" className="gap-1.5">
+              <ArrowRightFromLine className="h-3.5 w-3.5" />
+              Issue Out
+            </TabsTrigger>
+          )}
+          {canViewLog && (
+            <TabsTrigger value="issue_out_log" className="gap-1.5">
+              <History className="h-3.5 w-3.5" />
+              Issue Out Log
+            </TabsTrigger>
           )}
         </TabsList>
 
@@ -990,7 +992,7 @@ export function StoreWorkspace() {
           </TabsContent>
         )}
 
-        {canIssue && (
+        {canViewLog && (
           <TabsContent value="issue_out_log" className="mt-4 space-y-3">
             <div className="grid gap-3 sm:grid-cols-3">
               <div className="rounded-xl border p-3 bg-muted/20">

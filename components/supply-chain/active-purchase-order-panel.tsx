@@ -25,7 +25,7 @@ import { PoDetailCard } from '@/components/supply-chain/po-detail-card'
 import { PoCommentBanner } from '@/components/supply-chain/po-comment-banner'
 import { poStatusBadge } from '@/components/supply-chain/po-approval-panel'
 import { toast } from 'sonner'
-import { Send, Trash2 } from 'lucide-react'
+import { Send, Trash2, Eraser } from 'lucide-react'
 import Link from 'next/link'
 import type { StoreItem } from '@/lib/supply-chain/types'
 import { playNotificationBeep } from '@/lib/utils/play-notification-beep'
@@ -57,6 +57,7 @@ export function ActivePurchaseOrderPanel({ actor, storeItems }: Props) {
     removeFromBasket,
     sendBasketForApproval,
     deleteActivePurchaseOrder,
+    clearBasket,
     selectWorkingPurchaseOrder,
     kitchenOrdersAtStore,
   } = useSupplyChain()
@@ -75,6 +76,7 @@ export function ActivePurchaseOrderPanel({ actor, storeItems }: Props) {
   const isRejected =
     displayStatus === 'accountant_rejected' || displayStatus === 'manager_rejected'
   const isPendingStore = displayStatus === 'pending_store'
+  const canClear = canRaise && basket.length > 0 && !awaitingAccountant
   const linesEditable =
     canRaise &&
     canEdit &&
@@ -196,9 +198,19 @@ export function ActivePurchaseOrderPanel({ actor, storeItems }: Props) {
   }
 
   const handleDeletePo = () => {
-    const res = deleteActivePurchaseOrder(actor)
-    if ('error' in res) toast.error(res.error)
-    else toast.success('Purchase order deleted')
+    void (async () => {
+      const res = await deleteActivePurchaseOrder(actor)
+      if ('error' in res) toast.error(res.error)
+      else toast.success('Purchase order deleted')
+    })()
+  }
+
+  const handleClearPo = () => {
+    void (async () => {
+      const res = await clearBasket(actor)
+      if (res && 'error' in res) toast.error(res.error)
+      else toast.success('Draft basket cleared')
+    })()
   }
 
   if (!po) {
@@ -401,6 +413,55 @@ export function ActivePurchaseOrderPanel({ actor, storeItems }: Props) {
         {stats.basketTotal > 0 ? (
           <p className="text-sm font-semibold tabular-nums">{formatNaira(stats.basketTotal)}</p>
         ) : null}
+        {(canClear || canDelete) && (
+          <div className="flex flex-wrap gap-2 shrink-0">
+            {canClear && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="text-destructive border-destructive/30 hover:bg-destructive/5"
+                onClick={handleClearPo}
+              >
+                <Eraser className="h-3.5 w-3.5 mr-1" />
+                Clear basket
+              </Button>
+            )}
+            {canDelete && (
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="text-destructive border-destructive/30 hover:bg-destructive/5"
+                  >
+                    <Trash2 className="h-3.5 w-3.5 mr-1" />
+                    Delete PO
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Delete this purchase order?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This removes all lines and data for {po.poNumber}. You can start a fresh PO
+                      from Raise purchase request.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction
+                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                      onClick={handleDeletePo}
+                    >
+                      Delete entire PO
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            )}
+          </div>
+        )}
       </div>
       <p className="px-4 pt-2 text-[13px] text-muted-foreground">{formatPoActorStamp(po)}</p>
       {formatPoLinesEditStamp(po) ? (
@@ -460,6 +521,18 @@ export function ActivePurchaseOrderPanel({ actor, storeItems }: Props) {
                     : 'Update lines, then send to accountant again.'}
         </p>
         <div className="flex flex-wrap gap-2">
+          {canClear && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="text-destructive border-destructive/30 hover:bg-destructive/5"
+              onClick={handleClearPo}
+            >
+              <Eraser className="h-3.5 w-3.5 mr-1" />
+              Clear basket
+            </Button>
+          )}
           {canDelete && (
             <AlertDialog>
               <AlertDialogTrigger asChild>

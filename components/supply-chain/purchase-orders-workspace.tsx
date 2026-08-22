@@ -5,6 +5,7 @@ import { useSearchParams } from 'next/navigation'
 import { useClientMounted } from '@/hooks/use-client-mounted'
 import { useAuth } from '@/lib/auth-context'
 import { useSupplyChain } from '@/lib/supply-chain/supply-chain-context'
+import { useSupplyPoPendingCounts } from '@/hooks/use-expenses-pending-counts'
 import {
   canAccessPoApprovalsTab,
   canAccessSupplyPurchaseOrdersMenu,
@@ -67,6 +68,8 @@ export function PurchaseOrdersWorkspace() {
     () => purchaseOrders.filter((p) => isPurchaseOrderInPoMenuHistory(p)).length,
     [purchaseOrders],
   )
+  const pendingCounts = useSupplyPoPendingCounts(role)
+  const pendingApprovalsCount = pendingCounts.purchaseOrders
 
   if (!menuOk) {
     return (
@@ -112,6 +115,11 @@ export function PurchaseOrdersWorkspace() {
             <TabsTrigger value="approvals" className="gap-1.5">
               <FileCheck2 className="h-4 w-4" />
               PO Approvals
+              {pendingApprovalsCount > 0 && (
+                <span className="ml-0.5 rounded-full bg-amber-500 px-1.5 py-0.5 text-[10px] font-semibold text-white tabular-nums">
+                  {pendingApprovalsCount}
+                </span>
+              )}
             </TabsTrigger>
           )}
           <TabsTrigger value="history" className="gap-1.5">

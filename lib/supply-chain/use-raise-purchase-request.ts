@@ -18,7 +18,7 @@ import {
 } from '@/lib/permissions'
 import {
   canEditStorePurchaseOrder,
-  poOriginOf,
+  getStoreCartMutationTarget,
   showsStoreDraftPurchaseList,
 } from '@/lib/supply-chain/po-active'
 import { toast } from 'sonner'
@@ -52,6 +52,8 @@ export function useRaisePurchaseRequest(activeTab: string) {
     activePurchaseOrder,
     stats,
     updateStoreItemDirect,
+    purchaseOrders,
+    workingPoId,
   } = useSupplyChain()
 
   const [dept, setDept] = useState<SupplyDept>('all')
@@ -62,12 +64,9 @@ export function useRaisePurchaseRequest(activeTab: string) {
   const [raiseSeedSearch, setRaiseSeedSearch] = useState('')
   const [focusRaiseItemId, setFocusRaiseItemId] = useState<string | null>(null)
 
-  const purchaseLocked = Boolean(
-    activePurchaseOrder && !canEditStorePurchaseOrder(activePurchaseOrder),
-  )
-  const kitchenAwaitingStore =
-    activePurchaseOrder?.status === 'pending_store' &&
-    poOriginOf(activePurchaseOrder) === 'kitchen'
+  const cartPo =
+    getStoreCartMutationTarget(purchaseOrders, workingPoId) ?? activePurchaseOrder
+  const purchaseLocked = Boolean(cartPo && !canEditStorePurchaseOrder(cartPo))
 
   const actor = { name: name ?? 'Store', role: canonicalRoleKey(role) ?? 'store' }
   const unitLabel = (unit: string) => formatUnitLabel(unit)
@@ -412,7 +411,6 @@ export function useRaisePurchaseRequest(activeTab: string) {
     basket,
     stats,
     purchaseLocked,
-    kitchenAwaitingStore,
     raiseSeedSearch,
     factorsFor,
     toStoreQty,
