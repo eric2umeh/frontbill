@@ -199,6 +199,8 @@ function applyRemoteBarStockArray(
 /** Skip applying a remote poll for a short window after this tab mutated stock. */
 let lastLocalSupplyMutationAt = 0;
 let liveSupplyInFlight = false;
+/** Serializes PO/basket PUTs so a slow full snapshot cannot overwrite a fresh clear/send. */
+let poBasketPutChain: Promise<void> = Promise.resolve();
 
 function markLocalSupplyMutation() {
   lastLocalSupplyMutationAt = Date.now();
@@ -625,11 +627,8 @@ function useSupplyChainImpl() {
         fnb_raw_stock: fnbRawStockRef.current,
         fnb_daily_sheets: fnbDailySheetsRef.current,
         fnb_movements: fnbMovementsRef.current,
-        purchase_orders: purchaseOrdersRef.current,
         issue_out_log: issueOutLogRef.current,
-        activity_log: activityLogRef.current,
         pending_items: pendingStoreItemsRef.current,
-        basket: basketRef.current,
       },
       role,
     );
@@ -663,6 +662,96 @@ function useSupplyChainImpl() {
       }
     }
   }, [useDbPersistence, userId, role]);
+
+  /** Small PUT for PO + basket only — avoids 502/timeouts from uploading the full org snapshot. */
+  const persistPoBasketSnapshot = useCallback(
+    async (opts?: { required?: boolean }): Promise<void> => {
+      const run = async (): Promise<void> => {
+        if (!useDbPersistence) {
+          if (opts?.required) {
+            throw new Error("Cloud sync is unavailable — sign in again and retry.");
+          }
+          return;
+        }
+        if (!dbHydratedRef.current || snapshotSyncSkipRef.current) {
+          if (opts?.required) {
+            throw new Error(
+              "Supply data is still loading — wait a moment and try again.",
+            );
+          }
+          return;
+        }
+        const payload = snapshotsPayloadForRole(
+          {
+            purchase_orders: purchaseOrdersRef.current,
+            basket: basketRef.current,
+            activity_log: activityLogRef.current,
+          },
+          role,
+        );
+        if (Object.keys(payload).length === 0) {
+          if (opts?.required) {
+            throw new Error("Your role cannot save the purchase basket to cloud.");
+          }
+          return;
+        }
+        markLocalSupplyMutation();
+        try {
+          await saveSupplySnapshots(userId, payload, orgIdRef.current || undefined);
+          broadcastSupplyLiveUpdate();
+        } catch (err) {
+          await new Promise((r) => setTimeout(r, 400));
+          try {
+            await saveSupplySnapshots(userId, payload, orgIdRef.current || undefined);
+            broadcastSupplyLiveUpdate();
+          } catch (err2) {
+            const msg = err2 instanceof Error ? err2.message : "";
+            if (/^forbidden$/i.test(msg.trim())) {
+              if (opts?.required) {
+                throw new Error("You do not have permission to save purchase orders.");
+              }
+              console.warn("[supply-chain] PO/basket sync skipped: Forbidden");
+              return;
+            }
+            if (isRetryableSupplyError(err2)) {
+              console.warn("[supply-chain] PO/basket sync retryable:", err2);
+            }
+            console.error("[supply-chain] PO/basket sync failed", err2);
+            const hint =
+              /502|503|504|bad gateway|temporarily unavailable/i.test(msg)
+                ? " Cloudflare or the server timed out — wait a few seconds and try again."
+                : "";
+            toast.error(
+              err2 instanceof Error
+                ? `Could not save purchase order to cloud: ${err2.message}.${hint}`
+                : "Could not save purchase order to cloud — wait and try again before refreshing",
+            );
+            throw err2;
+          }
+        }
+      };
+
+      const next = poBasketPutChain.then(run, run);
+      poBasketPutChain = next.catch(() => {});
+      await next;
+    },
+    [useDbPersistence, userId, role],
+  );
+
+  /** Retry PO/basket sync until DB hydration finishes. */
+  const schedulePersistPoBasketSnapshot = useCallback(() => {
+    if (!useDbPersistence) return;
+    const attempt = (triesLeft: number) => {
+      if (dbHydratedRef.current && !snapshotSyncSkipRef.current) {
+        void persistPoBasketSnapshot();
+        return;
+      }
+      if (triesLeft > 0) {
+        window.setTimeout(() => attempt(triesLeft - 1), 200);
+      }
+    };
+    window.setTimeout(() => attempt(8), 50);
+  }, [useDbPersistence, persistPoBasketSnapshot]);
 
   /** Retry snapshot sync until DB hydration finishes (kitchen / outlet stock changes). */
   const schedulePersistSnapshots = useCallback(() => {
@@ -783,11 +872,7 @@ function useSupplyChainImpl() {
         }
         // Org basket is the store cart — never hydrate it for kitchen-only chefs
         // (it was resurrecting a "cleared" kitchen draft after hard refresh).
-        if (
-          hasPermission(role, "supply:store") &&
-          Array.isArray(snapshots.basket) &&
-          snapshots.basket.length
-        ) {
+        if (hasPermission(role, "supply:store") && Array.isArray(snapshots.basket)) {
           setBasket(snapshots.basket as BasketLine[]);
         }
 
@@ -893,7 +978,7 @@ function useSupplyChainImpl() {
     return () => window.clearTimeout(timer);
   }, [useDbPersistence, dbHydrated, userId, storeItems, role]);
 
-  /** Debounced JSON snapshot sync — always read refs so a slow PUT cannot overwrite Clear. */
+  /** Debounced org snapshot sync (stock, recipes, etc.) — never PO/basket (see persistPoBasketSnapshot). */
   useEffect(() => {
     if (!useDbPersistence || !dbHydrated || snapshotSyncSkipRef.current) return;
     if (
@@ -920,11 +1005,36 @@ function useSupplyChainImpl() {
     fnbRawStock,
     fnbDailySheets,
     fnbMovements,
-    purchaseOrders,
     issueOutLog,
-    activityLog,
     pendingStoreItems,
+    role,
+  ]);
+
+  /** Debounced PO + basket sync — small payload; avoids stale full PUT restoring the draft cart. */
+  useEffect(() => {
+    if (!useDbPersistence || !dbHydrated || snapshotSyncSkipRef.current) return;
+    if (
+      !hasPermission(role, "supply:store") &&
+      !hasPermission(role, "supply:purchasing") &&
+      !hasPermission(role, "supply:kitchen") &&
+      !hasPermission(role, "supply:approve_accountant") &&
+      !hasPermission(role, "supply:approve_manager")
+    ) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      void persistPoBasketSnapshot().catch(() => {
+        /* toast handled inside persistPoBasketSnapshot when required */
+      });
+    }, 900);
+    return () => window.clearTimeout(timer);
+  }, [
+    useDbPersistence,
+    dbHydrated,
+    persistPoBasketSnapshot,
+    purchaseOrders,
     basket,
+    activityLog,
     role,
   ]);
 
@@ -1399,14 +1509,19 @@ function useSupplyChainImpl() {
         );
       });
       if (basketPatch === "remove-item") {
-        setBasket((b) => b.filter((x) => x.stockItemId !== item.id));
+        setBasket((b) => {
+          const next = b.filter((x) => x.stockItemId !== item.id);
+          basketRef.current = next;
+          return next;
+        });
       } else if (basketPatch !== undefined) {
         setBasket(basketPatch);
+        basketRef.current = basketPatch;
       }
-      schedulePersistSnapshots();
+      schedulePersistPoBasketSnapshot();
       return err;
     },
-    [poWorkspaceOrigin, workingPoId, schedulePersistSnapshots],
+    [poWorkspaceOrigin, workingPoId, schedulePersistPoBasketSnapshot],
   );
 
   const addToBasket = useCallback(
@@ -1457,9 +1572,15 @@ function useSupplyChainImpl() {
         (p.status === "draft" ||
           p.status === "accountant_rejected" ||
           p.status === "manager_rejected");
+      const storeClearable = (p: PurchaseOrder) =>
+        !isPurchaseOrderDeleted(p) &&
+        poOriginOf(p) === "store" &&
+        (p.status === "draft" ||
+          p.status === "accountant_rejected" ||
+          p.status === "manager_rejected");
 
       // Kitchen Clear soft-deletes draft POs (tombstone) so hard refresh + org basket
-      // cannot resurrect lines. Store Clear empties the focused draft with a newer clock.
+      // cannot resurrect lines. Store Clear tombstones every editable store draft.
       setPurchaseOrders((prev) => {
         let next: PurchaseOrder[];
         if (poWorkspaceOrigin === "kitchen") {
@@ -1492,37 +1613,34 @@ function useSupplyChainImpl() {
               : p,
           );
         } else {
-          const current = resolveTarget(prev);
-          if (!current || !canEditStorePurchaseOrder(current)) {
-            next = prev;
-          } else {
-            next = prev.map((p) =>
-              p.id === current.id
-                ? {
-                    ...p,
-                    lines: [],
-                    totalAmount: 0,
-                    cashDisbursed: 0,
-                    workflowUpdatedAt: nowIso,
-                    linesLastEditedAt: nowIso,
-                    linesLastEditedBy: who.name,
-                    linesLastEditedRole: who.role,
-                    lineEdits: [
-                      {
-                        at: nowIso,
-                        by: who.name,
-                        role: who.role,
-                        action: "removed" as const,
-                        stockItemId: "*",
-                        name: "All lines",
-                        detail: "cleared draft basket",
-                      },
-                      ...(p.lineEdits ?? []),
-                    ].slice(0, 40),
-                  }
-                : p,
-            );
-          }
+          next = prev.map((p) =>
+            storeClearable(p)
+              ? {
+                  ...p,
+                  deletedAt: nowIso,
+                  deletedBy: who.name,
+                  workflowUpdatedAt: nowIso,
+                  linesLastEditedAt: nowIso,
+                  linesLastEditedBy: who.name,
+                  linesLastEditedRole: who.role,
+                  lines: [],
+                  totalAmount: 0,
+                  cashDisbursed: 0,
+                  lineEdits: [
+                    {
+                      at: nowIso,
+                      by: who.name,
+                      role: who.role,
+                      action: "removed" as const,
+                      stockItemId: "*",
+                      name: "All lines",
+                      detail: "cleared draft basket",
+                    },
+                    ...(p.lineEdits ?? []),
+                  ].slice(0, 40),
+                }
+              : p,
+          );
         }
         purchaseOrdersRef.current = next;
         return next;
@@ -1530,8 +1648,9 @@ function useSupplyChainImpl() {
       setBasket([]);
       basketRef.current = [];
       setWorkingPoId(null);
+      markLocalSupplyMutation();
       try {
-        await persistSnapshotsNow();
+        await persistPoBasketSnapshot({ required: true });
         return { ok: true };
       } catch {
         return {
@@ -1540,7 +1659,7 @@ function useSupplyChainImpl() {
         };
       }
     },
-    [purchaseOrders, poWorkspaceOrigin, workingPoId, persistSnapshotsNow],
+    [purchaseOrders, poWorkspaceOrigin, workingPoId, persistPoBasketSnapshot],
   );
 
   const setBasketLineQty = useCallback(
@@ -1608,7 +1727,7 @@ function useSupplyChainImpl() {
             ]
           : [];
         const editMeta = appendPoLineEdits(current, removeEvents, who);
-        return prev.map((p) =>
+        const next = prev.map((p) =>
           p.id === current.id
             ? {
                 ...p,
@@ -1619,15 +1738,21 @@ function useSupplyChainImpl() {
               }
             : p,
         );
+        purchaseOrdersRef.current = next;
+        return next;
       });
-      if (basketPatch !== undefined) setBasket(basketPatch);
+      if (basketPatch !== undefined) {
+        setBasket(basketPatch);
+        basketRef.current = basketPatch;
+      }
+      schedulePersistPoBasketSnapshot();
       return { ok: true };
     },
-    [purchaseOrders, poWorkspaceOrigin, workingPoId],
+    [purchaseOrders, poWorkspaceOrigin, workingPoId, schedulePersistPoBasketSnapshot],
   );
 
   const sendBasketForApproval = useCallback(
-    (actor: Actor): { po: PurchaseOrder } | { error: string } => {
+    async (actor: Actor): Promise<{ po: PurchaseOrder } | { error: string }> => {
       if (!canRaisePurchaseRequest(actor.role)) {
         return { error: "You do not have permission to raise a purchase order." };
       }
@@ -1761,8 +1886,10 @@ function useSupplyChainImpl() {
         purchaseOrdersRef.current = next;
         return next;
       });
-      setBasket(poLinesToBasketLines(recalcLines));
+      setBasket([]);
+      basketRef.current = [];
       setWorkingPoId(submitted.id);
+      markLocalSupplyMutation();
       const mergedNote =
         companions.length > 0
           ? ` (combined with ${companions.map((c) => c.poNumber).join(", ")})`
@@ -1788,7 +1915,14 @@ function useSupplyChainImpl() {
         body: `${actor.name} sent ${submitted.poNumber}${originNote} (₦${total.toLocaleString()}) for approval`,
         href: "/supply/purchase-orders?tab=approvals",
       });
-      void persistSnapshotsNow();
+      try {
+        await persistPoBasketSnapshot({ required: true });
+      } catch {
+        return {
+          error:
+            "Sent on this screen but cloud sync failed — wait a moment and send again before refreshing",
+        };
+      }
       return { po: submitted };
     },
     [
@@ -1796,7 +1930,7 @@ function useSupplyChainImpl() {
       purchaseOrders,
       poWorkspaceOrigin,
       workingPoId,
-      persistSnapshotsNow,
+      persistPoBasketSnapshot,
     ],
   );
 
@@ -1890,7 +2024,7 @@ function useSupplyChainImpl() {
         body: `${actor.name} sent a kitchen purchase list (₦${total.toLocaleString()}) for store review`,
         href: "/supply/purchase-orders?tab=orders",
       });
-      void persistSnapshotsNow();
+      void persistPoBasketSnapshot();
       return { po: submitted };
     },
     [
@@ -1898,7 +2032,7 @@ function useSupplyChainImpl() {
       purchaseOrders,
       poWorkspaceOrigin,
       workingPoId,
-      persistSnapshotsNow,
+      persistPoBasketSnapshot,
     ],
   );
 
@@ -2022,9 +2156,9 @@ function useSupplyChainImpl() {
           }
         }
       }
-      void persistSnapshotsNow();
+      void persistPoBasketSnapshot();
     },
-    [purchaseOrders, persistSnapshotsNow],
+    [purchaseOrders, persistPoBasketSnapshot],
   );
 
   const managerDecision = useCallback(
@@ -2135,9 +2269,9 @@ function useSupplyChainImpl() {
           });
         }
       }
-      void persistSnapshotsNow();
+      void persistPoBasketSnapshot();
     },
-    [purchaseOrders, persistSnapshotsNow],
+    [purchaseOrders, persistPoBasketSnapshot],
   );
 
   /** Testing: admin approves or rejects a raised PO in one step (skips accountant → manager chain). */
@@ -2246,9 +2380,9 @@ function useSupplyChainImpl() {
           });
         }
       }
-      void persistSnapshotsNow();
+      void persistPoBasketSnapshot();
     },
-    [purchaseOrders, persistSnapshotsNow],
+    [purchaseOrders, persistPoBasketSnapshot],
   );
 
   /** Mutate lines on a specific PO (accountant / privileged in-queue edits). */
@@ -2340,11 +2474,14 @@ function useSupplyChainImpl() {
             : p,
         );
       });
-      if (basketPatch !== undefined) setBasket(basketPatch);
-      schedulePersistSnapshots();
+      if (basketPatch !== undefined) {
+        setBasket(basketPatch);
+        basketRef.current = basketPatch;
+      }
+      schedulePersistPoBasketSnapshot();
       return err;
     },
-    [poWorkspaceOrigin, workingPoId, schedulePersistSnapshots],
+    [poWorkspaceOrigin, workingPoId, schedulePersistPoBasketSnapshot],
   );
 
   const applyRetirementToStock = useCallback(
@@ -2541,10 +2678,10 @@ function useSupplyChainImpl() {
         body: `${actor.name} added ${stamped.length} item(s) to Central Store. Review under Retirement.`,
         href: "/supply/purchasing?tab=retirement",
       });
-      void persistSnapshotsNow();
+      void persistPoBasketSnapshot();
       return { ok: true as const, posted, stampedLineIds: stamped.map((l) => l.lineId) };
     },
-    [purchaseOrders, applyRetirementToStock, persistSnapshotsNow],
+    [purchaseOrders, applyRetirementToStock, persistPoBasketSnapshot],
   );
 
   const submitRetirement = useCallback(
@@ -2704,10 +2841,10 @@ function useSupplyChainImpl() {
         );
       }
 
-      void persistSnapshotsNow();
+      void persistPoBasketSnapshot();
       return { ok: true };
     },
-    [purchaseOrders, applyRetirementToStock, persistSnapshotsNow],
+    [purchaseOrders, applyRetirementToStock, persistPoBasketSnapshot],
   );
 
   const deleteActivePurchaseOrder = useCallback(
@@ -2751,6 +2888,7 @@ function useSupplyChainImpl() {
         return next;
       });
       setBasket([]);
+      basketRef.current = [];
       setWorkingPoId(null);
       setActivityLog((a) =>
         log(
@@ -2761,10 +2899,10 @@ function useSupplyChainImpl() {
           po.id,
         ),
       );
-      void persistSnapshotsNow();
+      void persistPoBasketSnapshot();
       return { ok: true };
     },
-    [purchaseOrders, poWorkspaceOrigin, workingPoId, persistSnapshotsNow],
+    [purchaseOrders, poWorkspaceOrigin, workingPoId, persistPoBasketSnapshot],
   );
 
   const kitchenRawOnHand = useCallback(
@@ -5187,7 +5325,7 @@ export function useSupplyChain() {
     clearBasket: ctx.clearBasket ?? (() => ({ error: "Basket not ready — refresh the page" })),
     sendBasketForApproval:
       ctx.sendBasketForApproval ??
-      (() => ({ error: "Basket not ready — refresh the page" })),
+      (async () => ({ error: "Basket not ready — refresh the page" })),
     sendKitchenOrderToStore:
       ctx.sendKitchenOrderToStore ??
       (() => ({ error: "Kitchen PO not ready — refresh the page" })),
