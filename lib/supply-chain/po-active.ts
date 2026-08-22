@@ -325,6 +325,11 @@ export function getActivePurchaseOrder(
     )[0];
   }
 
+  const atAccountant = candidates.filter((p) => p.status === "pending_accountant");
+  if (atAccountant.length) {
+    return [...atAccountant].sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+  }
+
   const storeDraft = candidates.filter(
     (p) =>
       poOriginOf(p) === "store" &&
@@ -365,11 +370,6 @@ export function getActivePurchaseOrder(
         a.workflowUpdatedAt || a.createdAt,
       ),
     )[0];
-  }
-
-  const atAccountant = candidates.filter((p) => p.status === "pending_accountant");
-  if (atAccountant.length) {
-    return [...atAccountant].sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
   }
 
   return [...candidates].sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
