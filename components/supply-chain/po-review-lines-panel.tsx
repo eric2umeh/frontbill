@@ -20,11 +20,14 @@ import { deptHeaderStyle } from '@/lib/supply-chain/dept-styles'
 type SharedProps = {
   editable?: boolean
   onQtyChange?: (stockItemId: string, qty: number) => void
+  onPriceChange?: (stockItemId: string, price: number) => void
   onDelete?: (stockItemId: string) => void
   pageSize?: number
   compact?: boolean
   showDept?: boolean
   title?: string
+  /** Hide the department summary block (compact lists). */
+  hideDeptSummary?: boolean
   /** Wider draft-basket sidebar: flat list, prominent search & pagination. */
   sidebarVariant?: boolean
   /** External department filter (e.g. from PaginatedListShell). */
@@ -98,6 +101,7 @@ function DeptSectionItems({
   items,
   editable,
   onQtyChange,
+  onPriceChange,
   onDelete,
   compact,
   pageSize,
@@ -107,6 +111,7 @@ function DeptSectionItems({
   items: NormalizedLine[]
   editable: boolean
   onQtyChange?: (stockItemId: string, qty: number) => void
+  onPriceChange?: (stockItemId: string, price: number) => void
   onDelete?: (stockItemId: string) => void
   compact: boolean
   pageSize: number
@@ -129,6 +134,7 @@ function DeptSectionItems({
           line: n.basketLine!,
           editable,
           onQtyChange: editable ? onQtyChange : undefined,
+          onPriceChange: editable ? onPriceChange : undefined,
           onDelete: editable ? onDelete : undefined,
         }))
       : pageItems.map((n) => ({
@@ -136,6 +142,7 @@ function DeptSectionItems({
           line: n.poLine!,
           editable,
           onQtyChange: editable ? onQtyChange : undefined,
+          onPriceChange: editable ? onPriceChange : undefined,
           onDelete: editable ? onDelete : undefined,
         }))
 
@@ -234,15 +241,18 @@ export function PoReviewLinesPanel(props: Props) {
   const {
     editable = false,
     onQtyChange,
+    onPriceChange,
     onDelete,
     pageSize = 10,
     compact = false,
     title,
     deptFilter,
     sidebarVariant = false,
+    hideDeptSummary,
   } = props
   const kind = props.kind ?? 'po'
   const lines = props.lines
+  const hideSummary = hideDeptSummary ?? (compact || sidebarVariant)
   const [search, setSearch] = useState('')
   /** Highlight only — does not filter the list or change the sum total. */
   const [highlightDept, setHighlightDept] = useState<string | null>(null)
@@ -445,7 +455,7 @@ export function PoReviewLinesPanel(props: Props) {
         </div>
       ) : null}
 
-      {!sidebarVariant ? (
+      {!sidebarVariant && !hideSummary ? (
       <div className="rounded-lg border bg-background overflow-hidden">
         <div
           className={cn(
@@ -610,6 +620,7 @@ export function PoReviewLinesPanel(props: Props) {
             items={filteredFlat}
             editable={editable}
             onQtyChange={onQtyChange}
+            onPriceChange={onPriceChange}
             onDelete={onDelete}
             compact={compact}
             pageSize={pageSize}
@@ -677,6 +688,7 @@ export function PoReviewLinesPanel(props: Props) {
                     items={group.items}
                     editable={editable}
                     onQtyChange={onQtyChange}
+                    onPriceChange={onPriceChange}
                     onDelete={onDelete}
                     compact={compact}
                     pageSize={pageSize}
