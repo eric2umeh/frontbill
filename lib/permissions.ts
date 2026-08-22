@@ -984,6 +984,36 @@ export function canAdminTestApproveSupplyPo(
   return roleKey === "admin" || roleKey === "superadmin";
 }
 
+/** Admin / Superadmin / Manager may approve a draft PO in one step (skip accountant queue). */
+export function canDirectDisbursePurchaseOrder(
+  userRole: string | null | undefined,
+): boolean {
+  const roleKey = canonicalRoleKey(userRole);
+  return (
+    roleKey === "admin" || roleKey === "superadmin" || roleKey === "manager"
+  );
+}
+
+/** Raise PO draft basket / active PO submit button label. */
+export function poDraftSubmitButtonLabel(
+  userRole: string | null | undefined,
+): string {
+  return canDirectDisbursePurchaseOrder(userRole)
+    ? "Approve Purchase Orders"
+    : "Send to accountant";
+}
+
+/** Success toast after draft submit from Raise PO / Purchase orders tab. */
+export function poDraftSubmitSuccessMessage(
+  poNumber: string,
+  userRole: string | null | undefined,
+): string {
+  if (canDirectDisbursePurchaseOrder(userRole)) {
+    return `${poNumber} approved — in Purchase Orders → History and Purchasing → Active for market retirement.`;
+  }
+  return `${poNumber} sent — kitchen + store draft lines are combined for accountant review`;
+}
+
 /** Accountant-stage PO accept/reject — not store or purchaser. */
 export function canSupplyPoAccountantReview(
   userRole: string | null | undefined,
