@@ -363,6 +363,26 @@ export function useRaisePurchaseRequest(activeTab: string) {
     if (err) toast.error(err)
   }
 
+  const handleBasketPriceChange = (stockItemId: string, price: number) => {
+    const item = storeItems.find((s) => s.id === stockItemId)
+    const existing = basket.find((b) => b.stockItemId === stockItemId)
+    if (!item || !existing) return
+    setPurchasePriceMap((m) => ({ ...m, [stockItemId]: String(price) }))
+    const storeQty = existing.storeQtyToBuy ?? existing.qtyToBuy
+    const storeUnitPrice =
+      storeQty > 0 && price > 0
+        ? (existing.qtyToBuy * price) / storeQty
+        : item.lastPrice
+    const err = setBasketLineQty(item, storeQty, storeUnitPrice, actor, {
+      purchaseUnit: existing.unit,
+      purchaseQty: existing.qtyToBuy,
+      purchaseUnitPrice: price,
+      storeQty,
+      storeUnitPrice,
+    })
+    if (err) toast.error(err)
+  }
+
   const handleSendToAccountant = () => {
     void (async () => {
       const res = await sendBasketForApproval(actor)
@@ -403,6 +423,7 @@ export function useRaisePurchaseRequest(activeTab: string) {
     handleClearBasket,
     handleRemoveFromBasket,
     handleBasketQtyChange,
+    handleBasketPriceChange,
     handleSendToAccountant,
     poSubmitLabel: poDraftSubmitButtonLabel(role),
     updateStoreItemDirect,
