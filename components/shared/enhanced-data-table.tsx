@@ -16,7 +16,7 @@ import {
 } from '@/lib/utils/booking-in-house-dates'
 
 /** `always`: all breakpoints (horizontal scroll). `md+` / `lg+`: hide below that breakpoint to prioritize key cols on phones. */
-export type ColumnResponsive = 'always' | 'md+' | 'lg+'
+export type ColumnResponsive = 'always' | 'md+' | 'lg+' | 'xl+'
 
 export interface Column<T> {
   key: keyof T | string
@@ -121,6 +121,8 @@ export function EnhancedDataTable<T extends Record<string, any>>({
         return 'hidden md:table-cell'
       case 'lg+':
         return 'hidden lg:table-cell'
+      case 'xl+':
+        return 'hidden xl:table-cell'
       case 'always':
       default:
         return ''
@@ -221,10 +223,10 @@ export function EnhancedDataTable<T extends Record<string, any>>({
   }
 
   const thClass = compactTable
-    ? 'px-2 py-1.5 text-left text-xs font-medium whitespace-nowrap max-md:px-1.5 max-md:py-1 max-md:text-[11px]'
+    ? 'px-1 py-1 text-left text-[11px] font-medium whitespace-nowrap max-md:px-1.5 max-md:py-1'
     : 'px-4 py-2 text-left text-sm font-medium whitespace-nowrap max-md:px-2 max-md:py-1.5 max-md:text-xs'
   const tdClass = compactTable
-    ? 'px-2 py-1.5 text-sm align-middle whitespace-nowrap max-md:px-1.5 max-md:py-1 max-md:text-[11px] max-md:whitespace-normal'
+    ? 'px-1 py-1 text-[11px] align-middle max-md:px-1.5 max-md:py-1 max-md:text-[11px] max-md:whitespace-normal'
     : 'px-4 py-2 text-sm align-middle whitespace-nowrap max-md:px-2 max-md:py-1.5 max-md:text-xs max-md:whitespace-normal'
 
   return (
@@ -376,12 +378,12 @@ export function EnhancedDataTable<T extends Record<string, any>>({
         <div className="border rounded-lg overflow-hidden max-w-full">
           <div
             className={[
-              'w-full max-w-full overflow-x-auto',
+              'w-full max-w-full',
+              compactTable ? 'max-md:overflow-x-auto md:overflow-x-hidden' : 'overflow-x-auto',
               '[scrollbar-width:thin]',
-              '[scrollbar-gutter:stable]',
             ].join(' ')}
           >
-            <table className="w-full min-w-0 table-fixed border-collapse">
+            <table className={`w-full border-collapse ${compactTable ? 'table-auto' : 'min-w-0 table-fixed'}`}>
               <thead className="bg-muted/50">
                 <tr>
                   {showRowNumbers && (
