@@ -34,14 +34,30 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'Only superadmins, admins or managers can list users' }, { status: 403 })
     }
 
-    const profileListSelect = 'id, full_name, role, avatar_url, created_at, added_by'
+    const profileListSelect =
+      'id, full_name, role, avatar_url, created_at, added_by, permission_overrides'
 
     let hasAddedByColumn = true
+    let hasPermissionOverridesColumn = true
     let { data: users, error: usersError }: { data: any[] | null; error: any } = await admin
       .from('profiles')
       .select(profileListSelect)
       .eq('organization_id', callerProfile.organization_id)
       .order('created_at', { ascending: true })
+
+    if (usersError && /permission_overrides/i.test(usersError.message || '')) {
+      hasPermissionOverridesColumn = false
+      const retrySelect = hasAddedByColumn
+        ? 'id, full_name, role, avatar_url, created_at, added_by'
+        : 'id, full_name, role, avatar_url, created_at'
+      const retry = await admin
+        .from('profiles')
+        .select(retrySelect)
+        .eq('organization_id', callerProfile.organization_id)
+        .order('created_at', { ascending: true })
+      users = retry.data
+      usersError = retry.error
+    }
 
     if (usersError && /added_by/i.test(usersError.message || '')) {
       hasAddedByColumn = false
