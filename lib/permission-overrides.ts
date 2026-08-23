@@ -5,3 +5,8 @@ export type PermissionOverrides = {
   /** Permissions removed from the role default (admin/superadmin only). */
   denies?: string[]
 }
+
+/** Hotel-wide overrides per role key (organizations.role_permission_overrides JSONB). */
+export type RolePermissionOverridesMap = Partial<
+  Record<string, PermissionOverrides>
+>
