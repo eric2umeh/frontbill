@@ -344,6 +344,7 @@ export default function AccountsPage() {
             <EnhancedDataTable
               showRowNumbers
               compactTable
+              itemsPerPage={15}
               data={tableData}
               listWhenSearchEmpty={listWhenSearchEmpty}
               searchPlaceholder="Search all guests by name, phone, or email…"
