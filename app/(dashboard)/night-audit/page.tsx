@@ -338,25 +338,24 @@ export default function NightAuditPage() {
   return (
     <div className="space-y-4">
       <Tabs value={auditTab} onValueChange={onAuditTabChange} className="w-full space-y-4">
-        <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight shrink-0">Night Audit</h1>
-          <TabsList className="flex flex-wrap h-auto gap-1 justify-start xl:justify-center xl:flex-1">
-            <TabsTrigger value="night-audit" className="text-xs sm:text-sm">
+        <div className="flex flex-row items-center justify-between gap-3">
+          <TabsList className="flex h-auto flex-nowrap gap-1 overflow-x-auto min-w-0">
+            <TabsTrigger value="night-audit" className="shrink-0 text-xs sm:text-sm">
               Night Audit
             </TabsTrigger>
-            <TabsTrigger value="expected-arrivals" className="text-xs sm:text-sm">
+            <TabsTrigger value="expected-arrivals" className="shrink-0 text-xs sm:text-sm">
               Expected Arrivals
             </TabsTrigger>
-            <TabsTrigger value="pending-checkouts" className="text-xs sm:text-sm">
+            <TabsTrigger value="pending-checkouts" className="shrink-0 text-xs sm:text-sm">
               Pending Checkouts
             </TabsTrigger>
             {canViewAuditTrails && (
-              <TabsTrigger value="audit-trails" className="text-xs sm:text-sm">
+              <TabsTrigger value="audit-trails" className="shrink-0 text-xs sm:text-sm">
                 Audit Trails
               </TabsTrigger>
             )}
             {canApproveBackdates && !!userId && (
-              <TabsTrigger value="backdate-requests" className="gap-1.5 text-xs sm:text-sm">
+              <TabsTrigger value="backdate-requests" className="shrink-0 gap-1.5 text-xs sm:text-sm">
                 <CalendarClock className="h-3.5 w-3.5" />
                 Backdate Requests
                 {pendingApprovals.backdate > 0 && (
@@ -367,7 +366,7 @@ export default function NightAuditPage() {
               </TabsTrigger>
             )}
             {canApproveRoomChanges && !!userId && (
-              <TabsTrigger value="room-change-requests" className="gap-1.5 text-xs sm:text-sm">
+              <TabsTrigger value="room-change-requests" className="shrink-0 gap-1.5 text-xs sm:text-sm">
                 <DoorOpen className="h-3.5 w-3.5" />
                 Room Changes
                 {pendingApprovals.room_change > 0 && (
@@ -378,7 +377,7 @@ export default function NightAuditPage() {
               </TabsTrigger>
             )}
             {canApproveExtendDiscount && !!userId && (
-              <TabsTrigger value="extend-discount" className="gap-1.5 text-xs sm:text-sm">
+              <TabsTrigger value="extend-discount" className="shrink-0 gap-1.5 text-xs sm:text-sm">
                 <Percent className="h-3.5 w-3.5" />
                 Extend discounts
                 {pendingApprovals.extend_discount > 0 && (
@@ -389,7 +388,7 @@ export default function NightAuditPage() {
               </TabsTrigger>
             )}
             {canApproveRescheduleStay && !!userId && (
-              <TabsTrigger value="reschedule-stay-requests" className="gap-1.5 text-xs sm:text-sm">
+              <TabsTrigger value="reschedule-stay-requests" className="shrink-0 gap-1.5 text-xs sm:text-sm">
                 <CalendarRange className="h-3.5 w-3.5" />
                 Move dates
                 {pendingApprovals.reschedule_stay > 0 && (
@@ -444,7 +443,13 @@ export default function NightAuditPage() {
 
         <TabsContent value="night-audit" className="mt-0 space-y-6">
           <Card>
-            <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-end">
+            <CardHeader>
+              <CardTitle>Night Audit</CardTitle>
+              <CardDescription>
+                Close the previous business day (typical morning run) and roll the hotel date forward
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-3 sm:flex-row sm:items-end">
               <div className="space-y-1.5 flex-1">
                 <Label htmlFor="closing_date">Business date to close</Label>
                 <Input
