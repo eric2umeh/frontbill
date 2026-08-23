@@ -10,7 +10,8 @@ import { Button } from '@/components/ui/button'
 import { Calendar } from '@/components/ui/calendar'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { TABLE_INLINE_ROW, TABLE_META_TEXT, TABLE_CELL_TRUNCATE } from '@/lib/utils/table-row-inline'
+import { TABLE_INLINE_ROW, TABLE_META_TEXT, TABLE_CELL_TRUNCATE, TABLE_STACKED_CELL } from '@/lib/utils/table-row-inline'
+import { paymentMethodRequiresAccount } from '@/lib/payments/payment-accounts'
 import { formatNaira } from '@/lib/utils/currency'
 import { MobileTableSubdetail } from '@/lib/utils/table-mobile'
 import { usePageData } from '@/hooks/use-page-data'
@@ -515,20 +516,21 @@ export default function TransactionsPage() {
                   icon: null,
                 }
               return (
-                <div
-                  className={`${TABLE_INLINE_ROW} max-w-[8rem]`}
-                  title={[cfg.label, p.payment_account_label, p.payment_method === 'city_ledger' ? p.notes?.replace(/^City Ledger:\s*/, '') : null].filter(Boolean).join(' · ')}
-                >
+                <div className={TABLE_STACKED_CELL}>
                   <Badge variant="outline" className={`${cfg.bg} ${cfg.color} gap-1 max-md:text-[10px] px-1.5 py-0 shrink-0`}>
                     {cfg.icon}
                     {cfg.label}
                   </Badge>
                   {p.payment_account_label ? (
-                    <span className={`${TABLE_META_TEXT} ${TABLE_CELL_TRUNCATE}`}>{p.payment_account_label}</span>
+                    <span className={`${TABLE_META_TEXT} ${TABLE_CELL_TRUNCATE}`} title={p.payment_account_label}>
+                      {p.payment_account_label}
+                    </span>
                   ) : p.payment_method === 'city_ledger' && p.notes ? (
                     <span className={`${TABLE_META_TEXT} ${TABLE_CELL_TRUNCATE}`}>
                       {p.notes.replace(/^City Ledger:\s*/, '')}
                     </span>
+                  ) : paymentMethodRequiresAccount(p.payment_method) ? (
+                    <span className={TABLE_META_TEXT}>—</span>
                   ) : null}
                 </div>
               )
