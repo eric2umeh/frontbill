@@ -16,6 +16,11 @@ import { ExtendStayModal } from "@/components/bookings/extend-stay-modal";
 import { AddChargeModal } from "@/components/bookings/add-charge-modal";
 import { CheckoutConfirmDialog } from "@/components/bookings/checkout-confirm-dialog";
 import { formatNaira } from "@/lib/utils/currency";
+import { fetchHotelBusinessNightUtcBounds } from "@/lib/payments/business-night-bounds";
+import {
+  sumRoomRevenueForHotelNight,
+  sumPaymentAmounts,
+} from "@/lib/reports/day-page-stats";
 import { usePageData } from "@/hooks/use-page-data";
 import { useAuth } from "@/lib/auth-context";
 import { hasPermission } from "@/lib/permissions";
@@ -286,7 +291,12 @@ export default function BookingsPage() {
     availableForCheckin: number;
     outOfOrder: number;
     dueOutToday: number;
+    roomRevenue: number;
+    cashCollected: number;
+    statsDate: string;
   } | null>(null);
+
+  const statsDateYmd = stayDateYmd ?? frontOfficeToday;
 
   useEffect(() => {
     if (!organizationId) return;
@@ -310,14 +320,12 @@ export default function BookingsPage() {
     };
   }, [organizationId]);
 
-  const refreshRoomStats = useCallback(async () => {
+  const refreshRoomStats = useCallback(async (forDate?: string) => {
     if (!organizationId) return;
     const supabase = createClient();
     if (!supabase) return;
     const tz = resolveHotelTimeZone();
-    const today = frontOfficeToday;
-
-    await reconcileRoomStatusesClient();
+    const today = forDate ?? frontOfficeToday;
 
     const [
       { data: roomRows, error: roomErr },
@@ -329,7 +337,7 @@ export default function BookingsPage() {
         .eq("organization_id", organizationId),
       supabase
         .from("bookings")
-        .select("id, room_id, check_in, check_out, status, folio_status")
+        .select("id, room_id, check_in, check_out, status, folio_status, rate_per_night")
         .eq("organization_id", organizationId)
         .in("status", ["checked_in", "confirmed", "reserved"]),
     ]);
@@ -340,6 +348,27 @@ export default function BookingsPage() {
     }
     if (dueErr) {
       console.warn("[bookings] due-out stats:", dueErr.message);
+    }
+
+    let cashCollected = 0;
+    try {
+      const bounds = await fetchHotelBusinessNightUtcBounds({
+        supabase,
+        organizationId,
+        ymd: today,
+        timeZone: tz,
+      });
+      if (!bounds.empty) {
+        const { data: payments } = await supabase
+          .from("payments")
+          .select("amount")
+          .eq("organization_id", organizationId)
+          .gte("payment_date", bounds.startIso)
+          .lte("payment_date", bounds.endInclusiveIso);
+        cashCollected = sumPaymentAmounts(payments ?? []);
+      }
+    } catch (e) {
+      console.warn("[bookings] cash stats:", e);
     }
 
     const norm = (s: string | null | undefined) =>
@@ -353,6 +382,7 @@ export default function BookingsPage() {
       (r: { status?: string }) => norm(r.status) === "out_of_order",
     ).length;
     const availableForCheckin = Math.max(0, list.length - physicallyHeld - outOfOrder);
+    const roomRevenue = sumRoomRevenueForHotelNight(dueBookings ?? [], today);
 
     setRoomStats({
       total: list.length,
@@ -361,6 +391,9 @@ export default function BookingsPage() {
       availableForCheckin,
       outOfOrder,
       dueOutToday: stay.dueOut,
+      roomRevenue,
+      cashCollected,
+      statsDate: today,
     });
   }, [organizationId, frontOfficeToday]);
 
@@ -640,10 +673,9 @@ export default function BookingsPage() {
       toast.error(msg);
       setInHouseBookings([]);
     } finally {
-      window.setTimeout(() => void refreshRoomStats(), 400);
       endFetch();
     }
-  }, [organizationId, userId, refreshRoomStats, startFetch, endFetch, frontOfficeToday]);
+  }, [organizationId, userId, startFetch, endFetch, frontOfficeToday]);
 
   const fetchBookingsCatalog = useCallback(
     async (scopeKey: string) => {
@@ -941,15 +973,17 @@ export default function BookingsPage() {
           status: "all",
         }));
         void fetchStayDateBookings(ymd);
+        void refreshRoomStats(ymd);
       } else {
         setStayDateYmd(null);
         setTableFilters((prev) => ({
           ...prev,
           status: "checked_in",
         }));
+        void refreshRoomStats(frontOfficeToday);
       }
     },
-    [fetchStayDateBookings],
+    [fetchStayDateBookings, refreshRoomStats, frontOfficeToday],
   );
 
   useEffect(() => {
@@ -993,8 +1027,8 @@ export default function BookingsPage() {
       setRoomStats(null);
       return;
     }
-    void refreshRoomStats();
-  }, [organizationId, refreshRoomStats]);
+    void refreshRoomStats(stayDateYmd ?? frontOfficeToday);
+  }, [organizationId, refreshRoomStats, stayDateYmd, frontOfficeToday]);
 
   const statusColors: Record<string, string> = {
     reserved: "bg-blue-500/10 text-blue-700 border-blue-200",
@@ -1368,120 +1402,66 @@ export default function BookingsPage() {
         </>
       )}
 
-      <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between lg:gap-3">
-        <div className="min-w-0 space-y-1">
-          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">
-            Bookings
-          </h1>
-          <p className="text-muted-foreground text-xs sm:text-sm leading-snug max-w-3xl">
-            Default: <strong>occupied + due today + today’s arrivals</strong>.
-            Due guests stay in this list with a note. Search finds any booking
-            in the last 90 days. Checkout frees the room.
+      <div className="text-center space-y-1">
+        <h1 className="text-3xl sm:text-4xl font-bold tracking-tight">Bookings</h1>
+        {roomStats && (
+          <p className="text-xs text-muted-foreground">
+            Stats for {roomStats.statsDate}
+            {stayDateYmd ? " (filtered date)" : " (today)"}
           </p>
+        )}
+      </div>
+
+      {roomStats !== null && (
+        <div className="mx-auto grid w-full max-w-5xl grid-cols-2 sm:grid-cols-4 gap-3">
+          {[
+            { label: "Occupied", value: roomStats.occupied, color: "border-blue-200 bg-blue-50/80" },
+            { label: "Reserved", value: roomStats.reserved, color: "border-violet-200 bg-violet-50/80" },
+            { label: "Due out", value: roomStats.dueOutToday, color: "border-amber-200 bg-amber-50/80" },
+            { label: "Available", value: roomStats.availableForCheckin, color: "border-green-200 bg-green-50/80" },
+            { label: "OOO", value: roomStats.outOfOrder, color: "border-orange-200 bg-orange-50/80" },
+            { label: "Room revenue", value: formatNaira(roomStats.roomRevenue), color: "border-slate-200 bg-slate-50/80", isText: true },
+            { label: "Cash collected", value: formatNaira(roomStats.cashCollected), color: "border-emerald-200 bg-emerald-50/80", isText: true },
+            { label: "Total rooms", value: roomStats.total, color: "border-gray-200 bg-muted/40" },
+          ].map((s) => (
+            <div
+              key={s.label}
+              className={`rounded-xl border px-4 py-3 text-center shadow-sm ${s.color}`}
+            >
+              <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{s.label}</p>
+              <p className={`mt-1 font-bold tabular-nums ${s.isText ? "text-lg sm:text-xl" : "text-2xl sm:text-3xl"}`}>
+                {s.value}
+              </p>
+            </div>
+          ))}
         </div>
-        <div className="flex flex-wrap items-center gap-1.5 shrink-0">
-          {roomStats !== null && (
-            <>
-              <div
-                className="inline-flex h-7 items-center gap-1 rounded-md border border-blue-200/80 bg-blue-50/50 px-1.5 text-[10px] font-medium leading-none shadow-sm"
-                title="Checked-in guests staying past today (excludes due-out and reservations)"
-              >
-                <Bed
-                  className="h-3 w-3 shrink-0 text-blue-700"
-                  aria-hidden
-                />
-                <span className="text-muted-foreground">Occ</span>
-                <span className="tabular-nums text-foreground">
-                  {roomStats.occupied}
-                </span>
-              </div>
-              <div
-                className="inline-flex h-7 items-center gap-1 rounded-md border border-violet-200/80 bg-violet-50/50 px-1.5 text-[10px] font-medium leading-none shadow-sm"
-                title="Reservations / not checked in yet"
-              >
-                <CalendarDays
-                  className="h-3 w-3 shrink-0 text-violet-700"
-                  aria-hidden
-                />
-                <span className="text-muted-foreground">Res</span>
-                <span className="tabular-nums text-foreground">
-                  {roomStats.reserved}
-                </span>
-              </div>
-              <div
-                className="inline-flex h-7 items-center gap-1 rounded-md border border-amber-200/80 bg-amber-50/50 px-1.5 text-[10px] font-medium leading-none shadow-sm"
-                title="Checkout on the hotel business date (Due out appears after Night Audit rolls the date)"
-              >
-                <CalendarClock
-                  className="h-3 w-3 shrink-0 text-amber-700"
-                  aria-hidden
-                />
-                <span className="text-muted-foreground">Due</span>
-                <span className="tabular-nums text-foreground">
-                  {roomStats.dueOutToday}
-                </span>
-              </div>
-              <div
-                className="inline-flex h-7 items-center gap-1 rounded-md border border-green-200/80 bg-green-50/50 px-1.5 text-[10px] font-medium leading-none shadow-sm"
-                title="Rooms free for check-in (total − Occ − Due today − OOO)"
-              >
-                <DoorOpen
-                  className="h-3 w-3 shrink-0 text-green-700"
-                  aria-hidden
-                />
-                <span className="text-muted-foreground">Avail</span>
-                <span className="tabular-nums text-foreground">
-                  {roomStats.availableForCheckin}
-                </span>
-              </div>
-              <div
-                className="inline-flex h-7 items-center gap-1 rounded-md border border-orange-200/80 bg-orange-50/50 px-1.5 text-[10px] font-medium leading-none shadow-sm"
-                title="Rooms marked Out of order"
-              >
-                <AlertTriangle
-                  className="h-3 w-3 shrink-0 text-orange-700"
-                  aria-hidden
-                />
-                <span className="text-muted-foreground">OOO</span>
-                <span className="tabular-nums text-foreground">
-                  {roomStats.outOfOrder}
-                </span>
-              </div>
-              <span
-                className="text-[9px] text-muted-foreground tabular-nums hidden sm:inline px-0.5"
-                title="Total rooms"
-              >
-                /{roomStats.total}
-              </span>
-            </>
-          )}
+      )}
+
+      <div className="flex flex-wrap items-center justify-center gap-2">
           {hasPermission(role, "bookings:create") && (
             <>
               <Button
                 variant="outline"
                 size="sm"
-                className="h-7 text-[10px] px-2"
                 onClick={() => setBulkModalOpen(true)}
               >
-                <Users className="mr-1 h-3 w-3" />
+                <Users className="mr-2 h-4 w-4" />
                 Bulk Booking
               </Button>
-              <Button
-                size="sm"
-                className="h-7 text-[10px] px-2"
-                onClick={() => setModalOpen(true)}
-              >
-                <Plus className="mr-1 h-3 w-3" />
+              <Button size="sm" onClick={() => setModalOpen(true)}>
+                <Plus className="mr-2 h-4 w-4" />
                 New Booking
               </Button>
             </>
           )}
-        </div>
       </div>
 
       <EnhancedDataTable
         data={allBookingsCatalog}
         loading={catalogFetchPending}
+        showRowNumbers
+        prominentDateFilter
+        centerToolbar
         listWhenSearchEmpty={
           tableFilters.status === "checked_in" ? inHouseBookings : undefined
         }
@@ -2074,27 +2054,6 @@ export default function BookingsPage() {
                 </div>
               );
             },
-          },
-          {
-            key: "folio_id",
-            label: "Folio ID",
-            responsive: "lg+",
-            render: (booking) => (
-              <div
-                className="font-mono text-xs cursor-pointer hover:text-primary lg:text-sm"
-                onClick={() =>
-                  router.push(
-                    booking.is_bulk
-                      ? `/bulk-bookings/${booking.bulk_group_id}`
-                      : `/bookings/${booking.id}`,
-                  )
-                }
-              >
-                {booking.is_bulk
-                  ? `Bulk (${booking.room_count})`
-                  : booking.folio_id}
-              </div>
-            ),
           },
           {
             key: "created_by_name",
