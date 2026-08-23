@@ -3,6 +3,8 @@
 import { useEffect, useState, useMemo, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { ROLE_DEFINITIONS, getPermissionGroups, type RoleKey, type Permission, canonicalRoleKey } from '@/lib/permissions'
+import type { PermissionOverrides } from '@/lib/permission-overrides'
+import { PermissionOverridesEditor, normalizePermissionOverrides } from '@/components/users/permission-overrides-editor'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -30,6 +32,7 @@ interface UserProfile {
   email?: string
   added_by?: string | null
   added_by_name?: string | null
+  permission_overrides?: PermissionOverrides | null
 }
 
 // ---- Add User state shape ----
@@ -51,6 +54,7 @@ export default function UsersRolesPage() {
   // Edit role/name/password dialog
   const [editingUser, setEditingUser] = useState<UserProfile | null>(null)
   const [editForm, setEditForm] = useState({ role: '', full_name: '', password: '', confirmPassword: '' })
+  const [editPermissionOverrides, setEditPermissionOverrides] = useState<PermissionOverrides>({})
   const [showEditPassword, setShowEditPassword] = useState(false)
   const [saving, setSaving] = useState(false)
 
@@ -159,10 +163,15 @@ export default function UsersRolesPage() {
     }
   }
 
+  const canEditPermissionOverrides =
+    canonicalRoleKey(currentUserRole) === 'superadmin' ||
+    canonicalRoleKey(currentUserRole) === 'admin'
+
   // ---- Edit user (role + name + optional password) ----
   const openEdit = (user: UserProfile) => {
     setEditingUser(user)
     setEditForm({ role: user.role, full_name: user.full_name || '', password: '', confirmPassword: '' })
+    setEditPermissionOverrides(user.permission_overrides ?? {})
     setShowEditPassword(false)
   }
 
@@ -178,10 +187,18 @@ export default function UsersRolesPage() {
     }
     setSaving(true)
     try {
-      const body: Record<string, string> = {}
+      const body: Record<string, unknown> = {}
       if (editForm.role !== editingUser.role) body.role = editForm.role
       if (editForm.full_name !== (editingUser.full_name || '')) body.full_name = editForm.full_name
       if (editForm.password) body.password = editForm.password
+
+      if (canEditPermissionOverrides) {
+        const normalized = normalizePermissionOverrides(editPermissionOverrides)
+        const prev = normalizePermissionOverrides(editingUser.permission_overrides ?? {})
+        const changed =
+          JSON.stringify(normalized ?? null) !== JSON.stringify(prev ?? null)
+        if (changed) body.permission_overrides = normalized
+      }
 
       if (Object.keys(body).length === 0) {
         toast.info('No changes to save')
@@ -199,9 +216,17 @@ export default function UsersRolesPage() {
       if (!res.ok) { toast.error(json.error || 'Failed to update user'); return }
 
       const displayName = editForm.full_name ? formatPersonName(editForm.full_name) : editingUser.full_name
+      const savedOverrides = canEditPermissionOverrides
+        ? normalizePermissionOverrides(editPermissionOverrides)
+        : editingUser.permission_overrides
       toast.success(`${displayName} updated`)
       setUsers(prev => prev.map(u => u.id === editingUser.id
-        ? { ...u, role: editForm.role, full_name: displayName || u.full_name }
+        ? {
+            ...u,
+            role: editForm.role,
+            full_name: displayName || u.full_name,
+            permission_overrides: savedOverrides,
+          }
         : u
       ))
       setEditingUser(null)
@@ -531,7 +556,7 @@ export default function UsersRolesPage() {
 
       {/* ======== EDIT USER DIALOG ======== */}
       <Dialog open={!!editingUser} onOpenChange={(o) => { if (!saving) { if (!o) setEditingUser(null) } }}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Edit User</DialogTitle>
             <DialogDescription>
@@ -570,6 +595,21 @@ export default function UsersRolesPage() {
             {editForm.role && (() => {
               const role = ROLE_DEFINITIONS.find(r => r.key === editForm.role)
               if (!role) return null
+              if (canEditPermissionOverrides) {
+                const roleKey = canonicalRoleKey(editForm.role) as RoleKey | null
+                if (!roleKey) return null
+                return (
+                  <div className="space-y-2">
+                    <Label>Custom permissions</Label>
+                    <PermissionOverridesEditor
+                      roleKey={roleKey}
+                      overrides={editPermissionOverrides}
+                      onChange={setEditPermissionOverrides}
+                      disabled={saving}
+                    />
+                  </div>
+                )
+              }
               return (
                 <div className="border rounded-md p-3 bg-muted/30 space-y-2">
                   <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Permissions granted</p>
