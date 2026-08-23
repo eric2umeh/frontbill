@@ -2,6 +2,8 @@
 
 import { createContext, useContext } from 'react'
 
+import type { PermissionOverrides } from '@/lib/permission-overrides'
+
 interface AuthContextValue {
   userId: string
   email: string
@@ -11,6 +13,7 @@ interface AuthContextValue {
   /** Public URL for hotel logo; empty when none */
   organizationLogoUrl: string
   setOrganizationLogoUrl: (url: string) => void
+  permissionOverrides?: PermissionOverrides | null
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
@@ -36,6 +39,7 @@ export function useAuth(): AuthContextValue {
       organizationId: '',
       organizationLogoUrl: '',
       setOrganizationLogoUrl: () => {},
+      permissionOverrides: null,
     }
   }
   return ctx
