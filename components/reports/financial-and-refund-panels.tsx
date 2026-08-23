@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import { format } from "date-fns";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import { format, subDays } from "date-fns";
 import { toast } from "sonner";
 import {
   Card,
@@ -40,6 +40,7 @@ import {
 } from "@/components/ui/popover";
 import { CalendarIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { EnhancedDataTable } from "@/components/shared/enhanced-data-table";
 
 export function DatePick({
   date,
@@ -95,7 +96,7 @@ export function DailyRevenueAccrualPanel({
   userId: string;
   organizationId: string;
 }) {
-  const [start, setStart] = useState<Date>(() => new Date());
+  const [start, setStart] = useState<Date>(() => subDays(new Date(), 6));
   const [end, setEnd] = useState<Date>(() => new Date());
   const [department, setDepartment] = useState("all");
   const [loading, setLoading] = useState(false);
@@ -135,6 +136,10 @@ export function DailyRevenueAccrualPanel({
   }, [load]);
 
   const totals = data?.periodTotals;
+  const tableRows = useMemo(
+    () => (data?.byDay || []).map((row: any) => ({ ...row })),
+    [data?.byDay],
+  );
 
   return (
     <div className="space-y-4 print-section">
@@ -167,9 +172,6 @@ export function DailyRevenueAccrualPanel({
         </Button>
         <PrintBtn />
       </div>
-      <p className="text-xs text-muted-foreground print:hidden">
-        {data?.vatNote}
-      </p>
 
       {loading && !data ? (
         <div className="flex justify-center py-12">
@@ -178,12 +180,10 @@ export function DailyRevenueAccrualPanel({
       ) : (
         <>
           {totals && (
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="grid gap-3 sm:grid-cols-2">
               <Card>
                 <CardContent className="p-4">
-                  <p className="text-sm text-muted-foreground">
-                    Period subtotal (earned)
-                  </p>
+                  <p className="text-sm text-muted-foreground">Period revenue</p>
                   <p className="text-2xl font-bold">
                     {formatNaira(totals.subtotal)}
                   </p>
@@ -191,71 +191,52 @@ export function DailyRevenueAccrualPanel({
               </Card>
               <Card>
                 <CardContent className="p-4">
-                  <p className="text-sm text-muted-foreground">VAT 7.5%</p>
+                  <p className="text-sm text-muted-foreground">Period net profit</p>
                   <p className="text-2xl font-bold">
-                    {formatNaira(totals.vat)}
-                  </p>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardContent className="p-4">
-                  <p className="text-sm text-muted-foreground">
-                    Total incl. VAT
-                  </p>
-                  <p className="text-2xl font-bold">
-                    {formatNaira(totals.withVat)}
-                  </p>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardContent className="p-4">
-                  <p className="text-sm text-muted-foreground">
-                    Room-night accrual
-                  </p>
-                  <p className="text-2xl font-bold">
-                    {formatNaira(totals.accommodation)}
+                    {formatNaira(totals.netProfit ?? 0)}
                   </p>
                 </CardContent>
               </Card>
             </div>
           )}
 
-          <div className="border rounded-lg overflow-auto max-h-[480px]">
-            <table className="w-full text-sm">
-              <thead className="bg-muted sticky top-0">
-                <tr>
-                  <th className="text-left p-2">Date</th>
-                  <th className="text-right p-2">Room accrual</th>
-                  <th className="text-right p-2">Folio charges</th>
-                  <th className="text-right p-2">Subtotal</th>
-                  <th className="text-right p-2">VAT</th>
-                  <th className="text-right p-2">Incl. VAT</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(data?.byDay || []).map((row: any) => (
-                  <tr key={row.date} className="border-t">
-                    <td className="p-2">{row.date}</td>
-                    <td className="text-right p-2">
-                      {formatNaira(row.accommodationAccrual)}
-                    </td>
-                    <td className="text-right p-2">
-                      {formatNaira(row.folioChargesRecognized)}
-                    </td>
-                    <td className="text-right p-2 font-medium">
-                      {formatNaira(row.subtotal)}
-                    </td>
-                    <td className="text-right p-2">
-                      {formatNaira(row.vatAmount)}
-                    </td>
-                    <td className="text-right p-2">
-                      {formatNaira(row.totalWithVat)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <EnhancedDataTable
+            compactTable
+            showRowNumbers
+            itemsPerPage={15}
+            data={tableRows}
+            searchKeys={["date"]}
+            searchPlaceholder="Search date…"
+            emptyState={{ title: "No revenue rows for this range" }}
+            rowKey={(row) => row.date}
+            columns={[
+              {
+                key: "date",
+                label: "Date",
+                render: (row) => row.date,
+              },
+              {
+                key: "subtotal",
+                label: "Revenue",
+                render: (row) => (
+                  <span className="font-medium">{formatNaira(row.subtotal)}</span>
+                ),
+              },
+              {
+                key: "netProfit",
+                label: "Net profit",
+                render: (row) => (
+                  <span className="font-medium">{formatNaira(row.netProfit ?? 0)}</span>
+                ),
+              },
+              {
+                key: "guestCount",
+                label: "In-house",
+                responsive: "md+",
+                render: (row) => row.guestCount ?? "—",
+              },
+            ]}
+          />
         </>
       )}
     </div>
@@ -327,10 +308,8 @@ export function OccupancyRangePanel({
         </Button>
         <PrintBtn />
       </div>
-      <p className="text-xs text-muted-foreground">
-        Occupancy rate each day uses{" "}
-        <strong>occupied ÷ (total rooms − out of order)</strong>. Out-of-order =
-        room status &quot;maintenance&quot;.
+      <p className="text-xs text-muted-foreground print:hidden">
+        In-house guest count per day (matches Daily book). Rate % = guests ÷ sellable rooms.
       </p>
       {s && (
         <div className="grid gap-3 sm:grid-cols-4">
@@ -348,7 +327,7 @@ export function OccupancyRangePanel({
           </Card>
           <Card>
             <CardContent className="p-4">
-              <p className="text-xs text-muted-foreground">Last day occupied</p>
+              <p className="text-xs text-muted-foreground">Last day in-house</p>
               <p className="text-xl font-bold">{s.periodEndOccupied}</p>
             </CardContent>
           </Card>
@@ -360,30 +339,45 @@ export function OccupancyRangePanel({
           </Card>
         </div>
       )}
-      <div className="border rounded-lg overflow-auto max-h-[400px]">
-        <table className="w-full text-sm">
-          <thead className="bg-muted sticky top-0">
-            <tr>
-              <th className="text-left p-2">Date</th>
-              <th className="text-right p-2">Occupied</th>
-              <th className="text-right p-2">Empty (sellable)</th>
-              <th className="text-right p-2">OOO</th>
-              <th className="text-right p-2">Rate %</th>
-            </tr>
-          </thead>
-          <tbody>
-            {(data?.byDay || []).map((row: any) => (
-              <tr key={row.date} className="border-t">
-                <td className="p-2">{row.date}</td>
-                <td className="text-right p-2">{row.occupiedRooms}</td>
-                <td className="text-right p-2">{row.unoccupiedSellable}</td>
-                <td className="text-right p-2">{row.outOfOrderRooms}</td>
-                <td className="text-right p-2">{row.occupancyPercent}%</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <EnhancedDataTable
+        compactTable
+        showRowNumbers
+        itemsPerPage={15}
+        data={(data?.byDay || []) as any[]}
+        searchKeys={["date"]}
+        searchPlaceholder="Search date…"
+        emptyState={{ title: "No occupancy rows" }}
+        rowKey={(row) => row.date}
+        columns={[
+          {
+            key: "date",
+            label: "Date",
+            render: (row) => row.date,
+          },
+          {
+            key: "occupiedRooms",
+            label: "In-house",
+            render: (row) => row.occupiedRooms,
+          },
+          {
+            key: "unoccupiedSellable",
+            label: "Empty",
+            responsive: "md+",
+            render: (row) => row.unoccupiedSellable,
+          },
+          {
+            key: "outOfOrderRooms",
+            label: "OOO",
+            responsive: "md+",
+            render: (row) => row.outOfOrderRooms,
+          },
+          {
+            key: "occupancyPercent",
+            label: "Rate %",
+            render: (row) => `${row.occupancyPercent}%`,
+          },
+        ]}
+      />
     </div>
   );
 }
@@ -489,7 +483,7 @@ export function SalesCollectionPanel({ userId }: { userId: string }) {
           <Card>
             <CardContent className="p-4">
               <p className="text-xs text-muted-foreground">
-                Net sales collection
+                Net profit
               </p>
               <p className="text-xl font-bold">
                 {formatNaira(data.netSalesCollection)}
