@@ -55,7 +55,7 @@ import {
 import { frontOfficeTodayYmd, resolveHotelTimeZone } from "@/lib/hotel-date";
 import { cancelBookingReservation } from "@/lib/reservations/cancel-reservation";
 import { reconcileRoomStatusesClient } from "@/lib/rooms/reconcile-room-status-client";
-import { roomHousekeepingPatchAfterCheckout } from "@/lib/rooms/sync-housekeeping-status";
+import { markRoomHousekeepingCheckout } from "@/lib/rooms/sync-housekeeping-status";
 import {
   classifyFrontOfficeStay,
   computeFrontOfficeStayStats,
@@ -1184,10 +1184,11 @@ export default function BookingsPage() {
           .eq("id", booking.id);
         if (error) throw error;
         if (booking.room_id) {
-          await supabase
-            .from("rooms")
-            .update(roomHousekeepingPatchAfterCheckout())
-            .eq("id", booking.room_id);
+          await markRoomHousekeepingCheckout(
+            supabase,
+            booking.room_id,
+            organizationId,
+          );
         }
         await reconcileRoomStatusesClient();
         toast.success(`${booking.guests?.name} checked out successfully`);
@@ -1220,10 +1221,11 @@ export default function BookingsPage() {
           .eq("id", m.id);
         if (error) throw error;
         if (m.room_id) {
-          await supabase
-            .from("rooms")
-            .update(roomHousekeepingPatchAfterCheckout())
-            .eq("id", m.room_id);
+          await markRoomHousekeepingCheckout(
+            supabase,
+            m.room_id,
+            organizationId,
+          );
         }
       }
       await reconcileRoomStatusesClient();

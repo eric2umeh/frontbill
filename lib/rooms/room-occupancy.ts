@@ -66,6 +66,13 @@ export function roomStatusFromOccupyingBooking(
   return "occupied";
 }
 
+/** True when a guest is already physically in the room (not merely reserved for today). */
+export function isCheckedInOccupant(
+  occupying: Pick<OccupyingBookingRow, "status"> | null | undefined,
+): boolean {
+  return normStatus(occupying?.status) === "checked_in";
+}
+
 /** PMS room status from the active folio on that room. Returns null if housekeeping block should stay. */
 export function deriveRoomStatusFromOccupying(
   occupying: Pick<OccupyingBookingRow, "status" | "check_in"> | null,
@@ -76,7 +83,11 @@ export function deriveRoomStatusFromOccupying(
   const hk = normStatus(housekeepingStatus);
   if (cur === "maintenance" || cur === "out_of_order") return null;
   if (hk === "out_of_order") return null;
-  if (hk === "checkout" || cur === "cleaning") return null;
+  // C/O / cleaning stays until HK clears — unless another guest is already checked in.
+  if (hk === "checkout" || cur === "cleaning") {
+    if (isCheckedInOccupant(occupying)) return "occupied";
+    return null;
+  }
 
   if (!occupying) {
     if (cur === "occupied" || cur === "reserved") return "available";

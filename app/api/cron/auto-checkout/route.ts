@@ -275,8 +275,14 @@ export async function GET(request: Request) {
   }
 
   if (roomIds.length > 0) {
+    const roomOrg = new Map<string, string>()
+    for (const booking of dueForCheckout) {
+      if (booking.room_id && booking.organization_id) {
+        roomOrg.set(booking.room_id, booking.organization_id)
+      }
+    }
     for (const roomId of roomIds) {
-      await markRoomHousekeepingCheckout(supabase, roomId)
+      await markRoomHousekeepingCheckout(supabase, roomId, roomOrg.get(roomId))
     }
   }
 

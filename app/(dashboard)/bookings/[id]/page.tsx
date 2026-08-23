@@ -90,7 +90,7 @@ import {
 } from "@/lib/cashback/cashback-eligibility";
 import { createClient } from "@/lib/supabase/client";
 import { reconcileRoomStatusesClient } from "@/lib/rooms/reconcile-room-status-client";
-import { roomHousekeepingPatchAfterCheckout } from "@/lib/rooms/sync-housekeeping-status";
+import { markRoomHousekeepingCheckout } from "@/lib/rooms/sync-housekeeping-status";
 import { useAuth } from "@/lib/auth-context";
 import { canonicalRoleKey, hasPermission } from "@/lib/permissions";
 import { getUserDisplayName } from "@/lib/utils/user-display";
@@ -1672,10 +1672,11 @@ export default function BookingDetailPage({
             if (error) throw error;
 
             if (booking.room_id) {
-              await supabase
-                .from("rooms")
-                .update(roomHousekeepingPatchAfterCheckout())
-                .eq("id", booking.room_id);
+              await markRoomHousekeepingCheckout(
+                supabase,
+                booking.room_id,
+                booking.organization_id,
+              );
             }
             await reconcileRoomStatusesClient();
 

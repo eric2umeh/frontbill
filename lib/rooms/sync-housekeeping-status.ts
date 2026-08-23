@@ -4,6 +4,7 @@ import {
   type HousekeepingStatusKey,
 } from '@/lib/rooms/housekeeping-status'
 import {
+  isCheckedInOccupant,
   pickOccupyingBooking,
   roomStatusFromOccupyingBooking,
   type OccupyingBookingRow,
@@ -57,6 +58,20 @@ export function roomHousekeepingPatchAfterCheckout(now = new Date().toISOString(
   }
 }
 
+/**
+ * After one folio leaves: C/O unless another guest is already checked in on the room.
+ * Arriving reservations stay on C/O so housekeeping can clean before sale.
+ */
+export function roomHousekeepingPatchAfterGuestDeparture(
+  occupying: Pick<OccupyingBookingRow, 'status' | 'check_in'> | null,
+  now = new Date().toISOString(),
+): Partial<RoomHousekeepingPatch> {
+  if (isCheckedInOccupant(occupying)) {
+    return roomHousekeepingPatchForInHouse('checked_in', now)
+  }
+  return roomHousekeepingPatchAfterCheckout(now)
+}
+
 export function buildHousekeepingSyncPatch(params: {
   currentHousekeepingStatus: string | null | undefined
   occupying: Pick<OccupyingBookingRow, 'status' | 'check_in'> | null
@@ -68,12 +83,17 @@ export function buildHousekeepingSyncPatch(params: {
 
   if (params.occupying) {
     if (cur === 'out_of_order') return null
+    if (cur === 'checkout') {
+      if (isCheckedInOccupant(params.occupying)) {
+        return patchForStatus('occupied', now)
+      }
+      return null
+    }
     if (cur === 'vacant' && next) {
       return patchForStatus(next, now)
     }
     if (next && cur !== next) {
       if (HK_STAFF_LOCKED.has(cur as HousekeepingStatusKey)) return null
-      if (cur === 'checkout') return null
       return patchForStatus(next, now)
     }
     return null
@@ -124,7 +144,18 @@ export async function markRoomHousekeepingCheckout(
   organizationId?: string,
 ): Promise<void> {
   const now = new Date().toISOString()
-  const patch = roomHousekeepingPatchAfterCheckout(now)
+  let occupantQuery = admin
+    .from('bookings')
+    .select('id, room_id, status, check_in, check_out, folio_status')
+    .eq('room_id', roomId)
+    .eq('status', 'checked_in')
+  if (organizationId) occupantQuery = occupantQuery.eq('organization_id', organizationId)
+  const { data: stays, error: stayErr } = await occupantQuery
+  if (stayErr) {
+    console.warn('[markRoomHousekeepingCheckout] occupant lookup', roomId, stayErr.message)
+  }
+  const occupying = pickOccupyingBooking((stays ?? []) as OccupyingBookingRow[])
+  const patch = roomHousekeepingPatchAfterGuestDeparture(occupying, now)
   let q = admin.from('rooms').update(patch).eq('id', roomId)
   if (organizationId) q = q.eq('organization_id', organizationId)
   const { error } = await q
