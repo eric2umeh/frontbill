@@ -5,15 +5,16 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import {
   APP_LOGIN_ROLE_KEYS,
   canonicalRoleKey,
+  parseRolePermissionOverridesMap,
+  parsePermissionOverrides,
   type RoleKey,
 } from '@/lib/permissions'
-import { parsePermissionOverrides } from '@/lib/permissions'
 import {
   AUTH_USER_EMAIL_HEADER,
   AUTH_USER_ID_HEADER,
 } from '@/lib/auth/request-auth-headers'
 
-import type { PermissionOverrides } from '@/lib/permission-overrides'
+import type { PermissionOverrides, RolePermissionOverridesMap } from '@/lib/permission-overrides'
 
 export type DashboardUserPayload = {
   id: string
@@ -23,6 +24,7 @@ export type DashboardUserPayload = {
   organizationId: string
   organizationLogoUrl: string
   permissionOverrides?: PermissionOverrides | null
+  orgRolePermissionOverrides?: RolePermissionOverridesMap | null
 }
 
 export type LoadDashboardUserResult =
@@ -179,6 +181,32 @@ async function fetchProfileById(userId: string): Promise<{
   }
 }
 
+async function fetchOrgRolePermissionOverrides(
+  organizationId: string,
+): Promise<RolePermissionOverridesMap | null> {
+  if (!organizationId) return null
+  try {
+    const admin = createAdminClient()
+    const { data, error } = await admin
+      .from('organizations')
+      .select('role_permission_overrides')
+      .eq('id', organizationId)
+      .maybeSingle()
+    if (error) {
+      if (/role_permission_overrides/i.test(error.message || '')) return null
+      console.warn('loadDashboardUser: org role overrides fetch failed', error.message)
+      return null
+    }
+    return parseRolePermissionOverridesMap(data?.role_permission_overrides)
+  } catch (error) {
+    console.warn(
+      'loadDashboardUser: org role overrides unavailable',
+      error instanceof Error ? error.message : error,
+    )
+    return null
+  }
+}
+
 export async function loadDashboardUser(): Promise<LoadDashboardUserResult> {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
   const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
@@ -220,6 +248,10 @@ export async function loadDashboardUser(): Promise<LoadDashboardUserResult> {
         return { status: 'forbidden' }
       }
 
+      const orgRolePermissionOverrides = profile.organization_id
+        ? await fetchOrgRolePermissionOverrides(profile.organization_id)
+        : null
+
       return {
         status: 'ok',
         user: {
@@ -230,6 +262,7 @@ export async function loadDashboardUser(): Promise<LoadDashboardUserResult> {
           organizationId: profile.organization_id || '',
           organizationLogoUrl: '',
           permissionOverrides: parsePermissionOverrides(profile.permission_overrides),
+          orgRolePermissionOverrides,
         },
       }
     }
