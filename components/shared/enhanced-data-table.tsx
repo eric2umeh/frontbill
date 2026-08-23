@@ -25,6 +25,8 @@ export interface Column<T> {
   responsive?: ColumnResponsive
   /** Keep visible when scrolling wide tables on phones (e.g. Actions). */
   stickyOnMobile?: boolean
+  /** Optional column width for table-fixed layouts (e.g. `18%`, `8rem`). */
+  width?: string
 }
 
 interface Filter {
@@ -378,8 +380,7 @@ export function EnhancedDataTable<T extends Record<string, any>>({
         <div className="border rounded-lg overflow-hidden max-w-full">
           <div
             className={[
-              'w-full max-w-full',
-              compactTable ? 'max-md:overflow-x-auto md:overflow-x-hidden' : 'overflow-x-auto',
+              'w-full max-w-full overflow-x-auto',
               '[scrollbar-width:thin]',
             ].join(' ')}
           >
