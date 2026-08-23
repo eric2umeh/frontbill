@@ -14,7 +14,6 @@ import {
 } from 'lucide-react'
 import { DailyExpenditurePanel } from '@/components/reports/daily-expenditure-panel'
 import { MonthlyPlPanel } from '@/components/reports/monthly-pl-panel'
-import { GuestDailyRevenueSummary } from '@/components/reports/guest-daily-revenue-summary'
 import {
   DailyRevenueAccrualPanel,
   OccupancyRangePanel,
@@ -24,7 +23,7 @@ import {
 import { DebtReportPanel } from '@/components/reports/debt-report-panel'
 
 export default function ReportsPage() {
-  const { organizationId, name, userId } = useAuth()
+  const { organizationId, userId } = useAuth()
 
   return (
     <div className="space-y-4">
@@ -59,10 +58,6 @@ export default function ReportsPage() {
             <TabsTrigger value="occupancy" className="gap-1.5 text-xs sm:text-sm">
               <BedDouble className="h-4 w-4" />
               Occupancy
-            </TabsTrigger>
-            <TabsTrigger value="guest-daily" className="gap-1.5 text-xs sm:text-sm">
-              <FileBarChart className="h-4 w-4" />
-              Guest daily
             </TabsTrigger>
             <TabsTrigger value="daily-expenditure" className="gap-1.5 text-xs sm:text-sm">
               <TrendingDown className="h-4 w-4" />
@@ -143,14 +138,6 @@ export default function ReportsPage() {
           <Card>
             <CardContent className="pt-6">
               {userId ? <MonthlyPlPanel userId={userId} /> : <p className="text-sm text-muted-foreground">Sign in.</p>}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="guest-daily" className="mt-0">
-          <Card>
-            <CardContent className="pt-6">
-              <GuestDailyRevenueSummary organizationId={organizationId} printedByName={name} />
             </CardContent>
           </Card>
         </TabsContent>
