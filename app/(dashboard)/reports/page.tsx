@@ -19,9 +19,7 @@ import {
   BedDouble,
   Users,
   Building2,
-  ReceiptText,
   Wallet,
-  Undo2,
   PieChart,
   TrendingDown,
   Scale,
@@ -30,13 +28,11 @@ import { DailyExpenditurePanel } from '@/components/reports/daily-expenditure-pa
 import { MonthlyPlPanel } from '@/components/reports/monthly-pl-panel'
 import { cn } from '@/lib/utils'
 import { GuestDailyRevenueSummary } from '@/components/reports/guest-daily-revenue-summary'
-import { DailyFrontDeskPanel } from '@/components/reports/daily-front-desk-panel'
 import {
   DailyRevenueAccrualPanel,
   OccupancyRangePanel,
   SalesCollectionPanel,
   AccountantChargeSummaryPanel,
-  RefundsPanel,
 } from '@/components/reports/financial-and-refund-panels'
 
 /* ------------------------------------------------------------------ */
@@ -446,17 +442,9 @@ export default function ReportsPage() {
             <FileBarChart className="h-4 w-4" />
             Daily revenue
           </TabsTrigger>
-          <TabsTrigger value="daily-book" className="gap-1.5">
-            <ReceiptText className="h-4 w-4" />
-            Daily book
-          </TabsTrigger>
           <TabsTrigger value="sales-collection" className="gap-1.5">
             <Wallet className="h-4 w-4" />
             Sales collection
-          </TabsTrigger>
-          <TabsTrigger value="refunds" className="gap-1.5">
-            <Undo2 className="h-4 w-4" />
-            Refunds
           </TabsTrigger>
           <TabsTrigger value="accountant-charges" className="gap-1.5">
             <PieChart className="h-4 w-4" />
@@ -475,7 +463,7 @@ export default function ReportsPage() {
             City Ledger
           </TabsTrigger>
           <TabsTrigger value="guest-daily" className="gap-1.5">
-            <ReceiptText className="h-4 w-4" />
+            <FileBarChart className="h-4 w-4" />
             Guest daily summary
           </TabsTrigger>
           <TabsTrigger value="daily-expenditure" className="gap-1.5">
@@ -507,10 +495,6 @@ export default function ReportsPage() {
           </Card>
         </TabsContent>
 
-        <TabsContent value="daily-book">
-          <DailyFrontDeskPanel />
-        </TabsContent>
-
         <TabsContent value="sales-collection">
           <Card>
             <CardHeader>
@@ -518,29 +502,11 @@ export default function ReportsPage() {
               <CardDescription>
                 Payments and transaction receipts in the period minus refunds. Contrast with Daily revenue: a ₦200,000
                 prepayment counts here in full; earned room revenue counts in Daily revenue at ₦100,000/night.
-                For the front-desk daily guest list + category breakdown, use Daily book.
+                For the front-desk daily guest list, use Accounting → Transactions / Analytics.
               </CardDescription>
             </CardHeader>
             <CardContent>
               {userId ? <SalesCollectionPanel userId={userId} /> : <p className="text-sm text-muted-foreground">Sign in to load.</p>}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="refunds">
-          <Card>
-            <CardHeader>
-              <CardTitle>Refunds</CardTitle>
-              <CardDescription>
-                Refunds reduce guest balance and net sales collection. They are excluded from earned revenue.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {userId ? (
-                <RefundsPanel userId={userId} organizationId={organizationId} />
-              ) : (
-                <p className="text-sm text-muted-foreground">Sign in to load.</p>
-              )}
             </CardContent>
           </Card>
         </TabsContent>
