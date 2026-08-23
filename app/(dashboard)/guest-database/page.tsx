@@ -96,6 +96,7 @@ export default function GuestDatabasePage() {
 
       <EnhancedDataTable
         compactTable
+        showRowNumbers
         data={guests}
         searchKeys={['name', 'phone', 'email', 'id_number']}
         filters={[]}
