@@ -25,6 +25,8 @@ import {
   mergeOutletOrdersIntoDailyRevenue,
   skipOutletTxnInSalesCollection,
 } from "@/lib/outlets/outlet-financial-integration";
+import { buildDailyFrontDeskPack } from "@/lib/reports/daily-front-desk-pack";
+import { isOccupyingHotelNight } from "@/lib/utils/booking-in-house-dates";
 
 const VAT_RATE = 0.075;
 
@@ -118,26 +120,29 @@ export async function GET(request: Request) {
         .from("bookings")
         .select("id, room_id, check_in, check_out, status")
         .eq("organization_id", orgId)
-        .in("status", ["checked_in", "confirmed", "reserved"]);
+        .in("status", ["checked_in", "confirmed", "reserved", "checked_out"]);
       if (be) return NextResponse.json({ error: be.message }, { status: 500 });
 
       const days = eachDayOfInterval({ start: startD, end: endD });
       const byDay = days.map((day) => {
         const d = ymd(day);
-        const occupiedIds = new Set<string>();
+        let guestCount = 0;
         for (const b of bookings || []) {
+          const st = String((b as any).status || "").toLowerCase();
+          if (!["checked_in", "confirmed", "reserved", "checked_out"].includes(st)) {
+            continue;
+          }
           const cin = String((b as any).check_in || "").slice(0, 10);
           const cout = String((b as any).check_out || "").slice(0, 10);
-          if (dayInStay(cin, cout, d) && (b as any).room_id) {
-            occupiedIds.add((b as any).room_id);
-          }
+          if (dayInStay(cin, cout, d)) guestCount += 1;
         }
-        const occ = occupiedIds.size;
+        const occ = guestCount;
         const denom = sellable > 0 ? sellable : 1;
         const rate = sellable > 0 ? (occ / denom) * 100 : 0;
         return {
           date: d,
           occupiedRooms: occ,
+          occupiedGuests: guestCount,
           unoccupiedSellable: Math.max(0, sellable - occ),
           outOfOrderRooms: ooo,
           totalRooms,
@@ -165,36 +170,33 @@ export async function GET(request: Request) {
         .from("bookings")
         .select("id, check_in, check_out, status, rate_per_night")
         .eq("organization_id", orgId)
-        .in("status", ["checked_in", "confirmed"]);
+        .in("status", ["checked_in", "confirmed", "reserved", "checked_out"]);
       if (be) return NextResponse.json({ error: be.message }, { status: 500 });
 
-      const { data: allBookingIds } = await admin
-        .from("bookings")
-        .select("id")
-        .eq("organization_id", orgId);
-      const ids = (allBookingIds || []).map((r: any) => r.id);
-      const filteredCharges: any[] = [];
-      const chunk = 120;
-      for (let i = 0; i < ids.length; i += chunk) {
-        const slice = ids.slice(i, i + chunk);
-        if (!slice.length) break;
-        const { data: part, error: ce } = await admin
-          .from("folio_charges")
-          .select(
-            "id, booking_id, amount, charge_type, description, revenue_category, created_at",
-          )
-          .in("booking_id", slice);
-        if (ce)
-          return NextResponse.json({ error: ce.message }, { status: 500 });
-        filteredCharges.push(...(part || []));
-      }
+      const { data: payments, error: payE } = await admin
+        .from("payments")
+        .select("id, amount, payment_date, payment_method, booking_id, guest_id, notes, reference_number, status")
+        .eq("organization_id", orgId)
+        .gte("payment_date", startD.toISOString())
+        .lte("payment_date", endD.toISOString());
+      if (payE) return NextResponse.json({ error: payE.message }, { status: 500 });
+
+      const { data: txrows, error: txE } = await admin
+        .from("transactions")
+        .select("id, amount, created_at, payment_method, status, booking_id, description, transaction_id, guest_name, room, payment_account_label")
+        .eq("organization_id", orgId)
+        .gte("created_at", startD.toISOString())
+        .lte("created_at", endD.toISOString());
+      if (txE) return NextResponse.json({ error: txE.message }, { status: 500 });
 
       let dailyPayload = buildDailyRevenuePayload(
-        filteredCharges,
+        [],
         bookings || [],
         startD,
         endD,
         department,
+        payments || [],
+        txrows || [],
       );
       try {
         const outletOrders = await fetchSettledOutletOrdersInRange(
@@ -621,85 +623,84 @@ export async function GET(request: Request) {
 }
 
 function buildDailyRevenuePayload(
-  charges: any[],
+  _charges: any[],
   bookings: any[],
   startD: Date,
   endD: Date,
   department: string,
+  payments: any[] = [],
+  transactions: any[] = [],
 ) {
   const dep = department === "all" ? "all" : department;
   const days = eachDayOfInterval({ start: startD, end: endD });
   const byDay = days.map((day) => {
     const d = ymd(day);
-    let accommodation = 0;
-    for (const b of bookings) {
-      const cin = String(b.check_in || "").slice(0, 10);
-      const cout = String(b.check_out || "").slice(0, 10);
-      if (!dayInStay(cin, cout, d)) continue;
-      accommodation += Number(b.rate_per_night) || 0;
-    }
-    if (dep !== "all" && dep !== "accommodation") {
-      accommodation = 0;
-    }
 
-    let chargesDay = 0;
-    const catParts: Record<string, number> = {};
-    for (const c of charges) {
-      const ct = String(c.charge_type || "").toLowerCase();
-      if (ct === "payment" || ct === "folio_note") continue;
-      const amt = Number(c.amount) || 0;
-      if (amt <= 0) continue;
-      const created = c.created_at;
-      if (!created) continue;
-      const cd = format(parseISO(String(created)), "yyyy-MM-dd");
-      if (cd !== d) continue;
-      const cat = resolveRevenueCategory(
-        c.revenue_category,
-        c.charge_type,
-        c.description,
-      );
-      const isRoomLine =
-        ["room_charge", "extended_stay", "reservation"].includes(ct) ||
-        cat === "accommodation";
-      if (dep === "accommodation" && !isRoomLine) continue;
-      if (dep !== "all" && dep !== "accommodation" && cat !== dep) continue;
-      chargesDay += amt;
-      catParts[cat] = (catParts[cat] || 0) + amt;
-    }
+    const dayBookings = (bookings || []).filter((b) =>
+      isOccupyingHotelNight(
+        String(b.check_in || "").slice(0, 10),
+        String(b.check_out || "").slice(0, 10),
+        d,
+      ),
+    );
 
-    const subtotal = accommodation + chargesDay;
-    const vat = subtotal * VAT_RATE;
-    const totalWithVat = subtotal + vat;
+    const dayPayments = (payments || []).filter((p) => {
+      const pd = String((p as any).payment_date || "").slice(0, 10);
+      return pd === d;
+    });
+    const dayTx = (transactions || []).filter((t) => {
+      const created = (t as any).created_at;
+      if (!created) return false;
+      try {
+        return format(parseISO(String(created)), "yyyy-MM-dd") === d;
+      } catch {
+        return false;
+      }
+    });
+
+    const pack = buildDailyFrontDeskPack({
+      dateYmd: d,
+      bookings: dayBookings,
+      payments: dayPayments,
+      transactions: dayTx,
+    });
+
+    const roomRevenue = dep === "all" || dep === "accommodation"
+      ? pack.roomRevenueGenerated
+      : 0;
+    const netProfit = dep === "all" ? pack.salesCollection.total : 0;
 
     return {
       date: d,
-      accommodationAccrual: accommodation,
-      folioChargesRecognized: chargesDay,
-      subtotal,
+      accommodationAccrual: roomRevenue,
+      folioChargesRecognized: 0,
+      subtotal: roomRevenue,
+      netProfit,
+      guestCount: pack.guestCount,
       vatRatePercent: VAT_RATE * 100,
-      vatAmount: vat,
-      totalWithVat,
-      chargeCategories: catParts,
+      vatAmount: roomRevenue * VAT_RATE,
+      totalWithVat: roomRevenue * (1 + VAT_RATE),
+      chargeCategories: {} as Record<string, number>,
     };
   });
 
   const totals = byDay.reduce(
     (acc, row) => {
       acc.subtotal += row.subtotal;
+      acc.netProfit += row.netProfit;
       acc.vat += row.vatAmount;
       acc.withVat += row.totalWithVat;
       acc.accommodation += row.accommodationAccrual;
-      acc.charges += row.folioChargesRecognized;
       return acc;
     },
-    { subtotal: 0, vat: 0, withVat: 0, accommodation: 0, charges: 0 },
+    { subtotal: 0, netProfit: 0, vat: 0, withVat: 0, accommodation: 0, charges: 0 },
   );
 
   return {
     report: "daily_revenue",
     department: dep,
     vatNote:
-      "VAT 7.5% is applied on top of the daily subtotal (room-rate accrual for in-house nights plus folio charges posted that day).",
+      "Revenue and net profit align with Accounting → Daily book (room rates in-house + POS/cash/transfer collected).",
     byDay,
     periodTotals: totals,
   };
