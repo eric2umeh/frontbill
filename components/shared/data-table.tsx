@@ -135,7 +135,7 @@ export function DataTable<T extends { id: string }>({
                 <TableRow
                   key={row.id}
                   onClick={() => onRowClick?.(row)}
-                  className={cn(onRowClick && 'cursor-pointer hover:bg-muted/50')}
+                  className={cn(onRowClick && 'cursor-pointer hover:bg-muted/50', 'whitespace-nowrap')}
                 >
                   {showRowNumbers && (
                     <TableCell className="w-10 text-center text-muted-foreground tabular-nums">
@@ -143,7 +143,7 @@ export function DataTable<T extends { id: string }>({
                     </TableCell>
                   )}
                   {columns.map((column, index) => (
-                    <TableCell key={index} className={column.className}>
+                    <TableCell key={index} className={cn('align-middle py-2 whitespace-nowrap', column.className)}>
                       {column.cell ? column.cell(row) : getCellValue(row, column)}
                     </TableCell>
                   ))}
