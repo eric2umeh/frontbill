@@ -342,6 +342,7 @@ export default function AccountsPage() {
             </div>
 
             <EnhancedDataTable
+              showRowNumbers
               compactTable
               data={tableData}
               listWhenSearchEmpty={listWhenSearchEmpty}
