@@ -215,30 +215,37 @@ export function DailyFrontDeskPanel() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <Card>
           <CardHeader className="pb-2">
             <CardDescription className="flex items-center gap-1.5">
-              <Users className="h-4 w-4" /> Room revenue generated
+              <Users className="h-4 w-4" /> In-house guests
+            </CardDescription>
+            <CardTitle className="text-3xl tabular-nums">{pack?.guestCount || 0}</CardTitle>
+          </CardHeader>
+          <CardContent className="text-sm text-muted-foreground">
+            Guest{pack?.guestCount === 1 ? '' : 's'} occupying rooms that night
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardDescription className="flex items-center gap-1.5">
+              <Wallet className="h-4 w-4" /> Room revenue generated
             </CardDescription>
             <CardTitle className="text-3xl">
               {formatNaira(pack?.roomRevenueGenerated || 0)}
             </CardTitle>
           </CardHeader>
-          <CardContent className="text-sm text-muted-foreground">
-            {pack?.guestCount || 0} guest{pack?.guestCount === 1 ? '' : 's'} in-house that night
-            (sum of room rates)
-          </CardContent>
         </Card>
         <Card className="bg-primary text-primary-foreground">
           <CardHeader className="pb-2">
             <CardDescription className="flex items-center gap-1.5 text-primary-foreground/80">
-              <Wallet className="h-4 w-4" /> Sales collection total
+              <Wallet className="h-4 w-4" /> Cash collected
             </CardDescription>
             <CardTitle className="text-3xl">{formatNaira(sc?.total || 0)}</CardTitle>
           </CardHeader>
           <CardContent className="text-sm text-primary-foreground/80">
-            Cash / POS / transfer until night audit (city ledger excluded)
+            POS / cash / transfer (city ledger excluded)
           </CardContent>
         </Card>
       </div>
@@ -284,7 +291,8 @@ export function DailyFrontDeskPanel() {
         <CardContent className="p-0 sm:p-6 pt-0">
           <EnhancedDataTable
             compactTable
-            data={(pack?.guests || []).map((g, i) => ({ ...g, sn: i + 1 }))}
+            showRowNumbers
+            data={pack?.guests || []}
             searchKeys={['guest_name', 'room_number', 'folio_id']}
             searchPlaceholder="Search guests, room, folio…"
             emptyState={{ title: 'No in-house guests for this date' }}
@@ -295,10 +303,7 @@ export function DailyFrontDeskPanel() {
                 label: 'Guest',
                 render: (g) => (
                   <div>
-                    <div className="font-medium max-md:text-[13px]">
-                      <span className="text-muted-foreground mr-1.5 md:hidden">{g.sn}.</span>
-                      {g.guest_name}
-                    </div>
+                    <div className="font-medium max-md:text-[13px]">{g.guest_name}</div>
                     <div className="text-[10px] text-muted-foreground max-md:hidden">
                       {g.room_number} · {g.room_type}
                     </div>
@@ -371,6 +376,7 @@ export function DailyFrontDeskPanel() {
         <CardContent className="p-0 sm:p-6 pt-0">
           <EnhancedDataTable
             compactTable
+            showRowNumbers
             data={pack?.lines || []}
             searchKeys={['guest_name', 'reference', 'payment_account_label', 'description']}
             searchPlaceholder="Search collections…"
