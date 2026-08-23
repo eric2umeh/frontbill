@@ -16,16 +16,30 @@ type Props = {
   overrides: PermissionOverrides
   onChange: (next: PermissionOverrides) => void
   disabled?: boolean
-  /** Role defaults only — checkboxes visible but not editable. */
+  /** When true, checkboxes reflect role defaults only (Roles tab preview for non-admins). */
   readOnly?: boolean
+  /** `org` = editing hotel role template; `user` = editing one staff member. */
+  layer?: 'org' | 'user'
+  /** Org role overrides applied before `overrides` when layer is `user`. */
+  orgRoleOverrides?: PermissionOverrides | null
 }
 
-export function PermissionOverridesEditor({ roleKey, overrides, onChange, disabled, readOnly }: Props) {
+export function PermissionOverridesEditor({
+  roleKey,
+  overrides,
+  onChange,
+  disabled,
+  readOnly,
+  layer = 'user',
+  orgRoleOverrides,
+}: Props) {
   const groups = useMemo(() => getPermissionGroups(), [])
-  const effective = useMemo(
-    () => resolveEffectivePermissions(roleKey, overrides),
-    [roleKey, overrides],
-  )
+  const effective = useMemo(() => {
+    if (layer === 'org') {
+      return resolveEffectivePermissions(roleKey, null, overrides)
+    }
+    return resolveEffectivePermissions(roleKey, overrides, orgRoleOverrides)
+  }, [roleKey, overrides, orgRoleOverrides, layer])
   const roleDefaults = useMemo(
     () => new Set(getRoleDefinition(roleKey)?.permissions ?? []),
     [roleKey],
@@ -60,7 +74,9 @@ export function PermissionOverridesEditor({ roleKey, overrides, onChange, disabl
       <p className="text-xs text-muted-foreground">
         {readOnly
           ? 'Checked permissions are included in this role by default.'
-          : 'Defaults match the selected role. Tick to grant extra access; untick to remove a default permission.'}
+          : layer === 'org'
+            ? 'Changes apply to every staff member with this role at your hotel. Tick to grant; untick to remove from the role default.'
+            : 'Defaults match the selected role. Tick to grant extra access; untick to remove a default permission for this user only.'}
       </p>
       {Object.entries(groups).map(([group, items]) => (
         <div key={group} className="space-y-2">
