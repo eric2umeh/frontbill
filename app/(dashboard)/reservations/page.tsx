@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
@@ -28,6 +28,7 @@ import { networkFetchHint, withFetchRetry } from '@/lib/utils/fetch-retry'
 import { toast } from 'sonner'
 import { useReservationsEventsHeader } from '@/components/reservations/reservations-events-header'
 import { formatShortStayDates, MobileTableSubdetail } from '@/lib/utils/table-mobile'
+import { calendarPickerYmd } from '@/lib/utils/booking-in-house-dates'
 
 const RESERVATIONS_LIST_LIMIT = 500
 
@@ -95,6 +96,7 @@ export default function ReservationsPage() {
     check_in?: string
     check_out?: string
   } | null>(null)
+  const [statsDateYmd, setStatsDateYmd] = useState<string | null>(null)
   const { initialLoading, startFetch, endFetch } = usePageData()
   const { organizationId, role, userId } = useAuth()
   const { setHeaderActions } = useReservationsEventsHeader()
@@ -126,6 +128,17 @@ export default function ReservationsPage() {
     )
     return () => setHeaderActions(null)
   }, [role, setHeaderActions])
+
+  const pageStats = useMemo(() => {
+    const rows = statsDateYmd
+      ? reservations.filter((r) => String(r.check_in).slice(0, 10) === statsDateYmd)
+      : reservations
+    return {
+      count: rows.length,
+      revenue: rows.reduce((sum, r) => sum + Number(r.total_amount || 0), 0),
+      deposits: rows.reduce((sum, r) => sum + Number(r.deposit || 0), 0),
+    }
+  }, [reservations, statsDateYmd])
 
   const fetchReservations = async () => {
     if (!organizationId) {
@@ -442,9 +455,33 @@ export default function ReservationsPage() {
         onSuccess={fetchReservations}
       />
       
+      <div className="mx-auto grid w-full max-w-3xl grid-cols-3 gap-3">
+        {[
+          { label: 'Reservations', value: pageStats.count },
+          { label: 'Revenue', value: formatNaira(pageStats.revenue), isText: true },
+          { label: 'Deposits', value: formatNaira(pageStats.deposits), isText: true },
+        ].map((s) => (
+          <div key={s.label} className="rounded-xl border bg-card px-4 py-3 text-center shadow-sm">
+            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{s.label}</p>
+            <p className={`mt-1 font-bold tabular-nums ${s.isText ? 'text-lg' : 'text-2xl sm:text-3xl'}`}>
+              {s.value}
+            </p>
+          </div>
+        ))}
+      </div>
+      {statsDateYmd && (
+        <p className="text-center text-xs text-muted-foreground">Arrivals on {statsDateYmd}</p>
+      )}
+
       <EnhancedDataTable
         compactTable
+        showRowNumbers
+        prominentDateFilter
+        centerToolbar
         data={reservations}
+        onDateFilterChange={(d) =>
+          setStatsDateYmd(d ? calendarPickerYmd(d) : null)
+        }
         searchKeys={['folio_id', 'guestName', 'guestPhone', 'ledger_account_name', 'rooms.room_number'] as any}
         dateField="check_in"
         onRowClick={(res) => {
@@ -604,19 +641,6 @@ export default function ReservationsPage() {
                   <Link href={res.is_bulk ? `/bulk-bookings/${res.bulk_group_id}` : `/reservations/${res.id}`}>View</Link>
                 </Button>
               </div>
-            ),
-          },
-          {
-            key: 'folio_id',
-            label: 'Folio Ref',
-            responsive: 'lg+',
-            render: (res) => (
-              <Link
-                href={res.is_bulk ? `/bulk-bookings/${res.bulk_group_id}` : `/reservations/${res.id}`}
-                className="font-mono text-xs cursor-pointer hover:text-primary"
-              >
-                {res.is_bulk ? `Bulk (${res.room_count})` : res.folio_id}
-              </Link>
             ),
           },
           {
