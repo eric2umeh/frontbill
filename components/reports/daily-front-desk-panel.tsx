@@ -25,6 +25,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { PageLoadingState } from '@/components/loading-screen'
 import { EnhancedDataTable } from '@/components/shared/enhanced-data-table'
 import { MobileTableSubdetail } from '@/lib/utils/table-mobile'
+import { TABLE_INLINE_ROW, TABLE_META_TEXT, TABLE_CELL_TRUNCATE } from '@/lib/utils/table-row-inline'
 import { toast } from 'sonner'
 import { CalendarIcon, RefreshCw, Users, Wallet } from 'lucide-react'
 import { calendarPickerYmd } from '@/lib/utils/booking-in-house-dates'
@@ -302,11 +303,11 @@ export function DailyFrontDeskPanel() {
                 key: 'guest_name',
                 label: 'Guest',
                 render: (g) => (
-                  <div>
-                    <div className="font-medium max-md:text-[13px]">{g.guest_name}</div>
-                    <div className="text-[10px] text-muted-foreground max-md:hidden">
+                  <div className={`${TABLE_INLINE_ROW} max-w-[12rem]`}>
+                    <span className={`font-medium max-md:text-[13px] ${TABLE_CELL_TRUNCATE}`}>{g.guest_name}</span>
+                    <span className={`${TABLE_META_TEXT} max-md:hidden shrink-0`}>
                       {g.room_number} · {g.room_type}
-                    </div>
+                    </span>
                     <MobileTableSubdetail>
                       <div>
                         Rm {g.room_number} · {g.room_type}
@@ -387,10 +388,10 @@ export function DailyFrontDeskPanel() {
                 key: 'guest_name',
                 label: 'Guest',
                 render: (line) => (
-                  <div className={!line.counts_as_cash_collection ? 'opacity-70' : undefined}>
-                    <div className="font-medium max-md:text-[13px]">{line.guest_name}</div>
+                  <div className={!line.counts_as_cash_collection ? `opacity-70 ${TABLE_INLINE_ROW} max-w-[12rem]` : `${TABLE_INLINE_ROW} max-w-[12rem]`}>
+                    <span className={`font-medium max-md:text-[13px] ${TABLE_CELL_TRUNCATE}`}>{line.guest_name}</span>
                     {line.room ? (
-                      <div className="text-[10px] text-muted-foreground max-md:hidden">{line.room}</div>
+                      <span className={`${TABLE_META_TEXT} max-md:hidden shrink-0`}>{line.room}</span>
                     ) : null}
                     <MobileTableSubdetail>
                       {line.room ? <div>{line.room}</div> : null}
@@ -417,17 +418,17 @@ export function DailyFrontDeskPanel() {
                 label: 'Method',
                 responsive: 'md+',
                 render: (line) => (
-                  <div className="space-y-1">
-                    <span className="capitalize text-sm">
+                  <div
+                    className={`${TABLE_INLINE_ROW} max-w-[8rem]`}
+                    title={[line.payment_method.replace(/_/g, ' '), line.payment_account_label].filter(Boolean).join(' · ')}
+                  >
+                    <span className="capitalize text-sm shrink-0">
                       {line.payment_method.replace(/_/g, ' ')}
                     </span>
                     {line.payment_account_label ? (
-                      <div
-                        className="text-[10px] text-muted-foreground truncate max-w-[140px]"
-                        title={line.payment_account_label}
-                      >
+                      <span className={`${TABLE_META_TEXT} ${TABLE_CELL_TRUNCATE}`}>
                         {line.payment_account_label}
-                      </div>
+                      </span>
                     ) : null}
                   </div>
                 ),
