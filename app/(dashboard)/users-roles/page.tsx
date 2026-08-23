@@ -3,7 +3,7 @@
 import { useEffect, useState, useMemo, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { ROLE_DEFINITIONS, getPermissionGroups, type RoleKey, type Permission, canonicalRoleKey } from '@/lib/permissions'
-import type { PermissionOverrides } from '@/lib/permission-overrides'
+import type { PermissionOverrides, RolePermissionOverridesMap } from '@/lib/permission-overrides'
 import { PermissionOverridesEditor, normalizePermissionOverrides } from '@/components/users/permission-overrides-editor'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -56,6 +56,10 @@ export default function UsersRolesPage() {
   const [editForm, setEditForm] = useState({ role: '', full_name: '', password: '', confirmPassword: '' })
   const [editPermissionOverrides, setEditPermissionOverrides] = useState<PermissionOverrides>({})
   const [editTab, setEditTab] = useState<'details' | 'permissions'>('details')
+  const [orgRoleOverrides, setOrgRoleOverrides] = useState<RolePermissionOverridesMap>({})
+  const [editingRoleOverrides, setEditingRoleOverrides] = useState<PermissionOverrides>({})
+  const [savingRole, setSavingRole] = useState(false)
+  const [roleMigrationRequired, setRoleMigrationRequired] = useState(false)
   const [showEditPassword, setShowEditPassword] = useState(false)
   const [saving, setSaving] = useState(false)
 
@@ -75,6 +79,23 @@ export default function UsersRolesPage() {
   const [repairingAttribution, setRepairingAttribution] = useState(false)
   const router = useRouter()
 
+  const fetchOrgRoleOverrides = useCallback(async () => {
+    if (!currentUserId) return
+    const rk = canonicalRoleKey(currentUserRole)
+    if (rk !== 'superadmin' && rk !== 'admin') return
+    try {
+      const res = await fetch(`/api/admin/roles/overrides?caller_id=${currentUserId}`, {
+        credentials: 'include',
+      })
+      const json = await res.json()
+      if (!res.ok) return
+      setRoleMigrationRequired(Boolean(json.migration_required))
+      setOrgRoleOverrides(json.role_permission_overrides ?? {})
+    } catch {
+      /* ignore */
+    }
+  }, [currentUserId, currentUserRole])
+
   const fetchUsers = useCallback(async () => {
     if (!currentUserId) return
     startFetch()
@@ -90,10 +111,11 @@ export default function UsersRolesPage() {
       const json = await res.json()
       if (!res.ok) { toast.error(json.error || 'Failed to load users'); return }
       setUsers(json.users || [])
+      void fetchOrgRoleOverrides()
     } finally {
       endFetch()
     }
-  }, [currentUserId, currentUserRole, router, startFetch, endFetch])
+  }, [currentUserId, currentUserRole, router, startFetch, endFetch, fetchOrgRoleOverrides])
 
   useEffect(() => {
     void fetchUsers()
@@ -181,6 +203,46 @@ export default function UsersRolesPage() {
     setEditPermissionOverrides(user.permission_overrides ?? {})
     setEditTab(canEditPermissionOverrides ? 'permissions' : 'details')
     setShowEditPassword(false)
+  }
+
+  const openRoleEditor = (roleKey: RoleKey) => {
+    setViewingRole(roleKey)
+    setEditingRoleOverrides(orgRoleOverrides[roleKey] ?? {})
+  }
+
+  const handleSaveRoleOverrides = async () => {
+    if (!viewingRole || !currentUserId) return
+    if (roleMigrationRequired) {
+      toast.error('Run scripts/081_organization_role_permission_overrides.sql on Supabase first.')
+      return
+    }
+    setSavingRole(true)
+    try {
+      const normalized = normalizePermissionOverrides(editingRoleOverrides)
+      const res = await fetch('/api/admin/roles/overrides', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          caller_id: currentUserId,
+          role: viewingRole,
+          permission_overrides: normalized,
+        }),
+      })
+      const json = await res.json()
+      if (!res.ok) {
+        toast.error(json.error || 'Failed to save role permissions')
+        return
+      }
+      const nextMap = (json.role_permission_overrides ?? {}) as RolePermissionOverridesMap
+      setOrgRoleOverrides(nextMap)
+      toast.success(`${roleDef?.label ?? viewingRole} permissions saved for your hotel`)
+      setViewingRole(null)
+    } catch {
+      toast.error('Network error, please try again')
+    } finally {
+      setSavingRole(false)
+    }
   }
 
   const handleUpdateUser = async () => {
@@ -445,14 +507,19 @@ export default function UsersRolesPage() {
         {/* ---- Roles tab ---- */}
         <TabsContent value="roles" className="mt-4 space-y-4">
           <p className="text-sm text-muted-foreground">
-            Role bundles are defined in code (<code className="text-xs bg-muted px-1 rounded">lib/permissions.ts</code>).
-            As Admin or Superadmin, open <strong>Staff Users → Edit → Permissions</strong> to tick/untick what an individual staff member can do (e.g. customize Front Desk).
-            Select a role card below to preview its default permission checkboxes.
+            Click a role card to customize its permissions for your hotel (Admin/Superadmin).
+            Changes apply to all staff with that role. For one person only, use{' '}
+            <strong>Staff Users → Edit → Permissions</strong>.
+            {roleMigrationRequired && (
+              <span className="block mt-2 text-amber-700">
+                Run <code className="text-xs bg-muted px-1 rounded">scripts/081_organization_role_permission_overrides.sql</code> on Supabase to enable saving role edits.
+              </span>
+            )}
           </p>
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
             {ROLE_DEFINITIONS.map(role => (
               <Card key={role.key} className="cursor-pointer hover:shadow-md transition-shadow"
-                onClick={() => setViewingRole(role.key as RoleKey)}>
+                onClick={() => openRoleEditor(role.key as RoleKey)}>
                 <CardHeader className="pb-2">
                   <div className="flex items-start justify-between">
                     <CardTitle className="text-base">{role.label}</CardTitle>
@@ -694,6 +761,7 @@ export default function UsersRolesPage() {
                       overrides={editPermissionOverrides}
                       onChange={setEditPermissionOverrides}
                       disabled={saving}
+                      orgRoleOverrides={orgRoleOverrides[editRoleKey] ?? null}
                     />
                   )
                 })()}
@@ -730,23 +798,55 @@ export default function UsersRolesPage() {
         </DialogContent>
       </Dialog>
 
-      {/* ======== VIEW ROLE PERMISSIONS DIALOG ======== */}
-      <Dialog open={!!viewingRole} onOpenChange={(o) => !o && setViewingRole(null)}>
+      {/* ======== EDIT ROLE PERMISSIONS DIALOG ======== */}
+      <Dialog
+        open={!!viewingRole}
+        onOpenChange={(o) => {
+          if (!savingRole && !o) setViewingRole(null)
+        }}
+      >
         <DialogContent className="max-w-4xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <ShieldCheck className="h-5 w-5" />
-              {roleDef?.label} — default permissions
+              {roleDef?.label} — permissions
             </DialogTitle>
-            <DialogDescription>{roleDef?.description}</DialogDescription>
+            <DialogDescription>
+              {canEditPermissionOverrides
+                ? 'Customize what this role can do at your hotel. Save applies to every staff member with this role.'
+                : roleDef?.description}
+            </DialogDescription>
           </DialogHeader>
           {viewingRole && (
-            <PermissionOverridesEditor
-              roleKey={viewingRole}
-              overrides={{}}
-              onChange={() => {}}
-              readOnly
-            />
+            <>
+              <PermissionOverridesEditor
+                roleKey={viewingRole}
+                overrides={editingRoleOverrides}
+                onChange={setEditingRoleOverrides}
+                disabled={savingRole || !canEditPermissionOverrides}
+                readOnly={!canEditPermissionOverrides}
+                layer="org"
+              />
+              {canEditPermissionOverrides && (
+                <div className="flex gap-3 justify-end pt-2">
+                  <Button
+                    variant="outline"
+                    onClick={() => setViewingRole(null)}
+                    disabled={savingRole}
+                  >
+                    Cancel
+                  </Button>
+                  <Button onClick={handleSaveRoleOverrides} disabled={savingRole}>
+                    {savingRole ? (
+                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    ) : (
+                      <Check className="h-4 w-4 mr-2" />
+                    )}
+                    Save role permissions
+                  </Button>
+                </div>
+              )}
+            </>
           )}
         </DialogContent>
       </Dialog>
