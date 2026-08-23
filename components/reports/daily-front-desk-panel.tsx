@@ -418,15 +418,12 @@ export function DailyFrontDeskPanel() {
                 label: 'Method',
                 responsive: 'md+',
                 render: (line) => (
-                  <div
-                    className={`${TABLE_INLINE_ROW} max-w-[8rem]`}
-                    title={[line.payment_method.replace(/_/g, ' '), line.payment_account_label].filter(Boolean).join(' · ')}
-                  >
-                    <span className="capitalize text-sm shrink-0">
+                  <div className={TABLE_STACKED_CELL}>
+                    <span className="capitalize text-[11px] shrink-0">
                       {line.payment_method.replace(/_/g, ' ')}
                     </span>
                     {line.payment_account_label ? (
-                      <span className={`${TABLE_META_TEXT} ${TABLE_CELL_TRUNCATE}`}>
+                      <span className={`${TABLE_META_TEXT} ${TABLE_CELL_TRUNCATE}`} title={line.payment_account_label}>
                         {line.payment_account_label}
                       </span>
                     ) : null}
