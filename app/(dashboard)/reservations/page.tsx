@@ -115,7 +115,7 @@ export default function ReservationsPage() {
   const [statsDateYmd, setStatsDateYmd] = useState<string | null>(null)
   const { initialLoading, startFetch, endFetch } = usePageData()
   const { organizationId, role, userId } = useAuth()
-  const { setHeaderActions } = useReservationsEventsHeader()
+  const { setHeaderActions, setHeaderStats } = useReservationsEventsHeader()
 
   useEffect(() => {
     fetchReservations()
@@ -155,6 +155,47 @@ export default function ReservationsPage() {
       deposits: rows.reduce((sum, r) => sum + Number(r.deposit || 0), 0),
     }
   }, [reservations, statsDateYmd])
+
+  useEffect(() => {
+    setHeaderStats(
+      <CompactStatBadgeRow
+        className="py-0.5"
+        items={[
+          {
+            key: 'count',
+            label: 'Res',
+            value: pageStats.count,
+            icon: CalendarClock,
+            borderClass: 'border-violet-200/80',
+            bgClass: 'bg-violet-50/50',
+            iconClass: 'text-violet-700',
+            title: statsDateYmd ? `Arrivals on ${statsDateYmd}` : 'All reservations',
+          },
+          {
+            key: 'revenue',
+            label: 'Rev',
+            value: formatNaira(pageStats.revenue),
+            icon: Receipt,
+            borderClass: 'border-slate-200/80',
+            bgClass: 'bg-slate-50/50',
+            iconClass: 'text-slate-700',
+            title: 'Total booking value',
+          },
+          {
+            key: 'deposits',
+            label: 'Dep',
+            value: formatNaira(pageStats.deposits),
+            icon: Banknote,
+            borderClass: 'border-emerald-200/80',
+            bgClass: 'bg-emerald-50/50',
+            iconClass: 'text-emerald-700',
+            title: 'Deposits collected',
+          },
+        ]}
+      />,
+    )
+    return () => setHeaderStats(null)
+  }, [pageStats, statsDateYmd, setHeaderStats])
 
   const fetchReservations = async () => {
     if (!organizationId) {
@@ -462,42 +503,6 @@ export default function ReservationsPage() {
         onSuccess={fetchReservations}
       />
       
-      <CompactStatBadgeRow
-        className="py-0.5"
-        items={[
-          {
-            key: 'count',
-            label: 'Res',
-            value: pageStats.count,
-            icon: CalendarClock,
-            borderClass: 'border-violet-200/80',
-            bgClass: 'bg-violet-50/50',
-            iconClass: 'text-violet-700',
-            title: statsDateYmd ? `Arrivals on ${statsDateYmd}` : 'All reservations',
-          },
-          {
-            key: 'revenue',
-            label: 'Rev',
-            value: formatNaira(pageStats.revenue),
-            icon: Receipt,
-            borderClass: 'border-slate-200/80',
-            bgClass: 'bg-slate-50/50',
-            iconClass: 'text-slate-700',
-            title: 'Total booking value',
-          },
-          {
-            key: 'deposits',
-            label: 'Dep',
-            value: formatNaira(pageStats.deposits),
-            icon: Banknote,
-            borderClass: 'border-emerald-200/80',
-            bgClass: 'bg-emerald-50/50',
-            iconClass: 'text-emerald-700',
-            title: 'Deposits collected',
-          },
-        ]}
-      />
-
       <EnhancedDataTable
         compactTable
         showRowNumbers

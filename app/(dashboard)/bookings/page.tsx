@@ -34,6 +34,8 @@ import {
   AlertTriangle,
   CalendarClock,
   CalendarDays,
+  Receipt,
+  Banknote,
 } from "lucide-react";
 import { CompactStatBadgeRow } from "@/components/shared/compact-stat-badges";
 import {
@@ -1232,10 +1234,6 @@ export default function BookingsPage() {
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight shrink-0">
             Bookings
           </h1>
-          <p className="text-sm text-muted-foreground mt-1 max-w-3xl">
-            Default list: occupied + due today + today&apos;s arrivals. Due guests stay in this list with a note.
-            Search finds any booking in the last 90 days. Checkout frees the room.
-          </p>
         </div>
         <div className="flex flex-wrap items-center justify-center lg:justify-end gap-1.5 shrink-0">
           {roomStats !== null && (
@@ -1250,6 +1248,26 @@ export default function BookingsPage() {
                   bgClass: "bg-blue-50/50",
                   iconClass: "text-blue-700",
                   title: "Checked-in guests staying past today",
+                },
+                {
+                  key: "rev",
+                  label: "Rev",
+                  value: formatNaira(roomStats.roomRevenue),
+                  icon: Receipt,
+                  borderClass: "border-slate-200/80",
+                  bgClass: "bg-slate-50/50",
+                  iconClass: "text-slate-700",
+                  title: "Room revenue for the hotel business date",
+                },
+                {
+                  key: "cash",
+                  label: "Cash",
+                  value: formatNaira(roomStats.cashCollected),
+                  icon: Banknote,
+                  borderClass: "border-emerald-200/80",
+                  bgClass: "bg-emerald-50/50",
+                  iconClass: "text-emerald-700",
+                  title: "Payments collected on the hotel business date",
                 },
                 {
                   key: "res",

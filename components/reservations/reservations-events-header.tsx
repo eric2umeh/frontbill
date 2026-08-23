@@ -12,6 +12,8 @@ import {
 type ReservationsEventsHeaderContextValue = {
   headerActions: ReactNode
   setHeaderActions: (actions: ReactNode) => void
+  headerStats: ReactNode
+  setHeaderStats: (stats: ReactNode) => void
 }
 
 const ReservationsEventsHeaderContext =
@@ -19,13 +21,17 @@ const ReservationsEventsHeaderContext =
 
 export function ReservationsEventsHeaderProvider({ children }: { children: ReactNode }) {
   const [headerActions, setHeaderActionsState] = useState<ReactNode>(null)
+  const [headerStats, setHeaderStatsState] = useState<ReactNode>(null)
   const setHeaderActions = useCallback((actions: ReactNode) => {
     setHeaderActionsState(actions)
   }, [])
+  const setHeaderStats = useCallback((stats: ReactNode) => {
+    setHeaderStatsState(stats)
+  }, [])
 
   const value = useMemo(
-    () => ({ headerActions, setHeaderActions }),
-    [headerActions, setHeaderActions],
+    () => ({ headerActions, setHeaderActions, headerStats, setHeaderStats }),
+    [headerActions, setHeaderActions, headerStats, setHeaderStats],
   )
 
   return (
