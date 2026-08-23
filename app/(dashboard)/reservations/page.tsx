@@ -34,6 +34,7 @@ import {
   formatBookingPaymentMethodLabel,
   bookingAmountPaid,
 } from '@/lib/booking/parse-booking-notes'
+import { attachPaymentAccountLabelsToBookings } from '@/lib/booking/fetch-booking-payment-accounts'
 import { paymentMethodRequiresAccount } from '@/lib/payments/payment-accounts'
 import {
   TABLE_ACTIONS_ROW,
@@ -236,6 +237,13 @@ export default function ReservationsPage() {
       })
 
       setReservations(groupBulkRows(reservationsWithData))
+      void attachPaymentAccountLabelsToBookings(supabase, reservationsWithData).then(() => {
+        setReservations(groupBulkRows(reservationsWithData))
+      }).catch((err) => {
+        if (process.env.NODE_ENV === 'development') {
+          console.warn('[reservations] payment account enrich failed:', err)
+        }
+      })
     } catch (error: unknown) {
       const detail = describeFetchError(error)
       if (process.env.NODE_ENV === 'development') {
@@ -521,14 +529,17 @@ export default function ReservationsPage() {
           {
             key: 'guest',
             label: 'Guest',
+            width: '24%',
             render: (res) => (
               <Link
                 href={res.is_bulk ? `/bulk-bookings/${res.bulk_group_id}` : `/reservations/${res.id}`}
-                className="cursor-pointer hover:text-primary inline-flex items-center gap-1.5 min-w-0 max-w-[12rem] whitespace-nowrap"
+                className="cursor-pointer hover:text-primary min-w-0 block"
               >
-                <span className={`font-medium max-md:text-[13px] ${TABLE_CELL_TRUNCATE}`}>{res.guests?.name}</span>
+                <span className={`font-semibold text-sm md:text-[15px] max-md:text-[13px] truncate block ${TABLE_CELL_TRUNCATE}`}>
+                  {res.guests?.name}
+                </span>
                 {res.guests?.phone && (
-                  <span className={`${TABLE_META_TEXT} max-md:hidden shrink-0`}>{res.guests.phone}</span>
+                  <span className={`${TABLE_META_TEXT} max-md:hidden truncate block`}>{res.guests.phone}</span>
                 )}
                 <MobileTableSubdetail>
                   <div>
@@ -545,6 +556,7 @@ export default function ReservationsPage() {
             key: 'room',
             label: 'Room',
             responsive: 'md+',
+            width: '8%',
             render: (res) => (
               <Link
                 href={res.is_bulk ? `/bulk-bookings/${res.bulk_group_id}` : `/reservations/${res.id}`}
@@ -563,6 +575,7 @@ export default function ReservationsPage() {
             key: 'check_in',
             label: 'Check-in',
             responsive: 'md+',
+            width: '7%',
             render: (res) => (
               <div className="text-sm max-md:text-xs">
                 {new Date(res.check_in).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}
@@ -573,6 +586,7 @@ export default function ReservationsPage() {
             key: 'check_out',
             label: 'Check-out',
             responsive: 'md+',
+            width: '8%',
             render: (res) => (
               <div className="text-sm max-md:text-xs">
                 {new Date(res.check_out).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}
@@ -583,6 +597,7 @@ export default function ReservationsPage() {
             key: 'payment_status',
             label: 'Payment',
             responsive: 'md+',
+            width: '9%',
             render: (res) => {
               const effectiveStatus =
                 res.payment_method === 'pending' ||
@@ -609,6 +624,7 @@ export default function ReservationsPage() {
             key: 'payment_method',
             label: 'Method',
             responsive: 'md+',
+            width: '12%',
             render: (res) => {
               const accountLabel =
                 res.payment_method === 'city_ledger'
@@ -628,8 +644,6 @@ export default function ReservationsPage() {
                     <span className={`${TABLE_META_TEXT} ${TABLE_CELL_TRUNCATE}`} title={accountLabel}>
                       {accountLabel}
                     </span>
-                  ) : paymentMethodRequiresAccount(res.payment_method) ? (
-                    <span className={TABLE_META_TEXT}>—</span>
                   ) : null}
                 </div>
               )
@@ -639,6 +653,7 @@ export default function ReservationsPage() {
             key: 'actions',
             label: 'Actions',
             stickyOnMobile: true,
+            width: '1%',
             render: (res) => (
               <div className={TABLE_ACTIONS_ROW} onClick={(e) => e.stopPropagation()}>
                 {!res.is_bulk && canCheckInReserved && (
@@ -686,6 +701,7 @@ export default function ReservationsPage() {
             key: 'created_by_name',
             label: 'Created By',
             responsive: 'lg+',
+            width: '9%',
             render: (res) => (
               <div className="text-sm text-muted-foreground">{res.created_by_name}</div>
             ),
