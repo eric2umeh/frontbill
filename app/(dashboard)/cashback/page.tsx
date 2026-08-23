@@ -195,6 +195,7 @@ export default function CashbackPage() {
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="w-10 text-center">#</TableHead>
                 <TableHead>Guest</TableHead>
                 <TableHead className="text-right">Earned</TableHead>
                 <TableHead className="text-right">Redeemed</TableHead>
@@ -205,15 +206,18 @@ export default function CashbackPage() {
             <TableBody>
               {balances.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
+                  <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
                     No cashback balances yet — earnings appear when guests pay with cash, POS, or transfer.
                   </TableCell>
                 </TableRow>
               ) : (
-                balances.map((row) => {
+                balances.map((row, index) => {
                   const g = row.guests
                   return (
                     <TableRow key={row.guest_id}>
+                      <TableCell className="w-10 text-center text-muted-foreground tabular-nums">
+                        {index + 1}
+                      </TableCell>
                       <TableCell>
                         <Link
                           href={`/guest-database/${row.guest_id}`}
@@ -258,6 +262,7 @@ export default function CashbackPage() {
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="w-10 text-center">#</TableHead>
                 <TableHead>Date</TableHead>
                 <TableHead>Guest</TableHead>
                 <TableHead>Type</TableHead>
@@ -269,13 +274,16 @@ export default function CashbackPage() {
             <TableBody>
               {recentTransactions.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center text-muted-foreground py-6">
+                  <TableCell colSpan={7} className="text-center text-muted-foreground py-6">
                     No transactions yet
                   </TableCell>
                 </TableRow>
               ) : (
-                recentTransactions.map((tx) => (
+                recentTransactions.map((tx, index) => (
                   <TableRow key={tx.id}>
+                    <TableCell className="w-10 text-center text-muted-foreground tabular-nums">
+                      {index + 1}
+                    </TableCell>
                     <TableCell className="text-sm whitespace-nowrap">
                       {format(new Date(tx.created_at), 'dd MMM yyyy HH:mm')}
                     </TableCell>
