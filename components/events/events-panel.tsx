@@ -120,7 +120,7 @@ const emptyForm = {
 export function EventsPanel() {
   const { role, organizationId, userId, name: userName } = useAuth()
   const canManage = canManageEvents(role)
-  const { setHeaderActions } = useReservationsEventsHeader()
+  const { setHeaderActions, setHeaderStats } = useReservationsEventsHeader()
   const [events, setEvents] = useState<HotelEventRow[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -196,6 +196,47 @@ export function EventsPanel() {
     )
     return () => setHeaderActions(null)
   }, [canManage, setHeaderActions])
+
+  useEffect(() => {
+    setHeaderStats(
+      <CompactStatBadgeRow
+        className="py-0.5"
+        items={[
+          {
+            key: 'count',
+            label: 'Events',
+            value: pageStats.count,
+            icon: PartyPopper,
+            borderClass: 'border-violet-200/80',
+            bgClass: 'bg-violet-50/50',
+            iconClass: 'text-violet-700',
+            title: statsDateYmd ? `Events starting ${statsDateYmd}` : 'All events',
+          },
+          {
+            key: 'revenue',
+            label: 'Rev',
+            value: formatNaira(pageStats.revenue),
+            icon: Receipt,
+            borderClass: 'border-slate-200/80',
+            bgClass: 'bg-slate-50/50',
+            iconClass: 'text-slate-700',
+            title: 'Estimated revenue',
+          },
+          {
+            key: 'guests',
+            label: 'Guests',
+            value: pageStats.guests,
+            icon: Users,
+            borderClass: 'border-blue-200/80',
+            bgClass: 'bg-blue-50/50',
+            iconClass: 'text-blue-700',
+            title: 'Expected guests',
+          },
+        ]}
+      />,
+    )
+    return () => setHeaderStats(null)
+  }, [pageStats, statsDateYmd, setHeaderStats])
 
   const openCreate = () => {
     setEditing(null)
@@ -479,42 +520,6 @@ export function EventsPanel() {
           View only — contact Front Desk or Manager to add or change events.
         </p>
       )}
-
-      <CompactStatBadgeRow
-        className="py-0.5"
-        items={[
-          {
-            key: 'count',
-            label: 'Events',
-            value: pageStats.count,
-            icon: PartyPopper,
-            borderClass: 'border-violet-200/80',
-            bgClass: 'bg-violet-50/50',
-            iconClass: 'text-violet-700',
-            title: statsDateYmd ? `Events starting ${statsDateYmd}` : 'All events',
-          },
-          {
-            key: 'revenue',
-            label: 'Rev',
-            value: formatNaira(pageStats.revenue),
-            icon: Receipt,
-            borderClass: 'border-slate-200/80',
-            bgClass: 'bg-slate-50/50',
-            iconClass: 'text-slate-700',
-            title: 'Estimated revenue',
-          },
-          {
-            key: 'guests',
-            label: 'Guests',
-            value: pageStats.guests,
-            icon: Users,
-            borderClass: 'border-blue-200/80',
-            bgClass: 'bg-blue-50/50',
-            iconClass: 'text-blue-700',
-            title: 'Expected guests',
-          },
-        ]}
-      />
 
       <EnhancedDataTable
         compactTable

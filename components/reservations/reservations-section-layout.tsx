@@ -14,7 +14,7 @@ import {
 function ReservationsEventsLayoutInner({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const { role } = useAuth()
-  const { headerActions } = useReservationsEventsHeader()
+  const { headerActions, headerStats } = useReservationsEventsHeader()
   const showEvents = hasPermission(role, 'events:view')
 
   const reservationsActive =
@@ -34,10 +34,15 @@ function ReservationsEventsLayoutInner({ children }: { children: React.ReactNode
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-        <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">{pageTitle}</h1>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+        <h1 className="text-2xl font-bold tracking-tight sm:text-3xl shrink-0">{pageTitle}</h1>
+        {headerStats ? (
+          <div className="flex flex-1 justify-center min-w-0">{headerStats}</div>
+        ) : null}
         {headerActions ? (
-          <div className="flex flex-wrap items-center justify-end gap-2 shrink-0">{headerActions}</div>
+          <div className="flex flex-wrap items-center justify-end gap-2 shrink-0 sm:ml-auto">
+            {headerActions}
+          </div>
         ) : null}
       </div>
       <nav className="flex flex-wrap gap-0 border-b">
