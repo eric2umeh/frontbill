@@ -243,6 +243,148 @@ export function DailyRevenueAccrualPanel({
   );
 }
 
+export function DailySalesByDayPanel({
+  userId,
+  organizationId,
+  showPrint = true,
+}: {
+  userId: string;
+  organizationId: string;
+  showPrint?: boolean;
+}) {
+  const [start, setStart] = useState<Date>(() => subDays(new Date(), 6));
+  const [end, setEnd] = useState<Date>(() => new Date());
+  const [department, setDepartment] = useState("all");
+  const [loading, setLoading] = useState(false);
+  const [data, setData] = useState<any>(null);
+
+  const load = useCallback(async () => {
+    if (!userId || !organizationId) return;
+    setLoading(true);
+    try {
+      const qs = new URLSearchParams({
+        caller_id: userId,
+        start_date: format(start, "yyyy-MM-dd"),
+        end_date: format(end, "yyyy-MM-dd"),
+        report: "daily_revenue",
+        department,
+      });
+      const res = await fetch(`/api/reports/financial?${qs}`, {
+        credentials: "include",
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        toast.error(json.error || "Failed to load sales");
+        setData(null);
+        return;
+      }
+      setData(json);
+    } catch {
+      toast.error("Failed to load sales");
+      setData(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [userId, organizationId, start, end, department]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const totals = data?.periodTotals;
+  const tableRows = useMemo(
+    () => (data?.byDay || []).map((row: any) => ({ ...row })),
+    [data?.byDay],
+  );
+
+  return (
+    <div className="space-y-4 print-section">
+      <div className="flex flex-wrap items-center gap-2 print:hidden">
+        <DatePick
+          date={start}
+          onSelect={(d) => d && setStart(d)}
+          label="From"
+        />
+        <DatePick date={end} onSelect={(d) => d && setEnd(d)} label="To" />
+        <Select value={department} onValueChange={setDepartment}>
+          <SelectTrigger className="w-[200px]">
+            <SelectValue placeholder="Department" />
+          </SelectTrigger>
+          <SelectContent>
+            {REPORT_DEPARTMENT_FILTERS.map((o) => (
+              <SelectItem key={o.value} value={o.value}>
+                {o.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() => load()}
+          disabled={loading}
+        >
+          {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Refresh"}
+        </Button>
+        {showPrint ? <PrintBtn /> : null}
+      </div>
+
+      {loading && !data ? (
+        <div className="flex justify-center py-12">
+          <Loader2 className="h-6 w-6 animate-spin" />
+        </div>
+      ) : (
+        <>
+          {totals && (
+            <Card>
+              <CardContent className="p-4">
+                <p className="text-sm text-muted-foreground">Period net profit</p>
+                <p className="text-2xl font-bold">
+                  {formatNaira(totals.netProfit ?? 0)}
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Matches Accounting → Daily book sales collection for each day.
+                </p>
+              </CardContent>
+            </Card>
+          )}
+
+          <EnhancedDataTable
+            compactTable
+            showRowNumbers
+            itemsPerPage={15}
+            data={tableRows}
+            searchKeys={["date"]}
+            searchPlaceholder="Search date…"
+            emptyState={{ title: "No sales rows for this range" }}
+            rowKey={(row) => row.date}
+            columns={[
+              {
+                key: "date",
+                label: "Date",
+                render: (row) => row.date,
+              },
+              {
+                key: "netProfit",
+                label: "Net profit",
+                render: (row) => (
+                  <span className="font-medium">{formatNaira(row.netProfit ?? 0)}</span>
+                ),
+              },
+              {
+                key: "guestCount",
+                label: "In-house",
+                responsive: "md+",
+                render: (row) => row.guestCount ?? "—",
+              },
+            ]}
+          />
+        </>
+      )}
+    </div>
+  );
+}
+
 export function OccupancyRangePanel({
   userId,
   organizationId,
@@ -382,118 +524,14 @@ export function OccupancyRangePanel({
   );
 }
 
-export function SalesCollectionPanel({ userId }: { userId: string }) {
-  const [start, setStart] = useState<Date>(() => new Date());
-  const [end, setEnd] = useState<Date>(() => new Date());
-  const [department, setDepartment] = useState("all");
-  const [loading, setLoading] = useState(false);
-  const [data, setData] = useState<any>(null);
-
-  const load = useCallback(async () => {
-    if (!userId) return;
-    setLoading(true);
-    try {
-      const qs = new URLSearchParams({
-        caller_id: userId,
-        start_date: format(start, "yyyy-MM-dd"),
-        end_date: format(end, "yyyy-MM-dd"),
-        report: "sales_collection",
-        department,
-      });
-      const res = await fetch(`/api/reports/financial?${qs}`, {
-        credentials: "include",
-      });
-      const json = await res.json();
-      if (!res.ok) {
-        toast.error(json.error || "Failed");
-        setData(null);
-        return;
-      }
-      setData(json);
-    } catch {
-      toast.error("Failed to load");
-      setData(null);
-    } finally {
-      setLoading(false);
-    }
-  }, [userId, start, end, department]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  return (
-    <div className="space-y-4 print-section">
-      <div className="flex flex-wrap gap-2 print:hidden">
-        <DatePick
-          date={start}
-          onSelect={(d) => d && setStart(d)}
-          label="From"
-        />
-        <DatePick date={end} onSelect={(d) => d && setEnd(d)} label="To" />
-        <Select value={department} onValueChange={setDepartment}>
-          <SelectTrigger className="w-[200px]">
-            <SelectValue placeholder="Department" />
-          </SelectTrigger>
-          <SelectContent>
-            {REPORT_DEPARTMENT_FILTERS.map((o) => (
-              <SelectItem key={o.value} value={o.value}>
-                {o.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Button
-          size="sm"
-          variant="secondary"
-          onClick={() => load()}
-          disabled={loading}
-        >
-          {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Refresh"}
-        </Button>
-        <PrintBtn />
-      </div>
-      <p className="text-xs text-muted-foreground">{data?.note}</p>
-      {data && (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <Card>
-            <CardContent className="p-4">
-              <p className="text-xs text-muted-foreground">Payments</p>
-              <p className="text-xl font-bold">
-                {formatNaira(data.paymentsTotal)}
-              </p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-4">
-              <p className="text-xs text-muted-foreground">Transactions</p>
-              <p className="text-xl font-bold">
-                {formatNaira(data.transactionsTotal)}
-              </p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-4">
-              <p className="text-xs text-muted-foreground">Refunds</p>
-              <p className="text-xl font-bold text-red-600">
-                −{formatNaira(data.refundsTotal)}
-              </p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-4">
-              <p className="text-xs text-muted-foreground">
-                Net profit
-              </p>
-              <p className="text-xl font-bold">
-                {formatNaira(data.netSalesCollection)}
-              </p>
-            </CardContent>
-          </Card>
-        </div>
-      )}
-    </div>
-  );
+export function SalesCollectionPanel({
+  userId,
+  organizationId,
+}: {
+  userId: string;
+  organizationId: string;
+}) {
+  return <DailySalesByDayPanel userId={userId} organizationId={organizationId} />;
 }
 
 export function AccountantChargeSummaryPanel({ userId }: { userId: string }) {
