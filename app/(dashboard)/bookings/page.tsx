@@ -44,6 +44,12 @@ import {
   bookingAmountPaid,
 } from "@/lib/booking/parse-booking-notes";
 import { paymentMethodRequiresAccount } from "@/lib/payments/payment-accounts";
+import {
+  TABLE_ACTIONS_ROW,
+  TABLE_INLINE_ROW,
+  TABLE_META_TEXT,
+  TABLE_CELL_TRUNCATE,
+} from "@/lib/utils/table-row-inline";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { getUserDisplayName } from "@/lib/utils/user-display";
@@ -1577,11 +1583,11 @@ export default function BookingsPage() {
               const isDueOutRow = stayKind === "due_out";
               return (
               <div
-                className={`cursor-pointer hover:text-primary ${
+                className={`cursor-pointer hover:text-primary inline-flex items-center gap-1.5 min-w-0 max-w-[12rem] whitespace-nowrap ${
                   isReservationRow
-                    ? "rounded-md border border-violet-200 bg-violet-50/60 px-1.5 py-1 dark:border-violet-900/40 dark:bg-violet-950/30"
+                    ? "rounded-md border border-violet-200 bg-violet-50/60 px-1.5 py-0.5 dark:border-violet-900/40 dark:bg-violet-950/30"
                     : isDueOutRow
-                      ? "rounded-md border border-amber-200 bg-amber-50/60 px-1.5 py-1 dark:border-amber-900/40 dark:bg-amber-950/30"
+                      ? "rounded-md border border-amber-200 bg-amber-50/60 px-1.5 py-0.5 dark:border-amber-900/40 dark:bg-amber-950/30"
                       : ""
                 }`}
                 onClick={() =>
@@ -1592,28 +1598,30 @@ export default function BookingsPage() {
                   )
                 }
               >
-                <div className="font-medium max-md:text-[13px] flex flex-wrap items-center gap-1.5">
-                  <span>{booking.guests?.name}</span>
-                  {isReservationRow && (
-                    <Badge
-                      variant="outline"
-                      className="text-[10px] px-1 py-0 bg-violet-100 text-violet-800 border-violet-200"
-                    >
-                      Reservation — not checked in
-                    </Badge>
-                  )}
-                  {isDueOutRow && (
-                    <Badge
-                      variant="outline"
-                      className="text-[10px] px-1 py-0 bg-amber-100 text-amber-900 border-amber-200"
-                    >
-                      Due out today
-                    </Badge>
-                  )}
-                </div>
-                <div className="text-xs text-muted-foreground max-md:hidden">
-                  {booking.guests?.phone}
-                </div>
+                <span className={`font-medium max-md:text-[13px] ${TABLE_CELL_TRUNCATE}`}>
+                  {booking.guests?.name}
+                </span>
+                {isReservationRow && (
+                  <Badge
+                    variant="outline"
+                    className="text-[10px] px-1 py-0 shrink-0 bg-violet-100 text-violet-800 border-violet-200"
+                  >
+                    Reservation
+                  </Badge>
+                )}
+                {isDueOutRow && (
+                  <Badge
+                    variant="outline"
+                    className="text-[10px] px-1 py-0 shrink-0 bg-amber-100 text-amber-900 border-amber-200"
+                  >
+                    Due out
+                  </Badge>
+                )}
+                {booking.guests?.phone && (
+                  <span className={`${TABLE_META_TEXT} max-md:hidden shrink-0`}>
+                    {booking.guests.phone}
+                  </span>
+                )}
                 <MobileTableSubdetail>
                   <div>
                     {booking.is_bulk
@@ -1639,15 +1647,17 @@ export default function BookingsPage() {
             label: "Room",
             responsive: "md+",
             render: (booking) => (
-              <div>
-                <div className="font-medium max-md:text-[13px]">
+              <div className={`${TABLE_INLINE_ROW} max-w-[9rem]`}>
+                <span className="font-medium max-md:text-[13px] shrink-0">
                   {booking.is_bulk
                     ? `${booking.room_count} Rooms`
                     : `Room ${booking.rooms?.room_number}`}
-                </div>
-                <div className="text-xs text-muted-foreground">
-                  {booking.rooms?.room_type}
-                </div>
+                </span>
+                {booking.rooms?.room_type && !booking.is_bulk && (
+                  <span className={`${TABLE_META_TEXT} ${TABLE_CELL_TRUNCATE}`}>
+                    · {booking.rooms.room_type}
+                  </span>
+                )}
               </div>
             ),
           },
@@ -1686,8 +1696,8 @@ export default function BookingsPage() {
               const isDueTodayBeforeCutoff =
                 booking.status === "checked_in" && coYmd === today && !pastCut;
               return (
-                <div className="text-sm space-y-1 max-md:text-xs">
-                  <span>
+                <div className={TABLE_INLINE_ROW}>
+                  <span className="text-sm max-md:text-xs shrink-0">
                     {new Date(booking.check_out).toLocaleDateString("en-GB", {
                       day: "2-digit",
                       month: "short",
@@ -1696,7 +1706,7 @@ export default function BookingsPage() {
                   {isDueTodayBeforeCutoff && (
                     <Badge
                       variant="outline"
-                      className="text-[10px] px-1 py-0 bg-amber-50 text-amber-700 border-amber-200 block w-fit"
+                      className="text-[10px] px-1 py-0 shrink-0 bg-amber-50 text-amber-700 border-amber-200"
                     >
                       Due today
                     </Badge>
@@ -1704,7 +1714,7 @@ export default function BookingsPage() {
                   {isOverdue && (
                     <Badge
                       variant="outline"
-                      className="text-[10px] px-1 py-0 bg-red-50 text-red-600 border-red-200 block w-fit"
+                      className="text-[10px] px-1 py-0 shrink-0 bg-red-50 text-red-600 border-red-200"
                     >
                       Overdue
                     </Badge>
@@ -1721,27 +1731,27 @@ export default function BookingsPage() {
               const { badgeClass, badgeText, owedLine, paidLine, creditLine } =
                 paymentCellForBooking(booking);
               return (
-                <div className="space-y-0.5 max-w-[6.5rem]">
+                <div className={TABLE_INLINE_ROW}>
                   <Badge
                     variant="outline"
-                    className={`${badgeClass} max-md:text-[10px]`}
+                    className={`${badgeClass} max-md:text-[10px] shrink-0`}
                   >
                     {badgeText}
                   </Badge>
                   {paidLine !== null && (
-                    <div className="text-[10px] text-muted-foreground truncate">
-                      Paid: {formatNaira(paidLine)}
-                    </div>
+                    <span className={`${TABLE_META_TEXT} tabular-nums`}>
+                      {formatNaira(paidLine)}
+                    </span>
                   )}
                   {owedLine !== null && (
-                    <div className="text-[10px] text-muted-foreground truncate">
-                      Bal: {formatNaira(owedLine)}
-                    </div>
+                    <span className={`${TABLE_META_TEXT} tabular-nums`}>
+                      Bal {formatNaira(owedLine)}
+                    </span>
                   )}
                   {creditLine !== null && creditLine > 0 && (
-                    <div className="text-[10px] text-muted-foreground truncate">
-                      Credit: {formatNaira(creditLine)}
-                    </div>
+                    <span className={`${TABLE_META_TEXT} tabular-nums`}>
+                      Cr {formatNaira(creditLine)}
+                    </span>
                   )}
                 </div>
               );
@@ -1761,29 +1771,30 @@ export default function BookingsPage() {
                   : paymentMethodRequiresAccount(booking.payment_method)
                     ? booking.payment_account_label
                     : "";
+              const methodTitle = [
+                methodLabel,
+                accountLabel,
+                booking.last_reschedule
+                  ? `Rescheduled ${booking.last_reschedule}`
+                  : null,
+              ]
+                .filter(Boolean)
+                .join(' · ')
               return (
-                <div className="space-y-0.5 max-w-[6.5rem]">
+                <div
+                  className={`${TABLE_INLINE_ROW} max-w-[7rem]`}
+                  title={methodTitle}
+                >
                   <Badge
                     variant="outline"
-                    className="text-[10px] capitalize max-md:text-[10px] max-w-full truncate"
+                    className="text-[10px] capitalize max-md:text-[10px] shrink-0"
                   >
                     {methodLabel}
                   </Badge>
                   {accountLabel ? (
-                    <div
-                      className="text-[10px] text-muted-foreground truncate"
-                      title={accountLabel}
-                    >
+                    <span className={`${TABLE_META_TEXT} ${TABLE_CELL_TRUNCATE}`}>
                       {accountLabel}
-                    </div>
-                  ) : null}
-                  {booking.last_reschedule ? (
-                    <div
-                      className="text-[10px] text-muted-foreground truncate"
-                      title={`Rescheduled ${booking.last_reschedule}`}
-                    >
-                      {booking.last_reschedule}
-                    </div>
+                    </span>
                   ) : null}
                 </div>
               );
@@ -1847,7 +1858,7 @@ export default function BookingsPage() {
                 }
                 return (
                   <div
-                    className="flex shrink-0 flex-wrap gap-0.5"
+                    className={TABLE_ACTIONS_ROW}
                     onClick={(e) => e.stopPropagation()}
                   >
                     {actionableMember && (
@@ -1953,7 +1964,7 @@ export default function BookingsPage() {
 
               return (
                 <div
-                  className="flex shrink-0 flex-wrap gap-0.5"
+                  className={TABLE_ACTIONS_ROW}
                   onClick={(e) => e.stopPropagation()}
                 >
                   {showReserveRow && canCheckInReserved && (
