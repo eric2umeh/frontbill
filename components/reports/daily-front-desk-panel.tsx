@@ -25,7 +25,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { PageLoadingState } from '@/components/loading-screen'
 import { EnhancedDataTable } from '@/components/shared/enhanced-data-table'
 import { MobileTableSubdetail } from '@/lib/utils/table-mobile'
-import { TABLE_INLINE_ROW, TABLE_META_TEXT, TABLE_CELL_TRUNCATE } from '@/lib/utils/table-row-inline'
+import { TABLE_INLINE_ROW, TABLE_META_TEXT, TABLE_CELL_TRUNCATE, TABLE_STACKED_CELL } from '@/lib/utils/table-row-inline'
 import { toast } from 'sonner'
 import { CalendarIcon, RefreshCw, Users, Wallet } from 'lucide-react'
 import { calendarPickerYmd } from '@/lib/utils/booking-in-house-dates'
