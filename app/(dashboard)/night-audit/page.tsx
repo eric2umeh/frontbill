@@ -27,6 +27,7 @@ import { BackdateRequestsTab } from '@/components/night-audit/backdate-requests-
 import { RoomChangeRequestsTab } from '@/components/night-audit/room-change-requests-tab'
 import { RescheduleStayRequestsTab } from '@/components/night-audit/reschedule-stay-requests-tab'
 import { ExtendStayDiscountTab } from '@/components/night-audit/extend-stay-discount-tab'
+import { DailySalesByDayPanel } from '@/components/reports/financial-and-refund-panels'
 import { useNightAuditPendingCounts } from '@/hooks/use-night-audit-pending-counts'
 import { LoadingSpinner } from '@/components/loading-screen'
 import { PaginatedListShell } from '@/components/shared/paginated-list-shell'
@@ -571,6 +572,24 @@ export default function NightAuditPage() {
               </div>
             </CardContent>
           </Card>
+
+          {userId && organizationId ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>Sales</CardTitle>
+                <CardDescription>
+                  Daily net profit by business date (matches Daily book). Defaults to the last 7 days.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <DailySalesByDayPanel
+                  userId={userId}
+                  organizationId={organizationId}
+                  showPrint={false}
+                />
+              </CardContent>
+            </Card>
+          ) : null}
 
           {auditData?.anomalies && auditData.anomalies.length > 0 && (
             <Card className="border-orange-200">
