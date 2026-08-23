@@ -175,7 +175,7 @@ export async function GET(request: Request) {
 
       const { data: payments, error: payE } = await admin
         .from("payments")
-        .select("id, amount, payment_date, payment_method, booking_id, guest_id, notes, reference_number, status")
+        .select("id, amount, payment_date, payment_method, booking_id, guest_id, notes, reference_number")
         .eq("organization_id", orgId)
         .gte("payment_date", startD.toISOString())
         .lte("payment_date", endD.toISOString());
