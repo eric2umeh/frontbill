@@ -462,6 +462,7 @@ export default function TransactionsPage() {
 
       {/* Table */}
       <EnhancedDataTable
+        showRowNumbers
         compactTable
         data={payments}
         searchKeys={['guest_name', 'folio_id', 'reference_number', 'notes', 'payment_account_label']}
