@@ -1,6 +1,7 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { format } from 'date-fns'
 import { useAuth } from '@/lib/auth-context'
 import { createClient } from '@/lib/supabase/client'
@@ -39,10 +40,12 @@ function categoryBadgeVariant(
 }
 
 export function DailyFrontDeskPanel() {
+  const searchParams = useSearchParams()
   const { userId, organizationId, role } = useAuth()
-  const [day, setDay] = useState(() =>
-    calendarDateMinusOneDay(hotelCalendarTodayYmd(new Date(), resolveHotelTimeZone())),
-  )
+  const initialDate =
+    searchParams.get('date')?.slice(0, 10) ||
+    calendarDateMinusOneDay(hotelCalendarTodayYmd(new Date(), resolveHotelTimeZone()))
+  const [day, setDay] = useState(initialDate)
   const [calOpen, setCalOpen] = useState(false)
   const [loading, setLoading] = useState(true)
   const [pack, setPack] = useState<DailyFrontDeskPack | null>(null)
@@ -176,6 +179,45 @@ export function DailyFrontDeskPanel() {
     void load()
   }, [load])
 
+  useEffect(() => {
+    const fromUrl = searchParams.get('date')?.slice(0, 10)
+    if (fromUrl && fromUrl !== day) setDay(fromUrl)
+  }, [searchParams, day])
+
+  useEffect(() => {
+    const hash = typeof window !== 'undefined' ? window.location.hash : ''
+    if (!hash || !pack) return
+    const el = document.querySelector(hash)
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }
+  }, [pack, day])
+
+  const owingGuests = useMemo(
+    () =>
+      (pack?.guests || []).filter((g) => {
+        const ps = String(g.payment_status || '').toLowerCase()
+        return ps === 'pending' || ps === 'partial' || ps === 'unpaid'
+      }),
+    [pack?.guests],
+  )
+
+  const collectionSections = useMemo(() => {
+    const lines = pack?.lines || []
+    return {
+      advance: lines.filter((l) => l.category === 'advance_payment'),
+      payments: lines.filter(
+        (l) =>
+          l.counts_as_cash_collection &&
+          ['pos', 'cash', 'transfer', 'additional_payment', 'extra_charges', 'other'].includes(
+            l.category,
+          ),
+      ),
+      debt: lines.filter((l) => l.category === 'debt_recovery'),
+      cityLedger: lines.filter((l) => l.category === 'city_ledger'),
+    }
+  }, [pack?.lines])
+
   if (loading && !pack) return <PageLoadingState label="Loading daily book…" />
 
   const sc = pack?.salesCollection
@@ -216,7 +258,7 @@ export function DailyFrontDeskPanel() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div id="daily-book-summary" className="scroll-mt-24 grid grid-cols-1 sm:grid-cols-3 gap-4">
         <Card>
           <CardHeader className="pb-2">
             <CardDescription className="flex items-center gap-1.5">
@@ -228,10 +270,10 @@ export function DailyFrontDeskPanel() {
             Guest{pack?.guestCount === 1 ? '' : 's'} occupying rooms that night
           </CardContent>
         </Card>
-        <Card>
+        <Card id="daily-book-revenue" className="scroll-mt-24">
           <CardHeader className="pb-2">
             <CardDescription className="flex items-center gap-1.5">
-              <Wallet className="h-4 w-4" /> Room revenue generated
+              <Wallet className="h-4 w-4" /> Room revenue
             </CardDescription>
             <CardTitle className="text-3xl">
               {formatNaira(pack?.roomRevenueGenerated || 0)}
@@ -241,7 +283,7 @@ export function DailyFrontDeskPanel() {
         <Card className="bg-primary text-primary-foreground">
           <CardHeader className="pb-2">
             <CardDescription className="flex items-center gap-1.5 text-primary-foreground/80">
-              <Wallet className="h-4 w-4" /> Cash collected
+              <Wallet className="h-4 w-4" /> Net profit
             </CardDescription>
             <CardTitle className="text-3xl">{formatNaira(sc?.total || 0)}</CardTitle>
           </CardHeader>
@@ -251,13 +293,9 @@ export function DailyFrontDeskPanel() {
         </Card>
       </div>
 
-      <Card>
+      <Card id="daily-book-net-breakdown" className="scroll-mt-24">
         <CardHeader>
-          <CardTitle className="text-base">Sales collection breakdown</CardTitle>
-          <CardDescription>
-            Matches the manual book categories: POS, cash, advance (reservations), additional (extend
-            stay), extra charges, debt recovery.
-          </CardDescription>
+          <CardTitle className="text-base">Net profit breakdown (POS &amp; methods)</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
@@ -281,18 +319,108 @@ export function DailyFrontDeskPanel() {
         </CardContent>
       </Card>
 
-      <Card>
+      {owingGuests.length > 0 && (
+        <Card className="border-amber-200/80">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Guests owing (in-house)</CardTitle>
+            <CardDescription>Outstanding folio balance on this hotel night</CardDescription>
+          </CardHeader>
+          <CardContent className="p-0 sm:p-6 pt-0">
+            <EnhancedDataTable
+              compactTable
+              showRowNumbers
+              itemsPerPage={10}
+              data={owingGuests}
+              searchKeys={['guest_name', 'room_number', 'folio_id']}
+              emptyState={{ title: 'No owing guests' }}
+              rowKey={(g) => g.booking_id}
+              columns={[
+                {
+                  key: 'guest_name',
+                  label: 'Guest',
+                  render: (g) => <span className="font-medium">{g.guest_name}</span>,
+                },
+                {
+                  key: 'room_number',
+                  label: 'Room',
+                  render: (g) => g.room_number,
+                },
+                {
+                  key: 'rate_per_night',
+                  label: 'Rate/night',
+                  render: (g) => formatNaira(g.rate_per_night),
+                },
+                {
+                  key: 'payment_status',
+                  label: 'Status',
+                  render: (g) => (
+                    <Badge variant="outline" className="capitalize text-amber-700 border-amber-300">
+                      {g.payment_status}
+                    </Badge>
+                  ),
+                },
+              ]}
+            />
+          </CardContent>
+        </Card>
+      )}
+
+      <Card id="daily-book-collections" className="scroll-mt-24">
         <CardHeader>
-          <CardTitle className="text-base">In-house guests</CardTitle>
+          <CardTitle className="text-base">Net profit — receipt lines</CardTitle>
           <CardDescription>
-            Every occupied room for this hotel night (arrivals and stayovers). Same list as Bookings →
-            Stay date.
+            Future reservation payments, guest payments received, and debt recovery for this business date.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6 p-4 sm:p-6">
+          {[
+            {
+              title: 'Future reservations paid today',
+              rows: collectionSections.advance,
+            },
+            {
+              title: 'Payments received today (POS / cash / transfer)',
+              rows: collectionSections.payments,
+            },
+            {
+              title: 'Debt recovery',
+              rows: collectionSections.debt,
+            },
+          ].map(({ title, rows }) =>
+            rows.length > 0 ? (
+              <div key={title} className="space-y-2">
+                <p className="text-sm font-semibold">{title}</p>
+                <EnhancedDataTable
+                  compactTable
+                  showRowNumbers
+                  itemsPerPage={10}
+                  data={rows}
+                  searchKeys={['guest_name', 'reference', 'payment_account_label']}
+                  emptyState={{ title: 'None' }}
+                  rowKey={(line) => line.id}
+                  columns={collectionLineColumns}
+                />
+              </div>
+            ) : null,
+          )}
+          {(pack?.lines || []).length === 0 && (
+            <p className="text-sm text-muted-foreground text-center py-6">No collections recorded for this date.</p>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card id="daily-book-guests" className="scroll-mt-24">
+        <CardHeader>
+          <CardTitle className="text-base">In-house guests (revenue)</CardTitle>
+          <CardDescription>
+            Every guest occupying a room this hotel night — room rates sum to Rev on Bookings.
           </CardDescription>
         </CardHeader>
         <CardContent className="p-0 sm:p-6 pt-0">
           <EnhancedDataTable
             compactTable
             showRowNumbers
+            itemsPerPage={15}
             data={pack?.guests || []}
             searchKeys={['guest_name', 'room_number', 'folio_id']}
             searchPlaceholder="Search guests, room, folio…"
@@ -336,22 +464,6 @@ export function DailyFrontDeskPanel() {
                 render: (g) => g.room_number,
               },
               {
-                key: 'room_type',
-                label: 'Type',
-                responsive: 'md+',
-                render: (g) => g.room_type,
-              },
-              {
-                key: 'check_in',
-                label: 'Stay',
-                responsive: 'md+',
-                render: (g) => (
-                  <span className="text-xs text-muted-foreground whitespace-nowrap">
-                    {g.check_in} → {g.check_out}
-                  </span>
-                ),
-              },
-              {
                 key: 'payment_status',
                 label: 'Payment',
                 responsive: 'md+',
@@ -365,106 +477,45 @@ export function DailyFrontDeskPanel() {
           />
         </CardContent>
       </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Collection lines</CardTitle>
-          <CardDescription>
-            Individual receipts for the day with category labels and bank/POS account. City ledger
-            lines are listed but not summed into Sales collection.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="p-0 sm:p-6 pt-0">
-          <EnhancedDataTable
-            compactTable
-            showRowNumbers
-            data={pack?.lines || []}
-            searchKeys={['guest_name', 'reference', 'payment_account_label', 'description']}
-            searchPlaceholder="Search collections…"
-            emptyState={{ title: 'No collections recorded for this date' }}
-            rowKey={(line) => line.id}
-            columns={[
-              {
-                key: 'guest_name',
-                label: 'Guest',
-                render: (line) => (
-                  <div className={!line.counts_as_cash_collection ? `opacity-70 ${TABLE_INLINE_ROW} max-w-[12rem]` : `${TABLE_INLINE_ROW} max-w-[12rem]`}>
-                    <span className={`font-medium max-md:text-[13px] ${TABLE_CELL_TRUNCATE}`}>{line.guest_name}</span>
-                    {line.room ? (
-                      <span className={`${TABLE_META_TEXT} max-md:hidden shrink-0`}>{line.room}</span>
-                    ) : null}
-                    <MobileTableSubdetail>
-                      {line.room ? <div>{line.room}</div> : null}
-                      <div className="capitalize">
-                        {line.payment_method.replace(/_/g, ' ')} ·{' '}
-                        {SALES_COLLECTION_LABELS[line.category]}
-                      </div>
-                      {line.payment_account_label ? <div>{line.payment_account_label}</div> : null}
-                    </MobileTableSubdetail>
-                  </div>
-                ),
-              },
-              {
-                key: 'amount',
-                label: 'Amount',
-                render: (line) => (
-                  <span className="font-semibold text-xs md:text-sm whitespace-nowrap">
-                    {formatNaira(line.amount)}
-                  </span>
-                ),
-              },
-              {
-                key: 'payment_method',
-                label: 'Method',
-                responsive: 'md+',
-                render: (line) => (
-                  <div className={TABLE_STACKED_CELL}>
-                    <span className="capitalize text-[11px] shrink-0">
-                      {line.payment_method.replace(/_/g, ' ')}
-                    </span>
-                    {line.payment_account_label ? (
-                      <span className={`${TABLE_META_TEXT} ${TABLE_CELL_TRUNCATE}`} title={line.payment_account_label}>
-                        {line.payment_account_label}
-                      </span>
-                    ) : null}
-                  </div>
-                ),
-              },
-              {
-                key: 'category',
-                label: 'Category',
-                responsive: 'md+',
-                render: (line) => (
-                  <Badge variant={categoryBadgeVariant(line.category)}>
-                    {SALES_COLLECTION_LABELS[line.category]}
-                  </Badge>
-                ),
-              },
-              {
-                key: 'payment_account_label',
-                label: 'Account',
-                responsive: 'lg+',
-                render: (line) => (
-                  <span
-                    className="text-xs text-muted-foreground max-w-[160px] inline-block truncate"
-                    title={line.payment_account_label || ''}
-                  >
-                    {line.payment_account_label || '—'}
-                  </span>
-                ),
-              },
-              {
-                key: 'reference',
-                label: 'Ref',
-                responsive: 'lg+',
-                render: (line) => (
-                  <span className="font-mono text-[10px] text-muted-foreground">{line.reference}</span>
-                ),
-              },
-            ]}
-          />
-        </CardContent>
-      </Card>
     </div>
   )
 }
+
+const collectionLineColumns = [
+  {
+    key: 'guest_name',
+    label: 'Guest',
+    render: (line: DailyFrontDeskPack['lines'][number]) => (
+      <span className="font-medium">{line.guest_name}</span>
+    ),
+  },
+  {
+    key: 'amount',
+    label: 'Amount',
+    render: (line: DailyFrontDeskPack['lines'][number]) => (
+      <span className="font-semibold">{formatNaira(line.amount)}</span>
+    ),
+  },
+  {
+    key: 'payment_method',
+    label: 'Method',
+    render: (line: DailyFrontDeskPack['lines'][number]) => (
+      <div className={TABLE_STACKED_CELL}>
+        <span className="capitalize text-[11px]">{line.payment_method.replace(/_/g, ' ')}</span>
+        {line.payment_account_label ? (
+          <span className={`${TABLE_META_TEXT} ${TABLE_CELL_TRUNCATE}`}>{line.payment_account_label}</span>
+        ) : null}
+      </div>
+    ),
+  },
+  {
+    key: 'category',
+    label: 'Category',
+    responsive: 'md+' as const,
+    render: (line: DailyFrontDeskPack['lines'][number]) => (
+      <Badge variant={categoryBadgeVariant(line.category)}>
+        {SALES_COLLECTION_LABELS[line.category]}
+      </Badge>
+    ),
+  },
+]
