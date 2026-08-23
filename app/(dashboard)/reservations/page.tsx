@@ -40,6 +40,7 @@ import {
   TABLE_INLINE_ROW,
   TABLE_META_TEXT,
   TABLE_CELL_TRUNCATE,
+  TABLE_STACKED_CELL,
 } from '@/lib/utils/table-row-inline'
 
 const RESERVATIONS_LIST_LIMIT = 500
@@ -590,7 +591,7 @@ export default function ReservationsPage() {
                   : res.payment_status
               const paidAmt = bookingAmountPaid(res.total_amount, res.balance)
               return (
-                <div className={TABLE_INLINE_ROW}>
+                <div className={TABLE_STACKED_CELL}>
                   <Badge variant="outline" className={`${(paymentColors as Record<string, string>)[effectiveStatus]} max-md:text-[10px] shrink-0`}>
                     {effectiveStatus}
                   </Badge>
@@ -617,14 +618,18 @@ export default function ReservationsPage() {
                     : ''
               return (
                 <div
-                  className={`${TABLE_INLINE_ROW} max-w-[7rem]`}
-                  title={[formatBookingPaymentMethodLabel(res.payment_method || 'cash'), accountLabel, res.last_reschedule ? `Rescheduled ${res.last_reschedule}` : null].filter(Boolean).join(' · ')}
+                  className={TABLE_STACKED_CELL}
+                  title={[formatBookingPaymentMethodLabel(res.payment_method || 'cash'), accountLabel].filter(Boolean).join(' · ')}
                 >
                   <Badge variant="outline" className="text-[10px] shrink-0">
                     {formatBookingPaymentMethodLabel(res.payment_method || 'cash')}
                   </Badge>
                   {accountLabel ? (
-                    <span className={`${TABLE_META_TEXT} ${TABLE_CELL_TRUNCATE}`}>{accountLabel}</span>
+                    <span className={`${TABLE_META_TEXT} ${TABLE_CELL_TRUNCATE}`} title={accountLabel}>
+                      {accountLabel}
+                    </span>
+                  ) : paymentMethodRequiresAccount(res.payment_method) ? (
+                    <span className={TABLE_META_TEXT}>—</span>
                   ) : null}
                 </div>
               )
