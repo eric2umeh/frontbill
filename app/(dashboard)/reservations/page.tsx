@@ -13,7 +13,8 @@ import { PageLoadingState } from '@/components/loading-screen'
 import { usePageData } from '@/hooks/use-page-data'
 import { useAuth } from '@/lib/auth-context'
 import { hasPermission } from '@/lib/permissions'
-import { Plus, Users, DoorOpen } from 'lucide-react'
+import { Plus, Users, DoorOpen, CalendarClock, Banknote, Receipt } from 'lucide-react'
+import { CompactStatBadgeRow } from '@/components/shared/compact-stat-badges'
 import { BulkBookingModal } from '@/components/reservations/bulk-booking-modal'
 import { NewReservationModal } from '@/components/reservations/new-reservation-modal'
 import { ReserveCheckInModal, type ReserveCheckInBooking } from '@/components/reservations/reserve-checkin-modal'
@@ -455,29 +456,45 @@ export default function ReservationsPage() {
         onSuccess={fetchReservations}
       />
       
-      <div className="mx-auto grid w-full max-w-3xl grid-cols-3 gap-3">
-        {[
-          { label: 'Reservations', value: pageStats.count },
-          { label: 'Revenue', value: formatNaira(pageStats.revenue), isText: true },
-          { label: 'Deposits', value: formatNaira(pageStats.deposits), isText: true },
-        ].map((s) => (
-          <div key={s.label} className="rounded-xl border bg-card px-4 py-3 text-center shadow-sm">
-            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{s.label}</p>
-            <p className={`mt-1 font-bold tabular-nums ${s.isText ? 'text-lg' : 'text-2xl sm:text-3xl'}`}>
-              {s.value}
-            </p>
-          </div>
-        ))}
-      </div>
-      {statsDateYmd && (
-        <p className="text-center text-xs text-muted-foreground">Arrivals on {statsDateYmd}</p>
-      )}
+      <CompactStatBadgeRow
+        className="py-0.5"
+        items={[
+          {
+            key: 'count',
+            label: 'Res',
+            value: pageStats.count,
+            icon: CalendarClock,
+            borderClass: 'border-violet-200/80',
+            bgClass: 'bg-violet-50/50',
+            iconClass: 'text-violet-700',
+            title: statsDateYmd ? `Arrivals on ${statsDateYmd}` : 'All reservations',
+          },
+          {
+            key: 'revenue',
+            label: 'Rev',
+            value: formatNaira(pageStats.revenue),
+            icon: Receipt,
+            borderClass: 'border-slate-200/80',
+            bgClass: 'bg-slate-50/50',
+            iconClass: 'text-slate-700',
+            title: 'Total booking value',
+          },
+          {
+            key: 'deposits',
+            label: 'Dep',
+            value: formatNaira(pageStats.deposits),
+            icon: Banknote,
+            borderClass: 'border-emerald-200/80',
+            bgClass: 'bg-emerald-50/50',
+            iconClass: 'text-emerald-700',
+            title: 'Deposits collected',
+          },
+        ]}
+      />
 
       <EnhancedDataTable
         compactTable
         showRowNumbers
-        prominentDateFilter
-        centerToolbar
         data={reservations}
         onDateFilterChange={(d) =>
           setStatsDateYmd(d ? calendarPickerYmd(d) : null)
