@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import {
   getPermissionGroups,
   getRoleDefinition,
@@ -10,6 +10,8 @@ import {
   type RoleKey,
 } from '@/lib/permissions'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Input } from '@/components/ui/input'
+import { Search } from 'lucide-react'
 
 type Props = {
   roleKey: RoleKey
@@ -33,7 +35,24 @@ export function PermissionOverridesEditor({
   layer = 'user',
   orgRoleOverrides,
 }: Props) {
+  const [search, setSearch] = useState('')
   const groups = useMemo(() => getPermissionGroups(), [])
+  const filteredGroups = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    if (!q) return groups
+    const next: typeof groups = {}
+    for (const [group, items] of Object.entries(groups)) {
+      const groupMatch = group.toLowerCase().includes(q)
+      const matched = items.filter(
+        ({ key, label }) =>
+          groupMatch ||
+          label.toLowerCase().includes(q) ||
+          key.toLowerCase().includes(q),
+      )
+      if (matched.length > 0) next[group] = matched
+    }
+    return next
+  }, [groups, search])
   const effective = useMemo(() => {
     if (layer === 'org') {
       return resolveEffectivePermissions(roleKey, null, overrides)
@@ -69,8 +88,20 @@ export function PermissionOverridesEditor({
     })
   }
 
+  const groupEntries = Object.entries(filteredGroups)
+  const hasResults = groupEntries.length > 0
+
   return (
-    <div className="space-y-4 max-h-[60vh] overflow-y-auto rounded-md border p-3">
+    <div className="space-y-3 rounded-md border p-3">
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search permissions…"
+          className="pl-9"
+        />
+      </div>
       <p className="text-xs text-muted-foreground">
         {readOnly
           ? 'Checked permissions are included in this role by default.'
@@ -78,7 +109,13 @@ export function PermissionOverridesEditor({
             ? 'Changes apply to every staff member with this role at your hotel. Tick to grant; untick to remove from the role default.'
             : 'Defaults match the selected role. Tick to grant extra access; untick to remove a default permission for this user only.'}
       </p>
-      {Object.entries(groups).map(([group, items]) => (
+      <div className="max-h-[55vh] space-y-4 overflow-y-auto">
+      {!hasResults && (
+        <p className="py-6 text-center text-sm text-muted-foreground">
+          No permissions match &ldquo;{search.trim()}&rdquo;.
+        </p>
+      )}
+      {groupEntries.map(([group, items]) => (
         <div key={group} className="space-y-2">
           <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{group}</p>
           <div className="grid gap-2 sm:grid-cols-2">
@@ -109,6 +146,7 @@ export function PermissionOverridesEditor({
           </div>
         </div>
       ))}
+      </div>
     </div>
   )
 }

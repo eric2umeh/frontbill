@@ -820,6 +820,7 @@ export default function UsersRolesPage() {
           {viewingRole && (
             <>
               <PermissionOverridesEditor
+                key={viewingRole}
                 roleKey={viewingRole}
                 overrides={editingRoleOverrides}
                 onChange={setEditingRoleOverrides}
