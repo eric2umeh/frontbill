@@ -39,6 +39,7 @@ import {
 } from '@/lib/events/event-other-services'
 import { formatNaira } from '@/lib/utils/currency'
 import { MobileTableSubdetail } from '@/lib/utils/table-mobile'
+import { calendarPickerYmd } from '@/lib/utils/booking-in-house-dates'
 import { EnhancedDataTable } from '@/components/shared/enhanced-data-table'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -120,6 +121,19 @@ export function EventsPanel() {
   const [editing, setEditing] = useState<HotelEventRow | null>(null)
   const [cancelTarget, setCancelTarget] = useState<HotelEventRow | null>(null)
   const [form, setForm] = useState(emptyForm)
+  const [statsDateYmd, setStatsDateYmd] = useState<string | null>(null)
+
+  const pageStats = useMemo(() => {
+    const rows = statsDateYmd
+      ? events.filter((e) => String(e.start_date).slice(0, 10) === statsDateYmd)
+      : events
+    const active = rows.filter((e) => e.status !== 'cancelled')
+    return {
+      count: active.length,
+      revenue: active.reduce((sum, e) => sum + Number(e.estimated_total ?? e.estimated_base_value ?? 0), 0),
+      guests: active.reduce((sum, e) => sum + Number(e.expected_guests ?? 0), 0),
+    }
+  }, [events, statsDateYmd])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -459,9 +473,31 @@ export function EventsPanel() {
         </p>
       )}
 
+      <div className="mx-auto grid w-full max-w-3xl grid-cols-3 gap-3">
+        {[
+          { label: 'Events', value: pageStats.count },
+          { label: 'Est. revenue', value: formatNaira(pageStats.revenue), isText: true },
+          { label: 'Expected guests', value: pageStats.guests },
+        ].map((s) => (
+          <div key={s.label} className="rounded-xl border bg-card px-4 py-3 text-center shadow-sm">
+            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{s.label}</p>
+            <p className={`mt-1 font-bold tabular-nums ${s.isText ? 'text-lg' : 'text-2xl sm:text-3xl'}`}>
+              {s.value}
+            </p>
+          </div>
+        ))}
+      </div>
+      {statsDateYmd && (
+        <p className="text-center text-xs text-muted-foreground">Events starting {statsDateYmd}</p>
+      )}
+
       <EnhancedDataTable
         compactTable
+        showRowNumbers
+        prominentDateFilter
+        centerToolbar
         data={events}
+        onDateFilterChange={(d) => setStatsDateYmd(d ? calendarPickerYmd(d) : null)}
         searchKeys={['title', 'venue', 'client_name', 'client_phone', 'remarks'] as (keyof HotelEventRow)[]}
         dateField="start_date"
         onRowClick={canManage ? (ev) => openEdit(ev) : undefined}
