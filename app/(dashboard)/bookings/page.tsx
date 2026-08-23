@@ -38,6 +38,12 @@ import {
   Receipt,
 } from "lucide-react";
 import { CompactStatBadgeRow } from "@/components/shared/compact-stat-badges";
+import {
+  parseBookingNotesMeta,
+  formatBookingPaymentMethodLabel,
+  bookingAmountPaid,
+} from "@/lib/booking/parse-booking-notes";
+import { paymentMethodRequiresAccount } from "@/lib/payments/payment-accounts";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { getUserDisplayName } from "@/lib/utils/user-display";
@@ -210,6 +216,8 @@ interface Booking {
   payment_status: string;
   payment_method?: string;
   ledger_account_name?: string;
+  payment_account_label?: string;
+  last_reschedule?: string | null;
   guestName?: string;
   guestPhone?: string;
   organization_id?: string;
@@ -546,37 +554,13 @@ export default function BookingsPage() {
           userId,
         );
 
-        // Derive payment_method from notes field (since there's no payment_method column on bookings)
+        // Derive payment method / account from notes (may include reschedule history on later lines).
         let bookingsWithUsers = (data || []).map((booking: any) => {
-          let payment_method = "cash";
-          let ledger_account_name = "";
-          if (booking.notes) {
-            if (booking.notes.startsWith("city_ledger:")) {
-              payment_method = "city_ledger";
-              ledger_account_name = booking.notes.replace(
-                /^city_ledger:\s*/i,
-                "",
-              );
-            } else if (booking.notes.startsWith("City Ledger:")) {
-              payment_method = "city_ledger";
-              ledger_account_name = booking.notes.replace(
-                /^City Ledger:\s*/,
-                "",
-              );
-            } else if (booking.notes.startsWith("payment_method:")) {
-              payment_method = booking.notes
-                .replace(/^payment_method:\s*/, "")
-                .split("|")[0]
-                .trim();
-              const match = booking.notes.match(/\|ledger:(.+)/);
-              if (match) ledger_account_name = match[1].trim();
-            }
-          }
+          const notesMeta = parseBookingNotesMeta(booking.notes);
           return {
             ...booking,
             _db_balance: Number(booking.balance ?? 0),
-            payment_method,
-            ledger_account_name,
+            ...notesMeta,
             guestName: booking.guests?.name || "",
             guestPhone: booking.guests?.phone || "",
             created_by_name: booking.created_by
@@ -755,35 +739,11 @@ export default function BookingsPage() {
           );
 
           let bookingsWithUsers = (data || []).map((booking: any) => {
-            let payment_method = "cash";
-            let ledger_account_name = "";
-            if (booking.notes) {
-              if (booking.notes.startsWith("city_ledger:")) {
-                payment_method = "city_ledger";
-                ledger_account_name = booking.notes.replace(
-                  /^city_ledger:\s*/i,
-                  "",
-                );
-              } else if (booking.notes.startsWith("City Ledger:")) {
-                payment_method = "city_ledger";
-                ledger_account_name = booking.notes.replace(
-                  /^City Ledger:\s*/,
-                  "",
-                );
-              } else if (booking.notes.startsWith("payment_method:")) {
-                payment_method = booking.notes
-                  .replace(/^payment_method:\s*/, "")
-                  .split("|")[0]
-                  .trim();
-                const match = booking.notes.match(/\|ledger:(.+)/);
-                if (match) ledger_account_name = match[1].trim();
-              }
-            }
+            const notesMeta = parseBookingNotesMeta(booking.notes);
             return {
               ...booking,
               _db_balance: Number(booking.balance ?? 0),
-              payment_method,
-              ledger_account_name,
+              ...notesMeta,
               guestName: booking.guests?.name || "",
               guestPhone: booking.guests?.phone || "",
               created_by_name: booking.created_by
@@ -885,35 +845,11 @@ export default function BookingsPage() {
           );
 
           let bookingsWithUsers = (data || []).map((booking: any) => {
-            let payment_method = "cash";
-            let ledger_account_name = "";
-            if (booking.notes) {
-              if (booking.notes.startsWith("city_ledger:")) {
-                payment_method = "city_ledger";
-                ledger_account_name = booking.notes.replace(
-                  /^city_ledger:\s*/i,
-                  "",
-                );
-              } else if (booking.notes.startsWith("City Ledger:")) {
-                payment_method = "city_ledger";
-                ledger_account_name = booking.notes.replace(
-                  /^City Ledger:\s*/,
-                  "",
-                );
-              } else if (booking.notes.startsWith("payment_method:")) {
-                payment_method = booking.notes
-                  .replace(/^payment_method:\s*/, "")
-                  .split("|")[0]
-                  .trim();
-                const match = booking.notes.match(/\|ledger:(.+)/);
-                if (match) ledger_account_name = match[1].trim();
-              }
-            }
+            const notesMeta = parseBookingNotesMeta(booking.notes);
             return {
               ...booking,
               _db_balance: Number(booking.balance ?? 0),
-              payment_method,
-              ledger_account_name,
+              ...notesMeta,
               guestName: booking.guests?.name || "",
               guestPhone: booking.guests?.phone || "",
               created_by_name: booking.created_by
@@ -1053,6 +989,7 @@ export default function BookingsPage() {
   const paymentCellForBooking = (booking: Booking) => {
     const owed = Math.max(0, Number(booking.balance ?? 0));
     const creditAmt = Math.max(0, Number(booking.folio_credit ?? 0));
+    const paidAmt = bookingAmountPaid(booking.total_amount, booking.balance);
     const isCancelledLike = booking.status === "cancelled";
 
     let effectiveStatus =
@@ -1073,6 +1010,7 @@ export default function BookingsPage() {
         badgeClass: paymentColors.paid,
         badgeText: "paid",
         owedLine: null as number | null,
+        paidLine: paidAmt > 0 ? paidAmt : null,
         creditLine: creditAmt,
       };
     }
@@ -1081,6 +1019,8 @@ export default function BookingsPage() {
       badgeClass: paymentColors[key] ?? paymentColors.pending,
       badgeText: key,
       owedLine: owed > 0 ? owed : null,
+      paidLine:
+        !isCancelledLike && key === "paid" && paidAmt > 0 ? paidAmt : null,
       creditLine: creditAmt > 0 ? creditAmt : null,
     };
   };
@@ -1405,9 +1345,11 @@ export default function BookingsPage() {
         </>
       )}
 
-      <div className="flex flex-col gap-2">
-        <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Bookings</h1>
-        <div className="flex flex-wrap items-center justify-center gap-1.5">
+      <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between lg:gap-3">
+        <h1 className="text-2xl sm:text-3xl font-bold tracking-tight shrink-0">
+          Bookings
+        </h1>
+        <div className="flex flex-wrap items-center justify-center lg:justify-end gap-1.5 shrink-0">
           {roomStats !== null && (
             <CompactStatBadgeRow
               items={[
@@ -1776,23 +1718,28 @@ export default function BookingsPage() {
             label: "Payment",
             responsive: "md+",
             render: (booking) => {
-              const { badgeClass, badgeText, owedLine, creditLine } =
+              const { badgeClass, badgeText, owedLine, paidLine, creditLine } =
                 paymentCellForBooking(booking);
               return (
-                <div className="space-y-1">
+                <div className="space-y-0.5 max-w-[6.5rem]">
                   <Badge
                     variant="outline"
                     className={`${badgeClass} max-md:text-[10px]`}
                   >
                     {badgeText}
                   </Badge>
+                  {paidLine !== null && (
+                    <div className="text-[10px] text-muted-foreground truncate">
+                      Paid: {formatNaira(paidLine)}
+                    </div>
+                  )}
                   {owedLine !== null && (
-                    <div className="text-xs text-muted-foreground">
+                    <div className="text-[10px] text-muted-foreground truncate">
                       Bal: {formatNaira(owedLine)}
                     </div>
                   )}
                   {creditLine !== null && creditLine > 0 && (
-                    <div className="text-xs text-muted-foreground">
+                    <div className="text-[10px] text-muted-foreground truncate">
                       Credit: {formatNaira(creditLine)}
                     </div>
                   )}
@@ -1804,22 +1751,43 @@ export default function BookingsPage() {
             key: "payment_method",
             label: "Method",
             responsive: "md+",
-            render: (booking) => (
-              <div className="space-y-1">
-                <Badge
-                  variant="outline"
-                  className="text-[10px] capitalize max-md:text-[10px]"
-                >
-                  {(booking.payment_method || "cash").replace(/_/g, " ")}
-                </Badge>
-                {booking.payment_method === "city_ledger" &&
-                  booking.ledger_account_name && (
-                    <div className="text-[10px] text-muted-foreground truncate max-w-[100px] md:max-w-[120px]">
-                      {booking.ledger_account_name}
+            render: (booking) => {
+              const methodLabel = formatBookingPaymentMethodLabel(
+                booking.payment_method,
+              );
+              const accountLabel =
+                booking.payment_method === "city_ledger"
+                  ? booking.ledger_account_name
+                  : paymentMethodRequiresAccount(booking.payment_method)
+                    ? booking.payment_account_label
+                    : "";
+              return (
+                <div className="space-y-0.5 max-w-[6.5rem]">
+                  <Badge
+                    variant="outline"
+                    className="text-[10px] capitalize max-md:text-[10px] max-w-full truncate"
+                  >
+                    {methodLabel}
+                  </Badge>
+                  {accountLabel ? (
+                    <div
+                      className="text-[10px] text-muted-foreground truncate"
+                      title={accountLabel}
+                    >
+                      {accountLabel}
                     </div>
-                  )}
-              </div>
-            ),
+                  ) : null}
+                  {booking.last_reschedule ? (
+                    <div
+                      className="text-[10px] text-muted-foreground truncate"
+                      title={`Rescheduled ${booking.last_reschedule}`}
+                    >
+                      {booking.last_reschedule}
+                    </div>
+                  ) : null}
+                </div>
+              );
+            },
           },
           {
             key: "actions",
@@ -2171,13 +2139,18 @@ export default function BookingsPage() {
                   <div className="text-muted-foreground">Payment</div>
                   <div className="space-y-1">
                     {(() => {
-                      const { badgeClass, badgeText, owedLine, creditLine } =
+                      const { badgeClass, badgeText, owedLine, paidLine, creditLine } =
                         paymentCellForBooking(booking);
                       return (
                         <>
                           <Badge variant="outline" className={badgeClass}>
                             {badgeText}
                           </Badge>
+                          {paidLine !== null && (
+                            <div className="text-xs text-muted-foreground">
+                              Paid: {formatNaira(paidLine)}
+                            </div>
+                          )}
                           {owedLine !== null && (
                             <div className="text-xs text-muted-foreground">
                               Bal: {formatNaira(owedLine)}
