@@ -1,13 +1,13 @@
 /** Shared classes for compact single-line data-table rows. */
 export const TABLE_ACTIONS_ROW =
-  'flex flex-nowrap items-center gap-0.5 shrink-0'
+  'flex flex-wrap items-center gap-1.5'
 
 export const TABLE_INLINE_ROW =
   'inline-flex items-center gap-1.5 min-w-0 whitespace-nowrap max-w-full'
 
 /** Badge on first line, amount/account on second (Payment & Method columns). */
 export const TABLE_STACKED_CELL =
-  'inline-flex flex-col items-start gap-0.5 min-w-0 max-w-[5rem]'
+  'inline-flex flex-col items-start gap-0.5 min-w-0'
 
 export const TABLE_META_TEXT = 'text-[10px] leading-tight text-muted-foreground'
 
