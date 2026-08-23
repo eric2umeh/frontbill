@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { EnhancedDataTable } from "@/components/shared/enhanced-data-table";
 import { Badge } from "@/components/ui/badge";
@@ -34,8 +34,6 @@ import {
   AlertTriangle,
   CalendarClock,
   CalendarDays,
-  Banknote,
-  Receipt,
 } from "lucide-react";
 import { CompactStatBadgeRow } from "@/components/shared/compact-stat-badges";
 import {
@@ -44,12 +42,12 @@ import {
   bookingAmountPaid,
 } from "@/lib/booking/parse-booking-notes";
 import { paymentMethodRequiresAccount } from "@/lib/payments/payment-accounts";
+import { enrichBookingsList } from "@/lib/booking/enrich-bookings-list";
 import {
   TABLE_ACTIONS_ROW,
-  TABLE_INLINE_ROW,
+  TABLE_STACKED_CELL,
   TABLE_META_TEXT,
   TABLE_CELL_TRUNCATE,
-  TABLE_STACKED_CELL,
 } from "@/lib/utils/table-row-inline";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -66,8 +64,6 @@ import {
 import { fetchOrgCheckoutTime } from "@/lib/utils/org-checkout-policy";
 import {
   folioGuestCreditAmount,
-  folioPositiveOutstandingSum,
-  shouldReconcileBookingPaymentPaid,
 } from "@/lib/utils/booking-bill-balance";
 import {
   calendarPickerYmd,
@@ -89,7 +85,6 @@ import {
   MobileTableSubdetail,
 } from "@/lib/utils/table-mobile";
 
-const FOLIO_BOOKING_ID_CHUNK = 80;
 const BOOKINGS_SCOPE_LIMIT = 500;
 
 function describeFetchError(err: unknown): string {
@@ -104,110 +99,6 @@ function describeFetchError(err: unknown): string {
     return JSON.stringify(err);
   } catch {
     return String(err);
-  }
-}
-
-type FolioChargeRow = {
-  amount?: unknown;
-  type?: string | null;
-  charge_type?: string | null;
-  payment_status?: string | null;
-  payment_method?: string | null;
-};
-
-async function fetchFolioChargesByBookingIds(
-  supabase: NonNullable<ReturnType<typeof createClient>>,
-  bookingIds: string[],
-): Promise<Record<string, FolioChargeRow[]>> {
-  const chargesByBooking: Record<string, FolioChargeRow[]> = {};
-  if (!bookingIds.length) return chargesByBooking;
-
-  for (let i = 0; i < bookingIds.length; i += FOLIO_BOOKING_ID_CHUNK) {
-    const chunk = bookingIds.slice(i, i + FOLIO_BOOKING_ID_CHUNK);
-    const { data, error } = await supabase
-      .from("folio_charges")
-      .select("booking_id, amount, payment_status, charge_type, payment_method")
-      .in("booking_id", chunk);
-    if (error) throw error;
-    for (const c of data ?? []) {
-      const id = (c as { booking_id: string }).booking_id;
-      if (!chargesByBooking[id]) chargesByBooking[id] = [];
-      chargesByBooking[id].push({
-        amount: (c as { amount?: unknown }).amount,
-        type: (c as { charge_type?: string | null }).charge_type,
-        charge_type: (c as { charge_type?: string | null }).charge_type,
-        payment_status: (c as { payment_status?: string | null })
-          .payment_status,
-        payment_method: (c as { payment_method?: string | null })
-          .payment_method,
-      });
-    }
-  }
-  return chargesByBooking;
-}
-
-/**
- * When city-ledger prepaid credit exists but was never posted as a folio line,
- * surface it under the most recent paid booking for that guest (Credit under paid).
- */
-async function attachGuestLedgerCreditToBookings(
-  supabase: NonNullable<ReturnType<typeof createClient>>,
-  organizationId: string,
-  bookings: Array<{
-    id: string;
-    guestName?: string;
-    guests?: { name?: string | null } | null;
-    check_in?: string;
-    balance?: number;
-    folio_credit?: number;
-  }>,
-): Promise<void> {
-  if (!bookings.length || !organizationId) return;
-
-  const { data: creditRows } = await supabase
-    .from("city_ledger_accounts")
-    .select("account_name, balance")
-    .eq("organization_id", organizationId)
-    .in("account_type", ["individual", "guest"])
-    .lt("balance", -0.005)
-    .limit(500);
-
-  if (!creditRows?.length) return;
-
-  const creditByName = new Map<string, number>();
-  for (const row of creditRows) {
-    const key = String(row.account_name || "")
-      .trim()
-      .toLowerCase();
-    if (!key) continue;
-    const amt = Math.abs(Number(row.balance || 0));
-    creditByName.set(key, Math.max(creditByName.get(key) || 0, amt));
-  }
-
-  for (const [nameKey, creditAmt] of creditByName) {
-    const guestBookings = bookings.filter((b) => {
-      const n = String(b.guestName || b.guests?.name || "")
-        .trim()
-        .toLowerCase();
-      return n === nameKey;
-    });
-    if (!guestBookings.length) continue;
-
-    const folioCreditSum = guestBookings.reduce(
-      (s, b) => s + Math.max(0, Number(b.folio_credit || 0)),
-      0,
-    );
-    if (folioCreditSum >= creditAmt - 0.5) continue;
-
-    const target = [...guestBookings].sort((a, b) =>
-      String(b.check_in || "").localeCompare(String(a.check_in || "")),
-    )[0];
-    if (Number(target.balance || 0) > 0.005) continue;
-
-    target.folio_credit = Math.max(
-      Number(target.folio_credit || 0),
-      creditAmt,
-    );
   }
 }
 
@@ -298,6 +189,8 @@ export default function BookingsPage() {
   const [catalogScopeLoaded, setCatalogScopeLoaded] = useState<string | null>(
     null,
   );
+  const inHouseEnrichRef = useRef(0);
+  const catalogEnrichRef = useRef(0);
   const [catalogLoading, setCatalogLoading] = useState(false);
   /** When set, table shows in-house guests for that hotel night (not arrivals-only). */
   const [stayDateYmd, setStayDateYmd] = useState<string | null>(null);
@@ -483,6 +376,50 @@ export default function BookingsPage() {
     );
   }
 
+  const runDeferredInHouseEnrich = useCallback(
+    async (
+      rows: Booking[],
+      supabase: NonNullable<ReturnType<typeof createClient>>,
+    ) => {
+      if (!organizationId || !rows.length) return;
+      const req = ++inHouseEnrichRef.current;
+      try {
+        const copy = rows.map((b) => ({ ...b }));
+        await enrichBookingsList(supabase, organizationId, copy);
+        if (inHouseEnrichRef.current !== req) return;
+        setInHouseBookings(groupBulkRows(copy as Booking[]));
+      } catch (err) {
+        if (process.env.NODE_ENV === "development") {
+          console.warn("[bookings] deferred folio enrich failed:", err);
+        }
+      }
+    },
+    [organizationId],
+  );
+
+  const runDeferredCatalogEnrich = useCallback(
+    async (
+      rows: Booking[],
+      scopeKey: string,
+      supabase: NonNullable<ReturnType<typeof createClient>>,
+    ) => {
+      if (!organizationId || !rows.length) return;
+      const req = ++catalogEnrichRef.current;
+      try {
+        const copy = rows.map((b) => ({ ...b }));
+        await enrichBookingsList(supabase, organizationId, copy);
+        if (catalogEnrichRef.current !== req) return;
+        setAllBookingsCatalog(groupBulkRows(copy as Booking[]));
+        setCatalogScopeLoaded(scopeKey);
+      } catch (err) {
+        if (process.env.NODE_ENV === "development") {
+          console.warn("[bookings] deferred catalog enrich failed:", err);
+        }
+      }
+    },
+    [organizationId],
+  );
+
   const fetchBookings = useCallback(async () => {
     startFetch();
     try {
@@ -498,7 +435,7 @@ export default function BookingsPage() {
       setCatalogScopeLoaded(null);
       setAllBookingsCatalog([]);
 
-      const loadScope = async (statusKey: string) => {
+      const loadScope = async (statusKey: string, enrich = true) => {
         const tz = resolveHotelTimeZone();
         const today = frontOfficeToday;
         const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000)
@@ -588,62 +525,26 @@ export default function BookingsPage() {
           );
         }
 
-        // Derive each booking's balance from folio (same rules as booking detail / bill card)
         const bookingIds = bookingsWithUsers.map((b: any) => b.id);
         if (bookingIds.length > 0) {
-          const chargesByBooking = await fetchFolioChargesByBookingIds(
-            supabase,
-            bookingIds,
-          );
-          bookingsWithUsers.forEach((b: any) => {
-            const ch = chargesByBooking[b.id] ?? [];
-            b.balance = folioPositiveOutstandingSum(ch);
-            b.folio_credit = folioGuestCreditAmount(ch);
-          });
-          await attachGuestLedgerCreditToBookings(
-            supabase,
-            organizationId,
-            bookingsWithUsers,
-          );
-
-          const healIds = bookingsWithUsers
-            .filter((b: any) =>
-              shouldReconcileBookingPaymentPaid(
-                {
-                  total_amount: b.total_amount,
-                  deposit: b.deposit,
-                  balance: b._db_balance,
-                  payment_status: b.payment_status,
-                },
-                chargesByBooking[b.id] ?? [],
-              ),
-            )
-            .map((b: any) => b.id as string);
-
-          if (healIds.length > 0) {
-            bookingsWithUsers.forEach((b: any) => {
-              if (healIds.includes(b.id)) b.payment_status = "paid";
-            });
-            void Promise.all(
-              healIds.map((id: string) =>
-                supabase
-                  .from("bookings")
-                  .update({ payment_status: "paid" })
-                  .eq("id", id),
-              ),
+          if (enrich) {
+            await enrichBookingsList(
+              supabase,
+              organizationId,
+              bookingsWithUsers,
             );
           }
+        } else {
+          bookingsWithUsers.forEach((b: any) => {
+            delete b._db_balance;
+          });
         }
-
-        bookingsWithUsers.forEach((b: any) => {
-          delete b._db_balance;
-        });
 
         return bookingsWithUsers;
       };
 
       const inHouse = await Promise.race([
-        withFetchRetry(() => loadScope("checked_in")),
+        withFetchRetry(() => loadScope("checked_in", false)),
         new Promise<never>((_, reject) =>
           setTimeout(
             () => reject(new Error("Bookings request timed out")),
@@ -652,6 +553,7 @@ export default function BookingsPage() {
         ),
       ]);
       setInHouseBookings(groupBulkRows(inHouse));
+      void runDeferredInHouseEnrich(inHouse, supabase);
     } catch (error: unknown) {
       const detail = describeFetchError(error);
       if (process.env.NODE_ENV === "development") {
@@ -669,7 +571,7 @@ export default function BookingsPage() {
     } finally {
       endFetch();
     }
-  }, [organizationId, userId, startFetch, endFetch, frontOfficeToday]);
+  }, [organizationId, userId, startFetch, endFetch, frontOfficeToday, runDeferredInHouseEnrich]);
 
   const fetchBookingsCatalog = useCallback(
     async (scopeKey: string) => {
@@ -765,26 +667,11 @@ export default function BookingsPage() {
           });
 
           const bookingIds = bookingsWithUsers.map((b: any) => b.id);
-          if (bookingIds.length > 0) {
-            const chargesByBooking = await fetchFolioChargesByBookingIds(
-              supabase,
-              bookingIds,
-            );
+          if (!bookingIds.length) {
             bookingsWithUsers.forEach((b: any) => {
-              const ch = chargesByBooking[b.id] ?? [];
-              b.balance = folioPositiveOutstandingSum(ch);
-              b.folio_credit = folioGuestCreditAmount(ch);
+              delete b._db_balance;
             });
-            await attachGuestLedgerCreditToBookings(
-              supabase,
-              organizationId,
-              bookingsWithUsers,
-            );
           }
-
-          bookingsWithUsers.forEach((b: any) => {
-            delete b._db_balance;
-          });
 
           if (scopeKey === "due_out") {
             const tz = resolveHotelTimeZone();
@@ -796,6 +683,7 @@ export default function BookingsPage() {
 
           setAllBookingsCatalog(groupBulkRows(bookingsWithUsers));
           setCatalogScopeLoaded(scopeKey);
+          void runDeferredCatalogEnrich(bookingsWithUsers, scopeKey, supabase);
         });
       } catch (error: unknown) {
         const detail = describeFetchError(error);
@@ -812,7 +700,7 @@ export default function BookingsPage() {
         setCatalogLoading(false);
       }
     },
-    [organizationId, userId, frontOfficeToday],
+    [organizationId, userId, frontOfficeToday, runDeferredCatalogEnrich],
   );
 
   /** In-house / stayovers for a hotel night (daily book), including later checked-out guests. */
@@ -871,28 +759,15 @@ export default function BookingsPage() {
           });
 
           const bookingIds = bookingsWithUsers.map((b: any) => b.id);
-          if (bookingIds.length > 0) {
-            const chargesByBooking = await fetchFolioChargesByBookingIds(
-              supabase,
-              bookingIds,
-            );
+          if (!bookingIds.length) {
             bookingsWithUsers.forEach((b: any) => {
-              const ch = chargesByBooking[b.id] ?? [];
-              b.balance = folioPositiveOutstandingSum(ch);
-              b.folio_credit = folioGuestCreditAmount(ch);
+              delete b._db_balance;
             });
-            await attachGuestLedgerCreditToBookings(
-              supabase,
-              organizationId,
-              bookingsWithUsers,
-            );
           }
-          bookingsWithUsers.forEach((b: any) => {
-            delete b._db_balance;
-          });
 
           setAllBookingsCatalog(groupBulkRows(bookingsWithUsers));
           setCatalogScopeLoaded(scopeKey);
+          void runDeferredCatalogEnrich(bookingsWithUsers, scopeKey, supabase);
         });
       } catch (error: unknown) {
         const detail = describeFetchError(error);
@@ -906,7 +781,7 @@ export default function BookingsPage() {
         setCatalogLoading(false);
       }
     },
-    [organizationId, userId],
+    [organizationId, userId, runDeferredCatalogEnrich],
   );
 
   const handleBookingsDateFilterChange = useCallback(
@@ -1352,10 +1227,16 @@ export default function BookingsPage() {
         </>
       )}
 
-      <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between lg:gap-3">
-        <h1 className="text-2xl sm:text-3xl font-bold tracking-tight shrink-0">
-          Bookings
-        </h1>
+      <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between lg:gap-3">
+        <div className="min-w-0">
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight shrink-0">
+            Bookings
+          </h1>
+          <p className="text-sm text-muted-foreground mt-1 max-w-3xl">
+            Default list: occupied + due today + today&apos;s arrivals. Due guests stay in this list with a note.
+            Search finds any booking in the last 90 days. Checkout frees the room.
+          </p>
+        </div>
         <div className="flex flex-wrap items-center justify-center lg:justify-end gap-1.5 shrink-0">
           {roomStats !== null && (
             <CompactStatBadgeRow
@@ -1369,26 +1250,6 @@ export default function BookingsPage() {
                   bgClass: "bg-blue-50/50",
                   iconClass: "text-blue-700",
                   title: "Checked-in guests staying past today",
-                },
-                {
-                  key: "revenue",
-                  label: "Rev",
-                  value: formatNaira(roomStats.roomRevenue),
-                  icon: Receipt,
-                  borderClass: "border-slate-200/80",
-                  bgClass: "bg-slate-50/50",
-                  iconClass: "text-slate-700",
-                  title: `Room revenue for ${roomStats.statsDate}`,
-                },
-                {
-                  key: "cash",
-                  label: "Cash",
-                  value: formatNaira(roomStats.cashCollected),
-                  icon: Banknote,
-                  borderClass: "border-emerald-200/80",
-                  bgClass: "bg-emerald-50/50",
-                  iconClass: "text-emerald-700",
-                  title: `Cash collected for ${roomStats.statsDate}`,
                 },
                 {
                   key: "res",
@@ -1584,11 +1445,11 @@ export default function BookingsPage() {
               const isDueOutRow = stayKind === "due_out";
               return (
               <div
-                className={`cursor-pointer hover:text-primary min-w-0 max-w-[9rem] ${
+                className={`cursor-pointer hover:text-primary ${
                   isReservationRow
-                    ? "rounded-md border border-violet-200 bg-violet-50/60 px-1 py-0.5 dark:border-violet-900/40 dark:bg-violet-950/30"
+                    ? "rounded-md border border-violet-200 bg-violet-50/60 px-1.5 py-1 dark:border-violet-900/40 dark:bg-violet-950/30"
                     : isDueOutRow
-                      ? "rounded-md border border-amber-200 bg-amber-50/60 px-1 py-0.5 dark:border-amber-900/40 dark:bg-amber-950/30"
+                      ? "rounded-md border border-amber-200 bg-amber-50/60 px-1.5 py-1 dark:border-amber-900/40 dark:bg-amber-950/30"
                       : ""
                 }`}
                 onClick={() =>
@@ -1599,32 +1460,28 @@ export default function BookingsPage() {
                   )
                 }
               >
-                <div className="flex items-center gap-1 min-w-0">
-                  <span className={`font-medium max-md:text-[13px] truncate ${TABLE_CELL_TRUNCATE}`}>
-                    {booking.guests?.name}
-                  </span>
+                <div className="font-medium max-md:text-[13px] flex flex-wrap items-center gap-1.5">
+                  <span>{booking.guests?.name}</span>
                   {isReservationRow && (
                     <Badge
                       variant="outline"
-                      className="text-[10px] px-1 py-0 shrink-0 bg-violet-100 text-violet-800 border-violet-200"
+                      className="text-[10px] px-1 py-0 bg-violet-100 text-violet-800 border-violet-200"
                     >
-                      Res
+                      Reservation — not checked in
                     </Badge>
                   )}
                   {isDueOutRow && (
                     <Badge
                       variant="outline"
-                      className="text-[10px] px-1 py-0 shrink-0 bg-amber-100 text-amber-900 border-amber-200"
+                      className="text-[10px] px-1 py-0 bg-amber-100 text-amber-900 border-amber-200"
                     >
-                      Due
+                      Due out today
                     </Badge>
                   )}
                 </div>
-                {booking.guests?.phone && (
-                  <div className={`${TABLE_META_TEXT} max-md:hidden truncate`}>
-                    {booking.guests.phone}
-                  </div>
-                )}
+                <div className="text-xs text-muted-foreground max-md:hidden">
+                  {booking.guests?.phone}
+                </div>
                 <MobileTableSubdetail>
                   <div>
                     {booking.is_bulk
@@ -1650,14 +1507,14 @@ export default function BookingsPage() {
             label: "Room",
             responsive: "md+",
             render: (booking) => (
-              <div className="min-w-0 max-w-[6rem]">
-                <div className="font-medium max-md:text-[13px] truncate">
+              <div>
+                <div className="font-medium max-md:text-[13px]">
                   {booking.is_bulk
                     ? `${booking.room_count} Rooms`
                     : `Room ${booking.rooms?.room_number}`}
                 </div>
                 {booking.rooms?.room_type && !booking.is_bulk && (
-                  <div className={`${TABLE_META_TEXT} truncate`}>
+                  <div className="text-xs text-muted-foreground">
                     {booking.rooms.room_type}
                   </div>
                 )}
@@ -1699,8 +1556,8 @@ export default function BookingsPage() {
               const isDueTodayBeforeCutoff =
                 booking.status === "checked_in" && coYmd === today && !pastCut;
               return (
-                <div className={TABLE_INLINE_ROW}>
-                  <span className="text-sm max-md:text-xs shrink-0">
+                <div className="text-sm space-y-1 max-md:text-xs">
+                  <span>
                     {new Date(booking.check_out).toLocaleDateString("en-GB", {
                       day: "2-digit",
                       month: "short",
@@ -1709,7 +1566,7 @@ export default function BookingsPage() {
                   {isDueTodayBeforeCutoff && (
                     <Badge
                       variant="outline"
-                      className="text-[10px] px-1 py-0 shrink-0 bg-amber-50 text-amber-700 border-amber-200"
+                      className="text-[10px] px-1 py-0 bg-amber-50 text-amber-700 border-amber-200 block w-fit"
                     >
                       Due today
                     </Badge>
@@ -1717,7 +1574,7 @@ export default function BookingsPage() {
                   {isOverdue && (
                     <Badge
                       variant="outline"
-                      className="text-[10px] px-1 py-0 shrink-0 bg-red-50 text-red-600 border-red-200"
+                      className="text-[10px] px-1 py-0 bg-red-50 text-red-600 border-red-200 block w-fit"
                     >
                       Overdue
                     </Badge>
@@ -1774,17 +1631,11 @@ export default function BookingsPage() {
                   : paymentMethodRequiresAccount(booking.payment_method)
                     ? booking.payment_account_label
                     : "";
-              const methodTitle = [
-                methodLabel,
-                accountLabel,
-                booking.last_reschedule
-                  ? `Rescheduled ${booking.last_reschedule}`
-                  : null,
-              ]
-                .filter(Boolean)
-                .join(' · ')
               return (
-                <div className={TABLE_STACKED_CELL} title={methodTitle}>
+                <div
+                  className={TABLE_STACKED_CELL}
+                  title={[methodLabel, accountLabel].filter(Boolean).join(" · ")}
+                >
                   <Badge
                     variant="outline"
                     className="text-[10px] capitalize max-md:text-[10px] shrink-0"
@@ -1792,11 +1643,12 @@ export default function BookingsPage() {
                     {methodLabel}
                   </Badge>
                   {accountLabel ? (
-                    <span className={`${TABLE_META_TEXT} ${TABLE_CELL_TRUNCATE}`} title={accountLabel}>
+                    <span
+                      className={`${TABLE_META_TEXT} ${TABLE_CELL_TRUNCATE} max-w-[7rem]`}
+                      title={accountLabel}
+                    >
                       {accountLabel}
                     </span>
-                  ) : paymentMethodRequiresAccount(booking.payment_method) ? (
-                    <span className={`${TABLE_META_TEXT} ${TABLE_CELL_TRUNCATE}`}>—</span>
                   ) : null}
                 </div>
               );
@@ -1848,7 +1700,7 @@ export default function BookingsPage() {
                     <Button
                       size="sm"
                       variant="outline"
-                      className="h-6 px-1.5 text-[10px]"
+                      className="h-7 px-2 text-[11px]"
                       onClick={(e) => {
                         e.stopPropagation();
                         router.push(`/bulk-bookings/${gid}`);
@@ -1869,7 +1721,7 @@ export default function BookingsPage() {
                           size="sm"
                           variant="outline"
                           title="Add charge to a room in this group"
-                          className="h-6 px-1.5 text-[10px] leading-tight whitespace-nowrap"
+                          className="h-7 px-2 text-[11px] leading-tight whitespace-nowrap"
                           onClick={(e) => {
                             e.stopPropagation();
                             setSelectedBooking({
@@ -1892,7 +1744,7 @@ export default function BookingsPage() {
                           size="sm"
                           variant="outline"
                           title="Extend stay for a room in this group"
-                          className="h-6 px-1.5 text-[10px] leading-tight whitespace-nowrap"
+                          className="h-7 px-2 text-[11px] leading-tight whitespace-nowrap"
                           onClick={(e) => {
                             e.stopPropagation();
                             setSelectedBooking({
@@ -1912,7 +1764,7 @@ export default function BookingsPage() {
                             setExtendModalOpen(true);
                           }}
                         >
-                          Extend
+                          Extend Stay
                         </Button>
                       </>
                     )}
@@ -1921,7 +1773,7 @@ export default function BookingsPage() {
                         size="sm"
                         variant="outline"
                         title="Check out all eligible rooms in this group"
-                        className="h-6 px-1.5 text-[10px] leading-tight text-amber-700 border-amber-200 hover:bg-amber-50"
+                        className="h-7 px-2 text-[11px] leading-tight text-amber-700 border-amber-200 hover:bg-amber-50"
                         disabled={checkoutLoadingGroupId === gid}
                         onClick={(e) => {
                           e.stopPropagation();
@@ -1942,7 +1794,7 @@ export default function BookingsPage() {
                       size="sm"
                       variant="ghost"
                       title="Open bulk group — extend/charge each room"
-                      className="h-6 px-1.5 text-[10px]"
+                      className="h-7 px-2 text-[11px]"
                       onClick={(e) => {
                         e.stopPropagation();
                         router.push(`/bulk-bookings/${gid}`);
@@ -1974,7 +1826,7 @@ export default function BookingsPage() {
                       size="sm"
                       variant="outline"
                       title="Check in — pick room when guest arrives"
-                      className="h-6 px-1.5 text-[10px] leading-tight whitespace-nowrap text-green-700 border-green-200 hover:bg-green-50"
+                      className="h-7 px-2 text-[11px] leading-tight whitespace-nowrap text-green-700 border-green-200 hover:bg-green-50"
                       onClick={(e) => {
                         e.stopPropagation();
                         openReserveCheckIn(booking);
@@ -1992,7 +1844,7 @@ export default function BookingsPage() {
                       size="sm"
                       variant="outline"
                       title="Cancel reservation"
-                      className="h-6 px-1.5 text-[10px] leading-tight whitespace-nowrap border-destructive/40 text-destructive hover:bg-destructive/10"
+                      className="h-7 px-2 text-[11px] leading-tight whitespace-nowrap border-destructive/40 text-destructive hover:bg-destructive/10"
                       disabled={cancelReserveLoadingId === booking.id}
                       onClick={(e) => {
                         e.stopPropagation();
@@ -2011,7 +1863,7 @@ export default function BookingsPage() {
                             size="sm"
                             variant="outline"
                             title="Add folio charge"
-                            className="h-6 px-1.5 text-[10px] leading-tight whitespace-nowrap"
+                            className="h-7 px-2 text-[11px] leading-tight whitespace-nowrap"
                             onClick={(e) => {
                               e.stopPropagation();
                               setSelectedBooking({
@@ -2034,7 +1886,7 @@ export default function BookingsPage() {
                             size="sm"
                             variant="outline"
                             title="Extend stay"
-                            className="h-6 px-1.5 text-[10px] leading-tight whitespace-nowrap"
+                            className="h-7 px-2 text-[11px] leading-tight whitespace-nowrap"
                             onClick={(e) => {
                               e.stopPropagation();
                               setSelectedBooking({
@@ -2054,7 +1906,7 @@ export default function BookingsPage() {
                               setExtendModalOpen(true);
                             }}
                           >
-                            Extend
+                            Extend Stay
                           </Button>
                         </>
                       )}
@@ -2071,7 +1923,7 @@ export default function BookingsPage() {
                           size="sm"
                           variant="outline"
                           title="Check out guest"
-                          className="h-6 px-1.5 text-[10px] leading-tight text-amber-700 border-amber-200 hover:bg-amber-50 whitespace-nowrap"
+                          className="h-7 px-2 text-[11px] leading-tight text-amber-700 border-amber-200 hover:bg-amber-50 whitespace-nowrap"
                           disabled={checkoutLoadingId === booking.id}
                           onClick={(e) => {
                             e.stopPropagation();
@@ -2097,9 +1949,9 @@ export default function BookingsPage() {
           {
             key: "created_by_name",
             label: "Created By",
-            responsive: "xl+",
+            responsive: "lg+",
             render: (booking) => (
-              <div className="text-[11px] text-muted-foreground truncate max-w-[5rem]">
+              <div className="text-sm text-muted-foreground">
                 {booking.created_by_name}
               </div>
             ),
