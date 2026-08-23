@@ -49,6 +49,7 @@ import {
   TABLE_INLINE_ROW,
   TABLE_META_TEXT,
   TABLE_CELL_TRUNCATE,
+  TABLE_STACKED_CELL,
 } from "@/lib/utils/table-row-inline";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -1370,6 +1371,26 @@ export default function BookingsPage() {
                   title: "Checked-in guests staying past today",
                 },
                 {
+                  key: "revenue",
+                  label: "Rev",
+                  value: formatNaira(roomStats.roomRevenue),
+                  icon: Receipt,
+                  borderClass: "border-slate-200/80",
+                  bgClass: "bg-slate-50/50",
+                  iconClass: "text-slate-700",
+                  title: `Room revenue for ${roomStats.statsDate}`,
+                },
+                {
+                  key: "cash",
+                  label: "Cash",
+                  value: formatNaira(roomStats.cashCollected),
+                  icon: Banknote,
+                  borderClass: "border-emerald-200/80",
+                  bgClass: "bg-emerald-50/50",
+                  iconClass: "text-emerald-700",
+                  title: `Cash collected for ${roomStats.statsDate}`,
+                },
+                {
                   key: "res",
                   label: "Res",
                   value: roomStats.reserved,
@@ -1408,26 +1429,6 @@ export default function BookingsPage() {
                   bgClass: "bg-orange-50/50",
                   iconClass: "text-orange-700",
                   title: "Out of order",
-                },
-                {
-                  key: "revenue",
-                  label: "Rev",
-                  value: formatNaira(roomStats.roomRevenue),
-                  icon: Receipt,
-                  borderClass: "border-slate-200/80",
-                  bgClass: "bg-slate-50/50",
-                  iconClass: "text-slate-700",
-                  title: `Room revenue for ${roomStats.statsDate}`,
-                },
-                {
-                  key: "cash",
-                  label: "Cash",
-                  value: formatNaira(roomStats.cashCollected),
-                  icon: Banknote,
-                  borderClass: "border-emerald-200/80",
-                  bgClass: "bg-emerald-50/50",
-                  iconClass: "text-emerald-700",
-                  title: `Cash collected for ${roomStats.statsDate}`,
                 },
               ]}
               suffix={
@@ -1583,11 +1584,11 @@ export default function BookingsPage() {
               const isDueOutRow = stayKind === "due_out";
               return (
               <div
-                className={`cursor-pointer hover:text-primary inline-flex items-center gap-1.5 min-w-0 max-w-[12rem] whitespace-nowrap ${
+                className={`cursor-pointer hover:text-primary min-w-0 max-w-[9rem] ${
                   isReservationRow
-                    ? "rounded-md border border-violet-200 bg-violet-50/60 px-1.5 py-0.5 dark:border-violet-900/40 dark:bg-violet-950/30"
+                    ? "rounded-md border border-violet-200 bg-violet-50/60 px-1 py-0.5 dark:border-violet-900/40 dark:bg-violet-950/30"
                     : isDueOutRow
-                      ? "rounded-md border border-amber-200 bg-amber-50/60 px-1.5 py-0.5 dark:border-amber-900/40 dark:bg-amber-950/30"
+                      ? "rounded-md border border-amber-200 bg-amber-50/60 px-1 py-0.5 dark:border-amber-900/40 dark:bg-amber-950/30"
                       : ""
                 }`}
                 onClick={() =>
@@ -1598,29 +1599,31 @@ export default function BookingsPage() {
                   )
                 }
               >
-                <span className={`font-medium max-md:text-[13px] ${TABLE_CELL_TRUNCATE}`}>
-                  {booking.guests?.name}
-                </span>
-                {isReservationRow && (
-                  <Badge
-                    variant="outline"
-                    className="text-[10px] px-1 py-0 shrink-0 bg-violet-100 text-violet-800 border-violet-200"
-                  >
-                    Reservation
-                  </Badge>
-                )}
-                {isDueOutRow && (
-                  <Badge
-                    variant="outline"
-                    className="text-[10px] px-1 py-0 shrink-0 bg-amber-100 text-amber-900 border-amber-200"
-                  >
-                    Due out
-                  </Badge>
-                )}
-                {booking.guests?.phone && (
-                  <span className={`${TABLE_META_TEXT} max-md:hidden shrink-0`}>
-                    {booking.guests.phone}
+                <div className="flex items-center gap-1 min-w-0">
+                  <span className={`font-medium max-md:text-[13px] truncate ${TABLE_CELL_TRUNCATE}`}>
+                    {booking.guests?.name}
                   </span>
+                  {isReservationRow && (
+                    <Badge
+                      variant="outline"
+                      className="text-[10px] px-1 py-0 shrink-0 bg-violet-100 text-violet-800 border-violet-200"
+                    >
+                      Res
+                    </Badge>
+                  )}
+                  {isDueOutRow && (
+                    <Badge
+                      variant="outline"
+                      className="text-[10px] px-1 py-0 shrink-0 bg-amber-100 text-amber-900 border-amber-200"
+                    >
+                      Due
+                    </Badge>
+                  )}
+                </div>
+                {booking.guests?.phone && (
+                  <div className={`${TABLE_META_TEXT} max-md:hidden truncate`}>
+                    {booking.guests.phone}
+                  </div>
                 )}
                 <MobileTableSubdetail>
                   <div>
@@ -1647,16 +1650,16 @@ export default function BookingsPage() {
             label: "Room",
             responsive: "md+",
             render: (booking) => (
-              <div className={`${TABLE_INLINE_ROW} max-w-[9rem]`}>
-                <span className="font-medium max-md:text-[13px] shrink-0">
+              <div className="min-w-0 max-w-[6rem]">
+                <div className="font-medium max-md:text-[13px] truncate">
                   {booking.is_bulk
                     ? `${booking.room_count} Rooms`
                     : `Room ${booking.rooms?.room_number}`}
-                </span>
+                </div>
                 {booking.rooms?.room_type && !booking.is_bulk && (
-                  <span className={`${TABLE_META_TEXT} ${TABLE_CELL_TRUNCATE}`}>
-                    · {booking.rooms.room_type}
-                  </span>
+                  <div className={`${TABLE_META_TEXT} truncate`}>
+                    {booking.rooms.room_type}
+                  </div>
                 )}
               </div>
             ),
@@ -1731,7 +1734,7 @@ export default function BookingsPage() {
               const { badgeClass, badgeText, owedLine, paidLine, creditLine } =
                 paymentCellForBooking(booking);
               return (
-                <div className={TABLE_INLINE_ROW}>
+                <div className={TABLE_STACKED_CELL}>
                   <Badge
                     variant="outline"
                     className={`${badgeClass} max-md:text-[10px] shrink-0`}
@@ -1781,10 +1784,7 @@ export default function BookingsPage() {
                 .filter(Boolean)
                 .join(' · ')
               return (
-                <div
-                  className={`${TABLE_INLINE_ROW} max-w-[7rem]`}
-                  title={methodTitle}
-                >
+                <div className={TABLE_STACKED_CELL} title={methodTitle}>
                   <Badge
                     variant="outline"
                     className="text-[10px] capitalize max-md:text-[10px] shrink-0"
@@ -1792,9 +1792,11 @@ export default function BookingsPage() {
                     {methodLabel}
                   </Badge>
                   {accountLabel ? (
-                    <span className={`${TABLE_META_TEXT} ${TABLE_CELL_TRUNCATE}`}>
+                    <span className={`${TABLE_META_TEXT} ${TABLE_CELL_TRUNCATE}`} title={accountLabel}>
                       {accountLabel}
                     </span>
+                  ) : paymentMethodRequiresAccount(booking.payment_method) ? (
+                    <span className={`${TABLE_META_TEXT} ${TABLE_CELL_TRUNCATE}`}>—</span>
                   ) : null}
                 </div>
               );
@@ -1846,7 +1848,7 @@ export default function BookingsPage() {
                     <Button
                       size="sm"
                       variant="outline"
-                      className="h-7 px-2 text-[11px]"
+                      className="h-6 px-1.5 text-[10px]"
                       onClick={(e) => {
                         e.stopPropagation();
                         router.push(`/bulk-bookings/${gid}`);
@@ -1867,7 +1869,7 @@ export default function BookingsPage() {
                           size="sm"
                           variant="outline"
                           title="Add charge to a room in this group"
-                          className="h-7 px-2 text-[11px] leading-tight whitespace-nowrap"
+                          className="h-6 px-1.5 text-[10px] leading-tight whitespace-nowrap"
                           onClick={(e) => {
                             e.stopPropagation();
                             setSelectedBooking({
@@ -1890,7 +1892,7 @@ export default function BookingsPage() {
                           size="sm"
                           variant="outline"
                           title="Extend stay for a room in this group"
-                          className="h-7 px-2 text-[11px] leading-tight whitespace-nowrap"
+                          className="h-6 px-1.5 text-[10px] leading-tight whitespace-nowrap"
                           onClick={(e) => {
                             e.stopPropagation();
                             setSelectedBooking({
@@ -1919,7 +1921,7 @@ export default function BookingsPage() {
                         size="sm"
                         variant="outline"
                         title="Check out all eligible rooms in this group"
-                        className="h-7 px-2 text-[11px] leading-tight text-amber-700 border-amber-200 hover:bg-amber-50"
+                        className="h-6 px-1.5 text-[10px] leading-tight text-amber-700 border-amber-200 hover:bg-amber-50"
                         disabled={checkoutLoadingGroupId === gid}
                         onClick={(e) => {
                           e.stopPropagation();
@@ -1940,7 +1942,7 @@ export default function BookingsPage() {
                       size="sm"
                       variant="ghost"
                       title="Open bulk group — extend/charge each room"
-                      className="h-7 px-2 text-[11px]"
+                      className="h-6 px-1.5 text-[10px]"
                       onClick={(e) => {
                         e.stopPropagation();
                         router.push(`/bulk-bookings/${gid}`);
@@ -1972,7 +1974,7 @@ export default function BookingsPage() {
                       size="sm"
                       variant="outline"
                       title="Check in — pick room when guest arrives"
-                      className="h-7 px-2 text-[11px] leading-tight whitespace-nowrap text-green-700 border-green-200 hover:bg-green-50"
+                      className="h-6 px-1.5 text-[10px] leading-tight whitespace-nowrap text-green-700 border-green-200 hover:bg-green-50"
                       onClick={(e) => {
                         e.stopPropagation();
                         openReserveCheckIn(booking);
@@ -1990,7 +1992,7 @@ export default function BookingsPage() {
                       size="sm"
                       variant="outline"
                       title="Cancel reservation"
-                      className="h-7 px-2 text-[11px] leading-tight whitespace-nowrap border-destructive/40 text-destructive hover:bg-destructive/10"
+                      className="h-6 px-1.5 text-[10px] leading-tight whitespace-nowrap border-destructive/40 text-destructive hover:bg-destructive/10"
                       disabled={cancelReserveLoadingId === booking.id}
                       onClick={(e) => {
                         e.stopPropagation();
@@ -2009,7 +2011,7 @@ export default function BookingsPage() {
                             size="sm"
                             variant="outline"
                             title="Add folio charge"
-                            className="h-7 px-2 text-[11px] leading-tight whitespace-nowrap"
+                            className="h-6 px-1.5 text-[10px] leading-tight whitespace-nowrap"
                             onClick={(e) => {
                               e.stopPropagation();
                               setSelectedBooking({
@@ -2032,7 +2034,7 @@ export default function BookingsPage() {
                             size="sm"
                             variant="outline"
                             title="Extend stay"
-                            className="h-7 px-2 text-[11px] leading-tight whitespace-nowrap"
+                            className="h-6 px-1.5 text-[10px] leading-tight whitespace-nowrap"
                             onClick={(e) => {
                               e.stopPropagation();
                               setSelectedBooking({
@@ -2052,7 +2054,7 @@ export default function BookingsPage() {
                               setExtendModalOpen(true);
                             }}
                           >
-                            Extend Stay
+                            Extend
                           </Button>
                         </>
                       )}
@@ -2069,7 +2071,7 @@ export default function BookingsPage() {
                           size="sm"
                           variant="outline"
                           title="Check out guest"
-                          className="h-7 px-2 text-[11px] leading-tight text-amber-700 border-amber-200 hover:bg-amber-50 whitespace-nowrap"
+                          className="h-6 px-1.5 text-[10px] leading-tight text-amber-700 border-amber-200 hover:bg-amber-50 whitespace-nowrap"
                           disabled={checkoutLoadingId === booking.id}
                           onClick={(e) => {
                             e.stopPropagation();
@@ -2095,9 +2097,9 @@ export default function BookingsPage() {
           {
             key: "created_by_name",
             label: "Created By",
-            responsive: "lg+",
+            responsive: "xl+",
             render: (booking) => (
-              <div className="text-sm text-muted-foreground">
+              <div className="text-[11px] text-muted-foreground truncate max-w-[5rem]">
                 {booking.created_by_name}
               </div>
             ),
