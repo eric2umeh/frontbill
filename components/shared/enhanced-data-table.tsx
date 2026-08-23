@@ -78,6 +78,12 @@ interface EnhancedDataTableProps<T> {
   resolveFilterMatch?: (item: T, filterKey: string, filterValue: string) => boolean | undefined
   /** Tighter cell padding (e.g. Bookings table with many actions). */
   compactTable?: boolean
+  /** Prefix table with a # column (respects pagination). */
+  showRowNumbers?: boolean
+  /** Larger date picker button (bookings / reservations toolbar). */
+  prominentDateFilter?: boolean
+  /** Center search + filter row (bookings / reservations). */
+  centerToolbar?: boolean
 }
 
 export function EnhancedDataTable<T extends Record<string, any>>({
@@ -105,6 +111,9 @@ export function EnhancedDataTable<T extends Record<string, any>>({
   loading = false,
   resolveFilterMatch,
   compactTable = false,
+  showRowNumbers = false,
+  prominentDateFilter = false,
+  centerToolbar = false,
 }: EnhancedDataTableProps<T>) {
   const columnResponsiveClass = (responsive?: ColumnResponsive): string => {
     switch (responsive) {
@@ -221,7 +230,14 @@ export function EnhancedDataTable<T extends Record<string, any>>({
   return (
     <div className="space-y-4">
       {/* Search and Filters */}
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+      <div
+        className={
+          centerToolbar
+            ? 'flex flex-col gap-4 items-center'
+            : 'flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between'
+        }
+      >
+        {!centerToolbar && (
         <div className="relative flex-1 max-w-md">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
@@ -236,8 +252,25 @@ export function EnhancedDataTable<T extends Record<string, any>>({
             className="pl-9"
           />
         </div>
+        )}
 
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className={`flex items-center gap-2 flex-wrap ${centerToolbar ? 'justify-center' : ''}`}>
+          {centerToolbar && (
+            <div className="relative w-full max-w-md">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                placeholder={searchPlaceholder}
+                value={searchQuery}
+                onChange={(e) => {
+                  const next = e.target.value
+                  setSearchQuery(next)
+                  setCurrentPage(1)
+                  onSearchQueryChange?.(next)
+                }}
+                className="pl-9"
+              />
+            </div>
+          )}
           {filters.map((filter) => (
             <Select
               key={filter.key}
@@ -261,9 +294,16 @@ export function EnhancedDataTable<T extends Record<string, any>>({
           {dateField && (
             <Popover>
               <PopoverTrigger asChild>
-                <Button variant="outline" className="gap-2 w-[180px]">
-                  <CalendarIcon className="h-4 w-4" />
-                  {selectedDate ? format(selectedDate, 'MMM dd') : datePickerPlaceholder}
+                <Button
+                  variant="outline"
+                  className={
+                    prominentDateFilter
+                      ? 'gap-2 h-11 px-5 text-base font-medium min-w-[200px] justify-center'
+                      : 'gap-2 w-[180px]'
+                  }
+                >
+                  <CalendarIcon className={prominentDateFilter ? 'h-5 w-5' : 'h-4 w-4'} />
+                  {selectedDate ? format(selectedDate, prominentDateFilter ? 'MMM dd, yyyy' : 'MMM dd') : datePickerPlaceholder}
                 </Button>
               </PopoverTrigger>
               <PopoverContent className="w-auto p-0" align="start">
@@ -344,6 +384,9 @@ export function EnhancedDataTable<T extends Record<string, any>>({
             <table className="w-full min-w-0 border-collapse">
               <thead className="bg-muted/50">
                 <tr>
+                  {showRowNumbers && (
+                    <th className={`${thClass} w-10 text-center tabular-nums`}>#</th>
+                  )}
                   {columns.map((column) => (
                     <th
                       key={column.key.toString()}
@@ -357,7 +400,7 @@ export function EnhancedDataTable<T extends Record<string, any>>({
               <tbody className="divide-y">
                 {paginatedData.length === 0 ? (
                   <tr>
-                    <td colSpan={columns.length} className={`${tdClass} text-center py-12 text-muted-foreground`}>
+                    <td colSpan={columns.length + (showRowNumbers ? 1 : 0)} className={`${tdClass} text-center py-12 text-muted-foreground`}>
                       {loading ? (
                         <div
                           className="flex flex-col items-center justify-center gap-3 py-4"
@@ -385,6 +428,11 @@ export function EnhancedDataTable<T extends Record<string, any>>({
                       className={`hover:bg-muted/50 transition-colors ${onRowClick ? 'cursor-pointer' : ''}`}
                       onClick={() => onRowClick?.(item)}
                     >
+                      {showRowNumbers && (
+                        <td className={`${tdClass} w-10 text-center tabular-nums text-muted-foreground`}>
+                          {startIndex + index + 1}
+                        </td>
+                      )}
                       {columns.map((column) => (
                         <td
                           key={column.key.toString()}
