@@ -16,9 +16,11 @@ type Props = {
   overrides: PermissionOverrides
   onChange: (next: PermissionOverrides) => void
   disabled?: boolean
+  /** Role defaults only — checkboxes visible but not editable. */
+  readOnly?: boolean
 }
 
-export function PermissionOverridesEditor({ roleKey, overrides, onChange, disabled }: Props) {
+export function PermissionOverridesEditor({ roleKey, overrides, onChange, disabled, readOnly }: Props) {
   const groups = useMemo(() => getPermissionGroups(), [])
   const effective = useMemo(
     () => resolveEffectivePermissions(roleKey, overrides),
@@ -32,6 +34,7 @@ export function PermissionOverridesEditor({ roleKey, overrides, onChange, disabl
   const isGranted = (perm: Permission) => effective.has(perm)
 
   const toggle = (perm: Permission, checked: boolean) => {
+    if (readOnly || disabled) return
     const grants = new Set(overrides.grants ?? [])
     const denies = new Set(overrides.denies ?? [])
     const inRole = roleDefaults.has(perm)
@@ -53,9 +56,11 @@ export function PermissionOverridesEditor({ roleKey, overrides, onChange, disabl
   }
 
   return (
-    <div className="space-y-4 max-h-[50vh] overflow-y-auto rounded-md border p-3">
+    <div className="space-y-4 max-h-[60vh] overflow-y-auto rounded-md border p-3">
       <p className="text-xs text-muted-foreground">
-        Defaults match the selected role. Tick to grant extra access; untick to remove a default permission.
+        {readOnly
+          ? 'Checked permissions are included in this role by default.'
+          : 'Defaults match the selected role. Tick to grant extra access; untick to remove a default permission.'}
       </p>
       {Object.entries(groups).map(([group, items]) => (
         <div key={group} className="space-y-2">
@@ -64,11 +69,13 @@ export function PermissionOverridesEditor({ roleKey, overrides, onChange, disabl
             {items.map(({ key, label }) => (
               <label
                 key={key}
-                className="flex items-start gap-2 rounded-md border px-2 py-1.5 text-sm cursor-pointer hover:bg-muted/40"
+                className={`flex items-start gap-2 rounded-md border px-2 py-1.5 text-sm ${
+                  readOnly ? 'cursor-default opacity-90' : 'cursor-pointer hover:bg-muted/40'
+                }`}
               >
                 <Checkbox
                   checked={isGranted(key)}
-                  disabled={disabled}
+                  disabled={disabled || readOnly}
                   onCheckedChange={(v) => toggle(key, v === true)}
                   className="mt-0.5"
                 />
