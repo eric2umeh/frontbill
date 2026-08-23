@@ -221,11 +221,11 @@ export function EnhancedDataTable<T extends Record<string, any>>({
   }
 
   const thClass = compactTable
-    ? 'px-2 py-1.5 text-left text-xs font-medium max-md:px-1.5 max-md:py-1 max-md:text-[11px]'
-    : 'px-4 py-3 text-left text-sm font-medium max-md:px-2 max-md:py-1.5 max-md:text-xs'
+    ? 'px-2 py-1.5 text-left text-xs font-medium whitespace-nowrap max-md:px-1.5 max-md:py-1 max-md:text-[11px]'
+    : 'px-4 py-2 text-left text-sm font-medium whitespace-nowrap max-md:px-2 max-md:py-1.5 max-md:text-xs'
   const tdClass = compactTable
-    ? 'px-2 py-1.5 text-sm max-md:px-1.5 max-md:py-1 max-md:text-[11px] align-top max-md:whitespace-normal md:whitespace-nowrap'
-    : 'px-4 py-3 text-sm max-md:px-2 max-md:py-1.5 max-md:text-xs align-top max-md:whitespace-normal md:whitespace-nowrap'
+    ? 'px-2 py-1.5 text-sm align-middle whitespace-nowrap max-md:px-1.5 max-md:py-1 max-md:text-[11px] max-md:whitespace-normal'
+    : 'px-4 py-2 text-sm align-middle whitespace-nowrap max-md:px-2 max-md:py-1.5 max-md:text-xs max-md:whitespace-normal'
 
   return (
     <div className="space-y-4">
