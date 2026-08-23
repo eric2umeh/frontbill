@@ -1,7 +1,7 @@
 // Hotel Roles & Permissions configuration
-import type { PermissionOverrides } from '@/lib/permission-overrides'
+import type { PermissionOverrides, RolePermissionOverridesMap } from '@/lib/permission-overrides'
 
-export type { PermissionOverrides } from '@/lib/permission-overrides'
+export type { PermissionOverrides, RolePermissionOverridesMap } from '@/lib/permission-overrides'
 // All roles and their permissions are defined here in code
 // No DB tables needed - uses profiles.role column
 //
@@ -1250,14 +1250,23 @@ export function canViewIssueOutLog(
 export function hasPermission(
   userRole: string | null | undefined,
   permission: Permission,
-  overrides?: PermissionOverrides | null,
+  userOverrides?: PermissionOverrides | null,
+  orgRoleOverridesMap?: RolePermissionOverridesMap | null,
 ): boolean {
   const roleKey = canonicalRoleKey(userRole);
   if (!roleKey) return false;
 
-  const parsed = parsePermissionOverrides(overrides);
-  if (parsed && ((parsed.grants?.length ?? 0) > 0 || (parsed.denies?.length ?? 0) > 0)) {
-    return hasPermissionWithOverrides(roleKey, permission, parsed);
+  const orgRoleOverrides = orgRoleOverridesMap?.[roleKey] ?? null;
+  const userParsed = parsePermissionOverrides(userOverrides);
+  const orgParsed = parsePermissionOverrides(orgRoleOverrides);
+
+  if (orgParsed || userParsed) {
+    return hasPermissionWithOverrides(
+      roleKey,
+      permission,
+      userParsed,
+      orgParsed,
+    );
   }
 
   if (permission.startsWith("expenses:") && !canAccessExpenseMenu(userRole)) {
@@ -1332,18 +1341,38 @@ export function parsePermissionOverrides(raw: unknown): PermissionOverrides | nu
   return { grants, denies };
 }
 
-/** Effective permission set for a user (role defaults + grants − denies). */
+/** Parse organizations.role_permission_overrides JSONB. */
+export function parseRolePermissionOverridesMap(
+  raw: unknown,
+): RolePermissionOverridesMap | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const out: RolePermissionOverridesMap = {};
+  for (const [key, val] of Object.entries(raw as Record<string, unknown>)) {
+    const roleKey = canonicalRoleKey(key);
+    if (!roleKey) continue;
+    const parsed = parsePermissionOverrides(val);
+    if (parsed) out[roleKey] = parsed;
+  }
+  return Object.keys(out).length > 0 ? out : null;
+}
+
+/** Effective permission set (code role defaults + org role + per-user overlays). */
 export function resolveEffectivePermissions(
   roleKey: RoleKey | null,
-  overrides?: PermissionOverrides | null,
+  userOverrides?: PermissionOverrides | null,
+  orgRoleOverrides?: PermissionOverrides | null,
 ): Set<Permission> {
   const role = roleKey ? getRoleDefinition(roleKey) : null;
   const base = new Set<Permission>(role?.permissions ?? []);
-  for (const g of overrides?.grants ?? []) {
-    if (isValidPermissionKey(g)) base.add(g);
-  }
-  for (const d of overrides?.denies ?? []) {
-    if (isValidPermissionKey(d)) base.delete(d);
+  for (const layer of [orgRoleOverrides, userOverrides]) {
+    const parsed = parsePermissionOverrides(layer);
+    if (!parsed) continue;
+    for (const g of parsed.grants ?? []) {
+      if (isValidPermissionKey(g)) base.add(g);
+    }
+    for (const d of parsed.denies ?? []) {
+      if (isValidPermissionKey(d)) base.delete(d);
+    }
   }
   return base;
 }
@@ -1351,7 +1380,10 @@ export function resolveEffectivePermissions(
 export function hasPermissionWithOverrides(
   roleKey: RoleKey | null,
   permission: Permission,
-  overrides?: PermissionOverrides | null,
+  userOverrides?: PermissionOverrides | null,
+  orgRoleOverrides?: PermissionOverrides | null,
 ): boolean {
-  return resolveEffectivePermissions(roleKey, overrides).has(permission);
+  return resolveEffectivePermissions(roleKey, userOverrides, orgRoleOverrides).has(
+    permission,
+  );
 }
