@@ -104,9 +104,8 @@ export function computeFrontOfficeStayStats(
 }
 
 /**
- * Default Bookings list for today: occupied + due out today + reservations
- * that arrive today (or are already past arrival and not yet checked in).
- * Future-dated reservations stay under Res / Reservations.
+ * Default Bookings in-house list: checked-in / confirmed stayovers + due out today only.
+ * Reservations belong on the Reservations page, not the in-house table.
  */
 export function isShownOnDefaultBookingsList(
   booking: FrontOfficeStayRow,
@@ -117,14 +116,11 @@ export function isShownOnDefaultBookingsList(
   const today = todayYmd ?? todayYmdHotel(tz)
   const kind = classifyFrontOfficeStay(booking, today, tz)
   if (kind === 'occupied') return true
-  // Due out today (checkout date = today) — keep in default in-house table
   if (kind === 'due_out') {
     const co = bookingYmdHotel(booking.check_out, tz)
     return co === today
   }
-  if (kind !== 'reserved') return false
-  const ci = bookingYmdHotel(booking.check_in, tz)
-  return Boolean(ci && ci <= today)
+  return false
 }
 
 /**
