@@ -24,12 +24,17 @@ import { getBulkGroupId, isLegacyBulkGroupId } from '@/lib/utils/bulk-booking'
 import { cancelBookingReservation, isCancellableReservationStatus } from '@/lib/reservations/cancel-reservation'
 import { isNoShowEligibleStatus } from '@/lib/reservations/mark-no-show'
 import { MarkNoShowDialog } from '@/components/reservations/mark-no-show-dialog'
-import { formatReservationPaymentMethodLabel } from '@/lib/reservations/reservation-payment-methods'
 import { networkFetchHint, withFetchRetry } from '@/lib/utils/fetch-retry'
 import { toast } from 'sonner'
 import { useReservationsEventsHeader } from '@/components/reservations/reservations-events-header'
 import { formatShortStayDates, MobileTableSubdetail } from '@/lib/utils/table-mobile'
 import { calendarPickerYmd } from '@/lib/utils/booking-in-house-dates'
+import {
+  parseBookingNotesMeta,
+  formatBookingPaymentMethodLabel,
+  bookingAmountPaid,
+} from '@/lib/booking/parse-booking-notes'
+import { paymentMethodRequiresAccount } from '@/lib/payments/payment-accounts'
 
 const RESERVATIONS_LIST_LIMIT = 500
 
@@ -60,6 +65,8 @@ interface Reservation {
   payment_status: string
   payment_method?: string
   ledger_account_name?: string
+  payment_account_label?: string
+  last_reschedule?: string | null
   guestName?: string
   guestPhone?: string
   rate_per_night: number
@@ -190,23 +197,8 @@ export default function ReservationsPage() {
         const guestsRaw = reservation.guests as { name?: string; phone?: string } | { name?: string; phone?: string }[] | null
         const roomsRaw = reservation.rooms as { id?: string; room_number?: string; room_type?: string } | { id?: string; room_number?: string; room_type?: string }[] | null
         const notes = typeof reservation.notes === 'string' ? reservation.notes : ''
+        const notesMeta = parseBookingNotesMeta(notes)
         let balance = reservation.balance !== undefined ? Number(reservation.balance) : 0
-
-        let payment_method = 'cash'
-        let ledger_account_name = ''
-        if (notes) {
-          if (/^city_ledger:/i.test(notes)) {
-            payment_method = 'city_ledger'
-            ledger_account_name = notes.replace(/^city_ledger:\s*/i, '')
-          } else if (notes.startsWith('City Ledger:')) {
-            payment_method = 'city_ledger'
-            ledger_account_name = notes.replace(/^City Ledger:\s*/, '')
-          } else if (notes.startsWith('payment_method:')) {
-            payment_method = notes.replace(/^payment_method:\s*/, '').split('|')[0].trim()
-            const match = notes.match(/\|ledger:(.+)/)
-            if (match) ledger_account_name = match[1].trim()
-          }
-        }
 
         const guests = guestsRaw
           ? Array.isArray(guestsRaw)
@@ -223,8 +215,7 @@ export default function ReservationsPage() {
 
         return {
           ...reservation,
-          payment_method,
-          ledger_account_name,
+          ...notesMeta,
           guestName: guests?.name || '',
           guestPhone: guests?.phone || '',
           guests,
@@ -582,13 +573,19 @@ export default function ReservationsPage() {
                 (res.payment_method === 'city_ledger' && res.payment_status === 'paid')
                   ? 'pending'
                   : res.payment_status
+              const paidAmt = bookingAmountPaid(res.total_amount, res.balance)
               return (
-                <div className="space-y-1">
+                <div className="space-y-0.5 max-w-[6.5rem]">
                   <Badge variant="outline" className={`${(paymentColors as Record<string, string>)[effectiveStatus]} max-md:text-[10px]`}>
                     {effectiveStatus}
                   </Badge>
+                  {effectiveStatus === 'paid' && paidAmt > 0 && (
+                    <div className="text-[10px] text-muted-foreground truncate">
+                      Paid: {formatNaira(paidAmt)}
+                    </div>
+                  )}
                   {res.balance > 0 && (
-                    <div className="text-xs text-muted-foreground">
+                    <div className="text-[10px] text-muted-foreground truncate">
                       Bal: {formatNaira(res.balance)}
                     </div>
                   )}
@@ -600,18 +597,31 @@ export default function ReservationsPage() {
             key: 'payment_method',
             label: 'Method',
             responsive: 'md+',
-            render: (res) => (
-              <div className="space-y-1">
-                <Badge variant="outline" className="text-[10px]">
-                  {formatReservationPaymentMethodLabel(res.payment_method || 'cash')}
-                </Badge>
-                {res.payment_method === 'city_ledger' && res.ledger_account_name && (
-                  <div className="text-[10px] text-muted-foreground truncate max-w-[100px]">
-                    {res.ledger_account_name}
-                  </div>
-                )}
-              </div>
-            ),
+            render: (res) => {
+              const accountLabel =
+                res.payment_method === 'city_ledger'
+                  ? res.ledger_account_name
+                  : paymentMethodRequiresAccount(res.payment_method)
+                    ? res.payment_account_label
+                    : ''
+              return (
+                <div className="space-y-0.5 max-w-[6.5rem]">
+                  <Badge variant="outline" className="text-[10px] max-w-full truncate">
+                    {formatBookingPaymentMethodLabel(res.payment_method || 'cash')}
+                  </Badge>
+                  {accountLabel ? (
+                    <div className="text-[10px] text-muted-foreground truncate" title={accountLabel}>
+                      {accountLabel}
+                    </div>
+                  ) : null}
+                  {res.last_reschedule ? (
+                    <div className="text-[10px] text-muted-foreground truncate" title={`Rescheduled ${res.last_reschedule}`}>
+                      {res.last_reschedule}
+                    </div>
+                  ) : null}
+                </div>
+              )
+            },
           },
           {
             key: 'actions',
