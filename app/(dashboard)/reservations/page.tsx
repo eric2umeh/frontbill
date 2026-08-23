@@ -35,6 +35,12 @@ import {
   bookingAmountPaid,
 } from '@/lib/booking/parse-booking-notes'
 import { paymentMethodRequiresAccount } from '@/lib/payments/payment-accounts'
+import {
+  TABLE_ACTIONS_ROW,
+  TABLE_INLINE_ROW,
+  TABLE_META_TEXT,
+  TABLE_CELL_TRUNCATE,
+} from '@/lib/utils/table-row-inline'
 
 const RESERVATIONS_LIST_LIMIT = 500
 
@@ -517,10 +523,12 @@ export default function ReservationsPage() {
             render: (res) => (
               <Link
                 href={res.is_bulk ? `/bulk-bookings/${res.bulk_group_id}` : `/reservations/${res.id}`}
-                className="cursor-pointer hover:text-primary block"
+                className="cursor-pointer hover:text-primary inline-flex items-center gap-1.5 min-w-0 max-w-[12rem] whitespace-nowrap"
               >
-                <div className="font-medium max-md:text-[13px]">{res.guests?.name}</div>
-                <div className="text-xs text-muted-foreground max-md:hidden">{res.guests?.phone}</div>
+                <span className={`font-medium max-md:text-[13px] ${TABLE_CELL_TRUNCATE}`}>{res.guests?.name}</span>
+                {res.guests?.phone && (
+                  <span className={`${TABLE_META_TEXT} max-md:hidden shrink-0`}>{res.guests.phone}</span>
+                )}
                 <MobileTableSubdetail>
                   <div>
                     {res.is_bulk
@@ -537,9 +545,16 @@ export default function ReservationsPage() {
             label: 'Room',
             responsive: 'md+',
             render: (res) => (
-              <Link href={res.is_bulk ? `/bulk-bookings/${res.bulk_group_id}` : `/reservations/${res.id}`} className="cursor-pointer block">
-                <div className="font-medium max-md:text-[13px]">{res.is_bulk ? `${res.room_count} Rooms` : `Room ${res.rooms?.room_number}`}</div>
-                <div className="text-xs text-muted-foreground">{res.rooms?.room_type}</div>
+              <Link
+                href={res.is_bulk ? `/bulk-bookings/${res.bulk_group_id}` : `/reservations/${res.id}`}
+                className={`cursor-pointer ${TABLE_INLINE_ROW} max-w-[9rem]`}
+              >
+                <span className="font-medium max-md:text-[13px] shrink-0">
+                  {res.is_bulk ? `${res.room_count} Rooms` : `Room ${res.rooms?.room_number}`}
+                </span>
+                {res.rooms?.room_type && !res.is_bulk && (
+                  <span className={`${TABLE_META_TEXT} ${TABLE_CELL_TRUNCATE}`}>· {res.rooms.room_type}</span>
+                )}
               </Link>
             ),
           },
@@ -575,19 +590,15 @@ export default function ReservationsPage() {
                   : res.payment_status
               const paidAmt = bookingAmountPaid(res.total_amount, res.balance)
               return (
-                <div className="space-y-0.5 max-w-[6.5rem]">
-                  <Badge variant="outline" className={`${(paymentColors as Record<string, string>)[effectiveStatus]} max-md:text-[10px]`}>
+                <div className={TABLE_INLINE_ROW}>
+                  <Badge variant="outline" className={`${(paymentColors as Record<string, string>)[effectiveStatus]} max-md:text-[10px] shrink-0`}>
                     {effectiveStatus}
                   </Badge>
                   {effectiveStatus === 'paid' && paidAmt > 0 && (
-                    <div className="text-[10px] text-muted-foreground truncate">
-                      Paid: {formatNaira(paidAmt)}
-                    </div>
+                    <span className={`${TABLE_META_TEXT} tabular-nums`}>{formatNaira(paidAmt)}</span>
                   )}
                   {res.balance > 0 && (
-                    <div className="text-[10px] text-muted-foreground truncate">
-                      Bal: {formatNaira(res.balance)}
-                    </div>
+                    <span className={`${TABLE_META_TEXT} tabular-nums`}>Bal {formatNaira(res.balance)}</span>
                   )}
                 </div>
               )
@@ -605,19 +616,15 @@ export default function ReservationsPage() {
                     ? res.payment_account_label
                     : ''
               return (
-                <div className="space-y-0.5 max-w-[6.5rem]">
-                  <Badge variant="outline" className="text-[10px] max-w-full truncate">
+                <div
+                  className={`${TABLE_INLINE_ROW} max-w-[7rem]`}
+                  title={[formatBookingPaymentMethodLabel(res.payment_method || 'cash'), accountLabel, res.last_reschedule ? `Rescheduled ${res.last_reschedule}` : null].filter(Boolean).join(' · ')}
+                >
+                  <Badge variant="outline" className="text-[10px] shrink-0">
                     {formatBookingPaymentMethodLabel(res.payment_method || 'cash')}
                   </Badge>
                   {accountLabel ? (
-                    <div className="text-[10px] text-muted-foreground truncate" title={accountLabel}>
-                      {accountLabel}
-                    </div>
-                  ) : null}
-                  {res.last_reschedule ? (
-                    <div className="text-[10px] text-muted-foreground truncate" title={`Rescheduled ${res.last_reschedule}`}>
-                      {res.last_reschedule}
-                    </div>
+                    <span className={`${TABLE_META_TEXT} ${TABLE_CELL_TRUNCATE}`}>{accountLabel}</span>
                   ) : null}
                 </div>
               )
@@ -628,7 +635,7 @@ export default function ReservationsPage() {
             label: 'Actions',
             stickyOnMobile: true,
             render: (res) => (
-              <div className="flex flex-wrap gap-1" onClick={(e) => e.stopPropagation()}>
+              <div className={TABLE_ACTIONS_ROW} onClick={(e) => e.stopPropagation()}>
                 {!res.is_bulk && canCheckInReserved && (
                   <Button
                     size="sm"
