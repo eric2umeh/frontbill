@@ -10,6 +10,8 @@ import { Button } from '@/components/ui/button'
 import { Calendar } from '@/components/ui/calendar'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { TABLE_INLINE_ROW, TABLE_META_TEXT, TABLE_CELL_TRUNCATE, TABLE_STACKED_CELL } from '@/lib/utils/table-row-inline'
+import { paymentMethodRequiresAccount } from '@/lib/payments/payment-accounts'
 import { formatNaira } from '@/lib/utils/currency'
 import { MobileTableSubdetail } from '@/lib/utils/table-mobile'
 import { usePageData } from '@/hooks/use-page-data'
@@ -462,6 +464,7 @@ export default function TransactionsPage() {
 
       {/* Table */}
       <EnhancedDataTable
+        showRowNumbers
         compactTable
         data={payments}
         searchKeys={['guest_name', 'folio_id', 'reference_number', 'notes', 'payment_account_label']}
@@ -513,21 +516,22 @@ export default function TransactionsPage() {
                   icon: null,
                 }
               return (
-                <div className="space-y-1">
-                  <Badge variant="outline" className={`${cfg.bg} ${cfg.color} gap-1 max-md:text-[10px] px-1.5 py-0`}>
+                <div className={TABLE_STACKED_CELL}>
+                  <Badge variant="outline" className={`${cfg.bg} ${cfg.color} gap-1 max-md:text-[10px] px-1.5 py-0 shrink-0`}>
                     {cfg.icon}
                     {cfg.label}
                   </Badge>
                   {p.payment_account_label ? (
-                    <div className="text-[10px] text-muted-foreground truncate max-w-[140px]" title={p.payment_account_label}>
+                    <span className={`${TABLE_META_TEXT} ${TABLE_CELL_TRUNCATE}`} title={p.payment_account_label}>
                       {p.payment_account_label}
-                    </div>
-                  ) : null}
-                  {p.payment_method === 'city_ledger' && p.notes && (
-                    <div className="text-[10px] text-muted-foreground truncate max-w-[100px]">
+                    </span>
+                  ) : p.payment_method === 'city_ledger' && p.notes ? (
+                    <span className={`${TABLE_META_TEXT} ${TABLE_CELL_TRUNCATE}`}>
                       {p.notes.replace(/^City Ledger:\s*/, '')}
-                    </div>
-                  )}
+                    </span>
+                  ) : paymentMethodRequiresAccount(p.payment_method) ? (
+                    <span className={TABLE_META_TEXT}>—</span>
+                  ) : null}
                 </div>
               )
             },

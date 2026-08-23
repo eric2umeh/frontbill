@@ -2,6 +2,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
 import { formatPersonName } from '@/lib/utils/name-format'
 import { canonicalRoleKey } from '@/lib/permissions'
+import { parsePermissionOverrides } from '@/lib/permissions'
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -73,6 +74,16 @@ export async function PATCH(request: Request, { params }: Params) {
       profileUpdates.role = rk
     }
     if (updates.full_name) profileUpdates.full_name = formattedFullName
+
+    if (updates.permission_overrides !== undefined) {
+      if (callerKey !== 'superadmin' && callerKey !== 'admin') {
+        return NextResponse.json(
+          { error: 'Only superadmins or admins can edit permission overrides' },
+          { status: 403 },
+        )
+      }
+      profileUpdates.permission_overrides = parsePermissionOverrides(updates.permission_overrides)
+    }
 
     const { error: profileError } = await admin
       .from('profiles')

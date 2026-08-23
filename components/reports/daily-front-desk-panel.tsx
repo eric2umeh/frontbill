@@ -25,6 +25,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { PageLoadingState } from '@/components/loading-screen'
 import { EnhancedDataTable } from '@/components/shared/enhanced-data-table'
 import { MobileTableSubdetail } from '@/lib/utils/table-mobile'
+import { TABLE_INLINE_ROW, TABLE_META_TEXT, TABLE_CELL_TRUNCATE, TABLE_STACKED_CELL } from '@/lib/utils/table-row-inline'
 import { toast } from 'sonner'
 import { CalendarIcon, RefreshCw, Users, Wallet } from 'lucide-react'
 import { calendarPickerYmd } from '@/lib/utils/booking-in-house-dates'
@@ -215,30 +216,37 @@ export function DailyFrontDeskPanel() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <Card>
           <CardHeader className="pb-2">
             <CardDescription className="flex items-center gap-1.5">
-              <Users className="h-4 w-4" /> Room revenue generated
+              <Users className="h-4 w-4" /> In-house guests
+            </CardDescription>
+            <CardTitle className="text-3xl tabular-nums">{pack?.guestCount || 0}</CardTitle>
+          </CardHeader>
+          <CardContent className="text-sm text-muted-foreground">
+            Guest{pack?.guestCount === 1 ? '' : 's'} occupying rooms that night
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardDescription className="flex items-center gap-1.5">
+              <Wallet className="h-4 w-4" /> Room revenue generated
             </CardDescription>
             <CardTitle className="text-3xl">
               {formatNaira(pack?.roomRevenueGenerated || 0)}
             </CardTitle>
           </CardHeader>
-          <CardContent className="text-sm text-muted-foreground">
-            {pack?.guestCount || 0} guest{pack?.guestCount === 1 ? '' : 's'} in-house that night
-            (sum of room rates)
-          </CardContent>
         </Card>
         <Card className="bg-primary text-primary-foreground">
           <CardHeader className="pb-2">
             <CardDescription className="flex items-center gap-1.5 text-primary-foreground/80">
-              <Wallet className="h-4 w-4" /> Sales collection total
+              <Wallet className="h-4 w-4" /> Cash collected
             </CardDescription>
             <CardTitle className="text-3xl">{formatNaira(sc?.total || 0)}</CardTitle>
           </CardHeader>
           <CardContent className="text-sm text-primary-foreground/80">
-            Cash / POS / transfer until night audit (city ledger excluded)
+            POS / cash / transfer (city ledger excluded)
           </CardContent>
         </Card>
       </div>
@@ -284,7 +292,8 @@ export function DailyFrontDeskPanel() {
         <CardContent className="p-0 sm:p-6 pt-0">
           <EnhancedDataTable
             compactTable
-            data={(pack?.guests || []).map((g, i) => ({ ...g, sn: i + 1 }))}
+            showRowNumbers
+            data={pack?.guests || []}
             searchKeys={['guest_name', 'room_number', 'folio_id']}
             searchPlaceholder="Search guests, room, folio…"
             emptyState={{ title: 'No in-house guests for this date' }}
@@ -294,14 +303,11 @@ export function DailyFrontDeskPanel() {
                 key: 'guest_name',
                 label: 'Guest',
                 render: (g) => (
-                  <div>
-                    <div className="font-medium max-md:text-[13px]">
-                      <span className="text-muted-foreground mr-1.5 md:hidden">{g.sn}.</span>
-                      {g.guest_name}
-                    </div>
-                    <div className="text-[10px] text-muted-foreground max-md:hidden">
+                  <div className={`${TABLE_INLINE_ROW} max-w-[12rem]`}>
+                    <span className={`font-medium max-md:text-[13px] ${TABLE_CELL_TRUNCATE}`}>{g.guest_name}</span>
+                    <span className={`${TABLE_META_TEXT} max-md:hidden shrink-0`}>
                       {g.room_number} · {g.room_type}
-                    </div>
+                    </span>
                     <MobileTableSubdetail>
                       <div>
                         Rm {g.room_number} · {g.room_type}
@@ -371,6 +377,7 @@ export function DailyFrontDeskPanel() {
         <CardContent className="p-0 sm:p-6 pt-0">
           <EnhancedDataTable
             compactTable
+            showRowNumbers
             data={pack?.lines || []}
             searchKeys={['guest_name', 'reference', 'payment_account_label', 'description']}
             searchPlaceholder="Search collections…"
@@ -381,10 +388,10 @@ export function DailyFrontDeskPanel() {
                 key: 'guest_name',
                 label: 'Guest',
                 render: (line) => (
-                  <div className={!line.counts_as_cash_collection ? 'opacity-70' : undefined}>
-                    <div className="font-medium max-md:text-[13px]">{line.guest_name}</div>
+                  <div className={!line.counts_as_cash_collection ? `opacity-70 ${TABLE_INLINE_ROW} max-w-[12rem]` : `${TABLE_INLINE_ROW} max-w-[12rem]`}>
+                    <span className={`font-medium max-md:text-[13px] ${TABLE_CELL_TRUNCATE}`}>{line.guest_name}</span>
                     {line.room ? (
-                      <div className="text-[10px] text-muted-foreground max-md:hidden">{line.room}</div>
+                      <span className={`${TABLE_META_TEXT} max-md:hidden shrink-0`}>{line.room}</span>
                     ) : null}
                     <MobileTableSubdetail>
                       {line.room ? <div>{line.room}</div> : null}
@@ -411,17 +418,14 @@ export function DailyFrontDeskPanel() {
                 label: 'Method',
                 responsive: 'md+',
                 render: (line) => (
-                  <div className="space-y-1">
-                    <span className="capitalize text-sm">
+                  <div className={TABLE_STACKED_CELL}>
+                    <span className="capitalize text-[11px] shrink-0">
                       {line.payment_method.replace(/_/g, ' ')}
                     </span>
                     {line.payment_account_label ? (
-                      <div
-                        className="text-[10px] text-muted-foreground truncate max-w-[140px]"
-                        title={line.payment_account_label}
-                      >
+                      <span className={`${TABLE_META_TEXT} ${TABLE_CELL_TRUNCATE}`} title={line.payment_account_label}>
                         {line.payment_account_label}
-                      </div>
+                      </span>
                     ) : null}
                   </div>
                 ),

@@ -97,6 +97,7 @@ export function PaymentsTable({ payments }: PaymentsTableProps) {
       columns={columns}
       data={payments}
       pageSize={15}
+      showRowNumbers
       searchPlaceholder="Search reference, payer, amount…"
       searchMatch={(payment, query) => {
         const q = query.trim().toLowerCase()

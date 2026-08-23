@@ -5,12 +5,16 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import {
   APP_LOGIN_ROLE_KEYS,
   canonicalRoleKey,
+  parseRolePermissionOverridesMap,
+  parsePermissionOverrides,
   type RoleKey,
 } from '@/lib/permissions'
 import {
   AUTH_USER_EMAIL_HEADER,
   AUTH_USER_ID_HEADER,
 } from '@/lib/auth/request-auth-headers'
+
+import type { PermissionOverrides, RolePermissionOverridesMap } from '@/lib/permission-overrides'
 
 export type DashboardUserPayload = {
   id: string
@@ -19,6 +23,8 @@ export type DashboardUserPayload = {
   role: string
   organizationId: string
   organizationLogoUrl: string
+  permissionOverrides?: PermissionOverrides | null
+  orgRolePermissionOverrides?: RolePermissionOverridesMap | null
 }
 
 export type LoadDashboardUserResult =
@@ -30,7 +36,11 @@ type ProfileRow = {
   full_name: string | null
   role: string | null
   organization_id: string | null
+  permission_overrides?: unknown
 }
+
+const PROFILE_SELECT = 'full_name, role, organization_id, permission_overrides'
+const PROFILE_SELECT_FALLBACK = 'full_name, role, organization_id'
 
 const PROFILE_FETCH_MS = 2_500
 const ADMIN_PROFILE_FETCH_MS = 2_500
@@ -50,14 +60,14 @@ function resolveLoginRole(...candidates: Array<string | null | undefined>): Role
 async function fetchProfileWithTimeout(
   supabase: Awaited<ReturnType<typeof createClient>>,
   userId: string,
-) {
+): Promise<{ data: ProfileRow | null; error: { message: string } | null }> {
   const query = supabase
     .from('profiles')
-    .select('full_name, role, organization_id')
+    .select(PROFILE_SELECT)
     .eq('id', userId)
     .maybeSingle()
 
-  return Promise.race([
+  let result = await Promise.race([
     query,
     new Promise<{ data: null; error: { message: string } }>((resolve) =>
       setTimeout(
@@ -66,6 +76,20 @@ async function fetchProfileWithTimeout(
       ),
     ),
   ])
+
+  if (result.error && /permission_overrides/i.test(result.error.message || '')) {
+    result = await Promise.race([
+      supabase.from('profiles').select(PROFILE_SELECT_FALLBACK).eq('id', userId).maybeSingle(),
+      new Promise<{ data: null; error: { message: string } }>((resolve) =>
+        setTimeout(
+          () => resolve({ data: null, error: { message: 'Profile fetch timed out' } }),
+          PROFILE_FETCH_MS,
+        ),
+      ),
+    ])
+  }
+
+  return result as { data: ProfileRow | null; error: { message: string } | null }
 }
 
 async function fetchProfileById(userId: string): Promise<{
@@ -102,9 +126,19 @@ async function fetchProfileById(userId: string): Promise<{
         const [profileResult, authResult] = await Promise.all([
           admin
             .from('profiles')
-            .select('full_name, role, organization_id')
+            .select(PROFILE_SELECT)
             .eq('id', userId)
-            .maybeSingle(),
+            .maybeSingle()
+            .then(async (res) => {
+              if (res.error && /permission_overrides/i.test(res.error.message || '')) {
+                return admin
+                  .from('profiles')
+                  .select(PROFILE_SELECT_FALLBACK)
+                  .eq('id', userId)
+                  .maybeSingle()
+              }
+              return res
+            }),
           admin.auth.admin.getUserById(userId),
         ])
 
@@ -144,6 +178,32 @@ async function fetchProfileById(userId: string): Promise<{
     profile: null,
     profileError: { message: 'Profile unavailable' },
     metadataRole,
+  }
+}
+
+async function fetchOrgRolePermissionOverrides(
+  organizationId: string,
+): Promise<RolePermissionOverridesMap | null> {
+  if (!organizationId) return null
+  try {
+    const admin = createAdminClient()
+    const { data, error } = await admin
+      .from('organizations')
+      .select('role_permission_overrides')
+      .eq('id', organizationId)
+      .maybeSingle()
+    if (error) {
+      if (/role_permission_overrides/i.test(error.message || '')) return null
+      console.warn('loadDashboardUser: org role overrides fetch failed', error.message)
+      return null
+    }
+    return parseRolePermissionOverridesMap(data?.role_permission_overrides)
+  } catch (error) {
+    console.warn(
+      'loadDashboardUser: org role overrides unavailable',
+      error instanceof Error ? error.message : error,
+    )
+    return null
   }
 }
 
@@ -188,6 +248,10 @@ export async function loadDashboardUser(): Promise<LoadDashboardUserResult> {
         return { status: 'forbidden' }
       }
 
+      const orgRolePermissionOverrides = profile.organization_id
+        ? await fetchOrgRolePermissionOverrides(profile.organization_id)
+        : null
+
       return {
         status: 'ok',
         user: {
@@ -197,6 +261,8 @@ export async function loadDashboardUser(): Promise<LoadDashboardUserResult> {
           role: roleKey,
           organizationId: profile.organization_id || '',
           organizationLogoUrl: '',
+          permissionOverrides: parsePermissionOverrides(profile.permission_overrides),
+          orgRolePermissionOverrides,
         },
       }
     }

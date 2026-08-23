@@ -39,6 +39,13 @@ import {
 } from '@/lib/events/event-other-services'
 import { formatNaira } from '@/lib/utils/currency'
 import { MobileTableSubdetail } from '@/lib/utils/table-mobile'
+import {
+  TABLE_ACTIONS_ROW,
+  TABLE_INLINE_ROW,
+  TABLE_META_TEXT,
+  TABLE_CELL_TRUNCATE,
+} from '@/lib/utils/table-row-inline'
+import { calendarPickerYmd } from '@/lib/utils/booking-in-house-dates'
 import { EnhancedDataTable } from '@/components/shared/enhanced-data-table'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -71,7 +78,8 @@ import {
 } from '@/components/ui/alert-dialog'
 import { PageLoadingState } from '@/components/loading-screen'
 import { toast } from 'sonner'
-import { Plus, Pencil, Ban, Loader2 } from 'lucide-react'
+import { Plus, Pencil, Ban, Loader2, PartyPopper, Receipt, Banknote, Users } from 'lucide-react'
+import { CompactStatBadgeRow } from '@/components/shared/compact-stat-badges'
 import { EventPaymentReceiptButton } from '@/components/receipts/event-payment-receipt-button'
 
 const defaultPayment = (): EventPaymentFormValue => ({
@@ -120,6 +128,19 @@ export function EventsPanel() {
   const [editing, setEditing] = useState<HotelEventRow | null>(null)
   const [cancelTarget, setCancelTarget] = useState<HotelEventRow | null>(null)
   const [form, setForm] = useState(emptyForm)
+  const [statsDateYmd, setStatsDateYmd] = useState<string | null>(null)
+
+  const pageStats = useMemo(() => {
+    const rows = statsDateYmd
+      ? events.filter((e) => String(e.start_date).slice(0, 10) === statsDateYmd)
+      : events
+    const active = rows.filter((e) => e.status !== 'cancelled')
+    return {
+      count: active.length,
+      revenue: active.reduce((sum, e) => sum + Number(e.estimated_total ?? e.estimated_base_value ?? 0), 0),
+      guests: active.reduce((sum, e) => sum + Number(e.expected_guests ?? 0), 0),
+    }
+  }, [events, statsDateYmd])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -459,9 +480,47 @@ export function EventsPanel() {
         </p>
       )}
 
+      <CompactStatBadgeRow
+        className="py-0.5"
+        items={[
+          {
+            key: 'count',
+            label: 'Events',
+            value: pageStats.count,
+            icon: PartyPopper,
+            borderClass: 'border-violet-200/80',
+            bgClass: 'bg-violet-50/50',
+            iconClass: 'text-violet-700',
+            title: statsDateYmd ? `Events starting ${statsDateYmd}` : 'All events',
+          },
+          {
+            key: 'revenue',
+            label: 'Rev',
+            value: formatNaira(pageStats.revenue),
+            icon: Receipt,
+            borderClass: 'border-slate-200/80',
+            bgClass: 'bg-slate-50/50',
+            iconClass: 'text-slate-700',
+            title: 'Estimated revenue',
+          },
+          {
+            key: 'guests',
+            label: 'Guests',
+            value: pageStats.guests,
+            icon: Users,
+            borderClass: 'border-blue-200/80',
+            bgClass: 'bg-blue-50/50',
+            iconClass: 'text-blue-700',
+            title: 'Expected guests',
+          },
+        ]}
+      />
+
       <EnhancedDataTable
         compactTable
+        showRowNumbers
         data={events}
+        onDateFilterChange={(d) => setStatsDateYmd(d ? calendarPickerYmd(d) : null)}
         searchKeys={['title', 'venue', 'client_name', 'client_phone', 'remarks'] as (keyof HotelEventRow)[]}
         dateField="start_date"
         onRowClick={canManage ? (ev) => openEdit(ev) : undefined}
@@ -470,13 +529,10 @@ export function EventsPanel() {
             key: 'title',
             label: 'Event',
             render: (ev) => (
-              <div>
-                <div className="font-medium max-md:text-[13px]">{ev.title}</div>
-                {ev.venue && <div className="text-xs text-muted-foreground max-md:hidden">{ev.venue}</div>}
-                {ev.other_services && ev.other_services.length > 0 && (
-                  <div className="text-xs text-muted-foreground max-md:hidden">
-                    + {ev.other_services.map((s) => eventOtherServiceLabel(s.type)).join(', ')}
-                  </div>
+              <div className={`${TABLE_INLINE_ROW} max-w-[14rem]`}>
+                <span className={`font-medium max-md:text-[13px] ${TABLE_CELL_TRUNCATE}`}>{ev.title}</span>
+                {ev.venue && (
+                  <span className={`${TABLE_META_TEXT} max-md:hidden ${TABLE_CELL_TRUNCATE}`}>· {ev.venue}</span>
                 )}
                 <MobileTableSubdetail>
                   {ev.client_name && <div>{ev.client_name}</div>}
@@ -492,10 +548,10 @@ export function EventsPanel() {
             key: 'period',
             label: 'Period',
             render: (ev) => (
-              <div className="space-y-1">
-                <span className="text-sm whitespace-nowrap block">{ev ? formatPeriod(ev) : '—'}</span>
+              <div className={TABLE_INLINE_ROW}>
+                <span className="text-sm whitespace-nowrap shrink-0">{ev ? formatPeriod(ev) : '—'}</span>
                 {ev.status === 'cancelled' && (
-                  <Badge variant="outline" className="text-[10px] text-destructive border-destructive/40">
+                  <Badge variant="outline" className="text-[10px] shrink-0 text-destructive border-destructive/40">
                     Cancelled
                   </Badge>
                 )}
@@ -507,10 +563,10 @@ export function EventsPanel() {
             label: 'Client',
             responsive: 'md+',
             render: (ev) => (
-              <div className="text-sm">
-                <div>{ev.client_name || '—'}</div>
+              <div className={TABLE_INLINE_ROW}>
+                <span className="text-sm shrink-0">{ev.client_name || '—'}</span>
                 {ev.client_phone && (
-                  <div className="text-xs text-muted-foreground">{ev.client_phone}</div>
+                  <span className={`${TABLE_META_TEXT} ${TABLE_CELL_TRUNCATE}`}>{ev.client_phone}</span>
                 )}
               </div>
             ),
@@ -538,7 +594,7 @@ export function EventsPanel() {
             label: '',
             stickyOnMobile: true,
             render: (ev) => (
-              <div className="flex gap-1 justify-end shrink-0">
+              <div className={`${TABLE_ACTIONS_ROW} justify-end`}>
                 <EventPaymentReceiptButton
                   event={ev}
                   role={role}

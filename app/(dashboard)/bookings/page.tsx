@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { EnhancedDataTable } from "@/components/shared/enhanced-data-table";
 import { Badge } from "@/components/ui/badge";
@@ -16,6 +16,11 @@ import { ExtendStayModal } from "@/components/bookings/extend-stay-modal";
 import { AddChargeModal } from "@/components/bookings/add-charge-modal";
 import { CheckoutConfirmDialog } from "@/components/bookings/checkout-confirm-dialog";
 import { formatNaira } from "@/lib/utils/currency";
+import { fetchHotelBusinessNightUtcBounds } from "@/lib/payments/business-night-bounds";
+import {
+  sumRoomRevenueForHotelNight,
+  sumPaymentAmounts,
+} from "@/lib/reports/day-page-stats";
 import { usePageData } from "@/hooks/use-page-data";
 import { useAuth } from "@/lib/auth-context";
 import { hasPermission } from "@/lib/permissions";
@@ -30,6 +35,20 @@ import {
   CalendarClock,
   CalendarDays,
 } from "lucide-react";
+import { CompactStatBadgeRow } from "@/components/shared/compact-stat-badges";
+import {
+  parseBookingNotesMeta,
+  formatBookingPaymentMethodLabel,
+  bookingAmountPaid,
+} from "@/lib/booking/parse-booking-notes";
+import { paymentMethodRequiresAccount } from "@/lib/payments/payment-accounts";
+import { enrichBookingsList } from "@/lib/booking/enrich-bookings-list";
+import {
+  TABLE_ACTIONS_ROW,
+  TABLE_STACKED_CELL,
+  TABLE_META_TEXT,
+  TABLE_CELL_TRUNCATE,
+} from "@/lib/utils/table-row-inline";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { getUserDisplayName } from "@/lib/utils/user-display";
@@ -45,8 +64,6 @@ import {
 import { fetchOrgCheckoutTime } from "@/lib/utils/org-checkout-policy";
 import {
   folioGuestCreditAmount,
-  folioPositiveOutstandingSum,
-  shouldReconcileBookingPaymentPaid,
 } from "@/lib/utils/booking-bill-balance";
 import {
   calendarPickerYmd,
@@ -68,7 +85,6 @@ import {
   MobileTableSubdetail,
 } from "@/lib/utils/table-mobile";
 
-const FOLIO_BOOKING_ID_CHUNK = 80;
 const BOOKINGS_SCOPE_LIMIT = 500;
 
 function describeFetchError(err: unknown): string {
@@ -86,110 +102,6 @@ function describeFetchError(err: unknown): string {
   }
 }
 
-type FolioChargeRow = {
-  amount?: unknown;
-  type?: string | null;
-  charge_type?: string | null;
-  payment_status?: string | null;
-  payment_method?: string | null;
-};
-
-async function fetchFolioChargesByBookingIds(
-  supabase: NonNullable<ReturnType<typeof createClient>>,
-  bookingIds: string[],
-): Promise<Record<string, FolioChargeRow[]>> {
-  const chargesByBooking: Record<string, FolioChargeRow[]> = {};
-  if (!bookingIds.length) return chargesByBooking;
-
-  for (let i = 0; i < bookingIds.length; i += FOLIO_BOOKING_ID_CHUNK) {
-    const chunk = bookingIds.slice(i, i + FOLIO_BOOKING_ID_CHUNK);
-    const { data, error } = await supabase
-      .from("folio_charges")
-      .select("booking_id, amount, payment_status, charge_type, payment_method")
-      .in("booking_id", chunk);
-    if (error) throw error;
-    for (const c of data ?? []) {
-      const id = (c as { booking_id: string }).booking_id;
-      if (!chargesByBooking[id]) chargesByBooking[id] = [];
-      chargesByBooking[id].push({
-        amount: (c as { amount?: unknown }).amount,
-        type: (c as { charge_type?: string | null }).charge_type,
-        charge_type: (c as { charge_type?: string | null }).charge_type,
-        payment_status: (c as { payment_status?: string | null })
-          .payment_status,
-        payment_method: (c as { payment_method?: string | null })
-          .payment_method,
-      });
-    }
-  }
-  return chargesByBooking;
-}
-
-/**
- * When city-ledger prepaid credit exists but was never posted as a folio line,
- * surface it under the most recent paid booking for that guest (Credit under paid).
- */
-async function attachGuestLedgerCreditToBookings(
-  supabase: NonNullable<ReturnType<typeof createClient>>,
-  organizationId: string,
-  bookings: Array<{
-    id: string;
-    guestName?: string;
-    guests?: { name?: string | null } | null;
-    check_in?: string;
-    balance?: number;
-    folio_credit?: number;
-  }>,
-): Promise<void> {
-  if (!bookings.length || !organizationId) return;
-
-  const { data: creditRows } = await supabase
-    .from("city_ledger_accounts")
-    .select("account_name, balance")
-    .eq("organization_id", organizationId)
-    .in("account_type", ["individual", "guest"])
-    .lt("balance", -0.005)
-    .limit(500);
-
-  if (!creditRows?.length) return;
-
-  const creditByName = new Map<string, number>();
-  for (const row of creditRows) {
-    const key = String(row.account_name || "")
-      .trim()
-      .toLowerCase();
-    if (!key) continue;
-    const amt = Math.abs(Number(row.balance || 0));
-    creditByName.set(key, Math.max(creditByName.get(key) || 0, amt));
-  }
-
-  for (const [nameKey, creditAmt] of creditByName) {
-    const guestBookings = bookings.filter((b) => {
-      const n = String(b.guestName || b.guests?.name || "")
-        .trim()
-        .toLowerCase();
-      return n === nameKey;
-    });
-    if (!guestBookings.length) continue;
-
-    const folioCreditSum = guestBookings.reduce(
-      (s, b) => s + Math.max(0, Number(b.folio_credit || 0)),
-      0,
-    );
-    if (folioCreditSum >= creditAmt - 0.5) continue;
-
-    const target = [...guestBookings].sort((a, b) =>
-      String(b.check_in || "").localeCompare(String(a.check_in || "")),
-    )[0];
-    if (Number(target.balance || 0) > 0.005) continue;
-
-    target.folio_credit = Math.max(
-      Number(target.folio_credit || 0),
-      creditAmt,
-    );
-  }
-}
-
 interface Booking {
   id: string;
   folio_id: string;
@@ -202,6 +114,8 @@ interface Booking {
   payment_status: string;
   payment_method?: string;
   ledger_account_name?: string;
+  payment_account_label?: string;
+  last_reschedule?: string | null;
   guestName?: string;
   guestPhone?: string;
   organization_id?: string;
@@ -275,6 +189,8 @@ export default function BookingsPage() {
   const [catalogScopeLoaded, setCatalogScopeLoaded] = useState<string | null>(
     null,
   );
+  const inHouseEnrichRef = useRef(0);
+  const catalogEnrichRef = useRef(0);
   const [catalogLoading, setCatalogLoading] = useState(false);
   /** When set, table shows in-house guests for that hotel night (not arrivals-only). */
   const [stayDateYmd, setStayDateYmd] = useState<string | null>(null);
@@ -286,7 +202,12 @@ export default function BookingsPage() {
     availableForCheckin: number;
     outOfOrder: number;
     dueOutToday: number;
+    roomRevenue: number;
+    cashCollected: number;
+    statsDate: string;
   } | null>(null);
+
+  const statsDateYmd = stayDateYmd ?? frontOfficeToday;
 
   useEffect(() => {
     if (!organizationId) return;
@@ -310,14 +231,12 @@ export default function BookingsPage() {
     };
   }, [organizationId]);
 
-  const refreshRoomStats = useCallback(async () => {
+  const refreshRoomStats = useCallback(async (forDate?: string) => {
     if (!organizationId) return;
     const supabase = createClient();
     if (!supabase) return;
     const tz = resolveHotelTimeZone();
-    const today = frontOfficeToday;
-
-    await reconcileRoomStatusesClient();
+    const today = forDate ?? frontOfficeToday;
 
     const [
       { data: roomRows, error: roomErr },
@@ -329,7 +248,7 @@ export default function BookingsPage() {
         .eq("organization_id", organizationId),
       supabase
         .from("bookings")
-        .select("id, room_id, check_in, check_out, status, folio_status")
+        .select("id, room_id, check_in, check_out, status, folio_status, rate_per_night")
         .eq("organization_id", organizationId)
         .in("status", ["checked_in", "confirmed", "reserved"]),
     ]);
@@ -340,6 +259,27 @@ export default function BookingsPage() {
     }
     if (dueErr) {
       console.warn("[bookings] due-out stats:", dueErr.message);
+    }
+
+    let cashCollected = 0;
+    try {
+      const bounds = await fetchHotelBusinessNightUtcBounds({
+        supabase,
+        organizationId,
+        ymd: today,
+        timeZone: tz,
+      });
+      if (!bounds.empty) {
+        const { data: payments } = await supabase
+          .from("payments")
+          .select("amount")
+          .eq("organization_id", organizationId)
+          .gte("payment_date", bounds.startIso)
+          .lte("payment_date", bounds.endInclusiveIso);
+        cashCollected = sumPaymentAmounts(payments ?? []);
+      }
+    } catch (e) {
+      console.warn("[bookings] cash stats:", e);
     }
 
     const norm = (s: string | null | undefined) =>
@@ -353,6 +293,7 @@ export default function BookingsPage() {
       (r: { status?: string }) => norm(r.status) === "out_of_order",
     ).length;
     const availableForCheckin = Math.max(0, list.length - physicallyHeld - outOfOrder);
+    const roomRevenue = sumRoomRevenueForHotelNight(dueBookings ?? [], today);
 
     setRoomStats({
       total: list.length,
@@ -361,6 +302,9 @@ export default function BookingsPage() {
       availableForCheckin,
       outOfOrder,
       dueOutToday: stay.dueOut,
+      roomRevenue,
+      cashCollected,
+      statsDate: today,
     });
   }, [organizationId, frontOfficeToday]);
 
@@ -432,6 +376,50 @@ export default function BookingsPage() {
     );
   }
 
+  const runDeferredInHouseEnrich = useCallback(
+    async (
+      rows: Booking[],
+      supabase: NonNullable<ReturnType<typeof createClient>>,
+    ) => {
+      if (!organizationId || !rows.length) return;
+      const req = ++inHouseEnrichRef.current;
+      try {
+        const copy = rows.map((b) => ({ ...b }));
+        await enrichBookingsList(supabase, organizationId, copy);
+        if (inHouseEnrichRef.current !== req) return;
+        setInHouseBookings(groupBulkRows(copy as Booking[]));
+      } catch (err) {
+        if (process.env.NODE_ENV === "development") {
+          console.warn("[bookings] deferred folio enrich failed:", err);
+        }
+      }
+    },
+    [organizationId],
+  );
+
+  const runDeferredCatalogEnrich = useCallback(
+    async (
+      rows: Booking[],
+      scopeKey: string,
+      supabase: NonNullable<ReturnType<typeof createClient>>,
+    ) => {
+      if (!organizationId || !rows.length) return;
+      const req = ++catalogEnrichRef.current;
+      try {
+        const copy = rows.map((b) => ({ ...b }));
+        await enrichBookingsList(supabase, organizationId, copy);
+        if (catalogEnrichRef.current !== req) return;
+        setAllBookingsCatalog(groupBulkRows(copy as Booking[]));
+        setCatalogScopeLoaded(scopeKey);
+      } catch (err) {
+        if (process.env.NODE_ENV === "development") {
+          console.warn("[bookings] deferred catalog enrich failed:", err);
+        }
+      }
+    },
+    [organizationId],
+  );
+
   const fetchBookings = useCallback(async () => {
     startFetch();
     try {
@@ -447,7 +435,7 @@ export default function BookingsPage() {
       setCatalogScopeLoaded(null);
       setAllBookingsCatalog([]);
 
-      const loadScope = async (statusKey: string) => {
+      const loadScope = async (statusKey: string, enrich = true) => {
         const tz = resolveHotelTimeZone();
         const today = frontOfficeToday;
         const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000)
@@ -510,37 +498,13 @@ export default function BookingsPage() {
           userId,
         );
 
-        // Derive payment_method from notes field (since there's no payment_method column on bookings)
+        // Derive payment method / account from notes (may include reschedule history on later lines).
         let bookingsWithUsers = (data || []).map((booking: any) => {
-          let payment_method = "cash";
-          let ledger_account_name = "";
-          if (booking.notes) {
-            if (booking.notes.startsWith("city_ledger:")) {
-              payment_method = "city_ledger";
-              ledger_account_name = booking.notes.replace(
-                /^city_ledger:\s*/i,
-                "",
-              );
-            } else if (booking.notes.startsWith("City Ledger:")) {
-              payment_method = "city_ledger";
-              ledger_account_name = booking.notes.replace(
-                /^City Ledger:\s*/,
-                "",
-              );
-            } else if (booking.notes.startsWith("payment_method:")) {
-              payment_method = booking.notes
-                .replace(/^payment_method:\s*/, "")
-                .split("|")[0]
-                .trim();
-              const match = booking.notes.match(/\|ledger:(.+)/);
-              if (match) ledger_account_name = match[1].trim();
-            }
-          }
+          const notesMeta = parseBookingNotesMeta(booking.notes);
           return {
             ...booking,
             _db_balance: Number(booking.balance ?? 0),
-            payment_method,
-            ledger_account_name,
+            ...notesMeta,
             guestName: booking.guests?.name || "",
             guestPhone: booking.guests?.phone || "",
             created_by_name: booking.created_by
@@ -561,62 +525,26 @@ export default function BookingsPage() {
           );
         }
 
-        // Derive each booking's balance from folio (same rules as booking detail / bill card)
         const bookingIds = bookingsWithUsers.map((b: any) => b.id);
         if (bookingIds.length > 0) {
-          const chargesByBooking = await fetchFolioChargesByBookingIds(
-            supabase,
-            bookingIds,
-          );
-          bookingsWithUsers.forEach((b: any) => {
-            const ch = chargesByBooking[b.id] ?? [];
-            b.balance = folioPositiveOutstandingSum(ch);
-            b.folio_credit = folioGuestCreditAmount(ch);
-          });
-          await attachGuestLedgerCreditToBookings(
-            supabase,
-            organizationId,
-            bookingsWithUsers,
-          );
-
-          const healIds = bookingsWithUsers
-            .filter((b: any) =>
-              shouldReconcileBookingPaymentPaid(
-                {
-                  total_amount: b.total_amount,
-                  deposit: b.deposit,
-                  balance: b._db_balance,
-                  payment_status: b.payment_status,
-                },
-                chargesByBooking[b.id] ?? [],
-              ),
-            )
-            .map((b: any) => b.id as string);
-
-          if (healIds.length > 0) {
-            bookingsWithUsers.forEach((b: any) => {
-              if (healIds.includes(b.id)) b.payment_status = "paid";
-            });
-            void Promise.all(
-              healIds.map((id: string) =>
-                supabase
-                  .from("bookings")
-                  .update({ payment_status: "paid" })
-                  .eq("id", id),
-              ),
+          if (enrich) {
+            await enrichBookingsList(
+              supabase,
+              organizationId,
+              bookingsWithUsers,
             );
           }
+        } else {
+          bookingsWithUsers.forEach((b: any) => {
+            delete b._db_balance;
+          });
         }
-
-        bookingsWithUsers.forEach((b: any) => {
-          delete b._db_balance;
-        });
 
         return bookingsWithUsers;
       };
 
       const inHouse = await Promise.race([
-        withFetchRetry(() => loadScope("checked_in")),
+        withFetchRetry(() => loadScope("checked_in", false)),
         new Promise<never>((_, reject) =>
           setTimeout(
             () => reject(new Error("Bookings request timed out")),
@@ -625,6 +553,7 @@ export default function BookingsPage() {
         ),
       ]);
       setInHouseBookings(groupBulkRows(inHouse));
+      void runDeferredInHouseEnrich(inHouse, supabase);
     } catch (error: unknown) {
       const detail = describeFetchError(error);
       if (process.env.NODE_ENV === "development") {
@@ -640,10 +569,9 @@ export default function BookingsPage() {
       toast.error(msg);
       setInHouseBookings([]);
     } finally {
-      window.setTimeout(() => void refreshRoomStats(), 400);
       endFetch();
     }
-  }, [organizationId, userId, refreshRoomStats, startFetch, endFetch, frontOfficeToday]);
+  }, [organizationId, userId, startFetch, endFetch, frontOfficeToday, runDeferredInHouseEnrich]);
 
   const fetchBookingsCatalog = useCallback(
     async (scopeKey: string) => {
@@ -720,35 +648,11 @@ export default function BookingsPage() {
           );
 
           let bookingsWithUsers = (data || []).map((booking: any) => {
-            let payment_method = "cash";
-            let ledger_account_name = "";
-            if (booking.notes) {
-              if (booking.notes.startsWith("city_ledger:")) {
-                payment_method = "city_ledger";
-                ledger_account_name = booking.notes.replace(
-                  /^city_ledger:\s*/i,
-                  "",
-                );
-              } else if (booking.notes.startsWith("City Ledger:")) {
-                payment_method = "city_ledger";
-                ledger_account_name = booking.notes.replace(
-                  /^City Ledger:\s*/,
-                  "",
-                );
-              } else if (booking.notes.startsWith("payment_method:")) {
-                payment_method = booking.notes
-                  .replace(/^payment_method:\s*/, "")
-                  .split("|")[0]
-                  .trim();
-                const match = booking.notes.match(/\|ledger:(.+)/);
-                if (match) ledger_account_name = match[1].trim();
-              }
-            }
+            const notesMeta = parseBookingNotesMeta(booking.notes);
             return {
               ...booking,
               _db_balance: Number(booking.balance ?? 0),
-              payment_method,
-              ledger_account_name,
+              ...notesMeta,
               guestName: booking.guests?.name || "",
               guestPhone: booking.guests?.phone || "",
               created_by_name: booking.created_by
@@ -763,26 +667,11 @@ export default function BookingsPage() {
           });
 
           const bookingIds = bookingsWithUsers.map((b: any) => b.id);
-          if (bookingIds.length > 0) {
-            const chargesByBooking = await fetchFolioChargesByBookingIds(
-              supabase,
-              bookingIds,
-            );
+          if (!bookingIds.length) {
             bookingsWithUsers.forEach((b: any) => {
-              const ch = chargesByBooking[b.id] ?? [];
-              b.balance = folioPositiveOutstandingSum(ch);
-              b.folio_credit = folioGuestCreditAmount(ch);
+              delete b._db_balance;
             });
-            await attachGuestLedgerCreditToBookings(
-              supabase,
-              organizationId,
-              bookingsWithUsers,
-            );
           }
-
-          bookingsWithUsers.forEach((b: any) => {
-            delete b._db_balance;
-          });
 
           if (scopeKey === "due_out") {
             const tz = resolveHotelTimeZone();
@@ -794,6 +683,7 @@ export default function BookingsPage() {
 
           setAllBookingsCatalog(groupBulkRows(bookingsWithUsers));
           setCatalogScopeLoaded(scopeKey);
+          void runDeferredCatalogEnrich(bookingsWithUsers, scopeKey, supabase);
         });
       } catch (error: unknown) {
         const detail = describeFetchError(error);
@@ -810,7 +700,7 @@ export default function BookingsPage() {
         setCatalogLoading(false);
       }
     },
-    [organizationId, userId, frontOfficeToday],
+    [organizationId, userId, frontOfficeToday, runDeferredCatalogEnrich],
   );
 
   /** In-house / stayovers for a hotel night (daily book), including later checked-out guests. */
@@ -850,35 +740,11 @@ export default function BookingsPage() {
           );
 
           let bookingsWithUsers = (data || []).map((booking: any) => {
-            let payment_method = "cash";
-            let ledger_account_name = "";
-            if (booking.notes) {
-              if (booking.notes.startsWith("city_ledger:")) {
-                payment_method = "city_ledger";
-                ledger_account_name = booking.notes.replace(
-                  /^city_ledger:\s*/i,
-                  "",
-                );
-              } else if (booking.notes.startsWith("City Ledger:")) {
-                payment_method = "city_ledger";
-                ledger_account_name = booking.notes.replace(
-                  /^City Ledger:\s*/,
-                  "",
-                );
-              } else if (booking.notes.startsWith("payment_method:")) {
-                payment_method = booking.notes
-                  .replace(/^payment_method:\s*/, "")
-                  .split("|")[0]
-                  .trim();
-                const match = booking.notes.match(/\|ledger:(.+)/);
-                if (match) ledger_account_name = match[1].trim();
-              }
-            }
+            const notesMeta = parseBookingNotesMeta(booking.notes);
             return {
               ...booking,
               _db_balance: Number(booking.balance ?? 0),
-              payment_method,
-              ledger_account_name,
+              ...notesMeta,
               guestName: booking.guests?.name || "",
               guestPhone: booking.guests?.phone || "",
               created_by_name: booking.created_by
@@ -893,28 +759,15 @@ export default function BookingsPage() {
           });
 
           const bookingIds = bookingsWithUsers.map((b: any) => b.id);
-          if (bookingIds.length > 0) {
-            const chargesByBooking = await fetchFolioChargesByBookingIds(
-              supabase,
-              bookingIds,
-            );
+          if (!bookingIds.length) {
             bookingsWithUsers.forEach((b: any) => {
-              const ch = chargesByBooking[b.id] ?? [];
-              b.balance = folioPositiveOutstandingSum(ch);
-              b.folio_credit = folioGuestCreditAmount(ch);
+              delete b._db_balance;
             });
-            await attachGuestLedgerCreditToBookings(
-              supabase,
-              organizationId,
-              bookingsWithUsers,
-            );
           }
-          bookingsWithUsers.forEach((b: any) => {
-            delete b._db_balance;
-          });
 
           setAllBookingsCatalog(groupBulkRows(bookingsWithUsers));
           setCatalogScopeLoaded(scopeKey);
+          void runDeferredCatalogEnrich(bookingsWithUsers, scopeKey, supabase);
         });
       } catch (error: unknown) {
         const detail = describeFetchError(error);
@@ -928,7 +781,7 @@ export default function BookingsPage() {
         setCatalogLoading(false);
       }
     },
-    [organizationId, userId],
+    [organizationId, userId, runDeferredCatalogEnrich],
   );
 
   const handleBookingsDateFilterChange = useCallback(
@@ -941,15 +794,17 @@ export default function BookingsPage() {
           status: "all",
         }));
         void fetchStayDateBookings(ymd);
+        void refreshRoomStats(ymd);
       } else {
         setStayDateYmd(null);
         setTableFilters((prev) => ({
           ...prev,
           status: "checked_in",
         }));
+        void refreshRoomStats(frontOfficeToday);
       }
     },
-    [fetchStayDateBookings],
+    [fetchStayDateBookings, refreshRoomStats, frontOfficeToday],
   );
 
   useEffect(() => {
@@ -993,8 +848,8 @@ export default function BookingsPage() {
       setRoomStats(null);
       return;
     }
-    void refreshRoomStats();
-  }, [organizationId, refreshRoomStats]);
+    void refreshRoomStats(stayDateYmd ?? frontOfficeToday);
+  }, [organizationId, refreshRoomStats, stayDateYmd, frontOfficeToday]);
 
   const statusColors: Record<string, string> = {
     reserved: "bg-blue-500/10 text-blue-700 border-blue-200",
@@ -1016,6 +871,7 @@ export default function BookingsPage() {
   const paymentCellForBooking = (booking: Booking) => {
     const owed = Math.max(0, Number(booking.balance ?? 0));
     const creditAmt = Math.max(0, Number(booking.folio_credit ?? 0));
+    const paidAmt = bookingAmountPaid(booking.total_amount, booking.balance);
     const isCancelledLike = booking.status === "cancelled";
 
     let effectiveStatus =
@@ -1036,6 +892,7 @@ export default function BookingsPage() {
         badgeClass: paymentColors.paid,
         badgeText: "paid",
         owedLine: null as number | null,
+        paidLine: paidAmt > 0 ? paidAmt : null,
         creditLine: creditAmt,
       };
     }
@@ -1044,6 +901,8 @@ export default function BookingsPage() {
       badgeClass: paymentColors[key] ?? paymentColors.pending,
       badgeText: key,
       owedLine: owed > 0 ? owed : null,
+      paidLine:
+        !isCancelledLike && key === "paid" && paidAmt > 0 ? paidAmt : null,
       creditLine: creditAmt > 0 ? creditAmt : null,
     };
   };
@@ -1368,110 +1227,98 @@ export default function BookingsPage() {
         </>
       )}
 
-      <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between lg:gap-3">
-        <div className="min-w-0 space-y-1">
-          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">
+      <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between lg:gap-3">
+        <div className="min-w-0">
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight shrink-0">
             Bookings
           </h1>
-          <p className="text-muted-foreground text-xs sm:text-sm leading-snug max-w-3xl">
-            Default: <strong>occupied + due today + today’s arrivals</strong>.
-            Due guests stay in this list with a note. Search finds any booking
-            in the last 90 days. Checkout frees the room.
+          <p className="text-sm text-muted-foreground mt-1 max-w-3xl">
+            Default list: occupied + due today + today&apos;s arrivals. Due guests stay in this list with a note.
+            Search finds any booking in the last 90 days. Checkout frees the room.
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+        <div className="flex flex-wrap items-center justify-center lg:justify-end gap-1.5 shrink-0">
           {roomStats !== null && (
-            <>
-              <div
-                className="inline-flex h-7 items-center gap-1 rounded-md border border-blue-200/80 bg-blue-50/50 px-1.5 text-[10px] font-medium leading-none shadow-sm"
-                title="Checked-in guests staying past today (excludes due-out and reservations)"
-              >
-                <Bed
-                  className="h-3 w-3 shrink-0 text-blue-700"
-                  aria-hidden
-                />
-                <span className="text-muted-foreground">Occ</span>
-                <span className="tabular-nums text-foreground">
-                  {roomStats.occupied}
+            <CompactStatBadgeRow
+              items={[
+                {
+                  key: "occ",
+                  label: "Occ",
+                  value: roomStats.occupied,
+                  icon: Bed,
+                  borderClass: "border-blue-200/80",
+                  bgClass: "bg-blue-50/50",
+                  iconClass: "text-blue-700",
+                  title: "Checked-in guests staying past today",
+                },
+                {
+                  key: "res",
+                  label: "Res",
+                  value: roomStats.reserved,
+                  icon: CalendarDays,
+                  borderClass: "border-violet-200/80",
+                  bgClass: "bg-violet-50/50",
+                  iconClass: "text-violet-700",
+                  title: "Reservations not checked in yet",
+                },
+                {
+                  key: "due",
+                  label: "Due",
+                  value: roomStats.dueOutToday,
+                  icon: CalendarClock,
+                  borderClass: "border-amber-200/80",
+                  bgClass: "bg-amber-50/50",
+                  iconClass: "text-amber-700",
+                  title: "Checkout on the hotel business date",
+                },
+                {
+                  key: "avail",
+                  label: "Avail",
+                  value: roomStats.availableForCheckin,
+                  icon: DoorOpen,
+                  borderClass: "border-green-200/80",
+                  bgClass: "bg-green-50/50",
+                  iconClass: "text-green-700",
+                  title: "Rooms free for check-in",
+                },
+                {
+                  key: "ooo",
+                  label: "OOO",
+                  value: roomStats.outOfOrder,
+                  icon: AlertTriangle,
+                  borderClass: "border-orange-200/80",
+                  bgClass: "bg-orange-50/50",
+                  iconClass: "text-orange-700",
+                  title: "Out of order",
+                },
+              ]}
+              suffix={
+                <span
+                  className="text-[10px] text-muted-foreground tabular-nums px-0.5"
+                  title="Total rooms"
+                >
+                  /{roomStats.total}
                 </span>
-              </div>
-              <div
-                className="inline-flex h-7 items-center gap-1 rounded-md border border-violet-200/80 bg-violet-50/50 px-1.5 text-[10px] font-medium leading-none shadow-sm"
-                title="Reservations / not checked in yet"
-              >
-                <CalendarDays
-                  className="h-3 w-3 shrink-0 text-violet-700"
-                  aria-hidden
-                />
-                <span className="text-muted-foreground">Res</span>
-                <span className="tabular-nums text-foreground">
-                  {roomStats.reserved}
-                </span>
-              </div>
-              <div
-                className="inline-flex h-7 items-center gap-1 rounded-md border border-amber-200/80 bg-amber-50/50 px-1.5 text-[10px] font-medium leading-none shadow-sm"
-                title="Checkout on the hotel business date (Due out appears after Night Audit rolls the date)"
-              >
-                <CalendarClock
-                  className="h-3 w-3 shrink-0 text-amber-700"
-                  aria-hidden
-                />
-                <span className="text-muted-foreground">Due</span>
-                <span className="tabular-nums text-foreground">
-                  {roomStats.dueOutToday}
-                </span>
-              </div>
-              <div
-                className="inline-flex h-7 items-center gap-1 rounded-md border border-green-200/80 bg-green-50/50 px-1.5 text-[10px] font-medium leading-none shadow-sm"
-                title="Rooms free for check-in (total − Occ − Due today − OOO)"
-              >
-                <DoorOpen
-                  className="h-3 w-3 shrink-0 text-green-700"
-                  aria-hidden
-                />
-                <span className="text-muted-foreground">Avail</span>
-                <span className="tabular-nums text-foreground">
-                  {roomStats.availableForCheckin}
-                </span>
-              </div>
-              <div
-                className="inline-flex h-7 items-center gap-1 rounded-md border border-orange-200/80 bg-orange-50/50 px-1.5 text-[10px] font-medium leading-none shadow-sm"
-                title="Rooms marked Out of order"
-              >
-                <AlertTriangle
-                  className="h-3 w-3 shrink-0 text-orange-700"
-                  aria-hidden
-                />
-                <span className="text-muted-foreground">OOO</span>
-                <span className="tabular-nums text-foreground">
-                  {roomStats.outOfOrder}
-                </span>
-              </div>
-              <span
-                className="text-[9px] text-muted-foreground tabular-nums hidden sm:inline px-0.5"
-                title="Total rooms"
-              >
-                /{roomStats.total}
-              </span>
-            </>
+              }
+            />
           )}
           {hasPermission(role, "bookings:create") && (
             <>
               <Button
                 variant="outline"
                 size="sm"
-                className="h-7 text-[10px] px-2"
+                className="h-[31px] text-[11px] px-2"
                 onClick={() => setBulkModalOpen(true)}
               >
-                <Users className="mr-1 h-3 w-3" />
+                <Users className="mr-1 h-3.5 w-3.5" />
                 Bulk Booking
               </Button>
               <Button
                 size="sm"
-                className="h-7 text-[10px] px-2"
+                className="h-[31px] text-[11px] px-2"
                 onClick={() => setModalOpen(true)}
               >
-                <Plus className="mr-1 h-3 w-3" />
+                <Plus className="mr-1 h-3.5 w-3.5" />
                 New Booking
               </Button>
             </>
@@ -1482,6 +1329,7 @@ export default function BookingsPage() {
       <EnhancedDataTable
         data={allBookingsCatalog}
         loading={catalogFetchPending}
+        showRowNumbers
         listWhenSearchEmpty={
           tableFilters.status === "checked_in" ? inHouseBookings : undefined
         }
@@ -1665,9 +1513,11 @@ export default function BookingsPage() {
                     ? `${booking.room_count} Rooms`
                     : `Room ${booking.rooms?.room_number}`}
                 </div>
-                <div className="text-xs text-muted-foreground">
-                  {booking.rooms?.room_type}
-                </div>
+                {booking.rooms?.room_type && !booking.is_bulk && (
+                  <div className="text-xs text-muted-foreground">
+                    {booking.rooms.room_type}
+                  </div>
+                )}
               </div>
             ),
           },
@@ -1738,25 +1588,30 @@ export default function BookingsPage() {
             label: "Payment",
             responsive: "md+",
             render: (booking) => {
-              const { badgeClass, badgeText, owedLine, creditLine } =
+              const { badgeClass, badgeText, owedLine, paidLine, creditLine } =
                 paymentCellForBooking(booking);
               return (
-                <div className="space-y-1">
+                <div className={TABLE_STACKED_CELL}>
                   <Badge
                     variant="outline"
-                    className={`${badgeClass} max-md:text-[10px]`}
+                    className={`${badgeClass} max-md:text-[10px] shrink-0`}
                   >
                     {badgeText}
                   </Badge>
+                  {paidLine !== null && (
+                    <span className={`${TABLE_META_TEXT} tabular-nums`}>
+                      {formatNaira(paidLine)}
+                    </span>
+                  )}
                   {owedLine !== null && (
-                    <div className="text-xs text-muted-foreground">
-                      Bal: {formatNaira(owedLine)}
-                    </div>
+                    <span className={`${TABLE_META_TEXT} tabular-nums`}>
+                      Bal {formatNaira(owedLine)}
+                    </span>
                   )}
                   {creditLine !== null && creditLine > 0 && (
-                    <div className="text-xs text-muted-foreground">
-                      Credit: {formatNaira(creditLine)}
-                    </div>
+                    <span className={`${TABLE_META_TEXT} tabular-nums`}>
+                      Cr {formatNaira(creditLine)}
+                    </span>
                   )}
                 </div>
               );
@@ -1766,22 +1621,38 @@ export default function BookingsPage() {
             key: "payment_method",
             label: "Method",
             responsive: "md+",
-            render: (booking) => (
-              <div className="space-y-1">
-                <Badge
-                  variant="outline"
-                  className="text-[10px] capitalize max-md:text-[10px]"
+            render: (booking) => {
+              const methodLabel = formatBookingPaymentMethodLabel(
+                booking.payment_method,
+              );
+              const accountLabel =
+                booking.payment_method === "city_ledger"
+                  ? booking.ledger_account_name
+                  : paymentMethodRequiresAccount(booking.payment_method)
+                    ? booking.payment_account_label
+                    : "";
+              return (
+                <div
+                  className={TABLE_STACKED_CELL}
+                  title={[methodLabel, accountLabel].filter(Boolean).join(" · ")}
                 >
-                  {(booking.payment_method || "cash").replace(/_/g, " ")}
-                </Badge>
-                {booking.payment_method === "city_ledger" &&
-                  booking.ledger_account_name && (
-                    <div className="text-[10px] text-muted-foreground truncate max-w-[100px] md:max-w-[120px]">
-                      {booking.ledger_account_name}
-                    </div>
-                  )}
-              </div>
-            ),
+                  <Badge
+                    variant="outline"
+                    className="text-[10px] capitalize max-md:text-[10px] shrink-0"
+                  >
+                    {methodLabel}
+                  </Badge>
+                  {accountLabel ? (
+                    <span
+                      className={`${TABLE_META_TEXT} ${TABLE_CELL_TRUNCATE} max-w-[7rem]`}
+                      title={accountLabel}
+                    >
+                      {accountLabel}
+                    </span>
+                  ) : null}
+                </div>
+              );
+            },
           },
           {
             key: "actions",
@@ -1841,7 +1712,7 @@ export default function BookingsPage() {
                 }
                 return (
                   <div
-                    className="flex shrink-0 flex-wrap gap-0.5"
+                    className={TABLE_ACTIONS_ROW}
                     onClick={(e) => e.stopPropagation()}
                   >
                     {actionableMember && (
@@ -1893,7 +1764,7 @@ export default function BookingsPage() {
                             setExtendModalOpen(true);
                           }}
                         >
-                          Extend
+                          Extend Stay
                         </Button>
                       </>
                     )}
@@ -1947,7 +1818,7 @@ export default function BookingsPage() {
 
               return (
                 <div
-                  className="flex shrink-0 flex-wrap gap-0.5"
+                  className={TABLE_ACTIONS_ROW}
                   onClick={(e) => e.stopPropagation()}
                 >
                   {showReserveRow && canCheckInReserved && (
@@ -2076,27 +1947,6 @@ export default function BookingsPage() {
             },
           },
           {
-            key: "folio_id",
-            label: "Folio ID",
-            responsive: "lg+",
-            render: (booking) => (
-              <div
-                className="font-mono text-xs cursor-pointer hover:text-primary lg:text-sm"
-                onClick={() =>
-                  router.push(
-                    booking.is_bulk
-                      ? `/bulk-bookings/${booking.bulk_group_id}`
-                      : `/bookings/${booking.id}`,
-                  )
-                }
-              >
-                {booking.is_bulk
-                  ? `Bulk (${booking.room_count})`
-                  : booking.folio_id}
-              </div>
-            ),
-          },
-          {
             key: "created_by_name",
             label: "Created By",
             responsive: "lg+",
@@ -2154,13 +2004,18 @@ export default function BookingsPage() {
                   <div className="text-muted-foreground">Payment</div>
                   <div className="space-y-1">
                     {(() => {
-                      const { badgeClass, badgeText, owedLine, creditLine } =
+                      const { badgeClass, badgeText, owedLine, paidLine, creditLine } =
                         paymentCellForBooking(booking);
                       return (
                         <>
                           <Badge variant="outline" className={badgeClass}>
                             {badgeText}
                           </Badge>
+                          {paidLine !== null && (
+                            <div className="text-xs text-muted-foreground">
+                              Paid: {formatNaira(paidLine)}
+                            </div>
+                          )}
                           {owedLine !== null && (
                             <div className="text-xs text-muted-foreground">
                               Bal: {formatNaira(owedLine)}

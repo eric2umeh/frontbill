@@ -9,6 +9,7 @@ import { CardContent } from '@/components/ui/card'
 import { calculateGuestBalancesBatch } from '@/lib/balance'
 import { formatNaira } from '@/lib/utils/currency'
 import { MobileTableSubdetail } from '@/lib/utils/table-mobile'
+import { TABLE_INLINE_ROW, TABLE_META_TEXT, TABLE_CELL_TRUNCATE } from '@/lib/utils/table-row-inline'
 import { usePageData } from '@/hooks/use-page-data'
 import { useAuth } from '@/lib/auth-context'
 import { PageLoadingState } from '@/components/loading-screen'
@@ -96,6 +97,7 @@ export default function GuestDatabasePage() {
 
       <EnhancedDataTable
         compactTable
+        showRowNumbers
         data={guests}
         searchKeys={['name', 'phone', 'email', 'id_number']}
         filters={[]}
@@ -104,9 +106,14 @@ export default function GuestDatabasePage() {
             key: 'name',
             label: 'Guest',
             render: (guest) => (
-              <div className="cursor-pointer hover:text-primary" onClick={() => goToGuest(guest)}>
-                <div className="font-semibold max-md:text-[13px]">{guest.name}</div>
-                <div className="text-xs text-muted-foreground max-md:hidden">{guest.phone}</div>
+              <div
+                className={`cursor-pointer hover:text-primary ${TABLE_INLINE_ROW} max-w-[12rem]`}
+                onClick={() => goToGuest(guest)}
+              >
+                <span className={`font-semibold max-md:text-[13px] ${TABLE_CELL_TRUNCATE}`}>{guest.name}</span>
+                {guest.phone && (
+                  <span className={`${TABLE_META_TEXT} max-md:hidden shrink-0`}>{guest.phone}</span>
+                )}
                 <MobileTableSubdetail>
                   {guest.phone && <div>{guest.phone}</div>}
                   {guest.email && <div className="truncate max-w-[200px]">{guest.email}</div>}
@@ -123,7 +130,7 @@ export default function GuestDatabasePage() {
               const isDebt = balance > 0.005
               return (
                 <div
-                  className={`text-xs font-medium cursor-pointer md:text-sm ${
+                  className={`text-xs font-medium cursor-pointer md:text-sm inline-flex items-center gap-1 whitespace-nowrap ${
                     isDebt
                       ? 'text-red-600'
                       : isCredit
@@ -132,11 +139,9 @@ export default function GuestDatabasePage() {
                   }`}
                   onClick={() => goToGuest(guest)}
                 >
-                  <div>{formatNaira(Math.abs(balance))}</div>
+                  <span>{formatNaira(Math.abs(balance))}</span>
                   {isCredit && (
-                    <div className="text-[10px] font-normal text-blue-600/80">
-                      Credit
-                    </div>
+                    <span className="text-[10px] font-normal text-blue-600/80 shrink-0">Credit</span>
                   )}
                 </div>
               )
@@ -167,12 +172,12 @@ export default function GuestDatabasePage() {
             label: 'ID',
             responsive: 'md+',
             render: (guest) => (
-              <div className="text-sm cursor-pointer" onClick={() => goToGuest(guest)}>
+              <div className={`text-sm cursor-pointer ${TABLE_INLINE_ROW}`} onClick={() => goToGuest(guest)}>
                 {guest.id_type ? (
-                  <div>
-                    <div className="font-medium capitalize">{guest.id_type}</div>
-                    <div className="text-xs text-muted-foreground">{guest.id_number || '—'}</div>
-                  </div>
+                  <>
+                    <span className="font-medium capitalize shrink-0">{guest.id_type}</span>
+                    <span className={`${TABLE_META_TEXT} ${TABLE_CELL_TRUNCATE}`}>{guest.id_number || '—'}</span>
+                  </>
                 ) : (
                   <span className="text-muted-foreground">—</span>
                 )}

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
@@ -13,7 +13,8 @@ import { PageLoadingState } from '@/components/loading-screen'
 import { usePageData } from '@/hooks/use-page-data'
 import { useAuth } from '@/lib/auth-context'
 import { hasPermission } from '@/lib/permissions'
-import { Plus, Users, DoorOpen } from 'lucide-react'
+import { Plus, Users, DoorOpen, CalendarClock, Banknote, Receipt } from 'lucide-react'
+import { CompactStatBadgeRow } from '@/components/shared/compact-stat-badges'
 import { BulkBookingModal } from '@/components/reservations/bulk-booking-modal'
 import { NewReservationModal } from '@/components/reservations/new-reservation-modal'
 import { ReserveCheckInModal, type ReserveCheckInBooking } from '@/components/reservations/reserve-checkin-modal'
@@ -23,11 +24,25 @@ import { getBulkGroupId, isLegacyBulkGroupId } from '@/lib/utils/bulk-booking'
 import { cancelBookingReservation, isCancellableReservationStatus } from '@/lib/reservations/cancel-reservation'
 import { isNoShowEligibleStatus } from '@/lib/reservations/mark-no-show'
 import { MarkNoShowDialog } from '@/components/reservations/mark-no-show-dialog'
-import { formatReservationPaymentMethodLabel } from '@/lib/reservations/reservation-payment-methods'
 import { networkFetchHint, withFetchRetry } from '@/lib/utils/fetch-retry'
 import { toast } from 'sonner'
 import { useReservationsEventsHeader } from '@/components/reservations/reservations-events-header'
 import { formatShortStayDates, MobileTableSubdetail } from '@/lib/utils/table-mobile'
+import { calendarPickerYmd } from '@/lib/utils/booking-in-house-dates'
+import {
+  parseBookingNotesMeta,
+  formatBookingPaymentMethodLabel,
+  bookingAmountPaid,
+} from '@/lib/booking/parse-booking-notes'
+import { attachPaymentAccountLabelsToBookings } from '@/lib/booking/fetch-booking-payment-accounts'
+import { paymentMethodRequiresAccount } from '@/lib/payments/payment-accounts'
+import {
+  TABLE_ACTIONS_ROW,
+  TABLE_INLINE_ROW,
+  TABLE_META_TEXT,
+  TABLE_CELL_TRUNCATE,
+  TABLE_STACKED_CELL,
+} from '@/lib/utils/table-row-inline'
 
 const RESERVATIONS_LIST_LIMIT = 500
 
@@ -58,6 +73,8 @@ interface Reservation {
   payment_status: string
   payment_method?: string
   ledger_account_name?: string
+  payment_account_label?: string
+  last_reschedule?: string | null
   guestName?: string
   guestPhone?: string
   rate_per_night: number
@@ -95,6 +112,7 @@ export default function ReservationsPage() {
     check_in?: string
     check_out?: string
   } | null>(null)
+  const [statsDateYmd, setStatsDateYmd] = useState<string | null>(null)
   const { initialLoading, startFetch, endFetch } = usePageData()
   const { organizationId, role, userId } = useAuth()
   const { setHeaderActions } = useReservationsEventsHeader()
@@ -126,6 +144,17 @@ export default function ReservationsPage() {
     )
     return () => setHeaderActions(null)
   }, [role, setHeaderActions])
+
+  const pageStats = useMemo(() => {
+    const rows = statsDateYmd
+      ? reservations.filter((r) => String(r.check_in).slice(0, 10) === statsDateYmd)
+      : reservations
+    return {
+      count: rows.length,
+      revenue: rows.reduce((sum, r) => sum + Number(r.total_amount || 0), 0),
+      deposits: rows.reduce((sum, r) => sum + Number(r.deposit || 0), 0),
+    }
+  }, [reservations, statsDateYmd])
 
   const fetchReservations = async () => {
     if (!organizationId) {
@@ -176,23 +205,8 @@ export default function ReservationsPage() {
         const guestsRaw = reservation.guests as { name?: string; phone?: string } | { name?: string; phone?: string }[] | null
         const roomsRaw = reservation.rooms as { id?: string; room_number?: string; room_type?: string } | { id?: string; room_number?: string; room_type?: string }[] | null
         const notes = typeof reservation.notes === 'string' ? reservation.notes : ''
+        const notesMeta = parseBookingNotesMeta(notes)
         let balance = reservation.balance !== undefined ? Number(reservation.balance) : 0
-
-        let payment_method = 'cash'
-        let ledger_account_name = ''
-        if (notes) {
-          if (/^city_ledger:/i.test(notes)) {
-            payment_method = 'city_ledger'
-            ledger_account_name = notes.replace(/^city_ledger:\s*/i, '')
-          } else if (notes.startsWith('City Ledger:')) {
-            payment_method = 'city_ledger'
-            ledger_account_name = notes.replace(/^City Ledger:\s*/, '')
-          } else if (notes.startsWith('payment_method:')) {
-            payment_method = notes.replace(/^payment_method:\s*/, '').split('|')[0].trim()
-            const match = notes.match(/\|ledger:(.+)/)
-            if (match) ledger_account_name = match[1].trim()
-          }
-        }
 
         const guests = guestsRaw
           ? Array.isArray(guestsRaw)
@@ -209,8 +223,7 @@ export default function ReservationsPage() {
 
         return {
           ...reservation,
-          payment_method,
-          ledger_account_name,
+          ...notesMeta,
           guestName: guests?.name || '',
           guestPhone: guests?.phone || '',
           guests,
@@ -224,6 +237,13 @@ export default function ReservationsPage() {
       })
 
       setReservations(groupBulkRows(reservationsWithData))
+      void attachPaymentAccountLabelsToBookings(supabase, reservationsWithData).then(() => {
+        setReservations(groupBulkRows(reservationsWithData))
+      }).catch((err) => {
+        if (process.env.NODE_ENV === 'development') {
+          console.warn('[reservations] payment account enrich failed:', err)
+        }
+      })
     } catch (error: unknown) {
       const detail = describeFetchError(error)
       if (process.env.NODE_ENV === 'development') {
@@ -442,9 +462,49 @@ export default function ReservationsPage() {
         onSuccess={fetchReservations}
       />
       
+      <CompactStatBadgeRow
+        className="py-0.5"
+        items={[
+          {
+            key: 'count',
+            label: 'Res',
+            value: pageStats.count,
+            icon: CalendarClock,
+            borderClass: 'border-violet-200/80',
+            bgClass: 'bg-violet-50/50',
+            iconClass: 'text-violet-700',
+            title: statsDateYmd ? `Arrivals on ${statsDateYmd}` : 'All reservations',
+          },
+          {
+            key: 'revenue',
+            label: 'Rev',
+            value: formatNaira(pageStats.revenue),
+            icon: Receipt,
+            borderClass: 'border-slate-200/80',
+            bgClass: 'bg-slate-50/50',
+            iconClass: 'text-slate-700',
+            title: 'Total booking value',
+          },
+          {
+            key: 'deposits',
+            label: 'Dep',
+            value: formatNaira(pageStats.deposits),
+            icon: Banknote,
+            borderClass: 'border-emerald-200/80',
+            bgClass: 'bg-emerald-50/50',
+            iconClass: 'text-emerald-700',
+            title: 'Deposits collected',
+          },
+        ]}
+      />
+
       <EnhancedDataTable
         compactTable
+        showRowNumbers
         data={reservations}
+        onDateFilterChange={(d) =>
+          setStatsDateYmd(d ? calendarPickerYmd(d) : null)
+        }
         searchKeys={['folio_id', 'guestName', 'guestPhone', 'ledger_account_name', 'rooms.room_number'] as any}
         dateField="check_in"
         onRowClick={(res) => {
@@ -469,13 +529,18 @@ export default function ReservationsPage() {
           {
             key: 'guest',
             label: 'Guest',
+            width: '24%',
             render: (res) => (
               <Link
                 href={res.is_bulk ? `/bulk-bookings/${res.bulk_group_id}` : `/reservations/${res.id}`}
-                className="cursor-pointer hover:text-primary block"
+                className="cursor-pointer hover:text-primary min-w-0 block"
               >
-                <div className="font-medium max-md:text-[13px]">{res.guests?.name}</div>
-                <div className="text-xs text-muted-foreground max-md:hidden">{res.guests?.phone}</div>
+                <span className={`font-semibold text-sm md:text-[15px] max-md:text-[13px] truncate block ${TABLE_CELL_TRUNCATE}`}>
+                  {res.guests?.name}
+                </span>
+                {res.guests?.phone && (
+                  <span className={`${TABLE_META_TEXT} max-md:hidden truncate block`}>{res.guests.phone}</span>
+                )}
                 <MobileTableSubdetail>
                   <div>
                     {res.is_bulk
@@ -491,10 +556,18 @@ export default function ReservationsPage() {
             key: 'room',
             label: 'Room',
             responsive: 'md+',
+            width: '8%',
             render: (res) => (
-              <Link href={res.is_bulk ? `/bulk-bookings/${res.bulk_group_id}` : `/reservations/${res.id}`} className="cursor-pointer block">
-                <div className="font-medium max-md:text-[13px]">{res.is_bulk ? `${res.room_count} Rooms` : `Room ${res.rooms?.room_number}`}</div>
-                <div className="text-xs text-muted-foreground">{res.rooms?.room_type}</div>
+              <Link
+                href={res.is_bulk ? `/bulk-bookings/${res.bulk_group_id}` : `/reservations/${res.id}`}
+                className={`cursor-pointer ${TABLE_INLINE_ROW} max-w-[9rem]`}
+              >
+                <span className="font-medium max-md:text-[13px] shrink-0">
+                  {res.is_bulk ? `${res.room_count} Rooms` : `Room ${res.rooms?.room_number}`}
+                </span>
+                {res.rooms?.room_type && !res.is_bulk && (
+                  <span className={`${TABLE_META_TEXT} ${TABLE_CELL_TRUNCATE}`}>· {res.rooms.room_type}</span>
+                )}
               </Link>
             ),
           },
@@ -502,6 +575,7 @@ export default function ReservationsPage() {
             key: 'check_in',
             label: 'Check-in',
             responsive: 'md+',
+            width: '7%',
             render: (res) => (
               <div className="text-sm max-md:text-xs">
                 {new Date(res.check_in).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}
@@ -512,6 +586,7 @@ export default function ReservationsPage() {
             key: 'check_out',
             label: 'Check-out',
             responsive: 'md+',
+            width: '8%',
             render: (res) => (
               <div className="text-sm max-md:text-xs">
                 {new Date(res.check_out).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}
@@ -522,21 +597,24 @@ export default function ReservationsPage() {
             key: 'payment_status',
             label: 'Payment',
             responsive: 'md+',
+            width: '9%',
             render: (res) => {
               const effectiveStatus =
                 res.payment_method === 'pending' ||
                 (res.payment_method === 'city_ledger' && res.payment_status === 'paid')
                   ? 'pending'
                   : res.payment_status
+              const paidAmt = bookingAmountPaid(res.total_amount, res.balance)
               return (
-                <div className="space-y-1">
-                  <Badge variant="outline" className={`${(paymentColors as Record<string, string>)[effectiveStatus]} max-md:text-[10px]`}>
+                <div className={TABLE_STACKED_CELL}>
+                  <Badge variant="outline" className={`${(paymentColors as Record<string, string>)[effectiveStatus]} max-md:text-[10px] shrink-0`}>
                     {effectiveStatus}
                   </Badge>
+                  {effectiveStatus === 'paid' && paidAmt > 0 && (
+                    <span className={`${TABLE_META_TEXT} tabular-nums`}>{formatNaira(paidAmt)}</span>
+                  )}
                   {res.balance > 0 && (
-                    <div className="text-xs text-muted-foreground">
-                      Bal: {formatNaira(res.balance)}
-                    </div>
+                    <span className={`${TABLE_META_TEXT} tabular-nums`}>Bal {formatNaira(res.balance)}</span>
                   )}
                 </div>
               )
@@ -546,25 +624,38 @@ export default function ReservationsPage() {
             key: 'payment_method',
             label: 'Method',
             responsive: 'md+',
-            render: (res) => (
-              <div className="space-y-1">
-                <Badge variant="outline" className="text-[10px]">
-                  {formatReservationPaymentMethodLabel(res.payment_method || 'cash')}
-                </Badge>
-                {res.payment_method === 'city_ledger' && res.ledger_account_name && (
-                  <div className="text-[10px] text-muted-foreground truncate max-w-[100px]">
-                    {res.ledger_account_name}
-                  </div>
-                )}
-              </div>
-            ),
+            width: '12%',
+            render: (res) => {
+              const accountLabel =
+                res.payment_method === 'city_ledger'
+                  ? res.ledger_account_name
+                  : paymentMethodRequiresAccount(res.payment_method)
+                    ? res.payment_account_label
+                    : ''
+              return (
+                <div
+                  className={TABLE_STACKED_CELL}
+                  title={[formatBookingPaymentMethodLabel(res.payment_method || 'cash'), accountLabel].filter(Boolean).join(' · ')}
+                >
+                  <Badge variant="outline" className="text-[10px] shrink-0">
+                    {formatBookingPaymentMethodLabel(res.payment_method || 'cash')}
+                  </Badge>
+                  {accountLabel ? (
+                    <span className={`${TABLE_META_TEXT} ${TABLE_CELL_TRUNCATE}`} title={accountLabel}>
+                      {accountLabel}
+                    </span>
+                  ) : null}
+                </div>
+              )
+            },
           },
           {
             key: 'actions',
             label: 'Actions',
             stickyOnMobile: true,
+            width: '1%',
             render: (res) => (
-              <div className="flex flex-wrap gap-1" onClick={(e) => e.stopPropagation()}>
+              <div className={TABLE_ACTIONS_ROW} onClick={(e) => e.stopPropagation()}>
                 {!res.is_bulk && canCheckInReserved && (
                   <Button
                     size="sm"
@@ -607,22 +698,10 @@ export default function ReservationsPage() {
             ),
           },
           {
-            key: 'folio_id',
-            label: 'Folio Ref',
-            responsive: 'lg+',
-            render: (res) => (
-              <Link
-                href={res.is_bulk ? `/bulk-bookings/${res.bulk_group_id}` : `/reservations/${res.id}`}
-                className="font-mono text-xs cursor-pointer hover:text-primary"
-              >
-                {res.is_bulk ? `Bulk (${res.room_count})` : res.folio_id}
-              </Link>
-            ),
-          },
-          {
             key: 'created_by_name',
             label: 'Created By',
             responsive: 'lg+',
+            width: '9%',
             render: (res) => (
               <div className="text-sm text-muted-foreground">{res.created_by_name}</div>
             ),

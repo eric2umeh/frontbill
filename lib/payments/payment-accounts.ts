@@ -94,6 +94,6 @@ export function resolvePaymentAccountLabel(input: {
   const direct = String(input.payment_account_label || '').trim()
   if (direct) return direct
   const text = `${input.notes || ''} ${input.description || ''}`
-  const m = text.match(/Account:\s*([^|]+)/i)
+  const m = text.match(/Account:\s*([^|\n]+)/i)
   return m ? m[1].trim() : ''
 }
