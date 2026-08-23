@@ -34,7 +34,10 @@ import {
   AlertTriangle,
   CalendarClock,
   CalendarDays,
+  Banknote,
+  Receipt,
 } from "lucide-react";
+import { CompactStatBadgeRow } from "@/components/shared/compact-stat-badges";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { getUserDisplayName } from "@/lib/utils/user-display";
@@ -1402,66 +1405,121 @@ export default function BookingsPage() {
         </>
       )}
 
-      <div className="text-center space-y-1">
-        <h1 className="text-3xl sm:text-4xl font-bold tracking-tight">Bookings</h1>
-        {roomStats && (
-          <p className="text-xs text-muted-foreground">
-            Stats for {roomStats.statsDate}
-            {stayDateYmd ? " (filtered date)" : " (today)"}
-          </p>
-        )}
-      </div>
-
-      {roomStats !== null && (
-        <div className="mx-auto grid w-full max-w-5xl grid-cols-2 sm:grid-cols-4 gap-3">
-          {[
-            { label: "Occupied", value: roomStats.occupied, color: "border-blue-200 bg-blue-50/80" },
-            { label: "Reserved", value: roomStats.reserved, color: "border-violet-200 bg-violet-50/80" },
-            { label: "Due out", value: roomStats.dueOutToday, color: "border-amber-200 bg-amber-50/80" },
-            { label: "Available", value: roomStats.availableForCheckin, color: "border-green-200 bg-green-50/80" },
-            { label: "OOO", value: roomStats.outOfOrder, color: "border-orange-200 bg-orange-50/80" },
-            { label: "Room revenue", value: formatNaira(roomStats.roomRevenue), color: "border-slate-200 bg-slate-50/80", isText: true },
-            { label: "Cash collected", value: formatNaira(roomStats.cashCollected), color: "border-emerald-200 bg-emerald-50/80", isText: true },
-            { label: "Total rooms", value: roomStats.total, color: "border-gray-200 bg-muted/40" },
-          ].map((s) => (
-            <div
-              key={s.label}
-              className={`rounded-xl border px-4 py-3 text-center shadow-sm ${s.color}`}
-            >
-              <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{s.label}</p>
-              <p className={`mt-1 font-bold tabular-nums ${s.isText ? "text-lg sm:text-xl" : "text-2xl sm:text-3xl"}`}>
-                {s.value}
-              </p>
-            </div>
-          ))}
-        </div>
-      )}
-
-      <div className="flex flex-wrap items-center justify-center gap-2">
+      <div className="flex flex-col gap-2">
+        <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Bookings</h1>
+        <div className="flex flex-wrap items-center justify-center gap-1.5">
+          {roomStats !== null && (
+            <CompactStatBadgeRow
+              items={[
+                {
+                  key: "occ",
+                  label: "Occ",
+                  value: roomStats.occupied,
+                  icon: Bed,
+                  borderClass: "border-blue-200/80",
+                  bgClass: "bg-blue-50/50",
+                  iconClass: "text-blue-700",
+                  title: "Checked-in guests staying past today",
+                },
+                {
+                  key: "res",
+                  label: "Res",
+                  value: roomStats.reserved,
+                  icon: CalendarDays,
+                  borderClass: "border-violet-200/80",
+                  bgClass: "bg-violet-50/50",
+                  iconClass: "text-violet-700",
+                  title: "Reservations not checked in yet",
+                },
+                {
+                  key: "due",
+                  label: "Due",
+                  value: roomStats.dueOutToday,
+                  icon: CalendarClock,
+                  borderClass: "border-amber-200/80",
+                  bgClass: "bg-amber-50/50",
+                  iconClass: "text-amber-700",
+                  title: "Checkout on the hotel business date",
+                },
+                {
+                  key: "avail",
+                  label: "Avail",
+                  value: roomStats.availableForCheckin,
+                  icon: DoorOpen,
+                  borderClass: "border-green-200/80",
+                  bgClass: "bg-green-50/50",
+                  iconClass: "text-green-700",
+                  title: "Rooms free for check-in",
+                },
+                {
+                  key: "ooo",
+                  label: "OOO",
+                  value: roomStats.outOfOrder,
+                  icon: AlertTriangle,
+                  borderClass: "border-orange-200/80",
+                  bgClass: "bg-orange-50/50",
+                  iconClass: "text-orange-700",
+                  title: "Out of order",
+                },
+                {
+                  key: "revenue",
+                  label: "Rev",
+                  value: formatNaira(roomStats.roomRevenue),
+                  icon: Receipt,
+                  borderClass: "border-slate-200/80",
+                  bgClass: "bg-slate-50/50",
+                  iconClass: "text-slate-700",
+                  title: `Room revenue for ${roomStats.statsDate}`,
+                },
+                {
+                  key: "cash",
+                  label: "Cash",
+                  value: formatNaira(roomStats.cashCollected),
+                  icon: Banknote,
+                  borderClass: "border-emerald-200/80",
+                  bgClass: "bg-emerald-50/50",
+                  iconClass: "text-emerald-700",
+                  title: `Cash collected for ${roomStats.statsDate}`,
+                },
+              ]}
+              suffix={
+                <span
+                  className="text-[10px] text-muted-foreground tabular-nums px-0.5"
+                  title="Total rooms"
+                >
+                  /{roomStats.total}
+                </span>
+              }
+            />
+          )}
           {hasPermission(role, "bookings:create") && (
             <>
               <Button
                 variant="outline"
                 size="sm"
+                className="h-[31px] text-[11px] px-2"
                 onClick={() => setBulkModalOpen(true)}
               >
-                <Users className="mr-2 h-4 w-4" />
+                <Users className="mr-1 h-3.5 w-3.5" />
                 Bulk Booking
               </Button>
-              <Button size="sm" onClick={() => setModalOpen(true)}>
-                <Plus className="mr-2 h-4 w-4" />
+              <Button
+                size="sm"
+                className="h-[31px] text-[11px] px-2"
+                onClick={() => setModalOpen(true)}
+              >
+                <Plus className="mr-1 h-3.5 w-3.5" />
                 New Booking
               </Button>
             </>
           )}
+        </div>
       </div>
 
       <EnhancedDataTable
         data={allBookingsCatalog}
         loading={catalogFetchPending}
         showRowNumbers
-        prominentDateFilter
-        centerToolbar
         listWhenSearchEmpty={
           tableFilters.status === "checked_in" ? inHouseBookings : undefined
         }
