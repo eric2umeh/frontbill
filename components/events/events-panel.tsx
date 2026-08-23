@@ -39,6 +39,12 @@ import {
 } from '@/lib/events/event-other-services'
 import { formatNaira } from '@/lib/utils/currency'
 import { MobileTableSubdetail } from '@/lib/utils/table-mobile'
+import {
+  TABLE_ACTIONS_ROW,
+  TABLE_INLINE_ROW,
+  TABLE_META_TEXT,
+  TABLE_CELL_TRUNCATE,
+} from '@/lib/utils/table-row-inline'
 import { calendarPickerYmd } from '@/lib/utils/booking-in-house-dates'
 import { EnhancedDataTable } from '@/components/shared/enhanced-data-table'
 import { Button } from '@/components/ui/button'
@@ -523,13 +529,10 @@ export function EventsPanel() {
             key: 'title',
             label: 'Event',
             render: (ev) => (
-              <div>
-                <div className="font-medium max-md:text-[13px]">{ev.title}</div>
-                {ev.venue && <div className="text-xs text-muted-foreground max-md:hidden">{ev.venue}</div>}
-                {ev.other_services && ev.other_services.length > 0 && (
-                  <div className="text-xs text-muted-foreground max-md:hidden">
-                    + {ev.other_services.map((s) => eventOtherServiceLabel(s.type)).join(', ')}
-                  </div>
+              <div className={`${TABLE_INLINE_ROW} max-w-[14rem]`}>
+                <span className={`font-medium max-md:text-[13px] ${TABLE_CELL_TRUNCATE}`}>{ev.title}</span>
+                {ev.venue && (
+                  <span className={`${TABLE_META_TEXT} max-md:hidden ${TABLE_CELL_TRUNCATE}`}>· {ev.venue}</span>
                 )}
                 <MobileTableSubdetail>
                   {ev.client_name && <div>{ev.client_name}</div>}
@@ -545,10 +548,10 @@ export function EventsPanel() {
             key: 'period',
             label: 'Period',
             render: (ev) => (
-              <div className="space-y-1">
-                <span className="text-sm whitespace-nowrap block">{ev ? formatPeriod(ev) : '—'}</span>
+              <div className={TABLE_INLINE_ROW}>
+                <span className="text-sm whitespace-nowrap shrink-0">{ev ? formatPeriod(ev) : '—'}</span>
                 {ev.status === 'cancelled' && (
-                  <Badge variant="outline" className="text-[10px] text-destructive border-destructive/40">
+                  <Badge variant="outline" className="text-[10px] shrink-0 text-destructive border-destructive/40">
                     Cancelled
                   </Badge>
                 )}
@@ -560,10 +563,10 @@ export function EventsPanel() {
             label: 'Client',
             responsive: 'md+',
             render: (ev) => (
-              <div className="text-sm">
-                <div>{ev.client_name || '—'}</div>
+              <div className={TABLE_INLINE_ROW}>
+                <span className="text-sm shrink-0">{ev.client_name || '—'}</span>
                 {ev.client_phone && (
-                  <div className="text-xs text-muted-foreground">{ev.client_phone}</div>
+                  <span className={`${TABLE_META_TEXT} ${TABLE_CELL_TRUNCATE}`}>{ev.client_phone}</span>
                 )}
               </div>
             ),
@@ -591,7 +594,7 @@ export function EventsPanel() {
             label: '',
             stickyOnMobile: true,
             render: (ev) => (
-              <div className="flex gap-1 justify-end shrink-0">
+              <div className={`${TABLE_ACTIONS_ROW} justify-end`}>
                 <EventPaymentReceiptButton
                   event={ev}
                   role={role}
