@@ -85,7 +85,11 @@ export default function ReportsPage() {
         <TabsContent value="sales-collection" className="mt-0">
           <Card>
             <CardContent className="pt-6">
-              {userId ? <SalesCollectionPanel userId={userId} /> : <p className="text-sm text-muted-foreground">Sign in to load.</p>}
+              {userId && organizationId ? (
+                <SalesCollectionPanel userId={userId} organizationId={organizationId} />
+              ) : (
+                <p className="text-sm text-muted-foreground">Sign in to load.</p>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
