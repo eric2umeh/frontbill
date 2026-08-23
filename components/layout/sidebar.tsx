@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { useAuth } from '@/lib/auth-context'
 import { canonicalRoleKey, hasPermission, canAccessSupplyPurchaseOrdersMenu, type Permission } from '@/lib/permissions'
+import type { PermissionOverrides } from '@/lib/permission-overrides'
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
 import {
   Collapsible,
@@ -154,17 +155,21 @@ function sectionVisibleForRole(sectionTitle: string, role: string | null): boole
   return true
 }
 
-function routeIsVisible(route: NavRoute | NavChild, role: string | null): boolean {
+function routeIsVisible(
+  route: NavRoute | NavChild,
+  role: string | null,
+  overrides?: PermissionOverrides | null,
+): boolean {
   const roleKey = canonicalRoleKey(role)
   if ('href' in route && route.href === '/dashboard' && roleKey === 'cashier') return false
   if ('href' in route && route.href === '/supply/purchase-orders') {
     return canAccessSupplyPurchaseOrdersMenu(role)
   }
   if (route.permissionAny?.length) {
-    return route.permissionAny.some((p) => hasPermission(role, p))
+    return route.permissionAny.some((p) => hasPermission(role, p, overrides))
   }
   if (!route.permission) return true
-  return hasPermission(role, route.permission)
+  return hasPermission(role, route.permission, overrides)
 }
 
 function usesCompactNav(role: string | null): boolean {
@@ -218,6 +223,7 @@ function collapseRoutesToDropdown(
   icon: LucideIcon,
   routes: NavRoute[],
   role: string | null,
+  overrides?: PermissionOverrides | null,
 ): NavRoute[] {
   const visibleChildren = routes
     .filter((r) => r.href)
@@ -227,7 +233,7 @@ function collapseRoutesToDropdown(
       permission: r.permission,
       permissionAny: r.permissionAny,
     }))
-    .filter((c) => routeIsVisible(c, role))
+    .filter((c) => routeIsVisible(c, role, overrides))
 
   if (visibleChildren.length === 0) return []
   if (visibleChildren.length === 1) {
@@ -244,13 +250,13 @@ const DROPDOWN_SECTIONS: Record<string, LucideIcon> = {
   Administration: ShieldCheck,
 }
 
-function buildSections(role: string | null): NavSection[] {
+function buildSections(role: string | null, overrides?: PermissionOverrides | null): NavSection[] {
   const compact = usesCompactNav(role)
   return NAV_SECTIONS.map((section) => {
     if (!sectionVisibleForRole(section.title, role)) {
       return { ...section, routes: [] }
     }
-    let routes = section.routes.filter((r) => routeIsVisible(r, role))
+    let routes = section.routes.filter((r) => routeIsVisible(r, role, overrides))
 
     const dropdownIcon = DROPDOWN_SECTIONS[section.title]
     const useDropdown =
@@ -259,13 +265,13 @@ function buildSections(role: string | null): NavSection[] {
       (section.title !== 'Accounting' || compact)
 
     if (useDropdown && dropdownIcon) {
-      routes = collapseRoutesToDropdown(section.title, dropdownIcon, routes, role)
+      routes = collapseRoutesToDropdown(section.title, dropdownIcon, routes, role, overrides)
     }
 
     routes = routes
       .map((r) => {
         if (!r.children?.length) return r
-        const children = r.children.filter((c) => routeIsVisible(c, role))
+        const children = r.children.filter((c) => routeIsVisible(c, role, overrides))
         if (!children.length) return null
         return { ...r, children }
       })
@@ -284,7 +290,7 @@ function SidebarInner({ mobileOpen, onMobileClose, isMobile = false }: SidebarPr
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const [collapsed, setCollapsed] = useState(false)
-  const { role, organizationLogoUrl } = useAuth()
+  const { role, organizationLogoUrl, permissionOverrides } = useAuth()
   const nightAuditPending = useNightAuditPendingCounts()
   const pendingNightAuditTotal = nightAuditPending.total
   const nightAuditHref =
@@ -318,7 +324,10 @@ function SidebarInner({ mobileOpen, onMobileClose, isMobile = false }: SidebarPr
     return 0
   }
 
-  const visibleSections = useMemo(() => buildSections(role), [role])
+  const visibleSections = useMemo(
+    () => buildSections(role, permissionOverrides),
+    [role, permissionOverrides],
+  )
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({})
   const [radixReady, setRadixReady] = useState(false)
 
