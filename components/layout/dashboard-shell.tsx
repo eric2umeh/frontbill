@@ -13,7 +13,7 @@ import {
   type Permission,
   canonicalRoleKey,
 } from '@/lib/permissions'
-import type { PermissionOverrides } from '@/lib/permission-overrides'
+import type { PermissionOverrides, RolePermissionOverridesMap } from '@/lib/permission-overrides'
 import { NightAuditPendingProvider } from '@/components/providers/night-audit-pending-provider'
 import { BRAND_LOGO_SESSION_KEY } from '@/lib/branding/constants'
 import { documentTitleForPath } from '@/lib/nav/document-title'
@@ -67,61 +67,62 @@ function canAccessPath(
   pathname: string,
   userRole: string,
   overrides?: PermissionOverrides | null,
+  orgRoleOverrides?: RolePermissionOverridesMap | null,
 ): boolean {
+  const perm = (p: Permission) =>
+    hasPermission(userRole, p, overrides, orgRoleOverrides)
+
   if (pathname === '/expenses' || pathname.startsWith('/expenses/')) {
-    return canAccessExpenseMenu(userRole) && hasPermission(userRole, 'expenses:view', overrides)
+    return canAccessExpenseMenu(userRole) && perm('expenses:view')
   }
   if (pathname === '/accounts' || pathname.startsWith('/accounts/')) {
-    return hasPermission(userRole, 'guests:view', overrides) || hasPermission(userRole, 'organizations:view', overrides)
+    return perm('guests:view') || perm('organizations:view')
   }
   if (pathname === '/organizations' || pathname.startsWith('/organizations/')) {
-    return hasPermission(userRole, 'organizations:view', overrides) || hasPermission(userRole, 'guests:view', overrides)
+    return perm('organizations:view') || perm('guests:view')
   }
   if (
     pathname.startsWith('/transactions/analytics') ||
     pathname === '/transactions/revenue' ||
     pathname === '/transactions/profitability'
   ) {
-    return hasPermission(userRole, 'analytics:view', overrides)
+    return perm('analytics:view')
   }
   if (pathname === '/transactions' || pathname.startsWith('/transactions/')) {
     if (pathname === '/transactions') {
-      return hasPermission(userRole, 'transactions:view', overrides) || hasPermission(userRole, 'analytics:view', overrides)
+      return perm('transactions:view') || perm('analytics:view')
     }
-    return hasPermission(userRole, 'transactions:view', overrides)
+    return perm('transactions:view')
   }
   if (pathname === '/analytics' || pathname.startsWith('/analytics/')) {
-    return hasPermission(userRole, 'analytics:view', overrides)
+    return perm('analytics:view')
   }
   if (pathname.startsWith('/supply/')) {
-    if (pathname.startsWith('/supply/store')) return hasPermission(userRole, 'supply:store', overrides)
-    if (pathname.startsWith('/supply/kitchen')) return hasPermission(userRole, 'supply:kitchen', overrides)
-    if (pathname.startsWith('/supply/fnb'))
-      return hasPermission(userRole, 'supply:fnb', overrides)
-    if (pathname.startsWith('/supply/purchasing')) {
-      return hasPermission(userRole, 'supply:purchasing', overrides)
-    }
+    if (pathname.startsWith('/supply/store')) return perm('supply:store')
+    if (pathname.startsWith('/supply/kitchen')) return perm('supply:kitchen')
+    if (pathname.startsWith('/supply/fnb')) return perm('supply:fnb')
+    if (pathname.startsWith('/supply/purchasing')) return perm('supply:purchasing')
     if (pathname.startsWith('/supply/purchase-orders')) {
       return canAccessSupplyPurchaseOrdersMenu(userRole)
     }
-    if (pathname.startsWith('/supply/activity')) return hasPermission(userRole, 'supply:activity', overrides)
-    return hasPermission(userRole, 'supply:store', overrides)
+    if (pathname.startsWith('/supply/activity')) return perm('supply:activity')
+    return perm('supply:store')
   }
   if (pathname === '/store/requisitions' || pathname.startsWith('/store/requisitions/')) {
-    return hasPermission(userRole, 'store:requisition', overrides) || hasPermission(userRole, 'store:view', overrides)
+    return perm('store:requisition') || perm('store:view')
   }
   if (pathname === '/store/purchase-orders' || pathname.startsWith('/store/purchase-orders/')) {
-    return hasPermission(userRole, 'store:view', overrides)
+    return perm('store:view')
   }
   if (pathname === '/store' || pathname.startsWith('/store/')) {
-    return hasPermission(userRole, 'store:view', overrides) || hasPermission(userRole, 'store:requisition', overrides)
+    return perm('store:view') || perm('store:requisition')
   }
   if (pathname === '/outlets' || pathname.startsWith('/outlets/')) {
-    return hasPermission(userRole, 'outlet:view', overrides)
+    return perm('outlet:view')
   }
   const requiredPermission = getRequiredPermission(pathname)
   if (!requiredPermission) return true
-  return hasPermission(userRole, requiredPermission, overrides)
+  return perm(requiredPermission)
 }
 
 export function DashboardShell({
@@ -177,16 +178,16 @@ export function DashboardShell({
         router.replace('/outlets')
         return
       }
-      if (!hasPermission(user.role, 'dashboard:view', user.permissionOverrides)) {
+      if (!hasPermission(user.role, 'dashboard:view', user.permissionOverrides, user.orgRolePermissionOverrides)) {
         router.replace(getPostLoginPath(user.role))
         return
       }
     }
 
-    if (!canAccessPath(pathname, user.role, user.permissionOverrides)) {
+    if (!canAccessPath(pathname, user.role, user.permissionOverrides, user.orgRolePermissionOverrides)) {
       router.replace('/access-denied')
     }
-  }, [pathname, router, user.role, user.permissionOverrides])
+  }, [pathname, router, user.role, user.permissionOverrides, user.orgRolePermissionOverrides])
 
   useLayoutEffect(() => {
     document.title = documentTitleForPath(pathname)
@@ -205,7 +206,7 @@ export function DashboardShell({
     }
   }, [user.organizationId, user.organizationLogoUrl])
 
-  const allowed = canAccessPath(pathname, user.role, user.permissionOverrides)
+  const allowed = canAccessPath(pathname, user.role, user.permissionOverrides, user.orgRolePermissionOverrides)
 
   return (
     <AuthProvider
@@ -218,6 +219,7 @@ export function DashboardShell({
         organizationLogoUrl: user.organizationLogoUrl,
         setOrganizationLogoUrl,
         permissionOverrides: user.permissionOverrides ?? null,
+        orgRolePermissionOverrides: user.orgRolePermissionOverrides ?? null,
       }}
     >
       <title>{documentTitleForPath(pathname)}</title>
