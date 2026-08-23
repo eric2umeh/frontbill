@@ -72,7 +72,8 @@ import {
 } from '@/components/ui/alert-dialog'
 import { PageLoadingState } from '@/components/loading-screen'
 import { toast } from 'sonner'
-import { Plus, Pencil, Ban, Loader2 } from 'lucide-react'
+import { Plus, Pencil, Ban, Loader2, PartyPopper, Receipt, Banknote, Users } from 'lucide-react'
+import { CompactStatBadgeRow } from '@/components/shared/compact-stat-badges'
 import { EventPaymentReceiptButton } from '@/components/receipts/event-payment-receipt-button'
 
 const defaultPayment = (): EventPaymentFormValue => ({
@@ -473,29 +474,45 @@ export function EventsPanel() {
         </p>
       )}
 
-      <div className="mx-auto grid w-full max-w-3xl grid-cols-3 gap-3">
-        {[
-          { label: 'Events', value: pageStats.count },
-          { label: 'Est. revenue', value: formatNaira(pageStats.revenue), isText: true },
-          { label: 'Expected guests', value: pageStats.guests },
-        ].map((s) => (
-          <div key={s.label} className="rounded-xl border bg-card px-4 py-3 text-center shadow-sm">
-            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{s.label}</p>
-            <p className={`mt-1 font-bold tabular-nums ${s.isText ? 'text-lg' : 'text-2xl sm:text-3xl'}`}>
-              {s.value}
-            </p>
-          </div>
-        ))}
-      </div>
-      {statsDateYmd && (
-        <p className="text-center text-xs text-muted-foreground">Events starting {statsDateYmd}</p>
-      )}
+      <CompactStatBadgeRow
+        className="py-0.5"
+        items={[
+          {
+            key: 'count',
+            label: 'Events',
+            value: pageStats.count,
+            icon: PartyPopper,
+            borderClass: 'border-violet-200/80',
+            bgClass: 'bg-violet-50/50',
+            iconClass: 'text-violet-700',
+            title: statsDateYmd ? `Events starting ${statsDateYmd}` : 'All events',
+          },
+          {
+            key: 'revenue',
+            label: 'Rev',
+            value: formatNaira(pageStats.revenue),
+            icon: Receipt,
+            borderClass: 'border-slate-200/80',
+            bgClass: 'bg-slate-50/50',
+            iconClass: 'text-slate-700',
+            title: 'Estimated revenue',
+          },
+          {
+            key: 'guests',
+            label: 'Guests',
+            value: pageStats.guests,
+            icon: Users,
+            borderClass: 'border-blue-200/80',
+            bgClass: 'bg-blue-50/50',
+            iconClass: 'text-blue-700',
+            title: 'Expected guests',
+          },
+        ]}
+      />
 
       <EnhancedDataTable
         compactTable
         showRowNumbers
-        prominentDateFilter
-        centerToolbar
         data={events}
         onDateFilterChange={(d) => setStatsDateYmd(d ? calendarPickerYmd(d) : null)}
         searchKeys={['title', 'venue', 'client_name', 'client_phone', 'remarks'] as (keyof HotelEventRow)[]}
