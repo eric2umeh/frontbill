@@ -381,7 +381,7 @@ export function EnhancedDataTable<T extends Record<string, any>>({
               '[scrollbar-gutter:stable]',
             ].join(' ')}
           >
-            <table className="w-full min-w-0 border-collapse">
+            <table className="w-full min-w-0 table-fixed border-collapse">
               <thead className="bg-muted/50">
                 <tr>
                   {showRowNumbers && (
