@@ -183,7 +183,7 @@ export default function ReservationsPage() {
           },
           {
             key: 'deposits',
-            label: 'Dep',
+            label: 'Deposit',
             value: formatNaira(pageStats.deposits),
             icon: Banknote,
             borderClass: 'border-emerald-200/80',
