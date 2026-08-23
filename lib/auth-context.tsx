@@ -2,7 +2,9 @@
 
 import { createContext, useContext } from 'react'
 
-import type { PermissionOverrides } from '@/lib/permission-overrides'
+import type { PermissionOverrides, RolePermissionOverridesMap } from '@/lib/permission-overrides'
+
+export type { PermissionOverrides, RolePermissionOverridesMap } from '@/lib/permission-overrides'
 
 interface AuthContextValue {
   userId: string
@@ -14,6 +16,8 @@ interface AuthContextValue {
   organizationLogoUrl: string
   setOrganizationLogoUrl: (url: string) => void
   permissionOverrides?: PermissionOverrides | null
+  /** Hotel-wide role permission customizations (Admin/Superadmin). */
+  orgRolePermissionOverrides?: RolePermissionOverridesMap | null
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
@@ -40,6 +44,7 @@ export function useAuth(): AuthContextValue {
       organizationLogoUrl: '',
       setOrganizationLogoUrl: () => {},
       permissionOverrides: null,
+      orgRolePermissionOverrides: null,
     }
   }
   return ctx
