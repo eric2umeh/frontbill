@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { useAuth } from '@/lib/auth-context'
 import { canonicalRoleKey, hasPermission, canAccessSupplyPurchaseOrdersMenu, type Permission } from '@/lib/permissions'
-import type { PermissionOverrides } from '@/lib/permission-overrides'
+import type { PermissionOverrides, RolePermissionOverridesMap } from '@/lib/permission-overrides'
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
 import {
   Collapsible,
@@ -159,6 +159,7 @@ function routeIsVisible(
   route: NavRoute | NavChild,
   role: string | null,
   overrides?: PermissionOverrides | null,
+  orgRoleOverrides?: RolePermissionOverridesMap | null,
 ): boolean {
   const roleKey = canonicalRoleKey(role)
   if ('href' in route && route.href === '/dashboard' && roleKey === 'cashier') return false
@@ -166,10 +167,12 @@ function routeIsVisible(
     return canAccessSupplyPurchaseOrdersMenu(role)
   }
   if (route.permissionAny?.length) {
-    return route.permissionAny.some((p) => hasPermission(role, p, overrides))
+    return route.permissionAny.some((p) =>
+      hasPermission(role, p, overrides, orgRoleOverrides),
+    )
   }
   if (!route.permission) return true
-  return hasPermission(role, route.permission, overrides)
+  return hasPermission(role, route.permission, overrides, orgRoleOverrides)
 }
 
 function usesCompactNav(role: string | null): boolean {
@@ -224,6 +227,7 @@ function collapseRoutesToDropdown(
   routes: NavRoute[],
   role: string | null,
   overrides?: PermissionOverrides | null,
+  orgRoleOverrides?: RolePermissionOverridesMap | null,
 ): NavRoute[] {
   const visibleChildren = routes
     .filter((r) => r.href)
@@ -233,7 +237,7 @@ function collapseRoutesToDropdown(
       permission: r.permission,
       permissionAny: r.permissionAny,
     }))
-    .filter((c) => routeIsVisible(c, role, overrides))
+    .filter((c) => routeIsVisible(c, role, overrides, orgRoleOverrides))
 
   if (visibleChildren.length === 0) return []
   if (visibleChildren.length === 1) {
@@ -250,13 +254,19 @@ const DROPDOWN_SECTIONS: Record<string, LucideIcon> = {
   Administration: ShieldCheck,
 }
 
-function buildSections(role: string | null, overrides?: PermissionOverrides | null): NavSection[] {
+function buildSections(
+  role: string | null,
+  overrides?: PermissionOverrides | null,
+  orgRoleOverrides?: RolePermissionOverridesMap | null,
+): NavSection[] {
   const compact = usesCompactNav(role)
   return NAV_SECTIONS.map((section) => {
     if (!sectionVisibleForRole(section.title, role)) {
       return { ...section, routes: [] }
     }
-    let routes = section.routes.filter((r) => routeIsVisible(r, role, overrides))
+    let routes = section.routes.filter((r) =>
+      routeIsVisible(r, role, overrides, orgRoleOverrides),
+    )
 
     const dropdownIcon = DROPDOWN_SECTIONS[section.title]
     const useDropdown =
@@ -265,13 +275,22 @@ function buildSections(role: string | null, overrides?: PermissionOverrides | nu
       (section.title !== 'Accounting' || compact)
 
     if (useDropdown && dropdownIcon) {
-      routes = collapseRoutesToDropdown(section.title, dropdownIcon, routes, role, overrides)
+      routes = collapseRoutesToDropdown(
+        section.title,
+        dropdownIcon,
+        routes,
+        role,
+        overrides,
+        orgRoleOverrides,
+      )
     }
 
     routes = routes
       .map((r) => {
         if (!r.children?.length) return r
-        const children = r.children.filter((c) => routeIsVisible(c, role, overrides))
+        const children = r.children.filter((c) =>
+          routeIsVisible(c, role, overrides, orgRoleOverrides),
+        )
         if (!children.length) return null
         return { ...r, children }
       })
@@ -290,7 +309,7 @@ function SidebarInner({ mobileOpen, onMobileClose, isMobile = false }: SidebarPr
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const [collapsed, setCollapsed] = useState(false)
-  const { role, organizationLogoUrl, permissionOverrides } = useAuth()
+  const { role, organizationLogoUrl, permissionOverrides, orgRolePermissionOverrides } = useAuth()
   const nightAuditPending = useNightAuditPendingCounts()
   const pendingNightAuditTotal = nightAuditPending.total
   const nightAuditHref =
@@ -325,8 +344,8 @@ function SidebarInner({ mobileOpen, onMobileClose, isMobile = false }: SidebarPr
   }
 
   const visibleSections = useMemo(
-    () => buildSections(role, permissionOverrides),
-    [role, permissionOverrides],
+    () => buildSections(role, permissionOverrides, orgRolePermissionOverrides),
+    [role, permissionOverrides, orgRolePermissionOverrides],
   )
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({})
   const [radixReady, setRadixReady] = useState(false)
