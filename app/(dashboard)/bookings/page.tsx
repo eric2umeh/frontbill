@@ -19,7 +19,6 @@ import { formatNaira } from "@/lib/utils/currency";
 import { fetchHotelBusinessNightUtcBounds } from "@/lib/payments/business-night-bounds";
 import {
   sumRoomRevenueForHotelNight,
-  sumPaymentAmounts,
 } from "@/lib/reports/day-page-stats";
 import { usePageData } from "@/hooks/use-page-data";
 import { useAuth } from "@/lib/auth-context";
@@ -45,6 +44,7 @@ import {
 } from "@/lib/booking/parse-booking-notes";
 import { paymentMethodRequiresAccount } from "@/lib/payments/payment-accounts";
 import { enrichBookingsList } from "@/lib/booking/enrich-bookings-list";
+import { buildDailyFrontDeskPack } from "@/lib/reports/daily-front-desk-pack";
 import {
   TABLE_ACTIONS_ROW,
   TABLE_STACKED_CELL,
@@ -205,7 +205,7 @@ export default function BookingsPage() {
     outOfOrder: number;
     dueOutToday: number;
     roomRevenue: number;
-    cashCollected: number;
+    netProfit: number;
     statsDate: string;
   } | null>(null);
 
@@ -263,7 +263,8 @@ export default function BookingsPage() {
       console.warn("[bookings] due-out stats:", dueErr.message);
     }
 
-    let cashCollected = 0;
+    let netProfit = 0;
+    let roomRevenue = 0;
     try {
       const bounds = await fetchHotelBusinessNightUtcBounds({
         supabase,
@@ -271,17 +272,57 @@ export default function BookingsPage() {
         ymd: today,
         timeZone: tz,
       });
-      if (!bounds.empty) {
-        const { data: payments } = await supabase
-          .from("payments")
-          .select("amount")
-          .eq("organization_id", organizationId)
-          .gte("payment_date", bounds.startIso)
-          .lte("payment_date", bounds.endInclusiveIso);
-        cashCollected = sumPaymentAmounts(payments ?? []);
-      }
+
+      const nightBookQ = supabase
+        .from("bookings")
+        .select(
+          "id, check_in, check_out, status, rate_per_night, folio_id, payment_status, guests:guest_id(name), rooms:room_id(room_number, room_type)",
+        )
+        .eq("organization_id", organizationId)
+        .in("status", ["confirmed", "checked_in", "reserved", "checked_out"])
+        .lte("check_in", today)
+        .gt("check_out", today)
+        .limit(500);
+
+      let txQ =
+        bounds.empty
+          ? null
+          : supabase
+              .from("transactions")
+              .select("*")
+              .eq("organization_id", organizationId)
+              .gte("created_at", bounds.startIso)
+              .lte("created_at", bounds.endInclusiveIso)
+              .limit(5000);
+
+      let payQ =
+        bounds.empty
+          ? null
+          : supabase
+              .from("payments")
+              .select("*")
+              .eq("organization_id", organizationId)
+              .gte("payment_date", bounds.startIso)
+              .lte("payment_date", bounds.endInclusiveIso)
+              .limit(5000);
+
+      const [nightBookRes, txRes, payRes] = await Promise.all([
+        nightBookQ,
+        txQ || Promise.resolve({ data: [] as unknown[], error: null }),
+        payQ || Promise.resolve({ data: [] as unknown[], error: null }),
+      ]);
+
+      const pack = buildDailyFrontDeskPack({
+        dateYmd: today,
+        bookings: (nightBookRes.data || []) as any,
+        transactions: (txRes.data || []) as any,
+        payments: (payRes.data || []) as any,
+      });
+      roomRevenue = pack.roomRevenueGenerated;
+      netProfit = pack.salesCollection.total;
     } catch (e) {
-      console.warn("[bookings] cash stats:", e);
+      console.warn("[bookings] net/rev stats:", e);
+      roomRevenue = sumRoomRevenueForHotelNight(dueBookings ?? [], today);
     }
 
     const norm = (s: string | null | undefined) =>
@@ -295,7 +336,6 @@ export default function BookingsPage() {
       (r: { status?: string }) => norm(r.status) === "out_of_order",
     ).length;
     const availableForCheckin = Math.max(0, list.length - physicallyHeld - outOfOrder);
-    const roomRevenue = sumRoomRevenueForHotelNight(dueBookings ?? [], today);
 
     setRoomStats({
       total: list.length,
@@ -305,7 +345,7 @@ export default function BookingsPage() {
       outOfOrder,
       dueOutToday: stay.dueOut,
       roomRevenue,
-      cashCollected,
+      netProfit,
       statsDate: today,
     });
   }, [organizationId, frontOfficeToday]);
@@ -457,9 +497,9 @@ export default function BookingsPage() {
           .limit(BOOKINGS_SCOPE_LIMIT);
 
         if (statusKey === "checked_in") {
-          // In-house: folio often stays "confirmed" after walk-in; avoid strict timestamp filters (TZ/casts).
+          // In-house: checked-in / confirmed stayovers + due out today (no reservations).
           query = query
-            .in("status", ["checked_in", "confirmed", "reserved"])
+            .in("status", ["checked_in", "confirmed"])
             .gte("check_out", today);
         } else if (statusKey === "all") {
           query = query
@@ -1236,9 +1276,33 @@ export default function BookingsPage() {
           </h1>
         </div>
         <div className="flex flex-wrap items-center justify-center lg:justify-end gap-1.5 shrink-0">
-          {roomStats !== null && (
+          {roomStats !== null && (() => {
+            const dailyBookBase = `/transactions/daily-book?date=${roomStats.statsDate}`
+            return (
             <CompactStatBadgeRow
               items={[
+                {
+                  key: "rev",
+                  label: "Rev",
+                  value: formatNaira(roomStats.roomRevenue),
+                  icon: Receipt,
+                  borderClass: "border-slate-200/80",
+                  bgClass: "bg-slate-50/50",
+                  iconClass: "text-slate-700",
+                  title: "Room revenue — view in-house breakdown in Daily book",
+                  href: `${dailyBookBase}#daily-book-guests`,
+                },
+                {
+                  key: "net",
+                  label: "Net",
+                  value: formatNaira(roomStats.netProfit),
+                  icon: Banknote,
+                  borderClass: "border-emerald-200/80",
+                  bgClass: "bg-emerald-50/50",
+                  iconClass: "text-emerald-700",
+                  title: "Net profit (sales collection) — view receipt lines in Daily book",
+                  href: `${dailyBookBase}#daily-book-collections`,
+                },
                 {
                   key: "occ",
                   label: "Occ",
@@ -1248,26 +1312,6 @@ export default function BookingsPage() {
                   bgClass: "bg-blue-50/50",
                   iconClass: "text-blue-700",
                   title: "Checked-in guests staying past today",
-                },
-                {
-                  key: "rev",
-                  label: "Rev",
-                  value: formatNaira(roomStats.roomRevenue),
-                  icon: Receipt,
-                  borderClass: "border-slate-200/80",
-                  bgClass: "bg-slate-50/50",
-                  iconClass: "text-slate-700",
-                  title: "Room revenue for the hotel business date",
-                },
-                {
-                  key: "cash",
-                  label: "Cash",
-                  value: formatNaira(roomStats.cashCollected),
-                  icon: Banknote,
-                  borderClass: "border-emerald-200/80",
-                  bgClass: "bg-emerald-50/50",
-                  iconClass: "text-emerald-700",
-                  title: "Payments collected on the hotel business date",
                 },
                 {
                   key: "res",
@@ -1319,7 +1363,8 @@ export default function BookingsPage() {
                 </span>
               }
             />
-          )}
+            )
+          })()}
           {hasPermission(role, "bookings:create") && (
             <>
               <Button
@@ -1425,7 +1470,7 @@ export default function BookingsPage() {
             key: "status",
             label: "Status",
             options: [
-              { value: "checked_in", label: "In house (Occ + Due + Res)" },
+              { value: "checked_in", label: "In house (Occ + Due)" },
               { value: "due_out", label: "Due out today" },
               { value: "reserved", label: "Reserved" },
               { value: "confirmed", label: "Confirmed" },

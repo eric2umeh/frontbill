@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { cn } from '@/lib/utils'
 import type { LucideIcon } from 'lucide-react'
 
@@ -16,6 +17,8 @@ export type CompactStatBadgeItem = {
   bgClass: string
   iconClass: string
   title?: string
+  /** When set, the badge links to daily book or report breakdown. */
+  href?: string
 }
 
 export function CompactStatBadgeRow({
@@ -31,17 +34,36 @@ export function CompactStatBadgeRow({
     <div className={cn('flex flex-wrap items-center justify-center gap-1.5', className)}>
       {items.map((item) => {
         const Icon = item.icon
-        return (
-          <div
-            key={item.key}
-            className={cn(BADGE_BASE, item.borderClass, item.bgClass)}
-            title={item.title}
-          >
+        const inner = (
+          <>
             {Icon ? (
               <Icon className={cn('h-3.5 w-3.5 shrink-0', item.iconClass)} aria-hidden />
             ) : null}
             <span className="text-muted-foreground">{item.label}</span>
             <span className="tabular-nums text-foreground">{item.value}</span>
+          </>
+        )
+        const className = cn(
+          BADGE_BASE,
+          item.borderClass,
+          item.bgClass,
+          item.href && 'hover:brightness-[0.98] transition-colors cursor-pointer',
+        )
+        if (item.href) {
+          return (
+            <Link
+              key={item.key}
+              href={item.href}
+              className={className}
+              title={item.title ?? `View ${item.label} breakdown`}
+            >
+              {inner}
+            </Link>
+          )
+        }
+        return (
+          <div key={item.key} className={className} title={item.title}>
+            {inner}
           </div>
         )
       })}

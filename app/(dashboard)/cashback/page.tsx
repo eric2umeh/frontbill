@@ -49,6 +49,9 @@ export default function CashbackPage() {
   const [config, setConfig] = useState({ enabled: true, percent: 2 })
   const [balances, setBalances] = useState<BalanceRow[]>([])
   const [recentTransactions, setRecentTransactions] = useState<CashbackTxn[]>([])
+  const [balPage, setBalPage] = useState(0)
+  const [txPage, setTxPage] = useState(0)
+  const PAGE_SIZE = 15
 
   const load = useCallback(async (q?: string) => {
     setLoading(true)
@@ -120,6 +123,10 @@ export default function CashbackPage() {
 
   const totalOutstanding = balances.reduce((s, b) => s + Number(b.balance || 0), 0)
   const totalEarned = balances.reduce((s, b) => s + Number(b.earned_total || 0), 0)
+  const pagedBalances = balances.slice(balPage * PAGE_SIZE, (balPage + 1) * PAGE_SIZE)
+  const pagedTx = recentTransactions.slice(txPage * PAGE_SIZE, (txPage + 1) * PAGE_SIZE)
+  const balPageCount = Math.max(1, Math.ceil(balances.length / PAGE_SIZE))
+  const txPageCount = Math.max(1, Math.ceil(recentTransactions.length / PAGE_SIZE))
 
   return (
     <div className="space-y-6 p-4 md:p-6">
@@ -211,12 +218,12 @@ export default function CashbackPage() {
                   </TableCell>
                 </TableRow>
               ) : (
-                balances.map((row, index) => {
+                pagedBalances.map((row, index) => {
                   const g = row.guests
                   return (
                     <TableRow key={row.guest_id}>
                       <TableCell className="w-10 text-center text-muted-foreground tabular-nums">
-                        {index + 1}
+                        {balPage * PAGE_SIZE + index + 1}
                       </TableCell>
                       <TableCell>
                         <Link
@@ -251,6 +258,21 @@ export default function CashbackPage() {
               )}
             </TableBody>
           </Table>
+          {balances.length > PAGE_SIZE && (
+            <div className="flex items-center justify-between pt-3 text-sm">
+              <span className="text-muted-foreground">
+                Page {balPage + 1} of {balPageCount} · {balances.length} guests
+              </span>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" disabled={balPage === 0} onClick={() => setBalPage((p) => p - 1)}>
+                  Previous
+                </Button>
+                <Button variant="outline" size="sm" disabled={balPage >= balPageCount - 1} onClick={() => setBalPage((p) => p + 1)}>
+                  Next
+                </Button>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -279,10 +301,10 @@ export default function CashbackPage() {
                   </TableCell>
                 </TableRow>
               ) : (
-                recentTransactions.map((tx, index) => (
+                pagedTx.map((tx, index) => (
                   <TableRow key={tx.id}>
                     <TableCell className="w-10 text-center text-muted-foreground tabular-nums">
-                      {index + 1}
+                      {txPage * PAGE_SIZE + index + 1}
                     </TableCell>
                     <TableCell className="text-sm whitespace-nowrap">
                       {format(new Date(tx.created_at), 'dd MMM yyyy HH:mm')}
@@ -303,6 +325,21 @@ export default function CashbackPage() {
               )}
             </TableBody>
           </Table>
+          {recentTransactions.length > PAGE_SIZE && (
+            <div className="flex items-center justify-between pt-3 text-sm">
+              <span className="text-muted-foreground">
+                Page {txPage + 1} of {txPageCount}
+              </span>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" disabled={txPage === 0} onClick={() => setTxPage((p) => p - 1)}>
+                  Previous
+                </Button>
+                <Button variant="outline" size="sm" disabled={txPage >= txPageCount - 1} onClick={() => setTxPage((p) => p + 1)}>
+                  Next
+                </Button>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

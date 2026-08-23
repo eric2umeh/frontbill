@@ -56,7 +56,7 @@ interface AuditTrailLog {
 export default function NightAuditPage() {
   const router = useRouter()
   const pathname = usePathname()
-  const [auditTab, setAuditTab] = useState('expected-arrivals')
+  const [auditTab, setAuditTab] = useState('night-audit')
   const [auditRunning, setAuditRunning] = useState(false)
   const [auditComplete, setAuditComplete] = useState(false)
   const [closingDateYmd, setClosingDateYmd] = useState(() => nightAuditClosingDateYmd())
@@ -87,21 +87,42 @@ export default function NightAuditPage() {
   useEffect(() => {
     if (typeof window === 'undefined') return
     const q = new URLSearchParams(window.location.search).get('tab')
-    if (q === 'backdate-requests' && canApproveBackdates && userId) setAuditTab('backdate-requests')
-    if (q === 'room-change-requests' && canApproveRoomChanges && userId) setAuditTab('room-change-requests')
-    if (q === 'extend-discount' && canApproveExtendDiscount && userId) setAuditTab('extend-discount')
-    if (q === 'reschedule-stay-requests' && canApproveRescheduleStay && userId) setAuditTab('reschedule-stay-requests')
-  }, [canApproveBackdates, canApproveRoomChanges, canApproveExtendDiscount, canApproveRescheduleStay, userId])
+    if (!q || q === 'night-audit') {
+      setAuditTab('night-audit')
+      return
+    }
+    const tabMap: Record<string, string> = {
+      'expected-arrivals': 'expected-arrivals',
+      'pending-checkouts': 'pending-checkouts',
+      'audit-trails': 'audit-trails',
+      'backdate-requests': 'backdate-requests',
+      'room-change-requests': 'room-change-requests',
+      'extend-discount': 'extend-discount',
+      'reschedule-stay-requests': 'reschedule-stay-requests',
+    }
+    const mapped = tabMap[q]
+    if (!mapped) return
+    if (mapped === 'backdate-requests' && !(canApproveBackdates && userId)) return
+    if (mapped === 'room-change-requests' && !(canApproveRoomChanges && userId)) return
+    if (mapped === 'extend-discount' && !(canApproveExtendDiscount && userId)) return
+    if (mapped === 'reschedule-stay-requests' && !(canApproveRescheduleStay && userId)) return
+    if (mapped === 'audit-trails' && !canViewAuditTrails) return
+    setAuditTab(mapped)
+  }, [
+    canApproveBackdates,
+    canApproveRoomChanges,
+    canApproveExtendDiscount,
+    canApproveRescheduleStay,
+    canViewAuditTrails,
+    userId,
+  ])
 
   const onAuditTabChange = (value: string) => {
     setAuditTab(value)
     if (typeof window === 'undefined') return
     const u = new URLSearchParams(window.location.search)
-    if (value === 'backdate-requests') u.set('tab', 'backdate-requests')
-    else if (value === 'room-change-requests') u.set('tab', 'room-change-requests')
-    else if (value === 'extend-discount') u.set('tab', 'extend-discount')
-    else if (value === 'reschedule-stay-requests') u.set('tab', 'reschedule-stay-requests')
-    else u.delete('tab')
+    if (value === 'night-audit') u.delete('tab')
+    else u.set('tab', value)
     const qs = u.toString()
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
   }
@@ -315,232 +336,347 @@ export default function NightAuditPage() {
   ]
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Night Audit</h1>
-          <p className="text-muted-foreground">
-            Close the previous business day (typical morning run) and roll the hotel date forward
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          {auditComplete && (
+    <div className="space-y-4">
+      <Tabs value={auditTab} onValueChange={onAuditTabChange} className="w-full space-y-4">
+        <div className="flex flex-row items-center justify-between gap-3">
+          <TabsList className="flex h-auto flex-nowrap gap-1 overflow-x-auto min-w-0">
+            <TabsTrigger value="night-audit" className="shrink-0 text-xs sm:text-sm">
+              Night Audit
+            </TabsTrigger>
+            <TabsTrigger value="expected-arrivals" className="shrink-0 text-xs sm:text-sm">
+              Expected Arrivals
+            </TabsTrigger>
+            <TabsTrigger value="pending-checkouts" className="shrink-0 text-xs sm:text-sm">
+              Pending Checkouts
+            </TabsTrigger>
+            {canViewAuditTrails && (
+              <TabsTrigger value="audit-trails" className="shrink-0 text-xs sm:text-sm">
+                Audit Trails
+              </TabsTrigger>
+            )}
+            {canApproveBackdates && !!userId && (
+              <TabsTrigger value="backdate-requests" className="shrink-0 gap-1.5 text-xs sm:text-sm">
+                <CalendarClock className="h-3.5 w-3.5" />
+                Backdate Requests
+                {pendingApprovals.backdate > 0 && (
+                  <Badge variant="destructive" className="h-5 min-w-5 rounded-full px-1.5 text-[11px] tabular-nums">
+                    {pendingApprovals.backdate > 99 ? '99+' : pendingApprovals.backdate}
+                  </Badge>
+                )}
+              </TabsTrigger>
+            )}
+            {canApproveRoomChanges && !!userId && (
+              <TabsTrigger value="room-change-requests" className="shrink-0 gap-1.5 text-xs sm:text-sm">
+                <DoorOpen className="h-3.5 w-3.5" />
+                Room Changes
+                {pendingApprovals.room_change > 0 && (
+                  <Badge variant="destructive" className="h-5 min-w-5 rounded-full px-1.5 text-[11px] tabular-nums">
+                    {pendingApprovals.room_change > 99 ? '99+' : pendingApprovals.room_change}
+                  </Badge>
+                )}
+              </TabsTrigger>
+            )}
+            {canApproveExtendDiscount && !!userId && (
+              <TabsTrigger value="extend-discount" className="shrink-0 gap-1.5 text-xs sm:text-sm">
+                <Percent className="h-3.5 w-3.5" />
+                Extend discounts
+                {pendingApprovals.extend_discount > 0 && (
+                  <Badge variant="destructive" className="h-5 min-w-5 rounded-full px-1.5 text-[11px] tabular-nums">
+                    {pendingApprovals.extend_discount > 99 ? '99+' : pendingApprovals.extend_discount}
+                  </Badge>
+                )}
+              </TabsTrigger>
+            )}
+            {canApproveRescheduleStay && !!userId && (
+              <TabsTrigger value="reschedule-stay-requests" className="shrink-0 gap-1.5 text-xs sm:text-sm">
+                <CalendarRange className="h-3.5 w-3.5" />
+                Move dates
+                {pendingApprovals.reschedule_stay > 0 && (
+                  <Badge variant="destructive" className="h-5 min-w-5 rounded-full px-1.5 text-[11px] tabular-nums">
+                    {pendingApprovals.reschedule_stay > 99 ? '99+' : pendingApprovals.reschedule_stay}
+                  </Badge>
+                )}
+              </TabsTrigger>
+            )}
+          </TabsList>
+          <div className="flex items-center gap-2 shrink-0">
+            {auditComplete && (
+              <Button
+                variant="outline"
+                onClick={handleAiSummary}
+                disabled={aiLoading}
+                className="gap-2"
+              >
+                {aiLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Sparkles className="h-4 w-4" />
+                )}
+                AI Summary
+              </Button>
+            )}
             <Button
-              variant="outline"
-              onClick={handleAiSummary}
-              disabled={aiLoading}
+              size="lg"
+              onClick={() => void handleRunAudit()}
+              disabled={auditRunning || auditComplete || !canRunNightAudit}
               className="gap-2"
             >
-              {aiLoading ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
+              {auditRunning ? (
+                <>
+                  <Clock className="h-4 w-4 animate-spin" />
+                  Running Audit...
+                </>
+              ) : auditComplete ? (
+                <>
+                  <CheckCircle2 className="h-4 w-4" />
+                  Audit Complete
+                </>
               ) : (
-                <Sparkles className="h-4 w-4" />
+                <>
+                  <Play className="h-4 w-4" />
+                  Run Night Audit
+                </>
               )}
-              AI Summary
             </Button>
-          )}
-          <Button 
-            size="lg" 
-            onClick={() => void handleRunAudit()}
-            disabled={auditRunning || auditComplete || !canRunNightAudit}
-            className="gap-2"
-          >
-            {auditRunning ? (
-              <>
-                <Clock className="h-4 w-4 animate-spin" />
-                Running Audit...
-              </>
-            ) : auditComplete ? (
-              <>
-                <CheckCircle2 className="h-4 w-4" />
-                Audit Complete
-              </>
-            ) : (
-              <>
-                <Play className="h-4 w-4" />
-                Run Night Audit
-              </>
-            )}
-          </Button>
+          </div>
         </div>
-      </div>
 
-      <Card>
-        <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-end">
-          <div className="space-y-1.5 flex-1">
-            <Label htmlFor="closing_date">Business date to close</Label>
-            <Input
-              id="closing_date"
-              type="date"
-              value={closingDateYmd}
-              onChange={(e) => setClosingDateYmd(e.target.value)}
-              disabled={auditComplete}
-            />
-            <p className="text-xs text-muted-foreground">
-              Morning audit (before 6pm hotel time) defaults to yesterday — e.g. run on 16 May closes 15 May.
-              Revenue and departures use this date; arrivals use {formatHotelDateDisplayGB(nextBusinessDateYmd)}.
-            </p>
-          </div>
-          {!auditComplete && (
-            <Button type="button" variant="outline" onClick={() => setClosingDateYmd(nightAuditClosingDateYmd())}>
-              Reset to suggested date
-            </Button>
-          )}
-        </CardContent>
-      </Card>
-
-      {auditComplete && (
-        <Card className="border-green-200 bg-green-50">
-          <CardContent className="flex items-center gap-3 p-4">
-            <CheckCircle2 className="h-5 w-5 text-green-600" />
-            <div>
-              <p className="font-semibold text-green-900">Night audit completed for {auditDateLabel}</p>
-              <p className="text-sm text-green-700">Hotel business date is now {nextBusinessLabel}</p>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Occupancy Rate
-            </CardTitle>
-            <Bed className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{occupancyPercent}%</div>
-            <p className="text-xs text-muted-foreground mt-1">
-              {auditData?.occupiedRooms || 0} of {auditData?.totalRooms || 0} rooms occupied
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Total Revenue
-            </CardTitle>
-            <DollarSign className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{formatNaira(auditData?.totalRevenue || 0)}</div>
-            <p className="text-xs text-green-600 mt-1 flex items-center gap-1">
-              <TrendingUp className="h-3 w-3" />
-              Revenue on {auditDateLabel}
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Pending Checkouts
-            </CardTitle>
-            <Users className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{auditData?.pendingCheckouts?.length || 0}</div>
-            <p className="text-xs text-muted-foreground mt-1">
-              Expected departures
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Expected Arrivals
-            </CardTitle>
-            <Users className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{auditData?.expectedArrivals?.length || 0}</div>
-            <p className="text-xs text-muted-foreground mt-1">
-              Confirmed reservations
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Revenue Breakdown</CardTitle>
-          <CardDescription>Payment method distribution for {auditDateLabel}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            {revenueRows.map((row) => (
-              <div key={row.label} className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className={`h-2 w-2 rounded-full ${row.color}`} />
-                  <span className="text-sm font-medium">{row.label}</span>
-                </div>
-                <div className="flex items-center gap-4">
-                  <div className="text-sm text-muted-foreground">
-                    {auditData?.totalRevenue ? ((row.value / auditData.totalRevenue) * 100).toFixed(1) : 0}%
-                  </div>
-                  <div className="font-semibold">{formatNaira(row.value)}</div>
-                </div>
+        <TabsContent value="night-audit" className="mt-0 space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Night Audit</CardTitle>
+              <CardDescription>
+                Close the previous business day (typical morning run) and roll the hotel date forward
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-3 sm:flex-row sm:items-end">
+              <div className="space-y-1.5 flex-1">
+                <Label htmlFor="closing_date">Business date to close</Label>
+                <Input
+                  id="closing_date"
+                  type="date"
+                  value={closingDateYmd}
+                  onChange={(e) => setClosingDateYmd(e.target.value)}
+                  disabled={auditComplete}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Morning audit (before 6pm hotel time) defaults to yesterday — e.g. run on 16 May closes 15 May.
+                  Revenue and departures use this date; arrivals use {formatHotelDateDisplayGB(nextBusinessDateYmd)}.
+                </p>
               </div>
-            ))}
+              {!auditComplete && (
+                <Button type="button" variant="outline" onClick={() => setClosingDateYmd(nightAuditClosingDateYmd())}>
+                  Reset to suggested date
+                </Button>
+              )}
+            </CardContent>
+          </Card>
+
+          {auditComplete && (
+            <Card className="border-green-200 bg-green-50">
+              <CardContent className="flex items-center gap-3 p-4">
+                <CheckCircle2 className="h-5 w-5 text-green-600" />
+                <div>
+                  <p className="font-semibold text-green-900">Night audit completed for {auditDateLabel}</p>
+                  <p className="text-sm text-green-700">Hotel business date is now {nextBusinessLabel}</p>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">
+                  Occupancy Rate
+                </CardTitle>
+                <Bed className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{occupancyPercent}%</div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {auditData?.occupiedRooms || 0} of {auditData?.totalRooms || 0} rooms occupied
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">
+                  Total Revenue
+                </CardTitle>
+                <DollarSign className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{formatNaira(auditData?.totalRevenue || 0)}</div>
+                <p className="text-xs text-green-600 mt-1 flex items-center gap-1">
+                  <TrendingUp className="h-3 w-3" />
+                  Revenue on {auditDateLabel}
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">
+                  Pending Checkouts
+                </CardTitle>
+                <Users className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{auditData?.pendingCheckouts?.length || 0}</div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Expected departures
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">
+                  Expected Arrivals
+                </CardTitle>
+                <Users className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{auditData?.expectedArrivals?.length || 0}</div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Confirmed reservations
+                </p>
+              </CardContent>
+            </Card>
           </div>
-        </CardContent>
-      </Card>
 
-      <Tabs value={auditTab} onValueChange={onAuditTabChange} className="space-y-4">
-        <TabsList className="flex flex-wrap h-auto">
-          <TabsTrigger value="expected-arrivals">Expected Arrivals</TabsTrigger>
-          <TabsTrigger value="pending-checkouts">Pending Checkouts</TabsTrigger>
-          {canViewAuditTrails && <TabsTrigger value="audit-trails">Audit Trails</TabsTrigger>}
-          {canApproveBackdates && !!userId && (
-            <TabsTrigger value="backdate-requests" className="gap-1.5">
-              <CalendarClock className="h-3.5 w-3.5" />
-              Backdate Requests
-              {pendingApprovals.backdate > 0 && (
-                <Badge variant="destructive" className="h-5 min-w-5 rounded-full px-1.5 text-[11px] tabular-nums">
-                  {pendingApprovals.backdate > 99 ? '99+' : pendingApprovals.backdate}
-                </Badge>
-              )}
-            </TabsTrigger>
-          )}
-          {canApproveRoomChanges && !!userId && (
-            <TabsTrigger value="room-change-requests" className="gap-1.5">
-              <DoorOpen className="h-3.5 w-3.5" />
-              Room Changes
-              {pendingApprovals.room_change > 0 && (
-                <Badge variant="destructive" className="h-5 min-w-5 rounded-full px-1.5 text-[11px] tabular-nums">
-                  {pendingApprovals.room_change > 99 ? '99+' : pendingApprovals.room_change}
-                </Badge>
-              )}
-            </TabsTrigger>
-          )}
-          {canApproveExtendDiscount && !!userId && (
-            <TabsTrigger value="extend-discount" className="gap-1.5">
-              <Percent className="h-3.5 w-3.5" />
-              Extend discounts
-              {pendingApprovals.extend_discount > 0 && (
-                <Badge variant="destructive" className="h-5 min-w-5 rounded-full px-1.5 text-[11px] tabular-nums">
-                  {pendingApprovals.extend_discount > 99 ? '99+' : pendingApprovals.extend_discount}
-                </Badge>
-              )}
-            </TabsTrigger>
-          )}
-          {canApproveRescheduleStay && !!userId && (
-            <TabsTrigger value="reschedule-stay-requests" className="gap-1.5">
-              <CalendarRange className="h-3.5 w-3.5" />
-              Move dates
-              {pendingApprovals.reschedule_stay > 0 && (
-                <Badge variant="destructive" className="h-5 min-w-5 rounded-full px-1.5 text-[11px] tabular-nums">
-                  {pendingApprovals.reschedule_stay > 99 ? '99+' : pendingApprovals.reschedule_stay}
-                </Badge>
-              )}
-            </TabsTrigger>
-          )}
-        </TabsList>
+          <Card>
+            <CardHeader>
+              <CardTitle>Revenue Breakdown</CardTitle>
+              <CardDescription>Payment method distribution for {auditDateLabel}</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                {revenueRows.map((row) => (
+                  <div key={row.label} className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className={`h-2 w-2 rounded-full ${row.color}`} />
+                      <span className="text-sm font-medium">{row.label}</span>
+                    </div>
+                    <div className="flex items-center gap-4">
+                      <div className="text-sm text-muted-foreground">
+                        {auditData?.totalRevenue ? ((row.value / auditData.totalRevenue) * 100).toFixed(1) : 0}%
+                      </div>
+                      <div className="font-semibold">{formatNaira(row.value)}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
 
-        <TabsContent value="expected-arrivals">
+          {auditData?.anomalies && auditData.anomalies.length > 0 && (
+            <Card className="border-orange-200">
+              <CardHeader>
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="h-5 w-5 text-orange-600" />
+                  <CardTitle>Anomalies Detected</CardTitle>
+                  <Badge variant="secondary">{auditData.anomalies.length}</Badge>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {auditData.anomalies.map((anomaly: any, index: number) => (
+                  <div key={index} className="flex items-start justify-between p-3 bg-orange-50 rounded-lg">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <Badge variant={anomaly.severity === 'high' ? 'destructive' : 'secondary'}>
+                          {anomaly.severity}
+                        </Badge>
+                        <span className="font-semibold text-sm">{anomaly.type}</span>
+                      </div>
+                      <p className="text-sm text-muted-foreground">{anomaly.description}</p>
+                    </div>
+                    {anomaly.bookingId && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => router.push(`/bookings/${anomaly.bookingId}`)}
+                      >
+                        View
+                      </Button>
+                    )}
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          )}
+
+          {aiSummary && (
+            <Card className="border-indigo-200">
+              <CardHeader>
+                <div className="flex items-center gap-2">
+                  <Sparkles className="h-5 w-5 text-indigo-600" />
+                  <CardTitle>AI Night Audit Summary</CardTitle>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid gap-4 md:grid-cols-3">
+                  <div>
+                    <p className="text-xs text-muted-foreground">Check-ins</p>
+                    <p className="text-lg font-semibold">{aiSummary.totalCheckIns}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Check-outs</p>
+                    <p className="text-lg font-semibold">{aiSummary.totalCheckouts}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Revenue</p>
+                    <p className="text-lg font-semibold">{aiSummary.dayRevenue}</p>
+                  </div>
+                </div>
+
+                {aiSummary.keyHighlights?.length > 0 && (
+                  <div>
+                    <p className="text-sm font-medium mb-1">Key Highlights</p>
+                    <ul className="list-disc list-inside text-sm text-muted-foreground space-y-1">
+                      {aiSummary.keyHighlights.map((h: string, i: number) => (
+                        <li key={i}>{h}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {aiSummary.issues && aiSummary.issues.length > 0 && (
+                  <div>
+                    <p className="text-sm font-medium mb-1 text-orange-700">Issues</p>
+                    <ul className="list-disc list-inside text-sm text-orange-600 space-y-1">
+                      {aiSummary.issues.map((issue: string, i: number) => (
+                        <li key={i}>{issue}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {aiSummary.recommendations?.length > 0 && (
+                  <div>
+                    <p className="text-sm font-medium mb-1">Recommendations</p>
+                    <ul className="list-disc list-inside text-sm text-muted-foreground space-y-1">
+                      {aiSummary.recommendations.map((r: string, i: number) => (
+                        <li key={i}>{r}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {aiSummary.staffNotes && (
+                  <div className="p-3 bg-indigo-50 rounded-lg">
+                    <p className="text-sm font-medium mb-1">Staff Notes</p>
+                    <p className="text-sm text-muted-foreground">{aiSummary.staffNotes}</p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
+        </TabsContent>
+
+        <TabsContent value="expected-arrivals" className="mt-0">
           <Card>
             <CardHeader>
               <CardTitle>Expected Arrivals</CardTitle>
@@ -600,7 +736,7 @@ export default function NightAuditPage() {
           </Card>
         </TabsContent>
 
-        <TabsContent value="pending-checkouts">
+        <TabsContent value="pending-checkouts" className="mt-0">
         <Card>
           <CardHeader>
             <CardTitle>Pending Checkouts</CardTitle>
@@ -679,7 +815,7 @@ export default function NightAuditPage() {
         </TabsContent>
 
         {canViewAuditTrails ? (
-          <TabsContent value="audit-trails">
+          <TabsContent value="audit-trails" className="mt-0">
         <Card>
           <CardHeader>
                 <div className="flex items-center gap-2">
@@ -820,132 +956,29 @@ export default function NightAuditPage() {
         ) : null}
 
         {canApproveBackdates && userId ? (
-          <TabsContent value="backdate-requests">
+          <TabsContent value="backdate-requests" className="mt-0">
             <BackdateRequestsTab userId={userId} />
           </TabsContent>
         ) : null}
 
         {canApproveRoomChanges && userId ? (
-          <TabsContent value="room-change-requests">
+          <TabsContent value="room-change-requests" className="mt-0">
             <RoomChangeRequestsTab userId={userId} />
           </TabsContent>
         ) : null}
 
         {canApproveExtendDiscount && userId ? (
-          <TabsContent value="extend-discount">
+          <TabsContent value="extend-discount" className="mt-0">
             <ExtendStayDiscountTab userId={userId} />
           </TabsContent>
         ) : null}
 
         {canApproveRescheduleStay && userId ? (
-          <TabsContent value="reschedule-stay-requests">
+          <TabsContent value="reschedule-stay-requests" className="mt-0">
             <RescheduleStayRequestsTab userId={userId} />
           </TabsContent>
         ) : null}
       </Tabs>
-
-      {auditData?.anomalies && auditData.anomalies.length > 0 && (
-        <Card className="border-orange-200">
-          <CardHeader>
-            <div className="flex items-center gap-2">
-              <AlertTriangle className="h-5 w-5 text-orange-600" />
-              <CardTitle>Anomalies Detected</CardTitle>
-              <Badge variant="secondary">{auditData.anomalies.length}</Badge>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {auditData.anomalies.map((anomaly: any, index: number) => (
-              <div key={index} className="flex items-start justify-between p-3 bg-orange-50 rounded-lg">
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <Badge variant={anomaly.severity === 'high' ? 'destructive' : 'secondary'}>
-                      {anomaly.severity}
-                    </Badge>
-                    <span className="font-semibold text-sm">{anomaly.type}</span>
-                  </div>
-                  <p className="text-sm text-muted-foreground">{anomaly.description}</p>
-                </div>
-                {anomaly.bookingId && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => router.push(`/bookings/${anomaly.bookingId}`)}
-                  >
-                    View
-                  </Button>
-                )}
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-      )}
-
-      {aiSummary && (
-        <Card className="border-indigo-200">
-          <CardHeader>
-            <div className="flex items-center gap-2">
-              <Sparkles className="h-5 w-5 text-indigo-600" />
-              <CardTitle>AI Night Audit Summary</CardTitle>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-3">
-              <div>
-                <p className="text-xs text-muted-foreground">Check-ins</p>
-                <p className="text-lg font-semibold">{aiSummary.totalCheckIns}</p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">Check-outs</p>
-                <p className="text-lg font-semibold">{aiSummary.totalCheckouts}</p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">Revenue</p>
-                <p className="text-lg font-semibold">{aiSummary.dayRevenue}</p>
-              </div>
-            </div>
-
-            {aiSummary.keyHighlights?.length > 0 && (
-              <div>
-                <p className="text-sm font-medium mb-1">Key Highlights</p>
-                <ul className="list-disc list-inside text-sm text-muted-foreground space-y-1">
-                  {aiSummary.keyHighlights.map((h: string, i: number) => (
-                    <li key={i}>{h}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {aiSummary.issues && aiSummary.issues.length > 0 && (
-              <div>
-                <p className="text-sm font-medium mb-1 text-orange-700">Issues</p>
-                <ul className="list-disc list-inside text-sm text-orange-600 space-y-1">
-                  {aiSummary.issues.map((issue: string, i: number) => (
-                    <li key={i}>{issue}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {aiSummary.recommendations?.length > 0 && (
-              <div>
-                <p className="text-sm font-medium mb-1">Recommendations</p>
-                <ul className="list-disc list-inside text-sm text-muted-foreground space-y-1">
-                  {aiSummary.recommendations.map((r: string, i: number) => (
-                    <li key={i}>{r}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {aiSummary.staffNotes && (
-              <div className="p-3 bg-indigo-50 rounded-lg">
-                <p className="text-sm font-medium mb-1">Staff Notes</p>
-                <p className="text-sm text-muted-foreground">{aiSummary.staffNotes}</p>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
     </div>
   )
 }
