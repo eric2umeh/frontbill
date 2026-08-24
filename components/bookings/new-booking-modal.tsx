@@ -217,7 +217,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
       ] = await Promise.all([
         supabase.from('guests').select('id, name, phone, email, address').eq('organization_id', orgId).order('name'),
         supabase.from('rooms').select('id, room_number, room_type, price_per_night, status, housekeeping_status').eq('organization_id', orgId).order('room_number').limit(BOOKING_MODAL_ROOMS_LIMIT),
-        supabase.from('bookings').select('room_id, check_in, check_out').eq('organization_id', orgId).in('status', ['confirmed', 'reserved', 'checked_in']).limit(BOOKING_MODAL_ROOMS_LIMIT),
+        supabase.from('bookings').select('room_id, check_in, check_out').eq('organization_id', orgId).in('status', ['confirmed', 'checked_in']).limit(BOOKING_MODAL_ROOMS_LIMIT),
         supabase.from('city_ledger_accounts').select('id, account_name, account_type, contact_phone, balance').eq('organization_id', orgId).order('account_name'),
         loadCounterpartyOrganizations(supabase, orgId),
       ])
@@ -884,14 +884,16 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
         }
       }
 
-      await supabase
-        .from('rooms')
-        .update({
-          ...roomHousekeepingPatchForInHouse(booking.status),
-          status: roomStatusForBookingStatus(booking.status, checkInYmd),
-          updated_by: user?.id,
-        })
-        .eq('id', selectedRoom.id)
+      if (booking.status !== 'reserved') {
+        await supabase
+          .from('rooms')
+          .update({
+            ...roomHousekeepingPatchForInHouse(booking.status),
+            status: roomStatusForBookingStatus(booking.status, checkInYmd),
+            updated_by: user?.id,
+          })
+          .eq('id', selectedRoom.id)
+      }
 
       // Insert folio charge (this is what the Transactions page reads from)
       const { error: folioInsertError } = await insertFolioCharges(supabase, [{
