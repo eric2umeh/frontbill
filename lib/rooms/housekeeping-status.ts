@@ -61,7 +61,7 @@ export const HOUSEKEEPING_STATUS_OPTIONS: HousekeepingStatusDef[] = [
     label: 'Check-out',
     abbr: 'C/O',
     color: 'bg-orange-100 text-orange-800 border-orange-200',
-    description: 'Guest checked out — room needs cleaning before it can be sold.',
+    description: 'Guest checked out. Room is immediately available for a new booking.',
   },
   {
     key: 'sleep_out',
@@ -100,8 +100,6 @@ export const HOUSEKEEPING_STATUSES_BLOCKING_BOOKINGS: readonly HousekeepingStatu
   'occupied',
   'complimentary',
   'long_stay',
-  'reservation',
-  'checkout',
   'sleep_out',
 ]
 
@@ -117,6 +115,6 @@ export function pmsStatusForHousekeepingStatus(hkStatus: HousekeepingStatusKey):
   if (hkStatus === 'vacant') return 'available'
   if (hkStatus === 'occupied') return 'occupied'
   if (hkStatus === 'reservation') return 'reserved'
-  if (hkStatus === 'checkout') return 'cleaning'
+  if (hkStatus === 'checkout') return 'available'
   return null
 }

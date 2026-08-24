@@ -7,11 +7,30 @@ import {
 } from "@/lib/utils/booking-in-house-dates";
 import { syncHousekeepingStatusesForOrganization } from "@/lib/rooms/sync-housekeeping-status";
 
+/** Folios that physically occupy a room. Reservations do not hold inventory until Check in. */
 export const OCCUPYING_BOOKING_STATUSES = [
   "checked_in",
   "confirmed",
-  "reserved",
 ] as const;
+
+export function isPhysicalInHouseStatus(
+  status: string | null | undefined,
+): boolean {
+  const st = String(status || "")
+    .toLowerCase()
+    .replace(/-/g, "_");
+  return st === "checked_in" || st === "confirmed";
+}
+
+/** Room revenue / occupancy for a hotel night — not reserved (unarrived) guests. */
+export function countsOnDailyBookForNight(
+  status: string | null | undefined,
+): boolean {
+  const st = String(status || "")
+    .toLowerCase()
+    .replace(/-/g, "_");
+  return st === "checked_in" || st === "confirmed" || st === "checked_out";
+}
 
 export type OccupyingBookingRow = {
   id: string;
@@ -55,7 +74,7 @@ export function pickOccupyingBooking<T extends OccupyingBookingRow>(
   return open[0] ?? null;
 }
 
-/** Occupied = in-house today (or checked in). Reserved = future arrival only. */
+/** Occupied = physically in-house. Future confirmed arrivals stay reserved on the folio only. */
 export function roomStatusFromOccupyingBooking(
   occupying: Pick<OccupyingBookingRow, "status" | "check_in">,
 ): "occupied" | "reserved" {
@@ -76,11 +95,17 @@ export function deriveRoomStatusFromOccupying(
   const hk = normStatus(housekeepingStatus);
   if (cur === "maintenance" || cur === "out_of_order") return null;
   if (hk === "out_of_order") return null;
-  if (hk === "checkout" || cur === "cleaning") return null;
 
   if (!occupying) {
-    if (cur === "occupied" || cur === "reserved") return "available";
-    if (cur === "cleaning") return "available";
+    if (
+      cur === "occupied" ||
+      cur === "reserved" ||
+      cur === "cleaning" ||
+      hk === "checkout" ||
+      hk === "reservation"
+    ) {
+      return "available";
+    }
     return null;
   }
 
@@ -205,12 +230,16 @@ export async function reconcileRoomStatusesForOrganization(
   return result;
 }
 
-/** Room row status after creating/updating a booking. */
+/** Room row status after creating/updating a booking. Reservations stay sellable. */
 export function roomStatusForBookingStatus(
   bookingStatus: string,
   checkIn?: string | null,
-): "occupied" | "reserved" {
-  if (bookingStatus === "checked_in") return "occupied";
+): "occupied" | "reserved" | "available" {
+  const st = String(bookingStatus || "")
+    .toLowerCase()
+    .replace(/-/g, "_");
+  if (st === "reserved") return "available";
+  if (st === "checked_in") return "occupied";
   const today = todayYmdHotel();
   const ci = checkIn ? bookingYmdHotel(checkIn) : "";
   if (ci && ci > today) return "reserved";

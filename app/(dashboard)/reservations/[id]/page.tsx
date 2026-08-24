@@ -18,6 +18,8 @@ import {
   hideChargeExtendInBookingsTable,
 } from '@/lib/utils/booking-checkout-ui'
 import { roomHousekeepingPatchForInHouse } from '@/lib/rooms/sync-housekeeping-status'
+import { stayDatesFromActualArrival } from '@/lib/booking/edit-booking-patch'
+import { todayYmdHotel } from '@/lib/utils/booking-in-house-dates'
 import { fetchOrgCheckoutTime } from '@/lib/utils/org-checkout-policy'
 import { RescheduleStayModal } from '@/components/bookings/reschedule-stay-modal'
 import { canRequestRescheduleStay, canFrontDeskApplyRescheduleStay, canRescheduleStayBooking } from '@/lib/booking/can-reschedule-stay'
@@ -212,9 +214,20 @@ export default function ReservationDetailPage({
                 setActionLoading(true)
                 try {
                   const supabase = createClient()
+                  const stay = stayDatesFromActualArrival({
+                    originalCheckIn: reservation.check_in,
+                    originalCheckOut: reservation.check_out,
+                    actualArrivalYmd: todayYmdHotel(),
+                    numberOfNights: reservation.number_of_nights,
+                  })
                   const { error } = await supabase
                     .from('bookings')
-                    .update({ status: 'checked_in' })
+                    .update({
+                      status: 'checked_in',
+                      check_in: stay.check_in,
+                      check_out: stay.check_out,
+                      number_of_nights: stay.number_of_nights,
+                    })
                     .eq('id', rid)
                   if (error) throw error
                   if (reservation?.rooms?.id) {

@@ -12,7 +12,6 @@ const PMS_STATUSES_BLOCKING_BOOKINGS = new Set([
   'maintenance',
   'out_of_order',
   'occupied',
-  'reserved',
 ])
 
 export type RoomBookabilityInput = {
@@ -29,8 +28,9 @@ function normStatus(s: string | null | undefined): string {
 
 /**
  * Whether a room may appear in booking / reservation pickers.
- * Blocked by PMS status (maintenance, OOO, occupied, reserved) or HK floor status
- * (OOO, O, Compl, L/in, R/s, C/O, S/O).
+ * Blocked by PMS status (maintenance, OOO, occupied) or HK floor status
+ * (OOO, occupied, complimentary, long stay, sleep-out).
+ * Reservations and post-checkout rooms stay bookable until a guest is checked in.
  */
 export function isRoomAssignable(
   status: string | null | undefined,
@@ -56,7 +56,6 @@ export function roomNotBookableReason(room: RoomBookabilityInput): string | null
   if (s === 'maintenance') return 'Room is under maintenance and cannot be booked.'
   if (s === 'out_of_order') return 'Room is out of order and cannot be booked.'
   if (s === 'occupied') return 'Room is occupied and cannot be booked.'
-  if (s === 'reserved') return 'Room is reserved and cannot be booked.'
   return 'Room is not available for booking.'
 }
 

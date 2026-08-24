@@ -373,7 +373,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
         .eq('organization_id', tenantId)
         .order('room_number')
         .limit(BOOKING_MODAL_ROOMS_LIMIT),
-      supabase.from('bookings').select('room_id, check_in, check_out').eq('organization_id', tenantId).in('status', ['confirmed', 'reserved', 'checked_in']).limit(BOOKING_MODAL_ROOMS_LIMIT),
+      supabase.from('bookings').select('room_id, check_in, check_out').eq('organization_id', tenantId).in('status', ['confirmed', 'checked_in']).limit(BOOKING_MODAL_ROOMS_LIMIT),
     ])
     setAllCounterpartyOrgs(counterpartyOrgs)
     setAllGuests(guestData || [])
@@ -1172,7 +1172,6 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
       const bulkGroupId = createBulkGroupId()
       /** Bulk booking = same-day check-in; bulk reservation = future arrival, stays reserved. */
       const bulkInitialStatus = wording === 'booking' ? 'checked_in' : 'reserved'
-      const bulkRoomStatus = bulkInitialStatus === 'checked_in' ? 'occupied' : 'reserved'
       let runningCashbackBalance = bulkCashbackEligible ? guestCashbackBalance : 0
 
       const postBulkPaymentLines = async (args: {
@@ -1438,14 +1437,16 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
             .single()
           if (insertErr) throw insertErr
 
-          await supabase
-            .from('rooms')
-            .update({
-              status: bulkRoomStatus,
-              updated_by: currentUserId,
-              updated_at: new Date().toISOString(),
-            })
-            .eq('id', room.id)
+          if (bulkInitialStatus === 'checked_in') {
+            await supabase
+              .from('rooms')
+              .update({
+                status: 'occupied',
+                updated_by: currentUserId,
+                updated_at: new Date().toISOString(),
+              })
+              .eq('id', room.id)
+          }
 
           const { error: fcErr } = await insertFolioCharges(supabase, [
             {
@@ -1554,7 +1555,9 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
             }]).select().single()
             if (be) throw be
 
-            await supabase.from('rooms').update({ status: bulkRoomStatus, updated_by: currentUserId, updated_at: new Date().toISOString() }).eq('id', room.id)
+            if (bulkInitialStatus === 'checked_in') {
+              await supabase.from('rooms').update({ status: 'occupied', updated_by: currentUserId, updated_at: new Date().toISOString() }).eq('id', room.id)
+            }
             const { error: fcErr } = await insertFolioCharges(supabase, [{
               booking_id: booking.id,
               organization_id: orgId,

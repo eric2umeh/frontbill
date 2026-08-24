@@ -129,7 +129,7 @@ export async function GET(request: Request) {
         let guestCount = 0;
         for (const b of bookings || []) {
           const st = String((b as any).status || "").toLowerCase();
-          if (!["checked_in", "confirmed", "reserved", "checked_out"].includes(st)) {
+          if (!["checked_in", "confirmed", "checked_out"].includes(st)) {
             continue;
           }
           const cin = String((b as any).check_in || "").slice(0, 10);

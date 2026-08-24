@@ -1,4 +1,5 @@
 import { isOccupyingHotelNight } from '@/lib/utils/booking-in-house-dates'
+import { countsOnDailyBookForNight } from '@/lib/rooms/room-occupancy'
 
 type BookingNightRow = {
   check_in: string
@@ -17,7 +18,8 @@ export function sumRoomRevenueForHotelNight(
   for (const b of bookings) {
     const st = String(b.status || '').toLowerCase()
     const fs = String(b.folio_status || 'active').toLowerCase()
-    if (st === 'checked_out' || st === 'cancelled' || fs === 'checked_out') continue
+    if (st === 'cancelled' || fs === 'cancelled') continue
+    if (!countsOnDailyBookForNight(b.status)) continue
     if (!isOccupyingHotelNight(b.check_in, b.check_out, ymd)) continue
     total += Number(b.rate_per_night) || 0
   }
@@ -33,7 +35,8 @@ export function countInHouseGuestsForNight(
   for (const b of bookings) {
     const st = String(b.status || '').toLowerCase()
     const fs = String(b.folio_status || 'active').toLowerCase()
-    if (st === 'checked_out' || st === 'cancelled' || fs === 'checked_out') continue
+    if (st === 'cancelled' || fs === 'cancelled') continue
+    if (!countsOnDailyBookForNight(b.status)) continue
     if (isOccupyingHotelNight(b.check_in, b.check_out, ymd)) count += 1
   }
   return count
