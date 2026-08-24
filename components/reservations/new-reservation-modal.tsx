@@ -54,8 +54,6 @@ import {
 } from '@/lib/cashback/cashback-client'
 import { paymentMethodEarnsCashback } from '@/lib/cashback/cashback-config'
 import { isGuestBookingCashbackEligible } from '@/lib/cashback/cashback-eligibility'
-import { roomHousekeepingPatchForInHouse } from '@/lib/rooms/sync-housekeeping-status'
-import { roomStatusForBookingStatus } from '@/lib/rooms/room-occupancy'
 import { buildBackdateDedupeKey } from '@/lib/backdate/dedupe-key'
 import { isStayCheckInConsideredBackdated, minSelectableCheckInYmdHotel, isLateNightCheckInGraceWindow, lateCheckInGraceWindowLabel, defaultStayCheckInYmdHotel, parseHotelYmdToLocalDate } from '@/lib/hotel-date'
 import { useNightAuditClosedDates } from '@/hooks/use-night-audit-closed-dates'
@@ -200,7 +198,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
       const [{ data: guestData }, { data: roomData }, { data: bookingData }, counterpartyOrgs] = await Promise.all([
         supabase.from('guests').select('id, name, phone, email, address').eq('organization_id', tenantId).order('name'),
         supabase.from('rooms').select('id, room_number, room_type, price_per_night, status, housekeeping_status').eq('organization_id', tenantId).order('room_number').limit(BOOKING_MODAL_ROOMS_LIMIT),
-        supabase.from('bookings').select('room_id, check_in, check_out').eq('organization_id', tenantId).in('status', ['confirmed', 'reserved', 'checked_in']).limit(BOOKING_MODAL_ROOMS_LIMIT),
+        supabase.from('bookings').select('room_id, check_in, check_out').eq('organization_id', tenantId).in('status', ['confirmed', 'checked_in']).limit(BOOKING_MODAL_ROOMS_LIMIT),
         loadCounterpartyOrganizations(supabase, tenantId),
       ])
       setAllCounterpartyOrgs(counterpartyOrgs)
@@ -654,11 +652,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
         .select().single()
       if (be) throw be
 
-      await supabase.from('rooms').update({
-        ...roomHousekeepingPatchForInHouse('reserved'),
-        status: roomStatusForBookingStatus('reserved', toLocalDateStr(checkInDate)),
-        updated_by: currentUserId,
-      }).eq('id', selectedRoom.id)
+      // Reservation does not occupy the room until front desk checks the guest in.
 
       // Insert folio charge (this is what the Transactions page reads from)
       const { error: fcErr } = await insertFolioCharges(supabase, [{
