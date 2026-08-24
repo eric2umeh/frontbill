@@ -26,6 +26,7 @@ import { isNoShowEligibleStatus } from '@/lib/reservations/mark-no-show'
 import { MarkNoShowDialog } from '@/components/reservations/mark-no-show-dialog'
 import { networkFetchHint, withFetchRetry } from '@/lib/utils/fetch-retry'
 import { toast } from 'sonner'
+import { reconcileRoomStatusesClient } from '@/lib/rooms/reconcile-room-status-client'
 import { useReservationsEventsHeader } from '@/components/reservations/reservations-events-header'
 import { formatShortStayDates, MobileTableSubdetail } from '@/lib/utils/table-mobile'
 import { calendarPickerYmd } from '@/lib/utils/booking-in-house-dates'
@@ -69,6 +70,7 @@ interface Reservation {
   room_id?: string | null
   check_in: string
   check_out: string
+  number_of_nights?: number | null
   status: string
   payment_status: string
   payment_method?: string
@@ -210,6 +212,7 @@ export default function ReservationsPage() {
 
     try {
       startFetch()
+      void reconcileRoomStatusesClient()
 
       const data = await Promise.race([
         withFetchRetry(async () => {
@@ -217,7 +220,7 @@ export default function ReservationsPage() {
             .from('bookings')
             .select(
               `
-          id, organization_id, folio_id, guest_id, room_id, check_in, check_out, status, payment_status,
+          id, organization_id, folio_id, guest_id, room_id, check_in, check_out, number_of_nights, status, payment_status,
           rate_per_night, total_amount, balance, deposit, notes, created_by, created_at,
           guests(name, phone),
           rooms(id, room_number, room_type)
@@ -381,6 +384,7 @@ export default function ReservationsPage() {
       folio_id: res.folio_id,
       check_in: res.check_in,
       check_out: res.check_out,
+      number_of_nights: res.number_of_nights,
       guest_id: res.guest_id,
       room_id: res.room_id,
       rate_per_night: res.rate_per_night,
