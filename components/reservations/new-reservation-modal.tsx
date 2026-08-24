@@ -95,6 +95,7 @@ interface NewReservationModalProps {
 export function NewReservationModal({ open, onClose, onSuccess }: NewReservationModalProps) {
   const { userId: authUserId, role: authRole, organizationId: authTenantOrgId } = useAuth()
   const [loading, setLoading] = useState(false)
+  const [roomsInventoryLoading, setRoomsInventoryLoading] = useState(false)
   const [orgId, setOrgId] = useState('')
   const [currentUserId, setCurrentUserId] = useState('')
   const [currentUserRole, setCurrentUserRole] = useState('')
@@ -166,7 +167,10 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
 
   useEffect(() => {
     if (open) {
-      loadData()
+      setRoomsInventoryLoading(true)
+      setRooms([])
+      setAllBookings([])
+      void loadData()
       // Set default dates: today for check-in, tomorrow for check-out
       const todayDate = today()
       setCheckInDate(todayDate)
@@ -175,6 +179,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
     } else {
       // Reset loading state when modal closes
       setLoading(false)
+      setRoomsInventoryLoading(false)
       resetForm()
     }
   }, [open])
@@ -184,29 +189,33 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
       const supabase = createClient()
       const tenantId = authTenantOrgId?.trim()
       const uid = authUserId?.trim()
-      if (!tenantId || !uid) return
+      if (!tenantId || !uid) {
+        setRoomsInventoryLoading(false)
+        return
+      }
 
       setCurrentUserId(uid)
       setOrgId(tenantId)
       setCurrentUserRole(authRole || '')
-
-      await syncLedgerOrgCounterpartiesToOrganizationsTable(supabase, {
-        hotelTenantOrganizationId: tenantId,
-        createdByUserId: uid,
-      })
 
       const [{ data: guestData }, { data: roomData }, { data: bookingData }, counterpartyOrgs] = await Promise.all([
         supabase.from('guests').select('id, name, phone, email, address').eq('organization_id', tenantId).order('name'),
         supabase.from('rooms').select('id, room_number, room_type, price_per_night, status, housekeeping_status').eq('organization_id', tenantId).order('room_number').limit(BOOKING_MODAL_ROOMS_LIMIT),
         supabase.from('bookings').select('room_id, check_in, check_out').eq('organization_id', tenantId).in('status', ['confirmed', 'checked_in']).limit(BOOKING_MODAL_ROOMS_LIMIT),
         loadCounterpartyOrganizations(supabase, tenantId),
+        syncLedgerOrgCounterpartiesToOrganizationsTable(supabase, {
+          hotelTenantOrganizationId: tenantId,
+          createdByUserId: uid,
+        }),
       ])
       setAllCounterpartyOrgs(counterpartyOrgs)
       setGuests(guestData || [])
       setRooms(normalizeRoomsForBookingPickers(roomData) as any[])
       setAllBookings(bookingData || [])
+      setRoomsInventoryLoading(false)
     } catch {
       toast.error('Failed to load data')
+      setRoomsInventoryLoading(false)
     } finally {
       setLoading(false)
     }
@@ -919,16 +928,27 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
               <Label>Room *</Label>
               <Select
                 value={selectedRoom?.id ?? ''}
+                disabled={roomsInventoryLoading}
                 onValueChange={(id) => {
                   const r = availableRoomOptions.find(x => x.id === id)
                   if (r) { setSelectedRoom(r); setSelectedRoomType(r.room_type); setPricePerNight(r.price_per_night) }
                 }}
               >
                 <SelectTrigger>
-                  <SelectValue placeholder={availableRoomOptions.length === 0 ? 'No rooms available for selected dates' : 'Select room type and number'} />
+                  <SelectValue
+                    placeholder={
+                      roomsInventoryLoading
+                        ? 'Loading rooms…'
+                        : availableRoomOptions.length === 0
+                          ? 'No rooms available for selected dates'
+                          : 'Select room type and number'
+                    }
+                  />
                 </SelectTrigger>
                 <SelectContent>
-                  {availableRoomOptions.length === 0 ? (
+                  {roomsInventoryLoading ? (
+                    <SelectItem value="__loading__" disabled>Loading rooms…</SelectItem>
+                  ) : availableRoomOptions.length === 0 ? (
                     <SelectItem value="__none__" disabled>No rooms available</SelectItem>
                   ) : (
                     availableRoomOptions.map(r => (

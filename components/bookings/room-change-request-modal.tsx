@@ -25,6 +25,11 @@ import {
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
+import { useAuth } from "@/lib/auth-context";
+import {
+  canApproveRoomChange,
+  canFrontDeskApplyRoomChange,
+} from "@/lib/booking/can-room-change";
 
 type RoomRow = {
   id: string;
@@ -58,6 +63,9 @@ export function RoomChangeRequestModal({
   checkIn,
   checkOut,
 }: Props) {
+  const { role } = useAuth();
+  const canApplyNow =
+    canFrontDeskApplyRoomChange(role) || canApproveRoomChange(role);
   const [rooms, setRooms] = useState<RoomRow[]>([]);
   const [loadingRooms, setLoadingRooms] = useState(false);
   const [toRoomId, setToRoomId] = useState("");
@@ -112,7 +120,7 @@ export function RoomChangeRequestModal({
     return rooms;
   }, [rooms]);
 
-  const handleSubmit = async () => {
+  const submit = async (applyImmediately: boolean) => {
     if (!userId) {
       toast.error("You must be signed in");
       return;
@@ -136,6 +144,7 @@ export function RoomChangeRequestModal({
           booking_id: bookingId,
           to_room_id: toRoomId,
           reason: reason.trim(),
+          apply_immediately: applyImmediately,
         }),
       });
       const json = await res.json().catch(() => ({}));
@@ -145,11 +154,15 @@ export function RoomChangeRequestModal({
         );
         return;
       }
-      toast.success("Room change request sent for approval");
-      const { dispatchNightAuditPendingChanged } = await import(
-        "@/lib/utils/dispatch-night-audit-pending-changed"
-      );
-      dispatchNightAuditPendingChanged();
+      if (json.applied) {
+        toast.success("Guest moved to the new room");
+      } else {
+        toast.success("Room change request sent for approval");
+        const { dispatchNightAuditPendingChanged } = await import(
+          "@/lib/utils/dispatch-night-audit-pending-changed"
+        );
+        dispatchNightAuditPendingChanged();
+      }
       onSuccess();
       onClose();
     } catch {
@@ -163,16 +176,18 @@ export function RoomChangeRequestModal({
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className={cn(dialogScrollableContentClass, "sm:max-w-md")}>
         <DialogScrollableHeader>
-          <DialogTitle>Request room change</DialogTitle>
+          <DialogTitle>
+            {canApplyNow ? "Change room" : "Request room change"}
+          </DialogTitle>
           <DialogDescription>
             Current room assignment:{" "}
             <span className="font-medium text-foreground">
               {currentRoomLabel}
             </span>
-            . A Superadmin, Administrator, or Manager must approve before the
-            booking&apos;s room is updated. You can submit this before or after
-            the guest is checked in (for example wrong room type or
-            maintenance). Dates and rates stay the same.
+            .{" "}
+            {canApplyNow
+              ? "You can move the guest now, or optionally send the change for Night Audit approval. Dates and rates stay the same."
+              : "A Superadmin, Administrator, or Manager must approve before the booking’s room is updated. Dates and rates stay the same."}
           </DialogDescription>
         </DialogScrollableHeader>
         <DialogScrollableBody className="space-y-4">
@@ -212,7 +227,9 @@ export function RoomChangeRequestModal({
             )}
           </div>
           <div className="space-y-2">
-            <Label htmlFor="room_change_reason">Reason for approvers</Label>
+            <Label htmlFor="room_change_reason">
+              {canApplyNow ? "Reason" : "Reason for approvers"}
+            </Label>
             <Textarea
               id="room_change_reason"
               placeholder="e.g. AC faulty — guest agreed to move to another room"
@@ -222,7 +239,7 @@ export function RoomChangeRequestModal({
             />
           </div>
         </DialogScrollableBody>
-        <DialogScrollableFooter className="gap-2 sm:gap-0">
+        <DialogScrollableFooter className="flex-col gap-2 sm:flex-row sm:justify-end">
           <Button
             type="button"
             variant="outline"
@@ -231,20 +248,42 @@ export function RoomChangeRequestModal({
           >
             Cancel
           </Button>
-          <Button
-            type="button"
-            onClick={() => void handleSubmit()}
-            disabled={submitting || loadingRooms}
-          >
-            {submitting ? (
-              <>
+          {canApplyNow ? (
+            <>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => void submit(false)}
+                disabled={submitting || loadingRooms}
+              >
+                {submitting ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : null}
+                Send for approval
+              </Button>
+              <Button
+                type="button"
+                onClick={() => void submit(true)}
+                disabled={submitting || loadingRooms}
+              >
+                {submitting ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : null}
+                Change room now
+              </Button>
+            </>
+          ) : (
+            <Button
+              type="button"
+              onClick={() => void submit(false)}
+              disabled={submitting || loadingRooms}
+            >
+              {submitting ? (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Submitting…
-              </>
-            ) : (
-              "Submit request"
-            )}
-          </Button>
+              ) : null}
+              Submit for approval
+            </Button>
+          )}
         </DialogScrollableFooter>
       </DialogContent>
     </Dialog>

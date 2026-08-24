@@ -14,12 +14,16 @@ import {
 } from '@/lib/permissions'
 import { playNotificationBeep } from '@/lib/utils/play-notification-beep'
 
-const SEEN_KEY = 'frontbill_supply_pending_seen'
+const DISMISSED_KEY_PREFIX = 'frontbill_supply_pending_dismissed'
 
-function loadSeen(): Set<string> {
+function storageKey(orgId: string | null | undefined, userId: string | null | undefined) {
+  return `${DISMISSED_KEY_PREFIX}:${orgId || 'org'}:${userId || 'user'}`
+}
+
+function loadDismissed(key: string): Set<string> {
   if (typeof window === 'undefined') return new Set()
   try {
-    const raw = sessionStorage.getItem(SEEN_KEY)
+    const raw = localStorage.getItem(key)
     const list = raw ? (JSON.parse(raw) as string[]) : []
     return new Set(Array.isArray(list) ? list : [])
   } catch {
@@ -27,34 +31,81 @@ function loadSeen(): Set<string> {
   }
 }
 
-function persistSeen(seen: Set<string>) {
+function persistDismissed(key: string, dismissed: Set<string>) {
   try {
-    sessionStorage.setItem(SEEN_KEY, JSON.stringify([...seen].slice(-80)))
+    localStorage.setItem(key, JSON.stringify([...dismissed].slice(-200)))
   } catch {
     /* ignore */
   }
 }
 
+function poAlertKey(po: { id: string; status: string }) {
+  return `${po.id}:${po.status}`
+}
+
 /**
  * Toast + beep when org PO / retirement queues gain new items (cross-user on staging/prod).
+ * Dismissed / clicked / auto-closed toasts are stored in localStorage so they do not return.
  */
 export function SupplyPendingAlerts() {
-  const { role } = useAuth()
+  const { role, organizationId, userId } = useAuth()
   const { purchaseOrders } = useSupplyChain()
   const router = useRouter()
-  const seenRef = useRef<Set<string>>(loadSeen())
-  const seededRef = useRef(false)
+  const storeKey = storageKey(organizationId, userId)
+  const dismissedRef = useRef<Set<string>>(new Set())
+  const storeKeyRef = useRef(storeKey)
+  const prevFingerprintRef = useRef<string | null>(null)
+  const mountAtRef = useRef(Date.now())
   const roleKey = canonicalRoleKey(role) ?? ''
 
   useEffect(() => {
-    if (!seededRef.current && purchaseOrders.length >= 0) {
+    if (storeKeyRef.current !== storeKey) {
+      storeKeyRef.current = storeKey
+      dismissedRef.current = loadDismissed(storeKey)
+      prevFingerprintRef.current = null
+      mountAtRef.current = Date.now()
+    } else if (dismissedRef.current.size === 0) {
+      dismissedRef.current = loadDismissed(storeKey)
+    }
+  }, [storeKey])
+
+  useEffect(() => {
+    const fingerprint = purchaseOrders
+      .map((po) => poAlertKey(po))
+      .sort()
+      .join('|')
+
+    const markDismissed = (key: string) => {
+      dismissedRef.current.add(key)
+      persistDismissed(storeKey, dismissedRef.current)
+    }
+
+    const silentBaseline = () => {
       for (const po of purchaseOrders) {
-        seenRef.current.add(`${po.id}:${po.status}`)
+        dismissedRef.current.add(poAlertKey(po))
       }
-      seededRef.current = true
-      persistSeen(seenRef.current)
+      persistDismissed(storeKey, dismissedRef.current)
+      prevFingerprintRef.current = fingerprint
+    }
+
+    // First observation this mount — never toast existing backlog.
+    if (prevFingerprintRef.current === null) {
+      silentBaseline()
       return
     }
+
+    // Empty → loaded shortly after open is hydration, not a "new" event.
+    if (
+      prevFingerprintRef.current === '' &&
+      fingerprint !== '' &&
+      Date.now() - mountAtRef.current < 8_000
+    ) {
+      silentBaseline()
+      return
+    }
+
+    if (prevFingerprintRef.current === fingerprint) return
+    prevFingerprintRef.current = fingerprint
 
     const canPoAccountant = canSupplyPoAccountantReview(role)
     const canPoManager = canSupplyPoManagerReview(role)
@@ -62,36 +113,46 @@ export function SupplyPendingAlerts() {
     const admin = canAdminTestApproveSupplyPo(role)
 
     for (const po of purchaseOrders) {
-      const key = `${po.id}:${po.status}`
-      if (seenRef.current.has(key)) continue
+      const key = poAlertKey(po)
+      if (dismissedRef.current.has(key)) continue
 
-      if (
-        po.status === 'pending_accountant' &&
-        (canPoAccountant || admin)
-      ) {
-        seenRef.current.add(key)
+      const dismissForever = () => markDismissed(key)
+
+      if (po.status === 'pending_accountant' && (canPoAccountant || admin)) {
+        markDismissed(key)
         playNotificationBeep()
         toast.info(`New purchase order — ${po.poNumber}`, {
+          id: `supply-alert-${key}`,
           description: `${po.createdByName} sent a PO for accountant review.`,
+          duration: 12_000,
+          onDismiss: dismissForever,
+          onAutoClose: dismissForever,
           action: {
             label: 'Review',
-            onClick: () => router.push('/supply/purchase-orders?tab=approvals'),
+            onClick: () => {
+              dismissForever()
+              router.push('/supply/purchase-orders?tab=approvals')
+            },
           },
         })
         continue
       }
 
-      if (
-        po.status === 'pending_manager' &&
-        (canPoManager || admin)
-      ) {
-        seenRef.current.add(key)
+      if (po.status === 'pending_manager' && (canPoManager || admin)) {
+        markDismissed(key)
         playNotificationBeep()
         toast.info(`PO awaiting manager — ${po.poNumber}`, {
+          id: `supply-alert-${key}`,
           description: 'Accountant approved — manager review needed.',
+          duration: 12_000,
+          onDismiss: dismissForever,
+          onAutoClose: dismissForever,
           action: {
             label: 'Review',
-            onClick: () => router.push('/supply/purchase-orders?tab=approvals'),
+            onClick: () => {
+              dismissForever()
+              router.push('/supply/purchase-orders?tab=approvals')
+            },
           },
         })
         continue
@@ -101,13 +162,20 @@ export function SupplyPendingAlerts() {
         po.status === 'retired' &&
         (canPoAccountant || canPoManager || admin || roleKey === 'accountant')
       ) {
-        seenRef.current.add(key)
+        markDismissed(key)
         playNotificationBeep()
         toast.info(`PO retired — ${po.poNumber}`, {
+          id: `supply-alert-${key}`,
           description: `${po.retirement?.submittedBy ?? 'Store'} retired this PO. Central store stock was updated.`,
+          duration: 12_000,
+          onDismiss: dismissForever,
+          onAutoClose: dismissForever,
           action: {
             label: 'View history',
-            onClick: () => router.push('/supply/purchasing?tab=history'),
+            onClick: () => {
+              dismissForever()
+              router.push('/supply/purchasing?tab=history')
+            },
           },
         })
         continue
@@ -117,13 +185,20 @@ export function SupplyPendingAlerts() {
         po.status === 'retirement_pending_accountant' &&
         (canRetirement || admin)
       ) {
-        seenRef.current.add(key)
+        markDismissed(key)
         playNotificationBeep()
         toast.info(`Retirement submitted — ${po.poNumber}`, {
+          id: `supply-alert-${key}`,
           description: `${po.retirement?.submittedBy ?? 'Purchaser'} submitted market retirement.`,
+          duration: 12_000,
+          onDismiss: dismissForever,
+          onAutoClose: dismissForever,
           action: {
             label: 'Review',
-            onClick: () => router.push('/supply/purchasing?tab=retirement'),
+            onClick: () => {
+              dismissForever()
+              router.push('/supply/purchasing?tab=retirement')
+            },
           },
         })
         continue
@@ -133,20 +208,25 @@ export function SupplyPendingAlerts() {
         po.status === 'retirement_rejected' &&
         (roleKey === 'purchaser' || roleKey === 'admin' || roleKey === 'superadmin')
       ) {
-        seenRef.current.add(key)
+        markDismissed(key)
         playNotificationBeep()
         toast.warning(`Retirement rejected — ${po.poNumber}`, {
+          id: `supply-alert-${key}`,
           description: po.retirementComment || 'Edit and resubmit from Retirement.',
+          duration: 12_000,
+          onDismiss: dismissForever,
+          onAutoClose: dismissForever,
           action: {
             label: 'Open Retirement',
-            onClick: () => router.push('/supply/purchasing'),
+            onClick: () => {
+              dismissForever()
+              router.push('/supply/purchasing')
+            },
           },
         })
       }
     }
-
-    persistSeen(seenRef.current)
-  }, [purchaseOrders, roleKey, router])
+  }, [purchaseOrders, role, roleKey, router, storeKey])
 
   return null
 }

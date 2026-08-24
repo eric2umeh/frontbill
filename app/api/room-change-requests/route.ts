@@ -3,6 +3,8 @@ import { NextResponse } from 'next/server'
 import { canonicalRoleKey, hasPermission } from '@/lib/permissions'
 import { notifyNightAuditRequestCreated } from '@/lib/night-audit/notify-request-created'
 import { roomNotBookableReason } from '@/lib/utils/room-bookability'
+import { roomHousekeepingPatchForInHouse } from '@/lib/rooms/sync-housekeeping-status'
+import { canFrontDeskApplyRoomChange } from '@/lib/booking/can-room-change'
 
 const DECISION = ['approved', 'rejected'] as const
 
@@ -90,7 +92,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const body = await request.json()
-    const { caller_id, booking_id, to_room_id, reason } = body
+    const { caller_id, booking_id, to_room_id, reason, apply_immediately } = body
 
     if (!caller_id || !booking_id || !to_room_id || !String(reason || '').trim()) {
       return NextResponse.json(
@@ -115,6 +117,10 @@ export async function POST(request: Request) {
     }
 
     const orgId = callerProfile.organization_id
+    const applyNow =
+      Boolean(apply_immediately) &&
+      (canFrontDeskApplyRoomChange(callerProfile.role) ||
+        hasPermission(callerProfile.role, 'room_change:approve'))
 
     const { data: booking, error: bookingErr } = await admin
       .from('bookings')
@@ -147,19 +153,21 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Select a different room than the current one' }, { status: 400 })
     }
 
-    const { data: pendingDup } = await admin
-      .from('room_change_requests')
-      .select('id')
-      .eq('organization_id', orgId)
-      .eq('booking_id', booking_id)
-      .eq('status', 'pending')
-      .maybeSingle()
+    if (!applyNow) {
+      const { data: pendingDup } = await admin
+        .from('room_change_requests')
+        .select('id')
+        .eq('organization_id', orgId)
+        .eq('booking_id', booking_id)
+        .eq('status', 'pending')
+        .maybeSingle()
 
-    if (pendingDup?.id) {
-      return NextResponse.json(
-        { error: 'A room change request is already pending for this booking' },
-        { status: 409 },
-      )
+      if (pendingDup?.id) {
+        return NextResponse.json(
+          { error: 'A room change request is already pending for this booking' },
+          { status: 409 },
+        )
+      }
     }
 
     const { data: fromRoom, error: fromErr } = await admin
@@ -207,7 +215,7 @@ export async function POST(request: Request) {
       .eq('organization_id', orgId)
       .eq('room_id', to_room_id)
       .neq('id', booking_id)
-      .in('status', ['reserved', 'confirmed', 'checked_in'])
+      .in('status', ['confirmed', 'checked_in'])
 
     for (const ob of conflicts || []) {
       const oIn = String((ob as any).check_in || '').slice(0, 10)
@@ -220,6 +228,96 @@ export async function POST(request: Request) {
       }
     }
 
+    const fromLabel = String(fromRoom.room_number || fromRoomId)
+    const toLabel = String(toRoom.room_number || to_room_id)
+    const reasonText = String(reason).trim()
+    const nowIso = new Date().toISOString()
+
+    if (applyNow) {
+      // Clear any leftover pending request so immediate move is not blocked later
+      await admin
+        .from('room_change_requests')
+        .update({
+          status: 'rejected',
+          approved_by: caller_id,
+          decided_at: nowIso,
+          decision_note: 'Superseded by immediate room change',
+        })
+        .eq('organization_id', orgId)
+        .eq('booking_id', booking_id)
+        .eq('status', 'pending')
+
+      const { error: bookUpErr } = await admin
+        .from('bookings')
+        .update({ room_id: to_room_id })
+        .eq('id', booking_id)
+        .eq('room_id', fromRoomId)
+
+      if (bookUpErr) {
+        return NextResponse.json({ error: bookUpErr.message }, { status: 500 })
+      }
+
+      // Reserved stays do not occupy inventory; only in-house folios mark rooms occupied.
+      if (bookingStatus === 'reserved') {
+        await admin.from('rooms').update({ status: 'available', updated_at: nowIso }).eq('id', fromRoomId)
+        await admin.from('rooms').update({ status: 'available', updated_at: nowIso }).eq('id', to_room_id)
+      } else {
+        await admin.from('rooms').update({ status: 'available', updated_at: nowIso }).eq('id', fromRoomId)
+        await admin
+          .from('rooms')
+          .update({
+            ...roomHousekeepingPatchForInHouse(bookingStatus, nowIso),
+            updated_at: nowIso,
+          })
+          .eq('id', to_room_id)
+      }
+
+      const noteDescription = `Room change (applied): ${fromLabel} → ${toLabel}. Reason: ${reasonText.slice(0, 500)}`
+      const { error: folioErr } = await admin.from('folio_charges').insert([
+        {
+          booking_id,
+          description: noteDescription,
+          amount: 0,
+          charge_type: 'folio_note',
+          payment_status: 'paid',
+          created_by: caller_id,
+        },
+      ])
+      if (folioErr) {
+        console.error('[room-change-requests] folio_note insert failed', folioErr)
+      }
+
+      // Audit trail as auto-approved (no pending Night Audit wait)
+      const { data: inserted, error: insErr } = await admin
+        .from('room_change_requests')
+        .insert([
+          {
+            organization_id: orgId,
+            booking_id,
+            from_room_id: fromRoomId,
+            to_room_id,
+            from_room_label: fromLabel,
+            to_room_label: toLabel,
+            reason: reasonText,
+            requested_by: caller_id,
+            status: 'approved',
+            approved_by: caller_id,
+            decided_at: nowIso,
+            decision_note: 'Applied immediately by front desk (approval not required)',
+          },
+        ])
+        .select()
+        .single()
+
+      if (insErr) {
+        // Room already moved — do not fail the whole op if history insert fails
+        console.error('[room-change-requests] immediate history insert failed', insErr)
+        return NextResponse.json({ applied: true, booking_id, request: null })
+      }
+
+      return NextResponse.json({ applied: true, request: inserted, booking_id })
+    }
+
     const { data: inserted, error: insErr } = await admin
       .from('room_change_requests')
       .insert([
@@ -228,9 +326,9 @@ export async function POST(request: Request) {
           booking_id,
           from_room_id: fromRoomId,
           to_room_id,
-          from_room_label: String(fromRoom.room_number || fromRoomId),
-          to_room_label: String(toRoom.room_number || to_room_id),
-          reason: String(reason).trim(),
+          from_room_label: fromLabel,
+          to_room_label: toLabel,
+          reason: reasonText,
           requested_by: caller_id,
         },
       ])
@@ -252,15 +350,15 @@ export async function POST(request: Request) {
       callerId: caller_id,
       kind: 'room_change',
       requestId: inserted.id,
-      reason: String(reason).trim(),
+      reason: reasonText,
       detailLines: [
-        { label: 'From room', value: String(fromRoom.room_number || fromRoomId) },
-        { label: 'To room', value: String(toRoom.room_number || to_room_id) },
+        { label: 'From room', value: fromLabel },
+        { label: 'To room', value: toLabel },
         { label: 'Folio', value: String(booking.folio_id || booking_id).slice(0, 32) },
       ],
     })
 
-    return NextResponse.json({ request: inserted })
+    return NextResponse.json({ applied: false, request: inserted })
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 })
   }
@@ -388,7 +486,7 @@ export async function PATCH(request: Request) {
       .eq('organization_id', row.organization_id)
       .eq('room_id', row.to_room_id)
       .neq('id', row.booking_id)
-      .in('status', ['reserved', 'confirmed', 'checked_in'])
+      .in('status', ['confirmed', 'checked_in'])
 
     for (const ob of conflicts || []) {
       const oIn = String((ob as any).check_in || '').slice(0, 10)
@@ -403,7 +501,7 @@ export async function PATCH(request: Request) {
 
     const { error: bookUpErr } = await admin
       .from('bookings')
-      .update({ room_id: row.to_room_id, updated_by: caller_id })
+      .update({ room_id: row.to_room_id })
       .eq('id', row.booking_id)
       .eq('room_id', row.from_room_id)
 
@@ -411,11 +509,24 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: bookUpErr.message }, { status: 500 })
     }
 
-    await admin.from('rooms').update({ status: 'available', updated_at: decidedAt }).eq('id', row.from_room_id)
-    await admin
-      .from('rooms')
-      .update({ status: 'occupied', updated_at: decidedAt })
-      .eq('id', row.to_room_id)
+    const approveBookingStatus = String(booking.status || '')
+      .trim()
+      .toLowerCase()
+      .replace(/[\s-]+/g, '_')
+
+    if (approveBookingStatus === 'reserved') {
+      await admin.from('rooms').update({ status: 'available', updated_at: decidedAt }).eq('id', row.from_room_id)
+      await admin.from('rooms').update({ status: 'available', updated_at: decidedAt }).eq('id', row.to_room_id)
+    } else {
+      await admin.from('rooms').update({ status: 'available', updated_at: decidedAt }).eq('id', row.from_room_id)
+      await admin
+        .from('rooms')
+        .update({
+          ...roomHousekeepingPatchForInHouse(approveBookingStatus, decidedAt),
+          updated_at: decidedAt,
+        })
+        .eq('id', row.to_room_id)
+    }
 
     const noteDescription =
       `Room change (approved): ${row.from_room_label} → ${row.to_room_label}. Reason on request: ${String(row.reason || '').slice(0, 500)}`
