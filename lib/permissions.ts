@@ -165,7 +165,7 @@ export const ALL_PERMISSIONS: {
   { key: "bookings:checkout", label: "Check Out Folios", group: "Bookings" },
   {
     key: "room_change:request",
-    label: "Request guest room change (approval)",
+    label: "Request or apply guest room change",
     group: "Bookings",
   },
   {
