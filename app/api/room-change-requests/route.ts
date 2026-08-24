@@ -249,7 +249,7 @@ export async function POST(request: Request) {
 
       const { error: bookUpErr } = await admin
         .from('bookings')
-        .update({ room_id: to_room_id, updated_by: caller_id, updated_at: nowIso })
+        .update({ room_id: to_room_id })
         .eq('id', booking_id)
         .eq('room_id', fromRoomId)
 
@@ -501,7 +501,7 @@ export async function PATCH(request: Request) {
 
     const { error: bookUpErr } = await admin
       .from('bookings')
-      .update({ room_id: row.to_room_id, updated_by: caller_id })
+      .update({ room_id: row.to_room_id })
       .eq('id', row.booking_id)
       .eq('room_id', row.from_room_id)
 
