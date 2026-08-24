@@ -237,6 +237,7 @@ export default function BookingsPage() {
     if (!organizationId) return;
     const supabase = createClient();
     if (!supabase) return;
+    void reconcileRoomStatusesClient();
     const tz = resolveHotelTimeZone();
     const today = forDate ?? frontOfficeToday;
 
@@ -1039,6 +1040,7 @@ export default function BookingsPage() {
       folio_id: booking.folio_id,
       check_in: booking.check_in,
       check_out: booking.check_out,
+      number_of_nights: booking.number_of_nights,
       guest_id: booking.guest_id,
       room_id: booking.room_id,
       rate_per_night: booking.rate_per_night,
