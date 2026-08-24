@@ -1,7 +1,7 @@
 'use client'
 
 // Cache bust marker: 2025-02-25-final-fix
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import {
   Dialog,
@@ -131,8 +131,8 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
   const [folioExtras, setFolioExtras] = useState<FolioRemarksAttachmentsValue>({ remarks: '', files: [] })
 
   // Room & Payment
-  const [rooms, setRooms] = useState<Room[]>([]) // date-filtered available rooms
-  const [allRooms, setAllRooms] = useState<Room[]>([]) // all non-maintenance rooms
+  const [roomsInventoryLoading, setRoomsInventoryLoading] = useState(false)
+  const [allRooms, setAllRooms] = useState<Room[]>([]) // all bookable rooms
   const [allBookingsForRooms, setAllBookingsForRooms] = useState<any[]>([]) // active bookings for date check
   const [selectedRoomType, setSelectedRoomType] = useState('')
   const [selectedRoom, setSelectedRoom] = useState<Room | null>(null)
@@ -185,9 +185,16 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
   const [newAccountCreating, setNewAccountCreating] = useState(false)
 
   useEffect(() => {
-    if (open) loadData()
-    else {
+    if (open) {
+      setRoomsInventoryLoading(true)
+      setAllRooms([])
+      setAllBookingsForRooms([])
+      setSelectedRoom(null)
+      setSelectedRoomType('')
+      void loadData()
+    } else {
       setLoading(false)
+      setRoomsInventoryLoading(false)
     }
   }, [open])
 
@@ -198,16 +205,13 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
       const uid = userId?.trim()
       if (!orgId || !uid) {
         toast.error('Missing hotel session — sign in again')
+        setRoomsInventoryLoading(false)
         return
       }
 
       setOrganizationId(orgId)
 
-      await syncLedgerOrgCounterpartiesToOrganizationsTable(supabase, {
-        hotelTenantOrganizationId: orgId,
-        createdByUserId: uid,
-      })
-
+      // Fetch rooms/bookings in parallel with ledger sync so the room picker is ready ASAP
       const [
         { data: guestData },
         { data: roomData },
@@ -220,12 +224,17 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
         supabase.from('bookings').select('room_id, check_in, check_out').eq('organization_id', orgId).in('status', ['confirmed', 'checked_in']).limit(BOOKING_MODAL_ROOMS_LIMIT),
         supabase.from('city_ledger_accounts').select('id, account_name, account_type, contact_phone, balance').eq('organization_id', orgId).order('account_name'),
         loadCounterpartyOrganizations(supabase, orgId),
+        syncLedgerOrgCounterpartiesToOrganizationsTable(supabase, {
+          hotelTenantOrganizationId: orgId,
+          createdByUserId: uid,
+        }),
       ])
 
       const sanitizedRooms = normalizeRoomsForBookingPickers(roomData) as unknown as Room[]
       setGuests(guestData || [])
       setAllRooms(sanitizedRooms)
       setAllBookingsForRooms(bookingData || [])
+      setRoomsInventoryLoading(false)
 
       // Individuals: city_ledger_accounts with type individual/guest
       const individualLedger: LedgerAccount[] = (cityLedgerData || [])
@@ -254,6 +263,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
     } catch (err: any) {
       console.error('Error loading booking data:', err)
       toast.error('Failed to load booking data')
+      setRoomsInventoryLoading(false)
     } finally {
       setLoading(false)
     }
@@ -518,41 +528,38 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
     }
   }
 
-  // Format a local date as YYYY-MM-DD without timezone conversion
   const toLocalDateStr = (date: Date) => {
     const y = date.getFullYear()
     const m = String(date.getMonth() + 1).padStart(2, '0')
     const d = String(date.getDate()).padStart(2, '0')
     return `${y}-${m}-${d}`
   }
-  const filterRoomsForDates = useCallback(
-    (ci: Date, co: Date) => {
-      const toStr = (d: Date) => {
-        const y = d.getFullYear(),
-          m = String(d.getMonth() + 1).padStart(2, '0'),
-          dd = String(d.getDate()).padStart(2, '0')
-        return `${y}-${m}-${dd}`
-      }
-      const ciStr = toStr(ci),
-        coStr = toStr(co)
-      const bookedRoomIds = new Set(
-        allBookingsForRooms.filter((b) => b.check_in < coStr && b.check_out > ciStr).map((b) => b.room_id)
-      )
-      setRooms(allRooms.filter((r) => !bookedRoomIds.has(r.id)))
-      setSelectedRoom((prev) => (prev && bookedRoomIds.has(prev.id) ? null : prev))
-      setSelectedRoomType((prev) => {
-        if (!prev) return prev
-        const stillAvail = allRooms.some((r) => r.room_type === prev && !bookedRoomIds.has(r.id))
-        return stillAvail ? prev : ''
-      })
-    },
-    [allRooms, allBookingsForRooms]
-  )
+
+  const availableRoomOptions = useMemo(() => {
+    if (!checkInDate || !checkOutDate) return []
+    const ciStr = toLocalDateStr(checkInDate)
+    const coStr = toLocalDateStr(checkOutDate)
+    const bookedRoomIds = new Set(
+      allBookingsForRooms
+        .filter((b) => b.check_in < coStr && b.check_out > ciStr)
+        .map((b) => b.room_id),
+    )
+    return allRooms.filter(
+      (r) => r.id && r.room_type && r.room_number && !bookedRoomIds.has(r.id),
+    )
+  }, [allRooms, allBookingsForRooms, checkInDate, checkOutDate])
 
   useEffect(() => {
-    if (!open || !checkInDate || !checkOutDate || allRooms.length === 0) return
-    filterRoomsForDates(checkInDate, checkOutDate)
-  }, [open, checkInDate, checkOutDate, allRooms, allBookingsForRooms, filterRoomsForDates])
+    if (!open || roomsInventoryLoading) return
+    setSelectedRoom((prev) => {
+      if (!prev) return prev
+      return availableRoomOptions.some((r) => r.id === prev.id) ? prev : null
+    })
+    setSelectedRoomType((prev) => {
+      if (!prev) return prev
+      return availableRoomOptions.some((r) => r.room_type === prev) ? prev : ''
+    })
+  }, [open, roomsInventoryLoading, availableRoomOptions])
 
   const handleStayDatesChange = (from: Date, to: Date | undefined) => {
     setCheckInDate(from)
@@ -560,7 +567,6 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
       setCheckOutDate(to)
       const n = Math.max(1, differenceInCalendarDays(to, from))
       setNights(n)
-      filterRoomsForDates(from, to)
     } else {
       setCheckOutDate(undefined)
       setNights(0)
@@ -571,22 +577,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
     const n = Math.max(1, value || 1)
     setNights(n)
     if (checkInDate) {
-      const co = addDays(checkInDate, n)
-      setCheckOutDate(co)
-      filterRoomsForDates(checkInDate, co)
-    }
-  }
-
-  // Room selection — rooms list is already filtered for the selected dates
-  const handleRoomTypeSelect = (roomType: string) => {
-    setSelectedRoomType(roomType)
-    const room = rooms.find(r => r.room_type === roomType)
-    if (room) {
-      setSelectedRoom(room)
-      setPricePerNight(room.price_per_night)
-    } else {
-      setSelectedRoom(null)
-      setPricePerNight(0)
+      setCheckOutDate(addDays(checkInDate, n))
     }
   }
 
@@ -1051,8 +1042,11 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
 
   const activeLedgerSource = ledgerTab === 'individual' ? individualAccounts : organizationAccounts
 
-  // Combined room list: each option shows "Room Type - Room Number"
-  const availableRoomOptions = rooms.filter(r => r.id && r.room_type && r.room_number)
+  const roomSelectPlaceholder = roomsInventoryLoading
+    ? 'Loading rooms…'
+    : availableRoomOptions.length === 0
+      ? 'No rooms available for selected dates'
+      : 'Select room type and number'
 
   return (
     <>
@@ -1166,6 +1160,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
                 <Label>Room *</Label>
                 <Select
                   value={selectedRoom?.id ?? ''}
+                  disabled={roomsInventoryLoading}
                   onValueChange={(id) => {
                     const room = availableRoomOptions.find(r => r.id === id)
                     if (room) {
@@ -1177,10 +1172,12 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
                   }}
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder={availableRoomOptions.length === 0 ? 'No rooms available for selected dates' : 'Select room type and number'} />
+                    <SelectValue placeholder={roomSelectPlaceholder} />
                   </SelectTrigger>
                   <SelectContent>
-                    {availableRoomOptions.length === 0 ? (
+                    {roomsInventoryLoading ? (
+                      <SelectItem value="__loading__" disabled>Loading rooms…</SelectItem>
+                    ) : availableRoomOptions.length === 0 ? (
                       <SelectItem value="__none__" disabled>No rooms available</SelectItem>
                     ) : (
                       availableRoomOptions.map(room => (
