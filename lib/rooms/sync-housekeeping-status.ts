@@ -15,8 +15,8 @@ const HK_STAFF_LOCKED: ReadonlySet<HousekeepingStatusKey> = new Set([
   'out_of_order',
 ])
 
-/** After checkout the room stays on checkout until HK marks vacant or OOO. */
-const HK_POST_CHECKOUT: HousekeepingStatusKey = 'checkout'
+/** After checkout the room is immediately sellable (HK vacant / PMS available). */
+const HK_POST_CHECKOUT: HousekeepingStatusKey = 'vacant'
 
 function normStatus(s: string | null | undefined): string {
   return String(s || '')
@@ -45,14 +45,14 @@ export type RoomHousekeepingPatch = {
   updated_at: string
 }
 
-/** Room row after guest checkout — needs cleaning before sale. */
+/** Room row after guest checkout — immediately available for a new booking. */
 export function roomHousekeepingPatchAfterCheckout(now = new Date().toISOString()): RoomHousekeepingPatch {
   return {
     housekeeping_status: HK_POST_CHECKOUT,
     housekeeping_status_updated_at: now,
     housekeeping_status_updated_by: null,
     housekeeping_status_updated_by_name: 'System',
-    status: 'cleaning',
+    status: 'available',
     updated_at: now,
   }
 }
@@ -73,32 +73,29 @@ export function buildHousekeepingSyncPatch(params: {
     }
     if (next && cur !== next) {
       if (HK_STAFF_LOCKED.has(cur as HousekeepingStatusKey)) return null
-      if (cur === 'checkout') return null
       return patchForStatus(next, now)
     }
     return null
   }
 
-  // Guest departed — cleaning queue vs ready to sell.
-  if (cur === 'occupied') {
+  // Guest departed — free the room for sale.
+  if (cur === 'occupied' || cur === 'checkout' || cur === 'reservation') {
     return roomHousekeepingPatchAfterCheckout(now)
-  }
-  if (cur === 'reservation') {
-    return patchForStatus('vacant', now)
   }
 
   return null
 }
 
-/** Room row when guest checks in or a reservation is held on the room. */
+/** Room row when a guest actually checks in (reservations do not hold the room). */
 export function roomHousekeepingPatchForInHouse(
   bookingStatus: string,
   now = new Date().toISOString(),
 ): Partial<RoomHousekeepingPatch> {
   const st = String(bookingStatus || '').toLowerCase()
-  const hk: HousekeepingStatusKey =
-    st === 'reserved' || st === 'confirmed' ? 'reservation' : 'occupied'
-  return patchForStatus(hk, now)
+  if (st === 'reserved') {
+    return patchForStatus('vacant', now)
+  }
+  return patchForStatus('occupied', now)
 }
 
 function patchForStatus(
