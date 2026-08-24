@@ -25,9 +25,13 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Loader2 } from "lucide-react";
+import { toast } from "sonner";
 import { roomHousekeepingPatchForInHouse } from "@/lib/rooms/sync-housekeeping-status";
+import { reconcileRoomStatusesClient } from "@/lib/rooms/reconcile-room-status-client";
+import { stayDatesFromActualArrival } from "@/lib/booking/edit-booking-patch";
+import { todayYmdHotel } from "@/lib/utils/booking-in-house-dates";
 import { formatPersonName, normalizeNameKey } from "@/lib/utils/name-format";
-import { guestOrOrganizationNameTaken } from "@/lib/utils/guest-org-name-uniqueness";
+import { isRoomAssignable } from "@/lib/utils/room-bookability";
 
 export interface ReserveCheckInBooking {
   id: string;
@@ -35,6 +39,7 @@ export interface ReserveCheckInBooking {
   folio_id: string;
   check_in: string;
   check_out: string;
+  number_of_nights?: number | null;
   guest_id?: string | null;
   room_id?: string | null;
   rate_per_night?: number | null;
@@ -64,6 +69,7 @@ export function ReserveCheckInModal({
       room_number: string;
       room_type: string;
       status: string;
+      housekeeping_status?: string | null;
     }>
   >([]);
   const [bookingsFetch, setBookingsFetch] = useState<
@@ -93,7 +99,7 @@ export function ReserveCheckInModal({
       const [{ data: rms }, { data: bks }] = await Promise.all([
         supabase
           .from("rooms")
-          .select("id, room_number, room_type, status")
+          .select("id, room_number, room_type, status, housekeeping_status")
           .eq("organization_id", orgId)
           .neq("status", "maintenance")
           .order("room_number"),
@@ -101,7 +107,7 @@ export function ReserveCheckInModal({
           .from("bookings")
           .select("id, room_id, check_in, check_out, status")
           .eq("organization_id", orgId)
-          .in("status", ["reserved", "confirmed", "checked_in"]),
+          .in("status", ["confirmed", "checked_in"]),
       ]);
       setRoomsFetch((rms || []) as any[]);
       setBookingsFetch(
@@ -118,7 +124,7 @@ export function ReserveCheckInModal({
             String(b.room_id || "") &&
             b.check_in < cout &&
             b.check_out > cin &&
-            ["reserved", "confirmed", "checked_in"].includes(
+            ["confirmed", "checked_in"].includes(
               String(b.status || ""),
             ),
         )
@@ -131,7 +137,7 @@ export function ReserveCheckInModal({
       if (!r.id) return false;
       if (booking?.room_id && r.id === booking.room_id) return true;
       if (bookedOverlapRoomIds.has(r.id)) return false;
-      return true;
+      return isRoomAssignable(r.status, r.housekeeping_status);
     });
   }, [roomsFetch, bookedOverlapRoomIds, booking?.room_id]);
 
@@ -247,9 +253,19 @@ export function ReserveCheckInModal({
           .eq("id", prevRoomId);
       }
 
+      const stay = stayDatesFromActualArrival({
+        originalCheckIn: booking.check_in,
+        originalCheckOut: booking.check_out,
+        actualArrivalYmd: todayYmdHotel(),
+        numberOfNights: booking.number_of_nights,
+      });
+
       const patch: Record<string, unknown> = {
         status: "checked_in",
         room_id: selectedRoomId,
+        check_in: stay.check_in,
+        check_out: stay.check_out,
+        number_of_nights: stay.number_of_nights,
         updated_at: new Date().toISOString(),
       };
       if (finalGuestId) patch.guest_id = finalGuestId;
@@ -265,7 +281,13 @@ export function ReserveCheckInModal({
         .update(roomHousekeepingPatchForInHouse("checked_in"))
         .eq("id", selectedRoomId);
 
-      toast.success("Guest checked in");
+      await reconcileRoomStatusesClient();
+
+      toast.success(
+        stay.check_in !== String(booking.check_in).slice(0, 10)
+          ? `Guest checked in — stay is now ${stay.check_in} → ${stay.check_out} (${stay.number_of_nights} night${stay.number_of_nights === 1 ? "" : "s"})`
+          : "Guest checked in",
+      );
       onSuccess();
       onClose();
     } catch (e: any) {
@@ -289,8 +311,10 @@ export function ReserveCheckInModal({
           <DialogTitle>Check in from reservation</DialogTitle>
           <DialogDescription>
             Folio {booking.folio_id} · {booking.check_in} → {booking.check_out}.
-            Pick an available room for today’s stay. Guest details are optional
-            if the reservation already has a contact.
+            Pick an available room for today’s stay. If they arrive later than
+            the reserved date, check-in starts today for the original number of
+            nights. Guest details are optional if the reservation already has a
+            contact.
           </DialogDescription>
         </DialogScrollableHeader>
 
