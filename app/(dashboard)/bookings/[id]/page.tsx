@@ -2283,7 +2283,7 @@ export default function BookingDetailPage({
               title={
                 roomChangeDisabledReason
                   ? roomChangeDisabledReason
-                  : "Send a room reassignment for Superadmin, Administrator, or Manager approval (works before or after check-in)."
+                  : "Move guest to another room (front desk can apply immediately, or send for approval)"
               }
               onClick={() => {
                 if (roomChangeDisabledReason) {
@@ -2296,7 +2296,7 @@ export default function BookingDetailPage({
               <DoorOpen className="mr-2 h-4 w-4" />
               {roomChangePending
                 ? "Room change pending"
-                : "Request room change"}
+                : "Change room"}
             </Button>
           )}
           {(showRescheduleStay || rescheduleStayPending) && (
