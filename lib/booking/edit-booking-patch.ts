@@ -56,6 +56,41 @@ export function calendarNightsBetween(checkInYmd: string, checkOutYmd: string): 
   return Math.max(1, calendarDaysBetween(checkInYmd, checkOutYmd))
 }
 
+/** Add (or subtract) whole calendar days to a YYYY-MM-DD date using UTC arithmetic. */
+export function addCalendarDaysYmd(ymd: string, days: number): string {
+  const a = toYmd(ymd)
+  if (!a) return ''
+  const [y, m, d] = a.split('-').map(Number)
+  const dt = new Date(Date.UTC(y, m - 1, d + days))
+  const yy = dt.getUTCFullYear()
+  const mm = String(dt.getUTCMonth() + 1).padStart(2, '0')
+  const dd = String(dt.getUTCDate()).padStart(2, '0')
+  return `${yy}-${mm}-${dd}`
+}
+
+/**
+ * When a reserved guest is checked in on a different calendar day, keep the
+ * original number of nights and start the stay on the actual arrival date.
+ */
+export function stayDatesFromActualArrival(input: {
+  originalCheckIn: string
+  originalCheckOut: string
+  actualArrivalYmd: string
+  numberOfNights?: number | null
+}): { check_in: string; check_out: string; number_of_nights: number } {
+  const nightsFromField = Number(input.numberOfNights)
+  const nights =
+    Number.isFinite(nightsFromField) && nightsFromField > 0
+      ? Math.floor(nightsFromField)
+      : calendarNightsBetween(input.originalCheckIn, input.originalCheckOut)
+  const arrival = toYmd(input.actualArrivalYmd) || toYmd(input.originalCheckIn)
+  return {
+    check_in: arrival,
+    check_out: addCalendarDaysYmd(arrival, nights),
+    number_of_nights: nights,
+  }
+}
+
 /**
  * Extra nights when moving checkout later.
  * Prefer (nights after − nights before) using check-in so a stale/mis-parsed
