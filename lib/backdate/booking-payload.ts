@@ -204,14 +204,16 @@ export async function createBookingFromPayload(
     }
   }
 
-  await admin
-    .from("rooms")
-    .update({
-      status: "occupied",
-      updated_by: createdByUserId,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", room_id);
+  if (booking.status !== "reserved") {
+    await admin
+      .from("rooms")
+      .update({
+        status: "occupied",
+        updated_by: createdByUserId,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", room_id);
+  }
 
   const { error: folioInsertError } = await insertFolioCharges(admin, [
     {
