@@ -182,7 +182,7 @@ export const HELP_FAQ: HelpFaqItem[] = [
     category: 'Bookings',
     question: 'How do I change a guest’s room?',
     answer:
-      'Open the booking and use the room change flow (may require Night Audit approval depending on your hotel rules). Pick the new room and confirm. Approvals appear under Night Audit if required.',
+      'Open the booking and use Change room. Front desk can move the guest immediately, or optionally send it for Night Audit approval. Pick the new room and confirm.',
     keywords: ['room change', 'move room', 'switch room'],
     aliases: ['change room', 'move guest to another room'],
     topics: ['create_booking', 'night_audit'],
