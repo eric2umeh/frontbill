@@ -10,6 +10,7 @@ import {
 import { filterDuplicatePaymentRows } from '@/lib/payments/dedupe-ledger-rows'
 import { resolvePaymentAccountLabel } from '@/lib/payments/payment-accounts'
 import { isOccupyingHotelNight } from '@/lib/utils/booking-in-house-dates'
+import { countsOnDailyBookForNight } from '@/lib/rooms/room-occupancy'
 
 export type SalesCollectionCategory =
   | 'pos'
@@ -184,12 +185,9 @@ export function buildDailyFrontDeskPack(input: {
   guestNameById?: Record<string, string>
 }): DailyFrontDeskPack {
   const date = input.dateYmd
-  const occupyingStatuses = new Set(['checked_in', 'confirmed', 'checked_out', 'reserved'])
-
   const guests: DailyGuestRow[] = (input.bookings || [])
     .filter((b) => {
-      const st = String(b.status || '').toLowerCase()
-      if (!occupyingStatuses.has(st)) return false
+      if (!countsOnDailyBookForNight(b.status)) return false
       return isOccupyingHotelNight(b.check_in, b.check_out, date)
     })
     .map((b) => ({
