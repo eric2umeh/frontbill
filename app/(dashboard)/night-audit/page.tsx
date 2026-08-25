@@ -578,7 +578,7 @@ export default function NightAuditPage() {
               <CardHeader>
                 <CardTitle>Sales</CardTitle>
                 <CardDescription>
-                  Daily net profit by business date (matches Daily book). Defaults to the last 7 days.
+                  Daily net sales by business date (matches Daily book). Defaults to the last 7 days.
                 </CardDescription>
               </CardHeader>
               <CardContent>
