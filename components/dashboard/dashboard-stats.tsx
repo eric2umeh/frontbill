@@ -26,7 +26,7 @@ export function DashboardStats() {
   const [dayYmd, setDayYmd] = useState(() => todayYmdHotel())
   const [calOpen, setCalOpen] = useState(false)
   const [stats, setStats] = useState([
-    { title: 'Net profit', value: formatNaira(0), icon: Wallet, description: '—' },
+    { title: 'Net sales', value: formatNaira(0), icon: Wallet, description: '—' },
     { title: 'Room revenue', value: formatNaira(0), icon: DollarSign, description: '—' },
     { title: 'Occupied', value: '0', icon: Users, description: '—' },
     { title: 'Available Rooms', value: '0', icon: Bed, description: '—' },
@@ -126,7 +126,7 @@ export function DashboardStats() {
 
       setStats([
         {
-          title: 'Net profit',
+          title: 'Net sales',
           value: formatNaira(netProfit),
           icon: Wallet,
           description: ymd,
