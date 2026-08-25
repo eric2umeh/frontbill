@@ -29,14 +29,23 @@ export function isPhysicalInHouseStatus(
   return st === "checked_in" || st === "confirmed";
 }
 
-/** Room revenue / occupancy for a hotel night — not reserved (unarrived) guests. */
+/** Room revenue / occupancy for a hotel night.
+ * Includes reserved when the stay covers that night — the date window already
+ * excludes future arrivals (check_in after the day). Unarrived future reservations
+ * never match `check_in ≤ day < check_out` for earlier report days.
+ */
 export function countsOnDailyBookForNight(
   status: string | null | undefined,
 ): boolean {
   const st = String(status || "")
     .toLowerCase()
     .replace(/-/g, "_");
-  return st === "checked_in" || st === "confirmed" || st === "checked_out";
+  return (
+    st === "checked_in" ||
+    st === "confirmed" ||
+    st === "checked_out" ||
+    st === "reserved"
+  );
 }
 
 export type OccupyingBookingRow = {

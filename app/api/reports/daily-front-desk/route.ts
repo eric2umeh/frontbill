@@ -65,17 +65,29 @@ export async function GET(request: Request) {
     })
 
     const emptyLedger = bounds.empty
-    const [{ data: bookings, error: bookErr }, txRes, payRes] = await Promise.all([
+    const bookingSelectFull =
+      'id, check_in, check_out, status, rate_per_night, total_amount, deposit, balance, folio_id, payment_status, payment_method, ledger_account_name, notes, guest_id, guests:guest_id(name), rooms:room_id(room_number, room_type)'
+    const bookingSelectBasic =
+      'id, check_in, check_out, status, rate_per_night, folio_id, payment_status, guest_id, guests:guest_id(name), rooms:room_id(room_number, room_type)'
+
+    const fetchBookings = async (select: string) =>
       admin
         .from('bookings')
-        .select(
-          'id, check_in, check_out, status, rate_per_night, total_amount, deposit, balance, folio_id, payment_status, payment_method, ledger_account_name, notes, guest_id, guests:guest_id(name), rooms:room_id(room_number, room_type)',
-        )
+        .select(select)
         .eq('organization_id', orgId)
         .in('status', ['confirmed', 'checked_in', 'reserved', 'checked_out'])
         .lte('check_in', date)
         .gt('check_out', date)
-        .limit(500),
+        .limit(500)
+
+    let bookRes = await fetchBookings(bookingSelectFull)
+    if (bookRes.error || !bookRes.data) {
+      console.error('[daily-front-desk] bookings full select', bookRes.error?.message)
+      bookRes = await fetchBookings(bookingSelectBasic)
+    }
+
+    const [{ data: bookings, error: bookErr }, txRes, payRes] = await Promise.all([
+      Promise.resolve(bookRes),
       // select * so missing optional columns (e.g. before/after SQL 076) never zero-out the ledger
       emptyLedger
         ? Promise.resolve({ data: [] as unknown[], error: null })

@@ -139,15 +139,24 @@ export function DailyFrontDeskPanel() {
             return { ...b, empty: false, mode: 'calendar_fallback' as const, orgBusinessDate: null }
           })()
 
-      let bookQ = supabase
-        .from('bookings')
-        .select(
-          'id, check_in, check_out, status, rate_per_night, total_amount, deposit, balance, folio_id, payment_status, payment_method, ledger_account_name, notes, guest_id, guests:guest_id(name), rooms:room_id(room_number, room_type)',
-        )
-        .in('status', ['confirmed', 'checked_in', 'reserved', 'checked_out'])
-        .lte('check_in', day)
-        .gt('check_out', day)
-        .limit(500)
+      const BOOKING_SELECT_FULL =
+        'id, check_in, check_out, status, rate_per_night, total_amount, deposit, balance, folio_id, payment_status, payment_method, ledger_account_name, notes, guest_id, guests:guest_id(name), rooms:room_id(room_number, room_type)'
+      const BOOKING_SELECT_BASIC =
+        'id, check_in, check_out, status, rate_per_night, folio_id, payment_status, guest_id, guests:guest_id(name), rooms:room_id(room_number, room_type)'
+
+      const buildBookingsQuery = (select: string) => {
+        let q = supabase
+          .from('bookings')
+          .select(select)
+          .in('status', ['confirmed', 'checked_in', 'reserved', 'checked_out'])
+          .lte('check_in', day)
+          .gt('check_out', day)
+          .limit(500)
+        if (role !== 'superadmin' && orgId) {
+          q = q.eq('organization_id', orgId)
+        }
+        return q
+      }
 
       let txQ = bounds.empty
         ? null
@@ -168,16 +177,21 @@ export function DailyFrontDeskPanel() {
             .limit(5000)
 
       if (role !== 'superadmin' && orgId) {
-        bookQ = bookQ.eq('organization_id', orgId)
         if (txQ) txQ = txQ.eq('organization_id', orgId)
         if (payQ) payQ = payQ.eq('organization_id', orgId)
       }
 
-      const [bookRes, txRes, payRes] = await Promise.all([
-        bookQ,
+      const [bookResFull, txRes, payRes] = await Promise.all([
+        buildBookingsQuery(BOOKING_SELECT_FULL),
         txQ || Promise.resolve({ data: [] as unknown[], error: null }),
         payQ || Promise.resolve({ data: [] as unknown[], error: null }),
       ])
+
+      let bookRes = bookResFull
+      if (bookRes.error || !bookRes.data) {
+        console.error('[daily-book] bookings full select', bookRes.error?.message)
+        bookRes = await buildBookingsQuery(BOOKING_SELECT_BASIC)
+      }
 
       if (txRes.error) {
         console.error('[daily-book] transactions', txRes.error.message)
@@ -188,6 +202,7 @@ export function DailyFrontDeskPanel() {
       }
       if (bookRes.error) {
         console.error('[daily-book] bookings', bookRes.error.message)
+        toast.error(bookRes.error.message || 'Could not load in-house guests for daily book')
       }
 
       const payments = payRes.data || []
@@ -211,13 +226,25 @@ export function DailyFrontDeskPanel() {
       })
       setPack(next)
 
-      if (next.salesCollection.total === 0 && next.lines.length === 0) {
+      // Recover guests/revenue via service-role API when client booking query failed or returned none
+      // while collections still loaded (previous fallback only ran when net sales was also empty).
+      const needGuestBackup =
+        next.guestCount === 0 &&
+        (Boolean(bookRes.error) || !(bookRes.data && bookRes.data.length))
+      const needSalesBackup = next.salesCollection.total === 0 && next.lines.length === 0
+      if (needGuestBackup || needSalesBackup) {
         const qs = new URLSearchParams({ caller_id: userId, date: day })
         const res = await fetch(`/api/reports/daily-front-desk?${qs}`, {
           credentials: 'include',
         })
         const json = await res.json()
-        if (res.ok && json.pack && (json.pack.lines?.length || json.pack.salesCollection?.total)) {
+        if (
+          res.ok &&
+          json.pack &&
+          (json.pack.guestCount > 0 ||
+            json.pack.lines?.length ||
+            json.pack.salesCollection?.total)
+        ) {
           setPack(json.pack)
         }
       }
