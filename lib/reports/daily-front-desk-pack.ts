@@ -190,6 +190,14 @@ function resolveGuestPaymentMeta(b: {
   }
 }
 
+function embedOne<T extends Record<string, unknown>>(
+  value: T | T[] | null | undefined,
+): T | null {
+  if (!value) return null
+  if (Array.isArray(value)) return (value[0] as T) ?? null
+  return value
+}
+
 export function buildDailyFrontDeskPack(input: {
   dateYmd: string
   bookings: Array<{
@@ -207,8 +215,11 @@ export function buildDailyFrontDeskPack(input: {
     ledger_account_name?: string | null
     notes?: string | null
     guest_id?: string | null
-    guests?: { name?: string | null } | null
-    rooms?: { room_number?: string | null; room_type?: string | null } | null
+    guests?: { name?: string | null } | { name?: string | null }[] | null
+    rooms?:
+      | { room_number?: string | null; room_type?: string | null }
+      | { room_number?: string | null; room_type?: string | null }[]
+      | null
     guest_name?: string | null
   }>
   transactions: Array<{
@@ -248,12 +259,15 @@ export function buildDailyFrontDeskPack(input: {
       const balance = Math.max(0, Number(b.balance) || 0)
       const total = Math.max(0, Number(b.total_amount) || 0)
       const deposit = Math.max(0, Number(b.deposit) || 0)
+      const guestRel = embedOne(b.guests as Record<string, unknown> | Record<string, unknown>[] | null)
+      const roomRel = embedOne(b.rooms as Record<string, unknown> | Record<string, unknown>[] | null)
       return {
         booking_id: b.id,
         guest_id: b.guest_id ? String(b.guest_id) : null,
-        guest_name: b.guests?.name || b.guest_name || 'Guest',
-        room_number: b.rooms?.room_number || '—',
-        room_type: b.rooms?.room_type || '—',
+        guest_name:
+          (guestRel?.name as string | undefined) || b.guest_name || 'Guest',
+        room_number: (roomRel?.room_number as string | undefined) || '—',
+        room_type: (roomRel?.room_type as string | undefined) || '—',
         rate_per_night: Number(b.rate_per_night) || 0,
         total_amount: total,
         deposit,
