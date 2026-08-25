@@ -46,7 +46,9 @@ import {
 import { syncLedgerOrgCounterpartiesToOrganizationsTable } from '@/lib/utils/sync-ledger-org-counterparties-to-organizations'
 import { appendBulkGroupNote, createBulkGroupId } from '@/lib/utils/bulk-booking'
 import { StayDateRangeFields } from '@/components/shared/stay-date-range-fields'
-import { BOOKING_MODAL_ROOMS_LIMIT, normalizeRoomsForBookingPickers } from '@/lib/utils/room-bookability'
+import { BOOKING_MODAL_ROOMS_LIMIT, normalizeRoomsForBookingPickers, roomIdsHeldForStayRange } from '@/lib/utils/room-bookability'
+import { DATE_HOLD_BOOKING_STATUSES } from '@/lib/rooms/room-occupancy'
+import { reconcileRoomStatusesClient } from '@/lib/rooms/reconcile-room-status-client'
 import { insertFolioCharges } from '@/lib/utils/insert-folio-charges'
 import {
   formatReservationPaymentMethodLabel,
@@ -359,10 +361,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
     setOrgId(tenantId)
     setCurrentUserRole(authRole || '')
 
-    await syncLedgerOrgCounterpartiesToOrganizationsTable(supabase, {
-      hotelTenantOrganizationId: tenantId,
-      createdByUserId: userId,
-    })
+    void reconcileRoomStatusesClient()
 
     const [counterpartyOrgs, { data: guestData }, { data: roomData }, { data: bookingData }] = await Promise.all([
       loadCounterpartyOrganizations(supabase, tenantId),
@@ -373,7 +372,11 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
         .eq('organization_id', tenantId)
         .order('room_number')
         .limit(BOOKING_MODAL_ROOMS_LIMIT),
-      supabase.from('bookings').select('room_id, check_in, check_out').eq('organization_id', tenantId).in('status', ['confirmed', 'checked_in']).limit(BOOKING_MODAL_ROOMS_LIMIT),
+      supabase.from('bookings').select('room_id, check_in, check_out, status').eq('organization_id', tenantId).in('status', [...DATE_HOLD_BOOKING_STATUSES]).limit(BOOKING_MODAL_ROOMS_LIMIT),
+      syncLedgerOrgCounterpartiesToOrganizationsTable(supabase, {
+        hotelTenantOrganizationId: tenantId,
+        createdByUserId: userId,
+      }),
     ])
     setAllCounterpartyOrgs(counterpartyOrgs)
     setAllGuests(guestData || [])
@@ -813,13 +816,9 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
     const cin = toLocalDateStr(checkIn)
     const cout = toLocalDateStr(checkOut)
     setPickedRoomIds([])
-    const bookedRoomIds = new Set(
-      allActiveBookings
-        .filter(b => b.check_in < cout && b.check_out > cin && b.room_id)
-        .map(b => b.room_id),
-    )
+    const bookedRoomIds = roomIdsHeldForStayRange(allActiveBookings, cin, cout)
     const available = allRooms.filter(
-      (r: any) => r.status !== 'maintenance' && r.id && !bookedRoomIds.has(r.id),
+      (r: any) => r.status !== 'maintenance' && r.status !== 'out_of_order' && r.status !== 'occupied' && r.id && !bookedRoomIds.has(r.id),
     )
     setAvailableRooms(available)
     setRoomAvailabilityChecked(true)
@@ -1072,11 +1071,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
     if (!fillLater) {
       const cin = toLocalDateStr(checkIn)
       const cout = toLocalDateStr(checkOut)
-      const bookedIds = new Set(
-        allActiveBookings
-          .filter(b => b.check_in < cout && b.check_out > cin && b.room_id)
-          .map(b => b.room_id),
-      )
+      const bookedIds = roomIdsHeldForStayRange(allActiveBookings, cin, cout)
       const requestedByType: Record<string, number> = {}
       entries.forEach((entry) => {
         requestedByType[entry.roomType] = (requestedByType[entry.roomType] || 0) + entry.numberOfRooms
@@ -1104,11 +1099,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
     if (!fillLater && pickedRoomIds.length > 0) {
       const cin = toLocalDateStr(checkIn)
       const cout = toLocalDateStr(checkOut)
-      const overlapBooked = new Set(
-        allActiveBookings
-          .filter(b => b.check_in < cout && b.check_out > cin && b.room_id)
-          .map(b => b.room_id),
-      )
+      const overlapBooked = roomIdsHeldForStayRange(allActiveBookings, cin, cout)
       for (const id of pickedRoomIds) {
         if (overlapBooked.has(id)) {
           toast.error('One or more picked rooms overlap another booking — run availability again.')
@@ -1362,11 +1353,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
 
         const cin = toLocalDateStr(checkIn)
         const cout = toLocalDateStr(checkOut)
-        const bookedIds = new Set(
-          allActiveBookings
-            .filter((b) => b.check_in < cout && b.check_out > cin && b.room_id)
-            .map((b) => b.room_id),
-        )
+        const bookedIds = roomIdsHeldForStayRange(allActiveBookings, cin, cout)
         const availablePool = sortRoomsByNumber(
           allRooms.filter((r: { id: string }) => !bookedIds.has(r.id)),
         )
@@ -1483,11 +1470,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
           const totalRoomSlots = entry.numberOfRooms
           const cin = toLocalDateStr(checkIn)
           const cout = toLocalDateStr(checkOut)
-          const bookedIds = new Set(
-            allActiveBookings
-              .filter(b => b.check_in < cout && b.check_out > cin && b.room_id)
-              .map(b => b.room_id),
-          )
+          const bookedIds = roomIdsHeldForStayRange(allActiveBookings, cin, cout)
 
           let finalGuestId = entry.guestId
           const entryGuestName = formatPersonName(entry.guestName)
