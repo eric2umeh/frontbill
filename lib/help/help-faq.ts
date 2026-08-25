@@ -550,7 +550,7 @@ export const HELP_FAQ: HelpFaqItem[] = [
     category: 'Rooms & property',
     question: 'How do I manage rooms?',
     answer:
-      'Property → Rooms: set room numbers, types, rates, and status (available, occupied, cleaning, maintenance, reserved). Occupancy on Bookings reflects live in-house folios.',
+      'Property → Rooms: set room numbers, types, rates, and status. Reservations do not lock a room until Check in — the room stays available for walk-ins on other dates and is only blocked on the reserved nights.',
     keywords: ['rooms', 'room type', 'maintenance', 'inventory'],
     aliases: ['add room', 'room status', 'edit room'],
     topics: ['room'],
