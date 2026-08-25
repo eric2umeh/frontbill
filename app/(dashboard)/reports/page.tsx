@@ -7,7 +7,6 @@ import {
   FileBarChart,
   BedDouble,
   Building2,
-  Wallet,
   PieChart,
   TrendingDown,
   Scale,
@@ -17,7 +16,6 @@ import { MonthlyPlPanel } from '@/components/reports/monthly-pl-panel'
 import {
   DailyRevenueAccrualPanel,
   OccupancyRangePanel,
-  SalesCollectionPanel,
   AccountantChargeSummaryPanel,
 } from '@/components/reports/financial-and-refund-panels'
 import { DebtReportPanel } from '@/components/reports/debt-report-panel'
@@ -41,11 +39,7 @@ export default function ReportsPage() {
           <TabsList className="flex flex-wrap h-auto gap-1 justify-start lg:justify-end">
             <TabsTrigger value="revenue" className="gap-1.5 text-xs sm:text-sm">
               <FileBarChart className="h-4 w-4" />
-              Daily revenue
-            </TabsTrigger>
-            <TabsTrigger value="sales-collection" className="gap-1.5 text-xs sm:text-sm">
-              <Wallet className="h-4 w-4" />
-              Sales
+              Revenue &amp; sales
             </TabsTrigger>
             <TabsTrigger value="ledger" className="gap-1.5 text-xs sm:text-sm">
               <Building2 className="h-4 w-4" />
@@ -77,18 +71,6 @@ export default function ReportsPage() {
                 <DailyRevenueAccrualPanel userId={userId} organizationId={organizationId} />
               ) : (
                 <p className="text-sm text-muted-foreground">Sign in to load reports.</p>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="sales-collection" className="mt-0">
-          <Card>
-            <CardContent className="pt-6">
-              {userId && organizationId ? (
-                <SalesCollectionPanel userId={userId} organizationId={organizationId} />
-              ) : (
-                <p className="text-sm text-muted-foreground">Sign in to load.</p>
               )}
             </CardContent>
           </Card>
