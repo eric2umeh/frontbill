@@ -34,7 +34,9 @@ import { syncLedgerOrgCounterpartiesToOrganizationsTable } from '@/lib/utils/syn
 import { formatPersonName, normalizeNameKey, titleCaseWhileTyping } from '@/lib/utils/name-format'
 import { guestOrOrganizationNameTaken } from '@/lib/utils/guest-org-name-uniqueness'
 import { StayDateRangeFields } from '@/components/shared/stay-date-range-fields'
-import { BOOKING_MODAL_ROOMS_LIMIT, isRoomAssignable, normalizeRoomsForBookingPickers, roomNotBookableReason } from '@/lib/utils/room-bookability'
+import { BOOKING_MODAL_ROOMS_LIMIT, isRoomAssignable, normalizeRoomsForBookingPickers, roomIdsHeldForStayRange, roomNotBookableReason } from '@/lib/utils/room-bookability'
+import { DATE_HOLD_BOOKING_STATUSES } from '@/lib/rooms/room-occupancy'
+import { reconcileRoomStatusesClient } from '@/lib/rooms/reconcile-room-status-client'
 import { Checkbox } from '@/components/ui/checkbox'
 import { applyPaymentToGuestCityLedger } from '@/lib/utils/guest-city-ledger'
 import { insertFolioCharges } from '@/lib/utils/insert-folio-charges'
@@ -170,6 +172,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
       setRoomsInventoryLoading(true)
       setRooms([])
       setAllBookings([])
+      void reconcileRoomStatusesClient()
       void loadData()
       // Set default dates: today for check-in, tomorrow for check-out
       const todayDate = today()
@@ -201,7 +204,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
       const [{ data: guestData }, { data: roomData }, { data: bookingData }, counterpartyOrgs] = await Promise.all([
         supabase.from('guests').select('id, name, phone, email, address').eq('organization_id', tenantId).order('name'),
         supabase.from('rooms').select('id, room_number, room_type, price_per_night, status, housekeeping_status').eq('organization_id', tenantId).order('room_number').limit(BOOKING_MODAL_ROOMS_LIMIT),
-        supabase.from('bookings').select('room_id, check_in, check_out').eq('organization_id', tenantId).in('status', ['confirmed', 'checked_in']).limit(BOOKING_MODAL_ROOMS_LIMIT),
+        supabase.from('bookings').select('room_id, check_in, check_out, status').eq('organization_id', tenantId).in('status', [...DATE_HOLD_BOOKING_STATUSES]).limit(BOOKING_MODAL_ROOMS_LIMIT),
         loadCounterpartyOrganizations(supabase, tenantId),
         syncLedgerOrgCounterpartiesToOrganizationsTable(supabase, {
           hotelTenantOrganizationId: tenantId,
@@ -398,11 +401,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
     const cin = toLocalDateStr(checkInDate)
     const cout = toLocalDateStr(checkOutDate)
     // A room is booked if any existing booking overlaps: existing.check_in < newCheckOut AND existing.check_out > newCheckIn
-    const bookedRoomIds = new Set(
-      allBookings
-        .filter(b => b.check_in < cout && b.check_out > cin)
-        .map(b => b.room_id)
-    )
+    const bookedRoomIds = roomIdsHeldForStayRange(allBookings, cin, cout)
     return roomsOfType.filter(
       (r) => isRoomAssignable(r.status, r.housekeeping_status) && !bookedRoomIds.has(r.id),
     )
@@ -815,10 +814,10 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
 
   // Combined room dropdown: each item shows "Room Type — Room Number"
   const availableRoomOptions = rooms.filter(r => {
-    if (!checkInDate || !checkOutDate) return true
+    if (!checkInDate || !checkOutDate) return isRoomAssignable(r.status, r.housekeeping_status)
     const cin = toLocalDateStr(checkInDate)
     const cout = toLocalDateStr(checkOutDate)
-    const bookedIds = new Set(allBookings.filter(b => b.check_in < cout && b.check_out > cin).map(b => b.room_id))
+    const bookedIds = roomIdsHeldForStayRange(allBookings, cin, cout)
     return isRoomAssignable(r.status, r.housekeeping_status) && !bookedIds.has(r.id)
   })
 
