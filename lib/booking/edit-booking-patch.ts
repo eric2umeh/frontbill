@@ -91,6 +91,76 @@ export function stayDatesFromActualArrival(input: {
   }
 }
 
+/** Hotel-night overlap: existing.check_in < other.check_out AND existing.check_out > other.check_in. */
+export function bookingsDateRangesOverlap(
+  aIn: string,
+  aOut: string,
+  bIn: string,
+  bOut: string,
+): boolean {
+  const aI = toYmd(aIn)
+  const aO = toYmd(aOut)
+  const bI = toYmd(bIn)
+  const bO = toYmd(bOut)
+  if (!aI || !aO || !bI || !bO) return false
+  return aI < bO && aO > bI
+}
+
+export type OccupyingStayRow = {
+  id?: string | null
+  room_id?: string | null
+  check_in: string
+  check_out: string
+  status?: string | null
+}
+
+function isPhysicalOccupyingStatus(status: string | null | undefined): boolean {
+  const st = String(status || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, '_')
+  return st === 'checked_in' || st === 'confirmed'
+}
+
+/** True when an in-house/confirmed folio already holds `targetRoomId` for the stay dates. */
+export function occupyingStayBlocksRoom(
+  occupying: OccupyingStayRow,
+  targetRoomId: string,
+  stayCheckIn: string,
+  stayCheckOut: string,
+  excludeBookingId?: string | null,
+): boolean {
+  if (!targetRoomId || occupying.room_id !== targetRoomId) return false
+  if (excludeBookingId && occupying.id && occupying.id === excludeBookingId) return false
+  if (occupying.status != null && occupying.status !== '' && !isPhysicalOccupyingStatus(occupying.status)) {
+    return false
+  }
+  return bookingsDateRangesOverlap(
+    occupying.check_in,
+    occupying.check_out,
+    stayCheckIn,
+    stayCheckOut,
+  )
+}
+
+/** Rooms that already have a confirmed or checked-in folio overlapping the stay. */
+export function roomIdsBlockedForStay(
+  occupying: OccupyingStayRow[],
+  stayCheckIn: string,
+  stayCheckOut: string,
+  excludeBookingId?: string | null,
+): Set<string> {
+  const blocked = new Set<string>()
+  for (const row of occupying) {
+    const roomId = String(row.room_id || '')
+    if (!roomId) continue
+    if (occupyingStayBlocksRoom(row, roomId, stayCheckIn, stayCheckOut, excludeBookingId)) {
+      blocked.add(roomId)
+    }
+  }
+  return blocked
+}
+
 /**
  * Extra nights when moving checkout later.
  * Prefer (nights after − nights before) using check-in so a stale/mis-parsed

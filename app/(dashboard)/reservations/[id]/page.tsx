@@ -13,13 +13,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { ArrowLeft, UserCheck, Trash2, CreditCard, AlertCircle, Loader2, CalendarRange, CalendarClock, Receipt } from 'lucide-react'
 import { ExtendStayModal } from '@/components/bookings/extend-stay-modal'
 import { AddChargeModal } from '@/components/bookings/add-charge-modal'
+import { ReserveCheckInModal } from '@/components/reservations/reserve-checkin-modal'
 import {
   DEFAULT_ORG_CHECKOUT_TIME,
   hideChargeExtendInBookingsTable,
 } from '@/lib/utils/booking-checkout-ui'
-import { roomHousekeepingPatchForInHouse } from '@/lib/rooms/sync-housekeeping-status'
-import { stayDatesFromActualArrival } from '@/lib/booking/edit-booking-patch'
-import { todayYmdHotel } from '@/lib/utils/booking-in-house-dates'
 import { fetchOrgCheckoutTime } from '@/lib/utils/org-checkout-policy'
 import { RescheduleStayModal } from '@/components/bookings/reschedule-stay-modal'
 import { canRequestRescheduleStay, canFrontDeskApplyRescheduleStay, canRescheduleStayBooking } from '@/lib/booking/can-reschedule-stay'
@@ -62,6 +60,7 @@ export default function ReservationDetailPage({
   const canMarkNoShow =
     hasPermission(role, 'reservations:edit') || hasPermission(role, 'bookings:edit')
   const [noShowDialogOpen, setNoShowDialogOpen] = useState(false)
+  const [checkInModalOpen, setCheckInModalOpen] = useState(false)
   const [extendModalOpen, setExtendModalOpen] = useState(false)
   const [addChargeModalOpen, setAddChargeModalOpen] = useState(false)
   const [orgCheckoutTime, setOrgCheckoutTime] = useState(DEFAULT_ORG_CHECKOUT_TIME)
@@ -117,7 +116,7 @@ export default function ReservationDetailPage({
       const { data, error } = await supabase
         .from('bookings')
         .select(
-          `id,            folio_id, check_in, check_out, status, folio_status, payment_status,
+          `id, organization_id, guest_id, room_id, folio_id, check_in, check_out, status, folio_status, payment_status,
            rate_per_night, total_amount, deposit, balance, number_of_nights,
            notes, created_at,
            guests:guest_id(id, name, phone, email, address),
@@ -190,72 +189,7 @@ export default function ReservationDetailPage({
     : false
 
   function handleCheckin() {
-    toast.custom(
-      (t: string | number) => (
-        <div className="flex flex-col gap-3">
-          <div className="flex gap-2 items-start">
-            <AlertCircle className="w-5 h-5 text-blue-600 mt-0.5 shrink-0" />
-            <div>
-              <p className="font-semibold">Check in Guest?</p>
-              <p className="text-sm text-muted-foreground">
-                The guest will be moved to active bookings.
-              </p>
-            </div>
-          </div>
-          <div className="flex gap-2 justify-end">
-            <Button variant="outline" size="sm" onClick={() => toast.dismiss(t)}>
-              Cancel
-            </Button>
-            <Button
-              size="sm"
-              disabled={actionLoading}
-              onClick={async () => {
-                toast.dismiss(t)
-                setActionLoading(true)
-                try {
-                  const supabase = createClient()
-                  const stay = stayDatesFromActualArrival({
-                    originalCheckIn: reservation.check_in,
-                    originalCheckOut: reservation.check_out,
-                    actualArrivalYmd: todayYmdHotel(),
-                    numberOfNights: reservation.number_of_nights,
-                  })
-                  const { error } = await supabase
-                    .from('bookings')
-                    .update({
-                      status: 'checked_in',
-                      check_in: stay.check_in,
-                      check_out: stay.check_out,
-                      number_of_nights: stay.number_of_nights,
-                    })
-                    .eq('id', rid)
-                  if (error) throw error
-                  if (reservation?.rooms?.id) {
-                    await supabase
-                      .from('rooms')
-                      .update(roomHousekeepingPatchForInHouse('checked_in'))
-                      .eq('id', reservation.rooms.id)
-                  }
-                  toast.success('Guest checked in successfully')
-                  router.push('/bookings')
-                } catch (err: any) {
-                  toast.error(err.message || 'Check-in failed')
-                } finally {
-                  setActionLoading(false)
-                }
-              }}
-            >
-              {actionLoading ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                'Check-in'
-              )}
-            </Button>
-          </div>
-        </div>
-      ),
-      { duration: Infinity }
-    )
+    setCheckInModalOpen(true)
   }
 
   async function handlePaymentUpdate() {
@@ -758,6 +692,28 @@ export default function ReservationDetailPage({
           )}
         </div>
       </div>
+
+      <ReserveCheckInModal
+        open={checkInModalOpen}
+        onClose={() => setCheckInModalOpen(false)}
+        onSuccess={() => router.push('/bookings')}
+        userId={userId || ''}
+        booking={{
+          id: reservation.id,
+          organization_id: reservation.organization_id || organizationId || '',
+          folio_id: reservation.folio_id,
+          check_in: reservation.check_in,
+          check_out: reservation.check_out,
+          number_of_nights: reservation.number_of_nights,
+          guest_id: reservation.guest_id || guest?.id || null,
+          room_id: reservation.room_id || room?.id || null,
+          rate_per_night: reservation.rate_per_night,
+          guests: guest?.name ? { name: guest.name } : null,
+          rooms: room?.id
+            ? { id: room.id, room_number: room.room_number, room_type: room.room_type }
+            : null,
+        }}
+      />
 
       <MarkNoShowDialog
         open={noShowDialogOpen}

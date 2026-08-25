@@ -28,9 +28,14 @@ import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { roomHousekeepingPatchForInHouse } from "@/lib/rooms/sync-housekeeping-status";
 import { reconcileRoomStatusesClient } from "@/lib/rooms/reconcile-room-status-client";
-import { stayDatesFromActualArrival } from "@/lib/booking/edit-booking-patch";
+import {
+  roomIdsBlockedForStay,
+  occupyingStayBlocksRoom,
+  stayDatesFromActualArrival,
+} from "@/lib/booking/edit-booking-patch";
 import { todayYmdHotel } from "@/lib/utils/booking-in-house-dates";
 import { formatPersonName, normalizeNameKey } from "@/lib/utils/name-format";
+import { guestOrOrganizationNameTaken } from "@/lib/utils/guest-org-name-uniqueness";
 import { isRoomAssignable } from "@/lib/utils/room-bookability";
 
 export interface ReserveCheckInBooking {
@@ -85,8 +90,22 @@ export function ReserveCheckInModal({
   const [guestPhoneOpt, setGuestPhoneOpt] = useState("");
   const [selectedRoomId, setSelectedRoomId] = useState("");
 
-  const cin = booking?.check_in ?? "";
-  const cout = booking?.check_out ?? "";
+  const stay = useMemo(() => {
+    if (!booking) return null;
+    return stayDatesFromActualArrival({
+      originalCheckIn: booking.check_in,
+      originalCheckOut: booking.check_out,
+      actualArrivalYmd: todayYmdHotel(),
+      numberOfNights: booking.number_of_nights,
+    });
+  }, [
+    booking?.check_in,
+    booking?.check_out,
+    booking?.number_of_nights,
+    booking?.id,
+  ]);
+  const cin = stay?.check_in ?? "";
+  const cout = stay?.check_out ?? "";
   const orgId = booking?.organization_id ?? "";
 
   useEffect(() => {
@@ -117,29 +136,22 @@ export function ReserveCheckInModal({
   }, [open, booking?.id, orgId]);
 
   const bookedOverlapRoomIds = useMemo(() => {
-    return new Set(
-      bookingsFetch
-        .filter(
-          (b) =>
-            String(b.room_id || "") &&
-            b.check_in < cout &&
-            b.check_out > cin &&
-            ["confirmed", "checked_in"].includes(
-              String(b.status || ""),
-            ),
-        )
-        .map((b) => b.room_id as string),
+    if (!cin || !cout) return new Set<string>();
+    return roomIdsBlockedForStay(
+      bookingsFetch,
+      cin,
+      cout,
+      booking?.id,
     );
-  }, [bookingsFetch, cin, cout]);
+  }, [bookingsFetch, cin, cout, booking?.id]);
 
   const availableRooms = useMemo(() => {
     return roomsFetch.filter((r) => {
       if (!r.id) return false;
-      if (booking?.room_id && r.id === booking.room_id) return true;
       if (bookedOverlapRoomIds.has(r.id)) return false;
       return isRoomAssignable(r.status, r.housekeeping_status);
     });
-  }, [roomsFetch, bookedOverlapRoomIds, booking?.room_id]);
+  }, [roomsFetch, bookedOverlapRoomIds]);
 
   const byTypeCounts = useMemo(() => {
     const m: Record<string, number> = {};
@@ -245,20 +257,34 @@ export function ReserveCheckInModal({
         }
       }
 
-      const prevRoomId = booking.room_id ? String(booking.room_id) : null;
-      if (prevRoomId && prevRoomId !== selectedRoomId) {
-        await supabase
-          .from("rooms")
-          .update({ status: "available", updated_at: new Date().toISOString() })
-          .eq("id", prevRoomId);
+      if (!stay) {
+        toast.error("Could not compute stay dates");
+        return;
       }
 
-      const stay = stayDatesFromActualArrival({
-        originalCheckIn: booking.check_in,
-        originalCheckOut: booking.check_out,
-        actualArrivalYmd: todayYmdHotel(),
-        numberOfNights: booking.number_of_nights,
-      });
+      const { data: occupyingNow } = await supabase
+        .from("bookings")
+        .select("id, room_id, check_in, check_out, status")
+        .eq("organization_id", orgId)
+        .eq("room_id", selectedRoomId)
+        .neq("id", booking.id)
+        .in("status", ["confirmed", "checked_in"]);
+
+      const blocked = (occupyingNow || []).some((row) =>
+        occupyingStayBlocksRoom(
+          row,
+          selectedRoomId,
+          stay.check_in,
+          stay.check_out,
+          booking.id,
+        ),
+      );
+      if (blocked) {
+        toast.error(
+          "That room is already occupied for these stay dates. Pick another room.",
+        );
+        return;
+      }
 
       const patch: Record<string, unknown> = {
         status: "checked_in",
@@ -310,11 +336,13 @@ export function ReserveCheckInModal({
         <DialogScrollableHeader>
           <DialogTitle>Check in from reservation</DialogTitle>
           <DialogDescription>
-            Folio {booking.folio_id} · {booking.check_in} → {booking.check_out}.
-            Pick an available room for today’s stay. If they arrive later than
-            the reserved date, check-in starts today for the original number of
-            nights. Guest details are optional if the reservation already has a
-            contact.
+            Folio {booking.folio_id} · reserved {String(booking.check_in).slice(0, 10)}{" "}
+            → {String(booking.check_out).slice(0, 10)}.
+            {stay
+              ? ` Stay will be ${stay.check_in} → ${stay.check_out} (${stay.number_of_nights} night${stay.number_of_nights === 1 ? "" : "s"}).`
+              : ""}{" "}
+            Rooms already occupied for those dates are hidden. Guest details are
+            optional if the reservation already has a contact.
           </DialogDescription>
         </DialogScrollableHeader>
 
