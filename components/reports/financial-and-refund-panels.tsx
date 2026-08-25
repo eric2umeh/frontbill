@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, type ReactNode } from "react";
 import { format, subDays } from "date-fns";
 import { toast } from "sonner";
 import {
@@ -99,6 +99,9 @@ export function DailyRevenueAccrualPanel({
   const [start, setStart] = useState<Date>(() => subDays(new Date(), 6));
   const [end, setEnd] = useState<Date>(() => new Date());
   const [department, setDepartment] = useState("all");
+  const [metricFilter, setMetricFilter] = useState<"all" | "revenue" | "net_sales">(
+    "all",
+  );
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<any>(null);
 
@@ -141,6 +144,49 @@ export function DailyRevenueAccrualPanel({
     [data?.byDay],
   );
 
+  const showRevenue = metricFilter === "all" || metricFilter === "revenue";
+  const showNetSales = metricFilter === "all" || metricFilter === "net_sales";
+
+  const columns = useMemo(() => {
+    const cols: Array<{
+      key: string;
+      label: string;
+      responsive?: "md+";
+      render: (row: any) => ReactNode;
+    }> = [
+      {
+        key: "date",
+        label: "Date",
+        render: (row) => row.date,
+      },
+    ];
+    if (showRevenue) {
+      cols.push({
+        key: "subtotal",
+        label: "Revenue",
+        render: (row) => (
+          <span className="font-medium">{formatNaira(row.subtotal)}</span>
+        ),
+      });
+    }
+    if (showNetSales) {
+      cols.push({
+        key: "netProfit",
+        label: "Net sales",
+        render: (row) => (
+          <span className="font-medium">{formatNaira(row.netProfit ?? 0)}</span>
+        ),
+      });
+    }
+    cols.push({
+      key: "guestCount",
+      label: "In-house",
+      responsive: "md+",
+      render: (row) => row.guestCount ?? "—",
+    });
+    return cols;
+  }, [showRevenue, showNetSales]);
+
   return (
     <div className="space-y-4 print-section">
       <div className="flex flex-wrap items-center gap-2 print:hidden">
@@ -162,6 +208,21 @@ export function DailyRevenueAccrualPanel({
             ))}
           </SelectContent>
         </Select>
+        <Select
+          value={metricFilter}
+          onValueChange={(v) =>
+            setMetricFilter(v as "all" | "revenue" | "net_sales")
+          }
+        >
+          <SelectTrigger className="w-[180px]">
+            <SelectValue placeholder="Metrics" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All (revenue + sales)</SelectItem>
+            <SelectItem value="revenue">Revenue only</SelectItem>
+            <SelectItem value="net_sales">Net sales only</SelectItem>
+          </SelectContent>
+        </Select>
         <Button
           variant="secondary"
           size="sm"
@@ -180,23 +241,32 @@ export function DailyRevenueAccrualPanel({
       ) : (
         <>
           {totals && (
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Card>
-                <CardContent className="p-4">
-                  <p className="text-sm text-muted-foreground">Period revenue</p>
-                  <p className="text-2xl font-bold">
-                    {formatNaira(totals.subtotal)}
-                  </p>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardContent className="p-4">
-                  <p className="text-sm text-muted-foreground">Period net profit</p>
-                  <p className="text-2xl font-bold">
-                    {formatNaira(totals.netProfit ?? 0)}
-                  </p>
-                </CardContent>
-              </Card>
+            <div
+              className={cn(
+                "grid gap-3",
+                showRevenue && showNetSales ? "sm:grid-cols-2" : "sm:grid-cols-1",
+              )}
+            >
+              {showRevenue ? (
+                <Card>
+                  <CardContent className="p-4">
+                    <p className="text-sm text-muted-foreground">Period revenue</p>
+                    <p className="text-2xl font-bold">
+                      {formatNaira(totals.subtotal)}
+                    </p>
+                  </CardContent>
+                </Card>
+              ) : null}
+              {showNetSales ? (
+                <Card>
+                  <CardContent className="p-4">
+                    <p className="text-sm text-muted-foreground">Period net sales</p>
+                    <p className="text-2xl font-bold">
+                      {formatNaira(totals.netProfit ?? 0)}
+                    </p>
+                  </CardContent>
+                </Card>
+              ) : null}
             </div>
           )}
 
@@ -207,35 +277,9 @@ export function DailyRevenueAccrualPanel({
             data={tableRows}
             searchKeys={["date"]}
             searchPlaceholder="Search date…"
-            emptyState={{ title: "No revenue rows for this range" }}
+            emptyState={{ title: "No rows for this range" }}
             rowKey={(row) => row.date}
-            columns={[
-              {
-                key: "date",
-                label: "Date",
-                render: (row) => row.date,
-              },
-              {
-                key: "subtotal",
-                label: "Revenue",
-                render: (row) => (
-                  <span className="font-medium">{formatNaira(row.subtotal)}</span>
-                ),
-              },
-              {
-                key: "netProfit",
-                label: "Net profit",
-                render: (row) => (
-                  <span className="font-medium">{formatNaira(row.netProfit ?? 0)}</span>
-                ),
-              },
-              {
-                key: "guestCount",
-                label: "In-house",
-                responsive: "md+",
-                render: (row) => row.guestCount ?? "—",
-              },
-            ]}
+            columns={columns}
           />
         </>
       )}
@@ -338,12 +382,12 @@ export function DailySalesByDayPanel({
           {totals && (
             <Card>
               <CardContent className="p-4">
-                <p className="text-sm text-muted-foreground">Period net profit</p>
+                <p className="text-sm text-muted-foreground">Period net sales</p>
                 <p className="text-2xl font-bold">
                   {formatNaira(totals.netProfit ?? 0)}
                 </p>
                 <p className="text-xs text-muted-foreground mt-1">
-                  Matches Accounting → Daily book sales collection for each day.
+                  Matches Accounting → Daily book net sales for each day.
                 </p>
               </CardContent>
             </Card>
@@ -366,7 +410,7 @@ export function DailySalesByDayPanel({
               },
               {
                 key: "netProfit",
-                label: "Net profit",
+                label: "Net sales",
                 render: (row) => (
                   <span className="font-medium">{formatNaira(row.netProfit ?? 0)}</span>
                 ),
