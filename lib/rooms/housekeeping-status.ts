@@ -114,7 +114,7 @@ export function pmsStatusForHousekeepingStatus(hkStatus: HousekeepingStatusKey):
   if (hkStatus === 'out_of_order') return 'out_of_order'
   if (hkStatus === 'vacant') return 'available'
   if (hkStatus === 'occupied') return 'occupied'
-  if (hkStatus === 'reservation') return 'reserved'
+  if (hkStatus === 'reservation') return 'available'
   if (hkStatus === 'checkout') return 'available'
   return null
 }
