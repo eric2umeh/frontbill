@@ -73,26 +73,14 @@ export function DebtReportPanel({ organizationId }: { organizationId: string }) 
 
       const today = todayYmdHotel()
 
-      const [ledgerRes, bookRes] = await Promise.all([
-        supabase
-          .from('city_ledger_accounts')
-          .select('id, account_name, account_type, balance, contact_email, contact_phone')
-          .eq('organization_id', organizationId)
-          .gt('balance', 0)
-          .order('balance', { ascending: false }),
-        supabase
-          .from('bookings')
-          .select(
-            'id, check_in, check_out, status, balance, payment_status, payment_method, ledger_account_name, guests:guest_id(name), rooms:room_id(room_number)',
-          )
-          .eq('organization_id', organizationId)
-          .in('status', ['confirmed', 'checked_in', 'reserved', 'checked_out'])
-          .gt('balance', 0)
-          .limit(2000),
-      ])
+      const ledgerRes = await supabase
+        .from('city_ledger_accounts')
+        .select('id, account_name, account_type, balance, contact_email, contact_phone')
+        .eq('organization_id', organizationId)
+        .gt('balance', 0)
+        .order('balance', { ascending: false })
 
       if (ledgerRes.error) throw ledgerRes.error
-      if (bookRes.error) throw bookRes.error
 
       setAccounts(
         (ledgerRes.data || []).map((a) => ({
@@ -105,43 +93,76 @@ export function DebtReportPanel({ organizationId }: { organizationId: string }) 
         })),
       )
 
-      setGuestDebts(
-        (bookRes.data || []).map((b) => {
-          const method = String(
-            (b as { payment_method?: string }).payment_method || '',
-          )
-            .toLowerCase()
-            .replace(/-/g, '_')
-          const isOrg = method === 'city_ledger'
-          const guests = (b as { guests?: { name?: string } | null }).guests
-          const rooms = (b as { rooms?: { room_number?: string } | null }).rooms
-          const ledgerName = String(
-            (b as { ledger_account_name?: string | null }).ledger_account_name || '',
-          ).trim()
-          const status = String((b as { status?: string }).status || '')
-          const checkIn = String((b as { check_in: string }).check_in).slice(0, 10)
-          const checkOut = String((b as { check_out: string }).check_out).slice(0, 10)
-          const inHouse =
-            countsOnDailyBookForNight(status) &&
-            isOccupyingHotelNight(checkIn, checkOut, today)
+      const bookingSelectFull =
+        'id, check_in, check_out, status, balance, payment_status, payment_method, ledger_account_name, guests:guest_id(name), rooms:room_id(room_number)'
+      const bookingSelectBasic =
+        'id, check_in, check_out, status, balance, payment_status, guests:guest_id(name), rooms:room_id(room_number)'
 
-          return {
-            id: (b as { id: string }).id,
-            guest_name:
-              (isOrg && ledgerName) || guests?.name || ledgerName || 'Guest',
-            room_number: rooms?.room_number || '—',
-            check_in: checkIn,
-            check_out: checkOut,
-            balance: Math.max(0, Number((b as { balance?: number }).balance) || 0),
-            payment_status: String(
-              (b as { payment_status?: string }).payment_status || '—',
-            ),
-            payment_method: method || 'cash',
-            kind: (isOrg ? 'organization' : 'guest') as 'guest' | 'organization',
-            is_in_house: Boolean(inHouse),
-          }
-        }),
-      )
+      let bookRes = await supabase
+        .from('bookings')
+        .select(bookingSelectFull)
+        .eq('organization_id', organizationId)
+        .in('status', ['confirmed', 'checked_in', 'reserved', 'checked_out'])
+        .gt('balance', 0)
+        .limit(2000)
+
+      if (bookRes.error || !bookRes.data) {
+        console.warn('[debt-report] bookings full select', bookRes.error?.message)
+        bookRes = await supabase
+          .from('bookings')
+          .select(bookingSelectBasic)
+          .eq('organization_id', organizationId)
+          .in('status', ['confirmed', 'checked_in', 'reserved', 'checked_out'])
+          .gt('balance', 0)
+          .limit(2000)
+      }
+
+      if (bookRes.error) {
+        console.warn('[debt-report] bookings', bookRes.error.message)
+        setGuestDebts([])
+      } else {
+        setGuestDebts(
+          (bookRes.data || []).map((b) => {
+            const method = String(
+              (b as { payment_method?: string }).payment_method || '',
+            )
+              .toLowerCase()
+              .replace(/-/g, '_')
+            const isOrg = method === 'city_ledger'
+            const guestsRaw = (b as { guests?: { name?: string } | { name?: string }[] | null })
+              .guests
+            const guests = Array.isArray(guestsRaw) ? guestsRaw[0] : guestsRaw
+            const roomsRaw = (b as { rooms?: { room_number?: string } | { room_number?: string }[] | null })
+              .rooms
+            const rooms = Array.isArray(roomsRaw) ? roomsRaw[0] : roomsRaw
+            const ledgerName = String(
+              (b as { ledger_account_name?: string | null }).ledger_account_name || '',
+            ).trim()
+            const status = String((b as { status?: string }).status || '')
+            const checkIn = String((b as { check_in: string }).check_in).slice(0, 10)
+            const checkOut = String((b as { check_out: string }).check_out).slice(0, 10)
+            const inHouse =
+              countsOnDailyBookForNight(status) &&
+              isOccupyingHotelNight(checkIn, checkOut, today)
+
+            return {
+              id: (b as { id: string }).id,
+              guest_name:
+                (isOrg && ledgerName) || guests?.name || ledgerName || 'Guest',
+              room_number: rooms?.room_number || '—',
+              check_in: checkIn,
+              check_out: checkOut,
+              balance: Math.max(0, Number((b as { balance?: number }).balance) || 0),
+              payment_status: String(
+                (b as { payment_status?: string }).payment_status || '—',
+              ),
+              payment_method: method || 'cash',
+              kind: (isOrg ? 'organization' : 'guest') as 'guest' | 'organization',
+              is_in_house: Boolean(inHouse),
+            }
+          }),
+        )
+      }
     } catch (err: unknown) {
       console.error('Error fetching debt accounts:', err)
       toast.error('Failed to fetch debt accounts')
