@@ -25,6 +25,7 @@ import {
   canManageStoreCatalog,
   canSubmitStoreItemForApproval,
   canViewIssueOutLog,
+  canCountStoreStock,
 } from '@/lib/permissions'
 import { issueOutletPickerOptions, isMainBarIssueDestination } from '@/lib/store/outlet-departments'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -99,6 +100,7 @@ export function StoreWorkspace() {
     barStock,
     addStoreItemDirect,
     updateStoreItemDirect,
+    setStoreOnHandForStockCount,
     deleteStoreItemDirect,
     submitStoreItemForApproval,
     approvePendingStoreItem,
@@ -145,9 +147,37 @@ export function StoreWorkspace() {
   const canManageCatalog = canManageStoreCatalog(role)
   const canSubmitItem = canSubmitStoreItemForApproval(role)
   const canApproveItems = canApproveStoreItems(role)
+  const canStockCount = canCountStoreStock(role)
+  const [stockCountMode, setStockCountMode] = useState(false)
+  const [stockCountDraft, setStockCountDraft] = useState<Record<string, string>>({})
   const pendingApprovals = (pendingStoreItems ?? []).filter((p) => p.status === 'pending')
   const actor = { name: name ?? 'Store', role: canonicalRoleKey(role) ?? 'store' }
   const unitLabel = (unit: string) => formatUnitLabel(unit)
+
+  const commitStockCount = (item: StoreItem) => {
+    const raw = stockCountDraft[item.id]
+    if (raw == null) return
+    if (!isCompleteQuantityInput(raw)) {
+      toast.error('Enter a valid quantity')
+      return
+    }
+    const qty = parseQuantityValue(raw)
+    if (qty == null || qty < 0) {
+      toast.error('Enter a valid quantity')
+      return
+    }
+    const result = setStoreOnHandForStockCount(item.id, qty, actor)
+    if ('error' in result) {
+      toast.error(result.error)
+      return
+    }
+    setStockCountDraft((prev) => {
+      const next = { ...prev }
+      delete next[item.id]
+      return next
+    })
+    toast.success(`Counted ${item.name}: ${qty} ${formatUnitLabel(item.unit)}`)
+  }
 
   const filtered = useMemo(() => {
     const list =
@@ -413,6 +443,20 @@ export function StoreWorkspace() {
             <div className="border-b px-4 py-2 bg-muted/30 flex flex-wrap items-center justify-between gap-2">
               <span className="text-sm font-medium">All Stock Items</span>
               <div className="flex flex-wrap items-center gap-2">
+                {canStockCount ? (
+                  <Button
+                    type="button"
+                    variant={stockCountMode ? 'default' : 'outline'}
+                    size="sm"
+                    className="h-8"
+                    onClick={() => {
+                      setStockCountMode((v) => !v)
+                      setStockCountDraft({})
+                    }}
+                  >
+                    {stockCountMode ? 'Done counting' : 'Stock count'}
+                  </Button>
+                ) : null}
                 <Input
                   type="date"
                   className="h-8 w-[132px] text-xs"
@@ -440,7 +484,11 @@ export function StoreWorkspace() {
               </div>
             </div>
             <div className="border-b px-4 py-2 bg-muted/10 text-[11px] text-muted-foreground">
-              Qty in store is updated only via Add to stock (approved PO → retirement). Manual edits are disabled.
+              {canStockCount && stockCountMode
+                ? 'Stock count mode: edit In Store and press Enter or Tab away to save instantly.'
+                : canStockCount
+                  ? 'Turn on Stock count (Store, Auditor, or Admin) to edit In Store quantities for a physical count.'
+                  : 'Qty in store is updated via Add to stock (approved PO → retirement).'}
             </div>
             <div className="p-3">
               <PaginatedListShell
@@ -493,9 +541,37 @@ export function StoreWorkspace() {
                             </div>
                             <div className="flex items-center justify-between gap-2">
                               <span className="text-xs text-muted-foreground">In store</span>
-                              <span className={stockLevelNumberPillClass(level)}>
-                                {item.quantityInStore} {unitLabel(item.unit)}
-                              </span>
+                              {canStockCount && stockCountMode ? (
+                                <div className="flex items-center gap-1.5">
+                                  <Input
+                                    className="h-8 w-20 text-right tabular-nums"
+                                    inputMode="decimal"
+                                    value={
+                                      stockCountDraft[item.id] ??
+                                      String(item.quantityInStore)
+                                    }
+                                    onChange={(e) =>
+                                      setStockCountDraft((prev) => ({
+                                        ...prev,
+                                        [item.id]: sanitizeQuantityInput(e.target.value),
+                                      }))
+                                    }
+                                    onBlur={() => commitStockCount(item)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') {
+                                        e.currentTarget.blur()
+                                      }
+                                    }}
+                                  />
+                                  <span className="text-xs text-muted-foreground">
+                                    {unitLabel(item.unit)}
+                                  </span>
+                                </div>
+                              ) : (
+                                <span className={stockLevelNumberPillClass(level)}>
+                                  {item.quantityInStore} {unitLabel(item.unit)}
+                                </span>
+                              )}
                             </div>
                             {canManageCatalog && (
                               <div className="flex justify-end gap-1 border-t pt-2">
@@ -584,9 +660,37 @@ export function StoreWorkspace() {
                                   </div>
                                 </TableCell>
                                 <TableCell className="text-right">
-                                  <span className={stockLevelNumberPillClass(level)}>
-                                    {item.quantityInStore} {unitLabel(item.unit)}
-                                  </span>
+                                  {canStockCount && stockCountMode ? (
+                                    <div className="inline-flex items-center justify-end gap-1.5">
+                                      <Input
+                                        className="h-8 w-20 text-right tabular-nums ml-auto"
+                                        inputMode="decimal"
+                                        value={
+                                          stockCountDraft[item.id] ??
+                                          String(item.quantityInStore)
+                                        }
+                                        onChange={(e) =>
+                                          setStockCountDraft((prev) => ({
+                                            ...prev,
+                                            [item.id]: sanitizeQuantityInput(e.target.value),
+                                          }))
+                                        }
+                                        onBlur={() => commitStockCount(item)}
+                                        onKeyDown={(e) => {
+                                          if (e.key === 'Enter') {
+                                            e.currentTarget.blur()
+                                          }
+                                        }}
+                                      />
+                                      <span className="text-xs text-muted-foreground">
+                                        {unitLabel(item.unit)}
+                                      </span>
+                                    </div>
+                                  ) : (
+                                    <span className={stockLevelNumberPillClass(level)}>
+                                      {item.quantityInStore} {unitLabel(item.unit)}
+                                    </span>
+                                  )}
                                 </TableCell>
                                 <TableCell className={`text-right tabular-nums ${RESPONSIVE_HIDE_LG}`}>
                                   {item.reorderLevel}

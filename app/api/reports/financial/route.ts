@@ -700,7 +700,7 @@ function buildDailyRevenuePayload(
     report: "daily_revenue",
     department: dep,
     vatNote:
-      "Revenue and net profit align with Accounting → Daily book (room rates in-house + POS/cash/transfer collected).",
+      "Revenue and net sales align with Accounting → Daily book (room rates in-house + POS/cash/transfer collected).",
     byDay,
     periodTotals: totals,
   };

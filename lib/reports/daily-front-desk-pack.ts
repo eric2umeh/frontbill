@@ -1,6 +1,12 @@
 /**
  * Hotel daily book: in-house guest list (room revenue) + cash sales collection
  * categories used for owner/director reports.
+ *
+ * Metrics (hotel night):
+ * - Revenue = Σ rate_per_night for occupying guests (accrual)
+ * - Net sales = cash/POS/transfer collections that business night (incl. advances)
+ * - Debt (walk-in) = Σ balance for in-house guests not on city ledger
+ * - In-house = occupying guest count
  */
 
 import {
@@ -9,6 +15,7 @@ import {
 } from '@/lib/outlets/outlet-financial-integration'
 import { filterDuplicatePaymentRows } from '@/lib/payments/dedupe-ledger-rows'
 import { resolvePaymentAccountLabel } from '@/lib/payments/payment-accounts'
+import { parseBookingNotesMeta } from '@/lib/booking/parse-booking-notes'
 import { isOccupyingHotelNight } from '@/lib/utils/booking-in-house-dates'
 import { countsOnDailyBookForNight } from '@/lib/rooms/room-occupancy'
 
@@ -25,19 +32,29 @@ export type SalesCollectionCategory =
 
 export type DailyGuestRow = {
   booking_id: string
+  guest_id: string | null
   guest_name: string
   room_number: string
   room_type: string
   rate_per_night: number
+  total_amount: number
+  deposit: number
+  balance: number
   check_in: string
   check_out: string
   folio_id: string
   payment_status: string
+  payment_method: string
+  payment_account_label: string
+  ledger_account_name: string
   status: string
+  /** True when folio is city ledger (org/corporate) — excluded from walk-in debt. */
+  is_city_ledger: boolean
 }
 
 export type DailyCollectionLine = {
   id: string
+  booking_id: string | null
   guest_name: string
   room: string
   amount: number
@@ -55,6 +72,8 @@ export type DailyFrontDeskPack = {
   guests: DailyGuestRow[]
   roomRevenueGenerated: number
   guestCount: number
+  /** Outstanding balances for in-house walk-in (non–city-ledger) guests. */
+  walkInDebt: number
   salesCollection: {
     total: number
     pos: number
@@ -144,6 +163,33 @@ function countsAsCashCollection(
   return true
 }
 
+function resolveGuestPaymentMeta(b: {
+  payment_method?: string | null
+  ledger_account_name?: string | null
+  notes?: string | null
+}): {
+  payment_method: string
+  ledger_account_name: string
+  payment_account_label: string
+  is_city_ledger: boolean
+} {
+  const fromNotes = parseBookingNotesMeta(b.notes)
+  const method = normMethod(b.payment_method) || fromNotes.payment_method
+  const ledger =
+    String(b.ledger_account_name || '').trim() || fromNotes.ledger_account_name
+  const accountLabel =
+    fromNotes.payment_account_label ||
+    resolvePaymentAccountLabel({ notes: b.notes }) ||
+    ledger
+  const isCity = method === 'city_ledger' || Boolean(ledger && method === 'city_ledger')
+  return {
+    payment_method: method || 'cash',
+    ledger_account_name: ledger,
+    payment_account_label: accountLabel,
+    is_city_ledger: isCity || method === 'city_ledger',
+  }
+}
+
 export function buildDailyFrontDeskPack(input: {
   dateYmd: string
   bookings: Array<{
@@ -152,8 +198,15 @@ export function buildDailyFrontDeskPack(input: {
     check_out: string
     status?: string | null
     rate_per_night?: unknown
+    total_amount?: unknown
+    deposit?: unknown
+    balance?: unknown
     folio_id?: string | null
     payment_status?: string | null
+    payment_method?: string | null
+    ledger_account_name?: string | null
+    notes?: string | null
+    guest_id?: string | null
     guests?: { name?: string | null } | null
     rooms?: { room_number?: string | null; room_type?: string | null } | null
     guest_name?: string | null
@@ -190,21 +243,39 @@ export function buildDailyFrontDeskPack(input: {
       if (!countsOnDailyBookForNight(b.status)) return false
       return isOccupyingHotelNight(b.check_in, b.check_out, date)
     })
-    .map((b) => ({
-      booking_id: b.id,
-      guest_name: b.guests?.name || b.guest_name || 'Guest',
-      room_number: b.rooms?.room_number || '—',
-      room_type: b.rooms?.room_type || '—',
-      rate_per_night: Number(b.rate_per_night) || 0,
-      check_in: String(b.check_in).slice(0, 10),
-      check_out: String(b.check_out).slice(0, 10),
-      folio_id: b.folio_id || '—',
-      payment_status: String(b.payment_status || '—'),
-      status: String(b.status || ''),
-    }))
+    .map((b) => {
+      const pay = resolveGuestPaymentMeta(b)
+      const balance = Math.max(0, Number(b.balance) || 0)
+      const total = Math.max(0, Number(b.total_amount) || 0)
+      const deposit = Math.max(0, Number(b.deposit) || 0)
+      return {
+        booking_id: b.id,
+        guest_id: b.guest_id ? String(b.guest_id) : null,
+        guest_name: b.guests?.name || b.guest_name || 'Guest',
+        room_number: b.rooms?.room_number || '—',
+        room_type: b.rooms?.room_type || '—',
+        rate_per_night: Number(b.rate_per_night) || 0,
+        total_amount: total,
+        deposit,
+        balance,
+        check_in: String(b.check_in).slice(0, 10),
+        check_out: String(b.check_out).slice(0, 10),
+        folio_id: b.folio_id || '—',
+        payment_status: String(b.payment_status || '—'),
+        payment_method: pay.payment_method,
+        payment_account_label: pay.payment_account_label,
+        ledger_account_name: pay.ledger_account_name,
+        status: String(b.status || ''),
+        is_city_ledger: pay.is_city_ledger,
+      }
+    })
     .sort((a, b) => a.room_number.localeCompare(b.room_number, undefined, { numeric: true }))
 
   const roomRevenueGenerated = guests.reduce((s, g) => s + g.rate_per_night, 0)
+  const walkInDebt = guests.reduce((s, g) => {
+    if (g.is_city_ledger) return s
+    return s + Math.max(0, g.balance)
+  }, 0)
 
   const visibleTx = (input.transactions || []).filter((t) => {
     const st = String(t.status || '').toLowerCase()
@@ -228,6 +299,7 @@ export function buildDailyFrontDeskPack(input: {
     const method = normMethod(t.payment_method)
     lines.push({
       id: t.id,
+      booking_id: t.booking_id ? String(t.booking_id) : null,
       guest_name: t.guest_name || 'Guest',
       room: t.room || '',
       amount: Number(t.amount) || 0,
@@ -254,6 +326,7 @@ export function buildDailyFrontDeskPack(input: {
     const method = normMethod(p.payment_method)
     lines.push({
       id: `pay-${p.id}`,
+      booking_id: p.booking_id ? String(p.booking_id) : null,
       guest_name: p.guest_id
         ? input.guestNameById?.[p.guest_id] || 'Guest'
         : 'Walk-in / Outlet',
@@ -338,6 +411,7 @@ export function buildDailyFrontDeskPack(input: {
     guests,
     roomRevenueGenerated,
     guestCount: guests.length,
+    walkInDebt,
     salesCollection,
     lines,
   }

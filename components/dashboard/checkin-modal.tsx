@@ -43,7 +43,9 @@ import {
 import { useNightAuditClosedDates } from '@/hooks/use-night-audit-closed-dates'
 import { useAuth } from '@/lib/auth-context'
 import { hasPermission } from '@/lib/permissions'
-import { BOOKING_MODAL_ROOMS_LIMIT, normalizeRoomsForBookingPickers } from '@/lib/utils/room-bookability'
+import { BOOKING_MODAL_ROOMS_LIMIT, normalizeRoomsForBookingPickers, roomIdsHeldForStayRange } from '@/lib/utils/room-bookability'
+import { DATE_HOLD_BOOKING_STATUSES } from '@/lib/rooms/room-occupancy'
+import { reconcileRoomStatusesClient } from '@/lib/rooms/reconcile-room-status-client'
 import { PaymentAccountSelect } from '@/components/payments/payment-account-select'
 import {
   appendAccountToNotes,
@@ -126,15 +128,16 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
       if (!tenantId || !uid) return
       setOrgId(tenantId)
 
-      await syncLedgerOrgCounterpartiesToOrganizationsTable(supabase, {
-        hotelTenantOrganizationId: tenantId,
-        createdByUserId: uid,
-      })
+      void reconcileRoomStatusesClient()
 
       const [{ data: guestData }, { data: roomData }, { data: bookingData }] = await Promise.all([
         supabase.from('guests').select('id, name, phone').eq('organization_id', tenantId).order('name'),
         supabase.from('rooms').select('id, room_number, room_type, price_per_night, status, housekeeping_status').eq('organization_id', tenantId).order('room_number').limit(BOOKING_MODAL_ROOMS_LIMIT),
-        supabase.from('bookings').select('room_id, check_in, check_out').eq('organization_id', tenantId).in('status', ['confirmed', 'checked_in']).limit(BOOKING_MODAL_ROOMS_LIMIT),
+        supabase.from('bookings').select('room_id, check_in, check_out, status').eq('organization_id', tenantId).in('status', [...DATE_HOLD_BOOKING_STATUSES]).limit(BOOKING_MODAL_ROOMS_LIMIT),
+        syncLedgerOrgCounterpartiesToOrganizationsTable(supabase, {
+          hotelTenantOrganizationId: tenantId,
+          createdByUserId: uid,
+        }),
       ])
 
       setGuests(guestData || [])
@@ -155,7 +158,7 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
   const filterRooms = (ci: Date, co: Date, bookings: any[], allRms: any[]) => {
     const ciStr = toLocalDateStr(ci)
     const coStr = toLocalDateStr(co)
-    const bookedIds = new Set(bookings.filter(b => b.check_in < coStr && b.check_out > ciStr).map(b => b.room_id))
+    const bookedIds = roomIdsHeldForStayRange(bookings, ciStr, coStr)
     const available = allRms.filter(r => !bookedIds.has(r.id))
     setRooms(available)
     setSelectedRoom((prev: any) => prev && bookedIds.has(prev.id) ? null : prev)

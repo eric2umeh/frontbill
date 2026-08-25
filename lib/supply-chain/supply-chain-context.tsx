@@ -3989,6 +3989,55 @@ function useSupplyChainImpl() {
     [storeItems, useDbPersistence, userId],
   );
 
+  /** Instant stock-count override of on-hand qty (Store role UI only). */
+  const setStoreOnHandForStockCount = useCallback(
+    (
+      itemId: string,
+      quantityInStore: number,
+      actor: Actor,
+    ): { ok: true } | { error: string } => {
+      const existing = storeItems.find((s) => s.id === itemId);
+      if (!existing) return { error: "Store item not found" };
+      const qty = Math.max(0, Number(quantityInStore) || 0);
+      if (!Number.isFinite(qty)) return { error: "Enter a valid quantity" };
+      const nextItem: StoreItem = { ...existing, quantityInStore: qty };
+      setStoreItems((prev) => prev.map((s) => (s.id === itemId ? nextItem : s)));
+      markLocalSupplyMutation();
+      setActivityLog((a) =>
+        log(
+          a,
+          "stock_received",
+          actor,
+          `Stock count: ${existing.name} → ${qty} ${existing.unit}`,
+          itemId,
+        ),
+      );
+      if (useDbPersistence) {
+        catalogSyncSkipRef.current = true;
+        void updateSupplyCatalogItem(
+          userId,
+          itemId,
+          {
+            ...nextItem,
+            ...storeItemDeptFieldsForDb(nextItem),
+          },
+          orgIdRef.current || undefined,
+        )
+          .catch((err) => {
+            const message =
+              err instanceof Error ? err.message : "Failed to save stock count";
+            toast.error(message);
+          })
+          .finally(() => {
+            catalogSyncSkipRef.current = false;
+            broadcastSupplyLiveUpdate();
+          });
+      }
+      return { ok: true };
+    },
+    [storeItems, useDbPersistence, userId],
+  );
+
   const deleteStoreItemDirect = useCallback(
     (itemId: string, actor: Actor): { ok: true } | { error: string } => {
       const existing = storeItems.find((s) => s.id === itemId);
@@ -5508,6 +5557,7 @@ function useSupplyChainImpl() {
     issueOutCart,
     addStoreItemDirect,
     updateStoreItemDirect,
+    setStoreOnHandForStockCount,
     deleteStoreItemDirect,
     submitStoreItemForApproval,
     approvePendingStoreItem,
@@ -5588,6 +5638,9 @@ export function useSupplyChain() {
       (() => ({ error: "Supply chain not ready — refresh the page" })),
     updateStoreItemDirect:
       ctx.updateStoreItemDirect ??
+      (() => ({ error: "Supply chain not ready — refresh the page" })),
+    setStoreOnHandForStockCount:
+      ctx.setStoreOnHandForStockCount ??
       (() => ({ error: "Supply chain not ready — refresh the page" })),
     deleteStoreItemDirect:
       ctx.deleteStoreItemDirect ??

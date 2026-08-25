@@ -7,10 +7,17 @@ import {
 } from "@/lib/utils/booking-in-house-dates";
 import { syncHousekeepingStatusesForOrganization } from "@/lib/rooms/sync-housekeeping-status";
 
-/** Folios that physically occupy a room. Reservations do not hold inventory until Check in. */
+/** Folios that can physically hold a room today. Future arrivals do not hold inventory. */
 export const OCCUPYING_BOOKING_STATUSES = [
   "checked_in",
   "confirmed",
+] as const;
+
+/** Folios that block a room only on overlapping stay dates (incl. future reservations). */
+export const DATE_HOLD_BOOKING_STATUSES = [
+  "checked_in",
+  "confirmed",
+  "reserved",
 ] as const;
 
 export function isPhysicalInHouseStatus(
@@ -65,6 +72,9 @@ export function pickOccupyingBooking<T extends OccupyingBookingRow>(
     ) {
       return false;
     }
+    const ci = bookingYmdHotel(b.check_in, tz);
+    // Future arrival (incl. confirmed) — room stays sellable until check-in day
+    if (ci && ci > today) return false;
     return isInHouseOnCalendarDay(b.check_in, b.check_out, today, tz);
   });
 
@@ -74,7 +84,7 @@ export function pickOccupyingBooking<T extends OccupyingBookingRow>(
   return open[0] ?? null;
 }
 
-/** Occupied = physically in-house. Future confirmed arrivals stay reserved on the folio only. */
+/** Occupied only when physically in-house today. Future arrivals do not mark the room reserved. */
 export function roomStatusFromOccupyingBooking(
   occupying: Pick<OccupyingBookingRow, "status" | "check_in">,
 ): "occupied" | "reserved" {
@@ -109,7 +119,11 @@ export function deriveRoomStatusFromOccupying(
     return null;
   }
 
-  return roomStatusFromOccupyingBooking(occupying);
+  // Future arrival occupying should not happen (filtered in pickOccupyingBooking);
+  // if it does, keep the room sellable.
+  const next = roomStatusFromOccupyingBooking(occupying);
+  if (next === "reserved") return "available";
+  return next;
 }
 
 /** Status to show in Rooms menu / pickers — always derived from today's active folios. */
@@ -124,7 +138,9 @@ export function computeEffectiveRoomStatus(
       return "available";
     return cur || "available";
   }
-  return roomStatusFromOccupyingBooking(occupying);
+  const next = roomStatusFromOccupyingBooking(occupying);
+  if (next === "reserved") return "available";
+  return next;
 }
 
 /** Distinct rooms with an in-house folio today (aligns with Bookings → Checked in filter). */
@@ -230,7 +246,7 @@ export async function reconcileRoomStatusesForOrganization(
   return result;
 }
 
-/** Room row status after creating/updating a booking. Reservations stay sellable. */
+/** Room row status after creating/updating a booking. Future reservations stay sellable. */
 export function roomStatusForBookingStatus(
   bookingStatus: string,
   checkIn?: string | null,
@@ -242,6 +258,7 @@ export function roomStatusForBookingStatus(
   if (st === "checked_in") return "occupied";
   const today = todayYmdHotel();
   const ci = checkIn ? bookingYmdHotel(checkIn) : "";
-  if (ci && ci > today) return "reserved";
+  // Future confirmed/reserved arrivals must not lock inventory
+  if (ci && ci > today) return "available";
   return "occupied";
 }

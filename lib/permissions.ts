@@ -1188,6 +1188,19 @@ export function canApproveStoreItems(
   return canAddStoreItemDirect(userRole);
 }
 
+/** Temporary stock-count: edit In Store qty instantly (Store, Auditor, Admin). */
+export function canCountStoreStock(
+  userRole: string | null | undefined,
+): boolean {
+  const roleKey = canonicalRoleKey(userRole);
+  return (
+    roleKey === "store" ||
+    roleKey === "auditor" ||
+    roleKey === "admin" ||
+    roleKey === "superadmin"
+  );
+}
+
 /** Edit catalogue, adjust on-hand qty, or delete central store items. */
 export function canManageStoreCatalog(
   userRole: string | null | undefined,

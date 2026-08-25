@@ -69,7 +69,7 @@ export async function GET(request: Request) {
       admin
         .from('bookings')
         .select(
-          'id, check_in, check_out, status, rate_per_night, folio_id, payment_status, guest_id, guests:guest_id(name), rooms:room_id(room_number, room_type)',
+          'id, check_in, check_out, status, rate_per_night, total_amount, deposit, balance, folio_id, payment_status, payment_method, ledger_account_name, notes, guest_id, guests:guest_id(name), rooms:room_id(room_number, room_type)',
         )
         .eq('organization_id', orgId)
         .in('status', ['confirmed', 'checked_in', 'reserved', 'checked_out'])

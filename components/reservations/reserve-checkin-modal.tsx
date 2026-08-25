@@ -31,7 +31,12 @@ import { reconcileRoomStatusesClient } from "@/lib/rooms/reconcile-room-status-c
 import { stayDatesFromActualArrival } from "@/lib/booking/edit-booking-patch";
 import { todayYmdHotel } from "@/lib/utils/booking-in-house-dates";
 import { formatPersonName, normalizeNameKey } from "@/lib/utils/name-format";
-import { isRoomAssignable } from "@/lib/utils/room-bookability";
+import {
+  isRoomAssignable,
+  roomIdsHeldForStayRange,
+} from "@/lib/utils/room-bookability";
+import { DATE_HOLD_BOOKING_STATUSES } from "@/lib/rooms/room-occupancy";
+import { guestOrOrganizationNameTaken } from "@/lib/utils/guest-org-name-uniqueness";
 
 export interface ReserveCheckInBooking {
   id: string;
@@ -107,7 +112,7 @@ export function ReserveCheckInModal({
           .from("bookings")
           .select("id, room_id, check_in, check_out, status")
           .eq("organization_id", orgId)
-          .in("status", ["confirmed", "checked_in"]),
+          .in("status", [...DATE_HOLD_BOOKING_STATUSES]),
       ]);
       setRoomsFetch((rms || []) as any[]);
       setBookingsFetch(
@@ -116,21 +121,23 @@ export function ReserveCheckInModal({
     })();
   }, [open, booking?.id, orgId]);
 
+  const stayForRoomPick = useMemo(() => {
+    if (!booking) return { check_in: cin, check_out: cout };
+    return stayDatesFromActualArrival({
+      originalCheckIn: booking.check_in,
+      originalCheckOut: booking.check_out,
+      actualArrivalYmd: todayYmdHotel(),
+      numberOfNights: booking.number_of_nights,
+    });
+  }, [booking, cin, cout]);
+
   const bookedOverlapRoomIds = useMemo(() => {
-    return new Set(
-      bookingsFetch
-        .filter(
-          (b) =>
-            String(b.room_id || "") &&
-            b.check_in < cout &&
-            b.check_out > cin &&
-            ["confirmed", "checked_in"].includes(
-              String(b.status || ""),
-            ),
-        )
-        .map((b) => b.room_id as string),
+    return roomIdsHeldForStayRange(
+      bookingsFetch,
+      stayForRoomPick.check_in,
+      stayForRoomPick.check_out,
     );
-  }, [bookingsFetch, cin, cout]);
+  }, [bookingsFetch, stayForRoomPick.check_in, stayForRoomPick.check_out]);
 
   const availableRooms = useMemo(() => {
     return roomsFetch.filter((r) => {
