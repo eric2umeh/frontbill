@@ -1296,13 +1296,13 @@ export default function BookingsPage() {
                 },
                 {
                   key: "net",
-                  label: "Net",
+                  label: "Net sales",
                   value: formatNaira(roomStats.netProfit),
                   icon: Banknote,
                   borderClass: "border-emerald-200/80",
                   bgClass: "bg-emerald-50/50",
                   iconClass: "text-emerald-700",
-                  title: "Net profit (sales collection) — view receipt lines in Daily book",
+                  title: "Net sales (sales collection) — view receipt lines in Daily book",
                   href: `${dailyBookBase}#daily-book-collections`,
                 },
                 {
