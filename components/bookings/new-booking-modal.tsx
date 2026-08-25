@@ -38,7 +38,9 @@ import { guestOrOrganizationNameTaken } from '@/lib/utils/guest-org-name-uniquen
 import { StayDateRangeFields } from '@/components/shared/stay-date-range-fields'
 import { useAuth } from '@/lib/auth-context'
 import { hasPermission } from '@/lib/permissions'
-import { BOOKING_MODAL_ROOMS_LIMIT, normalizeRoomsForBookingPickers, roomNotBookableReason } from '@/lib/utils/room-bookability'
+import { BOOKING_MODAL_ROOMS_LIMIT, normalizeRoomsForBookingPickers, roomIdsHeldForStayRange, roomNotBookableReason } from '@/lib/utils/room-bookability'
+import { DATE_HOLD_BOOKING_STATUSES } from '@/lib/rooms/room-occupancy'
+import { reconcileRoomStatusesClient } from '@/lib/rooms/reconcile-room-status-client'
 import { Checkbox } from '@/components/ui/checkbox'
 import { insertFolioCharges } from '@/lib/utils/insert-folio-charges'
 import { applyPaymentToGuestCityLedger } from '@/lib/utils/guest-city-ledger'
@@ -191,6 +193,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
       setAllBookingsForRooms([])
       setSelectedRoom(null)
       setSelectedRoomType('')
+      void reconcileRoomStatusesClient()
       void loadData()
     } else {
       setLoading(false)
@@ -221,7 +224,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
       ] = await Promise.all([
         supabase.from('guests').select('id, name, phone, email, address').eq('organization_id', orgId).order('name'),
         supabase.from('rooms').select('id, room_number, room_type, price_per_night, status, housekeeping_status').eq('organization_id', orgId).order('room_number').limit(BOOKING_MODAL_ROOMS_LIMIT),
-        supabase.from('bookings').select('room_id, check_in, check_out').eq('organization_id', orgId).in('status', ['confirmed', 'checked_in']).limit(BOOKING_MODAL_ROOMS_LIMIT),
+        supabase.from('bookings').select('room_id, check_in, check_out, status').eq('organization_id', orgId).in('status', [...DATE_HOLD_BOOKING_STATUSES]).limit(BOOKING_MODAL_ROOMS_LIMIT),
         supabase.from('city_ledger_accounts').select('id, account_name, account_type, contact_phone, balance').eq('organization_id', orgId).order('account_name'),
         loadCounterpartyOrganizations(supabase, orgId),
         syncLedgerOrgCounterpartiesToOrganizationsTable(supabase, {
@@ -539,11 +542,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
     if (!checkInDate || !checkOutDate) return []
     const ciStr = toLocalDateStr(checkInDate)
     const coStr = toLocalDateStr(checkOutDate)
-    const bookedRoomIds = new Set(
-      allBookingsForRooms
-        .filter((b) => b.check_in < coStr && b.check_out > ciStr)
-        .map((b) => b.room_id),
-    )
+    const bookedRoomIds = roomIdsHeldForStayRange(allBookingsForRooms, ciStr, coStr)
     return allRooms.filter(
       (r) => r.id && r.room_type && r.room_number && !bookedRoomIds.has(r.id),
     )
@@ -778,11 +777,9 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
         return `${y}-${m}-${dd}`
       }
       const ciStr = toStr(checkInDate), coStr = toStr(checkOutDate)
-      const hasConflict = allBookingsForRooms.some(
-        b => b.room_id === selectedRoom.id && b.check_in < coStr && b.check_out > ciStr && b.status !== 'cancelled'
-      )
-      if (hasConflict) {
-        toast.error('Selected room is already booked for these dates')
+      const held = roomIdsHeldForStayRange(allBookingsForRooms, ciStr, coStr)
+      if (held.has(selectedRoom.id)) {
+        toast.error('Selected room is already booked or reserved for these dates')
         return
       }
 
