@@ -276,7 +276,7 @@ export function DailyFrontDeskPanel() {
   }, [pack, day])
 
   const netSalesLines = useMemo(
-    () => (pack?.lines || []).filter((l) => l.counts_as_cash_collection || l.category === 'city_ledger'),
+    () => (pack?.lines || []).filter((l) => l.counts_as_cash_collection),
     [pack?.lines],
   )
 
