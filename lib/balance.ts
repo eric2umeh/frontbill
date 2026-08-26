@@ -31,7 +31,26 @@ export async function calculateGuestBalance(
     .eq('organization_id', organizationId)
     .not('status', 'in', '("cancelled")')
 
-  if (!bookings || bookings.length === 0) return 0
+  if (!bookings || bookings.length === 0) {
+    const { data: guestRow } = await supabase
+      .from('guests')
+      .select('name')
+      .eq('id', guestId)
+      .maybeSingle()
+    const guestName = String(guestRow?.name || '').trim()
+    if (!guestName) return 0
+    const { data: ledgerRows } = await supabase
+      .from('city_ledger_accounts')
+      .select('balance, account_type')
+      .eq('organization_id', organizationId)
+      .in('account_type', ['individual', 'guest'])
+      .ilike('account_name', guestName)
+      .limit(20)
+    const preferred = pickPreferredGuestLedgerAccount(ledgerRows || [])
+    const led = Number(preferred?.balance ?? 0)
+    if (Math.abs(led) > 0.005) return led
+    return 0
+  }
 
   const bookingIds = bookings.map(b => b.id)
 
@@ -77,6 +96,28 @@ export async function calculateGuestBalance(
 
   if (debt > 0.005) return debt
   if (credit > 0.005) return -credit
+
+  // Folios clear — still surface city-ledger debit so Guest DB / owing alerts match
+  const { data: guestRow } = await supabase
+    .from('guests')
+    .select('name')
+    .eq('id', guestId)
+    .maybeSingle()
+  const guestName = String(guestRow?.name || '').trim()
+  if (guestName) {
+    const { data: ledgerRows } = await supabase
+      .from('city_ledger_accounts')
+      .select('balance, account_type')
+      .eq('organization_id', organizationId)
+      .in('account_type', ['individual', 'guest'])
+      .ilike('account_name', guestName)
+      .limit(20)
+    const preferred = pickPreferredGuestLedgerAccount(ledgerRows || [])
+    const led = Number(preferred?.balance ?? 0)
+    if (led > 0.005) return led
+    if (led < -0.005) return led
+  }
+
   return 0
 }
 
@@ -225,6 +266,7 @@ async function applyLedgerCreditsToBalanceMap(
 ): Promise<Record<string, number>> {
   const balanceMap: Record<string, number> = {}
   const ledgerCreditByName = new Map<string, number>()
+  const ledgerDebitByName = new Map<string, number>()
 
   const names = Object.values(nameById).filter(Boolean)
   if (organizationId && names.length > 0) {
@@ -250,6 +292,8 @@ async function applyLedgerCreditsToBalanceMap(
       const bal = Number(preferred?.balance ?? 0)
       if (bal < -0.005) {
         ledgerCreditByName.set(key, Math.abs(bal))
+      } else if (bal > 0.005) {
+        ledgerDebitByName.set(key, bal)
       }
     }
   }
@@ -261,11 +305,15 @@ async function applyLedgerCreditsToBalanceMap(
       .trim()
       .toLowerCase()
     const ledgerCredit = nameKey ? ledgerCreditByName.get(nameKey) || 0 : 0
+    const ledgerDebit = nameKey ? ledgerDebitByName.get(nameKey) || 0 : 0
     const credit = Math.max(folioCredit, ledgerCredit)
 
     if (debt > 0.005) {
-      // Still owing — show debt; credit is tracked on guest detail
+      // Still owing on folio — show debt; credit is tracked on guest detail
       balanceMap[id] = debt
+    } else if (ledgerDebit > 0.005) {
+      // Folios clear but city ledger still has a debit (posted / legacy)
+      balanceMap[id] = ledgerDebit
     } else if (credit > 0.005) {
       balanceMap[id] = -credit
     } else {

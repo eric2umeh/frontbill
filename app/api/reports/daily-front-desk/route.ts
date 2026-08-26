@@ -4,6 +4,7 @@ import { canonicalRoleKey } from '@/lib/permissions'
 import { resolveHotelTimeZone } from '@/lib/hotel-date'
 import { fetchHotelBusinessNightUtcBounds } from '@/lib/payments/business-night-bounds'
 import { buildDailyFrontDeskPack } from '@/lib/reports/daily-front-desk-pack'
+import { enrichBookingsList } from '@/lib/booking/enrich-bookings-list'
 
 function isYmd(s: string) {
   return /^\d{4}-\d{2}-\d{2}$/.test(s)
@@ -136,9 +137,21 @@ export async function GET(request: Request) {
       }
     }
 
+    const bookingList = (bookings || []) as any[]
+    if (bookingList.length > 0) {
+      try {
+        await enrichBookingsList(admin as any, orgId, bookingList)
+      } catch (enrichErr) {
+        console.error(
+          '[daily-front-desk] folio enrich',
+          enrichErr instanceof Error ? enrichErr.message : enrichErr,
+        )
+      }
+    }
+
     const pack = buildDailyFrontDeskPack({
       dateYmd: date,
-      bookings: (bookings || []) as any,
+      bookings: bookingList,
       transactions: transactions as any,
       payments: payments as any,
       guestNameById,

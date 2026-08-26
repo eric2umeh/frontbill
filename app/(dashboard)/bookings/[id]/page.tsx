@@ -125,12 +125,10 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { PageLoadingState } from "@/components/loading-screen";
 import { fetchOrgCheckoutTime } from "@/lib/utils/org-checkout-policy";
 import {
-  fetchGuestCityLedgerAccount,
+  fetchGuestBookingLedgerSnapshot,
   applyBookingPaymentToGuestLedger,
   applyPaymentToGuestCityLedger,
   recordGuestLedgerCashMovement,
-  impliedGuestPrepaidCredit,
-  isGuestCityLedgerCashInDescription,
 } from "@/lib/utils/guest-city-ledger";
 import { isOutletFolioDescription } from "@/lib/outlets/booking-folio";
 
@@ -176,9 +174,13 @@ export default function BookingDetailPage({
   const [bookingLedgerSnapshot, setBookingLedgerSnapshot] = useState<{
     id: string | null;
     balance: number;
+    dueBalance: number;
+    rawBalance: number;
   }>({
     id: null,
     balance: 0,
+    dueBalance: 0,
+    rawBalance: 0,
   });
   const [guestCashbackBalance, setGuestCashbackBalance] = useState(0);
   const [applyCashback, setApplyCashback] = useState(false);
@@ -523,55 +525,19 @@ export default function BookingDetailPage({
               }
             }
           }
-          const row = await fetchGuestCityLedgerAccount(
-            supabase,
-            bookingData.organization_id,
+          const snapshot = await fetchGuestBookingLedgerSnapshot(supabase, {
+            organizationId: bookingData.organization_id,
             guestName,
-          );
-          let balance = Number(row?.balance) || 0;
-          if (balance >= -0.005 && guestIdForLedger) {
-            const [{ data: txRows }, { data: bkRows }] = await Promise.all([
-              supabase
-                .from("transactions")
-                .select("amount, description, status")
-                .eq("organization_id", bookingData.organization_id)
-                .ilike("guest_name", guestName)
-                .eq("status", "paid")
-                .limit(50),
-              supabase
-                .from("bookings")
-                .select("deposit")
-                .eq("guest_id", guestIdForLedger),
-            ]);
-            const cashIn = (txRows || [])
-              .filter((t: { description?: string | null }) =>
-                isGuestCityLedgerCashInDescription(t.description),
-              )
-              .reduce(
-                (s: number, t: { amount?: number | null }) =>
-                  s + Number(t.amount || 0),
-                0,
-              );
-            const deposits = (bkRows || []).reduce(
-              (s: number, b: { deposit?: number | null }) =>
-                s + Number(b.deposit || 0),
-              0,
-            );
-            const implied = impliedGuestPrepaidCredit({
-              ledgerBalance: balance,
-              folioOutstanding: Math.max(0, Number(bookingData.balance) || 0),
-              ledgerCashInTotal: cashIn,
-              depositTotal: deposits,
-              folioCreditTotal: folioGuestCreditAmount(chargesWithCreator),
-            });
-            if (implied > 0.005) balance = -implied;
-          }
-          setBookingLedgerSnapshot({
-            id: row?.id ?? null,
-            balance,
+            guestId: guestIdForLedger,
           });
+          setBookingLedgerSnapshot(snapshot);
         } catch {
-          setBookingLedgerSnapshot({ id: null, balance: 0 });
+          setBookingLedgerSnapshot({
+            id: null,
+            balance: 0,
+            dueBalance: 0,
+            rawBalance: 0,
+          });
         }
       }
 
@@ -704,15 +670,12 @@ export default function BookingDetailPage({
     (async () => {
       const supabase = createClient();
       if (guestName) {
-        const row = await fetchGuestCityLedgerAccount(
-          supabase,
-          booking.organization_id,
+        const snapshot = await fetchGuestBookingLedgerSnapshot(supabase, {
+          organizationId: booking.organization_id,
           guestName,
-        );
-        setBookingLedgerSnapshot({
-          id: row?.id ?? null,
-          balance: Number(row?.balance) || 0,
+          guestId,
         });
+        setBookingLedgerSnapshot(snapshot);
       }
       if (guestId) {
         const cb = await fetchGuestCashbackBalanceClient(supabase, guestId);
@@ -1254,7 +1217,7 @@ export default function BookingDetailPage({
         transactionType: "City Ledger Top-Up",
         userId: user.id,
         ledgerAccountId: bookingLedgerSnapshot.id,
-        currentLedgerBalance: bookingLedgerSnapshot.balance,
+        currentLedgerBalance: bookingLedgerSnapshot.rawBalance,
         syncGuestProfile: false,
         ...creditAccountFields,
       });
@@ -1293,15 +1256,12 @@ export default function BookingDetailPage({
         }
       }
 
-      const row = await fetchGuestCityLedgerAccount(
-        supabase,
-        booking.organization_id,
+      const snapshot = await fetchGuestBookingLedgerSnapshot(supabase, {
+        organizationId: booking.organization_id,
         guestName,
-      );
-      setBookingLedgerSnapshot({
-        id: row?.id ?? null,
-        balance: Number(row?.balance) || 0,
+        guestId: booking.guest_id || booking.guests?.id,
       });
+      setBookingLedgerSnapshot(snapshot);
 
       toast.success(
         `Credit of ${formatNaira(amt)} added to ${guestName}'s account`,
@@ -2739,16 +2699,49 @@ export default function BookingDetailPage({
                   </span>
                 </div>
               )}
-              {Number(bookingLedgerSnapshot.balance) < -0.005 && (
-                <div className="flex justify-between rounded-md border border-blue-200 bg-blue-50/80 px-3 py-2">
-                  <span className="text-sm font-medium text-blue-900">
-                    Guest account credit (city ledger)
-                  </span>
-                  <span className="font-bold text-blue-700 tabular-nums">
-                    {formatNaira(Math.abs(Number(bookingLedgerSnapshot.balance)))}
-                  </span>
-                </div>
-              )}
+              {(() => {
+                const due = Number(bookingLedgerSnapshot.dueBalance) || 0;
+                const led = Number(bookingLedgerSnapshot.balance) || 0;
+                const showDue = due > 0.005;
+                const showCredit = led < -0.005;
+                const showLedgerDebit =
+                  led > 0.005 && Math.abs(led - due) > 0.005;
+                return (
+                  <>
+                    {showDue && (
+                      <div className="flex justify-between rounded-md border border-red-200 bg-red-50/80 px-3 py-2">
+                        <span className="text-sm font-medium text-red-900">
+                          Guest due balance
+                          {showLedgerDebit ? " (open folios)" : " / city ledger"}
+                        </span>
+                        <span className="font-bold text-red-700 tabular-nums">
+                          {formatNaira(due)}
+                        </span>
+                      </div>
+                    )}
+                    {showLedgerDebit && (
+                      <div className="flex justify-between rounded-md border border-orange-200 bg-orange-50/80 px-3 py-2">
+                        <span className="text-sm font-medium text-orange-900">
+                          City ledger balance
+                        </span>
+                        <span className="font-bold text-orange-700 tabular-nums">
+                          {formatNaira(led)}
+                        </span>
+                      </div>
+                    )}
+                    {showCredit && (
+                      <div className="flex justify-between rounded-md border border-blue-200 bg-blue-50/80 px-3 py-2">
+                        <span className="text-sm font-medium text-blue-900">
+                          Guest account credit (city ledger)
+                        </span>
+                        <span className="font-bold text-blue-700 tabular-nums">
+                          {formatNaira(Math.abs(led))}
+                        </span>
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
               <Separator />
               <div className="flex justify-between text-lg">
                 <span className="font-semibold">Bill Balance (Unpaid)</span>

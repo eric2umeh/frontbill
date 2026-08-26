@@ -18,9 +18,10 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { formatBookingPaymentMethodLabel } from '@/lib/booking/parse-booking-notes'
-import { todayYmdHotel } from '@/lib/utils/booking-in-house-dates'
+import { todayYmdHotel, isOccupyingHotelNight } from '@/lib/utils/booking-in-house-dates'
 import { countsOnDailyBookForNight } from '@/lib/rooms/room-occupancy'
-import { isOccupyingHotelNight } from '@/lib/utils/booking-in-house-dates'
+import { enrichBookingsList } from '@/lib/booking/enrich-bookings-list'
+import { calculateGuestBalancesBatch } from '@/lib/balance'
 
 interface LedgerRow {
   id: string
@@ -73,37 +74,16 @@ export function DebtReportPanel({ organizationId }: { organizationId: string }) 
 
       const today = todayYmdHotel()
 
-      const ledgerRes = await supabase
-        .from('city_ledger_accounts')
-        .select('id, account_name, account_type, balance, contact_email, contact_phone')
-        .eq('organization_id', organizationId)
-        .gt('balance', 0)
-        .order('balance', { ascending: false })
-
-      if (ledgerRes.error) throw ledgerRes.error
-
-      setAccounts(
-        (ledgerRes.data || []).map((a) => ({
-          id: a.id,
-          account_name: a.account_name,
-          account_type: a.account_type || 'organization',
-          balance: Number(a.balance || 0),
-          contact_email: a.contact_email,
-          contact_phone: a.contact_phone,
-        })),
-      )
-
       const bookingSelectFull =
-        'id, check_in, check_out, status, balance, payment_status, payment_method, ledger_account_name, guests:guest_id(name), rooms:room_id(room_number)'
+        'id, check_in, check_out, status, balance, total_amount, deposit, payment_status, payment_method, ledger_account_name, guest_id, guests:guest_id(name), rooms:room_id(room_number)'
       const bookingSelectBasic =
-        'id, check_in, check_out, status, balance, payment_status, guests:guest_id(name), rooms:room_id(room_number)'
+        'id, check_in, check_out, status, balance, total_amount, deposit, payment_status, guest_id, guests:guest_id(name), rooms:room_id(room_number)'
 
       let bookRes = await supabase
         .from('bookings')
         .select(bookingSelectFull)
         .eq('organization_id', organizationId)
         .in('status', ['confirmed', 'checked_in', 'reserved', 'checked_out'])
-        .gt('balance', 0)
         .limit(2000)
 
       if (bookRes.error || !bookRes.data) {
@@ -113,56 +93,159 @@ export function DebtReportPanel({ organizationId }: { organizationId: string }) 
           .select(bookingSelectBasic)
           .eq('organization_id', organizationId)
           .in('status', ['confirmed', 'checked_in', 'reserved', 'checked_out'])
-          .gt('balance', 0)
           .limit(2000)
       }
+
+      const bookingRows = (bookRes.data || []) as Array<{
+        id: string
+        balance?: number
+        total_amount?: number
+        deposit?: number
+        payment_status?: string
+        [key: string]: unknown
+      }>
 
       if (bookRes.error) {
         console.warn('[debt-report] bookings', bookRes.error.message)
         setGuestDebts([])
       } else {
-        setGuestDebts(
-          (bookRes.data || []).map((b) => {
-            const method = String(
-              (b as { payment_method?: string }).payment_method || '',
-            )
-              .toLowerCase()
-              .replace(/-/g, '_')
-            const isOrg = method === 'city_ledger'
-            const guestsRaw = (b as { guests?: { name?: string } | { name?: string }[] | null })
-              .guests
-            const guests = Array.isArray(guestsRaw) ? guestsRaw[0] : guestsRaw
-            const roomsRaw = (b as { rooms?: { room_number?: string } | { room_number?: string }[] | null })
-              .rooms
-            const rooms = Array.isArray(roomsRaw) ? roomsRaw[0] : roomsRaw
-            const ledgerName = String(
-              (b as { ledger_account_name?: string | null }).ledger_account_name || '',
-            ).trim()
-            const status = String((b as { status?: string }).status || '')
-            const checkIn = String((b as { check_in: string }).check_in).slice(0, 10)
-            const checkOut = String((b as { check_out: string }).check_out).slice(0, 10)
-            const inHouse =
-              countsOnDailyBookForNight(status) &&
-              isOccupyingHotelNight(checkIn, checkOut, today)
+        // Same folio outstanding as booking detail / Guest Database
+        await enrichBookingsList(supabase, organizationId, bookingRows as any)
 
-            return {
-              id: (b as { id: string }).id,
-              guest_name:
-                (isOrg && ledgerName) || guests?.name || ledgerName || 'Guest',
-              room_number: rooms?.room_number || '—',
-              check_in: checkIn,
-              check_out: checkOut,
-              balance: Math.max(0, Number((b as { balance?: number }).balance) || 0),
-              payment_status: String(
-                (b as { payment_status?: string }).payment_status || '—',
-              ),
-              payment_method: method || 'cash',
-              kind: (isOrg ? 'organization' : 'guest') as 'guest' | 'organization',
-              is_in_house: Boolean(inHouse),
-            }
-          }),
+        setGuestDebts(
+          bookingRows
+            .map((b) => {
+              const method = String(
+                (b as { payment_method?: string }).payment_method || '',
+              )
+                .toLowerCase()
+                .replace(/-/g, '_')
+              const isOrg = method === 'city_ledger'
+              const guestsRaw = (
+                b as {
+                  guests?:
+                    | { name?: string }
+                    | { name?: string }[]
+                    | null
+                }
+              ).guests
+              const guests = Array.isArray(guestsRaw) ? guestsRaw[0] : guestsRaw
+              const roomsRaw = (
+                b as {
+                  rooms?:
+                    | { room_number?: string }
+                    | { room_number?: string }[]
+                    | null
+                }
+              ).rooms
+              const rooms = Array.isArray(roomsRaw) ? roomsRaw[0] : roomsRaw
+              const ledgerName = String(
+                (b as { ledger_account_name?: string | null }).ledger_account_name ||
+                  '',
+              ).trim()
+              const status = String((b as { status?: string }).status || '')
+              const checkIn = String((b as { check_in: string }).check_in).slice(
+                0,
+                10,
+              )
+              const checkOut = String(
+                (b as { check_out: string }).check_out,
+              ).slice(0, 10)
+              const inHouse =
+                countsOnDailyBookForNight(status) &&
+                isOccupyingHotelNight(checkIn, checkOut, today)
+              const owing = Math.max(0, Number(b.balance) || 0)
+
+              return {
+                id: b.id,
+                guest_name:
+                  (isOrg && ledgerName) || guests?.name || ledgerName || 'Guest',
+                room_number: rooms?.room_number || '—',
+                check_in: checkIn,
+                check_out: checkOut,
+                balance: owing,
+                payment_status: String(
+                  (b as { payment_status?: string }).payment_status || '—',
+                ),
+                payment_method: method || 'cash',
+                kind: (isOrg ? 'organization' : 'guest') as
+                  | 'guest'
+                  | 'organization',
+                is_in_house: Boolean(inHouse),
+              }
+            })
+            .filter((g) => g.balance > 0.005),
         )
       }
+
+      const [{ data: ledgerData, error: ledgerErr }, { data: guestData }] =
+        await Promise.all([
+          supabase
+            .from('city_ledger_accounts')
+            .select(
+              'id, account_name, account_type, balance, contact_email, contact_phone',
+            )
+            .eq('organization_id', organizationId)
+            .order('balance', { ascending: false })
+            .limit(2000),
+          supabase
+            .from('guests')
+            .select('id, name')
+            .eq('organization_id', organizationId)
+            .limit(5000),
+        ])
+
+      if (ledgerErr) throw ledgerErr
+
+      const guestBalanceMap =
+        (guestData || []).length > 0
+          ? await calculateGuestBalancesBatch(
+              supabase,
+              (guestData || []).map((g) => ({ id: g.id, name: g.name })),
+              organizationId,
+            )
+          : {}
+
+      const guestDueByName = new Map<string, number>()
+      for (const g of guestData || []) {
+        const key = String(g.name || '')
+          .trim()
+          .toLowerCase()
+        if (!key) continue
+        const signed = Number(guestBalanceMap[g.id] ?? 0)
+        if (signed > 0.005) {
+          guestDueByName.set(
+            key,
+            Math.max(guestDueByName.get(key) || 0, signed),
+          )
+        }
+      }
+
+      setAccounts(
+        (ledgerData || [])
+          .map((a) => {
+            const type = String(a.account_type || 'organization').toLowerCase()
+            const nameKey = String(a.account_name || '')
+              .trim()
+              .toLowerCase()
+            const raw = Math.max(0, Number(a.balance || 0))
+            let balance = raw
+            if (type === 'individual' || type === 'guest') {
+              // Match Guest Database / booking due when a guest profile exists
+              const guestDue = nameKey ? guestDueByName.get(nameKey) || 0 : 0
+              balance = Math.max(raw, guestDue)
+            }
+            return {
+              id: a.id,
+              account_name: a.account_name,
+              account_type: a.account_type || 'organization',
+              balance,
+              contact_email: a.contact_email,
+              contact_phone: a.contact_phone,
+            }
+          })
+          .filter((a) => a.balance > 0.005),
+      )
     } catch (err: unknown) {
       console.error('Error fetching debt accounts:', err)
       toast.error('Failed to fetch debt accounts')
@@ -192,8 +275,30 @@ export function DebtReportPanel({ organizationId }: { organizationId: string }) 
   const filteredLedger = useMemo(() => {
     if (scopeFilter === 'in_house') return []
     if (partyFilter === 'guest') return []
-    return accounts.filter((a) => a.balance > 0)
-  }, [accounts, partyFilter, scopeFilter])
+    return accounts.filter((a) => {
+      const type = String(a.account_type || '').toLowerCase()
+      // Guest/individual owing is already on folio rows + Guest Database — avoid double-count
+      // unless party is organization-only view of the ledger list
+      if (partyFilter === 'organization') {
+        return (
+          a.balance > 0 &&
+          (type === 'organization' || type === 'corporate')
+        )
+      }
+      if (type === 'individual' || type === 'guest') {
+        // Show only when no matching folio debt row (ledger-only debit)
+        const nameKey = a.account_name.trim().toLowerCase()
+        const hasFolioDebt = guestDebts.some(
+          (g) =>
+            g.kind === 'guest' &&
+            g.guest_name.trim().toLowerCase() === nameKey &&
+            g.balance > 0.005,
+        )
+        return a.balance > 0 && !hasFolioDebt
+      }
+      return a.balance > 0
+    })
+  }, [accounts, partyFilter, scopeFilter, guestDebts])
 
   const guestOutstanding = filteredGuests.reduce((s, g) => s + g.balance, 0)
   const ledgerOutstanding = filteredLedger.reduce((s, a) => s + a.balance, 0)
@@ -220,9 +325,9 @@ export function DebtReportPanel({ organizationId }: { organizationId: string }) 
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">Guest + org</SelectItem>
-              <SelectItem value="guest">Guest only</SelectItem>
-              <SelectItem value="organization">Org only</SelectItem>
+              <SelectItem value="all">All parties</SelectItem>
+              <SelectItem value="guest">Guests</SelectItem>
+              <SelectItem value="organization">Organizations</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -236,26 +341,26 @@ export function DebtReportPanel({ organizationId }: { organizationId: string }) 
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All debt</SelectItem>
+              <SelectItem value="all">All</SelectItem>
               <SelectItem value="in_house">In-house only</SelectItem>
               <SelectItem value="city_ledger">City ledger only</SelectItem>
             </SelectContent>
           </Select>
         </div>
         <div className="space-y-1">
-          <Label className="text-xs text-muted-foreground">Check-in from</Label>
+          <Label className="text-xs text-muted-foreground">From</Label>
           <Input
             type="date"
-            className="w-[150px]"
+            className="h-9 w-[140px]"
             value={dateFrom}
             onChange={(e) => setDateFrom(e.target.value)}
           />
         </div>
         <div className="space-y-1">
-          <Label className="text-xs text-muted-foreground">Check-in to</Label>
+          <Label className="text-xs text-muted-foreground">To</Label>
           <Input
             type="date"
-            className="w-[150px]"
+            className="h-9 w-[140px]"
             value={dateTo}
             onChange={(e) => setDateTo(e.target.value)}
           />
@@ -265,24 +370,26 @@ export function DebtReportPanel({ organizationId }: { organizationId: string }) 
       <div className="grid gap-3 sm:grid-cols-3">
         <Card>
           <CardContent className="p-4">
-            <p className="text-sm text-muted-foreground">Folios / accounts</p>
-            <p className="text-2xl font-bold">
-              {filteredGuests.length + filteredLedger.length}
-            </p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
             <p className="text-sm text-muted-foreground">Guest / org folios</p>
-            <p className="text-2xl font-bold text-amber-700">
+            <p className="text-2xl font-bold text-red-600">
               {formatNaira(guestOutstanding)}
             </p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4">
+            <p className="text-sm text-muted-foreground">City ledger</p>
+            <p className="text-2xl font-bold text-red-600">
+              {formatNaira(ledgerOutstanding)}
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
             <p className="text-sm text-muted-foreground">Total outstanding</p>
-            <p className="text-2xl font-bold text-red-600">{formatNaira(totalOutstanding)}</p>
+            <p className="text-2xl font-bold text-red-600">
+              {formatNaira(totalOutstanding)}
+            </p>
           </CardContent>
         </Card>
       </div>
@@ -332,7 +439,9 @@ export function DebtReportPanel({ organizationId }: { organizationId: string }) 
               key: 'balance',
               label: 'Owing',
               render: (g) => (
-                <span className="font-semibold text-red-600">{formatNaira(g.balance)}</span>
+                <span className="font-semibold text-red-600">
+                  {formatNaira(g.balance)}
+                </span>
               ),
             },
           ]}
@@ -353,7 +462,9 @@ export function DebtReportPanel({ organizationId }: { organizationId: string }) 
             {
               key: 'account_name',
               label: 'Ledger account',
-              render: (a) => <span className="font-medium">{a.account_name}</span>,
+              render: (a) => (
+                <span className="font-medium">{a.account_name}</span>
+              ),
             },
             {
               key: 'account_type',
@@ -376,16 +487,6 @@ export function DebtReportPanel({ organizationId }: { organizationId: string }) 
                   )}
                 >
                   {formatNaira(a.balance)}
-                </span>
-              ),
-            },
-            {
-              key: 'contact',
-              label: 'Contact',
-              responsive: 'md+',
-              render: (a) => (
-                <span className="text-muted-foreground truncate">
-                  {a.contact_email || a.contact_phone || '—'}
                 </span>
               ),
             },
