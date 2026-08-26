@@ -1,13 +1,27 @@
 'use client'
 
+import { useEffect } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { Suspense } from 'react'
-import { DailyFrontDeskPanel } from '@/components/reports/daily-front-desk-panel'
 import { PageLoadingState } from '@/components/loading-screen'
 
-export default function TransactionsDailyBookPage() {
+function RedirectInner() {
+  const router = useRouter()
+  const searchParams = useSearchParams()
+
+  useEffect(() => {
+    const qs = searchParams.toString()
+    const hash = typeof window !== 'undefined' ? window.location.hash : ''
+    router.replace(`/daily-book${qs ? `?${qs}` : ''}${hash}`)
+  }, [router, searchParams])
+
+  return <PageLoadingState label="Opening daily book…" />
+}
+
+export default function TransactionsDailyBookRedirectPage() {
   return (
-    <Suspense fallback={<PageLoadingState label="Loading daily book…" />}>
-      <DailyFrontDeskPanel />
+    <Suspense fallback={<PageLoadingState label="Opening daily book…" />}>
+      <RedirectInner />
     </Suspense>
   )
 }
