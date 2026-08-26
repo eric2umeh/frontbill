@@ -1279,7 +1279,7 @@ export default function BookingsPage() {
         </div>
         <div className="flex flex-wrap items-center justify-center lg:justify-end gap-1.5 shrink-0">
           {roomStats !== null && (() => {
-            const dailyBookBase = `/transactions/daily-book?date=${roomStats.statsDate}`
+            const dailyBookBase = `/daily-book?date=${roomStats.statsDate}`
             return (
             <CompactStatBadgeRow
               items={[

@@ -7,20 +7,14 @@ export const BOOKING_MODAL_ROOMS_LIMIT = 20_000
 
 const DEFAULT_ROOM_TYPE_LABEL = 'Standard'
 
+/** Hard physical blocks only — occupied rooms stay sellable on non-overlapping nights. */
 const PMS_STATUSES_BLOCKING_BOOKINGS = new Set([
   'maintenance',
   'out_of_order',
-  'occupied',
 ])
 
-/** HK statuses that hide a room from pickers. reservation/checkout/vacant do not. */
-const HK_STATUSES_BLOCKING_BOOKINGS = new Set([
-  'out_of_order',
-  'occupied',
-  'complimentary',
-  'long_stay',
-  'sleep_out',
-])
+/** HK statuses that hide a room from pickers regardless of stay dates. */
+const HK_STATUSES_BLOCKING_BOOKINGS = new Set(['out_of_order'])
 
 const DATE_HOLD = new Set<string>(DATE_HOLD_BOOKING_STATUSES as readonly string[])
 
@@ -45,8 +39,8 @@ function normStatus(s: string | null | undefined): string {
 
 /**
  * Whether a room may appear in booking / reservation pickers.
- * Physical holds only (occupied / OOO / maintenance). PMS "reserved" stays sellable;
- * reserved nights are enforced by date overlap instead.
+ * Occupied / reserved / HK floor statuses do not hide the room — stay-date overlap
+ * decides whether it can be sold for the selected nights.
  */
 export function isRoomAssignable(
   status: string | null | undefined,
@@ -72,7 +66,6 @@ export function roomNotBookableReason(room: RoomBookabilityInput): string | null
   const s = normStatus(room.status)
   if (s === 'maintenance') return 'Room is under maintenance and cannot be booked.'
   if (s === 'out_of_order') return 'Room is out of order and cannot be booked.'
-  if (s === 'occupied') return 'Room is occupied and cannot be booked.'
   return 'Room is not available for booking.'
 }
 
@@ -93,7 +86,7 @@ export function staysOverlap(
 
 /**
  * Room IDs held for the selected stay by checked-in, confirmed, or reserved folios.
- * A future reservation only blocks on its reserved nights — other nights stay free for walk-ins.
+ * A current in-house stay (e.g. 26–30 Aug) does not block a later reservation (e.g. 1 Sep).
  */
 export function roomIdsHeldForStayRange(
   bookings: StayHoldBooking[],
@@ -116,8 +109,8 @@ export function roomIdsHeldForStayRange(
 }
 
 /**
- * After fetch: trim room_number, coerce blank room_type, exclude non-bookable rooms.
- * Rooms with PMS status reserved remain listed for walk-ins on free nights.
+ * After fetch: trim room_number, coerce blank room_type, exclude OOO/maintenance only.
+ * Occupied rooms remain listed so future non-overlapping stays can select them.
  */
 export function normalizeRoomsForBookingPickers(roomData: unknown[] | null | undefined): Record<string, unknown>[] {
   if (!roomData?.length) return []

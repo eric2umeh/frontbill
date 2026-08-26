@@ -16,6 +16,7 @@ const EXACT: Record<string, string> = {
   '/analytics/revenue': 'Revenue',
   '/analytics/profitability': 'Profitability',
   '/transactions': 'Transactions',
+  '/daily-book': 'Daily book',
   '/transactions/daily-book': 'Daily book',
   '/transactions/analytics': 'Analytics',
   '/transactions/analytics/revenue': 'Revenue',

@@ -413,6 +413,10 @@ export function Header({ user, onMenuClick }: HeaderProps) {
 
           for (const r of backdateRequests) {
             if (r.requested_by !== user.id || r.status === 'pending' || !r.decided_at) continue
+            // Only notify for fresh decisions — avoids stale "rejected" toasts when Night Audit
+            // polls after an unrelated approval (e.g. move-dates).
+            const decidedMs = new Date(r.decided_at).getTime()
+            if (!Number.isFinite(decidedMs) || Date.now() - decidedMs > 15 * 60 * 1000) continue
             const mark = `${r.id}:${r.status}`
             if (seen.has(mark)) continue
             seen.add(mark)

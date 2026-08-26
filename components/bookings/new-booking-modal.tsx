@@ -57,6 +57,7 @@ import { persistFolioAttachments } from '@/lib/folio/persist-folio-attachments'
 import { SelectedRoomsStickyBar } from '@/components/shared/selected-rooms-sticky-bar'
 import { CashbackPaymentPanel } from '@/components/cashback/cashback-payment-panel'
 import { PaymentAccountSelect } from '@/components/payments/payment-account-select'
+import { PartyOwingAlert } from '@/components/bookings/party-owing-alert'
 import {
   appendAccountToNotes,
   paymentAccountInsertFields,
@@ -1229,6 +1230,27 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
             {/* Payment */}
             <div className="rounded-lg border p-4 space-y-4">
               <p className="text-sm font-semibold">Payment</p>
+              <PartyOwingAlert
+                open={open}
+                hotelOrganizationId={organizationId}
+                guestId={guestId || null}
+                guestName={fullName || null}
+                ledgerAccountId={
+                  paymentMethod === 'city_ledger' ? ledgerAccount || null : null
+                }
+                ledgerAccountName={
+                  paymentMethod === 'city_ledger' ? ledgerAccountName || null : null
+                }
+                ledgerBalanceHint={
+                  paymentMethod === 'city_ledger'
+                    ? (
+                        [...individualAccounts, ...organizationAccounts].find(
+                          (a) => a.id === ledgerAccount,
+                        )?.balance ?? null
+                      )
+                    : null
+                }
+              />
               {paymentMethod !== 'city_ledger' && (
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-2">

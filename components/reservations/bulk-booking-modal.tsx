@@ -818,7 +818,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
     setPickedRoomIds([])
     const bookedRoomIds = roomIdsHeldForStayRange(allActiveBookings, cin, cout)
     const available = allRooms.filter(
-      (r: any) => r.status !== 'maintenance' && r.status !== 'out_of_order' && r.status !== 'occupied' && r.id && !bookedRoomIds.has(r.id),
+      (r: any) => r.status !== 'maintenance' && r.status !== 'out_of_order' && r.id && !bookedRoomIds.has(r.id),
     )
     setAvailableRooms(available)
     setRoomAvailabilityChecked(true)

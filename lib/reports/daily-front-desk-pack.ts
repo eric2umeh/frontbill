@@ -72,8 +72,14 @@ export type DailyFrontDeskPack = {
   guests: DailyGuestRow[]
   roomRevenueGenerated: number
   guestCount: number
-  /** Outstanding balances for in-house walk-in (non–city-ledger) guests. */
+  /** @deprecated Prefer guestDebt — outstanding walk-in (non–city-ledger) balances. */
   walkInDebt: number
+  /** Outstanding balances for in-house individual (non–city-ledger) guests. */
+  guestDebt: number
+  /** Outstanding balances for in-house city-ledger / organization folios. */
+  organizationDebt: number
+  /** Cash collected that settles a prior stay (guest already checked out / not occupying tonight). */
+  debtRecovery: number
   salesCollection: {
     total: number
     pos: number
@@ -286,10 +292,16 @@ export function buildDailyFrontDeskPack(input: {
     .sort((a, b) => a.room_number.localeCompare(b.room_number, undefined, { numeric: true }))
 
   const roomRevenueGenerated = guests.reduce((s, g) => s + g.rate_per_night, 0)
-  const walkInDebt = guests.reduce((s, g) => {
+  const guestDebt = guests.reduce((s, g) => {
     if (g.is_city_ledger) return s
     return s + Math.max(0, g.balance)
   }, 0)
+  const organizationDebt = guests.reduce((s, g) => {
+    if (!g.is_city_ledger) return s
+    return s + Math.max(0, g.balance)
+  }, 0)
+  const walkInDebt = guestDebt
+  const occupyingBookingIds = new Set(guests.map((g) => g.booking_id))
 
   const visibleTx = (input.transactions || []).filter((t) => {
     const st = String(t.status || '').toLowerCase()
@@ -359,6 +371,24 @@ export function buildDailyFrontDeskPack(input: {
     })
   }
 
+  // Cash collected against a folio that is not in-house tonight = settling prior debt
+  // (e.g. Prince pays after checkout). Leave advances / extras / city ledger alone.
+  for (const line of lines) {
+    if (!line.counts_as_cash_collection) continue
+    if (
+      line.category === 'advance_payment' ||
+      line.category === 'additional_payment' ||
+      line.category === 'extra_charges' ||
+      line.category === 'city_ledger' ||
+      line.category === 'debt_recovery'
+    ) {
+      continue
+    }
+    if (line.booking_id && !occupyingBookingIds.has(line.booking_id)) {
+      line.category = 'debt_recovery'
+    }
+  }
+
   lines.sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
 
   const salesCollection = {
@@ -426,6 +456,9 @@ export function buildDailyFrontDeskPack(input: {
     roomRevenueGenerated,
     guestCount: guests.length,
     walkInDebt,
+    guestDebt,
+    organizationDebt,
+    debtRecovery: salesCollection.debtRecovery,
     salesCollection,
     lines,
   }

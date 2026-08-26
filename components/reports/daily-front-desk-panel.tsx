@@ -34,7 +34,7 @@ import { PageLoadingState } from '@/components/loading-screen'
 import { EnhancedDataTable } from '@/components/shared/enhanced-data-table'
 import { TABLE_CELL_TRUNCATE, TABLE_META_TEXT, TABLE_STACKED_CELL } from '@/lib/utils/table-row-inline'
 import { toast } from 'sonner'
-import { CalendarIcon, RefreshCw, Users, Wallet, CircleDollarSign, HandCoins } from 'lucide-react'
+import { CalendarIcon, RefreshCw, Users, Wallet, CircleDollarSign, HandCoins, Building2, RotateCcw } from 'lucide-react'
 import { calendarPickerYmd } from '@/lib/utils/booking-in-house-dates'
 import { cn } from '@/lib/utils'
 
@@ -291,7 +291,8 @@ export function DailyFrontDeskPanel() {
           <h2 className="text-xl font-semibold tracking-tight">Daily book</h2>
           <p className="text-sm text-muted-foreground">
             Revenue is room rates for the hotel night. Net sales is money collected that business
-            night (until Night Audit). Debt is walk-in guest balances still owing.
+            night (until Night Audit). Debt recovery is settlements for guests no longer in-house.
+            Debt is split between individual guests and organizations.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -320,7 +321,7 @@ export function DailyFrontDeskPanel() {
         </div>
       </div>
 
-      <div id="daily-book-summary" className="scroll-mt-24 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div id="daily-book-summary" className="scroll-mt-24 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
         <Card>
           <CardHeader className="pb-2">
             <CardDescription className="flex items-center gap-1.5">
@@ -356,17 +357,43 @@ export function DailyFrontDeskPanel() {
             POS / cash / transfer collected
           </CardContent>
         </Card>
-        <Card className="border-amber-200/80">
+        <Card id="daily-book-debt-recovery" className="scroll-mt-24 border-emerald-200/80">
           <CardHeader className="pb-2">
             <CardDescription className="flex items-center gap-1.5">
-              <HandCoins className="h-4 w-4" /> Debt (walk-in)
+              <RotateCcw className="h-4 w-4" /> Debt recovery
             </CardDescription>
-            <CardTitle className="text-3xl text-amber-800">
-              {formatNaira(pack?.walkInDebt || 0)}
+            <CardTitle className="text-3xl text-emerald-700">
+              {formatNaira(pack?.debtRecovery ?? sc?.debtRecovery ?? 0)}
             </CardTitle>
           </CardHeader>
           <CardContent className="text-sm text-muted-foreground">
-            Outstanding balances (excludes city ledger)
+            Settlements for guests not in-house tonight
+          </CardContent>
+        </Card>
+        <Card className="border-amber-200/80">
+          <CardHeader className="pb-2">
+            <CardDescription className="flex items-center gap-1.5">
+              <HandCoins className="h-4 w-4" /> Debt (guest)
+            </CardDescription>
+            <CardTitle className="text-3xl text-amber-800">
+              {formatNaira(pack?.guestDebt ?? pack?.walkInDebt ?? 0)}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="text-sm text-muted-foreground">
+            Individual walk-in balances owing
+          </CardContent>
+        </Card>
+        <Card className="border-slate-200/80">
+          <CardHeader className="pb-2">
+            <CardDescription className="flex items-center gap-1.5">
+              <Building2 className="h-4 w-4" /> Debt (organization)
+            </CardDescription>
+            <CardTitle className="text-3xl text-slate-800">
+              {formatNaira(pack?.organizationDebt || 0)}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="text-sm text-muted-foreground">
+            City ledger / corporate folios owing
           </CardContent>
         </Card>
       </div>

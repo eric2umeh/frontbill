@@ -9,12 +9,6 @@ import { hasPermission } from '@/lib/permissions'
 
 const MAIN_TABS = [
   {
-    href: '/transactions/daily-book',
-    label: 'Daily book',
-    permission: 'transactions:view' as const,
-    match: (pathname: string) => pathname.startsWith('/transactions/daily-book'),
-  },
-  {
     href: '/transactions',
     label: 'Transactions',
     permission: 'transactions:view' as const,
@@ -58,7 +52,7 @@ export function TransactionsSectionLayout({ children }: { children: React.ReactN
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Transactions / Analytics</h1>
         <p className="text-muted-foreground">
-          Payment ledger, daily book (in-house guests + sales collection), and profitability
+          Payment ledger and profitability analytics
         </p>
       </div>
 

@@ -44,6 +44,7 @@ import {
   Building2,
   Package,
   Gift,
+  BookOpen,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useNightAuditPendingCounts } from '@/hooks/use-night-audit-pending-counts'
@@ -97,14 +98,20 @@ const NAV_SECTIONS: NavSection[] = [
     title: 'Accounting',
     routes: [
       {
+        label: 'Daily book',
+        icon: BookOpen,
+        href: '/daily-book',
+        permissionAny: ['transactions:view', 'analytics:view'],
+      },
+      { label: 'Reports', icon: FileBarChart, href: '/reports', permission: 'reports:view' },
+      { label: 'Night Audit', icon: Moon, href: '/night-audit', permission: 'night_audit:view' },
+      {
         label: 'Transactions / Analytics',
         icon: Receipt,
-        href: '/transactions/daily-book',
+        href: '/transactions',
         permissionAny: ['transactions:view', 'analytics:view'],
       },
       { label: 'Expenses', icon: Wallet, href: '/expenses', permission: 'expenses:view' },
-      { label: 'Reports', icon: FileBarChart, href: '/reports', permission: 'reports:view' },
-      { label: 'Night Audit', icon: Moon, href: '/night-audit', permission: 'night_audit:view' },
       { label: 'Refunds', icon: RotateCcw, href: '/refunds', permission: 'payments:refund' },
       { label: 'Cashback', icon: Gift, href: '/cashback', permission: 'cashback:view' },
     ],
@@ -199,10 +206,13 @@ function routeIsActive(
       pathname.startsWith('/organizations/')
     )
   }
-  if (href === '/transactions' || href === '/transactions/daily-book') {
+  if (href === '/daily-book') {
+    return pathname === '/daily-book' || pathname.startsWith('/daily-book/')
+  }
+  if (href === '/transactions') {
     return (
       pathname === '/transactions' ||
-      pathname.startsWith('/transactions/') ||
+      (pathname.startsWith('/transactions/') && !pathname.startsWith('/transactions/daily-book')) ||
       pathname === '/analytics' ||
       pathname.startsWith('/analytics/')
     )
