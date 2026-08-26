@@ -1,5 +1,6 @@
 /** Outlets / departments items can be issued or sold to — shown in store movements & reports. */
 export const OUTLET_DEPARTMENTS = [
+  'Restaurant',
   'Main Bar',
   'Housekeeping',
   'Laundry',
@@ -12,6 +13,7 @@ export type OutletDepartment = (typeof OUTLET_DEPARTMENTS)[number]
 
 /** Outlets highlighted in Store: switch context & issue totals (main stock still lives in central). */
 export const STORE_FOCUS_OUTLETS = [
+  'Restaurant',
   'Main Bar',
   'Kitchen',
   'Housekeeping',
@@ -39,6 +41,7 @@ function destNorm(destination: string): string {
 }
 
 export type StoreIssueDestinationKey =
+  | 'restaurant'
   | 'main_bar'
   | 'housekeeping'
   | 'laundry'
@@ -46,6 +49,7 @@ export type StoreIssueDestinationKey =
   | 'gym'
 
 export function storeIssueDestinationLabel(key: StoreIssueDestinationKey): string {
+  if (key === 'restaurant') return 'Restaurant'
   if (key === 'main_bar') return 'Main Bar'
   if (key === 'housekeeping') return 'Housekeeping'
   if (key === 'laundry') return 'Laundry'
@@ -63,12 +67,18 @@ export function isGymIssueDestination(destination: string): boolean {
   )
 }
 
+export function isRestaurantIssueDestination(destination: string): boolean {
+  const d = destNorm(destination)
+  return d === 'restaurant' || d.startsWith('restaurant ')
+}
+
 export function isStoreIssueDestination(
   destination: string,
   key: StoreIssueDestinationKey,
 ): boolean {
   if (key === 'main_bar') return isMainBarIssueDestination(destination)
   if (key === 'gym') return isGymIssueDestination(destination)
+  if (key === 'restaurant') return isRestaurantIssueDestination(destination)
   const d = destNorm(destination)
   const label = storeIssueDestinationLabel(key).toLowerCase()
   return d === label || d.startsWith(`${label} `)
@@ -78,6 +88,7 @@ export function isStoreIssueDestination(
 export function storeIssueDestinationForOutletDepartment(
   department: string,
 ): StoreIssueDestinationKey | null {
+  if (department === 'restaurant') return 'restaurant'
   if (department === 'main_bar') return 'main_bar'
   if (department === 'laundry') return 'laundry'
   if (department === 'gym') return 'gym'
