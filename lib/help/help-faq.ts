@@ -345,7 +345,7 @@ export const HELP_FAQ: HelpFaqItem[] = [
     category: 'Daily book & Transactions',
     question: 'How do I check payments made on a specific date?',
     answer:
-      '1) Go to Accounting → Transactions / Analytics (opens Daily book).\n2) On Daily book, pick Yesterday or a custom hotel date (e.g. 6 August).\n3) Review Sales collection lines for that night — Cash, POS, Transfer, Advance, Additional, etc.\n4) Or open the Transactions tab and filter/browse payments for that date.\n5) Tap a row for receipt detail (method, Payment account, guest).',
+      '1) Go to Accounting → Daily book.\n2) Pick Yesterday or a custom hotel date (e.g. 6 August).\n3) Review Sales collection lines for that night — Cash, POS, Transfer, Advance, Additional, etc.\n4) Or open Accounting → Transactions / Analytics and filter/browse payments for that date.\n5) Tap a row for receipt detail (method, Payment account, guest).',
     keywords: [
       'payments by date',
       'payments made',
@@ -377,7 +377,7 @@ export const HELP_FAQ: HelpFaqItem[] = [
     category: 'Daily book & Transactions',
     question: 'How do I pick Yesterday or a custom date on Daily book?',
     answer:
-      'On Accounting → Transactions / Analytics → Daily book, use the date controls (Today / Yesterday / custom calendar). The pack reloads for that hotel night in Africa/Lagos time.',
+      'On Accounting → Daily book, use the date controls (Today / Yesterday / custom calendar). The pack reloads for that hotel night in Africa/Lagos time.',
     keywords: ['yesterday', 'custom date', 'pick date', 'calendar', 'hotel date'],
     aliases: [
       'change daily book date',
@@ -602,7 +602,7 @@ export const HELP_FAQ: HelpFaqItem[] = [
     category: 'Accounting',
     question: 'Where are financial reports?',
     answer:
-      'Accounting → Reports: Daily revenue, Daily book, Sales collection, occupancy, guest, city ledger, expenditure, monthly P&L, and more. Daily book is also under Transactions / Analytics. Use print/export where offered.',
+      'Accounting → Reports: Daily revenue, Sales, occupancy, guest, city ledger, expenditure, monthly P&L, and more. Daily book is under Accounting → Daily book. Use print/export where offered.',
     keywords: ['reports', 'financial', 'revenue report', 'p&l', 'occupancy report'],
     aliases: ['print report', 'owner report', 'daily revenue report'],
     topics: ['report'],
