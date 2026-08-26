@@ -39,6 +39,7 @@ import {
   impliedGuestPrepaidCredit,
   isGuestCityLedgerCashInDescription,
   pickPreferredGuestLedgerAccount,
+  guestCityLedgerDisplayBalance,
 } from '@/lib/utils/guest-city-ledger'
 import { PageLoadingState } from '@/components/loading-screen'
 import { fetchGuestCashbackBalanceClient } from '@/lib/cashback/cashback-client'
@@ -726,15 +727,14 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
     folioCreditTotal: guestFolioCreditTotal,
   })
   /** Folio-derived outstanding is source of truth for debit; ledger credit stays negative. */
-  const ledgerDisplayBalance = (() => {
-    if (dbLedgerBalance < -0.005) return dbLedgerBalance
-    if (prepaidFromLedgerOrCashIn > 0.005) {
-      return -prepaidFromLedgerOrCashIn
-    }
-    if (!ledgerAccount) return guestOutstandingBalance > 0 ? guestOutstandingBalance : 0
-    if (guestOutstandingBalance > 0) return guestOutstandingBalance
-    return Math.max(0, dbLedgerBalance)
-  })()
+  const ledgerDisplayBalance = guestCityLedgerDisplayBalance({
+    dbLedgerBalance,
+    folioOutstanding: guestOutstandingBalance,
+    ledgerCashInTotal,
+    depositTotal: depositPaid,
+    folioCreditTotal: guestFolioCreditTotal,
+    hasLedgerAccount: Boolean(ledgerAccount),
+  })
 
   const ledgerAccountCreditAmount = Math.max(
     prepaidFromLedgerOrCashIn,
