@@ -61,6 +61,46 @@ export function impliedGuestPrepaidCredit(args: {
 }
 
 /**
+ * Signed guest/city-ledger amount (debit +, credit −) — same rules as the
+ * Guest Database city ledger card so booking pages stay in sync.
+ */
+export function guestCityLedgerDisplayBalance(args: {
+  dbLedgerBalance: number;
+  folioOutstanding: number;
+  ledgerCashInTotal: number;
+  depositTotal: number;
+  folioCreditTotal?: number;
+  hasLedgerAccount: boolean;
+}): number {
+  const dbLedgerBalance = Number(args.dbLedgerBalance) || 0;
+  const folioOutstanding = Math.max(0, Number(args.folioOutstanding) || 0);
+  const prepaid = impliedGuestPrepaidCredit({
+    ledgerBalance: dbLedgerBalance,
+    folioOutstanding,
+    ledgerCashInTotal: args.ledgerCashInTotal,
+    depositTotal: args.depositTotal,
+    folioCreditTotal: args.folioCreditTotal,
+  });
+  if (dbLedgerBalance < -0.005) return dbLedgerBalance;
+  if (prepaid > 0.005) return -prepaid;
+  if (!args.hasLedgerAccount) {
+    return folioOutstanding > 0 ? folioOutstanding : 0;
+  }
+  if (folioOutstanding > 0) return folioOutstanding;
+  return Math.max(0, dbLedgerBalance);
+}
+
+export type GuestBookingLedgerSnapshot = {
+  id: string | null;
+  /** Signed display balance (Guest Database city ledger rules). */
+  balance: number;
+  /** Unpaid folio total across all of this guest’s bookings. */
+  dueBalance: number;
+  /** Raw `city_ledger_accounts.balance` for payment/top-up math. */
+  rawBalance: number;
+};
+
+/**
  * Post leftover cash as a folio payment line so the bookings "paid" pill
  * can show Credit (folioGuestCreditAmount) and guest UI stays in sync.
  */
@@ -452,6 +492,83 @@ export async function guestFolioOutstandingTotal(
     total += Math.max(0, folioPositiveOutstandingSum(byBooking[bk.id] ?? []));
   }
   return Math.round(total * 100) / 100;
+}
+
+/** Load city-ledger + guest-wide due for a booking detail page (matches Guest Database). */
+export async function fetchGuestBookingLedgerSnapshot(
+  supabase: SupabaseClient,
+  args: {
+    organizationId: string;
+    guestName: string;
+    guestId?: string | null;
+  },
+): Promise<GuestBookingLedgerSnapshot> {
+  const guestName = String(args.guestName || "").trim();
+  if (!guestName || !args.organizationId) {
+    return { id: null, balance: 0, dueBalance: 0, rawBalance: 0 };
+  }
+
+  const row = await fetchGuestCityLedgerAccount(
+    supabase,
+    args.organizationId,
+    guestName,
+  );
+  const dbLedgerBalance = Number(row?.balance) || 0;
+
+  let folioOutstanding = 0;
+  let folioCreditTotal = 0;
+  let depositTotal = 0;
+  let ledgerCashInTotal = 0;
+
+  if (args.guestId) {
+    const [out, credit, { data: bkRows }, { data: txRows }] = await Promise.all([
+      guestFolioOutstandingTotal(supabase, args.guestId, args.organizationId),
+      guestFolioCreditTotal(supabase, args.guestId, args.organizationId),
+      supabase
+        .from("bookings")
+        .select("deposit")
+        .eq("guest_id", args.guestId)
+        .eq("organization_id", args.organizationId),
+      supabase
+        .from("transactions")
+        .select("amount, description, status")
+        .eq("organization_id", args.organizationId)
+        .ilike("guest_name", guestName)
+        .eq("status", "paid")
+        .limit(200),
+    ]);
+    folioOutstanding = out;
+    folioCreditTotal = credit;
+    depositTotal = (bkRows || []).reduce(
+      (s: number, b: { deposit?: number | null }) => s + Number(b.deposit || 0),
+      0,
+    );
+    ledgerCashInTotal = (txRows || [])
+      .filter((t: { description?: string | null }) =>
+        isGuestCityLedgerCashInDescription(t.description),
+      )
+      .reduce(
+        (s: number, t: { amount?: number | null }) =>
+          s + Number(t.amount || 0),
+        0,
+      );
+  }
+
+  const balance = guestCityLedgerDisplayBalance({
+    dbLedgerBalance,
+    folioOutstanding,
+    ledgerCashInTotal,
+    depositTotal,
+    folioCreditTotal,
+    hasLedgerAccount: Boolean(row?.id),
+  });
+
+  return {
+    id: (row as { id?: string } | null)?.id ?? null,
+    balance,
+    dueBalance: folioOutstanding,
+    rawBalance: dbLedgerBalance,
+  };
 }
 
 async function markBookingFolioSettled(
