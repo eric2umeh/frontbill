@@ -68,6 +68,7 @@ import {
 import { persistFolioAttachments } from '@/lib/folio/persist-folio-attachments'
 import { SelectedRoomsStickyBar } from '@/components/shared/selected-rooms-sticky-bar'
 import { PaymentAccountSelect } from '@/components/payments/payment-account-select'
+import { PartyOwingAlert } from '@/components/bookings/party-owing-alert'
 import {
   appendAccountToNotes,
   paymentAccountInsertFields,
@@ -989,6 +990,25 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
           {/* Payment */}
           <div className="rounded-lg border p-4 space-y-4">
             <p className="text-sm font-semibold">Payment</p>
+            <PartyOwingAlert
+              open={open}
+              hotelOrganizationId={orgId || authTenantOrgId}
+              guestId={guestId || null}
+              guestName={fullName || null}
+              ledgerAccountId={
+                paymentMethod === 'city_ledger' ? selectedLedger?.id || null : null
+              }
+              ledgerAccountName={
+                paymentMethod === 'city_ledger'
+                  ? selectedLedger?.name || selectedLedger?.account_name || null
+                  : null
+              }
+              ledgerBalanceHint={
+                paymentMethod === 'city_ledger'
+                  ? Number(selectedLedger?.balance ?? selectedLedger?.current_balance ?? NaN)
+                  : null
+              }
+            />
             <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-2">
                   <Label>Payment Status</Label>

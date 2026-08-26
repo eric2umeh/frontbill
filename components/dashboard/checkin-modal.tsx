@@ -47,6 +47,7 @@ import { BOOKING_MODAL_ROOMS_LIMIT, normalizeRoomsForBookingPickers, roomIdsHeld
 import { DATE_HOLD_BOOKING_STATUSES } from '@/lib/rooms/room-occupancy'
 import { reconcileRoomStatusesClient } from '@/lib/rooms/reconcile-room-status-client'
 import { PaymentAccountSelect } from '@/components/payments/payment-account-select'
+import { PartyOwingAlert } from '@/components/bookings/party-owing-alert'
 import {
   appendAccountToNotes,
   paymentAccountInsertFields,
@@ -659,6 +660,25 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
               <p className="text-sm font-semibold">Payment Mode</p>
               <p className="text-xs text-muted-foreground">Select how the guest will pay for their stay</p>
             </div>
+            <PartyOwingAlert
+              open={open}
+              hotelOrganizationId={authTenantOrgId}
+              guestId={guestId || null}
+              guestName={fullName || null}
+              ledgerAccountId={
+                paymentMethod === 'city_ledger' ? selectedLedger?.id || null : null
+              }
+              ledgerAccountName={
+                paymentMethod === 'city_ledger'
+                  ? selectedLedger?.name || selectedLedger?.account_name || null
+                  : null
+              }
+              ledgerBalanceHint={
+                paymentMethod === 'city_ledger'
+                  ? Number(selectedLedger?.balance ?? selectedLedger?.current_balance ?? NaN)
+                  : null
+              }
+            />
             <div className="space-y-2">
               <Label>Payment Mode *</Label>
               <Select value={paymentMethod} onValueChange={(v) => {
