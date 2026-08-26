@@ -550,7 +550,7 @@ export const HELP_FAQ: HelpFaqItem[] = [
     category: 'Rooms & property',
     question: 'How do I manage rooms?',
     answer:
-      'Property → Rooms: set room numbers, types, rates, and status. Reservations do not lock a room until Check in — the room stays available for walk-ins on other dates and is only blocked on the reserved nights.',
+      'Property → Rooms: set room numbers, types, rates, and status. A room in use today still appears for future reservations on free nights (e.g. stay 26–30 Aug does not block 1 Sep). It is only hidden when the selected dates overlap an existing stay, or when the room is out of order / under maintenance.',
     keywords: ['rooms', 'room type', 'maintenance', 'inventory'],
     aliases: ['add room', 'room status', 'edit room'],
     topics: ['room'],
