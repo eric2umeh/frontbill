@@ -103,8 +103,8 @@ const NAV_SECTIONS: NavSection[] = [
         href: '/daily-book',
         permissionAny: ['transactions:view', 'analytics:view'],
       },
-      { label: 'Night Audit', icon: Moon, href: '/night-audit', permission: 'night_audit:view' },
       { label: 'Reports', icon: FileBarChart, href: '/reports', permission: 'reports:view' },
+      { label: 'Night Audit', icon: Moon, href: '/night-audit', permission: 'night_audit:view' },
       {
         label: 'Transactions / Analytics',
         icon: Receipt,
