@@ -21,6 +21,7 @@ import {
   type SalesCollectionCategory,
 } from '@/lib/reports/daily-front-desk-pack'
 import { formatBookingPaymentMethodLabel } from '@/lib/booking/parse-booking-notes'
+import { enrichBookingsList } from '@/lib/booking/enrich-bookings-list'
 import {
   DailyBookRowDetailModal,
   type DailyBookDetailTarget,
@@ -217,9 +218,18 @@ export function DailyFrontDeskPanel() {
         }
       }
 
+      const bookingRows = (bookRes.data || []) as any[]
+      if (bookingRows.length > 0 && organizationId) {
+        try {
+          await enrichBookingsList(supabase, organizationId, bookingRows)
+        } catch (enrichErr) {
+          console.error('[daily-book] folio enrich', enrichErr)
+        }
+      }
+
       const next = buildDailyFrontDeskPack({
         dateYmd: day,
-        bookings: (bookRes.data || []) as any,
+        bookings: bookingRows,
         transactions: (txRes.data || []) as any,
         payments: payments as any,
         guestNameById,
