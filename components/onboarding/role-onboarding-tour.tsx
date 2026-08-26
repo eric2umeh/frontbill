@@ -182,7 +182,9 @@ function tourTargetAttr(href: string): string | undefined {
     '/night-audit': 'nav-night-audit',
     '/dashboard': 'nav-dashboard',
     '/reports': 'nav-reports',
-    '/transactions/daily-book': 'nav-transactions',
+    '/daily-book': 'nav-daily-book',
+    '/transactions/daily-book': 'nav-daily-book',
+    '/transactions': 'nav-transactions',
   }
   return map[href]
 }
