@@ -188,8 +188,13 @@ export function RescheduleStayModal({
         )
         dispatchNightAuditPendingChanged()
       }
-      await onSuccess({ applied: Boolean(data.applied) })
+      // Close first so a slow/failing refresh cannot leave the dialog open
       onClose()
+      try {
+        await onSuccess({ applied: Boolean(data.applied) })
+      } catch (refreshErr) {
+        console.warn('[reschedule-stay] refresh after submit', refreshErr)
+      }
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Failed to submit request'
       toast.error(msg)
