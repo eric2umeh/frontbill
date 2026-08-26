@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { releaseRoomIfUnoccupied } from '@/lib/rooms/room-occupancy'
 
 const CANCELLABLE_RESERVATION_STATUSES = ['reserved']
 
@@ -18,7 +19,7 @@ export async function cancelBookingReservation(
 ): Promise<{ error: string | null }> {
   const { data: booking, error: fetchErr } = await supabase
     .from('bookings')
-    .select('id, status, room_id')
+    .select('id, status, room_id, organization_id')
     .eq('id', input.bookingId)
     .maybeSingle()
 
@@ -44,12 +45,12 @@ export async function cancelBookingReservation(
 
   const roomId = input.roomId ?? booking.room_id
   if (roomId) {
-    const { error: roomErr } = await supabase
-      .from('rooms')
-      .update({ status: 'available', updated_at: new Date().toISOString() })
-      .eq('id', roomId)
-      .in('status', ['reserved', 'occupied'])
-    if (roomErr) return { error: roomErr.message }
+    const { error: roomErr } = await releaseRoomIfUnoccupied(supabase, {
+      roomId,
+      organizationId: (booking as { organization_id?: string }).organization_id,
+      excludeBookingId: input.bookingId,
+    })
+    if (roomErr) return { error: roomErr }
   }
 
   return { error: null }

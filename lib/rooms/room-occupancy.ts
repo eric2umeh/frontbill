@@ -255,6 +255,67 @@ export async function reconcileRoomStatusesForOrganization(
   return result;
 }
 
+/**
+ * True when it is safe to mark a room available after a folio leaves it.
+ * False if another checked-in/confirmed guest still occupies the room today.
+ */
+export function canReleaseRoomInventory(
+  remainingOccupyingRows: OccupyingBookingRow[],
+): boolean {
+  return pickOccupyingBooking(remainingOccupyingRows) == null;
+}
+
+/**
+ * Free leftover reserved/occupied inventory only when no other in-house folio
+ * remains. Reservations do not occupy rooms, so cancelling / moving / no-show
+ * of a future stay must not wipe a current guest.
+ *
+ * Query errors fail closed (room is left as-is) so occupancy cannot be cleared
+ * without knowing who is still in the room.
+ */
+export async function releaseRoomIfUnoccupied(
+  supabase: SupabaseClient,
+  input: {
+    roomId: string | null | undefined;
+    organizationId?: string | null;
+    excludeBookingId?: string | null;
+    now?: string;
+  },
+): Promise<{ released: boolean; error: string | null }> {
+  const roomId = input.roomId ? String(input.roomId) : "";
+  if (!roomId) return { released: false, error: null };
+
+  let q = supabase
+    .from("bookings")
+    .select("id, room_id, status, check_in, check_out, folio_status")
+    .eq("room_id", roomId)
+    .in("status", [...OCCUPYING_BOOKING_STATUSES]);
+  if (input.organizationId) {
+    q = q.eq("organization_id", input.organizationId);
+  }
+  if (input.excludeBookingId) {
+    q = q.neq("id", input.excludeBookingId);
+  }
+
+  const { data, error } = await q;
+  if (error) {
+    console.warn("[releaseRoomIfUnoccupied]", error.message);
+    return { released: false, error: null };
+  }
+
+  if (!canReleaseRoomInventory((data ?? []) as OccupyingBookingRow[])) {
+    return { released: false, error: null };
+  }
+
+  const now = input.now ?? new Date().toISOString();
+  const { error: upErr } = await supabase
+    .from("rooms")
+    .update({ status: "available", updated_at: now })
+    .eq("id", roomId);
+  if (upErr) return { released: false, error: upErr.message };
+  return { released: true, error: null };
+}
+
 /** Room row status after creating/updating a booking. Future reservations stay sellable. */
 export function roomStatusForBookingStatus(
   bookingStatus: string,

@@ -4,6 +4,7 @@ import { canonicalRoleKey, hasPermission } from '@/lib/permissions'
 import { notifyNightAuditRequestCreated } from '@/lib/night-audit/notify-request-created'
 import { roomNotBookableReason } from '@/lib/utils/room-bookability'
 import { roomHousekeepingPatchForInHouse } from '@/lib/rooms/sync-housekeeping-status'
+import { releaseRoomIfUnoccupied } from '@/lib/rooms/room-occupancy'
 import { canFrontDeskApplyRoomChange } from '@/lib/booking/can-room-change'
 
 const DECISION = ['approved', 'rejected'] as const
@@ -257,12 +258,14 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: bookUpErr.message }, { status: 500 })
       }
 
-      // Reserved stays do not occupy inventory; only in-house folios mark rooms occupied.
-      if (bookingStatus === 'reserved') {
-        await admin.from('rooms').update({ status: 'available', updated_at: nowIso }).eq('id', fromRoomId)
-        await admin.from('rooms').update({ status: 'available', updated_at: nowIso }).eq('id', to_room_id)
-      } else {
-        await admin.from('rooms').update({ status: 'available', updated_at: nowIso }).eq('id', fromRoomId)
+      // Reserved stays do not occupy inventory — never free a room another guest still holds.
+      await releaseRoomIfUnoccupied(admin, {
+        roomId: fromRoomId,
+        organizationId: orgId,
+        excludeBookingId: booking_id,
+        now: nowIso,
+      })
+      if (bookingStatus !== 'reserved') {
         await admin
           .from('rooms')
           .update({
@@ -514,11 +517,14 @@ export async function PATCH(request: Request) {
       .toLowerCase()
       .replace(/[\s-]+/g, '_')
 
-    if (approveBookingStatus === 'reserved') {
-      await admin.from('rooms').update({ status: 'available', updated_at: decidedAt }).eq('id', row.from_room_id)
-      await admin.from('rooms').update({ status: 'available', updated_at: decidedAt }).eq('id', row.to_room_id)
-    } else {
-      await admin.from('rooms').update({ status: 'available', updated_at: decidedAt }).eq('id', row.from_room_id)
+    await releaseRoomIfUnoccupied(admin, {
+      roomId: row.from_room_id,
+      organizationId: row.organization_id,
+      excludeBookingId: row.booking_id,
+      now: decidedAt,
+    })
+
+    if (approveBookingStatus !== 'reserved') {
       await admin
         .from('rooms')
         .update({

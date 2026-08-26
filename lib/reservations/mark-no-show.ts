@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { releaseRoomIfUnoccupied } from '@/lib/rooms/room-occupancy'
 import { insertFolioCharges } from '@/lib/utils/insert-folio-charges'
 import { bookingDisplayBillBalance } from '@/lib/utils/booking-bill-balance'
 import {
@@ -81,11 +82,13 @@ export async function markBookingNoShow(
   if (!updated) return { data: null, error: 'Booking is no longer eligible for no-show' }
 
   if (booking.room_id) {
-    await supabase
-      .from('rooms')
-      .update({ status: 'available', updated_at: now })
-      .eq('id', booking.room_id)
-      .in('status', ['reserved', 'occupied'])
+    const { error: roomErr } = await releaseRoomIfUnoccupied(supabase, {
+      roomId: booking.room_id,
+      organizationId: input.organizationId,
+      excludeBookingId: input.bookingId,
+      now,
+    })
+    if (roomErr) return { data: null, error: roomErr }
   }
 
   if (feeAmount > 0) {

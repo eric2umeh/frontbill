@@ -105,11 +105,17 @@ export async function applyRescheduleStay(
     return { ok: false, status: 500, error: upErr.message }
   }
 
-  const nextHousekeeping = roomHousekeepingAfterEdit(String((existing as { status?: string }).status ?? 'reserved'))
-  await admin
-    .from('rooms')
-    .update({ status: nextHousekeeping, updated_at, updated_by: callerId })
-    .eq('id', ex.room_id)
+  const stayStatus = String((existing as { status?: string }).status ?? 'reserved')
+    .toLowerCase()
+    .replace(/[\s-]+/g, '_')
+  // Reservations do not occupy inventory — do not overwrite an in-house guest's room.
+  if (stayStatus !== 'reserved') {
+    const nextHousekeeping = roomHousekeepingAfterEdit(stayStatus)
+    await admin
+      .from('rooms')
+      .update({ status: nextHousekeeping, updated_at, updated_by: callerId })
+      .eq('id', ex.room_id)
+  }
 
   return { ok: true, booking: updated as Record<string, unknown> }
 }

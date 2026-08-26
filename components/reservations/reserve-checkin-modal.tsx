@@ -35,7 +35,7 @@ import {
   isRoomAssignable,
   roomIdsHeldForStayRange,
 } from "@/lib/utils/room-bookability";
-import { DATE_HOLD_BOOKING_STATUSES } from "@/lib/rooms/room-occupancy";
+import { DATE_HOLD_BOOKING_STATUSES, releaseRoomIfUnoccupied } from "@/lib/rooms/room-occupancy";
 import { guestOrOrganizationNameTaken } from "@/lib/utils/guest-org-name-uniqueness";
 
 export interface ReserveCheckInBooking {
@@ -254,10 +254,11 @@ export function ReserveCheckInModal({
 
       const prevRoomId = booking.room_id ? String(booking.room_id) : null;
       if (prevRoomId && prevRoomId !== selectedRoomId) {
-        await supabase
-          .from("rooms")
-          .update({ status: "available", updated_at: new Date().toISOString() })
-          .eq("id", prevRoomId);
+        await releaseRoomIfUnoccupied(supabase, {
+          roomId: prevRoomId,
+          organizationId: orgId,
+          excludeBookingId: booking.id,
+        });
       }
 
       const stay = stayDatesFromActualArrival({

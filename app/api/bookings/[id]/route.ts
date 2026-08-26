@@ -6,6 +6,7 @@ import {
 } from '@/lib/booking/edit-booking-patch'
 import { hasRoomDateConflict } from '@/lib/booking/room-date-conflict'
 import { isBookingCheckedOut } from '@/lib/utils/booking-checkout-ui'
+import { releaseRoomIfUnoccupied } from '@/lib/rooms/room-occupancy'
 import { NextResponse } from 'next/server'
 
 const ADMIN_ROLES = new Set(['superadmin', 'admin'])
@@ -134,14 +135,22 @@ export async function PATCH(request: Request, ctx: { params: Promise<{ id: strin
     const prevStatus = String((existing as { status?: string }).status ?? '')
 
     if (parsed.data.room_id !== undefined || scheduleOrRoomChanged || (parsed.data.status !== undefined && parsed.data.status !== prevStatus)) {
+      const nextStatus = String(merged.status || '').toLowerCase().replace(/[\s-]+/g, '_')
       if (merged.room_id !== prevRoomId) {
-        await admin.from('rooms').update({ status: 'available', updated_at }).eq('id', prevRoomId)
-        const nextHousekeeping = roomHousekeepingAfterEdit(merged.status)
-        await admin
-          .from('rooms')
-          .update({ status: nextHousekeeping, updated_at, updated_by: caller_id })
-          .eq('id', merged.room_id)
-      } else {
+        await releaseRoomIfUnoccupied(admin, {
+          roomId: prevRoomId,
+          organizationId: caller.organization_id,
+          excludeBookingId: bookingId,
+          now: updated_at,
+        })
+        if (nextStatus !== 'reserved') {
+          const nextHousekeeping = roomHousekeepingAfterEdit(merged.status)
+          await admin
+            .from('rooms')
+            .update({ status: nextHousekeeping, updated_at, updated_by: caller_id })
+            .eq('id', merged.room_id)
+        }
+      } else if (nextStatus !== 'reserved') {
         const nextHousekeeping = roomHousekeepingAfterEdit(merged.status)
         await admin
           .from('rooms')
@@ -216,10 +225,11 @@ export async function DELETE(request: Request, ctx: { params: Promise<{ id: stri
 
     const freedRoomId = (booking as { room_id?: string }).room_id
     if (freedRoomId) {
-      await admin
-        .from('rooms')
-        .update({ status: 'available', updated_at: new Date().toISOString() })
-        .eq('id', freedRoomId)
+      await releaseRoomIfUnoccupied(admin, {
+        roomId: freedRoomId,
+        organizationId: (booking as { organization_id?: string }).organization_id,
+        excludeBookingId: bookingId,
+      })
     }
 
     const guestId = (booking as { guest_id?: string }).guest_id
