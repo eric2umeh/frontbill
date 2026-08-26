@@ -644,7 +644,7 @@ export const HELP_FAQ: HelpFaqItem[] = [
     category: 'Supply & kitchen',
     question: 'How do I use Central Store?',
     answer:
-      'Supply Chain → Central Store: add/edit items, Issue Out to departments (including Main Bar), raise a draft purchase list and send to the accountant. After manager approval the PO is in History and cannot be edited. Retire at market from Purchasing to add stock.',
+      'Supply Chain → Central Store: add/edit items, Issue Out to departments (Restaurant, Main Bar, Kitchen, etc.), raise a draft purchase list and send to the accountant. After manager approval the PO is in History and cannot be edited. Retire at market from Purchasing to add stock.',
     keywords: ['central store', 'issue out', 'stock in', 'stock out'],
     aliases: ['issue out basket', 'store items', 'stock history'],
     topics: ['supply'],
@@ -696,7 +696,7 @@ export const HELP_FAQ: HelpFaqItem[] = [
     category: 'Supply & kitchen',
     question: 'How do Kitchen and Main Bar stock work?',
     answer:
-      'Kitchen tracks food production (recipes, batches, raw stock). Main Bar drinks are issued from Central Store → Issue Out → Main Bar. F&B Store is temporarily paused.',
+      'Kitchen tracks food production (recipes, batches, raw stock) from Central Store → Issue Out → Kitchen. Finished dishes sync to Restaurant POS (Items from Kitchen). Main Bar drinks are issued from Central Store → Issue Out → Main Bar. Restaurant can also receive supplies directly via Issue Out → Restaurant (Items from Store). F&B Store is temporarily paused.',
     keywords: ['kitchen', 'f&b', 'fnb', 'food', 'recipe', 'batch'],
     aliases: ['fnb store', 'kitchen store', 'production batch'],
     topics: ['supply', 'outlet'],

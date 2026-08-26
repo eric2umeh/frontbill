@@ -796,8 +796,10 @@ export function StoreWorkspace() {
                 <h3 className="font-semibold text-sm">Issue out to department / outlet</h3>
                 <p className="text-xs text-muted-foreground mt-1">
                   Add quantities to the issue cart, review on the right, then issue in one step.
-                  Received by is required. Drinks go to <strong>Main Bar</strong> (same path as
-                  kitchen items going to Kitchen).
+                  Received by is required. Drinks go to <strong>Main Bar</strong>; kitchen
+                  raw materials go to <strong>Kitchen</strong>; restaurant supplies go to{' '}
+                  <strong>Restaurant</strong> (shown under Outlets → Restaurant → Items from
+                  Store).
                 </p>
               </div>
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
