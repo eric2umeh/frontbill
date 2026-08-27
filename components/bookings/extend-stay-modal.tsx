@@ -51,6 +51,7 @@ import {
   paymentMethodRequiresAccount,
   type PaymentAccount,
 } from "@/lib/payments/payment-accounts";
+import { hasRoomDateConflict } from "@/lib/booking/room-date-conflict";
 
 interface ExtendStayModalProps {
   open: boolean;
@@ -71,6 +72,7 @@ interface ExtendStayModalProps {
     status?: string;
     check_in?: string;
     folio_status?: string;
+    room_id?: string;
   };
 }
 
@@ -276,6 +278,58 @@ export function ExtendStayModal({
     return format(new Date(y, m - 1, d), "PP");
   })();
 
+  const ensureRoomFreeForExtension = async (
+    supabase: ReturnType<typeof createClient>,
+    newCheckoutStr: string,
+  ): Promise<boolean> => {
+    if (!supabase) {
+      toast.error(
+        "Could not verify that this room is free for the extra nights",
+      );
+      return false;
+    }
+    const { data: live, error } = await supabase
+      .from("bookings")
+      .select("id, room_id, organization_id, check_in")
+      .eq("id", booking.id)
+      .maybeSingle();
+    if (error || !live?.room_id || !live.organization_id) {
+      toast.error(
+        "Could not verify that this room is free for the extra nights",
+      );
+      return false;
+    }
+    const stayCheckIn = toYmd(live.check_in) || checkInYmd;
+    if (!stayCheckIn) {
+      toast.error("This booking is missing a check-in date");
+      return false;
+    }
+    try {
+      const conflict = await hasRoomDateConflict(
+        supabase,
+        String(live.organization_id),
+        String(live.room_id),
+        stayCheckIn,
+        newCheckoutStr,
+        booking.id,
+      );
+      if (conflict) {
+        toast.error(
+          "This room already has a reservation or stay on those extra nights. Shorten the extension or move the other booking first.",
+        );
+        return false;
+      }
+    } catch (err: unknown) {
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : "Could not verify room availability for the extra nights",
+      );
+      return false;
+    }
+    return true;
+  };
+
   const handleDiscountRequest = async () => {
     if (!newCheckOutDate || !paymentMethod || paymentMethod === "city_ledger") {
       toast.error(
@@ -312,6 +366,13 @@ export function ExtendStayModal({
     }
     setDiscountSubmitting(true);
     try {
+      const supabase = createClient();
+      const free = await ensureRoomFreeForExtension(
+        supabase,
+        format(newCheckOutDate, "yyyy-MM-dd"),
+      );
+      if (!free) return;
+
       const res = await fetch("/api/extend-stay-discount-requests", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -407,6 +468,8 @@ export function ExtendStayModal({
       const { data: authData } = await supabase.auth.getUser();
       const currentUserId = authData.user?.id || booking.created_by || null;
       const newCheckoutStr = newCheckOutYmd;
+      const free = await ensureRoomFreeForExtension(supabase, newCheckoutStr);
+      if (!free) return;
 
       // Add charge to folio_charges
       // For immediate payments (cash/pos/transfer): status = 'paid'

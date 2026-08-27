@@ -9,6 +9,7 @@ import {
   extensionAdditionalNights,
   toYmd,
 } from '@/lib/booking/edit-booking-patch'
+import { hasRoomDateConflict } from '@/lib/booking/room-date-conflict'
 
 const DECISION = ['approved', 'rejected'] as const
 
@@ -94,7 +95,7 @@ export async function POST(request: Request) {
 
     const { data: booking } = await admin
       .from('bookings')
-      .select('id, organization_id, status, folio_status, guest_id, rate_per_night, check_in, check_out')
+      .select('id, organization_id, status, folio_status, guest_id, rate_per_night, check_in, check_out, room_id')
       .eq('id', booking_id)
       .single()
     if (!booking || booking.organization_id !== prof.organization_id) {
@@ -123,6 +124,30 @@ export async function POST(request: Request) {
     })
     if (nights <= 0) {
       return NextResponse.json({ error: 'Extension must add at least one night' }, { status: 400 })
+    }
+    if (!booking.room_id) {
+      return NextResponse.json({ error: 'Booking has no room assigned' }, { status: 400 })
+    }
+    const stayCheckIn = toYmd(booking.check_in)
+    if (!stayCheckIn) {
+      return NextResponse.json({ error: 'Booking is missing a check-in date' }, { status: 400 })
+    }
+    const requestConflict = await hasRoomDateConflict(
+      admin,
+      prof.organization_id,
+      booking.room_id,
+      stayCheckIn,
+      newCo,
+      booking_id,
+    )
+    if (requestConflict) {
+      return NextResponse.json(
+        {
+          error:
+            'This room already has a reservation or stay on those extra nights. Shorten the extension or move the other booking first.',
+        },
+        { status: 409 },
+      )
     }
     // Ignore client-reported nights if they don't match calendar math (prevents overcharge).
     if (Number(additional_nights) > 0 && Number(additional_nights) !== nights) {
@@ -236,7 +261,7 @@ export async function PATCH(request: Request) {
 
     const { data: booking } = await admin
       .from('bookings')
-      .select('id, deposit, balance, total_amount, number_of_nights, check_in, guest_id, folio_id, organization_id')
+      .select('id, deposit, balance, total_amount, number_of_nights, check_in, guest_id, folio_id, organization_id, room_id')
       .eq('id', row.booking_id)
       .single()
     if (!booking) return NextResponse.json({ error: 'Booking missing' }, { status: 400 })
@@ -245,9 +270,30 @@ export async function PATCH(request: Request) {
     const nights = Number(row.additional_nights) || 0
     const newCo = toYmd(row.new_check_out)
     const stayCheckIn = toYmd(booking.check_in)
-    const totalNights = stayCheckIn && newCo
-      ? calendarNightsBetween(stayCheckIn, newCo)
-      : Math.max(1, (Number(booking.number_of_nights) || 0) + nights)
+    if (!newCo || !stayCheckIn) {
+      return NextResponse.json({ error: 'Booking dates are incomplete' }, { status: 400 })
+    }
+    if (!booking.room_id) {
+      return NextResponse.json({ error: 'Booking has no room assigned' }, { status: 400 })
+    }
+    const approveConflict = await hasRoomDateConflict(
+      admin,
+      row.organization_id,
+      booking.room_id,
+      stayCheckIn,
+      newCo,
+      row.booking_id,
+    )
+    if (approveConflict) {
+      return NextResponse.json(
+        {
+          error:
+            'Cannot approve: another stay or reservation already holds this room on those extra nights.',
+        },
+        { status: 409 },
+      )
+    }
+    const totalNights = calendarNightsBetween(stayCheckIn, newCo)
     const nextTotal = (Number(booking.total_amount) || 0) + discTotal
     const nextDeposit = (Number(booking.deposit) || 0) + discTotal
     const approverLabel = (await admin.from('profiles').select('full_name').eq('id', caller_id).maybeSingle()).data
