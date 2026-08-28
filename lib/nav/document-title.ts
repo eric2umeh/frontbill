@@ -33,6 +33,7 @@ const EXACT: Record<string, string> = {
   '/rooms': 'Rooms',
   '/users-roles': 'Users & Roles',
   '/settings': 'Settings',
+  '/settings/operational-report': 'Operational report',
   '/supply': 'Supply',
   '/supply/store': 'Central Store',
   '/supply/kitchen': 'Kitchen',

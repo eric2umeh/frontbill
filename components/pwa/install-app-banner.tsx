@@ -36,7 +36,11 @@ export function InstallAppBanner() {
 
   const install = async () => {
     await deferred.prompt()
+    const choice = await deferred.userChoice
     setDeferred(null)
+    if (choice.outcome === 'accepted') {
+      window.dispatchEvent(new CustomEvent('frontbill:pwa-installed'))
+    }
   }
 
   return (

@@ -22,6 +22,7 @@ import { SupplyChainProvider } from '@/lib/supply-chain/supply-chain-context'
 import { SupplyPendingAlerts } from '@/components/supply-chain/supply-pending-alerts'
 import { StockShortageDialogHost } from '@/components/shared/stock-shortage-dialog-host'
 import { InstallAppBanner } from '@/components/pwa/install-app-banner'
+import { AppSessionLogger } from '@/components/pwa/app-session-logger'
 import { HelpAssistant } from '@/components/help/help-assistant'
 import { RoleOnboardingTour } from '@/components/onboarding/role-onboarding-tour'
 
@@ -236,6 +237,7 @@ export function DashboardShell({
                 <Header user={user} onMenuClick={() => setMobileMenuOpen(true)} />
               )}
               {allowed && <InstallAppBanner />}
+              {allowed && <AppSessionLogger />}
               {allowed && <RoleOnboardingTour />}
               {!allowed && (
                 <div className="flex flex-1 items-center justify-center">
