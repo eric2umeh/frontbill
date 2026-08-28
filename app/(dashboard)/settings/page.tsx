@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { useState, useEffect, useRef } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -8,7 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { Badge } from '@/components/ui/badge'
 import { toast } from 'sonner'
-import { Loader2, Building2, Shield, Eye, EyeOff, Clock, ImageIcon, Trash2, Gift, UserX } from 'lucide-react'
+import { Loader2, Building2, Shield, Eye, EyeOff, Clock, ImageIcon, Trash2, Gift, UserX, FileText } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
 import { createClient } from '@/lib/supabase/client'
 import { canonicalRoleKey, hasPermission } from '@/lib/permissions'
@@ -61,6 +62,7 @@ export default function SettingsPage() {
   /** Administrator + Superadmin (canonical); not strict string match on role label */
   const canManageHotelSettings = hasPermission(role, 'settings:manage')
   const canUpdateHotelLogo = canonicalRoleKey(role) === 'superadmin'
+  const canOperationalReport = canonicalRoleKey(role) === 'superadmin'
 
   /** Server routes read cookies; browser auth uses localStorage — send the access token for API auth. */
   async function logoApiHeaders(): Promise<Record<string, string>> {
@@ -361,6 +363,26 @@ export default function SettingsPage() {
           Manage your profile and hotel information
         </p>
       </div>
+
+      {canOperationalReport && (
+        <Card className="border-dashed">
+          <CardHeader className="pb-3">
+            <div className="flex items-center gap-2">
+              <FileText className="h-5 w-5" />
+              <CardTitle className="text-base">Operational report</CardTitle>
+            </div>
+            <CardDescription>
+              Monthly bookings, payments, night audits, staff activity, and app adoption for your
+              property. Superadmin only.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button variant="outline" size="sm" asChild>
+              <Link href="/settings/operational-report">Open operational report</Link>
+            </Button>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Hotel Information */}
       <Card>
