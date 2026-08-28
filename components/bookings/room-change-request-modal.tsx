@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -30,6 +30,11 @@ import {
   canApproveRoomChange,
   canFrontDeskApplyRoomChange,
 } from "@/lib/booking/can-room-change";
+import { DATE_HOLD_BOOKING_STATUSES } from "@/lib/rooms/room-occupancy";
+import {
+  BOOKING_MODAL_ROOMS_LIMIT,
+  roomIdsHeldForStayRange,
+} from "@/lib/utils/room-bookability";
 
 type RoomRow = {
   id: string;
@@ -73,6 +78,8 @@ export function RoomChangeRequestModal({
   const [submitting, setSubmitting] = useState(false);
 
   const supabase = createClient();
+  const cin = String(checkIn || "").slice(0, 10);
+  const cout = String(checkOut || "").slice(0, 10);
 
   useEffect(() => {
     if (!open || !organizationId || !supabase) return;
@@ -80,20 +87,34 @@ export function RoomChangeRequestModal({
     (async () => {
       setLoadingRooms(true);
       try {
-        const { data, error } = await supabase
-          .from("rooms")
-          .select("id, room_number, room_type, status")
-          .eq("organization_id", organizationId)
-          .eq("status", "available")
-          .order("room_number");
-        if (error) throw error;
-        const rows = (data || []) as RoomRow[];
-        const filtered = currentRoomId
-          ? rows.filter((r) => r.id !== currentRoomId)
-          : rows;
+        const [roomsRes, bookingsRes] = await Promise.all([
+          supabase
+            .from("rooms")
+            .select("id, room_number, room_type, status")
+            .eq("organization_id", organizationId)
+            .eq("status", "available")
+            .order("room_number"),
+          supabase
+            .from("bookings")
+            .select("room_id, check_in, check_out, status")
+            .eq("organization_id", organizationId)
+            .in("status", [...DATE_HOLD_BOOKING_STATUSES])
+            .limit(BOOKING_MODAL_ROOMS_LIMIT),
+        ]);
+        if (roomsRes.error) throw roomsRes.error;
+        if (bookingsRes.error) throw bookingsRes.error;
+        const rows = (roomsRes.data || []) as RoomRow[];
+        const held = roomIdsHeldForStayRange(bookingsRes.data || [], cin, cout);
+        const filtered = rows.filter((r) => {
+          if (currentRoomId && r.id === currentRoomId) return false;
+          return !held.has(r.id);
+        });
         if (!cancelled) setRooms(filtered);
       } catch (e: any) {
-        if (!cancelled) toast.error(e.message || "Failed to load rooms");
+        if (!cancelled) {
+          setRooms([]);
+          toast.error(e.message || "Failed to load rooms");
+        }
       } finally {
         if (!cancelled) setLoadingRooms(false);
       }
@@ -101,7 +122,7 @@ export function RoomChangeRequestModal({
     return () => {
       cancelled = true;
     };
-  }, [open, organizationId, supabase, currentRoomId]);
+  }, [open, organizationId, supabase, currentRoomId, cin, cout]);
 
   useEffect(() => {
     if (!open) {
@@ -109,16 +130,6 @@ export function RoomChangeRequestModal({
       setReason("");
     }
   }, [open]);
-
-  const overlapSet = useMemo(() => {
-    const cin = String(checkIn || "").slice(0, 10);
-    const cout = String(checkOut || "").slice(0, 10);
-    return { cin, cout };
-  }, [checkIn, checkOut]);
-
-  const selectableRooms = useMemo(() => {
-    return rooms;
-  }, [rooms]);
 
   const submit = async (applyImmediately: boolean) => {
     if (!userId) {
@@ -192,8 +203,8 @@ export function RoomChangeRequestModal({
         </DialogScrollableHeader>
         <DialogScrollableBody className="space-y-4">
           <div className="text-xs text-muted-foreground">
-            Stay {overlapSet.cin} → {overlapSet.cout} (only available rooms are
-            listed)
+            Stay {cin} → {cout} (rooms already reserved or occupied on these
+            dates are hidden)
           </div>
           <div className="space-y-2">
             <Label>Move to room</Label>
@@ -211,12 +222,12 @@ export function RoomChangeRequestModal({
                   <SelectValue placeholder="Select target room" />
                 </SelectTrigger>
                 <SelectContent>
-                  {selectableRooms.length === 0 ? (
+                  {rooms.length === 0 ? (
                     <div className="px-2 py-3 text-sm text-muted-foreground">
-                      No available rooms
+                      No rooms free for these stay dates
                     </div>
                   ) : (
-                    selectableRooms.map((r) => (
+                    rooms.map((r) => (
                       <SelectItem key={r.id} value={r.id}>
                         {r.room_number} · {r.room_type}
                       </SelectItem>

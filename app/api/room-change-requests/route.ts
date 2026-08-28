@@ -5,22 +5,13 @@ import { notifyNightAuditRequestCreated } from '@/lib/night-audit/notify-request
 import { roomNotBookableReason } from '@/lib/utils/room-bookability'
 import { roomHousekeepingPatchForInHouse } from '@/lib/rooms/sync-housekeeping-status'
 import { canFrontDeskApplyRoomChange } from '@/lib/booking/can-room-change'
+import { hasRoomDateConflict } from '@/lib/booking/room-date-conflict'
 
 const DECISION = ['approved', 'rejected'] as const
 
 function isRoomChangeDeciderRole(role: string | null | undefined): boolean {
   const k = canonicalRoleKey(role)
   return k === 'superadmin' || k === 'admin' || k === 'manager'
-}
-
-/** Calendar overlap: existing.check_in < newCheckOut AND existing.check_out > newCheckIn */
-function bookingsOverlap(
-  aIn: string,
-  aOut: string,
-  bIn: string,
-  bOut: string,
-): boolean {
-  return aIn < bOut && aOut > bIn
 }
 
 export async function GET(request: Request) {
@@ -208,24 +199,17 @@ export async function POST(request: Request) {
 
     const cin = String(booking.check_in || '').slice(0, 10)
     const cout = String(booking.check_out || '').slice(0, 10)
+    if (!cin || !cout) {
+      return NextResponse.json({ error: 'Booking is missing stay dates' }, { status: 400 })
+    }
 
-    const { data: conflicts } = await admin
-      .from('bookings')
-      .select('id, check_in, check_out, status')
-      .eq('organization_id', orgId)
-      .eq('room_id', to_room_id)
-      .neq('id', booking_id)
-      .in('status', ['confirmed', 'checked_in'])
-
-    for (const ob of conflicts || []) {
-      const oIn = String((ob as any).check_in || '').slice(0, 10)
-      const oOut = String((ob as any).check_out || '').slice(0, 10)
-      if (bookingsOverlap(cin, cout, oIn, oOut)) {
-        return NextResponse.json(
-          { error: `Room ${toRoom.room_number} is already assigned for overlapping dates` },
-          { status: 400 },
-        )
-      }
+    // Reserved folios are date holds after occupied rooms became sellable on later nights.
+    const conflict = await hasRoomDateConflict(admin, orgId, to_room_id, cin, cout, booking_id)
+    if (conflict) {
+      return NextResponse.json(
+        { error: `Room ${toRoom.room_number} is already assigned for overlapping dates` },
+        { status: 400 },
+      )
     }
 
     const fromLabel = String(fromRoom.room_number || fromRoomId)
@@ -480,23 +464,23 @@ export async function PATCH(request: Request) {
 
     const cin = String(booking.check_in || '').slice(0, 10)
     const cout = String(booking.check_out || '').slice(0, 10)
-    const { data: conflicts } = await admin
-      .from('bookings')
-      .select('id, check_in, check_out')
-      .eq('organization_id', row.organization_id)
-      .eq('room_id', row.to_room_id)
-      .neq('id', row.booking_id)
-      .in('status', ['confirmed', 'checked_in'])
+    if (!cin || !cout) {
+      return NextResponse.json({ error: 'Booking is missing stay dates' }, { status: 400 })
+    }
 
-    for (const ob of conflicts || []) {
-      const oIn = String((ob as any).check_in || '').slice(0, 10)
-      const oOut = String((ob as any).check_out || '').slice(0, 10)
-      if (bookingsOverlap(cin, cout, oIn, oOut)) {
-        return NextResponse.json(
-          { error: 'Target room is now assigned for overlapping dates' },
-          { status: 409 },
-        )
-      }
+    const approveConflict = await hasRoomDateConflict(
+      admin,
+      row.organization_id,
+      row.to_room_id,
+      cin,
+      cout,
+      row.booking_id,
+    )
+    if (approveConflict) {
+      return NextResponse.json(
+        { error: 'Target room is now assigned for overlapping dates' },
+        { status: 409 },
+      )
     }
 
     const { error: bookUpErr } = await admin
