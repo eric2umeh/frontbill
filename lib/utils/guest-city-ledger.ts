@@ -60,9 +60,20 @@ export function impliedGuestPrepaidCredit(args: {
   return Math.max(0, overpay);
 }
 
+export function normalizeLedgerAccountName(name: string): string {
+  return String(name || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
+
 /**
  * Signed guest/city-ledger amount (debit +, credit −) — same rules as the
  * Guest Database city ledger card so booking pages stay in sync.
+ *
+ * Folio outstanding is the source of truth for owing. A leftover positive
+ * `city_ledger_accounts.balance` after the folio was paid is stale and must
+ * not show as debt (unless charges were posted_to_ledger and still open).
  */
 export function guestCityLedgerDisplayBalance(args: {
   dbLedgerBalance: number;
@@ -71,6 +82,8 @@ export function guestCityLedgerDisplayBalance(args: {
   depositTotal: number;
   folioCreditTotal?: number;
   hasLedgerAccount: boolean;
+  /** True when any folio line is posted_to_ledger (debt lives on city ledger). */
+  hasPostedToLedger?: boolean;
 }): number {
   const dbLedgerBalance = Number(args.dbLedgerBalance) || 0;
   const folioOutstanding = Math.max(0, Number(args.folioOutstanding) || 0);
@@ -83,11 +96,9 @@ export function guestCityLedgerDisplayBalance(args: {
   });
   if (dbLedgerBalance < -0.005) return dbLedgerBalance;
   if (prepaid > 0.005) return -prepaid;
-  if (!args.hasLedgerAccount) {
-    return folioOutstanding > 0 ? folioOutstanding : 0;
-  }
-  if (folioOutstanding > 0) return folioOutstanding;
-  return Math.max(0, dbLedgerBalance);
+  if (folioOutstanding > 0.005) return folioOutstanding;
+  if (args.hasPostedToLedger && dbLedgerBalance > 0.005) return dbLedgerBalance;
+  return 0;
 }
 
 export type GuestBookingLedgerSnapshot = {
@@ -367,14 +378,28 @@ export async function fetchAllGuestCityLedgerAccounts(
   organizationId: string,
   guestName: string,
 ) {
-  if (!guestName?.trim()) return [];
+  const trimmed = guestName?.trim();
+  if (!trimmed) return [];
   const { data } = await supabase
     .from("city_ledger_accounts")
     .select("id, balance, account_name, account_type")
     .eq("organization_id", organizationId)
-    .ilike("account_name", guestName.trim())
+    .ilike("account_name", trimmed)
     .in("account_type", ["individual", "guest"]);
-  return data || [];
+  if (data?.length) return data;
+
+  const fuzzy = trimmed.replace(/\s+/g, "%");
+  const { data: fuzzyRows } = await supabase
+    .from("city_ledger_accounts")
+    .select("id, balance, account_name, account_type")
+    .eq("organization_id", organizationId)
+    .ilike("account_name", `%${fuzzy}%`)
+    .in("account_type", ["individual", "guest"])
+    .limit(50);
+  const want = normalizeLedgerAccountName(trimmed);
+  return (fuzzyRows || []).filter(
+    (row) => normalizeLedgerAccountName(String(row.account_name || "")) === want,
+  );
 }
 
 /** Keep every name-matched guest ledger row on the same balance (avoids orphan ₦70k rows). */
@@ -494,6 +519,31 @@ export async function guestFolioOutstandingTotal(
   return Math.round(total * 100) / 100;
 }
 
+/** True when this guest still has folio lines posted to city ledger (not cash-settled). */
+export async function guestHasPostedToLedgerCharges(
+  supabase: SupabaseClient,
+  guestId: string,
+  organizationId: string,
+): Promise<boolean> {
+  const bookings = await fetchBookingsForGuestSettlement(
+    supabase,
+    guestId,
+    organizationId,
+  );
+  if (!bookings.length) return false;
+  const { data: charges } = await supabase
+    .from("folio_charges")
+    .select("payment_status")
+    .in(
+      "booking_id",
+      bookings.map((b) => b.id),
+    );
+  return (charges || []).some(
+    (c: { payment_status?: string | null }) =>
+      String(c.payment_status || "").toLowerCase() === "posted_to_ledger",
+  );
+}
+
 /** Load city-ledger + guest-wide due for a booking detail page (matches Guest Database). */
 export async function fetchGuestBookingLedgerSnapshot(
   supabase: SupabaseClient,
@@ -519,26 +569,34 @@ export async function fetchGuestBookingLedgerSnapshot(
   let folioCreditTotal = 0;
   let depositTotal = 0;
   let ledgerCashInTotal = 0;
+  let hasPostedToLedger = false;
 
   if (args.guestId) {
-    const [out, credit, { data: bkRows }, { data: txRows }] = await Promise.all([
-      guestFolioOutstandingTotal(supabase, args.guestId, args.organizationId),
-      guestFolioCreditTotal(supabase, args.guestId, args.organizationId),
-      supabase
-        .from("bookings")
-        .select("deposit")
-        .eq("guest_id", args.guestId)
-        .eq("organization_id", args.organizationId),
-      supabase
-        .from("transactions")
-        .select("amount, description, status")
-        .eq("organization_id", args.organizationId)
-        .ilike("guest_name", guestName)
-        .eq("status", "paid")
-        .limit(200),
-    ]);
+    const [out, credit, { data: bkRows }, { data: txRows }, posted] =
+      await Promise.all([
+        guestFolioOutstandingTotal(supabase, args.guestId, args.organizationId),
+        guestFolioCreditTotal(supabase, args.guestId, args.organizationId),
+        supabase
+          .from("bookings")
+          .select("deposit")
+          .eq("guest_id", args.guestId)
+          .eq("organization_id", args.organizationId),
+        supabase
+          .from("transactions")
+          .select("amount, description, status")
+          .eq("organization_id", args.organizationId)
+          .ilike("guest_name", guestName)
+          .eq("status", "paid")
+          .limit(200),
+        guestHasPostedToLedgerCharges(
+          supabase,
+          args.guestId,
+          args.organizationId,
+        ),
+      ]);
     folioOutstanding = out;
     folioCreditTotal = credit;
+    hasPostedToLedger = posted;
     depositTotal = (bkRows || []).reduce(
       (s: number, b: { deposit?: number | null }) => s + Number(b.deposit || 0),
       0,
@@ -561,6 +619,7 @@ export async function fetchGuestBookingLedgerSnapshot(
     depositTotal,
     folioCreditTotal,
     hasLedgerAccount: Boolean(row?.id),
+    hasPostedToLedger,
   });
 
   return {
