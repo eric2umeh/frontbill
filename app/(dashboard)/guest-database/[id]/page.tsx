@@ -40,6 +40,7 @@ import {
   isGuestCityLedgerCashInDescription,
   pickPreferredGuestLedgerAccount,
   guestCityLedgerDisplayBalance,
+  fetchAllGuestCityLedgerAccounts,
 } from '@/lib/utils/guest-city-ledger'
 import { PageLoadingState } from '@/components/loading-screen'
 import { fetchGuestCashbackBalanceClient } from '@/lib/cashback/cashback-client'
@@ -120,6 +121,7 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
   const [guestFolioCreditTotal, setGuestFolioCreditTotal] = useState(0)
   /** Same signed balance as Guest Database table (positive = debt, negative = credit). */
   const [guestTableBalance, setGuestTableBalance] = useState(0)
+  const [hasPostedToLedger, setHasPostedToLedger] = useState(false)
   const [cashbackEarned, setCashbackEarned] = useState(0)
   const [cashbackAvailable, setCashbackAvailable] = useState(0)
   const [guestTab, setGuestTab] = useState('overview')
@@ -248,8 +250,17 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
 
       let pendingTotal = 0
       let creditTotal = 0
+      let postedToLedger = false
       const enrichedBookings = rawBookings.map((b: any) => {
         const ch = chargesByBooking[b.id] ?? []
+        if (
+          ch.some(
+            (c) =>
+              String(c.payment_status || '').toLowerCase() === 'posted_to_ledger',
+          )
+        ) {
+          postedToLedger = true
+        }
         const net = bookingDisplayBillBalance(
           {
             balance: b.balance,
@@ -266,6 +277,7 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
       setBookings(enrichedBookings)
       setGuestPendingBalance(pendingTotal)
       setGuestFolioCreditTotal(creditTotal)
+      setHasPostedToLedger(postedToLedger)
 
       // Same signed balance as Guest Database table Balance column
       let signedTableBalance = 0
@@ -289,12 +301,11 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
       }
 
       // City ledger — prefer debit when owed, otherwise largest prepaid credit
-      const { data: ledgerRows } = await supabase
-        .from('city_ledger_accounts')
-        .select('id, balance, account_name, account_type')
-        .eq('organization_id', profile.organization_id)
-        .ilike('account_name', guestData.name)
-        .in('account_type', ['individual', 'guest'])
+      const ledgerRows = await fetchAllGuestCityLedgerAccounts(
+        supabase,
+        profile.organization_id,
+        guestData.name,
+      )
 
       type LedgerRow = {
         id: string | null
@@ -458,23 +469,16 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
         signedTableBalance > 0.005 ? signedTableBalance : 0
 
       if (ledgerData) {
-        if (
-          tableDebt > 0.005 &&
-          Number(ledgerData.balance) <= 0 &&
-          pendingTotal <= 0.005
-        ) {
-          ledgerData = { ...ledgerData, balance: tableDebt }
-        }
         setLedgerAccount({
           id: ledgerData.id,
           balance: Number(ledgerData.balance ?? 0),
           account_name: ledgerData.account_name,
           account_type: ledgerData.account_type,
         })
-      } else if (pendingTotal > 0.005 || tableDebt > 0.005) {
+      } else if (pendingTotal > 0.005 || (postedToLedger && tableDebt > 0.005)) {
         setLedgerAccount({
           id: null,
-          balance: tableDebt > 0.005 ? tableDebt : pendingTotal,
+          balance: pendingTotal > 0.005 ? pendingTotal : tableDebt,
           account_name: guestData.name,
           account_type: 'individual',
         })
@@ -728,30 +732,29 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
     .reduce((s, t) => s + Number(t.amount || 0), 0)
   const guestTableCredit =
     guestTableBalance < -0.005 ? Math.abs(guestTableBalance) : 0
-  const totalBookingBalance =
-    guestTableBalance > 0.005 ? guestTableBalance : guestPendingBalance
   const lastVisit = bookings.length > 0 ? bookings[0].check_in : null
-  const guestOutstandingBalance = totalBookingBalance
   const dbLedgerBalance = Number(ledgerAccount?.balance ?? 0)
   const prepaidFromLedgerOrCashIn = impliedGuestPrepaidCredit({
     ledgerBalance: dbLedgerBalance,
-    folioOutstanding: guestOutstandingBalance,
+    folioOutstanding: guestPendingBalance,
     ledgerCashInTotal,
     depositTotal: depositPaid,
     folioCreditTotal: guestFolioCreditTotal,
   })
-  /** Prefer table signed balance so detail page matches Guest Database list. */
-  const ledgerDisplayBalance =
-    Math.abs(guestTableBalance) > 0.005
-      ? guestTableBalance
-      : guestCityLedgerDisplayBalance({
-          dbLedgerBalance,
-          folioOutstanding: guestPendingBalance,
-          ledgerCashInTotal,
-          depositTotal: depositPaid,
-          folioCreditTotal: guestFolioCreditTotal,
-          hasLedgerAccount: Boolean(ledgerAccount),
-        })
+  const ledgerDisplayBalance = guestCityLedgerDisplayBalance({
+    dbLedgerBalance,
+    folioOutstanding: guestPendingBalance,
+    ledgerCashInTotal,
+    depositTotal: depositPaid,
+    folioCreditTotal: guestFolioCreditTotal,
+    hasLedgerAccount: Boolean(ledgerAccount),
+    hasPostedToLedger,
+  })
+  const totalBookingBalance = Math.max(
+    guestPendingBalance,
+    ledgerDisplayBalance > 0.005 ? ledgerDisplayBalance : 0,
+  )
+  const guestOutstandingBalance = totalBookingBalance
 
   const ledgerAccountCreditAmount = Math.max(
     prepaidFromLedgerOrCashIn,
@@ -765,8 +768,10 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
   const totalSpent = depositPaid + effectiveGuestCreditAmount
   const hasOutstandingDebit = totalBookingBalance > 0.005
   const hasGuestCredit =
-    guestTableBalance < -0.005 || effectiveGuestCreditAmount > 0.005
+    ledgerDisplayBalance < -0.005 || effectiveGuestCreditAmount > 0.005
   const canSettleTopUp = hasOutstandingDebit || hasGuestCredit
+  const showLedgerCard =
+    Boolean(ledgerAccount) || canSettleTopUp || bookings.length > 0
 
   const statusColor = (status: string) => {
     switch (status) {
@@ -784,7 +789,7 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
     if (hasOutstandingDebit) {
       return { label: 'Debit', color: 'text-red-600', bg: 'bg-red-50 border-red-200' }
     }
-    if (!ledgerAccount && !hasGuestCredit) {
+    if (!showLedgerCard && !hasGuestCredit) {
       return { label: 'No Account', color: 'text-muted-foreground', bg: 'bg-muted/40 border-border' }
     }
     if (ledgerDisplayBalance > 0) return { label: 'Debit', color: 'text-red-600', bg: 'bg-red-50 border-red-200' }
@@ -1189,7 +1194,7 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
             <div className="flex items-center gap-2">
               <Wallet className="h-5 w-5 text-primary" />
               <CardTitle className="text-base">City Ledger Account</CardTitle>
-              {canSettleTopUp || ledgerAccount ? (
+              {showLedgerCard ? (
                 <Badge variant="outline" className={`text-xs ${ls.color} ${ls.bg} border font-normal`}>
                   {ls.label}
                 </Badge>
@@ -1197,13 +1202,17 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
                 <Badge variant="secondary" className="text-xs">No Account</Badge>
               )}
             </div>
-            {canSettleTopUp && (
+            {(canSettleTopUp ||
+              (canRepairBalance && dbLedgerBalance > 0.005 && !hasGuestCredit)) && (
               <div className="flex flex-wrap gap-2">
-                <Button size="sm" onClick={() => setPaymentModalOpen(true)}>
-                  Settle / Top Up
-                </Button>
+                {canSettleTopUp && (
+                  <Button size="sm" onClick={() => setPaymentModalOpen(true)}>
+                    Settle / Top Up
+                  </Button>
+                )}
                 {canRepairBalance &&
-                  (hasOutstandingDebit || ledgerDisplayBalance > 0.005) && (
+                  dbLedgerBalance > 0.005 &&
+                  !hasGuestCredit && (
                     <Button
                       size="sm"
                       variant="outline"
@@ -1217,7 +1226,7 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
           </div>
         </CardHeader>
         <CardContent>
-          {!canSettleTopUp && !ledgerAccount ? (
+          {!showLedgerCard ? (
             <p className="text-sm text-muted-foreground">
               No city ledger account linked to this guest. City ledger accounts are created when a booking is made using City Ledger as the payment method.
             </p>
