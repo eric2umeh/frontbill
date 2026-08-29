@@ -1575,21 +1575,15 @@ export default function BookingDetailPage({
     paymentMethod: paymentMethodFromBookingNotes(booking.notes),
   });
 
-  const paymentStatusLower = String(booking.payment_status || "").toLowerCase();
   const owesOrPending =
-    totalBillBalance > 0 ||
-    Number(booking.balance || 0) > 0 ||
-    paymentStatusLower === "pending" ||
-    paymentStatusLower === "partial" ||
-    paymentStatusLower === "unpaid";
+    totalBillBalance > 0.005 ||
+    Number(booking.balance || 0) > 0.005;
 
   const guestAccountOwes =
     Number(bookingLedgerSnapshot.balance) > 0.005 ||
-    Number(bookingLedgerSnapshot.dueBalance) > 0.005 ||
-    Number(bookingLedgerSnapshot.rawBalance) > 0.005;
+    Number(bookingLedgerSnapshot.dueBalance) > 0.005;
 
-  const showSettleTopUp =
-    canManageFolio && (owesOrPending || guestAccountOwes);
+  const showSettleTopUp = canManageFolio && (owesOrPending || guestAccountOwes);
 
   return (
     <div className="space-y-6">
