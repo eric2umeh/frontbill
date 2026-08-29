@@ -14,16 +14,11 @@ import {
   DialogDescription,
   DialogFooter,
   DialogHeader,
-  DialogScrollableBody,
-  DialogScrollableFooter,
-  DialogScrollableHeader,
   DialogTitle,
-  dialogScrollableContentClass,
 } from '@/components/ui/dialog'
-import { cn } from '@/lib/utils'
 import { formatNaira } from '@/lib/utils/currency'
 import {
-  ArrowLeft, User, Phone, Mail, MapPin,
+  ArrowLeft, User, Phone, Mail, MapPin, Pencil,
   Calendar, CreditCard, TrendingUp, FileText, Building2, Hash,
   Wallet, ArrowDownCircle, ArrowUpCircle, Clock, RefreshCw,
   Trash2, Gift, Printer,
@@ -45,7 +40,8 @@ import {
 import { PageLoadingState } from '@/components/loading-screen'
 import { fetchGuestCashbackBalanceClient } from '@/lib/cashback/cashback-client'
 import { GuestCashbackPanel } from '@/components/cashback/guest-cashback-panel'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { GuestProfileEditPanel } from '@/components/guests/guest-profile-edit-panel'
 import { Input } from '@/components/ui/input'
 import { buildGuestAccountStatementHtml } from '@/lib/receipts/guest-account-statement'
 import { printHtmlDocument } from '@/lib/receipts/receipt-pdf-print'
@@ -623,6 +619,26 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
     })
   }
 
+  const startGuestEditing = () => {
+    if (!guest) return
+    setGuestForm({
+      name: guest.name || '',
+      phone: guest.phone || '',
+      email: guest.email || '',
+      address: guest.address || '',
+      city: guest.city || '',
+      country: guest.country || '',
+      id_type: guest.id_type || '',
+      id_number: guest.id_number || '',
+    })
+    setGuestTab('overview')
+    setIsEditingGuest(true)
+  }
+
+  const patchGuestForm = (patch: Partial<typeof guestForm>) => {
+    setGuestForm((prev) => ({ ...prev, ...patch }))
+  }
+
   const handlePrintStatement = async () => {
     if (!guest || !orgId) return
     if (statementFrom > statementTo) {
@@ -851,36 +867,42 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
         </Button>
       </div>
 
+      {canEditGuest && isEditingGuest ? (
+        <GuestProfileEditPanel
+          values={guestForm}
+          onChange={patchGuestForm}
+          onCancel={cancelGuestEditing}
+          onSave={handleSaveGuest}
+          saving={savingGuest}
+        />
+      ) : (
       <div className="flex items-start justify-between flex-wrap gap-4">
-        <div className="flex items-center gap-4">
-          <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/10">
+        <div className="flex items-center gap-4 min-w-0">
+          <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-primary/10">
             <User className="h-8 w-8 text-primary" />
           </div>
-          <div>
+          <div className="min-w-0">
             <h1 className="text-3xl font-bold tracking-tight">{guest.name}</h1>
-            <p className="text-muted-foreground">Guest since {guest.created_at ? format(new Date(guest.created_at), 'MMMM yyyy') : '-'}</p>
+            <p className="text-muted-foreground">
+              Guest since {guest.created_at ? format(new Date(guest.created_at), 'MMMM yyyy') : '-'}
+            </p>
+            {(guest.phone || guest.email) && (
+              <p className="text-sm text-muted-foreground mt-1 truncate">
+                {[guest.phone, guest.email].filter(Boolean).join(' · ')}
+              </p>
+            )}
           </div>
         </div>
         <div className="flex flex-col items-end gap-2 self-start">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap justify-end">
             {canEditGuest && (
               <Button
-                variant="outline"
+                type="button"
                 size="sm"
-                onClick={() => {
-                  setGuestForm({
-                    name: guest.name || '',
-                    phone: guest.phone || '',
-                    email: guest.email || '',
-                    address: guest.address || '',
-                    city: guest.city || '',
-                    country: guest.country || '',
-                    id_type: guest.id_type || '',
-                    id_number: guest.id_number || '',
-                  })
-                  setIsEditingGuest(true)
-                }}
+                className="gap-2"
+                onClick={startGuestEditing}
               >
+                <Pencil className="h-4 w-4" />
                 Edit Guest
               </Button>
             )}
@@ -917,6 +939,7 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
           )}
         </div>
       </div>
+      )}
 
       {hasGuestCredit && (
         <div className="rounded-xl border-2 border-blue-300 bg-blue-50 px-4 py-4 sm:px-5 dark:border-blue-800 dark:bg-blue-950/40">
@@ -1413,113 +1436,6 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
         </Card>
       )}
         </>
-      )}
-
-      {canEditGuest && (
-        <Dialog
-          open={isEditingGuest}
-          onOpenChange={(open) => {
-            if (!open) cancelGuestEditing()
-          }}
-        >
-          <DialogContent className={cn(dialogScrollableContentClass, 'sm:max-w-lg')}>
-            <DialogScrollableHeader>
-              <DialogTitle>Edit guest</DialogTitle>
-              <DialogDescription>
-                Update contact details and identification. Changing the full name also updates this guest&apos;s
-                city ledger account title and transaction labels tied to their bookings, so lists stay consistent.
-              </DialogDescription>
-            </DialogScrollableHeader>
-            <DialogScrollableBody className="space-y-3">
-              <div className="space-y-2">
-                <Label htmlFor="guest-edit-name">Full Name</Label>
-                <input
-                  id="guest-edit-name"
-                  className="w-full px-3 py-2 border rounded-md text-sm bg-background"
-                  value={guestForm.name}
-                  onChange={(e) => setGuestForm((prev) => ({ ...prev, name: e.target.value }))}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="guest-edit-phone">Phone</Label>
-                <input
-                  id="guest-edit-phone"
-                  className="w-full px-3 py-2 border rounded-md text-sm bg-background"
-                  value={guestForm.phone}
-                  onChange={(e) => setGuestForm((prev) => ({ ...prev, phone: e.target.value }))}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="guest-edit-email">Email</Label>
-                <input
-                  id="guest-edit-email"
-                  type="email"
-                  className="w-full px-3 py-2 border rounded-md text-sm bg-background"
-                  value={guestForm.email}
-                  onChange={(e) => setGuestForm((prev) => ({ ...prev, email: e.target.value }))}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="guest-edit-address">Address</Label>
-                <input
-                  id="guest-edit-address"
-                  className="w-full px-3 py-2 border rounded-md text-sm bg-background"
-                  value={guestForm.address}
-                  onChange={(e) => setGuestForm((prev) => ({ ...prev, address: e.target.value }))}
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-2">
-                  <Label htmlFor="guest-edit-city">City</Label>
-                  <input
-                    id="guest-edit-city"
-                    className="w-full px-3 py-2 border rounded-md text-sm bg-background"
-                    value={guestForm.city}
-                    onChange={(e) => setGuestForm((prev) => ({ ...prev, city: e.target.value }))}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="guest-edit-country">Country</Label>
-                  <input
-                    id="guest-edit-country"
-                    className="w-full px-3 py-2 border rounded-md text-sm bg-background"
-                    value={guestForm.country}
-                    onChange={(e) => setGuestForm((prev) => ({ ...prev, country: e.target.value }))}
-                  />
-                </div>
-              </div>
-              <Separator />
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-2">
-                  <Label htmlFor="guest-edit-id-type">ID Type</Label>
-                  <input
-                    id="guest-edit-id-type"
-                    className="w-full px-3 py-2 border rounded-md text-sm bg-background"
-                    value={guestForm.id_type}
-                    onChange={(e) => setGuestForm((prev) => ({ ...prev, id_type: e.target.value }))}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="guest-edit-id-number">ID Number</Label>
-                  <input
-                    id="guest-edit-id-number"
-                    className="w-full px-3 py-2 border rounded-md text-sm bg-background"
-                    value={guestForm.id_number}
-                    onChange={(e) => setGuestForm((prev) => ({ ...prev, id_number: e.target.value }))}
-                  />
-                </div>
-              </div>
-            </DialogScrollableBody>
-            <DialogScrollableFooter>
-              <Button type="button" variant="outline" onClick={cancelGuestEditing} disabled={savingGuest}>
-                Cancel
-              </Button>
-              <Button type="button" onClick={handleSaveGuest} disabled={savingGuest}>
-                {savingGuest ? 'Saving...' : 'Save changes'}
-              </Button>
-            </DialogScrollableFooter>
-          </DialogContent>
-        </Dialog>
       )}
 
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>

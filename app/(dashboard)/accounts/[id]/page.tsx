@@ -18,7 +18,7 @@ import {
 } from '@/components/ui/dialog'
 import { formatNaira } from '@/lib/utils/currency'
 import {
-  ArrowLeft, User, Phone, Mail, MapPin,
+  ArrowLeft, User, Phone, Mail, MapPin, Pencil,
   Calendar, CreditCard, TrendingUp, FileText, Building2, Hash,
   Wallet, ArrowDownCircle, ArrowUpCircle, Clock, RefreshCw,
   Trash2, Gift,
@@ -32,6 +32,7 @@ import { bookingDisplayBillBalance } from '@/lib/utils/booking-bill-balance'
 import { PageLoadingState } from '@/components/loading-screen'
 import { fetchGuestCashbackBalanceClient } from '@/lib/cashback/cashback-client'
 import { GuestCashbackPanel } from '@/components/cashback/guest-cashback-panel'
+import { GuestProfileEditPanel } from '@/components/guests/guest-profile-edit-panel'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 interface GuestAccount {
@@ -399,6 +400,41 @@ export default function AccountDetailPage() {
     }
   }
 
+  const startGuestEditing = () => {
+    if (!guestData) return
+    setGuestForm({
+      name: guestData.name || '',
+      phone: guestData.phone || '',
+      email: guestData.email || '',
+      address: guestData.address || '',
+      city: guestData.city || '',
+      country: guestData.country || '',
+      id_type: guestData.id_type || '',
+      id_number: guestData.id_number || '',
+    })
+    setGuestTab('overview')
+    setIsEditingGuest(true)
+  }
+
+  const cancelGuestEditing = () => {
+    setIsEditingGuest(false)
+    if (!guestData) return
+    setGuestForm({
+      name: guestData.name || '',
+      phone: guestData.phone || '',
+      email: guestData.email || '',
+      address: guestData.address || '',
+      city: guestData.city || '',
+      country: guestData.country || '',
+      id_type: guestData.id_type || '',
+      id_number: guestData.id_number || '',
+    })
+  }
+
+  const patchGuestForm = (patch: Partial<typeof guestForm>) => {
+    setGuestForm((prev) => ({ ...prev, ...patch }))
+  }
+
   if (loading) {
     return <PageLoadingState />
   }
@@ -448,6 +484,15 @@ export default function AccountDetailPage() {
       </div>
 
       {/* Header */}
+      {isGuest && canEditGuest && isEditingGuest ? (
+        <GuestProfileEditPanel
+          values={guestForm}
+          onChange={patchGuestForm}
+          onCancel={cancelGuestEditing}
+          onSave={handleSaveGuestProfile}
+          saving={savingGuest}
+        />
+      ) : (
       <div className="flex items-start justify-between flex-wrap gap-4">
         <div className="flex items-center gap-4">
           <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/10">
@@ -467,32 +512,20 @@ export default function AccountDetailPage() {
           <div className="flex items-center gap-2 flex-wrap justify-end">
             {isGuest && canEditGuest && (
               <>
-                {isEditingGuest ? (
-                  <>
-                    <Button size="sm" variant="outline" onClick={() => { setIsEditingGuest(false); loadAccount() }} disabled={savingGuest}>
-                      Cancel
-                    </Button>
-                    <Button size="sm" onClick={handleSaveGuestProfile} disabled={savingGuest}>
-                      {savingGuest ? 'Saving...' : 'Save Guest'}
-                    </Button>
-                  </>
-                ) : (
-                  <>
-                    <Button variant="outline" size="sm" onClick={() => setIsEditingGuest(true)}>
-                      Edit Guest
-                    </Button>
-                    {canDeleteGuest && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="text-destructive border-destructive/40 hover:bg-destructive/10"
-                        onClick={() => setDeleteDialogOpen(true)}
-                      >
-                        <Trash2 className="h-4 w-4 mr-1.5" />
-                        Delete Guest
-                      </Button>
-                    )}
-                  </>
+                <Button type="button" variant="default" size="sm" className="gap-2" onClick={startGuestEditing}>
+                  <Pencil className="h-4 w-4" />
+                  Edit Guest
+                </Button>
+                {canDeleteGuest && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-destructive border-destructive/40 hover:bg-destructive/10"
+                    onClick={() => setDeleteDialogOpen(true)}
+                  >
+                    <Trash2 className="h-4 w-4 mr-1.5" />
+                    Delete Guest
+                  </Button>
                 )}
               </>
             )}
@@ -520,6 +553,7 @@ export default function AccountDetailPage() {
           )}
         </div>
       </div>
+      )}
 
       {/* Summary cards */}
       <div className={`grid grid-cols-1 gap-4 sm:grid-cols-2 ${isGuest ? 'lg:grid-cols-5' : 'lg:grid-cols-4'}`}>
@@ -712,82 +746,7 @@ export default function AccountDetailPage() {
             <CardTitle className="text-base">{isGuest ? 'Guest' : 'Account'} Information</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            {isGuest && isEditingGuest && canEditGuest ? (
-              <div className="space-y-3">
-                <div className="space-y-2">
-                  <Label>Full Name</Label>
-                  <input
-                    className="w-full px-3 py-2 border rounded-md text-sm bg-background"
-                    value={guestForm.name}
-                    onChange={(e) => setGuestForm((prev) => ({ ...prev, name: e.target.value }))}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Phone</Label>
-                  <input
-                    className="w-full px-3 py-2 border rounded-md text-sm bg-background"
-                    value={guestForm.phone}
-                    onChange={(e) => setGuestForm((prev) => ({ ...prev, phone: e.target.value }))}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Email</Label>
-                  <input
-                    className="w-full px-3 py-2 border rounded-md text-sm bg-background"
-                    type="email"
-                    value={guestForm.email}
-                    onChange={(e) => setGuestForm((prev) => ({ ...prev, email: e.target.value }))}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Address</Label>
-                  <input
-                    className="w-full px-3 py-2 border rounded-md text-sm bg-background"
-                    value={guestForm.address}
-                    onChange={(e) => setGuestForm((prev) => ({ ...prev, address: e.target.value }))}
-                  />
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-2">
-                    <Label>City</Label>
-                    <input
-                      className="w-full px-3 py-2 border rounded-md text-sm bg-background"
-                      value={guestForm.city}
-                      onChange={(e) => setGuestForm((prev) => ({ ...prev, city: e.target.value }))}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Country</Label>
-                    <input
-                      className="w-full px-3 py-2 border rounded-md text-sm bg-background"
-                      value={guestForm.country}
-                      onChange={(e) => setGuestForm((prev) => ({ ...prev, country: e.target.value }))}
-                    />
-                  </div>
-                </div>
-                <Separator />
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-2">
-                    <Label>ID Type</Label>
-                    <input
-                      className="w-full px-3 py-2 border rounded-md text-sm bg-background"
-                      value={guestForm.id_type}
-                      onChange={(e) => setGuestForm((prev) => ({ ...prev, id_type: e.target.value }))}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>ID Number</Label>
-                    <input
-                      className="w-full px-3 py-2 border rounded-md text-sm bg-background"
-                      value={guestForm.id_number}
-                      onChange={(e) => setGuestForm((prev) => ({ ...prev, id_number: e.target.value }))}
-                    />
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <>
-                <div className="space-y-3">
+            <div className="space-y-3">
                   {(isGuest ? guestData?.phone : ledgerData?.contact_phone) && (
                     <div className="flex items-center gap-3 text-sm">
                       <Phone className="h-4 w-4 text-muted-foreground shrink-0" />
@@ -822,8 +781,6 @@ export default function AccountDetailPage() {
                     </div>
                   </>
                 )}
-              </>
-            )}
           </CardContent>
         </Card>
 
