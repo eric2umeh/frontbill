@@ -118,8 +118,8 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
   const [repairingBalance, setRepairingBalance] = useState(false)
   const [guestPendingBalance, setGuestPendingBalance] = useState(0)
   const [guestFolioCreditTotal, setGuestFolioCreditTotal] = useState(0)
-  /** Same signed-balance credit the Guest Database table uses (positive = credit ₦). */
-  const [guestTableCredit, setGuestTableCredit] = useState(0)
+  /** Same signed balance as Guest Database table (positive = debt, negative = credit). */
+  const [guestTableBalance, setGuestTableBalance] = useState(0)
   const [cashbackEarned, setCashbackEarned] = useState(0)
   const [cashbackAvailable, setCashbackAvailable] = useState(0)
   const [guestTab, setGuestTab] = useState('overview')
@@ -267,20 +267,21 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
       setGuestPendingBalance(pendingTotal)
       setGuestFolioCreditTotal(creditTotal)
 
-      // Same credit source as Guest Database table Balance column
-      let tableCreditAmt = 0
+      // Same signed balance as Guest Database table Balance column
+      let signedTableBalance = 0
       try {
         const tableBalanceMap = await calculateGuestBalancesBatch(
           supabase,
           [{ id: guestData.id, name: guestData.name }],
           profile.organization_id,
         )
-        const signed = Number(tableBalanceMap[guestData.id] ?? 0)
-        if (signed < -0.005) tableCreditAmt = Math.abs(signed)
-        setGuestTableCredit(tableCreditAmt)
+        signedTableBalance = Number(tableBalanceMap[guestData.id] ?? 0)
+        setGuestTableBalance(signedTableBalance)
       } catch {
-        setGuestTableCredit(0)
+        setGuestTableBalance(0)
       }
+      const tableCreditAmt =
+        signedTableBalance < -0.005 ? Math.abs(signedTableBalance) : 0
 
       // Set selected folio to most recent booking's folio
       if (enrichedBookings.length > 0) {
@@ -453,17 +454,27 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
         }
       }
 
+      const tableDebt =
+        signedTableBalance > 0.005 ? signedTableBalance : 0
+
       if (ledgerData) {
+        if (
+          tableDebt > 0.005 &&
+          Number(ledgerData.balance) <= 0 &&
+          pendingTotal <= 0.005
+        ) {
+          ledgerData = { ...ledgerData, balance: tableDebt }
+        }
         setLedgerAccount({
           id: ledgerData.id,
           balance: Number(ledgerData.balance ?? 0),
           account_name: ledgerData.account_name,
           account_type: ledgerData.account_type,
         })
-      } else if (pendingTotal > 0) {
+      } else if (pendingTotal > 0.005 || tableDebt > 0.005) {
         setLedgerAccount({
           id: null,
-          balance: pendingTotal,
+          balance: tableDebt > 0.005 ? tableDebt : pendingTotal,
           account_name: guestData.name,
           account_type: 'individual',
         })
@@ -715,9 +726,12 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
         isGuestCityLedgerCashInDescription(t.description),
     )
     .reduce((s, t) => s + Number(t.amount || 0), 0)
-  const totalBookingBalance = guestPendingBalance
+  const guestTableCredit =
+    guestTableBalance < -0.005 ? Math.abs(guestTableBalance) : 0
+  const totalBookingBalance =
+    guestTableBalance > 0.005 ? guestTableBalance : guestPendingBalance
   const lastVisit = bookings.length > 0 ? bookings[0].check_in : null
-  const guestOutstandingBalance = guestPendingBalance
+  const guestOutstandingBalance = totalBookingBalance
   const dbLedgerBalance = Number(ledgerAccount?.balance ?? 0)
   const prepaidFromLedgerOrCashIn = impliedGuestPrepaidCredit({
     ledgerBalance: dbLedgerBalance,
@@ -726,15 +740,18 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
     depositTotal: depositPaid,
     folioCreditTotal: guestFolioCreditTotal,
   })
-  /** Folio-derived outstanding is source of truth for debit; ledger credit stays negative. */
-  const ledgerDisplayBalance = guestCityLedgerDisplayBalance({
-    dbLedgerBalance,
-    folioOutstanding: guestOutstandingBalance,
-    ledgerCashInTotal,
-    depositTotal: depositPaid,
-    folioCreditTotal: guestFolioCreditTotal,
-    hasLedgerAccount: Boolean(ledgerAccount),
-  })
+  /** Prefer table signed balance so detail page matches Guest Database list. */
+  const ledgerDisplayBalance =
+    Math.abs(guestTableBalance) > 0.005
+      ? guestTableBalance
+      : guestCityLedgerDisplayBalance({
+          dbLedgerBalance,
+          folioOutstanding: guestPendingBalance,
+          ledgerCashInTotal,
+          depositTotal: depositPaid,
+          folioCreditTotal: guestFolioCreditTotal,
+          hasLedgerAccount: Boolean(ledgerAccount),
+        })
 
   const ledgerAccountCreditAmount = Math.max(
     prepaidFromLedgerOrCashIn,
@@ -746,8 +763,10 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
     guestTableCredit,
   )
   const totalSpent = depositPaid + effectiveGuestCreditAmount
-  const hasOutstandingDebit = totalBookingBalance > 0
-  const hasGuestCredit = effectiveGuestCreditAmount > 0.005
+  const hasOutstandingDebit = totalBookingBalance > 0.005
+  const hasGuestCredit =
+    guestTableBalance < -0.005 || effectiveGuestCreditAmount > 0.005
+  const canSettleTopUp = hasOutstandingDebit || hasGuestCredit
 
   const statusColor = (status: string) => {
     switch (status) {
@@ -761,6 +780,9 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
   const ledgerStatusBadge = () => {
     if (hasGuestCredit && !hasOutstandingDebit) {
       return { label: 'Credit', color: 'text-blue-700', bg: 'bg-blue-50 border-blue-200' }
+    }
+    if (hasOutstandingDebit) {
+      return { label: 'Debit', color: 'text-red-600', bg: 'bg-red-50 border-red-200' }
     }
     if (!ledgerAccount && !hasGuestCredit) {
       return { label: 'No Account', color: 'text-muted-foreground', bg: 'bg-muted/40 border-border' }
@@ -1167,7 +1189,7 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
             <div className="flex items-center gap-2">
               <Wallet className="h-5 w-5 text-primary" />
               <CardTitle className="text-base">City Ledger Account</CardTitle>
-              {(ledgerAccount || hasGuestCredit) ? (
+              {canSettleTopUp || ledgerAccount ? (
                 <Badge variant="outline" className={`text-xs ${ls.color} ${ls.bg} border font-normal`}>
                   {ls.label}
                 </Badge>
@@ -1175,7 +1197,7 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
                 <Badge variant="secondary" className="text-xs">No Account</Badge>
               )}
             </div>
-            {(ledgerAccount || hasGuestCredit) && (
+            {canSettleTopUp && (
               <div className="flex flex-wrap gap-2">
                 <Button size="sm" onClick={() => setPaymentModalOpen(true)}>
                   Settle / Top Up
@@ -1195,7 +1217,7 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
           </div>
         </CardHeader>
         <CardContent>
-          {!ledgerAccount && !hasGuestCredit ? (
+          {!canSettleTopUp && !ledgerAccount ? (
             <p className="text-sm text-muted-foreground">
               No city ledger account linked to this guest. City ledger accounts are created when a booking is made using City Ledger as the payment method.
             </p>
@@ -1544,16 +1566,20 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
       </Dialog>
 
       {/* City Ledger Payment Modal */}
-      {ledgerAccount && (
+      {canSettleTopUp && (
         <CityLedgerPaymentModal
           open={paymentModalOpen}
           onClose={() => setPaymentModalOpen(false)}
           onSuccess={loadGuest}
           accountType="guest"
           accountName={guest.name}
-          ledgerAccountId={ledgerAccount.id}
+          ledgerAccountId={ledgerAccount?.id ?? null}
           currentBalance={
-            ledgerAccount?.id ? Number(ledgerAccount.balance ?? 0) : guestOutstandingBalance
+            hasOutstandingDebit
+              ? totalBookingBalance
+              : ledgerAccount?.id
+                ? Number(ledgerAccount.balance ?? 0)
+                : -effectiveGuestCreditAmount
           }
           organizationId={orgId}
           guestId={guest.id}

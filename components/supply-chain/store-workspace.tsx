@@ -443,7 +443,8 @@ export function StoreWorkspace() {
             <div className="border-b px-4 py-2 bg-muted/30 flex flex-wrap items-center justify-between gap-2">
               <span className="text-sm font-medium">All Stock Items</span>
               <div className="flex flex-wrap items-center gap-2">
-                {canStockCount ? (
+                {/* Stock count temporarily hidden */}
+                {false && canStockCount ? (
                   <Button
                     type="button"
                     variant={stockCountMode ? 'default' : 'outline'}

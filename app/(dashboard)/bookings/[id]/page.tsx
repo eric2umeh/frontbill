@@ -1583,7 +1583,13 @@ export default function BookingDetailPage({
     paymentStatusLower === "partial" ||
     paymentStatusLower === "unpaid";
 
-  const showSettleTopUp = canManageFolio && owesOrPending;
+  const guestAccountOwes =
+    Number(bookingLedgerSnapshot.balance) > 0.005 ||
+    Number(bookingLedgerSnapshot.dueBalance) > 0.005 ||
+    Number(bookingLedgerSnapshot.rawBalance) > 0.005;
+
+  const showSettleTopUp =
+    canManageFolio && (owesOrPending || guestAccountOwes);
 
   return (
     <div className="space-y-6">
@@ -2813,9 +2819,19 @@ export default function BookingDetailPage({
                   onClick={() => {
                     setPaymentCreditTab("payment");
                     setApplyOverpaymentAsCredit(false);
+                    const guestWideDue = Math.max(
+                      0,
+                      Number(bookingLedgerSnapshot.balance) > 0
+                        ? Number(bookingLedgerSnapshot.balance)
+                        : 0,
+                      Number(bookingLedgerSnapshot.dueBalance) > 0
+                        ? Number(bookingLedgerSnapshot.dueBalance)
+                        : 0,
+                    );
                     const due = Math.max(
                       totalBillBalance,
                       Number(booking.balance) || 0,
+                      guestWideDue,
                     );
                     setChargeAmount(due > 0 ? String(due) : "");
                     setPaymentCreditModalOpen(true);
