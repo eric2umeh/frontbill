@@ -130,6 +130,10 @@ import {
   applyPaymentToGuestCityLedger,
   recordGuestLedgerCashMovement,
 } from "@/lib/utils/guest-city-ledger";
+import {
+  guestWideSettleDue,
+  planBookingSettlePayment,
+} from "@/lib/utils/booking-settle-payment";
 import { isOutletFolioDescription } from "@/lib/outlets/booking-folio";
 
 function isFolioAdditionalChargeRow(c: {
@@ -958,6 +962,64 @@ export default function BookingDetailPage({
         ),
       );
 
+      const guestName = (booking.guests?.name || "").trim();
+      const guestWideDue = guestWideSettleDue(bookingLedgerSnapshot);
+      const settlePlan = planBookingSettlePayment({
+        thisBookingDue: billBefore,
+        guestWideDue,
+        cashEntered,
+        allowOverpayment: applyOverpaymentAsCredit,
+      });
+      if (!settlePlan.ok) {
+        toast.error(settlePlan.error);
+        setAddChargeLoading(false);
+        return;
+      }
+
+      if (settlePlan.mode === "guest-wide") {
+        if (!guestId || !booking.organization_id || !guestName) {
+          toast.error(
+            "Guest profile is required to apply this payment across open folios",
+          );
+          setAddChargeLoading(false);
+          return;
+        }
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (!user) {
+          toast.error("Session expired");
+          setAddChargeLoading(false);
+          return;
+        }
+        await recordGuestLedgerCashMovement(supabase, {
+          organizationId: booking.organization_id,
+          accountName: guestName,
+          guestId,
+          amount: cashEntered,
+          paymentMethod,
+          notes: "",
+          transactionType: "City Ledger Settlement",
+          userId: user.id,
+          ledgerAccountId: bookingLedgerSnapshot.id,
+          currentLedgerBalance: bookingLedgerSnapshot.rawBalance,
+          syncGuestProfile: true,
+          ...accountFields,
+        });
+        await fetchBookingDetails(bookingId);
+        toast.success(
+          `Payment of ${formatNaira(cashEntered)} recorded across the guest's open folios`,
+        );
+        setPaymentCreditModalOpen(false);
+        setChargeAmount("");
+        setPaymentMethod("");
+        setPaymentAccountId("");
+        setPaymentAccount(null);
+        setApplyOverpaymentAsCredit(false);
+        setApplyCashback(false);
+        return;
+      }
+
       const cashbackOk = isGuestBookingCashbackEligible({
         guestName: booking.guests?.name,
         paymentMethod: paymentMethodFromBookingNotes(booking.notes),
@@ -1043,13 +1105,14 @@ export default function BookingDetailPage({
           .not("charge_type", "eq", "payment");
       }
 
-      const guestName = (booking.guests?.name || "").trim();
       if (guestName && booking.organization_id) {
         await applyBookingPaymentToGuestLedger(supabase, {
           organizationId: booking.organization_id,
           guestName,
-          bookingBillBefore: billBefore,
-          paymentAmount: totalApplied,
+          bookingBillBefore: applyOverpaymentAsCredit
+            ? breakdown.dueAfterDiscount
+            : billBefore,
+          paymentAmount: applyOverpaymentAsCredit ? cashEntered : totalApplied,
         });
       }
 
@@ -1991,6 +2054,15 @@ export default function BookingDetailPage({
                 <p className="text-sm text-muted-foreground">
                   Record money received against this booking&apos;s bill
                   balance.
+                  {guestWideSettleDue(bookingLedgerSnapshot) >
+                    Math.max(0, totalBillBalance) + 0.005 && (
+                    <>
+                      {" "}
+                      Amounts above this stay are applied to the guest&apos;s
+                      other open folios first (same as Settle / Top Up on the
+                      guest profile).
+                    </>
+                  )}
                 </p>
                 <div className="flex items-start gap-2 rounded-md border border-input p-3">
                   <Checkbox
@@ -2819,14 +2891,8 @@ export default function BookingDetailPage({
                   onClick={() => {
                     setPaymentCreditTab("payment");
                     setApplyOverpaymentAsCredit(false);
-                    const guestWideDue = Math.max(
-                      0,
-                      Number(bookingLedgerSnapshot.balance) > 0
-                        ? Number(bookingLedgerSnapshot.balance)
-                        : 0,
-                      Number(bookingLedgerSnapshot.dueBalance) > 0
-                        ? Number(bookingLedgerSnapshot.dueBalance)
-                        : 0,
+                    const guestWideDue = guestWideSettleDue(
+                      bookingLedgerSnapshot,
                     );
                     const due = Math.max(
                       totalBillBalance,
