@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
@@ -20,9 +21,9 @@ import { StayDateRangeFields } from '@/components/shared/stay-date-range-fields'
 import { formatNaira } from '@/lib/utils/currency'
 import { toast } from 'sonner'
 import { Loader2 } from 'lucide-react'
-import { parseISO } from 'date-fns'
+import { parseISO, addDays } from 'date-fns'
 import { calendarNightsBetween } from '@/lib/booking/edit-booking-patch'
-import { isStayCheckInConsideredBackdated, minSelectableCheckInYmdHotel, parseHotelYmdToLocalDate } from '@/lib/hotel-date'
+import { isStayCheckInConsideredBackdated, hotelCalendarTodayYmd } from '@/lib/hotel-date'
 import { useNightAuditClosedDates } from '@/hooks/use-night-audit-closed-dates'
 import {
   FolioRemarksAttachmentsField,
@@ -76,6 +77,7 @@ export function RescheduleStayModal({
   const [checkIn, setCheckIn] = useState<Date | undefined>()
   const [checkOut, setCheckOut] = useState<Date | undefined>()
   const [reason, setReason] = useState('')
+  const [adjustmentDate, setAdjustmentDate] = useState('')
   const [folioExtras, setFolioExtras] = useState<FolioRemarksAttachmentsValue>({ remarks: '', files: [] })
   const [submitting, setSubmitting] = useState(false)
   const { closedDates: nightAuditClosedDates } = useNightAuditClosedDates(userId, open)
@@ -85,6 +87,7 @@ export function RescheduleStayModal({
     setCheckIn(ymdToDate(booking.check_in))
     setCheckOut(ymdToDate(booking.check_out))
     setReason('')
+    setAdjustmentDate(hotelCalendarTodayYmd())
     setFolioExtras({ remarks: '', files: [] })
   }, [open, booking])
 
@@ -112,10 +115,13 @@ export function RescheduleStayModal({
       isStayCheckInConsideredBackdated(check_in, new Date(), undefined, {
         auditedDates: nightAuditClosedDates,
       }) && check_in !== prevCi
-    return { total, balance, deposit, isBackdate }
-  }, [booking, nights, checkIn, nightAuditClosedDates])
-
-  const minCheckInDate = parseHotelYmdToLocalDate(minSelectableCheckInYmdHotel())
+    const adjustmentBackdate =
+      adjustmentDate.trim() &&
+      isStayCheckInConsideredBackdated(adjustmentDate.trim(), new Date(), undefined, {
+        auditedDates: nightAuditClosedDates,
+      })
+    return { total, balance, deposit, isBackdate, adjustmentBackdate }
+  }, [booking, nights, checkIn, nightAuditClosedDates, adjustmentDate])
 
   const datesUnchanged =
     booking &&
@@ -123,6 +129,17 @@ export function RescheduleStayModal({
     checkOut &&
     toYmd(checkIn) === booking.check_in.slice(0, 10) &&
     toYmd(checkOut) === booking.check_out.slice(0, 10)
+
+  const submitBlockedReason = useMemo(() => {
+    if (!checkIn || !checkOut) return 'Select check-in and check-out dates'
+    if (nights < 1) return 'Check-out must be after check-in'
+    if (datesUnchanged) return 'Change check-in or check-out from the current stay dates'
+    if (!reason.trim()) return 'Enter a reason for the date change'
+    if (!adjustmentDate.trim() || !/^\d{4}-\d{2}-\d{2}$/.test(adjustmentDate.trim())) {
+      return 'Choose a valid adjustment date'
+    }
+    return null
+  }, [checkIn, checkOut, nights, datesUnchanged, reason, adjustmentDate])
 
   async function handleSubmit() {
     if (!booking?.id || !userId || !checkIn || !checkOut) return
@@ -134,6 +151,11 @@ export function RescheduleStayModal({
     }
     if (!reason.trim()) {
       toast.error('Please enter a reason for the date change')
+      return
+    }
+    const adjustment_date = adjustmentDate.trim() || hotelCalendarTodayYmd()
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(adjustment_date)) {
+      toast.error('Choose a valid adjustment date')
       return
     }
     if (datesUnchanged) {
@@ -151,6 +173,7 @@ export function RescheduleStayModal({
           booking_id: booking.id,
           check_in,
           check_out,
+          adjustment_date,
           reason: reason.trim(),
         }),
       })
@@ -221,17 +244,45 @@ export function RescheduleStayModal({
             checkIn={checkIn}
             checkOut={checkOut}
             nights={nights}
-            minCheckIn={minCheckInDate}
             onDatesChange={(ci, co) => {
               setCheckIn(ci)
-              setCheckOut(co)
+              if (co) {
+                setCheckOut(co)
+              } else if (checkOut && ci && checkOut > ci) {
+                // Keep check-out while guest finishes picking a new range
+              } else if (ci) {
+                setCheckOut(addDays(ci, 1))
+              }
             }}
           />
 
-          {preview?.isBackdate && (
+          <div className="space-y-2">
+            <Label htmlFor="reschedule-adjustment-date">Adjustment date *</Label>
+            <Input
+              id="reschedule-adjustment-date"
+              type="date"
+              value={adjustmentDate}
+              onChange={(e) => setAdjustmentDate(e.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">
+              Business date this change applies to (for receipts and accounting). Choose a past date
+              if correcting a prior night — approvers will see it flagged like a backdate. You must
+              also change check-in or check-out above (adjustment date alone is not enough).
+            </p>
+          </div>
+
+          {(preview?.isBackdate || preview?.adjustmentBackdate) && (
             <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
-              This moves check-in to a past date. It will be flagged as <strong>backdated</strong> for
-              approvers in Night Audit.
+              {preview?.isBackdate && (
+                <>
+                  This moves check-in to a past date. It will be flagged as{' '}
+                  <strong>backdated</strong> for approvers in Night Audit.
+                </>
+              )}
+              {preview?.isBackdate && preview?.adjustmentBackdate && ' '}
+              {preview?.adjustmentBackdate && (
+                <>The adjustment date is in the past and requires manager approval.</>
+              )}
             </p>
           )}
 
@@ -241,9 +292,9 @@ export function RescheduleStayModal({
                 <span className="text-muted-foreground">Nights</span>
                 <span className="font-medium">{nights}</span>
               </div>
-              {preview.isBackdate && (
+              {(preview.isBackdate || preview.adjustmentBackdate) && (
                 <Badge variant="outline" className="w-fit border-amber-500 text-amber-800">
-                  Backdated check-in
+                  {preview.isBackdate ? 'Backdated check-in' : 'Backdated adjustment'}
                 </Badge>
               )}
               <div className="flex justify-between">
@@ -284,21 +335,19 @@ export function RescheduleStayModal({
           />
         </DialogScrollableBody>
 
-        <DialogScrollableFooter className="gap-2 sm:gap-0">
+        <DialogScrollableFooter className="gap-2 sm:gap-0 flex-col sm:flex-row sm:items-center">
+          {submitBlockedReason && !submitting && (
+            <p className="text-xs text-muted-foreground sm:mr-auto order-first sm:order-none w-full sm:w-auto">
+              {submitBlockedReason}
+            </p>
+          )}
           <Button type="button" variant="outline" onClick={onClose} disabled={submitting}>
             Cancel
           </Button>
           <Button
             type="button"
             onClick={handleSubmit}
-            disabled={
-              submitting ||
-              !checkIn ||
-              !checkOut ||
-              nights < 1 ||
-              Boolean(datesUnchanged) ||
-              !reason.trim()
-            }
+            disabled={submitting || Boolean(submitBlockedReason)}
           >
             {submitting ? (
               <>
