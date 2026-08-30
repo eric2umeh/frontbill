@@ -19,7 +19,7 @@ import { Download, Flame, Pencil, Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { RESPONSIVE_HIDE_MD, RESPONSIVE_HIDE_LG } from '@/lib/ui/responsive-table'
 import { PaginatedListShell } from '@/components/shared/paginated-list-shell'
-import { sanitizeQuantityInput, parseQuantityValue } from '@/lib/supply-chain/measurement-units'
+import { sanitizeQuantityInput, parseQuantityValue, isCompleteQuantityInput } from '@/lib/supply-chain/measurement-units'
 import { batchMaterialShortages } from '@/lib/supply-chain/batch-material-shortages'
 import { BatchMaterialShortageList } from '@/components/supply-chain/batch-material-shortage-list'
 import { syncBatchToRestaurantOutlet } from '@/lib/supply-chain/sync-restaurant-outlet'
@@ -139,6 +139,7 @@ export function KitchenWorkspace() {
     deleteInProgressBatch,
     getRecipeEconomics,
     kitchenRawOnHand,
+    setKitchenStockAvailable,
   } = useSupplyChain()
 
   const [stockTick, setStockTick] = useState(0)
@@ -219,10 +220,37 @@ export function KitchenWorkspace() {
   const [budgetQty, setBudgetQty] = useState<Record<string, string>>({})
   const [deleteRecipeId, setDeleteRecipeId] = useState<string | null>(null)
   const [plannedInput, setPlannedInput] = useState('')
+  const [stockCountDraft, setStockCountDraft] = useState<Record<string, string>>({})
   const actor = { name: name ?? 'Kitchen', role: canonicalRoleKey(role) ?? 'staff' }
   const canManageBatchStandards = canManageKitchenBatchStandards(role)
   const canOpenProduction = canOperateKitchenProduction(role)
+  const canCountKitchenStock = canOpenProduction
   const canRaiseKitchenPo = canRaisePurchaseRequest(role)
+
+  const commitKitchenStockCount = (item: (typeof kitchenStock)[0]) => {
+    const raw = stockCountDraft[item.id]
+    if (raw == null) return
+    if (!isCompleteQuantityInput(raw)) {
+      toast.error('Enter a valid quantity')
+      return
+    }
+    const qty = parseQuantityValue(raw)
+    if (qty == null || qty < 0) {
+      toast.error('Enter a valid quantity')
+      return
+    }
+    const result = setKitchenStockAvailable(item.id, qty, actor)
+    if ('error' in result) {
+      toast.error(result.error)
+      return
+    }
+    setStockCountDraft((prev) => {
+      const next = { ...prev }
+      delete next[item.id]
+      return next
+    })
+    toast.success(`Counted ${item.name}: ${qty} ${item.unit || 'portion'}`)
+  }
 
   const recipeCategoryFilterOptions = useMemo(() => {
     const cats = [...new Set(recipes.map((r) => r.category).filter(Boolean))].sort((a, b) =>
@@ -305,7 +333,7 @@ export function KitchenWorkspace() {
       ) : (
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList className="flex h-auto flex-wrap">
-          <TabsTrigger value="stock">Finished / Prep Stock</TabsTrigger>
+          <TabsTrigger value="stock">Finished Menu</TabsTrigger>
           <TabsTrigger value="raw-stock">Raw from Store</TabsTrigger>
           <TabsTrigger value="production">Production Records</TabsTrigger>
           <TabsTrigger value="recipes">All Batches</TabsTrigger>
@@ -437,7 +465,9 @@ export function KitchenWorkspace() {
         <TabsContent value="stock" className="mt-4">
         <div>
           <p className="text-sm text-muted-foreground mb-3">
-            Finished dishes and prep stock increase only when a production run is closed. Batch standards start at 0.
+            Finished Menu items increase when a production run is closed. Tap{' '}
+            <strong className="text-foreground">Available</strong> to set a physical count; closing
+            a batch adds portions on top of that number.
           </p>
           <PaginatedListShell
             items={kitchenStock}
@@ -492,10 +522,48 @@ export function KitchenWorkspace() {
                       <TableRow key={k.id} className={stockLevelRowClass(level)}>
                         <TableCell className="font-medium">{k.name}</TableCell>
                         <TableCell className={RESPONSIVE_HIDE_MD}>
-                          <Badge className="bg-emerald-100 text-emerald-800">Produced</Badge>
+                          <Badge
+                            className={
+                              k.source === 'issued_raw'
+                                ? 'bg-blue-100 text-blue-800'
+                                : 'bg-emerald-100 text-emerald-800'
+                            }
+                          >
+                            {k.source === 'issued_raw' ? 'From store' : 'Produced'}
+                          </Badge>
                         </TableCell>
                         <TableCell className={`text-right ${stockLevelTextClass(level)}`}>
-                          {k.availablePortions} {k.unit || 'portion'}
+                          {canCountKitchenStock ? (
+                            <div className="inline-flex items-center justify-end gap-1.5">
+                              <Input
+                                className="h-8 w-20 text-right tabular-nums"
+                                inputMode="decimal"
+                                value={
+                                  stockCountDraft[k.id] ??
+                                  String(k.availablePortions)
+                                }
+                                onChange={(e) =>
+                                  setStockCountDraft((prev) => ({
+                                    ...prev,
+                                    [k.id]: sanitizeQuantityInput(e.target.value),
+                                  }))
+                                }
+                                onBlur={() => commitKitchenStockCount(k)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    e.currentTarget.blur()
+                                  }
+                                }}
+                              />
+                              <span className="text-xs text-muted-foreground whitespace-nowrap">
+                                {k.unit || 'portion'}
+                              </span>
+                            </div>
+                          ) : (
+                            <>
+                              {k.availablePortions} {k.unit || 'portion'}
+                            </>
+                          )}
                         </TableCell>
                         <TableCell className={`text-right ${RESPONSIVE_HIDE_MD}`}>
                           {k.reorderLevel}
@@ -519,7 +587,7 @@ export function KitchenWorkspace() {
         <div>
           <p className="text-sm text-muted-foreground rounded-lg border bg-muted/30 px-3 py-2 mb-4">
             <strong className="text-foreground">Production records</strong> are chef production runs
-            opened from All Batches. Raw stock deducts and finished stock updates when a run is closed.
+            opened from All Batches. Raw stock deducts and Finished Menu updates when a run is closed.
           </p>
           <PaginatedListShell
             items={batches}
@@ -933,7 +1001,7 @@ export function KitchenWorkspace() {
               <>
                 <p className="text-sm text-muted-foreground">
                   Closes this production run and deducts raw materials from kitchen stock. {portions}{' '}
-                  {closeBatchRecipe?.yieldUnit || 'portion'} are added to finished/prep stock when you close.
+                  {closeBatchRecipe?.yieldUnit || 'portion'} are added to Finished Menu when you close.
                 </p>
                 <div className="space-y-3">
                   <div className="space-y-2">
@@ -1000,7 +1068,7 @@ export function KitchenWorkspace() {
                         }
                       } else {
                         toast.success(
-                          `${actual} ${unit} added to finished/prep stock (not listed on outlet POS)`,
+                          `${actual} ${unit} added to Finished Menu (not listed on outlet POS)`,
                         )
                       }
                       setCloseDialog(null)

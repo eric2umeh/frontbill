@@ -1157,6 +1157,18 @@ export function canKickstartOutletStock(
   );
 }
 
+/** Physical count / set on-hand for kitchen finished prep or bar outlet stock. */
+export function canCountOutletDepartmentStock(
+  userRole: string | null | undefined,
+): boolean {
+  return (
+    canKickstartOutletStock(userRole) ||
+    canOperateKitchenProduction(userRole) ||
+    hasPermission(userRole, "outlet:sell") ||
+    hasPermission(userRole, "supply:fnb")
+  );
+}
+
 /** Add catalogue items directly to central store (no approval). */
 export function canAddStoreItemDirect(
   userRole: string | null | undefined,

@@ -4038,6 +4038,70 @@ function useSupplyChainImpl() {
     [storeItems, useDbPersistence, userId],
   );
 
+  /** Set absolute finished/prep portions (kitchen physical count). Production close still adds on top later. */
+  const setKitchenStockAvailable = useCallback(
+    (
+      stockId: string,
+      availablePortions: number,
+      actor: Actor,
+    ): { ok: true } | { error: string } => {
+      const existing = kitchenStock.find((k) => k.id === stockId);
+      if (!existing) return { error: "Kitchen stock item not found" };
+      const qty = Math.max(0, Number(availablePortions) || 0);
+      if (!Number.isFinite(qty)) return { error: "Enter a valid quantity" };
+      setKitchenStock((prev) =>
+        prev.map((k) =>
+          k.id === stockId ? { ...k, availablePortions: qty } : k,
+        ),
+      );
+      markLocalSupplyMutation();
+      setActivityLog((a) =>
+        log(
+          a,
+          "stock_issued_kitchen",
+          actor,
+          `Kitchen count: ${existing.name} → ${qty} ${existing.unit || "portion"}`,
+          stockId,
+        ),
+      );
+      schedulePersistSnapshots();
+      return { ok: true };
+    },
+    [kitchenStock, schedulePersistSnapshots],
+  );
+
+  /** Set absolute on-hand qty for a main bar stock row (physical count). Issue-out still adds on top later. */
+  const setBarStockOnHand = useCallback(
+    (
+      stockId: string,
+      quantityOnHand: number,
+      actor: Actor,
+    ): { ok: true } | { error: string } => {
+      const existing = barStock.find((b) => b.id === stockId);
+      if (!existing) return { error: "Bar stock item not found" };
+      const qty = Math.max(0, Number(quantityOnHand) || 0);
+      if (!Number.isFinite(qty)) return { error: "Enter a valid quantity" };
+      setBarStock((prev) =>
+        prev.map((b) =>
+          b.id === stockId ? { ...b, quantityOnHand: qty } : b,
+        ),
+      );
+      markLocalSupplyMutation();
+      setActivityLog((a) =>
+        log(
+          a,
+          "stock_issued_bar",
+          actor,
+          `Bar count: ${existing.name} → ${qty} ${existing.unit}`,
+          stockId,
+        ),
+      );
+      schedulePersistSnapshots();
+      return { ok: true };
+    },
+    [barStock, schedulePersistSnapshots],
+  );
+
   const deleteStoreItemDirect = useCallback(
     (itemId: string, actor: Actor): { ok: true } | { error: string } => {
       const existing = storeItems.find((s) => s.id === itemId);
@@ -5558,6 +5622,8 @@ function useSupplyChainImpl() {
     addStoreItemDirect,
     updateStoreItemDirect,
     setStoreOnHandForStockCount,
+    setKitchenStockAvailable,
+    setBarStockOnHand,
     deleteStoreItemDirect,
     submitStoreItemForApproval,
     approvePendingStoreItem,
@@ -5641,6 +5707,12 @@ export function useSupplyChain() {
       (() => ({ error: "Supply chain not ready — refresh the page" })),
     setStoreOnHandForStockCount:
       ctx.setStoreOnHandForStockCount ??
+      (() => ({ error: "Supply chain not ready — refresh the page" })),
+    setKitchenStockAvailable:
+      ctx.setKitchenStockAvailable ??
+      (() => ({ error: "Supply chain not ready — refresh the page" })),
+    setBarStockOnHand:
+      ctx.setBarStockOnHand ??
       (() => ({ error: "Supply chain not ready — refresh the page" })),
     deleteStoreItemDirect:
       ctx.deleteStoreItemDirect ??
