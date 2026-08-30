@@ -258,27 +258,314 @@ export default function BookingDetailPage({
     // Re-run when `userId` becomes available so room-change + display-name fetches use auth.
   }, [routeBookingId, userId]);
 
+  const mapFolioChargeRow = (
+    charge: {
+      id: string;
+      created_at?: string | null;
+      description?: string | null;
+      amount?: number | null;
+      charge_type?: string | null;
+      payment_status?: string | null;
+      payment_method?: string | null;
+      created_by?: string | null;
+    },
+    creatorMap: Record<string, string>,
+  ) => {
+    const creatorName = charge.created_by
+      ? creatorMap[charge.created_by] ||
+        getUserDisplayName(null, charge.created_by)
+      : "System";
+    return {
+      id: charge.id,
+      date: charge.created_at?.split("T")[0],
+      timestamp: charge.created_at ?? "",
+      description: charge.description ?? "",
+      amount: charge.amount ?? 0,
+      type: charge.charge_type ?? "charge",
+      createdBy: creatorName,
+      paymentStatus: charge.payment_status,
+      paymentMethod: charge.payment_method,
+    };
+  };
+
+  const enrichBookingDetails = async (
+    id: string,
+    bookingData: Record<string, unknown>,
+    uid: string | null | undefined,
+    initialCharges: Array<{
+      id: string;
+      created_at?: string | null;
+      description?: string | null;
+      amount?: number | null;
+      charge_type?: string | null;
+      payment_status?: string | null;
+      payment_method?: string | null;
+      created_by?: string | null;
+    }>,
+  ) => {
+    const supabase = createClient();
+    const nestedOrgRaw = bookingData.organizations as unknown;
+    const nestedOrg =
+      nestedOrgRaw &&
+      typeof nestedOrgRaw === "object" &&
+      !Array.isArray(nestedOrgRaw)
+        ? (nestedOrgRaw as {
+            name?: string | null;
+            address?: string | null;
+            phone?: string | null;
+            email?: string | null;
+          })
+        : null;
+
+    const orgId = bookingData.organization_id as string | undefined;
+    if (orgId) {
+      const checkoutTime = await fetchOrgCheckoutTime(supabase, orgId);
+      setOrgCheckoutTime(checkoutTime);
+    }
+
+    const hotelName = String(nestedOrg?.name ?? "").trim();
+    if (nestedOrg || orgId) {
+      setReceiptOrg({
+        hotelName,
+        address: String(nestedOrg?.address ?? ""),
+        phone: String(nestedOrg?.phone ?? ""),
+        email: String(nestedOrg?.email ?? ""),
+      });
+    }
+
+    if (uid && uid !== "placeholder") {
+      try {
+        const rb = await fetch(
+          `/api/bookings/${encodeURIComponent(id)}/receipt-branding?caller_id=${encodeURIComponent(uid)}`,
+          { credentials: "include" },
+        );
+        if (rb.ok) {
+          const j = (await rb.json()) as {
+            hotelName?: string;
+            address?: string;
+            phone?: string;
+            email?: string;
+            logoUrl?: string | null;
+          };
+          const hn = String(j.hotelName ?? "").trim();
+          setReceiptOrg({
+            hotelName: hn,
+            address: String(j.address ?? ""),
+            phone: String(j.phone ?? ""),
+            email: String(j.email ?? ""),
+            logoUrl: j.logoUrl ?? null,
+          });
+        }
+      } catch {
+        /* keep client-derived branding */
+      }
+
+      try {
+        await fetch(
+          `/api/bookings/${encodeURIComponent(id)}/sync-outlet-folio`,
+          {
+            method: "POST",
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ caller_id: uid }),
+          },
+        );
+      } catch {
+        /* non-fatal */
+      }
+    }
+
+    const bookingUserIds = [
+      bookingData.created_by,
+      bookingData.updated_by,
+    ].filter(Boolean) as string[];
+    const bookingUserMap = await fetchUserDisplayNameMap(bookingUserIds, uid);
+    if (bookingData.created_by) {
+      setCreatedByUser({
+        id: String(bookingData.created_by),
+        full_name: bookingUserMap[String(bookingData.created_by)],
+      });
+    }
+    if (bookingData.updated_by) {
+      setUpdatedByUser({
+        id: String(bookingData.updated_by),
+        full_name: bookingUserMap[String(bookingData.updated_by)],
+      });
+    }
+
+    const chargeCreatorIds = initialCharges
+      .map((charge) => charge.created_by)
+      .filter(Boolean) as string[];
+    const chargeCreatorMap = await fetchUserDisplayNameMap(chargeCreatorIds, uid);
+    let chargesWithCreator = initialCharges.map((charge) =>
+      mapFolioChargeRow(charge, chargeCreatorMap),
+    );
+    setFolioCharges(chargesWithCreator);
+
+    const { data: txRows } = await supabase
+      .from("transactions")
+      .select(
+        "id, created_at, amount, payment_method, description, received_by, transaction_id, status",
+      )
+      .eq("booking_id", id)
+      .order("created_at", { ascending: false });
+
+    const payLedgerRaw = filterPaymentLedgerTransactions(txRows || []);
+    const receiverIds = [
+      ...new Set(
+        payLedgerRaw
+          .map((t: { received_by?: string | null }) => t.received_by)
+          .filter(Boolean),
+      ),
+    ] as string[];
+    const receiverMap = receiverIds.length
+      ? await fetchUserDisplayNameMap(receiverIds, uid)
+      : {};
+    setPaymentLedgerRows(
+      payLedgerRaw.map((t: Record<string, unknown>) => ({
+        id: String(t.id),
+        created_at: String(t.created_at ?? ""),
+        amount: Number(t.amount) || 0,
+        payment_method: (t.payment_method as string | null) ?? null,
+        description: (t.description as string | null) ?? null,
+        transaction_id: (t.transaction_id as string | null) ?? null,
+        receivedByLabel: t.received_by
+          ? receiverMap[String(t.received_by)] ||
+            getUserDisplayName(null, String(t.received_by))
+          : "Staff",
+      })),
+    );
+
+    let nextBooking = bookingData;
+    if (shouldReconcileBookingPaymentPaid(bookingData, chargesWithCreator)) {
+      const { error: psFixErr } = await supabase
+        .from("bookings")
+        .update({ payment_status: "paid" })
+        .eq("id", id);
+      if (!psFixErr) {
+        nextBooking = { ...bookingData, payment_status: "paid" };
+        setBooking(nextBooking);
+      }
+    }
+
+    const guests = bookingData.guests as { name?: string; id?: string } | null;
+    const guestName = (guests?.name || "").trim();
+    const guestIdForLedger =
+      (bookingData.guest_id as string | undefined) || guests?.id;
+    if (guestName && orgId) {
+      try {
+        if (guestIdForLedger && uid) {
+          const reconRes = await fetch(
+            `/api/guests/${guestIdForLedger}/reconcile-credit`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ caller_id: uid }),
+            },
+          );
+          const reconPayload = await reconRes.json().catch(() => ({}));
+          if (reconRes.ok && reconPayload?.updated) {
+            const { data: refreshedCharges } = await supabase
+              .from("folio_charges")
+              .select(
+                "id, created_at, description, amount, charge_type, payment_status, payment_method, created_by",
+              )
+              .eq("booking_id", id)
+              .order("created_at", { ascending: true });
+            if (refreshedCharges) {
+              chargesWithCreator = refreshedCharges.map((charge) =>
+                mapFolioChargeRow(charge, chargeCreatorMap),
+              );
+              setFolioCharges(chargesWithCreator);
+            }
+          }
+        }
+        const snapshot = await fetchGuestBookingLedgerSnapshot(supabase, {
+          organizationId: orgId,
+          guestName,
+          guestId: guestIdForLedger,
+        });
+        setBookingLedgerSnapshot(snapshot);
+      } catch {
+        setBookingLedgerSnapshot({
+          id: null,
+          balance: 0,
+          dueBalance: 0,
+          rawBalance: 0,
+        });
+      }
+    }
+
+    if (uid) {
+      try {
+        const [rcRes, rsRes] = await Promise.all([
+          fetch(`/api/room-change-requests?caller_id=${uid}&booking_id=${id}`, {
+            credentials: "include",
+          }),
+          fetch(`/api/reschedule-stay-requests?caller_id=${uid}&booking_id=${id}`, {
+            credentials: "include",
+          }),
+        ]);
+        const rcJson = await rcRes.json();
+        const rsJson = await rsRes.json();
+        if (rcRes.ok) {
+          setRoomChangePending(
+            (rcJson.requests || []).some(
+              (r: { status?: string }) =>
+                String(r.status || "").toLowerCase() === "pending",
+            ),
+          );
+        } else {
+          setRoomChangePending(false);
+        }
+        if (rsRes.ok) {
+          setRescheduleStayPending(
+            (rsJson.requests || []).some(
+              (r: { status?: string }) =>
+                String(r.status || "").toLowerCase() === "pending",
+            ),
+          );
+        } else {
+          setRescheduleStayPending(false);
+        }
+      } catch {
+        setRoomChangePending(false);
+        setRescheduleStayPending(false);
+      }
+    }
+  };
+
   const fetchBookingDetails = async (id: string) => {
     const uid = userIdRef.current;
     try {
       const supabase = createClient();
-      
-      // Fetch booking with related data
-      let { data: bookingData, error: bookingError } = await supabase
-        .from("bookings")
-        .select(
-          `
+
+      const [bookingRes, chargesRes] = await Promise.all([
+        supabase
+          .from("bookings")
+          .select(
+            `
           *,
           guests(name, phone, email, address),
           rooms(id, room_number, room_type, price_per_night),
           organizations(name, address, phone, email)
         `,
-        )
-        .eq("id", id)
-        .single();
+          )
+          .eq("id", id)
+          .single(),
+        supabase
+          .from("folio_charges")
+          .select(
+            "id, created_at, description, amount, charge_type, payment_status, payment_method, created_by",
+          )
+          .eq("booking_id", id)
+          .order("created_at", { ascending: true }),
+      ]);
 
-      if (bookingError) throw bookingError;
+      if (bookingRes.error) throw bookingRes.error;
+      const bookingData = bookingRes.data;
       if (!bookingData) throw new Error("Booking not found");
+      if (chargesRes.error) throw chargesRes.error;
 
       const nestedOrgRaw = bookingData.organizations as unknown;
       const nestedOrg =
@@ -293,308 +580,34 @@ export default function BookingDetailPage({
             })
           : null;
 
-      let orgRow: {
-        name?: string | null;
-        address?: string | null;
-        phone?: string | null;
-        email?: string | null;
-      } | null = null;
-
-      let checkoutTime = DEFAULT_ORG_CHECKOUT_TIME;
-      if (bookingData.organization_id) {
-        const { data, error } = await supabase
-          .from("organizations")
-          .select("name, address, phone, email")
-          .eq("id", bookingData.organization_id)
-          .maybeSingle();
-        if (!error) {
-          orgRow = data ?? null;
-        }
-        checkoutTime = await fetchOrgCheckoutTime(
-          supabase,
-          bookingData.organization_id,
-        );
-      }
-      setOrgCheckoutTime(checkoutTime);
-
-      const hotelName = String(orgRow?.name ?? nestedOrg?.name ?? "").trim();
-      const hasOrgReceiptContext = !!(
-        orgRow ||
-        nestedOrg ||
-        bookingData.organization_id
-      );
-      const setBranding: PaymentReceiptBranding | null = hasOrgReceiptContext
-        ? {
-            hotelName,
-            address: String(orgRow?.address ?? nestedOrg?.address ?? ""),
-            phone: String(orgRow?.phone ?? nestedOrg?.phone ?? ""),
-            email: String(orgRow?.email ?? nestedOrg?.email ?? ""),
-          }
-        : null;
-      setReceiptOrg(setBranding);
-
-      if (uid && uid !== "placeholder") {
-        try {
-          const rb = await fetch(
-            `/api/bookings/${encodeURIComponent(id)}/receipt-branding?caller_id=${encodeURIComponent(uid)}`,
-            { credentials: "include" },
-          );
-          if (rb.ok) {
-            const j = (await rb.json()) as {
-              hotelName?: string;
-              address?: string;
-              phone?: string;
-              email?: string;
-              logoUrl?: string | null;
-            };
-            const hn = String(j.hotelName ?? "").trim();
-            setReceiptOrg({
-              hotelName: hn,
-              address: String(j.address ?? ""),
-              phone: String(j.phone ?? ""),
-              email: String(j.email ?? ""),
-              logoUrl: j.logoUrl ?? null,
-            });
-          }
-        } catch {
-          /* keep client-derived branding */
-        }
-      }
-
-      const bookingUserIds = [
-        bookingData.created_by,
-        bookingData.updated_by,
-      ].filter(Boolean);
-      const bookingUserMap = await fetchUserDisplayNameMap(bookingUserIds, uid);
-      if (bookingData.created_by) {
-        setCreatedByUser({
-          id: bookingData.created_by,
-          full_name: bookingUserMap[bookingData.created_by],
-        });
-      }
-      if (bookingData.updated_by) {
-        setUpdatedByUser({
-          id: bookingData.updated_by,
-          full_name: bookingUserMap[bookingData.updated_by],
-        });
-      }
-
-      if (uid && uid !== "placeholder") {
-        try {
-          await fetch(
-            `/api/bookings/${encodeURIComponent(id)}/sync-outlet-folio`,
-            {
-              method: "POST",
-              credentials: "include",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ caller_id: uid }),
-            },
-          );
-        } catch {
-          /* non-fatal — folio may still load */
-        }
-      }
-
-      // Fetch folio charges from database
-      const { data: chargesData, error: chargesError } = await supabase
-        .from("folio_charges")
-        .select("*")
-        .eq("booking_id", id)
-        .order("created_at", { ascending: true });
-
-      if (chargesError) throw chargesError;
-
-      // Fetch creator info for each charge
-      const chargeCreatorIds = chargesData
-        .map((charge: any) => charge.created_by)
-        .filter(Boolean);
-      const chargeCreatorMap = await fetchUserDisplayNameMap(
-        chargeCreatorIds,
-        uid,
-      );
-      let chargesWithCreator = chargesData.map((charge: any) => {
-        const creatorName = charge.created_by
-          ? chargeCreatorMap[charge.created_by] ||
-            getUserDisplayName(null, charge.created_by)
-          : "System";
-        
-        return {
-          id: charge.id,
-          date: charge.created_at?.split("T")[0],
-          timestamp: charge.created_at,
-          description: charge.description,
-          amount: charge.amount,
-          type: charge.charge_type,
-          createdBy: creatorName,
-          paymentStatus: charge.payment_status,
-          paymentMethod: charge.payment_method,
-        };
-      });
-
-      setFolioCharges(chargesWithCreator);
-
-      const { data: txRows } = await supabase
-        .from("transactions")
-        .select(
-          "id, created_at, amount, payment_method, description, received_by, transaction_id, status",
-        )
-        .eq("booking_id", id)
-        .order("created_at", { ascending: false });
-
-      const payLedgerRaw = filterPaymentLedgerTransactions(txRows || []);
-
-      const receiverIds = [
-        ...new Set(
-          payLedgerRaw
-            .map((t: { received_by?: string | null }) => t.received_by)
-            .filter(Boolean),
-        ),
-      ] as string[];
-      const receiverMap = receiverIds.length
-        ? await fetchUserDisplayNameMap(receiverIds, uid)
-        : {};
-      const ledgerRows: PaymentLedgerReceiptRow[] = payLedgerRaw.map(
-        (t: any) => ({
-          id: t.id,
-          created_at: t.created_at,
-          amount: Number(t.amount) || 0,
-          payment_method: t.payment_method ?? null,
-          description: t.description ?? null,
-          transaction_id: t.transaction_id ?? null,
-          receivedByLabel: t.received_by
-            ? receiverMap[t.received_by] ||
-              getUserDisplayName(null, t.received_by)
-            : "Staff",
-        }),
-      );
-      setPaymentLedgerRows(ledgerRows);
-
-      if (shouldReconcileBookingPaymentPaid(bookingData, chargesWithCreator)) {
-        const { error: psFixErr } = await supabase
-          .from("bookings")
-          .update({ payment_status: "paid" })
-          .eq("id", id);
-        if (!psFixErr) {
-          bookingData = { ...bookingData, payment_status: "paid" };
-        }
-      }
-
       setBooking(bookingData);
+      setFolioCharges(
+        (chargesRes.data || []).map((charge) =>
+          mapFolioChargeRow(charge, {}),
+        ),
+      );
 
-      // Load / restore guest city-ledger prepaid credit for front-desk visibility
-      const guestName = (bookingData.guests?.name || "").trim();
-      const guestIdForLedger = bookingData.guest_id || bookingData.guests?.id;
-      if (guestName && bookingData.organization_id) {
-        try {
-          if (guestIdForLedger && uid) {
-            const reconRes = await fetch(
-              `/api/guests/${guestIdForLedger}/reconcile-credit`,
-              {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ caller_id: uid }),
-              },
-            );
-            const reconPayload = await reconRes.json().catch(() => ({}));
-            // Reconcile may post a prepaid folio line — refresh charges for Credit display
-            if (reconRes.ok && reconPayload?.updated) {
-              const { data: refreshedCharges } = await supabase
-                .from("folio_charges")
-                .select("*")
-                .eq("booking_id", id)
-                .order("created_at", { ascending: true });
-              if (refreshedCharges) {
-                chargesWithCreator = refreshedCharges.map((charge: any) => {
-                  const creatorName = charge.created_by
-                    ? chargeCreatorMap[charge.created_by] ||
-                      getUserDisplayName(null, charge.created_by)
-                    : "System";
-        return {
-          id: charge.id,
-                    date: charge.created_at?.split("T")[0],
-          timestamp: charge.created_at,
-          description: charge.description,
-          amount: charge.amount,
-          type: charge.charge_type,
-          createdBy: creatorName,
-          paymentStatus: charge.payment_status,
-          paymentMethod: charge.payment_method,
-                  };
-                });
-                setFolioCharges(chargesWithCreator);
-              }
-            }
-          }
-          const snapshot = await fetchGuestBookingLedgerSnapshot(supabase, {
-            organizationId: bookingData.organization_id,
-            guestName,
-            guestId: guestIdForLedger,
-          });
-          setBookingLedgerSnapshot(snapshot);
-        } catch {
-          setBookingLedgerSnapshot({
-            id: null,
-            balance: 0,
-            dueBalance: 0,
-            rawBalance: 0,
-          });
-        }
+      const hotelName = String(nestedOrg?.name ?? "").trim();
+      if (nestedOrg || bookingData.organization_id) {
+        setReceiptOrg({
+          hotelName,
+          address: String(nestedOrg?.address ?? ""),
+          phone: String(nestedOrg?.phone ?? ""),
+          email: String(nestedOrg?.email ?? ""),
+        });
       }
-
-      if (uid) {
-        try {
-          const [rcRes, rsRes] = await Promise.all([
-            fetch(`/api/room-change-requests?caller_id=${uid}&booking_id=${id}`, {
-              credentials: "include",
-            }),
-            fetch(`/api/reschedule-stay-requests?caller_id=${uid}&booking_id=${id}`, {
-              credentials: "include",
-            }),
-          ]);
-          const rcJson = await rcRes.json();
-          const rsJson = await rsRes.json();
-          if (rcRes.ok) {
-            setRoomChangePending(
-              (rcJson.requests || []).some(
-                (r: { status?: string }) =>
-                  String(r.status || "").toLowerCase() === "pending",
-              ),
-            );
-          } else {
-            setRoomChangePending(false);
-          }
-          if (rsRes.ok) {
-            setRescheduleStayPending(
-              (rsJson.requests || []).some(
-                (r: { status?: string }) =>
-                  String(r.status || "").toLowerCase() === "pending",
-              ),
-            );
-          } else {
-            setRescheduleStayPending(false);
-          }
-        } catch {
-          setRoomChangePending(false);
-          setRescheduleStayPending(false);
-        }
-      } else {
-        setRoomChangePending(false);
-      }
-
-      // Note: booking.balance is maintained by handlers (add-charge, extend-stay, record-payment)
-      // If the folio implies nothing owed but `payment_status` was stale (e.g. after auto-checkout + settle),
-      // we reconcile to `paid` above.
 
       setLoading(false);
-  } catch (error: any) {
-    // Check if it's an auth error
-      if (error?.status === 401 || error?.code === "PGRST") {
+      void enrichBookingDetails(id, bookingData, uid, chargesRes.data || []);
+    } catch (error: unknown) {
+      const err = error as { status?: number; code?: string; message?: string };
+      if (err?.status === 401 || err?.code === "PGRST") {
         toast.error("Session expired. Please log in again.");
         router.push("/login");
         return;
       }
 
-      toast.error(error.message || "Failed to fetch booking details");
+      toast.error(err.message || "Failed to fetch booking details");
       setLoading(false);
     }
   };
@@ -604,47 +617,10 @@ export default function BookingDetailPage({
     if (isBookingCheckedOut(booking)) return;
     const iv = window.setInterval(() => {
       fetchBookingDetails(bookingId);
-    }, 60_000);
+    }, 120_000);
     return () => window.clearInterval(iv);
   }, [bookingId, loading, booking?.status, booking?.folio_status]);
 
-  useEffect(() => {
-    if (!bookingId || !userId) return;
-    const st = String(booking?.status ?? "")
-      .trim()
-      .toLowerCase()
-      .replace(/[\s-]+/g, "_");
-    if (st !== "checked_in") {
-      if (booking) setRoomChangePending(false);
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      try {
-        const pr = await fetch(
-          `/api/room-change-requests?caller_id=${userId}&booking_id=${bookingId}`,
-          { credentials: "include" },
-        );
-        const pj = await pr.json();
-        if (cancelled) return;
-        if (!pr.ok) {
-          setRoomChangePending(false);
-          return;
-        }
-        setRoomChangePending(
-          (pj.requests || []).some(
-            (r: { status?: string }) =>
-              String(r.status || "").toLowerCase() === "pending",
-          ),
-        );
-      } catch {
-        if (!cancelled) setRoomChangePending(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [bookingId, userId, booking?.status, booking?.id]);
 
   useEffect(() => {
     if (!editBookingOpen || loading || !booking) return;
