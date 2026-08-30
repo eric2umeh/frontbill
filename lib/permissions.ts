@@ -1241,6 +1241,23 @@ export function canManageKitchenBatchStandards(
   return roleKey === "superadmin" || roleKey === "admin";
 }
 
+/** Temporary selling-price edit on Kitchen → All Batches (auditor during initial rollout). */
+export function canAuditorEditKitchenBatchPrice(
+  userRole: string | null | undefined,
+): boolean {
+  return canonicalRoleKey(userRole) === "auditor";
+}
+
+/** Kitchen All Batches selling price — admin/superadmin or auditor price-only edit. */
+export function canEditKitchenBatchSellingPrice(
+  userRole: string | null | undefined,
+): boolean {
+  return (
+    canManageKitchenBatchStandards(userRole) ||
+    canAuditorEditKitchenBatchPrice(userRole)
+  );
+}
+
 /** Central Store → Issue Out tab (transfer stock to kitchen, bar, etc.). */
 export function canIssueStockFromStore(
   userRole: string | null | undefined,
