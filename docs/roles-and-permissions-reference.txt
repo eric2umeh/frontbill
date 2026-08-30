@@ -1,0 +1,392 @@
+FrontBill — Roles & Permissions Reference
+=========================================
+Source of truth: lib/permissions.ts
+
+Use this when editing profiles.role in Supabase (SQL Editor or Table Editor).
+The app reads profiles.role and maps it to a canonical role key via canonicalRoleKey().
+
+HOW TO CHANGE A USER'S ROLE IN SUPABASE
+---------------------------------------
+Table:  profiles
+Column: role  (text)
+
+Recommended: use the exact CANONICAL KEY from Section 1 (e.g. admin, store, superadmin).
+Display labels also work (e.g. "Administrator", "Front Desk") — see Section 2.
+
+Example SQL:
+  UPDATE profiles SET role = 'admin' WHERE email = 'user@example.com';
+  UPDATE profiles SET role = 'store' WHERE email = 'storekeeper@example.com';
+  UPDATE profiles SET role = 'superadmin' WHERE email = 'owner@example.com';
+
+
+================================================================================
+SECTION 1 — ROLES (Display name = canonical key for profiles.role)
+================================================================================
+
+Superadmin / Owner     = superadmin
+Administrator / Admin  = admin
+Manager                = manager
+Store                  = store
+Purchaser              = purchaser
+Auditor                = auditor
+Cashier                = cashier
+Accountant             = accountant
+Front Desk             = front_desk
+Receptionist           = receptionist
+Staff                  = staff
+Housekeeper            = housekeeping
+Maintenance            = maintenance
+Food & Beverage        = food_beverage
+Chef                   = chef
+Laundry                = laundry
+Gym                    = gym
+
+
+================================================================================
+SECTION 2 — ALIASES (also accepted in profiles.role)
+================================================================================
+
+These shorthand values are mapped to the canonical key above:
+
+owner                  → superadmin
+super_admin            → superadmin
+super_administrator    → superadmin
+superadministrator     → superadmin
+platform_admin         → superadmin
+
+administrator          → admin
+
+frontdesk              → front_desk
+front_office           → front_desk
+frontoffice            → front_desk
+
+reception              → receptionist
+reception_staff        → receptionist
+
+housekeeper            → housekeeping
+housekeeping_staff     → housekeeping
+
+maint                  → maintenance
+maintenance_staff      → maintenance
+
+restaurant             → food_beverage
+bar                    → food_beverage
+waiter                 → food_beverage
+restaurant_staff       → food_beverage
+bartender              → food_beverage
+bar_staff              → food_beverage
+pool_bar               → food_beverage
+food_and_beverage      → food_beverage
+food_&_beverage        → food_beverage
+fnb                    → food_beverage
+f&b                    → food_beverage
+f_b                    → food_beverage
+banquets_staff         → food_beverage
+events_staff           → food_beverage
+
+head_chef              → chef
+sous_chef              → chef
+kitchen_staff          → chef
+cook                   → chef
+cooks                  → chef
+
+buyer                  → purchaser
+procurement            → purchaser
+
+cash                   → cashier
+cashiers               → cashier
+cashier_staff          → cashier
+treasury               → cashier
+
+laundry_staff          → laundry
+
+gym_staff              → gym
+wellness               → gym
+wellness_staff         → gym
+
+
+================================================================================
+SECTION 3 — ALL PERMISSION KEYS (module:action)
+================================================================================
+
+--- Dashboard ---
+dashboard:view                    View Dashboard Widgets
+
+--- Bookings ---
+bookings:view                     View Bookings
+bookings:create                   Create Bookings & Bulk Bookings
+bookings:edit                     Edit Booking Details
+bookings:delete                   Delete Bookings
+bookings:checkin                  Check In Guests
+bookings:checkout                 Check Out Folios
+room_change:request               Request or apply guest room change
+room_change:approve               Approve Room Change Requests
+reschedule_stay:request           Request move stay dates (approval)
+reschedule_stay:approve           Approve Move Stay Dates Requests
+
+--- Reservations ---
+reservations:view                 View Reservations
+reservations:create               Create Reservations & Bulk Reservation
+reservations:edit                 Edit Reservations
+reservations:delete               Cancel/Delete Reservations
+events:view                       View Events
+events:create                     Create Events
+events:edit                       Edit Events
+events:delete                     Delete Events
+
+--- Guests ---
+guests:view                       View Guests
+guests:create                     Create Guest Profiles
+guests:edit                       Edit Guest Profiles
+guests:delete                     Delete Guest Profiles
+
+--- Organizations ---
+organizations:view                View Organizations
+organizations:create              Create Organizations
+organizations:edit                Edit Organizations
+organizations:delete              Delete Organizations
+
+--- Transactions ---
+transactions:view                 View Transactions
+transactions:create               Record Transactions
+transactions:edit                 Edit Transactions
+transactions:delete               Delete Transactions
+transactions:export               Export Transactions
+
+--- Payments ---
+payments:view                     View Payments
+payments:create                   Record Payments
+payments:refund                     Process Refunds/Credits
+cashback:view                     View Cashback Program
+cashback:manage                   Adjust Cashback Balances
+
+--- Reports ---
+reports:view                      View Reports
+reports:export                    Export/Print Reports
+
+--- Expenses ---
+expenses:view                     View Operating Expenses
+expenses:create                   Record Operating Expenses
+expenses:edit                     Edit Operating Expenses
+expenses:export                   Import/Export Expenses
+expenses:budget                   Manage Expense Budgets
+
+--- Night Audit ---
+night_audit:view                  View Night Audit
+night_audit:run                   Run Night Audit
+audit_trails:view                 View Audit Trails
+backdate:request                  Request Backdated Booking/Reservation
+backdate:approve                  Approve/Reject Backdates (Night Audit)
+
+--- Housekeeping ---
+housekeeping:view                 View Housekeeping
+housekeeping:create               Create Housekeeping Log Entries
+housekeeping:edit                 Update Housekeeping Tasks
+housekeeping:assign               Assign Housekeeping Work
+housekeeping:report               Submit Housekeeping Daily Reports
+
+--- Maintenance ---
+maintenance:view                  View Maintenance
+maintenance:create                Create Maintenance Log Entries
+maintenance:edit                  Update Maintenance Work
+maintenance:assign                Assign Maintenance Work
+maintenance:report                Submit Maintenance Daily Reports
+
+--- Store ---
+store:view                        View Store & Inventory
+store:create                      Add Store Items
+store:edit                        Edit Store Items
+store:delete                      Delete Store Items
+store:adjust                      Stock In / Out & Adjustments
+store:issue                       Issue Stock to Outlets / Departments
+store:reports                     Store reports (daily closing & monthly)
+store:audit                       Store Movement Audit Trail (Full Detail)
+store:requisition                 Store Requisitions (request items)
+
+--- Outlets ---
+outlet:view                       View Outlets (FnB / Laundry / Gym)
+outlet:menu                       Manage Outlet Menu (categories & items)
+outlet:sell                       Take Orders & Sell (POS)
+outlet:void                       Void Outlet Orders
+outlet:edit                       Edit Outlet Orders
+outlet:delete                     Delete / Void Outlet Orders
+outlet:reports                    Outlet Sales Reports & Night Audit
+outlet:receipt                    Print / View Outlet Receipts
+
+--- Supply Chain ---
+supply:store                      Central Store (stock & PO basket)
+supply:kitchen                    Kitchen batches & recipes
+supply:fnb                        F&B Store (daily inventory & Main Bar transfer)
+supply:purchasing                 Market retirement & PO
+supply:approve_accountant         Approve PO (Accountant)
+supply:approve_manager            Approve PO (Manager)
+supply:activity                   Supply chain activity log
+
+--- Analytics ---
+analytics:view                    View Analytics
+analytics:export                  Export Analytics
+
+--- Rooms ---
+rooms:view                        View Rooms
+rooms:create                      Create Rooms
+rooms:edit                        Edit Rooms
+rooms:delete                      Delete Rooms
+rooms:update_status               Update Room Status
+
+--- City Ledger ---
+ledger:view                       View City Ledger
+ledger:manage                     Manage City Ledger Balances
+
+--- Reconciliation ---
+reconciliation:view               View Reconciliation
+reconciliation:manage             Manage Reconciliation
+
+--- Users & Roles ---
+users:view                        View Users & Roles
+users:create                      Add Staff Users
+users:edit                        Edit Staff Users
+users:delete                      Delete Staff Users
+roles:view                        View Permission Sets
+roles:manage                      Manage Role Assignments
+
+--- Settings ---
+settings:view                     View Profile & Settings
+settings:manage                   Manage Hotel/System Settings
+
+
+================================================================================
+SECTION 4 — PERMISSIONS BY ROLE (default bundle in code)
+================================================================================
+
+Note: Some permissions are further restricted in hasPermission() regardless of
+role bundle (e.g. bookings:edit only admin/superadmin; rooms CRUD only admin/superadmin).
+Org-level role_permission_overrides and per-user permission_overrides can grant/deny on top.
+
+--- superadmin (Superadmin) — ALL permissions ---
+
+--- admin (Administrator) — ALL permissions ---
+
+--- manager (Manager) ---
+ALL except:
+  roles:manage, users:delete, settings:manage,
+  rooms:create, rooms:edit, rooms:delete,
+  bookings:edit, bookings:delete, reservations:edit,
+  outlet:void
+
+--- store (Store) ---
+store:view, store:requisition, store:create, store:edit, store:delete,
+store:adjust, store:issue, store:reports, store:audit,
+supply:store, supply:purchasing, supply:activity, settings:view
+
+--- purchaser (Purchaser) ---
+store:view, store:reports, supply:store, supply:purchasing,
+supply:activity, settings:view
+
+--- auditor (Auditor) — view-only finance/ops ---
+dashboard:view, bookings:view, reservations:view, events:view, guests:view,
+organizations:view, rooms:view, transactions:view, transactions:export,
+analytics:view, analytics:export, payments:view, cashback:view,
+reports:view, reports:export, expenses:view, ledger:view, reconciliation:view,
+night_audit:view, audit_trails:view, store:view, store:requisition,
+store:reports, store:audit, supply:store, supply:kitchen, supply:fnb,
+supply:purchasing, supply:activity, outlet:view, outlet:reports,
+outlet:receipt, settings:view
+
+--- cashier (Cashier) ---
+bookings:view, reservations:view, events:view, guests:view, organizations:view,
+transactions:view, transactions:create, transactions:export, payments:view,
+payments:create, payments:refund, cashback:view, reports:view, reports:export,
+expenses:view, expenses:create, expenses:edit, reconciliation:view, ledger:view,
+outlet:view, outlet:sell, outlet:reports, outlet:receipt, settings:view
+
+--- accountant (Accountant) ---
+dashboard:view, transactions:view, transactions:export, analytics:view,
+analytics:export, payments:view, payments:create, payments:refund,
+cashback:view, cashback:manage, reports:view, reports:export, expenses:view,
+expenses:create, expenses:edit, expenses:export, expenses:budget, ledger:view,
+ledger:manage, reconciliation:view, reconciliation:manage, night_audit:view,
+audit_trails:view, bookings:view, reservations:view, events:view, guests:view,
+organizations:view, rooms:view, store:view, store:requisition, store:reports,
+store:audit, supply:store, supply:purchasing, supply:approve_accountant,
+supply:activity, outlet:view, outlet:reports, outlet:receipt, settings:view
+
+--- front_desk (Front Desk) ---
+dashboard:view, bookings:view, bookings:create, bookings:checkin,
+bookings:checkout, reservations:view, reservations:create, events:view,
+events:create, events:edit, events:delete, rooms:view, guests:view,
+guests:create, transactions:view, transactions:create, payments:view,
+payments:create, cashback:view, organizations:view, organizations:create,
+ledger:view, night_audit:view, night_audit:run, audit_trails:view,
+backdate:request, room_change:request, reschedule_stay:request,
+store:requisition, settings:view
+
+--- receptionist (Receptionist) ---
+dashboard:view, bookings:view, bookings:checkin, bookings:checkout,
+reservations:view, events:view, rooms:view, guests:view, guests:create,
+payments:view, transactions:view, room_change:request, reschedule_stay:request,
+store:requisition, settings:view
+
+--- staff (Staff) ---
+rooms:view, bookings:view, store:requisition, settings:view
+
+--- housekeeping (Housekeeper) ---
+housekeeping:view, housekeeping:create, housekeeping:edit, housekeeping:report,
+rooms:view, rooms:update_status, settings:view
+
+--- maintenance (Maintenance) ---
+maintenance:view, maintenance:create, maintenance:edit, maintenance:report,
+rooms:view, rooms:update_status, settings:view
+
+--- food_beverage (Food & Beverage) ---
+outlet:view, outlet:menu, outlet:sell, outlet:reports, outlet:receipt,
+settings:view
+
+--- chef (Chef) ---
+supply:kitchen, supply:activity, settings:view
+
+--- laundry (Laundry) ---
+outlet:view, outlet:sell, outlet:reports, outlet:receipt, settings:view
+
+--- gym (Gym) ---
+outlet:view, outlet:sell, outlet:reports, outlet:receipt, settings:view
+
+
+================================================================================
+SECTION 5 — EXTRA HARD-CODED RULES (not in role bundle alone)
+================================================================================
+
+These apply even if a permission appears in a role's list:
+
+bookings:edit, bookings:delete     → admin, superadmin only
+reservations:edit                  → admin, superadmin only
+rooms:create, rooms:edit, rooms:delete → admin, superadmin only
+organizations:edit, organizations:delete → admin, superadmin only
+guests:edit, guests:delete           → admin, superadmin, manager
+outlet:void                          → admin, superadmin only
+outlet:edit, outlet:delete           → admin, superadmin, manager
+events:create/edit/delete            → admin, superadmin, manager, front_desk
+expenses:*                           → requires expense-menu role (superadmin, admin,
+                                       manager, accountant, cashier, auditor)
+
+Special capability helpers (not separate permission keys):
+  Kitchen batch create/edit/delete   → admin, superadmin only (canManageKitchenBatchStandards)
+  Kitchen / Restaurant sell price    → admin, superadmin, auditor (canEditKitchenBatchSellingPrice)
+  Main Bar menu category & price     → admin, superadmin, or auditor (canAuditorEditOutletMenuPricing)
+  Restaurant kitchen dish cat/price  → same auditor helper on restaurant department
+  Main Bar menu CRUD (full)          → admin, superadmin only (canManageOutletMenu for main_bar)
+  F&B Store management               → superadmin, admin, manager, food_beverage
+  PO direct approve (skip accountant)→ admin, superadmin, manager
+
+
+================================================================================
+SECTION 6 — PER-USER / PER-ORG OVERRIDES (optional, advanced)
+================================================================================
+
+profiles.permission_overrides       JSONB  { "grants": ["perm:key"], "denies": ["perm:key"] }
+organizations.role_permission_overrides  JSONB  { "store": { "grants": [...], "denies": [...] } }
+
+Use canonical role keys as object keys in role_permission_overrides.
+Permission keys must match Section 3 exactly.
+
+
+Last updated from lib/permissions.ts — regenerate this file if roles change in code.
