@@ -1704,8 +1704,7 @@ export default function BookingsPage() {
                 booking.status !== "checked_in" &&
                 booking.status !== "checked_out" &&
                 ciYmd <= calendarToday &&
-                (booking.status === "reserved" ||
-                  booking.status === "confirmed") &&
+                booking.status === "reserved" &&
                 canCheckInReserved;
               const showReserveRow =
                 !booking.is_bulk &&
