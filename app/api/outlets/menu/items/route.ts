@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { resolveOutletAuthed, resolveOutletMenuManage } from '@/lib/outlets/api-auth'
+import { resolveOutletAuthed, resolveOutletMenuManage, canPatchOutletMenuItem } from '@/lib/outlets/api-auth'
 import { canAccessOutletDepartment, canManageOutletMenu } from '@/lib/outlets/access'
 import { isOutletDepartmentKey, type OutletDepartmentKey } from '@/lib/outlets/departments'
 import { normalizeOutletItemTags } from '@/lib/outlets/item-display'
@@ -97,37 +97,36 @@ export async function PATCH(request: Request) {
   const admin = createAdminClient()
   const { data: existing, error: fe } = await admin
     .from('outlet_menu_items')
-    .select('department')
+    .select('department, service_code')
     .eq('id', id)
     .eq('organization_id', auth.ctx.organizationId)
     .single()
 
   if (fe || !existing) return NextResponse.json({ error: 'Item not found' }, { status: 404 })
-  if (!canAccessOutletDepartment(auth.ctx.role, existing.department)) {
+  const dept = existing.department as OutletDepartmentKey
+  if (!canAccessOutletDepartment(auth.ctx.role, dept)) {
     return NextResponse.json({ error: 'No access' }, { status: 403 })
   }
-  if (!canManageOutletMenu(auth.ctx.role, existing.department as OutletDepartmentKey)) {
-    return NextResponse.json(
-      {
-        error:
-          existing.department === 'main_bar'
-            ? 'Only Superadmin or Administrator can change the Main Bar menu'
-            : 'Only F&B, Superadmin, Administrator, or Manager can change the outlet menu',
-      },
-      { status: 403 },
-    )
+
+  const patchAuth = canPatchOutletMenuItem(auth.ctx.role, dept, body as Record<string, unknown>)
+  if ('error' in patchAuth) {
+    return NextResponse.json({ error: patchAuth.error }, { status: 403 })
   }
 
   const patch: Record<string, unknown> = { updated_by: auth.ctx.userId, updated_at: new Date().toISOString() }
-  if (body.name != null) patch.name = String(body.name).trim()
-  if (body.description != null) patch.description = String(body.description).trim()
+  if (!patchAuth.auditorLimited) {
+    if (body.name != null) patch.name = String(body.name).trim()
+    if (body.description != null) patch.description = String(body.description).trim()
+    if (body.tags != null) patch.tags = normalizeOutletItemTags(body.tags)
+    if (body.is_active != null) patch.is_active = Boolean(body.is_active)
+    if (body.sort_order != null) patch.sort_order = Number(body.sort_order)
+    if (body.service_code !== undefined) {
+      patch.service_code = body.service_code ? String(body.service_code).trim() : null
+    }
+    if (body.price_editable !== undefined) patch.price_editable = body.price_editable === true
+  }
   if (body.unit_price != null) patch.unit_price = Number(body.unit_price)
   if (body.category_id !== undefined) patch.category_id = body.category_id || null
-  if (body.tags != null) patch.tags = normalizeOutletItemTags(body.tags)
-  if (body.is_active != null) patch.is_active = Boolean(body.is_active)
-  if (body.sort_order != null) patch.sort_order = Number(body.sort_order)
-  if (body.service_code !== undefined) patch.service_code = body.service_code ? String(body.service_code).trim() : null
-  if (body.price_editable !== undefined) patch.price_editable = body.price_editable === true
 
   const { data, error } = await updateOutletMenuItem(admin, id, patch)
 
