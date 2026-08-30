@@ -100,7 +100,7 @@ import {
 } from "./unit-factor-storage";
 import type { StockShortageLine } from "@/lib/ui/stock-shortage-dialog";
 import { useAuth } from "@/lib/auth-context";
-import { canManageFnbStore, canManageKitchenBatchStandards, canEditKitchenBatchSellingPrice, canOperateKitchenProduction, canRaisePurchaseRequest, canSubmitMarketRetirement, canAddPurchasedToStock, canSupplyRetirementReview, canSupplyPoAccountantReview, canSupplyPoManagerReview, canAdminTestApproveSupplyPo, canDirectDisbursePurchaseOrder, canonicalRoleKey, hasPermission } from "@/lib/permissions";
+import { canManageFnbStore, canManageKitchenBatchStandards, canEditKitchenBatchSellingPrice, canCountKitchenRawStock, canCountOutletDepartmentStock, canOperateKitchenProduction, canRaisePurchaseRequest, canSubmitMarketRetirement, canAddPurchasedToStock, canSupplyRetirementReview, canSupplyPoAccountantReview, canSupplyPoManagerReview, canAdminTestApproveSupplyPo, canDirectDisbursePurchaseOrder, canonicalRoleKey, hasPermission } from "@/lib/permissions";
 import { isRetryableSupplyError } from "@/lib/utils/fetch-retry";
 import { isMainBarIssueDestination } from "@/lib/store/outlet-departments";
 import { formatSupplyActorStamp } from "./fnb-store";
@@ -135,6 +135,8 @@ import {
   reconcileKitchenStockWithRecipes,
 } from "./kitchen-batch-link";
 import { deactivateBatchFromRestaurantOutlet, reconcileRestaurantKitchenMenu } from "./deactivate-restaurant-batch";
+import { syncBatchToRestaurantOutlet } from "./sync-restaurant-outlet";
+import { shouldSyncBatchToOutlet } from "./batch-outlet-sync";
 import { canReadSupplySnapshots, snapshotsPayloadForRole } from "./supply-snapshot-payload";
 import { dedupeBatchMaterials } from "./parse-csv-row";
 import { broadcastSupplyLiveUpdate, subscribeSupplyLiveUpdates } from "./supply-live-sync";
@@ -263,6 +265,7 @@ function applyRemoteBarStockArray(
 /** Skip applying a remote poll for a short window after this tab mutated stock. */
 let lastLocalSupplyMutationAt = 0;
 let liveSupplyInFlight = false;
+let lastRemotePoRefreshAt = 0;
 /** Serializes PO/basket PUTs so a slow full snapshot cannot overwrite a fresh clear/send. */
 let poBasketPutChain: Promise<void> = Promise.resolve();
 /** Bumped on clear/send so stale debounced PO PUTs cannot restore the cart after refresh. */
@@ -1237,6 +1240,25 @@ function useSupplyChainImpl() {
           });
         }
 
+        if (
+          Date.now() - lastLocalSupplyMutationAt >= 45_000 &&
+          Date.now() - lastRemotePoRefreshAt >= 45_000
+        ) {
+          const remotePos = snapshots.purchase_orders;
+          if (Array.isArray(remotePos)) {
+            setPurchaseOrders((prev) => {
+              const merged = mergePurchaseOrdersFromRemote(
+                prev,
+                remotePos as PurchaseOrder[],
+              );
+              if (JSON.stringify(prev) === JSON.stringify(merged)) return prev;
+              lastRemotePoRefreshAt = Date.now();
+              changed = true;
+              return merged;
+            });
+          }
+        }
+
         if (changed && typeof window !== "undefined") {
           window.dispatchEvent(new CustomEvent("frontbill:supply-stock-changed"));
           window.dispatchEvent(new CustomEvent("frontbill:kitchen-raw-stock"));
@@ -1256,7 +1278,7 @@ function useSupplyChainImpl() {
       if (document.visibilityState === "visible") void refreshLiveSupply(false, true);
     };
 
-    const firstPoll = window.setTimeout(() => void refreshLiveSupply(false, true), 1_500);
+    const firstPoll = window.setTimeout(() => void refreshLiveSupply(false, true), 4_000);
     document.addEventListener("visibilitychange", onVis);
     const interval = window.setInterval(() => void refreshLiveSupply(false, false), 15_000);
     const unsubscribeLive = subscribeSupplyLiveUpdates(() => {
@@ -1316,49 +1338,6 @@ function useSupplyChainImpl() {
     recipes,
     kitchenStock,
   ]);
-
-  /** Refresh PO list from org snapshot so accountant / purchaser see each other's decisions. */
-  useEffect(() => {
-    if (!useDbPersistence || !dbHydrated) return;
-    if (!canReadSupplySnapshots(role)) return;
-
-    let cancelled = false;
-
-    const refreshPurchaseOrders = async () => {
-      try {
-        // Don't clobber a just-made PO approve / Add-to-stock with a stale GET (slow network).
-        if (Date.now() - lastLocalSupplyMutationAt < 45_000) return;
-        const snapshots = await fetchSupplySnapshots(
-          userId,
-          organizationId || undefined,
-        );
-        if (cancelled) return;
-        const remote = snapshots.purchase_orders;
-        if (!Array.isArray(remote)) return;
-        setPurchaseOrders((prev) => {
-          const merged = mergePurchaseOrdersFromRemote(prev, remote as PurchaseOrder[]);
-          if (JSON.stringify(prev) === JSON.stringify(merged)) return prev;
-          return merged;
-        });
-      } catch {
-        /* non-blocking — network may be slow */
-      }
-    };
-
-    const onVis = () => {
-      if (document.visibilityState === "visible") void refreshPurchaseOrders();
-    };
-
-    void refreshPurchaseOrders();
-    document.addEventListener("visibilitychange", onVis);
-    const interval = window.setInterval(refreshPurchaseOrders, 45_000);
-
-    return () => {
-      cancelled = true;
-      document.removeEventListener("visibilitychange", onVis);
-      window.clearInterval(interval);
-    };
-  }, [useDbPersistence, dbHydrated, userId, organizationId, role]);
 
   /** Drop legacy demo kitchen seed (Peppered Chicken / Jollof / Egusi) once per browser. */
   useEffect(() => {
@@ -4280,6 +4259,28 @@ function useSupplyChainImpl() {
         ),
       );
       markLocalSupplyMutation();
+      const recipe = existing.linkedRecipeId
+        ? recipes.find((r) => r.id === existing.linkedRecipeId)
+        : recipes.find(
+            (r) =>
+              !isRecipeDeleted(r) &&
+              kitchenStockIdForRecipe(r) === stockId,
+          );
+      const outletSync = recipe
+        ? normalizeBatchOutletMenuSync(recipe.outletMenuSync ?? recipe.fnbEligible)
+        : "none";
+      if (recipe && shouldSyncBatchToOutlet(outletSync)) {
+        void syncBatchToRestaurantOutlet({
+          batchName: recipe.name,
+          categoryName: recipe.category,
+          kitchenStockId: stockId,
+          unitPrice: recipe.sellingPricePerPortion,
+          outletMenuSync: outletSync,
+        });
+      }
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("frontbill:supply-stock-changed"));
+      }
       setActivityLog((a) =>
         log(
           a,
@@ -4290,9 +4291,99 @@ function useSupplyChainImpl() {
         ),
       );
       schedulePersistSnapshots();
+      void persistSnapshotsNow();
       return { ok: true };
     },
-    [kitchenStock, schedulePersistSnapshots],
+    [kitchenStock, recipes, schedulePersistSnapshots, persistSnapshotsNow],
+  );
+
+  /** Placeholder kitchen raw rows (qty 0) for every kitchen catalogue item; drop non-kitchen rows. */
+  const ensureKitchenRawStockFromCatalog = useCallback(() => {
+    const kitchenItems = storeItems.filter((s) => storeItemMatchesDept(s, "kitchen"));
+    const kitchenIds = new Set(kitchenItems.map((s) => s.id));
+    const existingIds = new Set<string>();
+    setKitchenRawStock((prev) => {
+      const next = prev.filter((k) => kitchenIds.has(k.storeItemId));
+      let changed = next.length !== prev.length;
+      for (const row of next) {
+        existingIds.add(row.storeItemId);
+      }
+      for (const store of kitchenItems) {
+        if (existingIds.has(store.id)) continue;
+        const id = `kraw-${store.id}`;
+        next.push({
+          id,
+          storeItemId: store.id,
+          name: store.name,
+          quantityOnHand: 0,
+          reorderLevel: Math.max(0, store.reorderLevel ?? 0),
+          unit: store.unit,
+        });
+        changed = true;
+      }
+      if (changed) {
+        markLocalSupplyMutation();
+        schedulePersistSnapshots();
+      }
+      return changed ? next : prev;
+    });
+  }, [storeItems, schedulePersistSnapshots]);
+
+  /** Set absolute on-hand for kitchen raw store (physical count at kitchen). */
+  const setKitchenRawOnHand = useCallback(
+    (
+      storeItemId: string,
+      quantityOnHand: number,
+      actor: Actor,
+    ): { ok: true } | { error: string } => {
+      if (!canCountKitchenRawStock(actor.role)) {
+        return { error: "You do not have permission to count kitchen raw stock" };
+      }
+      const store = storeItems.find((s) => s.id === storeItemId);
+      if (!store || !storeItemMatchesDept(store, "kitchen")) {
+        return { error: "Kitchen store item not found" };
+      }
+      const qty = Math.max(0, Number(quantityOnHand) || 0);
+      if (!Number.isFinite(qty)) return { error: "Enter a valid quantity" };
+
+      const rowId = `kraw-${storeItemId}`;
+      setKitchenRawStock((prev) => {
+        const idx = prev.findIndex(
+          (k) => k.storeItemId === storeItemId || k.id === rowId,
+        );
+        if (idx >= 0) {
+          return prev.map((k, i) =>
+            i === idx ? { ...k, quantityOnHand: qty, name: store.name, unit: store.unit } : k,
+          );
+        }
+        return [
+          ...prev,
+          {
+            id: rowId,
+            storeItemId,
+            name: store.name,
+            quantityOnHand: qty,
+            reorderLevel: Math.max(0, store.reorderLevel ?? 0),
+            unit: store.unit,
+          },
+        ];
+      });
+      markLocalSupplyMutation();
+      notifyKitchenRawStockChanged();
+      setActivityLog((a) =>
+        log(
+          a,
+          "stock_issued_kitchen",
+          actor,
+          `Kitchen store count: ${store.name} → ${qty} ${store.unit}`,
+          rowId,
+        ),
+      );
+      schedulePersistSnapshots();
+      void persistSnapshotsNow();
+      return { ok: true };
+    },
+    [storeItems, schedulePersistSnapshots, persistSnapshotsNow],
   );
 
   /** Set absolute on-hand qty for a main bar stock row (physical count). Issue-out still adds on top later. */
@@ -4302,6 +4393,9 @@ function useSupplyChainImpl() {
       quantityOnHand: number,
       actor: Actor,
     ): { ok: true } | { error: string } => {
+      if (!canCountOutletDepartmentStock(actor.role)) {
+        return { error: "You do not have permission to count outlet stock" };
+      }
       const existing = barStock.find((b) => b.id === stockId);
       if (!existing) return { error: "Bar stock item not found" };
       const qty = Math.max(0, Number(quantityOnHand) || 0);
@@ -4978,7 +5072,7 @@ function useSupplyChainImpl() {
         ),
       );
 
-      if (store.dept === "kitchen" && destinationCreditsKitchenRaw(dest)) {
+      if (storeItemMatchesDept(store, "kitchen") && destinationCreditsKitchenRaw(dest)) {
         setKitchenRawStock((prev) => {
           const idx = prev.findIndex((k) => k.storeItemId === storeItemId);
           if (idx >= 0) {
@@ -5485,6 +5579,9 @@ function useSupplyChainImpl() {
       if (!isStoreControlledFnbOutlet(department)) {
         return { error: "Stock kickstart is only for Restaurant and Main Bar" };
       }
+      if (!canCountOutletDepartmentStock(actor.role)) {
+        return { error: "You do not have permission to adjust outlet stock" };
+      }
       if (!Number.isFinite(newQty) || newQty < 0) {
         return { error: "Enter a valid quantity (0 or more)" };
       }
@@ -5833,6 +5930,20 @@ function useSupplyChainImpl() {
     [storeItems, draftLines, batches, recipes, kitchenStock, barStock, orders],
   );
 
+  const visibleRecipesList = useMemo(() => visibleRecipes(recipes), [recipes]);
+  const visibleBatchesList = useMemo(
+    () => visibleProductionBatches(batches),
+    [batches],
+  );
+  const filteredKitchenStock = useMemo(
+    () => kitchenStockForActiveBatchStandards(recipes, kitchenStock),
+    [recipes, kitchenStock],
+  );
+  const visiblePurchaseOrdersList = useMemo(
+    () => visiblePurchaseOrders(purchaseOrders),
+    [purchaseOrders],
+  );
+
   return {
     storeItems,
     pendingStoreItems,
@@ -5853,7 +5964,7 @@ function useSupplyChainImpl() {
     sendKitchenOrderToStore,
     submitBasketAsPo,
     // Hide soft-deleted tombstones from UI; keep them in state for cloud merge.
-    purchaseOrders: visiblePurchaseOrders(purchaseOrders),
+    purchaseOrders: visiblePurchaseOrdersList,
     mutatePurchaseOrderLine,
     accountantDecision,
     managerDecision,
@@ -5863,8 +5974,8 @@ function useSupplyChainImpl() {
     accountantRetirementDecision,
     correctRetirementLineDuringReview,
     deleteActivePurchaseOrder,
-    recipes: visibleRecipes(recipes),
-    kitchenStock: kitchenStockForActiveBatchStandards(recipes, kitchenStock),
+    recipes: visibleRecipesList,
+    kitchenStock: filteredKitchenStock,
     kitchenRawStock,
     fnbRawStock,
     fnbDailySheets,
@@ -5880,6 +5991,8 @@ function useSupplyChainImpl() {
     setKitchenStockAvailable,
     setBarStockOnHand,
     ensureMainBarStockFromCatalog,
+    ensureKitchenRawStockFromCatalog,
+    setKitchenRawOnHand,
     deleteStoreItemDirect,
     submitStoreItemForApproval,
     approvePendingStoreItem,
@@ -5896,7 +6009,7 @@ function useSupplyChainImpl() {
     getOutletItemStock,
     validateOutletCart,
     deductOutletCart,
-    batches: visibleProductionBatches(batches),
+    batches: visibleBatchesList,
     fnbMenu: fnbOrders,
     orders,
     openBatch,
@@ -5976,6 +6089,11 @@ export function useSupplyChain() {
       (() => ({ error: "Supply chain not ready — refresh the page" })),
     ensureMainBarStockFromCatalog:
       ctx.ensureMainBarStockFromCatalog ?? (() => undefined),
+    ensureKitchenRawStockFromCatalog:
+      ctx.ensureKitchenRawStockFromCatalog ?? (() => undefined),
+    setKitchenRawOnHand:
+      ctx.setKitchenRawOnHand ??
+      (() => ({ error: "Supply chain not ready — refresh the page" })),
     deleteStoreItemDirect:
       ctx.deleteStoreItemDirect ??
       (() => ({ error: "Supply chain not ready — refresh the page" })),
