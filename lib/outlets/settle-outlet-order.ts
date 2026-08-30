@@ -16,6 +16,7 @@ import {
 import { postOutletCityLedgerCharge } from '@/lib/outlets/post-outlet-city-ledger'
 import { recordCashbackEarn } from '@/lib/cashback/cashback-service'
 import { paymentMethodEarnsCashback } from '@/lib/cashback/cashback-config'
+import { OUTLET_FEE_LINE_NAMES } from '@/lib/outlets/order-extra-fees'
 
 function isCityLedgerPayment(method: string) {
   return method === 'city_ledger' || method === 'room_charge'
