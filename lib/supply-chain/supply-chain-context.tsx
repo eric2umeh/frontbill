@@ -100,7 +100,7 @@ import {
 } from "./unit-factor-storage";
 import type { StockShortageLine } from "@/lib/ui/stock-shortage-dialog";
 import { useAuth } from "@/lib/auth-context";
-import { canManageFnbStore, canManageKitchenBatchStandards, canOperateKitchenProduction, canRaisePurchaseRequest, canSubmitMarketRetirement, canAddPurchasedToStock, canSupplyRetirementReview, canSupplyPoAccountantReview, canSupplyPoManagerReview, canAdminTestApproveSupplyPo, canDirectDisbursePurchaseOrder, canonicalRoleKey, hasPermission } from "@/lib/permissions";
+import { canManageFnbStore, canManageKitchenBatchStandards, canEditKitchenBatchSellingPrice, canOperateKitchenProduction, canRaisePurchaseRequest, canSubmitMarketRetirement, canAddPurchasedToStock, canSupplyRetirementReview, canSupplyPoAccountantReview, canSupplyPoManagerReview, canAdminTestApproveSupplyPo, canDirectDisbursePurchaseOrder, canonicalRoleKey, hasPermission } from "@/lib/permissions";
 import { isRetryableSupplyError } from "@/lib/utils/fetch-retry";
 import { isMainBarIssueDestination } from "@/lib/store/outlet-departments";
 import { formatSupplyActorStamp } from "./fnb-store";
@@ -130,6 +130,7 @@ import {
 import {
   kitchenStockForActiveBatchStandards,
   kitchenStockIdForBatchName,
+  kitchenStockIdForRecipe,
   kitchenStockIdsForActiveRecipes,
   reconcileKitchenStockWithRecipes,
 } from "./kitchen-batch-link";
@@ -3774,6 +3775,92 @@ function useSupplyChainImpl() {
     [recipes, kitchenStock, persistSnapshotsNow],
   );
 
+  /** Selling price and/or menu category — admin/superadmin or auditor (price/category only). */
+  const updateRecipeOutletFields = useCallback(
+    (
+      recipeId: string,
+      patch: { sellingPricePerPortion?: number; category?: string },
+      actor: Actor,
+    ):
+      | {
+          ok: true;
+          kitchenStockId: string;
+          menuItemName: string;
+          category: string;
+          outletMenuSync: import("./types").BatchOutletMenuSync;
+          sellingPricePerPortion: number;
+        }
+      | { error: string } => {
+      const existing = recipes.find((r) => r.id === recipeId);
+      if (!existing || isRecipeDeleted(existing)) {
+        return { error: "Batch standard not found" };
+      }
+
+      if (!canEditKitchenBatchSellingPrice(actor.role)) {
+        return { error: "You do not have permission to edit this batch price" };
+      }
+
+      const hasPrice = patch.sellingPricePerPortion !== undefined;
+      const hasCategory = patch.category !== undefined;
+      if (!hasPrice && !hasCategory) {
+        return { error: "Nothing to update" };
+      }
+
+      let sellingPricePerPortion = existing.sellingPricePerPortion;
+      if (hasPrice) {
+        const sell = Math.max(0, Number(patch.sellingPricePerPortion));
+        if (!Number.isFinite(sell)) {
+          return { error: "Enter a valid selling price" };
+        }
+        sellingPricePerPortion = sell;
+      }
+
+      let category = existing.category;
+      if (hasCategory) {
+        category = toTitleCaseWords(patch.category ?? "");
+        if (!category) return { error: "Enter a menu category" };
+      }
+
+      const updated: Recipe = {
+        ...existing,
+        sellingPricePerPortion,
+        category,
+        updatedAt: new Date().toISOString(),
+      };
+
+      const kitchenRow = kitchenStock.find((k) => k.linkedRecipeId === recipeId);
+      const kitchenStockId =
+        kitchenRow?.id ?? kitchenStockIdForRecipe(existing);
+
+      setRecipes((prev) => {
+        const next = prev.map((r) => (r.id === recipeId ? updated : r));
+        recipesRef.current = next;
+        return next;
+      });
+      setActivityLog((a) =>
+        log(
+          a,
+          "recipe_updated",
+          actor,
+          `Batch price/category updated: ${updated.name} — sell ${sellingPricePerPortion}, category ${category}`,
+          recipeId,
+        ),
+      );
+      void persistSnapshotsNow();
+      return {
+        ok: true,
+        kitchenStockId,
+        menuItemName: updated.name,
+        category,
+        outletMenuSync: normalizeBatchOutletMenuSync(
+          updated.outletMenuSync ?? updated.fnbEligible,
+        ),
+        sellingPricePerPortion,
+      };
+    },
+    [recipes, kitchenStock, persistSnapshotsNow],
+  );
+
   const deleteRecipe = useCallback(
     (recipeId: string, actor: Actor): { ok: true } | { error: string } => {
       if (!canManageKitchenBatchStandards(actor.role)) {
@@ -5815,6 +5902,7 @@ function useSupplyChainImpl() {
     openBatch,
     openKitchenBatchFromMaterials,
     updateRecipe,
+    updateRecipeOutletFields,
     deleteRecipe,
     clearKitchenRestaurantMenu,
     deleteInProgressBatch,
@@ -5854,6 +5942,9 @@ export function useSupplyChain() {
     issueOutLog: ctx.issueOutLog ?? [],
     updateRecipe:
       ctx.updateRecipe ??
+      (() => ({ error: "Supply chain not ready — refresh the page" })),
+    updateRecipeOutletFields:
+      ctx.updateRecipeOutletFields ??
       (() => ({ error: "Supply chain not ready — refresh the page" })),
     deleteRecipe:
       ctx.deleteRecipe ??

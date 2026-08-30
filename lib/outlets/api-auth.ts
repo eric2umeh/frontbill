@@ -3,10 +3,11 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { hasPermission, canonicalRoleKey, type Permission } from '@/lib/permissions'
 import {
   canAccessOutletDepartment,
+  canAuditorEditOutletMenuPricing,
   canManageOutletMenu,
   canManageOutletOrders,
 } from '@/lib/outlets/access'
-import { isOutletDepartmentKey } from '@/lib/outlets/departments'
+import { isOutletDepartmentKey, type OutletDepartmentKey } from '@/lib/outlets/departments'
 
 export type OutletAuthedContext = {
   userId: string
@@ -105,6 +106,32 @@ export async function resolveOutletMenuManage(
     }
   }
   return auth
+}
+
+const AUDITOR_MENU_PATCH_KEYS = new Set(['unit_price', 'category_id'])
+
+/** Auth for PATCH outlet menu item — full manage or auditor price/category on Main Bar / Restaurant. */
+export function canPatchOutletMenuItem(
+  role: string,
+  department: OutletDepartmentKey,
+  body: Record<string, unknown>,
+): { ok: true; auditorLimited: boolean } | { error: string } {
+  if (canManageOutletMenu(role, department)) {
+    return { ok: true, auditorLimited: false }
+  }
+  if (!canAuditorEditOutletMenuPricing(role, department)) {
+    return {
+      error:
+        department === 'main_bar'
+          ? 'Only Superadmin, Administrator, or Auditor can change Main Bar menu price/category'
+          : 'Only F&B, Superadmin, Administrator, Manager, or Auditor can change this menu',
+    }
+  }
+  const keys = Object.keys(body).filter((k) => k !== 'id' && body[k] !== undefined)
+  if (!keys.length || keys.every((k) => AUDITOR_MENU_PATCH_KEYS.has(k))) {
+    return { ok: true, auditorLimited: true }
+  }
+  return { error: 'Auditor may only change category and price on this menu' }
 }
 
 /** Auth for PATCH/DELETE on outlet orders — superadmin, admin, manager only. */

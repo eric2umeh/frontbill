@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/lib/auth-context'
 import { hasPermission } from '@/lib/permissions'
-import { canManageOutletMenu, canManageOutletOrders } from '@/lib/outlets/access'
+import { canManageOutletMenu, canEditOutletMenuPriceAndCategory, canManageOutletOrders } from '@/lib/outlets/access'
 import { getOutletDepartment, type OutletDepartmentKey } from '@/lib/outlets/departments'
 import type { OutletMenuCategoryRow, OutletMenuItemRow, OutletOrderRow } from '@/lib/outlets/types'
 import { LoadingSpinner } from '@/components/loading-screen'
@@ -164,6 +164,7 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
   if (loading && items.length === 0 && categories.length === 0) return <LoadingSpinner />
 
   const canManageMenu = canManageOutletMenu(role, department)
+  const canEditMenuPricing = canEditOutletMenuPriceAndCategory(role, department)
   const canReports = hasPermission(role, 'outlet:reports')
   const canManageOrders = canManageOutletOrders(role)
   const openReceipt = (
@@ -274,6 +275,7 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
               categories={categories}
               items={items}
               canManage={canManageMenu}
+              canEditMenuPricing={canEditMenuPricing}
               onRefresh={() => void loadMenu()}
             />
           </TabsContent>

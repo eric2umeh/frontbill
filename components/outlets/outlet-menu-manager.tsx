@@ -4,8 +4,10 @@ import { useMemo, useState, useEffect } from 'react'
 import type { OutletMenuCategoryRow, OutletMenuItemRow } from '@/lib/outlets/types'
 import { isStoreControlledFnbOutlet, type OutletDepartmentKey } from '@/lib/outlets/departments'
 import { itemAllowsPosPriceEdit } from '@/lib/outlets/category-price-editable'
-import { isKitchenSyncedMenuItem } from '@/lib/supply-chain/kitchen-menu-link'
-import { filterOutletMenuForActiveKitchenBatches } from '@/lib/supply-chain/kitchen-batch-link'
+import { isKitchenSyncedMenuItem, kitchenStockIdFromServiceCode } from '@/lib/supply-chain/kitchen-menu-link'
+import { filterOutletMenuForActiveKitchenBatches, recipeIdForKitchenStockId } from '@/lib/supply-chain/kitchen-batch-link'
+import { syncBatchToRestaurantOutlet } from '@/lib/supply-chain/sync-restaurant-outlet'
+import { shouldSyncBatchToOutlet } from '@/lib/supply-chain/batch-outlet-sync'
 import { useAuth } from '@/lib/auth-context'
 import { canCountOutletDepartmentStock, canKickstartOutletStock, canonicalRoleKey } from '@/lib/permissions'
 import { Button } from '@/components/ui/button'
@@ -74,6 +76,8 @@ type Props = {
   categories: OutletMenuCategoryRow[]
   items: OutletMenuItemRow[]
   canManage: boolean
+  /** Auditor: price & category on Main Bar / Restaurant kitchen dishes. */
+  canEditMenuPricing?: boolean
   onRefresh: () => void
 }
 
@@ -97,7 +101,7 @@ function parseItemUnitPrice(raw: string): number | null {
 const numberInputValue = (value: number | null | undefined) =>
   value != null ? String(value) : ''
 
-export function OutletMenuManager({ department, categories, items, canManage, onRefresh }: Props) {
+export function OutletMenuManager({ department, categories, items, canManage, canEditMenuPricing = false, onRefresh }: Props) {
   const { name: staffName, role } = useAuth()
   const supply = useSupplyChain()
   const { recipes } = supply
@@ -107,6 +111,7 @@ export function OutletMenuManager({ department, categories, items, canManage, on
   const canAdjustStock = canKickstartOutletStock(role) && storeControlledFnb
   const canCountStock = canCountOutletDepartmentStock(role) && storeControlledFnb
   const actor = { name: staffName ?? 'Staff', role: canonicalRoleKey(role) ?? 'staff' }
+  const canEditCategoryOrPrice = canManage || canEditMenuPricing
   const sortedCategories = useMemo(() => sortOutletMenuByName(categories), [categories])
   const sortedItems = useMemo(() => sortOutletMenuByName(items), [items])
   const [itemSearch, setItemSearch] = useState('')
@@ -172,9 +177,30 @@ export function OutletMenuManager({ department, categories, items, canManage, on
   const [stockEditUnit, setStockEditUnit] = useState('portion')
   const [stockCountDraft, setStockCountDraft] = useState<Record<string, string>>({})
   const [categorySavingId, setCategorySavingId] = useState<string | null>(null)
+  const [priceDraft, setPriceDraft] = useState<Record<string, string>>({})
+  const [priceSavingId, setPriceSavingId] = useState<string | null>(null)
+
+  const syncKitchenBatchFromOutletItem = async (
+    item: OutletMenuItemRow,
+    patch: { unitPrice?: number; categoryName?: string },
+  ) => {
+    if (department !== 'restaurant' || !isKitchenSyncedMenuItem(item.service_code)) return
+    const ksId = kitchenStockIdFromServiceCode(item.service_code)
+    if (!ksId) return
+    const recipeId = recipeIdForKitchenStockId(supply.recipes, ksId, supply.kitchenStock)
+    if (!recipeId) return
+    const outletPatch: { sellingPricePerPortion?: number; category?: string } = {}
+    if (patch.unitPrice != null) outletPatch.sellingPricePerPortion = patch.unitPrice
+    if (patch.categoryName) outletPatch.category = patch.categoryName
+    if (!Object.keys(outletPatch).length) return
+    const res = supply.updateRecipeOutletFields(recipeId, outletPatch, actor)
+    if ('error' in res) {
+      toast.warning(`Menu saved but Kitchen batch not updated: ${res.error}`)
+    }
+  }
 
   const updateItemCategory = async (item: OutletMenuItemRow, categoryId: string | null) => {
-    if (!canManage) return
+    if (!canEditCategoryOrPrice) return
     const nextCategoryId = categoryId || null
     if ((item.category_id || null) === nextCategoryId) return
     setCategorySavingId(item.id)
@@ -190,10 +216,56 @@ export function OutletMenuManager({ department, categories, items, canManage, on
         toast.error(json.error || 'Failed to update category')
         return
       }
+      const categoryName = nextCategoryId
+        ? sortedCategories.find((c) => c.id === nextCategoryId)?.name
+        : undefined
+      await syncKitchenBatchFromOutletItem(item, { categoryName })
       toast.success(`Category updated for ${item.name}`)
       onRefresh()
     } finally {
       setCategorySavingId(null)
+    }
+  }
+
+  const updateItemPrice = async (item: OutletMenuItemRow) => {
+    if (!canEditCategoryOrPrice) return
+    const raw = priceDraft[item.id] ?? String(item.unit_price)
+    const unitPrice = parseItemUnitPrice(raw)
+    if (unitPrice == null) {
+      toast.error('Enter a valid price')
+      return
+    }
+    if (Number(item.unit_price) === unitPrice) {
+      setPriceDraft((prev) => {
+        const next = { ...prev }
+        delete next[item.id]
+        return next
+      })
+      return
+    }
+    setPriceSavingId(item.id)
+    try {
+      const res = await fetch('/api/outlets/menu/items', {
+        method: 'PATCH',
+        headers: await outletApiHeaders({ 'Content-Type': 'application/json' }),
+        credentials: 'include',
+        body: JSON.stringify({ id: item.id, unit_price: unitPrice }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        toast.error(json.error || 'Failed to update price')
+        return
+      }
+      await syncKitchenBatchFromOutletItem(item, { unitPrice })
+      toast.success(`Price updated for ${item.name}`)
+      setPriceDraft((prev) => {
+        const next = { ...prev }
+        delete next[item.id]
+        return next
+      })
+      onRefresh()
+    } finally {
+      setPriceSavingId(null)
     }
   }
 
@@ -472,6 +544,15 @@ export function OutletMenuManager({ department, categories, items, canManage, on
         toast.error(json.error || 'Update failed')
         return
       }
+      const categoryName = editItemForm.category_id
+        ? sortedCategories.find((c) => c.id === editItemForm.category_id)?.name
+        : undefined
+      if (editItem) {
+        await syncKitchenBatchFromOutletItem(editItem, {
+          unitPrice,
+          categoryName,
+        })
+      }
       toast.success('Item updated')
       setEditItem(null)
       onRefresh()
@@ -551,11 +632,19 @@ export function OutletMenuManager({ department, categories, items, canManage, on
           list price to ₦0, and the cashier enters the amount when ordering.
         </p>
       )}
-      {!canManage && (
+      {!canManage && !canEditMenuPricing && (
         <p className="text-sm text-muted-foreground rounded-lg border bg-muted/40 px-3 py-2">
           {department === 'main_bar'
             ? 'View only. Only Superadmin or Administrator can add, edit, or delete categories and items.'
             : 'View only. F&amp;B, Superadmin, Administrator, or Manager can add, edit, or delete categories and items.'}
+        </p>
+      )}
+      {!canManage && canEditMenuPricing && (
+        <p className="text-sm text-muted-foreground rounded-lg border border-violet-200 bg-violet-50/70 dark:bg-violet-950/20 px-3 py-2">
+          Auditor: you can change <strong>category</strong> and <strong>price</strong> on this menu.
+          {department === 'restaurant'
+            ? ' Restaurant price updates also update Kitchen → All Batches for kitchen-linked dishes.'
+            : null}
         </p>
       )}
 
@@ -692,7 +781,7 @@ export function OutletMenuManager({ department, categories, items, canManage, on
                         )}
                       </td>
                       <td className="p-2">
-                        {canManage ? (
+                        {canEditCategoryOrPrice ? (
                           <Select
                             value={it.category_id || '__none__'}
                             disabled={categorySavingId === it.id || saving}
@@ -770,9 +859,29 @@ export function OutletMenuManager({ department, categories, items, canManage, on
                         </td>
                       )}
                       <td className="p-2 text-right font-mono">
-                        {itemAllowsPosPriceEdit(it, sortedCategories) && Number(it.unit_price) === 0
-                          ? '—'
-                          : formatNaira(it.unit_price)}
+                        {canEditCategoryOrPrice &&
+                        !(itemAllowsPosPriceEdit(it, sortedCategories) && Number(it.unit_price) === 0) ? (
+                          <Input
+                            className="h-8 w-24 ml-auto text-right tabular-nums font-mono"
+                            inputMode="decimal"
+                            disabled={priceSavingId === it.id || saving}
+                            value={priceDraft[it.id] ?? String(it.unit_price)}
+                            onChange={(e) =>
+                              setPriceDraft((prev) => ({
+                                ...prev,
+                                [it.id]: sanitizeQuantityInput(e.target.value),
+                              }))
+                            }
+                            onBlur={() => void updateItemPrice(it)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') e.currentTarget.blur()
+                            }}
+                          />
+                        ) : itemAllowsPosPriceEdit(it, sortedCategories) && Number(it.unit_price) === 0 ? (
+                          '—'
+                        ) : (
+                          formatNaira(it.unit_price)
+                        )}
                       </td>
                       <td className="p-2 text-center">
                         <Switch

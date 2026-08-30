@@ -4,6 +4,18 @@ import { isKitchenSyncedMenuItem, kitchenStockIdFromServiceCode } from '@/lib/su
 import { visibleKitchenStock, visibleRecipes } from '@/lib/supply-chain/kitchen-sync-merge'
 import type { KitchenStockItem, Recipe } from '@/lib/supply-chain/types'
 
+/** Resolve batch standard id from a finished-stock / menu service_code id. */
+export function recipeIdForKitchenStockId(
+  recipes: Recipe[],
+  kitchenStockId: string,
+  stock: KitchenStockItem[] = [],
+): string | undefined {
+  const linked = stock.find((k) => k.id === kitchenStockId)?.linkedRecipeId
+  if (linked) return linked
+  const bySlug = recipes.find((r) => kitchenStockIdForRecipe(r) === kitchenStockId)
+  return bySlug?.id
+}
+
 /** Default finished-stock row id for a batch standard name. */
 export function kitchenStockIdForBatchName(batchName: string): string {
   return `ks-${outletStockSlug(batchName)}`
