@@ -182,7 +182,19 @@ export function resolveOutletItemStock(
 
   const parsed = parseMenuStockLink(item.service_code)
   if (parsed?.source === 'kitchen') {
-    return kitchenLink(parsed.stockId, parsed.portionsPerSale, kitchenStock)
+    const link = kitchenLink(parsed.stockId, parsed.portionsPerSale, kitchenStock)
+    if (link.available <= 0 && link.stockId) {
+      const byName = matchKitchenByName(item.name, kitchenStock)
+      if (byName) {
+        return {
+          ...link,
+          stockId: byName.id,
+          available: byName.availablePortions,
+          unit: byName.unit || link.unit,
+        }
+      }
+    }
+    return link
   }
   if (parsed?.source === 'bar' && source === 'bar') {
     return barLink(parsed.stockId, parsed.portionsPerSale, barStock)

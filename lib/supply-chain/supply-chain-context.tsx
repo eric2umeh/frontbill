@@ -228,7 +228,10 @@ function applyRemoteKitchenStockArray(
   if (!Array.isArray(remote)) return false;
   let changed = false;
   setter((prev) => {
-    const merged = mergeKitchenStockFromRemote(prev, remote as KitchenStockItem[]);
+    const preferLocalRecent = Date.now() - lastLocalSupplyMutationAt < 12_000
+    const merged = mergeKitchenStockFromRemote(prev, remote as KitchenStockItem[], {
+      preferLocalRecent,
+    });
     const { stock: reconciled, changed: reconciledChanged } = reconcileKitchenStockWithRecipes(
       getRecipes(),
       merged,
@@ -4389,11 +4392,14 @@ function useSupplyChainImpl() {
       if (!existing) return { error: "Kitchen stock item not found" };
       const qty = Math.max(0, Number(availablePortions) || 0);
       if (!Number.isFinite(qty)) return { error: "Enter a valid quantity" };
-      setKitchenStock((prev) =>
-        prev.map((k) =>
+      let nextKitchenStock = kitchenStock;
+      setKitchenStock((prev) => {
+        nextKitchenStock = prev.map((k) =>
           k.id === stockId ? { ...k, availablePortions: qty } : k,
-        ),
-      );
+        );
+        kitchenStockRef.current = nextKitchenStock;
+        return nextKitchenStock;
+      });
       markLocalSupplyMutation();
       const recipe = existing.linkedRecipeId
         ? recipes.find((r) => r.id === existing.linkedRecipeId)
@@ -4427,10 +4433,14 @@ function useSupplyChainImpl() {
         ),
       );
       schedulePersistSnapshots();
-      void persistSnapshotsNow();
+      void persistKitchenStockSnapshot(nextKitchenStock, { required: false }).catch(
+        (err) => {
+          console.warn("[supply-chain] kitchen stock count sync failed", err);
+        },
+      );
       return { ok: true };
     },
-    [kitchenStock, recipes, schedulePersistSnapshots, persistSnapshotsNow],
+    [kitchenStock, recipes, schedulePersistSnapshots, persistKitchenStockSnapshot],
   );
 
   /** Placeholder kitchen raw rows (qty 0) for every kitchen catalogue item; drop non-kitchen rows. */

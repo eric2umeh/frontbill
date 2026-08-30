@@ -152,10 +152,37 @@ export function preferKitchenStock(a: KitchenStockItem, b: KitchenStockItem): Ki
   return a
 }
 
-/** Merge finished / prep stock — local tombstones must beat stale remote rows on refresh. */
+function kitchenStockQty(item: KitchenStockItem): number {
+  return Math.max(0, Number(item.availablePortions) || 0)
+}
+
+/** Merge one finished-stock row — cloud counts from Kitchen reach outlet POS readers. */
+export function mergeKitchenStockPair(
+  local: KitchenStockItem,
+  remote: KitchenStockItem,
+  opts?: { preferLocalRecent?: boolean },
+): KitchenStockItem {
+  const aDel = tombstoneMs(local.deletedAt)
+  const bDel = tombstoneMs(remote.deletedAt)
+  if (aDel || bDel) {
+    return preferKitchenStock(local, remote)
+  }
+
+  const lQty = kitchenStockQty(local)
+  const rQty = kitchenStockQty(remote)
+  if (lQty === rQty) return local
+
+  if (opts?.preferLocalRecent) return local
+  if (lQty === 0 && rQty > 0) return remote
+  if (rQty === 0 && lQty > 0) return local
+  return remote
+}
+
+/** Merge finished / prep stock — tombstones stay local; qty follows cloud unless this device just edited. */
 export function mergeKitchenStockFromRemote(
   local: KitchenStockItem[],
   remote: KitchenStockItem[],
+  opts?: { preferLocalRecent?: boolean },
 ): KitchenStockItem[] {
   if (local.length === 0) return remote
   if (remote.length === 0) return local
@@ -176,7 +203,7 @@ export function mergeKitchenStockFromRemote(
       merged.push(l)
       continue
     }
-    merged.push(preferKitchenStock(l, r))
+    merged.push(mergeKitchenStockPair(l, r, opts))
   }
 
   return merged
