@@ -79,6 +79,8 @@ type Props = {
   /** Auditor: price & category on Main Bar / Restaurant kitchen dishes. */
   canEditMenuPricing?: boolean
   onRefresh: () => void
+  /** Apply a server-saved menu row without waiting for a full reload. */
+  onMenuItemUpdated?: (item: OutletMenuItemRow) => void
 }
 
 const emptyItemForm = {
@@ -101,7 +103,7 @@ function parseItemUnitPrice(raw: string): number | null {
 const numberInputValue = (value: number | null | undefined) =>
   value != null ? String(value) : ''
 
-export function OutletMenuManager({ department, categories, items, canManage, canEditMenuPricing = false, onRefresh }: Props) {
+export function OutletMenuManager({ department, categories, items, canManage, canEditMenuPricing = false, onRefresh, onMenuItemUpdated }: Props) {
   const { name: staffName, role } = useAuth()
   const supply = useSupplyChain()
   const { recipes } = supply
@@ -233,6 +235,11 @@ export function OutletMenuManager({ department, categories, items, canManage, ca
     const unitPrice = parseItemUnitPrice(raw)
     if (unitPrice == null) {
       toast.error('Enter a valid price')
+      setPriceDraft((prev) => {
+        const next = { ...prev }
+        delete next[item.id]
+        return next
+      })
       return
     }
     if (Number(item.unit_price) === unitPrice) {
@@ -253,16 +260,28 @@ export function OutletMenuManager({ department, categories, items, canManage, ca
       })
       const json = await res.json().catch(() => ({}))
       if (!res.ok) {
-        toast.error(json.error || 'Failed to update price')
+        toast.error(json.error || 'Failed to update price — change was not saved')
+        setPriceDraft((prev) => {
+          const next = { ...prev }
+          delete next[item.id]
+          return next
+        })
         return
       }
+      const saved = json.item as OutletMenuItemRow | undefined
+      if (saved?.id) {
+        onMenuItemUpdated?.(saved)
+      }
       await syncKitchenBatchFromOutletItem(item, { unitPrice })
-      toast.success(`Price updated for ${item.name}`)
+      toast.success(`Price saved for ${item.name}`)
       setPriceDraft((prev) => {
         const next = { ...prev }
         delete next[item.id]
         return next
       })
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('frontbill:outlet-menu-price-saved'))
+      }
       onRefresh()
     } finally {
       setPriceSavingId(null)
@@ -278,11 +297,21 @@ export function OutletMenuManager({ department, categories, items, canManage, ca
     if (raw == null) return
     if (!isCompleteQuantityInput(raw)) {
       toast.error('Enter a valid quantity')
+      setStockCountDraft((prev) => {
+        const next = { ...prev }
+        delete next[it.id]
+        return next
+      })
       return
     }
     const qty = parseQuantityValue(raw)
     if (qty == null || qty < 0) {
       toast.error('Enter a valid quantity')
+      setStockCountDraft((prev) => {
+        const next = { ...prev }
+        delete next[it.id]
+        return next
+      })
       return
     }
     const link = supply.getOutletItemStock(department, it)
@@ -294,7 +323,12 @@ export function OutletMenuManager({ department, categories, items, canManage, ca
           ? supply.setBarStockOnHand(link.stockId, qty, actor)
           : supply.setKitchenStockAvailable(link.stockId, qty, actor)
       if ('error' in result) {
-        toast.error(result.error)
+        toast.error(result.error || 'Quantity was not saved')
+        setStockCountDraft((prev) => {
+          const next = { ...prev }
+          delete next[it.id]
+          return next
+        })
         return
       }
       setStockCountDraft((prev) => {
@@ -302,7 +336,7 @@ export function OutletMenuManager({ department, categories, items, canManage, ca
         delete next[it.id]
         return next
       })
-      toast.success(`${it.name}: ${qty} ${link.unit}(s) on hand`)
+      toast.success(`${it.name}: ${qty} ${link.unit}(s) saved`)
       return
     }
 
@@ -310,7 +344,12 @@ export function OutletMenuManager({ department, categories, items, canManage, ca
     try {
       const res = supply.kickstartOutletMenuStock(department, it, qty, actor)
       if ('error' in res) {
-        toast.error(res.error)
+        toast.error(res.error || 'Quantity was not saved')
+        setStockCountDraft((prev) => {
+          const next = { ...prev }
+          delete next[it.id]
+          return next
+        })
         return
       }
       const patchRes = await fetch('/api/outlets/menu/items', {
@@ -321,7 +360,12 @@ export function OutletMenuManager({ department, categories, items, canManage, ca
       })
       if (!patchRes.ok) {
         const json = await patchRes.json().catch(() => ({}))
-        toast.error(json.error || 'Stock counted but failed to save menu link')
+        toast.error(json.error || 'Stock saved but menu link failed — refresh and retry')
+        setStockCountDraft((prev) => {
+          const next = { ...prev }
+          delete next[it.id]
+          return next
+        })
         return
       }
       setStockCountDraft((prev) => {
@@ -329,7 +373,7 @@ export function OutletMenuManager({ department, categories, items, canManage, ca
         delete next[it.id]
         return next
       })
-      toast.success(`${it.name}: ${qty} ${res.unit}(s) on hand`)
+      toast.success(`${it.name}: ${qty} ${res.unit}(s) saved`)
       onRefresh()
     } finally {
       setSaving(false)
@@ -544,6 +588,10 @@ export function OutletMenuManager({ department, categories, items, canManage, ca
         toast.error(json.error || 'Update failed')
         return
       }
+      const saved = json.item as OutletMenuItemRow | undefined
+      if (saved?.id) {
+        onMenuItemUpdated?.(saved)
+      }
       const categoryName = editItemForm.category_id
         ? sortedCategories.find((c) => c.id === editItemForm.category_id)?.name
         : undefined
@@ -552,6 +600,11 @@ export function OutletMenuManager({ department, categories, items, canManage, ca
           unitPrice,
           categoryName,
         })
+      }
+      if (department === 'main_bar' && Number(editItem.unit_price) !== unitPrice) {
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('frontbill:outlet-menu-price-saved'))
+        }
       }
       toast.success('Item updated')
       setEditItem(null)

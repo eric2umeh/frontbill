@@ -44,19 +44,23 @@ export async function updateOutletMenuItem(
   admin: AdminClient,
   id: string,
   patch: Record<string, unknown>,
+  organizationId?: string,
 ) {
-  let result = await admin.from('outlet_menu_items').update(patch).eq('id', id).select().single()
+  let query = admin.from('outlet_menu_items').update(patch).eq('id', id)
+  if (organizationId) {
+    query = query.eq('organization_id', organizationId)
+  }
+  let result = await query.select().single()
   if (
     result.error &&
     isMissingOptionalMenuColumnError(result.error.message) &&
     OPTIONAL_MENU_COLUMNS.some((col) => col in patch)
   ) {
-    result = await admin
-      .from('outlet_menu_items')
-      .update(omitOptionalMenuColumns(patch))
-      .eq('id', id)
-      .select()
-      .single()
+    let retry = admin.from('outlet_menu_items').update(omitOptionalMenuColumns(patch)).eq('id', id)
+    if (organizationId) {
+      retry = retry.eq('organization_id', organizationId)
+    }
+    result = await retry.select().single()
   }
   return result
 }

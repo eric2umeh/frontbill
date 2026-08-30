@@ -55,7 +55,7 @@ export async function POST(request: Request) {
       .eq('department', 'main_bar'),
     admin
       .from('outlet_menu_items')
-      .select('id, name, service_code, category_id, is_active')
+      .select('id, name, service_code, category_id, is_active, unit_price')
       .eq('organization_id', organizationId)
       .eq('department', 'main_bar'),
   ])

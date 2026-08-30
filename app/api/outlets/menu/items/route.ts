@@ -128,9 +128,18 @@ export async function PATCH(request: Request) {
   if (body.unit_price != null) patch.unit_price = Number(body.unit_price)
   if (body.category_id !== undefined) patch.category_id = body.category_id || null
 
-  const { data, error } = await updateOutletMenuItem(admin, id, patch)
+  const { data, error } = await updateOutletMenuItem(admin, id, patch, auth.ctx.organizationId)
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+  if (error) {
+    const msg = error.message || 'Update failed'
+    if (/0 rows|multiple/i.test(msg)) {
+      return NextResponse.json({ error: 'Item not found or could not be updated' }, { status: 404 })
+    }
+    return NextResponse.json({ error: msg }, { status: 400 })
+  }
+  if (!data) {
+    return NextResponse.json({ error: 'Item not found or could not be updated' }, { status: 404 })
+  }
   return NextResponse.json({ item: data })
 }
 
