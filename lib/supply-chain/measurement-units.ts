@@ -4,6 +4,7 @@ import {
 } from '@/lib/supply-chain/measurement-unit-core'
 import {
   convertToStoreUnitsWithFactors,
+  convertFromStoreUnitsWithFactors,
   type UnitFactorMap,
 } from '@/lib/supply-chain/unit-factor-storage'
 import { convertQtyBetweenUnits } from '@/lib/supply-chain/recipe-units'
@@ -164,3 +165,12 @@ export function materialCostForUnit(
   )
   return Math.round(qtyInStoreUnits * pricePerStoreUnit * 100) / 100
 }
+
+/** Format qty for count inputs — trim float noise from unit conversion. */
+export function formatCountInputQty(qty: number): string {
+  if (!Number.isFinite(qty)) return ''
+  const rounded = Math.round(qty * 10000) / 10000
+  return String(rounded)
+}
+
+export { convertFromStoreUnitsWithFactors }
