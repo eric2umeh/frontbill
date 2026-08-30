@@ -16,7 +16,6 @@ import { ExtendStayModal } from "@/components/bookings/extend-stay-modal";
 import { AddChargeModal } from "@/components/bookings/add-charge-modal";
 import { CheckoutConfirmDialog } from "@/components/bookings/checkout-confirm-dialog";
 import { formatNaira } from "@/lib/utils/currency";
-import { fetchHotelBusinessNightUtcBounds } from "@/lib/payments/business-night-bounds";
 import {
   sumRoomRevenueForHotelNight,
 } from "@/lib/reports/day-page-stats";
@@ -44,7 +43,6 @@ import {
 } from "@/lib/booking/parse-booking-notes";
 import { paymentMethodRequiresAccount } from "@/lib/payments/payment-accounts";
 import { enrichBookingsList } from "@/lib/booking/enrich-bookings-list";
-import { buildDailyFrontDeskPack } from "@/lib/reports/daily-front-desk-pack";
 import {
   TABLE_ACTIONS_ROW,
   TABLE_STACKED_CELL,
@@ -69,9 +67,10 @@ import {
 } from "@/lib/utils/booking-bill-balance";
 import {
   calendarPickerYmd,
+  bookingYmdHotel,
   todayYmdHotel,
 } from "@/lib/utils/booking-in-house-dates";
-import { frontOfficeTodayYmd, resolveHotelTimeZone } from "@/lib/hotel-date";
+import { frontOfficeTodayYmd, hotelCalendarTodayYmd, resolveHotelTimeZone } from "@/lib/hotel-date";
 import { cancelBookingReservation } from "@/lib/reservations/cancel-reservation";
 import { reconcileRoomStatusesClient } from "@/lib/rooms/reconcile-room-status-client";
 import { roomHousekeepingPatchAfterCheckout } from "@/lib/rooms/sync-housekeeping-status";
@@ -237,7 +236,6 @@ export default function BookingsPage() {
     if (!organizationId) return;
     const supabase = createClient();
     if (!supabase) return;
-    void reconcileRoomStatusesClient();
     const tz = resolveHotelTimeZone();
     const today = forDate ?? frontOfficeToday;
 
@@ -264,68 +262,6 @@ export default function BookingsPage() {
       console.warn("[bookings] due-out stats:", dueErr.message);
     }
 
-    let netProfit = 0;
-    let roomRevenue = 0;
-    try {
-      const bounds = await fetchHotelBusinessNightUtcBounds({
-        supabase,
-        organizationId,
-        ymd: today,
-        timeZone: tz,
-      });
-
-      const nightBookQ = supabase
-        .from("bookings")
-        .select(
-          "id, check_in, check_out, status, rate_per_night, folio_id, payment_status, guests:guest_id(name), rooms:room_id(room_number, room_type)",
-        )
-        .eq("organization_id", organizationId)
-        .in("status", ["confirmed", "checked_in", "reserved", "checked_out"])
-        .lte("check_in", today)
-        .gt("check_out", today)
-        .limit(500);
-
-      let txQ =
-        bounds.empty
-          ? null
-          : supabase
-              .from("transactions")
-              .select("*")
-              .eq("organization_id", organizationId)
-              .gte("created_at", bounds.startIso)
-              .lte("created_at", bounds.endInclusiveIso)
-              .limit(5000);
-
-      let payQ =
-        bounds.empty
-          ? null
-          : supabase
-              .from("payments")
-              .select("*")
-              .eq("organization_id", organizationId)
-              .gte("payment_date", bounds.startIso)
-              .lte("payment_date", bounds.endInclusiveIso)
-              .limit(5000);
-
-      const [nightBookRes, txRes, payRes] = await Promise.all([
-        nightBookQ,
-        txQ || Promise.resolve({ data: [] as unknown[], error: null }),
-        payQ || Promise.resolve({ data: [] as unknown[], error: null }),
-      ]);
-
-      const pack = buildDailyFrontDeskPack({
-        dateYmd: today,
-        bookings: (nightBookRes.data || []) as any,
-        transactions: (txRes.data || []) as any,
-        payments: (payRes.data || []) as any,
-      });
-      roomRevenue = pack.roomRevenueGenerated;
-      netProfit = pack.salesCollection.total;
-    } catch (e) {
-      console.warn("[bookings] net/rev stats:", e);
-      roomRevenue = sumRoomRevenueForHotelNight(dueBookings ?? [], today);
-    }
-
     const norm = (s: string | null | undefined) =>
       String(s || "")
         .toLowerCase()
@@ -338,18 +274,53 @@ export default function BookingsPage() {
     ).length;
     const availableForCheckin = Math.max(0, list.length - physicallyHeld - outOfOrder);
 
-    setRoomStats({
+    setRoomStats((prev) => ({
       total: list.length,
       occupied: stay.occupied,
       reserved: stay.reserved,
       availableForCheckin,
       outOfOrder,
       dueOutToday: stay.dueOut,
-      roomRevenue,
-      netProfit,
+      roomRevenue: prev?.statsDate === today ? (prev?.roomRevenue ?? 0) : 0,
+      netProfit: prev?.statsDate === today ? (prev?.netProfit ?? 0) : 0,
       statsDate: today,
-    });
-  }, [organizationId, frontOfficeToday]);
+    }));
+
+    const applyRevenueStats = (roomRevenue: number, netProfit: number) => {
+      setRoomStats((prev) =>
+        prev?.statsDate === today
+          ? { ...prev, roomRevenue, netProfit }
+          : prev,
+      );
+    };
+
+    if (userId) {
+      try {
+        const res = await fetch(
+          `/api/reports/daily-front-desk?caller_id=${encodeURIComponent(userId)}&date=${encodeURIComponent(today)}`,
+          { credentials: "include" },
+        );
+        if (res.ok) {
+          const pack = (await res.json()) as {
+            roomRevenueGenerated?: number;
+            salesCollection?: { total?: number };
+          };
+          applyRevenueStats(
+            Number(pack.roomRevenueGenerated ?? 0),
+            Number(pack.salesCollection?.total ?? 0),
+          );
+          return;
+        }
+      } catch (e) {
+        console.warn("[bookings] daily-front-desk stats:", e);
+      }
+    }
+
+    applyRevenueStats(
+      sumRoomRevenueForHotelNight(dueBookings ?? [], today),
+      0,
+    );
+  }, [organizationId, frontOfficeToday, userId]);
 
   function groupBulkRows(rows: Booking[]) {
     const grouped = new Map<string, Booking[]>();
@@ -1501,10 +1472,11 @@ export default function BookingsPage() {
             key: "guest",
             label: "Guest",
             render: (booking) => {
+              const tz = resolveHotelTimeZone();
               const stayKind = classifyFrontOfficeStay(
                 booking,
                 frontOfficeToday,
-                resolveHotelTimeZone(),
+                tz,
               );
               const isReservationRow = stayKind === "reserved";
               const isDueOutRow = stayKind === "due_out";
@@ -1724,12 +1696,28 @@ export default function BookingsPage() {
             label: "Actions",
             stickyOnMobile: true,
             render: (booking) => {
+              const tz = resolveHotelTimeZone();
+              const ciYmd = bookingYmdHotel(booking.check_in, tz);
+              const calendarToday = hotelCalendarTodayYmd(undefined, tz);
+              const showCheckInRow =
+                !booking.is_bulk &&
+                booking.status !== "checked_in" &&
+                booking.status !== "checked_out" &&
+                ciYmd <= calendarToday &&
+                (booking.status === "reserved" ||
+                  booking.status === "confirmed") &&
+                canCheckInReserved;
               const showReserveRow =
                 !booking.is_bulk &&
                 booking.status === "reserved" &&
-                (canCheckInReserved || canCancelReservation);
+                canCancelReservation;
 
-              if (!canManageFolio && !booking.is_bulk && !showReserveRow)
+              if (
+                !canManageFolio &&
+                !booking.is_bulk &&
+                !showCheckInRow &&
+                !showReserveRow
+              )
                 return null;
 
               if (booking.is_bulk) {
@@ -1886,7 +1874,7 @@ export default function BookingsPage() {
                   className={TABLE_ACTIONS_ROW}
                   onClick={(e) => e.stopPropagation()}
                 >
-                  {showReserveRow && canCheckInReserved && (
+                  {showCheckInRow && (
                 <Button 
                   size="sm" 
                   variant="outline"
