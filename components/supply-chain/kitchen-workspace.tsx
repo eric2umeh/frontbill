@@ -19,7 +19,22 @@ import { Download, Flame, Pencil, Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { RESPONSIVE_HIDE_MD, RESPONSIVE_HIDE_LG } from '@/lib/ui/responsive-table'
 import { PaginatedListShell } from '@/components/shared/paginated-list-shell'
-import { sanitizeQuantityInput, parseQuantityValue, isCompleteQuantityInput } from '@/lib/supply-chain/measurement-units'
+import {
+  sanitizeQuantityInput,
+  parseQuantityValue,
+  isCompleteQuantityInput,
+  defaultUnitForStoreItem,
+  formatQuantityDisplay,
+} from '@/lib/supply-chain/measurement-units'
+import { KITCHEN_BATCH_UNITS } from '@/lib/supply-chain/conversion-units'
+import {
+  mergeUnitFactors,
+  needsUnitFactor,
+  convertToStoreUnitsWithFactors,
+  type UnitFactorMap,
+} from '@/lib/supply-chain/unit-factor-storage'
+import { UnitSelect } from '@/components/supply-chain/unit-select'
+import { UnitConversionField } from '@/components/supply-chain/unit-conversion-field'
 import { batchMaterialShortages } from '@/lib/supply-chain/batch-material-shortages'
 import { BatchMaterialShortageList } from '@/components/supply-chain/batch-material-shortage-list'
 import { syncBatchToRestaurantOutlet } from '@/lib/supply-chain/sync-restaurant-outlet'
@@ -153,12 +168,15 @@ export function KitchenWorkspace() {
     updateRecipeOutletFields,
     ensureKitchenRawStockFromCatalog,
     setKitchenRawOnHand,
+    updateStoreItemDirect,
   } = useSupplyChain()
 
   const todayYmd = hotelCalendarTodayYmd()
   const [rawDateFrom, setRawDateFrom] = useState(todayYmd)
   const [rawDateTo, setRawDateTo] = useState(todayYmd)
   const [kitchenRawCountDraft, setKitchenRawCountDraft] = useState<Record<string, string>>({})
+  const [kitchenRawUnitDraft, setKitchenRawUnitDraft] = useState<Record<string, string>>({})
+  const [kitchenRawFactorMap, setKitchenRawFactorMap] = useState<Record<string, UnitFactorMap>>({})
 
   useEffect(() => {
     ensureKitchenRawStockFromCatalog?.()
@@ -334,6 +352,14 @@ export function KitchenWorkspace() {
   const canCountKitchenRaw = canCountKitchenRawStock(role)
   const canRaiseKitchenPo = canRaisePurchaseRequest(role)
 
+  const kitchenRawEntryUnit = (row: (typeof kitchenStoreRows)[0]) =>
+    kitchenRawUnitDraft[row.storeItemId] ?? defaultUnitForStoreItem(row.unit)
+
+  const kitchenRawFactorsFor = (storeItemId: string, storeUnit: string) => {
+    const item = storeItems.find((s) => s.id === storeItemId)
+    return kitchenRawFactorMap[storeItemId] ?? mergeUnitFactors(storeItemId, storeUnit, item?.unitFactors)
+  }
+
   const commitKitchenRawCount = (row: (typeof kitchenStoreRows)[0]) => {
     const raw = kitchenRawCountDraft[row.storeItemId] ?? kitchenRawCountDraft[row.id]
     if (raw == null) return
@@ -346,7 +372,21 @@ export function KitchenWorkspace() {
       toast.error('Enter a valid quantity')
       return
     }
-    const result = setKitchenRawOnHand(row.storeItemId, qty, actor)
+    const entryUnit = kitchenRawEntryUnit(row)
+    const factors = kitchenRawFactorsFor(row.storeItemId, row.unit)
+    if (needsUnitFactor(entryUnit, row.unit, factors)) {
+      toast.error(`Set conversion — how many ${entryUnit} in 1 ${row.unit}?`)
+      return
+    }
+    const storeQty =
+      entryUnit === row.unit
+        ? qty
+        : convertToStoreUnitsWithFactors(qty, entryUnit, row.unit, factors)
+    if (storeQty == null || !Number.isFinite(storeQty)) {
+      toast.error('Could not convert quantity to store units')
+      return
+    }
+    const result = setKitchenRawOnHand(row.storeItemId, storeQty, actor)
     if ('error' in result) {
       toast.error(result.error)
       return
@@ -357,7 +397,11 @@ export function KitchenWorkspace() {
       delete next[row.id]
       return next
     })
-    toast.success(`Kitchen store: ${row.name} → ${qty} ${row.unit}`)
+    const label =
+      entryUnit === row.unit
+        ? `${qty} ${row.unit}`
+        : formatQuantityDisplay(qty, entryUnit, row.unit, factors)
+    toast.success(`Kitchen store: ${row.name} → ${label}`)
   }
 
   const kitchenStoreCategoryOptions = useMemo(() => {
@@ -701,30 +745,89 @@ export function KitchenWorkspace() {
                           </TableCell>
                           <TableCell className="text-right">
                             {canCountKitchenRaw ? (
-                              <div className="inline-flex items-center justify-end gap-1.5">
-                                <Input
-                                  className="h-8 w-20 text-right tabular-nums"
-                                  inputMode="decimal"
-                                  value={
-                                    kitchenRawCountDraft[row.storeItemId] ??
-                                    kitchenRawCountDraft[row.id] ??
-                                    String(row.quantityOnHand)
-                                  }
-                                  onChange={(e) =>
-                                    setKitchenRawCountDraft((prev) => ({
-                                      ...prev,
-                                      [row.storeItemId]: sanitizeQuantityInput(e.target.value),
-                                    }))
-                                  }
-                                  onBlur={() => commitKitchenRawCount(row)}
-                                  onKeyDown={(e) => {
-                                    if (e.key === 'Enter') e.currentTarget.blur()
-                                  }}
-                                />
-                                <span className="text-xs text-muted-foreground whitespace-nowrap">
-                                  {row.unit}
-                                </span>
-                              </div>
+                              (() => {
+                                const entryUnit = kitchenRawEntryUnit(row)
+                                const factors = kitchenRawFactorsFor(row.storeItemId, row.unit)
+                                const showFactor = needsUnitFactor(entryUnit, row.unit, factors)
+                                return (
+                                  <div className="inline-flex flex-col items-end gap-1">
+                                    <div className="inline-flex items-center justify-end gap-1.5">
+                                      <Input
+                                        className="h-8 w-20 text-right tabular-nums"
+                                        inputMode="decimal"
+                                        value={
+                                          kitchenRawCountDraft[row.storeItemId] ??
+                                          kitchenRawCountDraft[row.id] ??
+                                          String(row.quantityOnHand)
+                                        }
+                                        onChange={(e) =>
+                                          setKitchenRawCountDraft((prev) => ({
+                                            ...prev,
+                                            [row.storeItemId]: sanitizeQuantityInput(e.target.value),
+                                          }))
+                                        }
+                                        onBlur={() => commitKitchenRawCount(row)}
+                                        onKeyDown={(e) => {
+                                          if (e.key === 'Enter') e.currentTarget.blur()
+                                        }}
+                                      />
+                                      <UnitSelect
+                                        storeUnit={row.unit}
+                                        itemName={row.name}
+                                        value={entryUnit}
+                                        units={[...KITCHEN_BATCH_UNITS]}
+                                        className="h-8 w-[76px] text-xs shrink-0"
+                                        onChange={(u) => {
+                                          setKitchenRawUnitDraft((prev) => ({
+                                            ...prev,
+                                            [row.storeItemId]: u,
+                                          }))
+                                          const raw =
+                                            kitchenRawCountDraft[row.storeItemId] ??
+                                            kitchenRawCountDraft[row.id] ??
+                                            String(row.quantityOnHand)
+                                          if (raw.trim()) commitKitchenRawCount(row)
+                                        }}
+                                      />
+                                    </div>
+                                    {(showFactor || entryUnit !== row.unit) && (
+                                      <UnitConversionField
+                                        compact
+                                        storeItemId={row.storeItemId}
+                                        storeUnit={row.unit}
+                                        selectedUnit={entryUnit}
+                                        factors={factors}
+                                        onFactorsChange={(next) => {
+                                          setKitchenRawFactorMap((m) => ({
+                                            ...m,
+                                            [row.storeItemId]: next,
+                                          }))
+                                          updateStoreItemDirect(row.storeItemId, { unitFactors: next }, actor)
+                                          const raw =
+                                            kitchenRawCountDraft[row.storeItemId] ??
+                                            kitchenRawCountDraft[row.id] ??
+                                            String(row.quantityOnHand)
+                                          if (raw.trim()) commitKitchenRawCount(row)
+                                        }}
+                                      />
+                                    )}
+                                    {entryUnit !== row.unit && !showFactor ? (
+                                      <p className="text-[10px] text-muted-foreground max-w-[200px] truncate">
+                                        {formatQuantityDisplay(
+                                          parseQuantityValue(
+                                            kitchenRawCountDraft[row.storeItemId] ??
+                                              kitchenRawCountDraft[row.id] ??
+                                              String(row.quantityOnHand),
+                                          ) ?? row.quantityOnHand,
+                                          entryUnit,
+                                          row.unit,
+                                          factors,
+                                        )}
+                                      </p>
+                                    ) : null}
+                                  </div>
+                                )
+                              })()
                             ) : (
                               <span className={stockLevelTextClass(level)}>
                                 {row.quantityOnHand} {row.unit}
