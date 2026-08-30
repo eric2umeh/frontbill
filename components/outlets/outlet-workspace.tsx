@@ -122,10 +122,13 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
       if (!opts?.silent) setLoading(false)
     }
 
-    if (department === 'main_bar' && opts?.syncFromStore === true) {
-      void runMainBarStoreSync()
+    if (department === 'main_bar') {
+      supply.ensureMainBarStockFromCatalog?.()
+      if (opts?.syncFromStore === true) {
+        void runMainBarStoreSync()
+      }
     }
-  }, [organizationId, department, fetchMenuRows, runMainBarStoreSync])
+  }, [organizationId, department, fetchMenuRows, runMainBarStoreSync, supply])
 
   const loadMenuRef = useRef(loadMenu)
   const fetchMenuRowsRef = useRef(fetchMenuRows)
