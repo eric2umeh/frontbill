@@ -47,7 +47,7 @@ export function normalizeBarStockRows(rows: BarStockItem[]): BarStockItem[] {
   return Array.from(byStore.values())
 }
 
-/** Merge cloud + local bar stock — local qty wins when the same store item exists in both. */
+/** Merge cloud + local bar stock — use the higher on-hand count when both exist (multi-user POS). */
 export function mergeBarStockFromRemote(
   local: BarStockItem[],
   remote: BarStockItem[],
@@ -77,7 +77,12 @@ export function mergeBarStockFromRemote(
       (max, b) => Math.max(max, Math.max(0, Number(b.quantityOnHand) || 0)),
       0,
     )
-    const quantityOnHand = localMatches.length > 0 ? localQty : remoteQty
+    const quantityOnHand =
+      localMatches.length > 0 && remoteMatches.length > 0
+        ? Math.max(localQty, remoteQty)
+        : localMatches.length > 0
+          ? localQty
+          : remoteQty
 
     merged.push({
       ...pick,
