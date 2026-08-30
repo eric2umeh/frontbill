@@ -87,7 +87,8 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const body = await request.json()
-    const { caller_id, booking_id, check_in, check_out, reason } = body
+    const { caller_id, booking_id, check_in, check_out, reason, adjustment_date: adjustmentDateRaw } =
+      body
 
     if (!caller_id || !booking_id || !check_in || !check_out || !String(reason || '').trim()) {
       return NextResponse.json(
@@ -103,6 +104,11 @@ export async function POST(request: Request) {
     if (check_in >= check_out) {
       return NextResponse.json({ error: 'Check-out must be after check-in' }, { status: 400 })
     }
+
+    const adjustment_date =
+      adjustmentDateRaw && /^\d{4}-\d{2}-\d{2}$/.test(String(adjustmentDateRaw).slice(0, 10))
+        ? String(adjustmentDateRaw).slice(0, 10)
+        : new Date().toISOString().slice(0, 10)
 
     const admin = createAdminClient()
     const { data: callerProfile, error: callerError } = await admin
@@ -172,15 +178,22 @@ export async function POST(request: Request) {
       .from('night_audits')
       .select('audit_date')
       .eq('organization_id', orgId)
-      .gte('audit_date', check_in)
-      .lte('audit_date', check_in)
+      .gte('audit_date', adjustment_date)
+      .lte('audit_date', adjustment_date)
     const auditedDates = (auditRows || [])
       .map((r) => String(r.audit_date || '').slice(0, 10))
       .filter(Boolean)
 
-    const is_backdate =
+    const checkInBackdate =
       isStayCheckInConsideredBackdated(check_in, new Date(), undefined, { auditedDates }) &&
       check_in !== prevCi
+    const adjustmentBackdate = isStayCheckInConsideredBackdated(
+      adjustment_date,
+      new Date(),
+      undefined,
+      { auditedDates },
+    )
+    const is_backdate = checkInBackdate || adjustmentBackdate
 
     let guest_label: string | null = null
     let room_label: string | null = null
@@ -204,6 +217,7 @@ export async function POST(request: Request) {
         check_out,
         callerId: caller_id,
         reason: String(reason).trim(),
+        adjustment_date,
       })
       if (!applyResult.ok) {
         return NextResponse.json({ error: applyResult.error }, { status: applyResult.status })
@@ -219,6 +233,7 @@ export async function POST(request: Request) {
             from_check_out: prevCo,
             to_check_in: check_in,
             to_check_out: check_out,
+            adjustment_date,
             is_backdate: false,
             folio_label: booking.folio_id || null,
             guest_label,
@@ -246,6 +261,7 @@ export async function POST(request: Request) {
           from_check_out: prevCo,
           to_check_in: check_in,
           to_check_out: check_out,
+          adjustment_date,
           is_backdate,
           folio_label: booking.folio_id || null,
           guest_label,
@@ -285,6 +301,7 @@ export async function POST(request: Request) {
       detailLines: [
         { label: 'From', value: `${prevCi} → ${prevCo}` },
         { label: 'To', value: `${check_in} → ${check_out}` },
+        { label: 'Adjustment date', value: adjustment_date },
         { label: 'Guest', value: guest_label || '—' },
       ],
     })
@@ -368,6 +385,9 @@ export async function PATCH(request: Request) {
       check_out: String(row.to_check_out).slice(0, 10),
       callerId: caller_id,
       reason: row.reason,
+      adjustment_date: row.adjustment_date
+        ? String(row.adjustment_date).slice(0, 10)
+        : null,
     })
 
     if (!applyResult.ok) {

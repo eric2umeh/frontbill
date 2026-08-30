@@ -49,14 +49,19 @@ export function appendRescheduleStayNote(
   prev: { check_in: string; check_out: string },
   next: { check_in: string; check_out: string },
   reason?: string | null,
+  adjustmentDate?: string | null,
 ): string {
   const prevCi = prev.check_in.slice(0, 10)
   const prevCo = prev.check_out.slice(0, 10)
   const nextCi = next.check_in.slice(0, 10)
   const nextCo = next.check_out.slice(0, 10)
+  const adj =
+    adjustmentDate && /^\d{4}-\d{2}-\d{2}$/.test(adjustmentDate.slice(0, 10))
+      ? adjustmentDate.slice(0, 10)
+      : null
   const line = `Stay rescheduled ${prevCi}–${prevCo} → ${nextCi}–${nextCo}${
-    reason?.trim() ? `: ${reason.trim()}` : ''
-  }`
+    adj ? ` (adjustment date: ${adj})` : ''
+  }${reason?.trim() ? `: ${reason.trim()}` : ''}`
   const base = (existingNotes || '').trim()
   return base ? `${base}\n${line}` : line
 }

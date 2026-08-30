@@ -20,6 +20,7 @@ import {
   type PaymentReceiptPayload,
   type PaymentReceiptBranding,
 } from "@/lib/receipts/receipt-format";
+import { parseLastAdjustmentDateFromNotes } from "@/lib/booking/parse-booking-notes";
 import { amountInWordsNgn } from "@/lib/utils/amount-in-words-ngn";
 import {
   exportElementToPdf,
@@ -40,6 +41,9 @@ type OrgProfile = PaymentReceiptBranding;
 
 type BookingLike = {
   folio_id?: string | null;
+  check_in?: string | null;
+  check_out?: string | null;
+  notes?: string | null;
   guests?: { name?: string | null } | null;
   guestName?: string | null;
   rooms?: { room_number?: string | null } | null;
@@ -85,6 +89,23 @@ function buildPayload(
     ctype === "payment" && folioContextLines && folioContextLines.length > 0
       ? folioContextLines
       : null;
+  const fmtStayYmd = (ymd: string | null | undefined) => {
+    const s = String(ymd || "").slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+    try {
+      return new Date(`${s}T12:00:00`).toLocaleDateString("en-GB", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      });
+    } catch {
+      return s;
+    }
+  };
+  const stayCheckInLabel = fmtStayYmd(booking.check_in);
+  const stayCheckOutLabel = fmtStayYmd(booking.check_out);
+  const adjustmentYmd = parseLastAdjustmentDateFromNotes(booking.notes);
+  const adjustmentDateLabel = adjustmentYmd ? fmtStayYmd(adjustmentYmd) : null;
   return {
     hotelName,
     address: org?.address ?? embeddedOrg?.address ?? "",
@@ -109,6 +130,9 @@ function buildPayload(
     receiptTitle:
       ctype === "payment" ? "Payment receipt" : "Folio service receipt",
     folioContextLines: ctx,
+    stayCheckInLabel,
+    stayCheckOutLabel,
+    adjustmentDateLabel,
     balanceRemaining:
       booking.balance != null && Number.isFinite(Number(booking.balance))
         ? Math.max(0, Number(booking.balance))

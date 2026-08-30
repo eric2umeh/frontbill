@@ -140,7 +140,7 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
     }
     const onSupply = () => {
       if (department === 'main_bar') {
-        void runMainBarStoreSyncRef.current().then(() => fetchMenuRowsRef.current())
+        void runMainBarStoreSyncRef.current()
         return
       }
       void loadMenuRef.current({ silent: true })

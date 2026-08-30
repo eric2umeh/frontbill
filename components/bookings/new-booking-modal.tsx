@@ -48,7 +48,8 @@ import { buildBackdateDedupeKey } from '@/lib/backdate/dedupe-key'
 import type { SerializedBookingPayload } from '@/lib/backdate/booking-payload'
 import { isStayCheckInConsideredBackdated, minSelectableCheckInYmdHotel, isLateNightCheckInGraceWindow, lateCheckInGraceWindowLabel, defaultStayCheckInYmdHotel, parseHotelYmdToLocalDate } from '@/lib/hotel-date'
 import { useNightAuditClosedDates } from '@/hooks/use-night-audit-closed-dates'
-import { todayYmdHotel } from '@/lib/utils/booking-in-house-dates'
+import { hotelCalendarTodayYmd } from '@/lib/hotel-date'
+import { calendarPickerYmd } from '@/lib/utils/booking-in-house-dates'
 import {
   FolioRemarksAttachmentsField,
   type FolioRemarksAttachmentsValue,
@@ -819,7 +820,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
         return
       }
       const folioId = `FOL-${Date.now().toString(36).toUpperCase()}`
-      const checkInYmd = toLocalDateStr(checkInDate)
+      const checkInYmd = calendarPickerYmd(checkInDate)
 
       const { data: booking, error: be } = await supabase
         .from('bookings')
@@ -828,16 +829,16 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
           guest_id: finalGuestId,
           room_id: selectedRoom.id,
           folio_id: folioId,
-          check_in: toLocalDateStr(checkInDate),
-          check_out: toLocalDateStr(checkOutDate),
+          check_in: checkInYmd,
+          check_out: calendarPickerYmd(checkOutDate),
           number_of_nights: nights,
           rate_per_night: effectiveRate,
           total_amount: total,
           deposit: paidAmount,
           balance: balanceAmount,
           payment_status: isCityLedger ? 'pending' : balanceAmount <= 0 ? 'paid' : 'partial',
-          // Future check-in dates are reservations, today/past are confirmed bookings
-          status: checkInYmd > todayYmdHotel() ? 'reserved' : 'confirmed',
+          // Future check-in dates are reservations; today/past are confirmed bookings
+          status: checkInYmd > hotelCalendarTodayYmd() ? 'reserved' : 'confirmed',
           created_by: user?.id,
           // Store payment method in notes (no payment_method column on bookings table)
           notes: paymentMethod === 'city_ledger'
