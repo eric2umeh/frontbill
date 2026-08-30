@@ -59,6 +59,7 @@ import { outletStockSlug } from "@/lib/outlets/outlet-stock-slug";
 import {
   effectiveStockSource,
   maxSellableQty,
+  parseMenuStockLink,
   resolveOutletItemStock,
 } from "@/lib/outlets/outlet-supply-stock";
 import {
@@ -4428,14 +4429,64 @@ function useSupplyChainImpl() {
       if (!canCountOutletDepartmentStock(actor.role)) {
         return { error: "You do not have permission to count outlet stock" };
       }
-      const existing = barStock.find((b) => b.id === stockId);
-      if (!existing) return { error: "Bar stock item not found" };
+      const id = stockId.trim();
+      if (!id) return { error: "Bar stock item not found" };
       const qty = Math.max(0, Number(quantityOnHand) || 0);
       if (!Number.isFinite(qty)) return { error: "Enter a valid quantity" };
+
+      const findBarIdx = (rows: BarStockItem[]) => {
+        let idx = rows.findIndex((b) => b.id === id);
+        if (idx >= 0) return idx;
+        const storeItemId = id.startsWith("bar-") ? id.slice(4).trim() : id;
+        if (!storeItemId) return -1;
+        return rows.findIndex((b) => b.storeItemId === storeItemId);
+      };
+
+      const existingIdx = findBarIdx(barStock);
+      if (existingIdx >= 0) {
+        const existing = barStock[existingIdx];
+        setBarStock((prev) => {
+          const idx = findBarIdx(prev);
+          if (idx < 0) return prev;
+          return prev.map((b, i) =>
+            i === idx ? { ...b, quantityOnHand: qty } : b,
+          );
+        });
+        markLocalSupplyMutation();
+        setActivityLog((a) =>
+          log(
+            a,
+            "stock_issued_bar",
+            actor,
+            `Bar count: ${existing.name} → ${qty} ${existing.unit}`,
+            existing.id,
+          ),
+        );
+        schedulePersistSnapshots();
+        void persistSnapshotsNow();
+        notifyBarStockChanged();
+        return { ok: true };
+      }
+
+      const storeItemId = id.startsWith("bar-") ? id.slice(4).trim() : id;
+      const store = storeItems.find((s) => s.id === storeItemId);
+      if (!store || !storeItemMatchesDept(store, "main_bar")) {
+        return { error: "Bar stock item not found" };
+      }
+      const canonicalId = canonicalBarStockId(store.id);
       setBarStock((prev) =>
-        prev.map((b) =>
-          b.id === stockId ? { ...b, quantityOnHand: qty } : b,
-        ),
+        normalizeBarStockRows([
+          ...prev,
+          {
+            id: canonicalId,
+            storeItemId: store.id,
+            name: store.name,
+            quantityOnHand: qty,
+            reorderLevel: Math.max(6, store.reorderLevel || 0),
+            unitsPerSale: 1,
+            unit: store.unit,
+          },
+        ]),
       );
       markLocalSupplyMutation();
       setActivityLog((a) =>
@@ -4443,8 +4494,8 @@ function useSupplyChainImpl() {
           a,
           "stock_issued_bar",
           actor,
-          `Bar count: ${existing.name} → ${qty} ${existing.unit}`,
-          stockId,
+          `Bar count: ${store.name} → ${qty} ${store.unit}`,
+          canonicalId,
         ),
       );
       schedulePersistSnapshots();
@@ -4452,7 +4503,7 @@ function useSupplyChainImpl() {
       notifyBarStockChanged();
       return { ok: true };
     },
-    [barStock, schedulePersistSnapshots, persistSnapshotsNow],
+    [barStock, storeItems, schedulePersistSnapshots, persistSnapshotsNow],
   );
 
   /** Placeholder bar rows (qty 0) for every main_bar central-store item — menu sync does not create stock rows. */
@@ -5672,27 +5723,40 @@ function useSupplyChainImpl() {
       }
 
       if (source === "bar") {
-        const stockId = link.stockId || `bar-${outletStockSlug(item.name)}`;
-        const matchedStore = storeItems.find(
-          (s) =>
-            isBarStoreDept(s.dept) &&
-            s.name.trim().toLowerCase() === item.name.trim().toLowerCase(),
-        );
+        const parsed = parseMenuStockLink(item.service_code);
+        const stockId =
+          parsed?.source === "bar" && parsed.stockId
+            ? parsed.stockId
+            : link.stockId || `bar-${outletStockSlug(item.name)}`;
+        const storeItemId = stockId.startsWith("bar-")
+          ? stockId.slice(4).trim()
+          : stockId.trim();
+        const matchedStore =
+          storeItems.find((s) => s.id === storeItemId) ??
+          storeItems.find(
+            (s) =>
+              storeItemMatchesDept(s, "main_bar") &&
+              s.name.trim().toLowerCase() === item.name.trim().toLowerCase(),
+          );
+        const canonicalId = matchedStore
+          ? canonicalBarStockId(matchedStore.id)
+          : stockId;
         const barUnit =
-          barStock.find((b) => b.id === stockId)?.unit ??
+          barStock.find((b) => b.id === canonicalId || b.storeItemId === storeItemId)
+            ?.unit ??
           matchedStore?.unit ??
           "bottle";
-        const serviceCode = `bar:${stockId}`;
+        const serviceCode = `bar:${canonicalId}`;
         const barRow: BarStockItem = {
-          id: stockId,
-          storeItemId: matchedStore?.id ?? `manual-${stockId}`,
-          name: item.name,
+          id: canonicalId,
+          storeItemId: matchedStore?.id ?? `manual-${canonicalId}`,
+          name: matchedStore?.name ?? item.name,
           quantityOnHand: qty,
           reorderLevel: Math.max(6, Math.ceil(qty * 0.2)),
           unitsPerSale: 1,
           unit: barUnit,
         };
-        setBarStock((prev) => upsertBarStockRow(prev, stockId, barRow, qty));
+        setBarStock((prev) => upsertBarStockRow(prev, canonicalId, barRow, qty));
         markLocalSupplyMutation();
         setActivityLog((a) =>
           log(
@@ -5706,7 +5770,7 @@ function useSupplyChainImpl() {
         schedulePersistSnapshots();
         void persistSnapshotsNow();
         notifyBarStockChanged();
-        return { ok: true, stockId, serviceCode, unit: barUnit };
+        return { ok: true, stockId: canonicalId, serviceCode, unit: barUnit };
       }
 
       return { error: "This outlet is not stock-controlled" };
