@@ -1157,15 +1157,29 @@ export function canKickstartOutletStock(
   );
 }
 
-/** Physical count / set on-hand for kitchen finished prep or bar outlet stock. */
+/** Physical count / set on-hand for kitchen finished prep or bar outlet stock. Cashiers are view-only. */
 export function canCountOutletDepartmentStock(
   userRole: string | null | undefined,
 ): boolean {
+  const roleKey = canonicalRoleKey(userRole);
+  if (roleKey === "cashier") return false;
   return (
     canKickstartOutletStock(userRole) ||
     canOperateKitchenProduction(userRole) ||
-    hasPermission(userRole, "outlet:sell") ||
     hasPermission(userRole, "supply:fnb")
+  );
+}
+
+/** Kitchen raw store tab — set on-hand for catalogue kitchen items (chef, admin, superadmin, auditor). */
+export function canCountKitchenRawStock(
+  userRole: string | null | undefined,
+): boolean {
+  const roleKey = canonicalRoleKey(userRole);
+  return (
+    roleKey === "chef" ||
+    roleKey === "admin" ||
+    roleKey === "superadmin" ||
+    roleKey === "auditor"
   );
 }
 
