@@ -19,6 +19,7 @@ export interface RescheduleStayRequestRow {
   from_check_out: string
   to_check_in: string
   to_check_out: string
+  adjustment_date?: string | null
   is_backdate: boolean
   folio_label?: string | null
   guest_label?: string | null
@@ -210,6 +211,12 @@ export function RescheduleStayRequestsTab({ userId }: Props) {
                           {fmtYmd(request.to_check_in)} → {fmtYmd(request.to_check_out)}
                         </span>
                       </p>
+                      {request.adjustment_date && (
+                        <p className="text-sm">
+                          <span className="text-muted-foreground">Adjustment date:</span>{' '}
+                          <span className="font-medium">{fmtYmd(request.adjustment_date)}</span>
+                        </p>
+                      )}
                       <p className="text-sm text-muted-foreground mt-1">Reason: {request.reason}</p>
                       <FolioAttachmentLinks
                         bookingId={request.booking_id}
