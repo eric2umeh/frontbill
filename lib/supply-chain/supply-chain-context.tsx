@@ -4416,9 +4416,11 @@ function useSupplyChainImpl() {
         ),
       );
       schedulePersistSnapshots();
+      void persistSnapshotsNow();
+      notifyBarStockChanged();
       return { ok: true };
     },
-    [barStock, schedulePersistSnapshots],
+    [barStock, schedulePersistSnapshots, persistSnapshotsNow],
   );
 
   /** Placeholder bar rows (qty 0) for every main_bar central-store item — menu sync does not create stock rows. */
@@ -5601,6 +5603,7 @@ function useSupplyChainImpl() {
         setKitchenStock((prev) =>
           upsertKitchenStockRow(prev, stockId, item.name, qty),
         );
+        markLocalSupplyMutation();
         setActivityLog((a) =>
           log(
             a,
@@ -5610,6 +5613,11 @@ function useSupplyChainImpl() {
             stockId,
           ),
         );
+        schedulePersistSnapshots();
+        void persistSnapshotsNow();
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("frontbill:supply-stock-changed"));
+        }
         return { ok: true, stockId, serviceCode, unit: "portion" };
       }
 
@@ -5635,6 +5643,7 @@ function useSupplyChainImpl() {
           unit: barUnit,
         };
         setBarStock((prev) => upsertBarStockRow(prev, stockId, barRow, qty));
+        markLocalSupplyMutation();
         setActivityLog((a) =>
           log(
             a,
@@ -5644,12 +5653,15 @@ function useSupplyChainImpl() {
             stockId,
           ),
         );
+        schedulePersistSnapshots();
+        void persistSnapshotsNow();
+        notifyBarStockChanged();
         return { ok: true, stockId, serviceCode, unit: barUnit };
       }
 
       return { error: "This outlet is not stock-controlled" };
     },
-    [kitchenStock, barStock, storeItems],
+    [kitchenStock, barStock, storeItems, schedulePersistSnapshots, persistSnapshotsNow],
   );
 
   /**
