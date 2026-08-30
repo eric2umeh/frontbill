@@ -36,21 +36,45 @@ export function normalizeBarStockRows(rows: BarStockItem[]): BarStockItem[] {
 
     byStore.set(storeItemId, {
       ...existing,
-      name: existing.name || row.name,
-      unit: existing.unit || row.unit,
+      name: row.name || existing.name,
+      unit: row.unit || existing.unit,
       reorderLevel: Math.max(existing.reorderLevel, row.reorderLevel),
       unitsPerSale: Math.max(1, existing.unitsPerSale || row.unitsPerSale || 1),
-      quantityOnHand: Math.max(existing.quantityOnHand, qty),
+      // Last row wins — avoid Math.max undoing a fresh physical count in the same batch.
+      quantityOnHand: qty,
     })
   }
 
   return Array.from(byStore.values())
 }
 
-/** Merge cloud + local bar stock — use the higher on-hand count when both exist (multi-user POS). */
+function resolveBarStockQty(
+  localQty: number,
+  remoteQty: number,
+  opts?: {
+    preferLocalWhenLower?: boolean
+    preferLocalRecent?: boolean
+    trustLocalBackup?: boolean
+  },
+): number {
+  if (localQty === remoteQty) return localQty
+  if (opts?.preferLocalRecent) return localQty
+  if (opts?.trustLocalBackup && localQty > 0) return localQty
+  if (localQty === 0 && remoteQty > 0) return remoteQty
+  if (remoteQty === 0 && localQty > 0) return localQty
+  if (opts?.preferLocalWhenLower && localQty < remoteQty) return localQty
+  return remoteQty
+}
+
+/** Merge cloud + local bar stock — cloud is source of truth on refresh; local wins briefly after edits. */
 export function mergeBarStockFromRemote(
   local: BarStockItem[],
   remote: BarStockItem[],
+  opts?: {
+    preferLocalWhenLower?: boolean
+    preferLocalRecent?: boolean
+    trustLocalBackup?: boolean
+  },
 ): BarStockItem[] {
   const storeIds = new Set<string>()
   for (const row of [...local, ...remote]) {
@@ -79,7 +103,7 @@ export function mergeBarStockFromRemote(
     )
     const quantityOnHand =
       localMatches.length > 0 && remoteMatches.length > 0
-        ? Math.max(localQty, remoteQty)
+        ? resolveBarStockQty(localQty, remoteQty, opts)
         : localMatches.length > 0
           ? localQty
           : remoteQty

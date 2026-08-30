@@ -127,3 +127,10 @@ export const KITCHEN_WRITE_SNAPSHOT_KEYS = [
   // Do not write org `basket` — that mirrors the store cart and would wipe store
   // draft lines when chef sends a kitchen list concurrently.
 ] as const satisfies readonly SupplySnapshotKey[]
+
+/** Outlet POS roles may upsert bar / kitchen stock after sales (cashier, F&B). */
+export const OUTLET_STOCK_WRITE_SNAPSHOT_KEYS = [
+  'bar_stock',
+  'kitchen_stock',
+  'activity_log',
+] as const satisfies readonly SupplySnapshotKey[]

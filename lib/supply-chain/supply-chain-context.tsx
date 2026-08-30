@@ -228,7 +228,10 @@ function applyRemoteKitchenStockArray(
   if (!Array.isArray(remote)) return false;
   let changed = false;
   setter((prev) => {
-    const merged = mergeKitchenStockFromRemote(prev, remote as KitchenStockItem[]);
+    const preferLocalRecent = Date.now() - lastLocalSupplyMutationAt < 12_000
+    const merged = mergeKitchenStockFromRemote(prev, remote as KitchenStockItem[], {
+      preferLocalRecent,
+    });
     const { stock: reconciled, changed: reconciledChanged } = reconcileKitchenStockWithRecipes(
       getRecipes(),
       merged,
@@ -253,8 +256,12 @@ function applyRemoteBarStockArray(
   if (!Array.isArray(remote)) return false;
   let changed = false;
   setter((prev) => {
+    const recentLocal = Date.now() - lastLocalSupplyMutationAt < 12_000;
     const merged = normalizeBarStockRows(
-      mergeBarStockFromRemote(prev, remote as BarStockItem[]),
+      mergeBarStockFromRemote(prev, remote as BarStockItem[], {
+        preferLocalWhenLower: recentLocal,
+        preferLocalRecent: recentLocal,
+      }),
     );
     try {
       if (JSON.stringify(prev) === JSON.stringify(merged)) return prev;
@@ -712,6 +719,7 @@ function useSupplyChainImpl() {
       await saveSupplySnapshots(userId, payload, orgIdRef.current || undefined);
       broadcastSupplyLiveUpdate();
       if ("bar_stock" in payload) dispatchOrgLiveEvent(ORG_LIVE_SUPPLY);
+      if ("kitchen_stock" in payload) dispatchOrgLiveEvent(ORG_LIVE_SUPPLY);
     } catch (err) {
       // One retry after a short delay (covers brief session refresh races).
       await new Promise((r) => setTimeout(r, 400));
@@ -719,6 +727,7 @@ function useSupplyChainImpl() {
         await saveSupplySnapshots(userId, payload, orgIdRef.current || undefined);
         broadcastSupplyLiveUpdate();
         if ("bar_stock" in payload) dispatchOrgLiveEvent(ORG_LIVE_SUPPLY);
+      if ("kitchen_stock" in payload) dispatchOrgLiveEvent(ORG_LIVE_SUPPLY);
       } catch (err2) {
         if (isRetryableSupplyError(err2)) {
           console.warn("[supply-chain] snapshot sync retryable:", err2);
@@ -775,6 +784,46 @@ function useSupplyChainImpl() {
       } catch (err) {
         if (opts?.required) throw err;
         console.warn("[supply-chain] bar stock sync failed", err);
+      }
+    },
+    [useDbPersistence, userId, role],
+  );
+
+  /** Immediate cloud write for kitchen stock after outlet POS sales (Restaurant, etc.). */
+  const persistKitchenStockSnapshot = useCallback(
+    async (rows: KitchenStockItem[], opts?: { required?: boolean }) => {
+      if (!useDbPersistence) {
+        if (opts?.required) {
+          throw new Error("Cloud sync is unavailable — sign in again and retry.");
+        }
+        return;
+      }
+      if (!dbHydratedRef.current || snapshotSyncSkipRef.current) {
+        if (opts?.required) {
+          throw new Error(
+            "Supply data is still loading — wait a moment and try again.",
+          );
+        }
+        return;
+      }
+      const payload = snapshotsPayloadForRole({ kitchen_stock: rows }, role);
+      if (!("kitchen_stock" in payload)) {
+        if (opts?.required) {
+          throw new Error("Your role cannot save kitchen stock to cloud.");
+        }
+        return;
+      }
+      try {
+        await saveSupplySnapshots(
+          userId,
+          { kitchen_stock: rows },
+          orgIdRef.current || undefined,
+        );
+        broadcastSupplyLiveUpdate();
+        dispatchOrgLiveEvent(ORG_LIVE_SUPPLY);
+      } catch (err) {
+        if (opts?.required) throw err;
+        console.warn("[supply-chain] kitchen stock sync failed", err);
       }
     },
     [useDbPersistence, userId, role],
@@ -972,13 +1021,13 @@ function useSupplyChainImpl() {
         const { stock: mergedKitchenStock, changed: kitchenStockReconciled } =
           reconcileKitchenStockWithRecipes(mergedRecipes, mergedKitchenStockRaw);
         const mergedKitchenRaw = resolveSupplySnapshot(localKitchenRaw, snapshots.kitchen_raw_stock);
+        const remoteBarStock = Array.isArray(snapshots.bar_stock)
+          ? (snapshots.bar_stock as BarStockItem[])
+          : [];
         const mergedBarStock = normalizeBarStockRows(
-          mergeBarStockFromRemote(
-            localBarStock,
-            Array.isArray(snapshots.bar_stock)
-              ? (snapshots.bar_stock as BarStockItem[])
-              : [],
-          ),
+          mergeBarStockFromRemote(localBarStock, remoteBarStock, {
+            trustLocalBackup: true,
+          }),
         );
         const mergedFnbRaw = resolveSupplySnapshot(localFnbRaw, snapshots.fnb_raw_stock);
         const mergedFnbSheets = resolveSupplySnapshot(localFnbSheets, snapshots.fnb_daily_sheets);
@@ -1086,6 +1135,13 @@ function useSupplyChainImpl() {
         }
         if (kitchenStockReconciled && mergedKitchenStock.length) {
           toUpload.kitchen_stock = mergedKitchenStock;
+        }
+        const remoteBarNormalized = normalizeBarStockRows(remoteBarStock);
+        if (
+          mergedBarStock.length &&
+          JSON.stringify(mergedBarStock) !== JSON.stringify(remoteBarNormalized)
+        ) {
+          toUpload.bar_stock = mergedBarStock;
         }
         if (Object.keys(toUpload).length > 0) {
           const rolePayload = snapshotsPayloadForRole(toUpload, role);
@@ -4343,11 +4399,14 @@ function useSupplyChainImpl() {
       if (!existing) return { error: "Kitchen stock item not found" };
       const qty = Math.max(0, Number(availablePortions) || 0);
       if (!Number.isFinite(qty)) return { error: "Enter a valid quantity" };
-      setKitchenStock((prev) =>
-        prev.map((k) =>
+      let nextKitchenStock = kitchenStock;
+      setKitchenStock((prev) => {
+        nextKitchenStock = prev.map((k) =>
           k.id === stockId ? { ...k, availablePortions: qty } : k,
-        ),
-      );
+        );
+        kitchenStockRef.current = nextKitchenStock;
+        return nextKitchenStock;
+      });
       markLocalSupplyMutation();
       const recipe = existing.linkedRecipeId
         ? recipes.find((r) => r.id === existing.linkedRecipeId)
@@ -4381,10 +4440,14 @@ function useSupplyChainImpl() {
         ),
       );
       schedulePersistSnapshots();
-      void persistSnapshotsNow();
+      void persistKitchenStockSnapshot(nextKitchenStock, { required: false }).catch(
+        (err) => {
+          console.warn("[supply-chain] kitchen stock count sync failed", err);
+        },
+      );
       return { ok: true };
     },
-    [kitchenStock, recipes, schedulePersistSnapshots, persistSnapshotsNow],
+    [kitchenStock, recipes, schedulePersistSnapshots, persistKitchenStockSnapshot],
   );
 
   /** Placeholder kitchen raw rows (qty 0) for every kitchen catalogue item; drop non-kitchen rows. */
@@ -4478,11 +4541,11 @@ function useSupplyChainImpl() {
 
   /** Set absolute on-hand qty for a main bar stock row (physical count). Issue-out still adds on top later. */
   const setBarStockOnHand = useCallback(
-    (
+    async (
       stockId: string,
       quantityOnHand: number,
       actor: Actor,
-    ): { ok: true } | { error: string } => {
+    ): Promise<{ ok: true } | { error: string }> => {
       if (!canCountOutletDepartmentStock(actor.role)) {
         return { error: "You do not have permission to count outlet stock" };
       }
@@ -4502,16 +4565,19 @@ function useSupplyChainImpl() {
       const existingIdx = findBarIdx(barStock);
       if (existingIdx >= 0) {
         const existing = barStock[existingIdx];
-        let nextBarStock: BarStockItem[] = barStock;
+        let nextBarStock: BarStockItem[] | null = null;
         setBarStock((prev) => {
           const idx = findBarIdx(prev);
           if (idx < 0) return prev;
-          nextBarStock = prev.map((b, i) =>
-            i === idx ? { ...b, quantityOnHand: qty } : b,
+          nextBarStock = normalizeBarStockRows(
+            prev.map((b, i) =>
+              i === idx ? { ...b, quantityOnHand: qty } : b,
+            ),
           );
           barStockRef.current = nextBarStock;
           return nextBarStock;
         });
+        if (!nextBarStock) return { error: "Bar stock item not found" };
         markLocalSupplyMutation();
         setActivityLog((a) =>
           log(
@@ -4522,14 +4588,16 @@ function useSupplyChainImpl() {
             existing.id,
           ),
         );
-        schedulePersistSnapshots();
-        void persistBarStockSnapshot(nextBarStock, { required: true }).catch((err) => {
-          toast.error(
-            err instanceof Error
-              ? `Bar stock saved locally but not synced: ${err.message}`
-              : "Bar stock saved locally but not synced to cloud — cashiers may not see qty yet",
-          );
-        });
+        try {
+          await persistBarStockSnapshot(nextBarStock, { required: true });
+        } catch (err) {
+          return {
+            error:
+              err instanceof Error
+                ? err.message
+                : "Bar stock saved locally but not synced to cloud",
+          };
+        }
         notifyBarStockChanged();
         return { ok: true };
       }
@@ -4540,7 +4608,7 @@ function useSupplyChainImpl() {
         return { error: "Bar stock item not found" };
       }
       const canonicalId = canonicalBarStockId(store.id);
-      let nextBarStock: BarStockItem[] = barStock;
+      let nextBarStock: BarStockItem[] | null = null;
       setBarStock((prev) => {
         nextBarStock = normalizeBarStockRows([
           ...prev,
@@ -4557,6 +4625,7 @@ function useSupplyChainImpl() {
         barStockRef.current = nextBarStock;
         return nextBarStock;
       });
+      if (!nextBarStock) return { error: "Bar stock item not found" };
       markLocalSupplyMutation();
       setActivityLog((a) =>
         log(
@@ -4567,18 +4636,20 @@ function useSupplyChainImpl() {
           canonicalId,
         ),
       );
-      schedulePersistSnapshots();
-      void persistBarStockSnapshot(nextBarStock, { required: true }).catch((err) => {
-        toast.error(
-          err instanceof Error
-            ? `Bar stock saved locally but not synced: ${err.message}`
-            : "Bar stock saved locally but not synced to cloud — cashiers may not see qty yet",
-        );
-      });
+      try {
+        await persistBarStockSnapshot(nextBarStock, { required: true });
+      } catch (err) {
+        return {
+          error:
+            err instanceof Error
+              ? err.message
+              : "Bar stock saved locally but not synced to cloud",
+        };
+      }
       notifyBarStockChanged();
       return { ok: true };
     },
-    [barStock, storeItems, schedulePersistSnapshots, persistBarStockSnapshot],
+    [barStock, storeItems, persistBarStockSnapshot],
   );
 
   /** Placeholder bar rows (qty 0) for every main_bar central-store item — menu sync does not create stock rows. */
@@ -6014,6 +6085,8 @@ function useSupplyChainImpl() {
       lines: { item: OutletMenuItemRow; qty: number }[],
       actor: Actor,
     ) => {
+      let nextBarStock = barStockRef.current;
+      let nextKitchenStock = kitchenStockRef.current;
       let touchedBar = false;
       let touchedKitchen = false;
       markLocalSupplyMutation();
@@ -6022,39 +6095,45 @@ function useSupplyChainImpl() {
         const link = resolveOutletItemStock(
           line.item,
           department,
-          kitchenStock,
-          barStock,
+          nextKitchenStock,
+          nextBarStock,
         );
         if (!link.tracked || !link.stockId) continue;
         const deduct = Math.max(1, link.portionsPerSale) * line.qty;
         if (link.source === "kitchen") {
           touchedKitchen = true;
-          setKitchenStock((ks) =>
-            ks.map((k) =>
-              k.id === link.stockId
-                ? {
-                    ...k,
-                    availablePortions: Math.max(
-                      0,
-                      k.availablePortions - deduct,
-                    ),
-                  }
-                : k,
-            ),
+          nextKitchenStock = nextKitchenStock.map((k) =>
+            k.id === link.stockId
+              ? {
+                  ...k,
+                  availablePortions: Math.max(
+                    0,
+                    k.availablePortions - deduct,
+                  ),
+                }
+              : k,
           );
         } else {
           touchedBar = true;
-          setBarStock((bs) =>
-            bs.map((b) =>
-              b.id === link.stockId
-                ? {
-                    ...b,
-                    quantityOnHand: Math.max(0, b.quantityOnHand - deduct),
-                  }
-                : b,
-            ),
+          nextBarStock = nextBarStock.map((b) =>
+            b.id === link.stockId
+              ? {
+                  ...b,
+                  quantityOnHand: Math.max(0, b.quantityOnHand - deduct),
+                }
+              : b,
           );
         }
+      }
+
+      if (touchedKitchen) {
+        kitchenStockRef.current = nextKitchenStock;
+        setKitchenStock(nextKitchenStock);
+      }
+      if (touchedBar) {
+        nextBarStock = normalizeBarStockRows(nextBarStock);
+        barStockRef.current = nextBarStock;
+        setBarStock(nextBarStock);
       }
       setActivityLog((a) =>
         log(
@@ -6066,9 +6145,32 @@ function useSupplyChainImpl() {
       );
       if (touchedBar) notifyBarStockChanged();
       if (touchedKitchen) notifyKitchenRawStockChanged();
-      if (touchedBar || touchedKitchen) schedulePersistSnapshots();
+      if (touchedBar || touchedKitchen) {
+        schedulePersistSnapshots();
+        if (touchedBar) {
+          void persistBarStockSnapshot(nextBarStock, { required: false }).catch(
+            (err) => {
+              console.warn("[supply-chain] bar stock deduct sync failed", err);
+            },
+          );
+        }
+        if (touchedKitchen) {
+          void persistKitchenStockSnapshot(nextKitchenStock, {
+            required: false,
+          }).catch((err) => {
+            console.warn(
+              "[supply-chain] kitchen stock deduct sync failed",
+              err,
+            );
+          });
+        }
+      }
     },
-    [kitchenStock, barStock, schedulePersistSnapshots],
+    [
+      schedulePersistSnapshots,
+      persistBarStockSnapshot,
+      persistKitchenStockSnapshot,
+    ],
   );
 
   const draftLines = useMemo(() => {

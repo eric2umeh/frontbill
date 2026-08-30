@@ -1,8 +1,17 @@
 import { canonicalRoleKey, hasPermission } from '@/lib/permissions'
 import {
   KITCHEN_WRITE_SNAPSHOT_KEYS,
+  OUTLET_STOCK_WRITE_SNAPSHOT_KEYS,
   type SupplySnapshotKey,
 } from '@/lib/supply-chain/supply-db-mappers'
+
+export function isOutletOnlyStockRole(role: string | null | undefined): boolean {
+  return (
+    hasPermission(role, 'outlet:sell') &&
+    !hasPermission(role, 'supply:store') &&
+    !hasPermission(role, 'supply:kitchen')
+  )
+}
 
 /** Who may GET org supply snapshots (bar stock, issue log, PO JSON). PUT stays write-gated. */
 export function canReadSupplySnapshots(role: string | null | undefined): boolean {
@@ -48,6 +57,13 @@ export function snapshotsPayloadForRole(
     if ('activity_log' in all) out.activity_log = all.activity_log
     if (hasPermission(role, 'supply:purchasing') && 'basket' in all) {
       out.basket = all.basket
+    }
+    return out
+  }
+  if (isOutletOnlyStockRole(role)) {
+    const out: Partial<Record<SupplySnapshotKey, unknown>> = {}
+    for (const key of OUTLET_STOCK_WRITE_SNAPSHOT_KEYS) {
+      if (key in all) out[key] = all[key]
     }
     return out
   }

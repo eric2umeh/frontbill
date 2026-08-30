@@ -2,7 +2,15 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { canonicalRoleKey, hasPermission } from '@/lib/permissions'
-import { canReadSupplySnapshots } from '@/lib/supply-chain/supply-snapshot-payload'
+import {
+  canReadSupplySnapshots,
+  isOutletOnlyStockRole,
+} from '@/lib/supply-chain/supply-snapshot-payload'
+import {
+  KITCHEN_WRITE_SNAPSHOT_KEYS,
+  OUTLET_STOCK_WRITE_SNAPSHOT_KEYS,
+  SUPPLY_SNAPSHOT_KEYS,
+} from '@/lib/supply-chain/supply-db-mappers'
 
 export type SupplyAuthed = {
   userId: string
@@ -162,26 +170,7 @@ export function requireSupplyPermission(
  * Includes store/kitchen plus PO reviewers (accountant, manager, auditor, admins).
  */
 export function requireSupplyKitchenOrStore(auth: SupplyAuthed): NextResponse | null {
-  if (
-    hasPermission(auth.role, 'supply:store') ||
-    hasPermission(auth.role, 'supply:kitchen') ||
-    hasPermission(auth.role, 'supply:purchasing') ||
-    hasPermission(auth.role, 'supply:approve_accountant') ||
-    hasPermission(auth.role, 'supply:approve_manager') ||
-    hasPermission(auth.role, 'supply:activity')
-  ) {
-    return null
-  }
-  const key = canonicalRoleKey(auth.role)
-  if (
-    key === 'admin' ||
-    key === 'superadmin' ||
-    key === 'manager' ||
-    key === 'accountant' ||
-    key === 'auditor'
-  ) {
-    return null
-  }
+  if (writableSupplySnapshotKeys(auth.role)) return null
   return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 }
 
@@ -196,4 +185,38 @@ export function requireSupplySnapshotRead(auth: SupplyAuthed): NextResponse | nu
 
 export function isKitchenOnlySupplyRole(role: string): boolean {
   return hasPermission(role, 'supply:kitchen') && !hasPermission(role, 'supply:store')
+}
+
+/** Which snapshot keys this role may PUT (null = no write access). */
+export function writableSupplySnapshotKeys(role: string): Set<string> | null {
+  if (hasPermission(role, 'supply:store')) {
+    return new Set(SUPPLY_SNAPSHOT_KEYS)
+  }
+  if (isKitchenOnlySupplyRole(role)) {
+    return new Set(KITCHEN_WRITE_SNAPSHOT_KEYS)
+  }
+  if (isOutletOnlyStockRole(role)) {
+    return new Set(OUTLET_STOCK_WRITE_SNAPSHOT_KEYS)
+  }
+  if (
+    hasPermission(role, 'supply:purchasing') ||
+    hasPermission(role, 'supply:approve_accountant') ||
+    hasPermission(role, 'supply:approve_manager') ||
+    hasPermission(role, 'supply:activity')
+  ) {
+    const keys = new Set<string>(['purchase_orders', 'activity_log'])
+    if (hasPermission(role, 'supply:purchasing')) keys.add('basket')
+    return keys
+  }
+  const key = canonicalRoleKey(role)
+  if (
+    key === 'admin' ||
+    key === 'superadmin' ||
+    key === 'manager' ||
+    key === 'accountant' ||
+    key === 'auditor'
+  ) {
+    return new Set(SUPPLY_SNAPSHOT_KEYS)
+  }
+  return null
 }

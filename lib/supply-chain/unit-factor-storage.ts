@@ -186,3 +186,35 @@ export function convertToStoreUnitsWithFactors(
 
   return null
 }
+
+/** Convert store catalogue qty into the selected entry unit (inverse of convertToStoreUnitsWithFactors). */
+export function convertFromStoreUnitsWithFactors(
+  storeQty: number,
+  toUnit: string,
+  storeUnit: string,
+  factors?: UnitFactorMap,
+): number | null {
+  const to = normalizeMeasurementUnit(toUnit)
+  const store = normalizeMeasurementUnit(storeUnit)
+  if (to === store) return storeQty
+
+  const viaSi = convertQtyBetweenUnits(storeQty, store, to)
+  if (viaSi != null) return viaSi
+
+  const def = unitFactorDefinition(store, to)
+  const defined = def ? factors?.[def.storageKey] : undefined
+  if (typeof defined === 'number' && defined > 0) {
+    return def!.storageKey.startsWith('__per_') ? storeQty / defined : storeQty * defined
+  }
+
+  const perStore = factors?.[to]
+  if (perStore && perStore > 0) return storeQty * perStore
+
+  const perContainer = factors?.[`__per_${to}`]
+  if (perContainer && perContainer > 0) {
+    if (isKitchenMeasureUnit(to)) return storeQty * perContainer
+    return storeQty / perContainer
+  }
+
+  return null
+}

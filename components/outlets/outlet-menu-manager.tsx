@@ -322,7 +322,7 @@ export function OutletMenuManager({ department, categories, items, canManage, ca
     if (link.stockId) {
       const result =
         link.source === 'bar'
-          ? supply.setBarStockOnHand(link.stockId, qty, actor)
+          ? await supply.setBarStockOnHand(link.stockId, qty, actor)
           : supply.setKitchenStockAvailable(link.stockId, qty, actor)
       if ('error' in result) {
         toast.error(result.error || 'Quantity was not saved')

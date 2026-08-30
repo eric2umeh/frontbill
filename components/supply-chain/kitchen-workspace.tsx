@@ -15,7 +15,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { Download, Flame, Pencil, Plus, Trash2 } from 'lucide-react'
+import { Download, Flame, Pencil, Plus, Trash2, Copy } from 'lucide-react'
 import { toast } from 'sonner'
 import { RESPONSIVE_HIDE_MD, RESPONSIVE_HIDE_LG } from '@/lib/ui/responsive-table'
 import { PaginatedListShell } from '@/components/shared/paginated-list-shell'
@@ -25,6 +25,8 @@ import {
   isCompleteQuantityInput,
   defaultUnitForStoreItem,
   formatQuantityDisplay,
+  formatCountInputQty,
+  convertFromStoreUnitsWithFactors,
 } from '@/lib/supply-chain/measurement-units'
 import { KITCHEN_BATCH_UNITS } from '@/lib/supply-chain/conversion-units'
 import {
@@ -360,7 +362,26 @@ export function KitchenWorkspace() {
     return kitchenRawFactorMap[storeItemId] ?? mergeUnitFactors(storeItemId, storeUnit, item?.unitFactors)
   }
 
-  const commitKitchenRawCount = (row: (typeof kitchenStoreRows)[0]) => {
+  const kitchenRawDisplayQty = (
+    row: (typeof kitchenStoreRows)[0],
+    entryUnit: string,
+    factors: UnitFactorMap,
+  ) => {
+    if (entryUnit === row.unit) return formatCountInputQty(row.quantityOnHand)
+    const converted = convertFromStoreUnitsWithFactors(
+      row.quantityOnHand,
+      entryUnit,
+      row.unit,
+      factors,
+    )
+    if (converted == null) return formatCountInputQty(row.quantityOnHand)
+    return formatCountInputQty(converted)
+  }
+
+  const commitKitchenRawCount = (
+    row: (typeof kitchenStoreRows)[0],
+    factorsOverride?: UnitFactorMap,
+  ) => {
     const raw = kitchenRawCountDraft[row.storeItemId] ?? kitchenRawCountDraft[row.id]
     if (raw == null) return
     if (!isCompleteQuantityInput(raw)) {
@@ -373,7 +394,7 @@ export function KitchenWorkspace() {
       return
     }
     const entryUnit = kitchenRawEntryUnit(row)
-    const factors = kitchenRawFactorsFor(row.storeItemId, row.unit)
+    const factors = factorsOverride ?? kitchenRawFactorsFor(row.storeItemId, row.unit)
     if (needsUnitFactor(entryUnit, row.unit, factors)) {
       toast.error(`Set conversion — how many ${entryUnit} in 1 ${row.unit}?`)
       return
@@ -758,7 +779,7 @@ export function KitchenWorkspace() {
                                         value={
                                           kitchenRawCountDraft[row.storeItemId] ??
                                           kitchenRawCountDraft[row.id] ??
-                                          String(row.quantityOnHand)
+                                          kitchenRawDisplayQty(row, entryUnit, factors)
                                         }
                                         onChange={(e) =>
                                           setKitchenRawCountDraft((prev) => ({
@@ -778,15 +799,49 @@ export function KitchenWorkspace() {
                                         units={[...KITCHEN_BATCH_UNITS]}
                                         className="h-8 w-[76px] text-xs shrink-0"
                                         onChange={(u) => {
+                                          const oldUnit = entryUnit
+                                          const rawDraft =
+                                            kitchenRawCountDraft[row.storeItemId] ??
+                                            kitchenRawCountDraft[row.id]
+                                          let storeQty = row.quantityOnHand
+                                          if (rawDraft?.trim()) {
+                                            const parsed = parseQuantityValue(rawDraft)
+                                            if (parsed != null) {
+                                              const asStore = convertToStoreUnitsWithFactors(
+                                                parsed,
+                                                oldUnit,
+                                                row.unit,
+                                                factors,
+                                              )
+                                              if (asStore != null) storeQty = asStore
+                                            }
+                                          }
+                                          const display =
+                                            u === row.unit
+                                              ? storeQty
+                                              : convertFromStoreUnitsWithFactors(
+                                                  storeQty,
+                                                  u,
+                                                  row.unit,
+                                                  factors,
+                                                )
                                           setKitchenRawUnitDraft((prev) => ({
                                             ...prev,
                                             [row.storeItemId]: u,
                                           }))
-                                          const raw =
-                                            kitchenRawCountDraft[row.storeItemId] ??
-                                            kitchenRawCountDraft[row.id] ??
-                                            String(row.quantityOnHand)
-                                          if (raw.trim()) commitKitchenRawCount(row)
+                                          if (display != null) {
+                                            setKitchenRawCountDraft((prev) => ({
+                                              ...prev,
+                                              [row.storeItemId]: formatCountInputQty(display),
+                                            }))
+                                          } else {
+                                            setKitchenRawCountDraft((prev) => {
+                                              const next = { ...prev }
+                                              delete next[row.storeItemId]
+                                              delete next[row.id]
+                                              return next
+                                            })
+                                          }
                                         }}
                                       />
                                     </div>
@@ -805,9 +860,23 @@ export function KitchenWorkspace() {
                                           updateStoreItemDirect(row.storeItemId, { unitFactors: next }, actor)
                                           const raw =
                                             kitchenRawCountDraft[row.storeItemId] ??
-                                            kitchenRawCountDraft[row.id] ??
-                                            String(row.quantityOnHand)
-                                          if (raw.trim()) commitKitchenRawCount(row)
+                                            kitchenRawCountDraft[row.id]
+                                          if (raw?.trim()) {
+                                            commitKitchenRawCount(row, next)
+                                            return
+                                          }
+                                          const display = convertFromStoreUnitsWithFactors(
+                                            row.quantityOnHand,
+                                            entryUnit,
+                                            row.unit,
+                                            next,
+                                          )
+                                          if (display != null) {
+                                            setKitchenRawCountDraft((prev) => ({
+                                              ...prev,
+                                              [row.storeItemId]: formatCountInputQty(display),
+                                            }))
+                                          }
                                         }}
                                       />
                                     )}
@@ -817,7 +886,7 @@ export function KitchenWorkspace() {
                                           parseQuantityValue(
                                             kitchenRawCountDraft[row.storeItemId] ??
                                               kitchenRawCountDraft[row.id] ??
-                                              String(row.quantityOnHand),
+                                              kitchenRawDisplayQty(row, entryUnit, factors),
                                           ) ?? row.quantityOnHand,
                                           entryUnit,
                                           row.unit,
@@ -1225,6 +1294,18 @@ export function KitchenWorkspace() {
                 <div className="flex flex-wrap gap-2">
                   {canManageBatchStandards && (
                     <>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="gap-1"
+                        asChild
+                      >
+                        <Link href={`/supply/kitchen/new?duplicateFrom=${encodeURIComponent(r.id)}`}>
+                          <Copy className="h-3.5 w-3.5" />
+                          Duplicate
+                        </Link>
+                      </Button>
                       <Button
                         type="button"
                         variant="outline"
