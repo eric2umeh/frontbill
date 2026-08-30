@@ -678,13 +678,6 @@ export function OutletMenuManager({ department, categories, items, canManage, ca
           Admins can create categories such as Membership, Day Pass, and set prices per plan.
         </p>
       )}
-      {['restaurant', 'main_bar', 'pool_bar', 'banquets'].includes(department) && (
-        <p className="text-sm text-muted-foreground rounded-lg border border-sky-200 bg-sky-50/70 dark:bg-sky-950/20 px-3 py-2">
-          Items like <strong>Rice only</strong> or other extras that are priced with a main plate do not need a
-          fixed menu price. Turn on <strong>Flexible price at POS</strong> for that item (or its category), set
-          list price to ₦0, and the cashier enters the amount when ordering.
-        </p>
-      )}
       {!canManage && !canEditMenuPricing && (
         <p className="text-sm text-muted-foreground rounded-lg border bg-muted/40 px-3 py-2">
           {department === 'main_bar'
