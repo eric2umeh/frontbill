@@ -465,9 +465,10 @@ export function KitchenWorkspace() {
         <TabsContent value="stock" className="mt-4">
         <div>
           <p className="text-sm text-muted-foreground mb-3">
-            Finished Menu items increase when a production run is closed. Tap{' '}
-            <strong className="text-foreground">Available</strong> to set a physical count; closing
-            a batch adds portions on top of that number.
+            Only batch standards from <strong className="text-foreground">All Batches</strong> appear
+            here. Portions increase when a production run is closed. Tap{' '}
+            <strong className="text-foreground">Available</strong> to set a physical count; closing a
+            batch adds portions on top of that number.
           </p>
           <PaginatedListShell
             items={kitchenStock}
@@ -1089,8 +1090,9 @@ export function KitchenWorkspace() {
             <DialogTitle>Delete batch standard?</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
-            This removes the batch standard and linked finished-stock row. Production records for this
-            batch will also be removed. This cannot be undone.
+            This removes the batch standard, linked finished-stock row, and Restaurant menu listing
+            (when synced). Production records for this batch will also be removed. This cannot be
+            undone.
           </p>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDeleteRecipeId(null)}>
