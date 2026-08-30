@@ -83,6 +83,11 @@ export type PaymentReceiptPayload = PaymentReceiptBranding & {
   folioContextLines?: string[] | null;
   /** Outstanding folio balance after this payment (when known). */
   balanceRemaining?: number | null;
+  /** Guest stay range after any approved date changes. */
+  stayCheckInLabel?: string | null;
+  stayCheckOutLabel?: string | null;
+  /** When set, shown on receipt for backdated move-dates. */
+  adjustmentDateLabel?: string | null;
 };
 
 export function defaultPaymentRemark(): string {
@@ -157,6 +162,13 @@ function oneReceiptBlock(p: PaymentReceiptPayload): string {
     ctxLines.length > 0
       ? `<div class="words" style="margin-top:8px;"><span class="label">Folio activity (room, add-on and extension charges):</span>${ctxLines.map((l) => `<div style="margin-top:3px;padding-left:8px;">• ${l}</div>`).join("")}</div>`
       : "";
+  const stayBlock =
+    p.stayCheckInLabel && p.stayCheckOutLabel
+      ? `<div style="margin-top:6px;font-size:12px;"><span class="label">Stay:</span> ${escapeHtml(p.stayCheckInLabel)} – ${escapeHtml(p.stayCheckOutLabel)}</div>`
+      : "";
+  const adjBlock = p.adjustmentDateLabel
+    ? `<div style="margin-top:4px;font-size:12px;"><span class="label">Date:</span> ${escapeHtml(p.adjustmentDateLabel)}</div>`
+    : "";
 
   return `
     <div class="block">
@@ -175,6 +187,8 @@ function oneReceiptBlock(p: PaymentReceiptPayload): string {
         </div>
       </div>
       <div class="hr"></div>
+      ${stayBlock}
+      ${adjBlock}
       ${ctxBlock}
       ${svc ? `<div class="pay-row"><span class="label">Service / folio line:</span><span style="text-align:right;max-width:65%;">${svc}</span></div>` : ""}
       <div class="pay-row">
