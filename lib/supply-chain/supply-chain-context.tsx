@@ -4163,6 +4163,38 @@ function useSupplyChainImpl() {
       setStoreItems((prev) =>
         prev.map((s) => (s.id === itemId ? nextItem : s)),
       );
+      const unitChanged =
+        input.unit != null && input.unit.trim() !== existing.unit.trim();
+      const nameChanged =
+        input.name != null && toTitleCaseWords(input.name) !== existing.name;
+      if (
+        storeItemMatchesDept(nextItem, "main_bar") &&
+        (unitChanged || nameChanged)
+      ) {
+        const barId = canonicalBarStockId(itemId);
+        setBarStock((prev) => {
+          const idx = prev.findIndex(
+            (b) => b.id === barId || b.storeItemId === itemId,
+          );
+          if (idx < 0) return prev;
+          const row = prev[idx];
+          if (row.name === nextItem.name && row.unit === nextItem.unit) {
+            return prev;
+          }
+          const next = [...prev];
+          next[idx] = {
+            ...row,
+            id: barId,
+            storeItemId: itemId,
+            name: nextItem.name,
+            unit: nextItem.unit,
+          };
+          return normalizeBarStockRows(next);
+        });
+        notifyBarStockChanged();
+        schedulePersistSnapshots();
+        void persistSnapshotsNow();
+      }
       markLocalSupplyMutation();
       setActivityLog((a) =>
         log(a, "stock_received", actor, `Updated store item: ${name}`, itemId),
@@ -4190,7 +4222,7 @@ function useSupplyChainImpl() {
       }
       return { ok: true };
     },
-    [storeItems, useDbPersistence, userId],
+    [storeItems, useDbPersistence, userId, schedulePersistSnapshots, persistSnapshotsNow],
   );
 
   /** Instant stock-count override of on-hand qty (Store role UI only). */
@@ -4432,20 +4464,38 @@ function useSupplyChainImpl() {
       let changed = false;
       for (const store of mainBarItems) {
         const id = canonicalBarStockId(store.id);
-        const exists = next.some(
+        const idx = next.findIndex(
           (b) => b.id === id || b.storeItemId === store.id,
         );
-        if (exists) continue;
-        next.push({
-          id,
-          storeItemId: store.id,
-          name: store.name,
-          quantityOnHand: 0,
-          reorderLevel: Math.max(6, store.reorderLevel || 0),
-          unitsPerSale: 1,
-          unit: store.unit,
-        });
-        changed = true;
+        if (idx < 0) {
+          next.push({
+            id,
+            storeItemId: store.id,
+            name: store.name,
+            quantityOnHand: 0,
+            reorderLevel: Math.max(6, store.reorderLevel || 0),
+            unitsPerSale: 1,
+            unit: store.unit,
+          });
+          changed = true;
+          continue;
+        }
+        const row = next[idx];
+        if (
+          row.name !== store.name ||
+          row.unit !== store.unit ||
+          row.id !== id ||
+          row.storeItemId !== store.id
+        ) {
+          next[idx] = {
+            ...row,
+            id,
+            storeItemId: store.id,
+            name: store.name,
+            unit: store.unit,
+          };
+          changed = true;
+        }
       }
       return changed ? normalizeBarStockRows(next) : prev;
     });
