@@ -43,6 +43,7 @@ import {
 } from "@/lib/booking/parse-booking-notes";
 import { paymentMethodRequiresAccount } from "@/lib/payments/payment-accounts";
 import { enrichBookingsList } from "@/lib/booking/enrich-bookings-list";
+import { ORG_LIVE_BOOKINGS } from "@/lib/live/org-live-events";
 import {
   TABLE_ACTIONS_ROW,
   TABLE_STACKED_CELL,
@@ -830,6 +831,22 @@ export default function BookingsPage() {
     }
     fetchBookings();
   }, [organizationId, userId, fetchBookings, endFetch]);
+
+  useEffect(() => {
+    if (!organizationId) return;
+    const onLiveBookings = () => {
+      void fetchBookings();
+      void refreshRoomStats(stayDateYmd ?? frontOfficeToday);
+    };
+    window.addEventListener(ORG_LIVE_BOOKINGS, onLiveBookings);
+    return () => window.removeEventListener(ORG_LIVE_BOOKINGS, onLiveBookings);
+  }, [
+    organizationId,
+    fetchBookings,
+    refreshRoomStats,
+    stayDateYmd,
+    frontOfficeToday,
+  ]);
 
   useEffect(() => {
     if (!organizationId) return;

@@ -34,10 +34,6 @@ export function createClient() {
       },
     })
 
-    if (process.env.NODE_ENV === 'production') {
-      client.removeAllChannels()
-    }
-
     return client
   } catch (error) {
     console.error('Failed to create Supabase client:', error)

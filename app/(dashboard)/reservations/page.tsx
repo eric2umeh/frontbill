@@ -13,6 +13,7 @@ import { PageLoadingState } from '@/components/loading-screen'
 import { usePageData } from '@/hooks/use-page-data'
 import { useAuth } from '@/lib/auth-context'
 import { hasPermission } from '@/lib/permissions'
+import { ORG_LIVE_BOOKINGS } from '@/lib/live/org-live-events'
 import { Plus, Users, DoorOpen, CalendarClock, Banknote, Receipt } from 'lucide-react'
 import { CompactStatBadgeRow } from '@/components/shared/compact-stat-badges'
 import { BulkBookingModal } from '@/components/reservations/bulk-booking-modal'
@@ -121,6 +122,15 @@ export default function ReservationsPage() {
 
   useEffect(() => {
     fetchReservations()
+  }, [organizationId])
+
+  useEffect(() => {
+    if (!organizationId) return
+    const onLive = () => {
+      void fetchReservations()
+    }
+    window.addEventListener(ORG_LIVE_BOOKINGS, onLive)
+    return () => window.removeEventListener(ORG_LIVE_BOOKINGS, onLive)
   }, [organizationId])
 
   useEffect(() => {
