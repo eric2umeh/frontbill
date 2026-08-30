@@ -64,6 +64,17 @@ export function formatLastRescheduleFromNotes(notes: string): string | null {
   return `${fmt(match[1])} → ${fmt(match[2])}`
 }
 
+/** Most recent adjustment date from a stay reschedule note line. */
+export function parseLastAdjustmentDateFromNotes(notes?: string | null): string | null {
+  const raw = String(notes || '').trim()
+  if (!raw) return null
+  const lines = raw.split('\n').filter((line) => /stay rescheduled/i.test(line))
+  if (!lines.length) return null
+  const last = lines[lines.length - 1]
+  const match = last.match(/\(adjustment date:\s*(\d{4}-\d{2}-\d{2})\)/i)
+  return match ? match[1] : null
+}
+
 export function formatBookingPaymentMethodLabel(method: string | null | undefined): string {
   const m = normalizePaymentMethodKey(method)
   if (m === 'pos' || m === 'card') return 'POS'
