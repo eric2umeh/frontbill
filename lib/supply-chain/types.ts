@@ -478,6 +478,8 @@ export interface Recipe {
   fnbEligible?: boolean
   /** ISO timestamp — used to keep the newest recipe when merging local + remote. */
   updatedAt?: string
+  /** Soft-delete tombstone — kept in snapshots so cloud merge does not resurrect the batch. */
+  deletedAt?: string
   /** Optional method / serving notes for kitchen staff. */
   description?: string
 }
@@ -636,6 +638,8 @@ export interface KitchenStockItem {
   unit?: string
   reorderLevel: number
   linkedRecipeId?: string
+  /** Soft-delete tombstone — kept in snapshots so cloud merge does not resurrect the row. */
+  deletedAt?: string
 }
 
 /** Flexible store → kitchen issue: raw qty in, portions out (yield varies by batch). */
