@@ -333,7 +333,7 @@ export function KitchenWorkspace() {
       ) : (
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList className="flex h-auto flex-wrap">
-          <TabsTrigger value="stock">Finished / Prep Stock</TabsTrigger>
+          <TabsTrigger value="stock">Finished Menu</TabsTrigger>
           <TabsTrigger value="raw-stock">Raw from Store</TabsTrigger>
           <TabsTrigger value="production">Production Records</TabsTrigger>
           <TabsTrigger value="recipes">All Batches</TabsTrigger>
@@ -465,7 +465,7 @@ export function KitchenWorkspace() {
         <TabsContent value="stock" className="mt-4">
         <div>
           <p className="text-sm text-muted-foreground mb-3">
-            Finished dishes and prep stock increase when a production run is closed. Tap{' '}
+            Finished Menu items increase when a production run is closed. Tap{' '}
             <strong className="text-foreground">Available</strong> to set a physical count; closing
             a batch adds portions on top of that number.
           </p>
@@ -587,7 +587,7 @@ export function KitchenWorkspace() {
         <div>
           <p className="text-sm text-muted-foreground rounded-lg border bg-muted/30 px-3 py-2 mb-4">
             <strong className="text-foreground">Production records</strong> are chef production runs
-            opened from All Batches. Raw stock deducts and finished stock updates when a run is closed.
+            opened from All Batches. Raw stock deducts and Finished Menu updates when a run is closed.
           </p>
           <PaginatedListShell
             items={batches}
@@ -1001,7 +1001,7 @@ export function KitchenWorkspace() {
               <>
                 <p className="text-sm text-muted-foreground">
                   Closes this production run and deducts raw materials from kitchen stock. {portions}{' '}
-                  {closeBatchRecipe?.yieldUnit || 'portion'} are added to finished/prep stock when you close.
+                  {closeBatchRecipe?.yieldUnit || 'portion'} are added to Finished Menu when you close.
                 </p>
                 <div className="space-y-3">
                   <div className="space-y-2">
@@ -1068,7 +1068,7 @@ export function KitchenWorkspace() {
                         }
                       } else {
                         toast.success(
-                          `${actual} ${unit} added to finished/prep stock (not listed on outlet POS)`,
+                          `${actual} ${unit} added to Finished Menu (not listed on outlet POS)`,
                         )
                       }
                       setCloseDialog(null)
