@@ -58,6 +58,7 @@ import {
 } from '@/lib/supply-chain/batch-outlet-sync'
 import { syncBatchToRestaurantOutlet } from '@/lib/supply-chain/sync-restaurant-outlet'
 import { KITCHEN_BATCH_UNITS } from '@/lib/supply-chain/conversion-units'
+import { kitchenBatchDraftFromRecipe } from '@/lib/supply-chain/kitchen-batch-duplicate'
 
 type IngredientSearchItem =
   | { source: 'raw'; id: string; name: string; unit: string; lastPrice: number; stockOnHand: number }
@@ -93,11 +94,18 @@ function applyKitchenBatchDraft(draft: KitchenBatchDraft) {
 type Props = {
   /** When set, builder edits an existing batch standard instead of creating new. */
   editRecipeId?: string | null
+  /** Pre-fill new batch form from an existing standard (duplicate flow). */
+  duplicateFromRecipeId?: string | null
   onSaved?: () => void
   onCancel?: () => void
 }
 
-export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props = {}) {
+export function KitchenBatchBuilder({
+  editRecipeId,
+  duplicateFromRecipeId,
+  onSaved,
+  onCancel,
+}: Props = {}) {
   const { name, role } = useAuth()
   const {
     storeItems,
@@ -139,6 +147,8 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
   })
   /** Only hydrate edit form once per recipe id — recipes poll must not restore deleted lines. */
   const hydratedEditRecipeIdRef = useRef<string | null>(null)
+  /** Only hydrate duplicate draft once per source recipe id. */
+  const hydratedDuplicateFromRef = useRef<string | null>(null)
   /** After save/reset, skip persisting the outgoing form back to localStorage. */
   const skipDraftPersistRef = useRef(false)
 
@@ -221,10 +231,28 @@ export function KitchenBatchBuilder({ editRecipeId, onSaved, onCancel }: Props =
   }, [editRecipeId])
 
   useLayoutEffect(() => {
-    if (editRecipeId) return
+    if (editRecipeId || duplicateFromRecipeId) return
     applyDraftToForm(loadKitchenBatchDraft())
     setDraftLoaded(true)
-  }, [editRecipeId, applyDraftToForm])
+  }, [editRecipeId, duplicateFromRecipeId, applyDraftToForm])
+
+  useLayoutEffect(() => {
+    if (editRecipeId || !duplicateFromRecipeId) return
+    if (hydratedDuplicateFromRef.current === duplicateFromRecipeId) return
+
+    const recipe = recipes.find((r) => r.id === duplicateFromRecipeId)
+    if (!recipe) return
+
+    hydratedDuplicateFromRef.current = duplicateFromRecipeId
+    skipDraftPersistRef.current = true
+    clearKitchenBatchDraft()
+    const draft = kitchenBatchDraftFromRecipe(recipe)
+    persistKitchenBatchDraft(draft, { force: true })
+    applyDraftToForm(draft)
+    setDraftLoaded(true)
+    skipDraftPersistRef.current = false
+    toast.success(`Copied from "${recipe.name}" — rename and save as a new batch`)
+  }, [editRecipeId, duplicateFromRecipeId, recipes, applyDraftToForm])
 
   useLayoutEffect(() => {
     if (!editRecipeId) {

@@ -15,7 +15,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { Download, Flame, Pencil, Plus, Trash2 } from 'lucide-react'
+import { Download, Flame, Pencil, Plus, Trash2, Copy } from 'lucide-react'
 import { toast } from 'sonner'
 import { RESPONSIVE_HIDE_MD, RESPONSIVE_HIDE_LG } from '@/lib/ui/responsive-table'
 import { PaginatedListShell } from '@/components/shared/paginated-list-shell'
@@ -1294,6 +1294,18 @@ export function KitchenWorkspace() {
                 <div className="flex flex-wrap gap-2">
                   {canManageBatchStandards && (
                     <>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="gap-1"
+                        asChild
+                      >
+                        <Link href={`/supply/kitchen/new?duplicateFrom=${encodeURIComponent(r.id)}`}>
+                          <Copy className="h-3.5 w-3.5" />
+                          Duplicate
+                        </Link>
+                      </Button>
                       <Button
                         type="button"
                         variant="outline"
