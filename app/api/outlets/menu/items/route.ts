@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { resolveOutletAuthed, resolveOutletMenuManage } from '@/lib/outlets/api-auth'
-import { canAccessOutletDepartment } from '@/lib/outlets/access'
-import { isOutletDepartmentKey } from '@/lib/outlets/departments'
+import { canAccessOutletDepartment, canManageOutletMenu } from '@/lib/outlets/access'
+import { isOutletDepartmentKey, type OutletDepartmentKey } from '@/lib/outlets/departments'
 import { normalizeOutletItemTags } from '@/lib/outlets/item-display'
 import { insertOutletMenuItem, updateOutletMenuItem } from '@/lib/outlets/menu-db-write'
 
@@ -33,13 +33,17 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const auth = await resolveOutletMenuManage(request)
-  if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status })
-
   const body = await request.json().catch(() => ({}))
   const department = body?.department as string
+  if (!isOutletDepartmentKey(department)) {
+    return NextResponse.json({ error: 'department required' }, { status: 400 })
+  }
+
+  const auth = await resolveOutletMenuManage(request, { department })
+  if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status })
+
   const name = String(body?.name || '').trim()
-  if (!isOutletDepartmentKey(department) || !name) {
+  if (!name) {
     return NextResponse.json({ error: 'department and name required' }, { status: 400 })
   }
   if (department === 'restaurant') {
@@ -83,7 +87,7 @@ export async function POST(request: Request) {
 }
 
 export async function PATCH(request: Request) {
-  const auth = await resolveOutletMenuManage(request)
+  const auth = await resolveOutletAuthed(request, { permission: 'outlet:view' })
   if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status })
 
   const body = await request.json().catch(() => ({}))
@@ -101,6 +105,17 @@ export async function PATCH(request: Request) {
   if (fe || !existing) return NextResponse.json({ error: 'Item not found' }, { status: 404 })
   if (!canAccessOutletDepartment(auth.ctx.role, existing.department)) {
     return NextResponse.json({ error: 'No access' }, { status: 403 })
+  }
+  if (!canManageOutletMenu(auth.ctx.role, existing.department as OutletDepartmentKey)) {
+    return NextResponse.json(
+      {
+        error:
+          existing.department === 'main_bar'
+            ? 'Only Superadmin or Administrator can change the Main Bar menu'
+            : 'Only F&B, Superadmin, Administrator, or Manager can change the outlet menu',
+      },
+      { status: 403 },
+    )
   }
 
   const patch: Record<string, unknown> = { updated_by: auth.ctx.userId, updated_at: new Date().toISOString() }
@@ -121,7 +136,7 @@ export async function PATCH(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  const auth = await resolveOutletMenuManage(request)
+  const auth = await resolveOutletAuthed(request, { permission: 'outlet:view' })
   if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status })
 
   const id = new URL(request.url).searchParams.get('id')?.trim()
@@ -138,6 +153,17 @@ export async function DELETE(request: Request) {
   if (fe || !existing) return NextResponse.json({ error: 'Item not found' }, { status: 404 })
   if (!canAccessOutletDepartment(auth.ctx.role, existing.department)) {
     return NextResponse.json({ error: 'No access' }, { status: 403 })
+  }
+  if (!canManageOutletMenu(auth.ctx.role, existing.department as OutletDepartmentKey)) {
+    return NextResponse.json(
+      {
+        error:
+          existing.department === 'main_bar'
+            ? 'Only Superadmin or Administrator can change the Main Bar menu'
+            : 'Only F&B, Superadmin, Administrator, or Manager can change the outlet menu',
+      },
+      { status: 403 },
+    )
   }
 
   const { error } = await admin.from('outlet_menu_items').delete().eq('id', id)

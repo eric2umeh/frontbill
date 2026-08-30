@@ -38,7 +38,7 @@ export default function ReportsPage() {
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight shrink-0">Reports</h1>
           <TabsList className="flex flex-wrap h-auto gap-1 justify-start lg:justify-end">
             <TabsTrigger value="revenue" className="gap-1.5 text-xs sm:text-sm">
-              <FileBarChart className="h-4 w-4" />
+            <FileBarChart className="h-4 w-4" />
               Revenue &amp; sales
             </TabsTrigger>
             <TabsTrigger value="ledger" className="gap-1.5 text-xs sm:text-sm">
@@ -48,20 +48,20 @@ export default function ReportsPage() {
             <TabsTrigger value="accountant-charges" className="gap-1.5 text-xs sm:text-sm">
               <PieChart className="h-4 w-4" />
               Charge summary
-            </TabsTrigger>
+          </TabsTrigger>
             <TabsTrigger value="occupancy" className="gap-1.5 text-xs sm:text-sm">
-              <BedDouble className="h-4 w-4" />
-              Occupancy
-            </TabsTrigger>
+            <BedDouble className="h-4 w-4" />
+            Occupancy
+          </TabsTrigger>
             <TabsTrigger value="daily-expenditure" className="gap-1.5 text-xs sm:text-sm">
               <TrendingDown className="h-4 w-4" />
               Expenditure
-            </TabsTrigger>
+          </TabsTrigger>
             <TabsTrigger value="monthly-pl" className="gap-1.5 text-xs sm:text-sm">
               <Scale className="h-4 w-4" />
               Monthly P&amp;L
-            </TabsTrigger>
-          </TabsList>
+          </TabsTrigger>
+        </TabsList>
         </div>
 
         <TabsContent value="revenue" className="mt-0">

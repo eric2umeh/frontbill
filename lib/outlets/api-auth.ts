@@ -72,7 +72,7 @@ export async function resolveOutletAuthed(
   }
 }
 
-/** Auth for POST/PATCH/DELETE on outlet menu — F&B, superadmin, admin, manager. */
+/** Auth for POST/PATCH/DELETE on outlet menu — F&B, superadmin, admin, manager; Main Bar admin/superadmin only. */
 export async function resolveOutletMenuManage(
   request: Request,
   opts?: { department?: string },
@@ -82,7 +82,23 @@ export async function resolveOutletMenuManage(
     department: opts?.department,
   })
   if ('error' in auth) return auth
-  if (!canManageOutletMenu(auth.ctx.role)) {
+
+  const dept =
+    opts?.department && isOutletDepartmentKey(opts.department)
+      ? opts.department
+      : undefined
+
+  if (dept && !canManageOutletMenu(auth.ctx.role, dept)) {
+    return {
+      error:
+        dept === 'main_bar'
+          ? 'Only Superadmin or Administrator can change the Main Bar menu'
+          : 'Only F&B, Superadmin, Administrator, or Manager can change the outlet menu',
+      status: 403,
+    }
+  }
+
+  if (!dept && !canManageOutletMenu(auth.ctx.role)) {
     return {
       error: 'Only F&B, Superadmin, Administrator, or Manager can change the outlet menu',
       status: 403,

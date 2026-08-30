@@ -544,8 +544,8 @@ export default function BookingsPage() {
         // Derive payment method / account from notes (may include reschedule history on later lines).
         let bookingsWithUsers = (data || []).map((booking: any) => {
           const notesMeta = parseBookingNotesMeta(booking.notes);
-          return {
-            ...booking,
+        return {
+          ...booking,
             _db_balance: Number(booking.balance ?? 0),
             ...notesMeta,
             guestName: booking.guests?.name || "",
@@ -569,7 +569,7 @@ export default function BookingsPage() {
         }
 
         const bookingIds = bookingsWithUsers.map((b: any) => b.id);
-        if (bookingIds.length > 0) {
+      if (bookingIds.length > 0) {
           if (enrich) {
             await enrichBookingsList(
               supabase,
@@ -739,7 +739,7 @@ export default function BookingsPage() {
               ? `Search catalog failed: ${detail}`
               : "Search catalog failed"),
         );
-      } finally {
+    } finally {
         setCatalogLoading(false);
       }
     },
@@ -1252,16 +1252,16 @@ export default function BookingsPage() {
       />
       {selectedBooking && (
         <>
-          <ExtendStayModal
-            open={extendModalOpen}
+          <ExtendStayModal 
+            open={extendModalOpen} 
             onClose={() => {
               setExtendModalOpen(false);
               fetchBookings();
             }}
             booking={selectedBooking}
           />
-          <AddChargeModal
-            open={addChargeModalOpen}
+          <AddChargeModal 
+            open={addChargeModalOpen} 
             onClose={() => {
               setAddChargeModalOpen(false);
               fetchBookings();
@@ -1270,7 +1270,7 @@ export default function BookingsPage() {
           />
         </>
       )}
-
+      
       <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between lg:gap-3">
         <div className="min-w-0">
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight shrink-0">
@@ -1384,10 +1384,10 @@ export default function BookingsPage() {
                 onClick={() => setModalOpen(true)}
               >
                 <Plus className="mr-1 h-3.5 w-3.5" />
-                New Booking
-              </Button>
+            New Booking
+          </Button>
             </>
-          )}
+        )}
         </div>
       </div>
 
@@ -1543,16 +1543,16 @@ export default function BookingsPage() {
                       Due out today
                     </Badge>
                   )}
-                </div>
+              </div>
                 <div className="text-xs text-muted-foreground max-md:hidden">
                   {booking.guests?.phone}
                 </div>
                 <MobileTableSubdetail>
-                  <div>
+              <div>
                     {booking.is_bulk
                       ? `${booking.room_count} rooms`
                       : `Rm ${booking.rooms?.room_number ?? "—"} · ${booking.rooms?.room_type ?? ""}`}
-                  </div>
+              </div>
                   <div>
                     {formatShortStayDates(booking.check_in, booking.check_out)}
                   </div>
@@ -1644,7 +1644,7 @@ export default function BookingsPage() {
                       Overdue
                     </Badge>
                   )}
-                </div>
+              </div>
               );
             },
           },
@@ -1715,7 +1715,7 @@ export default function BookingsPage() {
                       {accountLabel}
                     </span>
                   ) : null}
-                </div>
+              </div>
               );
             },
           },
@@ -1867,7 +1867,7 @@ export default function BookingsPage() {
                     >
                       Group
                     </Button>
-                  </div>
+              </div>
                 );
               }
 
@@ -1887,12 +1887,12 @@ export default function BookingsPage() {
                   onClick={(e) => e.stopPropagation()}
                 >
                   {showReserveRow && canCheckInReserved && (
-                    <Button
-                      size="sm"
-                      variant="outline"
+                <Button 
+                  size="sm" 
+                  variant="outline"
                       title="Check in — pick room when guest arrives"
                       className="h-7 px-2 text-[11px] leading-tight whitespace-nowrap text-green-700 border-green-200 hover:bg-green-50"
-                      onClick={(e) => {
+                  onClick={(e) => {
                         e.stopPropagation();
                         openReserveCheckIn(booking);
                       }}
@@ -1931,48 +1931,48 @@ export default function BookingsPage() {
                             className="h-7 px-2 text-[11px] leading-tight whitespace-nowrap"
                             onClick={(e) => {
                               e.stopPropagation();
-                              setSelectedBooking({
-                                id: booking.id,
-                                folioId: booking.folio_id,
-                                guestName: booking.guests?.name,
-                                guestId: booking.guest_id,
-                                room: `Room ${booking.rooms?.room_number}`,
-                                currentCheckOut: booking.check_out,
-                                ratePerNight: booking.rate_per_night,
-                                organization_id: booking.organization_id,
+                    setSelectedBooking({
+                      id: booking.id,
+                      folioId: booking.folio_id,
+                      guestName: booking.guests?.name,
+                      guestId: booking.guest_id,
+                      room: `Room ${booking.rooms?.room_number}`,
+                      currentCheckOut: booking.check_out,
+                      ratePerNight: booking.rate_per_night,
+                      organization_id: booking.organization_id,
                                 created_by: booking.created_by,
                               });
                               setAddChargeModalOpen(true);
                             }}
                           >
                             Charge
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
+                </Button>
+                <Button 
+                  size="sm" 
+                  variant="outline"
                             title="Extend stay"
                             className="h-7 px-2 text-[11px] leading-tight whitespace-nowrap"
-                            onClick={(e) => {
+                  onClick={(e) => {
                               e.stopPropagation();
-                              setSelectedBooking({
-                                id: booking.id,
-                                folioId: booking.folio_id,
-                                guestName: booking.guests?.name,
-                                guestId: booking.guest_id,
-                                room: `Room ${booking.rooms?.room_number}`,
-                                currentCheckOut: booking.check_out,
+                    setSelectedBooking({
+                      id: booking.id,
+                      folioId: booking.folio_id,
+                      guestName: booking.guests?.name,
+                      guestId: booking.guest_id,
+                      room: `Room ${booking.rooms?.room_number}`,
+                      currentCheckOut: booking.check_out,
                                 check_in: booking.check_in,
-                                ratePerNight: booking.rate_per_night,
-                                organization_id: booking.organization_id,
+                      ratePerNight: booking.rate_per_night,
+                      organization_id: booking.organization_id,
                                 created_by: booking.created_by,
                                 status: booking.status,
                                 folio_status: booking.folio_status,
                               });
                               setExtendModalOpen(true);
-                            }}
-                          >
-                            Extend Stay
-                          </Button>
+                  }}
+                >
+                  Extend Stay
+                </Button>
                         </>
                       )}
                       {!manualCheckoutEligible(
@@ -2030,7 +2030,7 @@ export default function BookingsPage() {
                   <div className="font-semibold truncate">{booking.guests?.name}</div>
                   <div className="text-sm text-muted-foreground">
                     {booking.guests?.phone}
-                  </div>
+                </div>
                   <div className="text-xs font-mono text-primary mt-1">
                     {booking.is_bulk
                       ? `Bulk · ${booking.room_count} rooms`
@@ -2075,16 +2075,16 @@ export default function BookingsPage() {
                         <>
                           <Badge variant="outline" className={badgeClass}>
                             {badgeText}
-                          </Badge>
+                  </Badge>
                           {paidLine !== null && (
                             <div className="text-xs text-muted-foreground">
                               Paid: {formatNaira(paidLine)}
-                            </div>
+                </div>
                           )}
                           {owedLine !== null && (
                             <div className="text-xs text-muted-foreground">
                               Bal: {formatNaira(owedLine)}
-                            </div>
+              </div>
                           )}
                           {creditLine !== null && creditLine > 0 && (
                             <div className="text-xs text-muted-foreground">
@@ -2102,13 +2102,13 @@ export default function BookingsPage() {
                 return (
                   <>
                     {owed > 0 && (
-                      <div className="pt-2 border-t text-sm">
+                <div className="pt-2 border-t text-sm">
                         <span className="text-muted-foreground">Balance:</span>{" "}
                         <span className="font-semibold text-destructive">
                           {formatNaira(owed)}
                         </span>
-                      </div>
-                    )}
+                </div>
+              )}
                   </>
                 );
               })()}

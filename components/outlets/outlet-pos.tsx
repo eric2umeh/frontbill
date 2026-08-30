@@ -84,6 +84,7 @@ import {
 import { OutletOrderCustomerFields } from '@/components/outlets/outlet-order-customer-fields'
 import type { OutletClientOption } from '@/lib/outlets/types'
 import { useSupplyChain } from '@/lib/supply-chain/supply-chain-context'
+import { filterOutletMenuForActiveKitchenBatches } from '@/lib/supply-chain/kitchen-batch-link'
 import { useAuth } from '@/lib/auth-context'
 import { canonicalRoleKey } from '@/lib/permissions'
 import {
@@ -182,7 +183,13 @@ export function OutletPos({
   const filteredItems = useMemo(() => {
     if (!hasMenuPicker) return []
     const q = search.trim().toLowerCase()
-    return items
+    const menuItems = filterOutletMenuForActiveKitchenBatches(
+      items,
+      department,
+      supply.recipes,
+      supply.kitchenStock,
+    )
+    return menuItems
       .filter((it) => it.is_active)
       .filter((it) => {
         if (parentCategoryId && categoryId === 'all') {
@@ -214,6 +221,9 @@ export function OutletPos({
     hasMenuPicker,
     showingAllRootItems,
     categories,
+    department,
+    supply.recipes,
+    supply.kitchenStock,
   ])
 
   const groupedByCategory = useMemo(() => {

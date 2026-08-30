@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/lib/auth-context'
@@ -24,9 +24,12 @@ import { RoomInventoryStatsStrip } from '@/components/shared/room-inventory-stat
 import { OutletStoreIssuesPanel } from '@/components/outlets/outlet-store-issues-panel'
 import { OutletKitchenItemsPanel } from '@/components/outlets/outlet-kitchen-items-panel'
 import { storeIssueDestinationForOutletDepartment } from '@/lib/store/outlet-departments'
+import { syncMainBarMenuFromStore } from '@/lib/supply-chain/sync-bar-menu'
+import { useSupplyChain } from '@/lib/supply-chain/supply-chain-context'
 
 export function OutletWorkspace({ department }: { department: OutletDepartmentKey }) {
   const { organizationId, role, name: staffName } = useAuth()
+  const supply = useSupplyChain()
   const def = getOutletDepartment(department)
   const [loading, setLoading] = useState(true)
   const [categories, setCategories] = useState<OutletMenuCategoryRow[]>([])
@@ -53,56 +56,97 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
   const [receiptOpen, setReceiptOpen] = useState(false)
   const [receiptAutoPrint, setReceiptAutoPrint] = useState(false)
   const [receiptBillKind, setReceiptBillKind] = useState<OutletBillPrintKind>('auto')
+  const mainBarSyncInFlight = useRef(false)
 
-  const loadMenu = useCallback(async (opts?: { silent?: boolean }) => {
+  const fetchMenuRows = useCallback(async () => {
+    if (!organizationId) return
+    const supabase = createClient()
+    if (!supabase) return
+    const [{ data: c }, { data: i }] = await Promise.all([
+      supabase
+        .from('outlet_menu_categories')
+        .select('*')
+        .eq('organization_id', organizationId)
+        .eq('department', department)
+        .order('name'),
+      supabase
+        .from('outlet_menu_items')
+        .select('*')
+        .eq('organization_id', organizationId)
+        .eq('department', department)
+        .order('name'),
+    ])
+    setCategories(sortOutletMenuByName((c as OutletMenuCategoryRow[]) ?? []))
+    setItems(sortOutletMenuByName((i as OutletMenuItemRow[]) ?? []))
+  }, [organizationId, department])
+
+  const runMainBarStoreSync = useCallback(
+    async (opts?: { refreshMenu?: boolean }) => {
+      if (department !== 'main_bar' || mainBarSyncInFlight.current) return
+      mainBarSyncInFlight.current = true
+      try {
+        const sync = await syncMainBarMenuFromStore()
+        if (!sync.ok) return
+        supply.ensureMainBarStockFromCatalog?.()
+        if (opts?.refreshMenu !== false && (sync.created > 0 || sync.updated > 0)) {
+          await fetchMenuRows()
+        }
+      } finally {
+        mainBarSyncInFlight.current = false
+      }
+    },
+    [department, supply, fetchMenuRows],
+  )
+
+  const loadMenu = useCallback(async (opts?: { silent?: boolean; syncFromStore?: boolean }) => {
     if (!organizationId) return
     if (!opts?.silent) setLoading(true)
     try {
-      const supabase = createClient()
-      if (!supabase) return
-      const [{ data: c }, { data: i }] = await Promise.all([
-        supabase
-          .from('outlet_menu_categories')
-          .select('*')
-          .eq('organization_id', organizationId)
-          .eq('department', department)
-          .order('name'),
-        supabase
-          .from('outlet_menu_items')
-          .select('*')
-          .eq('organization_id', organizationId)
-          .eq('department', department)
-          .order('name'),
-      ])
-      setCategories(sortOutletMenuByName((c as OutletMenuCategoryRow[]) ?? []))
-      setItems(sortOutletMenuByName((i as OutletMenuItemRow[]) ?? []))
+      await fetchMenuRows()
     } catch {
       toast.error('Failed to load outlet menu')
     } finally {
-      setLoading(false)
+      if (!opts?.silent) setLoading(false)
     }
-  }, [organizationId, department])
+
+    if (department === 'main_bar' && opts?.syncFromStore === true) {
+      void runMainBarStoreSync()
+    }
+  }, [organizationId, department, fetchMenuRows, runMainBarStoreSync])
+
+  const loadMenuRef = useRef(loadMenu)
+  const fetchMenuRowsRef = useRef(fetchMenuRows)
+  const runMainBarStoreSyncRef = useRef(runMainBarStoreSync)
+  loadMenuRef.current = loadMenu
+  fetchMenuRowsRef.current = fetchMenuRows
+  runMainBarStoreSyncRef.current = runMainBarStoreSync
 
   const notifyOrdersChanged = useCallback(() => {
     setOrdersRefresh((n) => n + 1)
   }, [])
 
   useEffect(() => {
-    void loadMenu()
-  }, [loadMenu])
+    void loadMenuRef.current({ syncFromStore: department === 'main_bar' })
+  }, [department, organizationId])
 
   useEffect(() => {
     const onCleared = () => {
-      void loadMenu({ silent: true })
+      void loadMenuRef.current({ silent: true })
     }
     const onSynced = () => {
-      if (department === 'restaurant' || department === 'main_bar') void loadMenu({ silent: true })
+      if (department === 'restaurant' || department === 'main_bar') {
+        void loadMenuRef.current({ silent: true })
+      }
     }
     const onSupply = () => {
-      void loadMenu({ silent: true })
+      if (department === 'main_bar') {
+        void runMainBarStoreSyncRef.current().then(() => fetchMenuRowsRef.current())
+        return
+      }
+      void loadMenuRef.current({ silent: true })
     }
     const onBar = () => {
-      if (department === 'main_bar') void loadMenu({ silent: true })
+      if (department === 'main_bar') void loadMenuRef.current({ silent: true })
     }
     window.addEventListener('frontbill:outlet-menu-cleared', onCleared)
     window.addEventListener('frontbill:outlet-menu-synced', onSynced)
@@ -114,12 +158,12 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
       window.removeEventListener('frontbill:supply-stock-changed', onSupply)
       window.removeEventListener('frontbill:bar-stock-changed', onBar)
     }
-  }, [department, loadMenu])
+  }, [department])
 
   if (!def) return null
   if (loading && items.length === 0 && categories.length === 0) return <LoadingSpinner />
 
-  const canManageMenu = canManageOutletMenu(role)
+  const canManageMenu = canManageOutletMenu(role, department)
   const canReports = hasPermission(role, 'outlet:reports')
   const canManageOrders = canManageOutletOrders(role)
   const openReceipt = (

@@ -28,10 +28,17 @@ const MANAGEMENT_ROLES: RoleKey[] = ['superadmin', 'admin', 'manager']
 
 const MENU_MANAGER_ROLES: RoleKey[] = [...MANAGEMENT_ROLES, 'food_beverage']
 
-/** Create, edit, and delete outlet menu categories & items (F&B, admin, manager, superadmin). */
-export function canManageOutletMenu(role: string | null | undefined): boolean {
+/** Create, edit, and delete outlet menu categories & items (F&B, admin, manager, superadmin). Main Bar: admin/superadmin only. */
+export function canManageOutletMenu(
+  role: string | null | undefined,
+  department?: OutletDepartmentKey,
+): boolean {
   const rk = canonicalRoleKey(role)
-  return rk != null && MENU_MANAGER_ROLES.includes(rk)
+  if (!rk) return false
+  if (department === 'main_bar') {
+    return rk === 'superadmin' || rk === 'admin'
+  }
+  return MENU_MANAGER_ROLES.includes(rk)
 }
 
 /** Edit or delete/void outlet orders (superadmin, admin, manager). */
