@@ -10,7 +10,7 @@
  * Overdue folios still classify as due_out for badges / held-room math.
  */
 
-import { resolveHotelTimeZone } from '@/lib/hotel-date'
+import { resolveHotelTimeZone, hotelCalendarTodayYmd } from '@/lib/hotel-date'
 import {
   bookingYmdHotel,
   todayYmdHotel,
@@ -49,7 +49,8 @@ export function classifyFrontOfficeStay(
   timeZone: string = resolveHotelTimeZone(),
 ): FrontOfficeStayKind {
   const tz = resolveHotelTimeZone(timeZone)
-  const today = todayYmd ?? todayYmdHotel(tz)
+  const frontOfficeDay = todayYmd ?? todayYmdHotel(tz)
+  const calendarToday = hotelCalendarTodayYmd(undefined, tz)
   const st = normStatus(booking.status)
   const fs = normStatus(booking.folio_status)
 
@@ -62,16 +63,16 @@ export function classifyFrontOfficeStay(
   const co = bookingYmdHotel(booking.check_out, tz)
   if (!ci || !co) return 'other'
 
-  // Future arrival — reservation (even if status is confirmed)
-  if (ci > today) return 'reserved'
+  // Future calendar arrival — guest has not arrived yet (independent of business_date lag)
+  if (ci > calendarToday) return 'reserved'
 
-  // Due out today or overdue (still open folio)
-  if (co <= today) return 'due_out'
+  // Due out on front-office business day or overdue (still open folio)
+  if (co <= frontOfficeDay) return 'due_out'
 
   // Same-day / stayover reservation not yet converted to checked_in
   if (st === 'reserved') return 'reserved'
 
-  // checked_in or confirmed, in-house, departing after today
+  // checked_in or confirmed, in-house, departing after front-office day
   return 'occupied'
 }
 
