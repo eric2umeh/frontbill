@@ -6,7 +6,7 @@ import { isStoreControlledFnbOutlet, type OutletDepartmentKey } from '@/lib/outl
 import { itemAllowsPosPriceEdit } from '@/lib/outlets/category-price-editable'
 import { isKitchenSyncedMenuItem } from '@/lib/supply-chain/kitchen-menu-link'
 import { useAuth } from '@/lib/auth-context'
-import { canKickstartOutletStock, canonicalRoleKey } from '@/lib/permissions'
+import { canCountOutletDepartmentStock, canKickstartOutletStock, canonicalRoleKey } from '@/lib/permissions'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -60,6 +60,11 @@ import {
 } from '@/lib/outlets/outlet-supply-stock'
 import { seedDefaultDrinkCategories } from '@/lib/outlets/seed-drink-categories'
 import { titleCaseWhileTyping, toTitleCaseWords } from '@/lib/supply-chain/title-case'
+import {
+  isCompleteQuantityInput,
+  parseQuantityValue,
+  sanitizeQuantityInput,
+} from '@/lib/supply-chain/measurement-units'
 
 type Props = {
   department: OutletDepartmentKey
@@ -96,6 +101,7 @@ export function OutletMenuManager({ department, categories, items, canManage, on
   const storeControlledFnb = isStoreControlledFnbOutlet(department)
   const showOutletQty = stockPipeline !== 'none'
   const canAdjustStock = canKickstartOutletStock(role) && storeControlledFnb
+  const canCountStock = canCountOutletDepartmentStock(role) && storeControlledFnb
   const actor = { name: staffName ?? 'Staff', role: canonicalRoleKey(role) ?? 'staff' }
   const sortedCategories = useMemo(() => sortOutletMenuByName(categories), [categories])
   const sortedItems = useMemo(() => sortOutletMenuByName(items), [items])
@@ -148,6 +154,70 @@ export function OutletMenuManager({ department, categories, items, canManage, on
   const [stockEditItem, setStockEditItem] = useState<OutletMenuItemRow | null>(null)
   const [stockEditQty, setStockEditQty] = useState('')
   const [stockEditUnit, setStockEditUnit] = useState('portion')
+  const [stockCountDraft, setStockCountDraft] = useState<Record<string, string>>({})
+
+  const commitOutletStockCount = async (it: OutletMenuItemRow) => {
+    const raw = stockCountDraft[it.id]
+    if (raw == null) return
+    if (!isCompleteQuantityInput(raw)) {
+      toast.error('Enter a valid quantity')
+      return
+    }
+    const qty = parseQuantityValue(raw)
+    if (qty == null || qty < 0) {
+      toast.error('Enter a valid quantity')
+      return
+    }
+    const link = supply.getOutletItemStock(department, it)
+    if (!link.tracked) return
+
+    if (link.stockId) {
+      const result =
+        link.source === 'bar'
+          ? supply.setBarStockOnHand(link.stockId, qty, actor)
+          : supply.setKitchenStockAvailable(link.stockId, qty, actor)
+      if ('error' in result) {
+        toast.error(result.error)
+        return
+      }
+      setStockCountDraft((prev) => {
+        const next = { ...prev }
+        delete next[it.id]
+        return next
+      })
+      toast.success(`${it.name}: ${qty} ${link.unit}(s) on hand`)
+      return
+    }
+
+    setSaving(true)
+    try {
+      const res = supply.kickstartOutletMenuStock(department, it, qty, actor)
+      if ('error' in res) {
+        toast.error(res.error)
+        return
+      }
+      const patchRes = await fetch('/api/outlets/menu/items', {
+        method: 'PATCH',
+        headers: await outletApiHeaders({ 'Content-Type': 'application/json' }),
+        credentials: 'include',
+        body: JSON.stringify({ id: it.id, service_code: res.serviceCode }),
+      })
+      if (!patchRes.ok) {
+        const json = await patchRes.json().catch(() => ({}))
+        toast.error(json.error || 'Stock counted but failed to save menu link')
+        return
+      }
+      setStockCountDraft((prev) => {
+        const next = { ...prev }
+        delete next[it.id]
+        return next
+      })
+      toast.success(`${it.name}: ${qty} ${res.unit}(s) on hand`)
+      onRefresh()
+    } finally {
+      setSaving(false)
+    }
+  }
 
   const openEditCategory = (c: OutletMenuCategoryRow) => {
     setEditCategory(c)
@@ -433,8 +503,8 @@ export function OutletMenuManager({ department, categories, items, canManage, on
             <CardDescription>
               {storeControlledFnb
                 ? department === 'main_bar' || department === 'pool_bar'
-                  ? 'Qty from Main Bar stock after Central Store issues it (Issue Out → Main Bar).'
-                  : 'Qty from kitchen/bar stock. Admin/Manager can kickstart quantities here until store supply updates them.'
+                  ? 'Tap Qty available to set a physical count. Store issue-out (Issue Out → Main Bar) adds bottles on top of that number.'
+                  : 'Tap Qty available to set a physical count. Kitchen production close adds portions on top of that number.'
                 : stockPipeline === 'kitchen'
                   ? 'Qty = kitchen portions (store → batch → prepared food).'
                   : 'Qty = bar stock issued from Central Store (same path as kitchen → restaurant).'}
@@ -568,9 +638,44 @@ export function OutletMenuManager({ department, categories, items, canManage, on
                         <td className="p-2 text-right">
                           {stockLink ? (
                             <span className="inline-flex flex-col items-end gap-0.5">
-                              <span className={qtyLevel ? stockLevelTextClass(qtyLevel) : 'text-muted-foreground text-xs'}>
-                                {qtyLabel}
-                              </span>
+                              {canCountStock && stockLink.tracked ? (
+                                <div className="inline-flex items-center justify-end gap-1.5">
+                                  <Input
+                                    className="h-8 w-20 text-right tabular-nums"
+                                    inputMode="decimal"
+                                    disabled={saving}
+                                    value={
+                                      stockCountDraft[it.id] ??
+                                      String(stockLink.available)
+                                    }
+                                    onChange={(e) =>
+                                      setStockCountDraft((prev) => ({
+                                        ...prev,
+                                        [it.id]: sanitizeQuantityInput(e.target.value),
+                                      }))
+                                    }
+                                    onBlur={() => void commitOutletStockCount(it)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') {
+                                        e.currentTarget.blur()
+                                      }
+                                    }}
+                                  />
+                                  <span className="text-xs text-muted-foreground whitespace-nowrap">
+                                    {stockLink.unit}
+                                  </span>
+                                </div>
+                              ) : (
+                                <span
+                                  className={
+                                    qtyLevel
+                                      ? stockLevelTextClass(qtyLevel)
+                                      : 'text-muted-foreground text-xs'
+                                  }
+                                >
+                                  {qtyLabel}
+                                </span>
+                              )}
                               {qtyLevel && (
                                 <Badge className={`text-[10px] h-5 ${stockLevelBadgeClass(qtyLevel)}`}>
                                   {qtyLevel === 'out' ? 'Unavailable' : stockLevelStatusLabel(qtyLevel)}
