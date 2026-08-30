@@ -24,6 +24,7 @@ export const MEASUREMENT_UNITS = [
   'mudu',
   'pack',
   'pcs',
+  'plastic',
   'portion',
   'roll',
   'sachet',
@@ -81,6 +82,8 @@ const UNIT_ALIASES: Record<string, string> = {
   rolls: 'roll',
   pac: 'pack',
   pack: 'pack',
+  plastic: 'plastic',
+  plastics: 'plastic',
   spoon: 'spoon',
   spoons: 'spoon',
   set: 'set',
@@ -132,6 +135,7 @@ export function formatUnitLabel(unit: string): string {
   if (normalized === 'kg') return 'kg'
   if (normalized === 'g') return 'g'
   if (normalized === 'pcs') return 'pcs'
+  if (normalized === 'plastic') return 'plastic'
   if (normalized === 'bag') return 'bag'
   if (normalized === 'carton') return 'carton'
   if (normalized === 'roll') return 'roll'
@@ -159,6 +163,7 @@ export function defaultUnitForStoreItem(unit?: string): string {
 
 const COUNT_LIKE_UNITS = [
   'pack',
+  'plastic',
   'pcs',
   'sachet',
   'tin',

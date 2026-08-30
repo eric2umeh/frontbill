@@ -68,6 +68,8 @@ const UNIT_ALIASES: Record<string, string> = {
   rolls: 'roll',
   pac: 'pack',
   pack: 'pack',
+  plastic: 'plastic',
+  plastics: 'plastic',
   cooking_spoon: 'cooking_spoon',
   'cooking spoon': 'cooking_spoon',
   'cooking spoons': 'cooking_spoon',
@@ -94,7 +96,7 @@ export function convertQtyBetweenUnits(
 export function parseRecipeQuantity(text: string): ParsedRecipeQty | null {
   const raw = text.trim()
   const m = raw.match(
-    /^(\d+(?:\.\d+)?(?:\s*[-–]\s*\d+(?:\.\d+)?)?)\s*(kg|g|ml|l|ltr|litre|liter|mudu|cups?|cooking\s+spoons?|tbsp|tsp|pcs?|pieces?|tin|tins|can|cans|bottle|bottles|sachet|sachets|ball|balls|head|heads|set|sets|basket|leather|portion|portions|pac|pack|spoon|spoons|rolls?|slice|slices|fillets?|leaves?|leaf|containers?|cloves?|loaves?|loaf|bunches?|bunch|wraps?|de\s*ricas?|derica|)?/i,
+    /^(\d+(?:\.\d+)?(?:\s*[-–]\s*\d+(?:\.\d+)?)?)\s*(kg|g|ml|l|ltr|litre|liter|mudu|cups?|cooking\s+spoons?|tbsp|tsp|pcs?|pieces?|tin|tins|can|cans|bottle|bottles|sachet|sachets|ball|balls|head|heads|set|sets|basket|leather|portion|portions|pac|pack|plastic|plastics|spoon|spoons|rolls?|slice|slices|fillets?|leaves?|leaf|containers?|cloves?|loaves?|loaf|bunches?|bunch|wraps?|de\s*ricas?|derica|)?/i,
   )
   if (!m) return null
   const numPart = m[1].replace(/\s*[-–]\s*\d+.*/, '')
