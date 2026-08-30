@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import {
-  isKitchenOnlySupplyRole,
   requireSupplyKitchenOrStore,
   requireSupplySnapshotRead,
   resolveSupplyAuthedUser,
+  writableSupplySnapshotKeys,
 } from '@/lib/supply-chain/supply-api-auth'
-import { SUPPLY_SNAPSHOT_KEYS, KITCHEN_WRITE_SNAPSHOT_KEYS, type SupplySnapshotKey } from '@/lib/supply-chain/supply-db-mappers'
+import { SUPPLY_SNAPSHOT_KEYS, type SupplySnapshotKey } from '@/lib/supply-chain/supply-db-mappers'
 import { mergePurchaseOrdersFromRemote } from '@/lib/supply-chain/po-sync-merge'
 import type { PurchaseOrder } from '@/lib/supply-chain/types'
 
@@ -85,10 +85,10 @@ export async function PUT(request: Request) {
     const denied = requireSupplyKitchenOrStore(auth)
     if (denied) return denied
 
-    const kitchenOnly = isKitchenOnlySupplyRole(auth.role)
-    const writableKeySet = new Set<string>(
-      kitchenOnly ? KITCHEN_WRITE_SNAPSHOT_KEYS : SUPPLY_SNAPSHOT_KEYS,
-    )
+    const writableKeySet = writableSupplySnapshotKeys(auth.role)
+    if (!writableKeySet) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
 
     const admin = createAdminClient()
     const now = new Date().toISOString()

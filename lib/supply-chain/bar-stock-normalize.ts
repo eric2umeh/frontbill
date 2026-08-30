@@ -51,6 +51,7 @@ export function normalizeBarStockRows(rows: BarStockItem[]): BarStockItem[] {
 export function mergeBarStockFromRemote(
   local: BarStockItem[],
   remote: BarStockItem[],
+  opts?: { preferLocalWhenLower?: boolean },
 ): BarStockItem[] {
   const storeIds = new Set<string>()
   for (const row of [...local, ...remote]) {
@@ -79,7 +80,11 @@ export function mergeBarStockFromRemote(
     )
     const quantityOnHand =
       localMatches.length > 0 && remoteMatches.length > 0
-        ? Math.max(localQty, remoteQty)
+        ? localQty === 0 && remoteQty > 0 && !opts?.preferLocalWhenLower
+          ? remoteQty
+          : opts?.preferLocalWhenLower && localQty < remoteQty
+            ? localQty
+            : Math.max(localQty, remoteQty)
         : localMatches.length > 0
           ? localQty
           : remoteQty

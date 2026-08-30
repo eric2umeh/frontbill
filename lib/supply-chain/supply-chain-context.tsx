@@ -253,8 +253,12 @@ function applyRemoteBarStockArray(
   if (!Array.isArray(remote)) return false;
   let changed = false;
   setter((prev) => {
+    const preferLocalWhenLower =
+      Date.now() - lastLocalSupplyMutationAt < 12_000;
     const merged = normalizeBarStockRows(
-      mergeBarStockFromRemote(prev, remote as BarStockItem[]),
+      mergeBarStockFromRemote(prev, remote as BarStockItem[], {
+        preferLocalWhenLower,
+      }),
     );
     try {
       if (JSON.stringify(prev) === JSON.stringify(merged)) return prev;
@@ -712,6 +716,7 @@ function useSupplyChainImpl() {
       await saveSupplySnapshots(userId, payload, orgIdRef.current || undefined);
       broadcastSupplyLiveUpdate();
       if ("bar_stock" in payload) dispatchOrgLiveEvent(ORG_LIVE_SUPPLY);
+      if ("kitchen_stock" in payload) dispatchOrgLiveEvent(ORG_LIVE_SUPPLY);
     } catch (err) {
       // One retry after a short delay (covers brief session refresh races).
       await new Promise((r) => setTimeout(r, 400));
@@ -719,6 +724,7 @@ function useSupplyChainImpl() {
         await saveSupplySnapshots(userId, payload, orgIdRef.current || undefined);
         broadcastSupplyLiveUpdate();
         if ("bar_stock" in payload) dispatchOrgLiveEvent(ORG_LIVE_SUPPLY);
+      if ("kitchen_stock" in payload) dispatchOrgLiveEvent(ORG_LIVE_SUPPLY);
       } catch (err2) {
         if (isRetryableSupplyError(err2)) {
           console.warn("[supply-chain] snapshot sync retryable:", err2);
@@ -775,6 +781,46 @@ function useSupplyChainImpl() {
       } catch (err) {
         if (opts?.required) throw err;
         console.warn("[supply-chain] bar stock sync failed", err);
+      }
+    },
+    [useDbPersistence, userId, role],
+  );
+
+  /** Immediate cloud write for kitchen stock after outlet POS sales (Restaurant, etc.). */
+  const persistKitchenStockSnapshot = useCallback(
+    async (rows: KitchenStockItem[], opts?: { required?: boolean }) => {
+      if (!useDbPersistence) {
+        if (opts?.required) {
+          throw new Error("Cloud sync is unavailable — sign in again and retry.");
+        }
+        return;
+      }
+      if (!dbHydratedRef.current || snapshotSyncSkipRef.current) {
+        if (opts?.required) {
+          throw new Error(
+            "Supply data is still loading — wait a moment and try again.",
+          );
+        }
+        return;
+      }
+      const payload = snapshotsPayloadForRole({ kitchen_stock: rows }, role);
+      if (!("kitchen_stock" in payload)) {
+        if (opts?.required) {
+          throw new Error("Your role cannot save kitchen stock to cloud.");
+        }
+        return;
+      }
+      try {
+        await saveSupplySnapshots(
+          userId,
+          { kitchen_stock: rows },
+          orgIdRef.current || undefined,
+        );
+        broadcastSupplyLiveUpdate();
+        dispatchOrgLiveEvent(ORG_LIVE_SUPPLY);
+      } catch (err) {
+        if (opts?.required) throw err;
+        console.warn("[supply-chain] kitchen stock sync failed", err);
       }
     },
     [useDbPersistence, userId, role],
@@ -6014,6 +6060,8 @@ function useSupplyChainImpl() {
       lines: { item: OutletMenuItemRow; qty: number }[],
       actor: Actor,
     ) => {
+      let nextBarStock = barStockRef.current;
+      let nextKitchenStock = kitchenStockRef.current;
       let touchedBar = false;
       let touchedKitchen = false;
       markLocalSupplyMutation();
@@ -6022,39 +6070,45 @@ function useSupplyChainImpl() {
         const link = resolveOutletItemStock(
           line.item,
           department,
-          kitchenStock,
-          barStock,
+          nextKitchenStock,
+          nextBarStock,
         );
         if (!link.tracked || !link.stockId) continue;
         const deduct = Math.max(1, link.portionsPerSale) * line.qty;
         if (link.source === "kitchen") {
           touchedKitchen = true;
-          setKitchenStock((ks) =>
-            ks.map((k) =>
-              k.id === link.stockId
-                ? {
-                    ...k,
-                    availablePortions: Math.max(
-                      0,
-                      k.availablePortions - deduct,
-                    ),
-                  }
-                : k,
-            ),
+          nextKitchenStock = nextKitchenStock.map((k) =>
+            k.id === link.stockId
+              ? {
+                  ...k,
+                  availablePortions: Math.max(
+                    0,
+                    k.availablePortions - deduct,
+                  ),
+                }
+              : k,
           );
         } else {
           touchedBar = true;
-          setBarStock((bs) =>
-            bs.map((b) =>
-              b.id === link.stockId
-                ? {
-                    ...b,
-                    quantityOnHand: Math.max(0, b.quantityOnHand - deduct),
-                  }
-                : b,
-            ),
+          nextBarStock = nextBarStock.map((b) =>
+            b.id === link.stockId
+              ? {
+                  ...b,
+                  quantityOnHand: Math.max(0, b.quantityOnHand - deduct),
+                }
+              : b,
           );
         }
+      }
+
+      if (touchedKitchen) {
+        kitchenStockRef.current = nextKitchenStock;
+        setKitchenStock(nextKitchenStock);
+      }
+      if (touchedBar) {
+        nextBarStock = normalizeBarStockRows(nextBarStock);
+        barStockRef.current = nextBarStock;
+        setBarStock(nextBarStock);
       }
       setActivityLog((a) =>
         log(
@@ -6066,9 +6120,32 @@ function useSupplyChainImpl() {
       );
       if (touchedBar) notifyBarStockChanged();
       if (touchedKitchen) notifyKitchenRawStockChanged();
-      if (touchedBar || touchedKitchen) schedulePersistSnapshots();
+      if (touchedBar || touchedKitchen) {
+        schedulePersistSnapshots();
+        if (touchedBar) {
+          void persistBarStockSnapshot(nextBarStock, { required: false }).catch(
+            (err) => {
+              console.warn("[supply-chain] bar stock deduct sync failed", err);
+            },
+          );
+        }
+        if (touchedKitchen) {
+          void persistKitchenStockSnapshot(nextKitchenStock, {
+            required: false,
+          }).catch((err) => {
+            console.warn(
+              "[supply-chain] kitchen stock deduct sync failed",
+              err,
+            );
+          });
+        }
+      }
     },
-    [kitchenStock, barStock, schedulePersistSnapshots],
+    [
+      schedulePersistSnapshots,
+      persistBarStockSnapshot,
+      persistKitchenStockSnapshot,
+    ],
   );
 
   const draftLines = useMemo(() => {
