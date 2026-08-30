@@ -1,10 +1,11 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useEffect } from 'react'
 import type { OutletMenuCategoryRow, OutletMenuItemRow } from '@/lib/outlets/types'
 import { isStoreControlledFnbOutlet, type OutletDepartmentKey } from '@/lib/outlets/departments'
 import { itemAllowsPosPriceEdit } from '@/lib/outlets/category-price-editable'
 import { isKitchenSyncedMenuItem } from '@/lib/supply-chain/kitchen-menu-link'
+import { filterOutletMenuForActiveKitchenBatches } from '@/lib/supply-chain/kitchen-batch-link'
 import { useAuth } from '@/lib/auth-context'
 import { canCountOutletDepartmentStock, canKickstartOutletStock, canonicalRoleKey } from '@/lib/permissions'
 import { Button } from '@/components/ui/button'
@@ -65,6 +66,8 @@ import {
   parseQuantityValue,
   sanitizeQuantityInput,
 } from '@/lib/supply-chain/measurement-units'
+import { usePaginatedList } from '@/lib/hooks/use-paginated-list'
+import { TableListControls } from '@/components/shared/table-list-controls'
 
 type Props = {
   department: OutletDepartmentKey
@@ -83,20 +86,21 @@ const emptyItemForm = {
   price_editable: false,
 }
 
-function parseItemUnitPrice(raw: string, priceEditable: boolean): number | null {
+function parseItemUnitPrice(raw: string): number | null {
   const trimmed = raw.trim()
-  if (!trimmed) return priceEditable ? 0 : null
+  if (!trimmed) return 0
   const n = Number(trimmed)
   if (!Number.isFinite(n) || n < 0) return null
   return n
 }
 
 const numberInputValue = (value: number | null | undefined) =>
-  value != null && Number(value) !== 0 ? String(value) : ''
+  value != null ? String(value) : ''
 
 export function OutletMenuManager({ department, categories, items, canManage, onRefresh }: Props) {
   const { name: staffName, role } = useAuth()
   const supply = useSupplyChain()
+  const { recipes } = supply
   const stockPipeline = outletStockSource(department)
   const storeControlledFnb = isStoreControlledFnbOutlet(department)
   const showOutletQty = stockPipeline !== 'none'
@@ -109,7 +113,14 @@ export function OutletMenuManager({ department, categories, items, canManage, on
   const [itemCategoryFilter, setItemCategoryFilter] = useState<string>('all')
   const filteredItems = useMemo(() => {
     const q = itemSearch.trim().toLowerCase()
-    return sortedItems.filter((it) => {
+    const batchLinked = filterOutletMenuForActiveKitchenBatches(
+      sortedItems,
+      department,
+      recipes,
+      supply.kitchenStock,
+    )
+    return batchLinked.filter((it) => {
+      if (department === 'main_bar' && !it.is_active) return false
       if (itemCategoryFilter === '__uncategorized__') {
         if (it.category_id) return false
       } else if (itemCategoryFilter !== 'all') {
@@ -123,19 +134,24 @@ export function OutletMenuManager({ department, categories, items, canManage, on
         .toLowerCase()
       return haystack.includes(q)
     })
-  }, [sortedItems, sortedCategories, itemSearch, itemCategoryFilter])
-  const drinkMenu = department === 'main_bar' || department === 'pool_bar'
-  const groupedDrinkItems = useMemo(() => {
-    if (!drinkMenu) return null
-    const groups: { id: string; name: string; items: typeof filteredItems }[] = []
-    for (const c of sortedCategories) {
-      const its = filteredItems.filter((it) => it.category_id === c.id)
-      if (its.length) groups.push({ id: c.id, name: toTitleCaseWords(c.name), items: its })
-    }
-    const uncat = filteredItems.filter((it) => !it.category_id)
-    if (uncat.length) groups.push({ id: '__uncategorized__', name: 'Uncategorized', items: uncat })
-    return groups
-  }, [drinkMenu, filteredItems, sortedCategories])
+  }, [sortedItems, sortedCategories, itemSearch, itemCategoryFilter, department, recipes, supply.kitchenStock])
+  const {
+    paginatedItems,
+    page,
+    setPage,
+    totalPages,
+    totalCount,
+    startIndex,
+  } = usePaginatedList({
+    items: filteredItems,
+    pageSize: 15,
+    search: '',
+  })
+
+  useEffect(() => {
+    setPage(1)
+  }, [itemSearch, itemCategoryFilter, department, setPage])
+
   const [saving, setSaving] = useState(false)
   const [newCatName, setNewCatName] = useState('')
   const [newCatPriceEditable, setNewCatPriceEditable] = useState(false)
@@ -155,6 +171,35 @@ export function OutletMenuManager({ department, categories, items, canManage, on
   const [stockEditQty, setStockEditQty] = useState('')
   const [stockEditUnit, setStockEditUnit] = useState('portion')
   const [stockCountDraft, setStockCountDraft] = useState<Record<string, string>>({})
+  const [categorySavingId, setCategorySavingId] = useState<string | null>(null)
+
+  const updateItemCategory = async (item: OutletMenuItemRow, categoryId: string | null) => {
+    if (!canManage) return
+    const nextCategoryId = categoryId || null
+    if ((item.category_id || null) === nextCategoryId) return
+    setCategorySavingId(item.id)
+    try {
+      const res = await fetch('/api/outlets/menu/items', {
+        method: 'PATCH',
+        headers: await outletApiHeaders({ 'Content-Type': 'application/json' }),
+        credentials: 'include',
+        body: JSON.stringify({ id: item.id, category_id: nextCategoryId }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        toast.error(json.error || 'Failed to update category')
+        return
+      }
+      toast.success(`Category updated for ${item.name}`)
+      onRefresh()
+    } finally {
+      setCategorySavingId(null)
+    }
+  }
+
+  const drinkMenu = department === 'main_bar' || department === 'pool_bar'
+  const itemTableColSpan =
+    5 + (showOutletQty ? 1 : 0) + (canManage || canAdjustStock ? 1 : 0)
 
   const commitOutletStockCount = async (it: OutletMenuItemRow) => {
     const raw = stockCountDraft[it.id]
@@ -267,10 +312,11 @@ export function OutletMenuManager({ department, categories, items, canManage, on
 
   const openEditItem = (it: OutletMenuItemRow) => {
     setEditItem(it)
+    const price = Number(it.unit_price)
     setEditItemForm({
       name: it.name,
       category_id: it.category_id || '',
-      unit_price: numberInputValue(it.unit_price),
+      unit_price: numberInputValue(Number.isFinite(price) ? price : 0),
       description: isLegacyDefaultDescription(it.description) ? '' : it.description || '',
       tags: [...(it.tags || [])],
       price_editable: !!it.price_editable,
@@ -356,13 +402,13 @@ export function OutletMenuManager({ department, categories, items, canManage, on
   }
 
   const addItem = async () => {
-    const unitPrice = parseItemUnitPrice(form.unit_price, form.price_editable)
-    if (!form.name.trim() || unitPrice == null) {
-      toast.error(
-        form.price_editable
-          ? 'Name required. For price-at-sale items, leave price blank.'
-          : 'Name and price required',
-      )
+    if (!form.name.trim()) {
+      toast.error('Name required')
+      return
+    }
+    const unitPrice = parseItemUnitPrice(form.unit_price)
+    if (unitPrice == null) {
+      toast.error('Enter a valid price')
       return
     }
     setSaving(true)
@@ -395,13 +441,13 @@ export function OutletMenuManager({ department, categories, items, canManage, on
   }
 
   const saveItem = async () => {
-    const unitPrice = parseItemUnitPrice(editItemForm.unit_price, editItemForm.price_editable)
-    if (!editItem || !editItemForm.name.trim() || unitPrice == null) {
-      toast.error(
-        editItemForm.price_editable
-          ? 'Name required. For price-at-sale items, leave price blank.'
-          : 'Name and price required',
-      )
+    if (!editItem || !editItemForm.name.trim()) {
+      toast.error('Name required')
+      return
+    }
+    const unitPrice = parseItemUnitPrice(editItemForm.unit_price)
+    if (unitPrice == null) {
+      toast.error('Enter a valid price')
       return
     }
     setSaving(true)
@@ -436,19 +482,37 @@ export function OutletMenuManager({ department, categories, items, canManage, on
 
   const confirmDeleteItem = async () => {
     if (!deleteItem) return
+    const storeLinkedBar =
+      department === 'main_bar' &&
+      String(deleteItem.service_code ?? '').trim().toLowerCase().startsWith('bar:')
     setSaving(true)
     try {
-      const res = await fetch(`/api/outlets/menu/items?id=${encodeURIComponent(deleteItem.id)}`, {
-        method: 'DELETE',
-        headers: await outletApiHeaders(),
-        credentials: 'include',
-      })
-      const json = await res.json().catch(() => ({}))
-      if (!res.ok) {
-        toast.error(json.error || 'Delete failed')
-        return
+      if (storeLinkedBar) {
+        const res = await fetch('/api/outlets/menu/items', {
+          method: 'PATCH',
+          headers: await outletApiHeaders({ 'Content-Type': 'application/json' }),
+          credentials: 'include',
+          body: JSON.stringify({ id: deleteItem.id, is_active: false }),
+        })
+        const json = await res.json().catch(() => ({}))
+        if (!res.ok) {
+          toast.error(json.error || 'Remove failed')
+          return
+        }
+        toast.success(`${deleteItem.name} removed from Main Bar menu (still in Central Store)`)
+      } else {
+        const res = await fetch(`/api/outlets/menu/items?id=${encodeURIComponent(deleteItem.id)}`, {
+          method: 'DELETE',
+          headers: await outletApiHeaders(),
+          credentials: 'include',
+        })
+        const json = await res.json().catch(() => ({}))
+        if (!res.ok) {
+          toast.error(json.error || 'Delete failed')
+          return
+        }
+        toast.success('Item deleted')
       }
-      toast.success('Item deleted')
       setDeleteItem(null)
       onRefresh()
     } finally {
@@ -489,7 +553,9 @@ export function OutletMenuManager({ department, categories, items, canManage, on
       )}
       {!canManage && (
         <p className="text-sm text-muted-foreground rounded-lg border bg-muted/40 px-3 py-2">
-          View only. F&amp;B, Superadmin, Administrator, or Manager can add, edit, or delete categories and items.
+          {department === 'main_bar'
+            ? 'View only. Only Superadmin or Administrator can add, edit, or delete categories and items.'
+            : 'View only. F&amp;B, Superadmin, Administrator, or Manager can add, edit, or delete categories and items.'}
         </p>
       )}
 
@@ -503,7 +569,9 @@ export function OutletMenuManager({ department, categories, items, canManage, on
             <CardDescription>
               {storeControlledFnb
                 ? department === 'main_bar' || department === 'pool_bar'
-                  ? 'Tap Qty available to set a physical count. Store issue-out (Issue Out → Main Bar) adds bottles on top of that number.'
+                  ? department === 'main_bar'
+                    ? 'Items mirror Central Store (Main Bar department): name and price from store, qty starts at 0. Issue-out adds stock. Remove items you do not sell here.'
+                    : 'Tap Qty available to set a physical count. Store issue-out (Issue Out → Main Bar) adds bottles on top of that number.'
                   : 'Tap Qty available to set a physical count. Kitchen production close adds portions on top of that number.'
                 : stockPipeline === 'kitchen'
                   ? 'Qty = kitchen portions (store → batch → prepared food).'
@@ -555,12 +623,13 @@ export function OutletMenuManager({ department, categories, items, canManage, on
               </Button>
             ))}
           </div>
-          <div className="border rounded-md overflow-x-auto max-h-[400px] overflow-y-auto">
+          <div className="border rounded-md overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-muted/50 sticky top-0">
+              <thead className="bg-muted/50">
                 <tr>
+                  <th className="text-right p-2 w-12">#</th>
                   <th className="text-left p-2">Name</th>
-                  <th className="text-left p-2">Category</th>
+                  <th className="text-left p-2 min-w-[160px]">Category</th>
                   {showOutletQty && <th className="text-right p-2">Qty available</th>}
                   <th className="text-right p-2">Price</th>
                   <th className="p-2">Active</th>
@@ -568,28 +637,14 @@ export function OutletMenuManager({ department, categories, items, canManage, on
                 </tr>
               </thead>
               <tbody>
-                {filteredItems.length === 0 ? (
+                {paginatedItems.length === 0 ? (
                   <tr>
-                    <td
-                      colSpan={(canManage || canAdjustStock ? 5 : 4) + (showOutletQty ? 1 : 0)}
-                      className="p-4 text-center text-muted-foreground"
-                    >
+                    <td colSpan={itemTableColSpan} className="p-4 text-center text-muted-foreground">
                       No items match your search or category filter.
                     </td>
                   </tr>
                 ) : (
-                  (groupedDrinkItems ?? [{ id: 'all', name: '', items: filteredItems }]).flatMap((group) => {
-                    const header = group.name ? (
-                      <tr key={`cat-${group.id}`}>
-                        <td
-                          colSpan={(canManage || canAdjustStock ? 5 : 4) + (showOutletQty ? 1 : 0)}
-                          className="bg-muted/60 p-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground"
-                        >
-                          {group.name}
-                        </td>
-                      </tr>
-                    ) : null
-                    const rows = group.items.map((it) => {
+                  paginatedItems.map((it, rowIdx) => {
                   const cat = sortedCategories.find((c) => c.id === it.category_id)
                   const stockLink = showOutletQty
                     ? supply.getOutletItemStock(department, it)
@@ -620,6 +675,9 @@ export function OutletMenuManager({ department, categories, items, canManage, on
                       key={it.id}
                       className={cn('border-t', qtyLevel && stockLevelRowClass(qtyLevel))}
                     >
+                      <td className="p-2 text-right tabular-nums text-muted-foreground text-xs">
+                        {startIndex + rowIdx + 1}
+                      </td>
                       <td className="p-2 font-medium">
                         {it.name}
                         {isKitchenSyncedMenuItem(it.service_code) && (
@@ -633,7 +691,31 @@ export function OutletMenuManager({ department, categories, items, canManage, on
                           </Badge>
                         )}
                       </td>
-                      <td className="p-2 text-muted-foreground">{cat?.name ?? '—'}</td>
+                      <td className="p-2">
+                        {canManage ? (
+                          <Select
+                            value={it.category_id || '__none__'}
+                            disabled={categorySavingId === it.id || saving}
+                            onValueChange={(v) =>
+                              void updateItemCategory(it, v === '__none__' ? null : v)
+                            }
+                          >
+                            <SelectTrigger className="h-8 text-xs max-w-[180px]">
+                              <SelectValue placeholder="Category" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="__none__">Uncategorized</SelectItem>
+                              {sortedCategories.map((c) => (
+                                <SelectItem key={c.id} value={c.id}>
+                                  {c.parent_id ? `↳ ${toTitleCaseWords(c.name)}` : toTitleCaseWords(c.name)}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        ) : (
+                          <span className="text-muted-foreground">{cat?.name ?? '—'}</span>
+                        )}
+                      </td>
                       {showOutletQty && (
                         <td className="p-2 text-right">
                           {stockLink ? (
@@ -743,13 +825,22 @@ export function OutletMenuManager({ department, categories, items, canManage, on
                       )}
                     </tr>
                   )
-                    })
-                    return header ? [header, ...rows] : rows
                   })
                 )}
               </tbody>
             </table>
           </div>
+          {totalCount > 0 && (
+            <TableListControls
+              section="pagination"
+              page={page}
+              totalPages={totalPages}
+              onPageChange={setPage}
+              startIndex={startIndex}
+              pageSize={15}
+              totalCount={totalCount}
+            />
+          )}
         </CardContent>
       </Card>
 
@@ -1049,7 +1140,7 @@ export function OutletMenuManager({ department, categories, items, canManage, on
               Cancel
             </Button>
             <Button onClick={() => void saveItem()} disabled={saving}>
-              Save
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save'}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1117,15 +1208,31 @@ export function OutletMenuManager({ department, categories, items, canManage, on
       <AlertDialog open={!!deleteItem} onOpenChange={(o) => !o && setDeleteItem(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete item?</AlertDialogTitle>
+            <AlertDialogTitle>
+              {deleteItem &&
+              department === 'main_bar' &&
+              String(deleteItem.service_code ?? '').trim().toLowerCase().startsWith('bar:')
+                ? 'Remove from Main Bar menu?'
+                : 'Delete item?'}
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              Permanently remove &quot;{deleteItem?.name}&quot; from the Restaurant menu? This cannot be
-              undone.
-              {deleteItem && isKitchenSyncedMenuItem(deleteItem.service_code) && (
+              {deleteItem &&
+              department === 'main_bar' &&
+              String(deleteItem.service_code ?? '').trim().toLowerCase().startsWith('bar:') ? (
                 <>
-                  {' '}
-                  This item was synced from Kitchen — deleting here removes it from the menu only; batch
-                  standards in Kitchen may still exist until removed there.
+                  Remove &quot;{deleteItem.name}&quot; from the Main Bar menu? It stays in Central Store
+                  and will not be re-added automatically.
+                </>
+              ) : (
+                <>
+                  Permanently remove &quot;{deleteItem?.name}&quot; from the menu? This cannot be undone.
+                  {deleteItem && isKitchenSyncedMenuItem(deleteItem.service_code) && (
+                    <>
+                      {' '}
+                      This item was synced from Kitchen — deleting here removes it from the menu only; batch
+                      standards in Kitchen may still exist until removed there.
+                    </>
+                  )}
                 </>
               )}
             </AlertDialogDescription>
