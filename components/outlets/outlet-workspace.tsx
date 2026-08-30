@@ -26,6 +26,7 @@ import { storeIssueDestinationForOutletDepartment } from '@/lib/store/outlet-dep
 import { syncMainBarMenuFromStore } from '@/lib/supply-chain/sync-bar-menu'
 import { useSupplyChain } from '@/lib/supply-chain/supply-chain-context'
 import { outletApiHeaders } from '@/lib/outlets/outlet-api-headers'
+import { ORG_LIVE_OUTLET_MENU } from '@/lib/live/org-live-events'
 
 export function OutletWorkspace({ department }: { department: OutletDepartmentKey }) {
   const { organizationId, role, name: staffName } = useAuth()
@@ -167,17 +168,22 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
     const onMenuPriceSaved = () => {
       mainBarPriceEditHoldUntilRef.current = Date.now() + 120_000
     }
+    const onOrgLiveOutletMenu = () => {
+      void fetchMenuRowsRef.current()
+    }
     window.addEventListener('frontbill:outlet-menu-cleared', onCleared)
     window.addEventListener('frontbill:outlet-menu-synced', onSynced)
     window.addEventListener('frontbill:supply-stock-changed', onSupply)
     window.addEventListener('frontbill:bar-stock-changed', onBar)
     window.addEventListener('frontbill:outlet-menu-price-saved', onMenuPriceSaved)
+    window.addEventListener(ORG_LIVE_OUTLET_MENU, onOrgLiveOutletMenu)
     return () => {
       window.removeEventListener('frontbill:outlet-menu-cleared', onCleared)
       window.removeEventListener('frontbill:outlet-menu-synced', onSynced)
       window.removeEventListener('frontbill:supply-stock-changed', onSupply)
       window.removeEventListener('frontbill:bar-stock-changed', onBar)
       window.removeEventListener('frontbill:outlet-menu-price-saved', onMenuPriceSaved)
+      window.removeEventListener(ORG_LIVE_OUTLET_MENU, onOrgLiveOutletMenu)
     }
   }, [department])
 

@@ -46,6 +46,7 @@ import { toast } from 'sonner'
 import { Loader2, Pencil, Plus, Trash2, Package, Search } from 'lucide-react'
 import { formatNaira } from '@/lib/utils/currency'
 import { outletApiHeaders } from '@/lib/outlets/outlet-api-headers'
+import { ORG_LIVE_OUTLET_MENU, dispatchOrgLiveEvent } from '@/lib/live/org-live-events'
 import { OutletItemMetaFields } from '@/components/outlets/outlet-item-meta-fields'
 import { isLegacyDefaultDescription } from '@/lib/outlets/item-display'
 import { sortOutletMenuByName } from '@/lib/outlets/sort-outlet-menu'
@@ -281,6 +282,7 @@ export function OutletMenuManager({ department, categories, items, canManage, ca
       })
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('frontbill:outlet-menu-price-saved'))
+        dispatchOrgLiveEvent(ORG_LIVE_OUTLET_MENU)
       }
       onRefresh()
     } finally {
@@ -604,6 +606,7 @@ export function OutletMenuManager({ department, categories, items, canManage, ca
       if (department === 'main_bar' && Number(editItem.unit_price) !== unitPrice) {
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new CustomEvent('frontbill:outlet-menu-price-saved'))
+          dispatchOrgLiveEvent(ORG_LIVE_OUTLET_MENU)
         }
       }
       toast.success('Item updated')

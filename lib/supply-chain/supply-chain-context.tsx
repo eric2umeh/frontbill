@@ -142,6 +142,11 @@ import { canReadSupplySnapshots, snapshotsPayloadForRole } from "./supply-snapsh
 import { dedupeBatchMaterials } from "./parse-csv-row";
 import { broadcastSupplyLiveUpdate, subscribeSupplyLiveUpdates } from "./supply-live-sync";
 import {
+  ORG_LIVE_CATALOG,
+  ORG_LIVE_SUPPLY,
+  dispatchOrgLiveEvent,
+} from "@/lib/live/org-live-events";
+import {
   canonicalBarStockId,
   mergeBarStockFromRemote,
   normalizeBarStockRows,
@@ -706,12 +711,14 @@ function useSupplyChainImpl() {
     try {
       await saveSupplySnapshots(userId, payload, orgIdRef.current || undefined);
       broadcastSupplyLiveUpdate();
+      if ("bar_stock" in payload) dispatchOrgLiveEvent(ORG_LIVE_SUPPLY);
     } catch (err) {
       // One retry after a short delay (covers brief session refresh races).
       await new Promise((r) => setTimeout(r, 400));
       try {
         await saveSupplySnapshots(userId, payload, orgIdRef.current || undefined);
         broadcastSupplyLiveUpdate();
+        if ("bar_stock" in payload) dispatchOrgLiveEvent(ORG_LIVE_SUPPLY);
       } catch (err2) {
         if (isRetryableSupplyError(err2)) {
           console.warn("[supply-chain] snapshot sync retryable:", err2);
@@ -764,6 +771,7 @@ function useSupplyChainImpl() {
           orgIdRef.current || undefined,
         );
         broadcastSupplyLiveUpdate();
+        dispatchOrgLiveEvent(ORG_LIVE_SUPPLY);
       } catch (err) {
         if (opts?.required) throw err;
         console.warn("[supply-chain] bar stock sync failed", err);
@@ -1211,7 +1219,7 @@ function useSupplyChainImpl() {
     let cancelled = false;
 
     const refreshLiveSupply = async (fromOtherTab = false, includeCatalog = fromOtherTab) => {
-      if (Date.now() - lastLocalSupplyMutationAt < 4000) {
+      if (!fromOtherTab && Date.now() - lastLocalSupplyMutationAt < 4000) {
         return;
       }
       if (liveSupplyInFlight) return;
@@ -1318,18 +1326,28 @@ function useSupplyChainImpl() {
       if (document.visibilityState === "visible") void refreshLiveSupply(false, true);
     };
 
-    const firstPoll = window.setTimeout(() => void refreshLiveSupply(false, true), 4_000);
+    const firstPoll = window.setTimeout(() => void refreshLiveSupply(false, true), 2_000);
     document.addEventListener("visibilitychange", onVis);
-    const interval = window.setInterval(() => void refreshLiveSupply(false, false), 15_000);
+    const interval = window.setInterval(() => void refreshLiveSupply(true, false), 30_000);
     const unsubscribeLive = subscribeSupplyLiveUpdates(() => {
       window.setTimeout(() => {
         if (!cancelled) void refreshLiveSupply(true);
-      }, 700);
+      }, 150);
     });
+    const onOrgLiveSupply = () => {
+      if (!cancelled) void refreshLiveSupply(true, false);
+    };
+    const onOrgLiveCatalog = () => {
+      if (!cancelled) void refreshLiveSupply(true, true);
+    };
+    window.addEventListener(ORG_LIVE_SUPPLY, onOrgLiveSupply);
+    window.addEventListener(ORG_LIVE_CATALOG, onOrgLiveCatalog);
 
     return () => {
       cancelled = true;
       document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener(ORG_LIVE_SUPPLY, onOrgLiveSupply);
+      window.removeEventListener(ORG_LIVE_CATALOG, onOrgLiveCatalog);
       window.clearTimeout(firstPoll);
       window.clearInterval(interval);
       unsubscribeLive();

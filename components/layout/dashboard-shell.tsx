@@ -25,6 +25,7 @@ import { InstallAppBanner } from '@/components/pwa/install-app-banner'
 import { AppSessionLogger } from '@/components/pwa/app-session-logger'
 import { HelpAssistant } from '@/components/help/help-assistant'
 import { RoleOnboardingTour } from '@/components/onboarding/role-onboarding-tour'
+import { OrgLiveSync } from '@/components/live/org-live-sync'
 
 const ROUTE_PERMISSIONS: Array<{ path: string; permission: Permission }> = [
   { path: '/dashboard', permission: 'dashboard:view' },
@@ -225,6 +226,7 @@ export function DashboardShell({
     >
       <title>{documentTitleForPath(pathname)}</title>
       <SupplyChainProvider>
+        <OrgLiveSync />
         <SupplyPendingAlerts />
         <NightAuditPendingProvider>
           <StockShortageDialogHost />
