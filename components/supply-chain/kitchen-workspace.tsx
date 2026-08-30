@@ -7,7 +7,7 @@ import { useClientMounted } from '@/hooks/use-client-mounted'
 import { useAuth } from '@/lib/auth-context'
 import { useSupplyChain } from '@/lib/supply-chain/supply-chain-context'
 import { formatNaira } from '@/lib/utils/currency'
-import { canonicalRoleKey, canEditKitchenBatchSellingPrice, canManageKitchenBatchStandards, canOperateKitchenProduction, canRaisePurchaseRequest } from '@/lib/permissions'
+import { canonicalRoleKey, canCountKitchenRawStock, canEditKitchenBatchSellingPrice, canManageKitchenBatchStandards, canOperateKitchenProduction, canRaisePurchaseRequest } from '@/lib/permissions'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -39,7 +39,17 @@ import {
   stockLevelTextClass,
 } from '@/lib/supply-chain/stock-level-ui'
 import type { Recipe } from '@/lib/supply-chain/types'
+import { storeItemMatchesDept } from '@/lib/supply-chain/types'
 import { KitchenPurchasePanel } from '@/components/supply-chain/kitchen-purchase-panel'
+import { hotelCalendarTodayYmd, formatYMDInTimeZone, resolveHotelTimeZone } from '@/lib/hotel-date'
+
+function issuedKitchenYmd(iso: string): string {
+  try {
+    return formatYMDInTimeZone(new Date(iso), resolveHotelTimeZone())
+  } catch {
+    return ''
+  }
+}
 
 type RawStockTableRow = {
   key: string
@@ -141,7 +151,18 @@ export function KitchenWorkspace() {
     kitchenRawOnHand,
     setKitchenStockAvailable,
     updateRecipeOutletFields,
+    ensureKitchenRawStockFromCatalog,
+    setKitchenRawOnHand,
   } = useSupplyChain()
+
+  const todayYmd = hotelCalendarTodayYmd()
+  const [rawDateFrom, setRawDateFrom] = useState(todayYmd)
+  const [rawDateTo, setRawDateTo] = useState(todayYmd)
+  const [kitchenRawCountDraft, setKitchenRawCountDraft] = useState<Record<string, string>>({})
+
+  useEffect(() => {
+    ensureKitchenRawStockFromCatalog?.()
+  }, [ensureKitchenRawStockFromCatalog, storeItems])
 
   const [stockTick, setStockTick] = useState(0)
   useEffect(() => {
@@ -158,10 +179,38 @@ export function KitchenWorkspace() {
 
   const kitchenReceipts = useMemo(
     () =>
-      (issueOutLog ?? []).filter((r) =>
-        r.destination.trim().toLowerCase().includes('kitchen'),
-      ),
-    [issueOutLog],
+      (issueOutLog ?? [])
+        .filter((r) => r.destination.trim().toLowerCase().includes('kitchen'))
+        .filter((r) => {
+          const ymd = issuedKitchenYmd(r.issuedAt)
+          if (!ymd) return true
+          if (rawDateFrom && ymd < rawDateFrom) return false
+          if (rawDateTo && ymd > rawDateTo) return false
+          return true
+        }),
+    [issueOutLog, rawDateFrom, rawDateTo],
+  )
+
+  const kitchenStoreRows = useMemo(
+    () =>
+      storeItems
+        .filter((s) => storeItemMatchesDept(s, 'kitchen'))
+        .map((store) => {
+          const raw = (kitchenRawStock ?? []).find((r) => r.storeItemId === store.id)
+          return {
+            id: raw?.id ?? `kraw-${store.id}`,
+            storeItemId: store.id,
+            name: store.name,
+            unit: store.unit,
+            quantityOnHand: raw?.quantityOnHand ?? 0,
+            reorderLevel: raw?.reorderLevel ?? Math.max(0, store.reorderLevel ?? 0),
+            category: store.kitchenCategory
+              ? String(store.kitchenCategory)
+              : 'Uncategorized',
+          }
+        })
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [kitchenRawStock, storeItems, stockTick],
   )
 
   const rawStockTableRows = useMemo<RawStockTableRow[]>(() => {
@@ -282,7 +331,41 @@ export function KitchenWorkspace() {
   }
   const canOpenProduction = canOperateKitchenProduction(role)
   const canCountKitchenStock = canOpenProduction
+  const canCountKitchenRaw = canCountKitchenRawStock(role)
   const canRaiseKitchenPo = canRaisePurchaseRequest(role)
+
+  const commitKitchenRawCount = (row: (typeof kitchenStoreRows)[0]) => {
+    const raw = kitchenRawCountDraft[row.storeItemId] ?? kitchenRawCountDraft[row.id]
+    if (raw == null) return
+    if (!isCompleteQuantityInput(raw)) {
+      toast.error('Enter a valid quantity')
+      return
+    }
+    const qty = parseQuantityValue(raw)
+    if (qty == null || qty < 0) {
+      toast.error('Enter a valid quantity')
+      return
+    }
+    const result = setKitchenRawOnHand(row.storeItemId, qty, actor)
+    if ('error' in result) {
+      toast.error(result.error)
+      return
+    }
+    setKitchenRawCountDraft((prev) => {
+      const next = { ...prev }
+      delete next[row.storeItemId]
+      delete next[row.id]
+      return next
+    })
+    toast.success(`Kitchen store: ${row.name} → ${qty} ${row.unit}`)
+  }
+
+  const kitchenStoreCategoryOptions = useMemo(() => {
+    const cats = [...new Set(kitchenStoreRows.map((r) => r.category).filter(Boolean))].sort((a, b) =>
+      a.localeCompare(b),
+    )
+    return cats.map((c) => ({ value: c, label: c }))
+  }, [kitchenStoreRows])
 
   const commitKitchenStockCount = (item: (typeof kitchenStock)[0]) => {
     const raw = stockCountDraft[item.id]
@@ -391,7 +474,8 @@ export function KitchenWorkspace() {
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList className="flex h-auto flex-wrap">
           <TabsTrigger value="stock">Finished Menu</TabsTrigger>
-          <TabsTrigger value="raw-stock">Raw from Store</TabsTrigger>
+          <TabsTrigger value="kitchen-store">Kitchen Store</TabsTrigger>
+          <TabsTrigger value="raw-stock">Raw from Central Store</TabsTrigger>
           <TabsTrigger value="production">Production Records</TabsTrigger>
           <TabsTrigger value="recipes">All Batches</TabsTrigger>
           {canRaiseKitchenPo && (
@@ -412,6 +496,43 @@ export function KitchenWorkspace() {
             Raw materials issued from Central Store → Kitchen: on-hand totals and each receipt in one
             table. Search and filters run locally — no extra API calls while you browse.
           </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-2">
+              <Label htmlFor="kitchen-raw-from" className="text-xs text-muted-foreground whitespace-nowrap">
+                From
+              </Label>
+              <Input
+                id="kitchen-raw-from"
+                type="date"
+                className="h-9 w-[150px]"
+                value={rawDateFrom}
+                onChange={(e) => setRawDateFrom(e.target.value)}
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <Label htmlFor="kitchen-raw-to" className="text-xs text-muted-foreground whitespace-nowrap">
+                To
+              </Label>
+              <Input
+                id="kitchen-raw-to"
+                type="date"
+                className="h-9 w-[150px]"
+                value={rawDateTo}
+                onChange={(e) => setRawDateTo(e.target.value)}
+              />
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setRawDateFrom(todayYmd)
+                setRawDateTo(todayYmd)
+              }}
+            >
+              Today
+            </Button>
+          </div>
           <div className="rounded-xl border overflow-hidden p-4">
             <PaginatedListShell
               items={rawStockTableRows}
@@ -519,14 +640,117 @@ export function KitchenWorkspace() {
         </div>
         </TabsContent>
 
+        <TabsContent value="kitchen-store" className="mt-4 space-y-4">
+          <div className="rounded-xl border overflow-hidden p-4">
+            <PaginatedListShell
+              items={kitchenStoreRows}
+              pageSize={15}
+              searchPlaceholder="Search kitchen store items…"
+              searchKeys={['name', 'category']}
+              filters={[
+                {
+                  key: 'stockLevel',
+                  label: 'Level',
+                  options: [
+                    { value: 'out', label: 'Out' },
+                    { value: 'low', label: 'Low' },
+                    { value: 'ok', label: 'OK' },
+                  ],
+                },
+                ...(kitchenStoreCategoryOptions.length
+                  ? [
+                      {
+                        key: 'category',
+                        label: 'Category',
+                        options: kitchenStoreCategoryOptions,
+                      },
+                    ]
+                  : []),
+              ]}
+              filterMatch={(row, key, value) => {
+                if (key === 'stockLevel') {
+                  const level = getStockLevel(row.quantityOnHand, row.reorderLevel)
+                  if (value === 'out') return level === 'out'
+                  if (value === 'low') return level === 'low'
+                  return level === 'ok'
+                }
+                if (key === 'category') return row.category === value
+                return undefined
+              }}
+              emptyMessage="No kitchen catalogue items yet. Add kitchen items in Central Store first."
+            >
+              {(pageRows) => (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Item</TableHead>
+                      <TableHead className={RESPONSIVE_HIDE_MD}>Category</TableHead>
+                      <TableHead className="text-right">On hand</TableHead>
+                      <TableHead className={`text-right ${RESPONSIVE_HIDE_MD}`}>Reorder at</TableHead>
+                      <TableHead>Status</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {pageRows.map((row) => {
+                      const level = getStockLevel(row.quantityOnHand, row.reorderLevel)
+                      return (
+                        <TableRow key={row.id} className={stockLevelRowClass(level)}>
+                          <TableCell className="font-medium">{row.name}</TableCell>
+                          <TableCell className={`text-muted-foreground text-sm ${RESPONSIVE_HIDE_MD}`}>
+                            {row.category}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {canCountKitchenRaw ? (
+                              <div className="inline-flex items-center justify-end gap-1.5">
+                                <Input
+                                  className="h-8 w-20 text-right tabular-nums"
+                                  inputMode="decimal"
+                                  value={
+                                    kitchenRawCountDraft[row.storeItemId] ??
+                                    kitchenRawCountDraft[row.id] ??
+                                    String(row.quantityOnHand)
+                                  }
+                                  onChange={(e) =>
+                                    setKitchenRawCountDraft((prev) => ({
+                                      ...prev,
+                                      [row.storeItemId]: sanitizeQuantityInput(e.target.value),
+                                    }))
+                                  }
+                                  onBlur={() => commitKitchenRawCount(row)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') e.currentTarget.blur()
+                                  }}
+                                />
+                                <span className="text-xs text-muted-foreground whitespace-nowrap">
+                                  {row.unit}
+                                </span>
+                              </div>
+                            ) : (
+                              <span className={stockLevelTextClass(level)}>
+                                {row.quantityOnHand} {row.unit}
+                              </span>
+                            )}
+                          </TableCell>
+                          <TableCell className={`text-right text-muted-foreground text-sm ${RESPONSIVE_HIDE_MD}`}>
+                            {row.reorderLevel} {row.unit}
+                          </TableCell>
+                          <TableCell>
+                            <Badge className={stockLevelBadgeClass(level)}>
+                              {stockLevelStatusLabel(level)}
+                            </Badge>
+                          </TableCell>
+                        </TableRow>
+                      )
+                    })}
+                  </TableBody>
+                </Table>
+              )}
+            </PaginatedListShell>
+          </div>
+        </TabsContent>
+
         <TabsContent value="stock" className="mt-4">
         <div>
-          <p className="text-sm text-muted-foreground mb-3">
-            Only batch standards from <strong className="text-foreground">All Batches</strong> appear
-            here. Portions increase when a production run is closed. Tap{' '}
-            <strong className="text-foreground">Available</strong> to set a physical count; closing a
-            batch adds portions on top of that number.
-          </p>
           <PaginatedListShell
             items={kitchenStock}
             pageSize={15}
@@ -755,14 +979,7 @@ export function KitchenWorkspace() {
 
         <TabsContent value="recipes" className="mt-4 space-y-4">
         <div className="space-y-4">
-          <div className="flex flex-col gap-3 rounded-lg border bg-muted/30 px-3 py-2 sm:flex-row sm:items-start sm:justify-between">
-            <p className="text-sm text-muted-foreground">
-              <strong className="text-foreground">All Batches</strong> holds batch standards and costing.
-              Default is not listed on outlet POS. Kitchen always supplies Restaurant — choose{' '}
-              <strong className="text-foreground">Restaurant outlet</strong> or{' '}
-              <strong className="text-foreground">Restaurant / F&amp;B outlet</strong> when creating
-              or editing a batch.
-            </p>
+          <div className="flex justify-end">
             <Button
               type="button"
               variant="outline"
@@ -955,10 +1172,6 @@ export function KitchenWorkspace() {
         </TabsContent>
 
         <TabsContent value="budget" className="mt-4 space-y-4">
-          <p className="text-sm text-muted-foreground rounded-lg border bg-muted/30 px-3 py-2">
-            Plan market purchases: pick a batch standard and how many runs you need. Total cost
-            includes ingredients and overhead per standard yield.
-          </p>
           <div className="rounded-xl border overflow-hidden">
             <Table>
               <TableHeader>
