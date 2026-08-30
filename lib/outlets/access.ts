@@ -41,6 +41,27 @@ export function canManageOutletMenu(
   return MENU_MANAGER_ROLES.includes(rk)
 }
 
+/** Auditor: change category & selling price only (Main Bar menu tab, Restaurant kitchen-synced dishes). */
+export function canAuditorEditOutletMenuPricing(
+  role: string | null | undefined,
+  department: OutletDepartmentKey,
+): boolean {
+  const rk = canonicalRoleKey(role)
+  if (rk !== 'auditor') return false
+  return department === 'main_bar' || department === 'restaurant'
+}
+
+/** Full menu manage, or auditor limited price/category edit on Main Bar / Restaurant. */
+export function canEditOutletMenuPriceAndCategory(
+  role: string | null | undefined,
+  department: OutletDepartmentKey,
+): boolean {
+  return (
+    canManageOutletMenu(role, department) ||
+    canAuditorEditOutletMenuPricing(role, department)
+  )
+}
+
 /** Edit or delete/void outlet orders (superadmin, admin, manager). */
 export function canManageOutletOrders(role: string | null | undefined): boolean {
   return hasPermission(role, 'outlet:edit')
