@@ -1,5 +1,11 @@
-import type { ProductionBatch, Recipe } from '@/lib/supply-chain/types'
+import type { KitchenStockItem, ProductionBatch, Recipe } from '@/lib/supply-chain/types'
 import { mergeSnapshotRowsById } from '@/lib/supply-chain/snapshot-merge'
+
+function tombstoneMs(iso: string | undefined): number {
+  if (!iso) return 0
+  const ms = Date.parse(iso)
+  return Number.isFinite(ms) ? ms : 0
+}
 
 function batchTieBreaker(b: ProductionBatch): number {
   const deleted = b.deletedAt ? Date.parse(b.deletedAt) : 0
@@ -55,18 +61,25 @@ export function mergeProductionBatchesFromRemote(
     const l = localById.get(id)
     const r = remoteById.get(id)
     if (!l) {
-      if (r && !isProductionBatchDeleted(r)) merged.push(r)
+      if (r) merged.push(r)
       continue
     }
     if (!r) {
-      if (!isProductionBatchDeleted(l)) merged.push(l)
+      merged.push(l)
       continue
     }
-    const picked = preferProductionBatch(l, r)
-    if (!isProductionBatchDeleted(picked)) merged.push(picked)
+    merged.push(preferProductionBatch(l, r))
   }
 
   return merged.sort((a, b) => (b.openedAt || '').localeCompare(a.openedAt || ''))
+}
+
+export function isRecipeDeleted(recipe: Recipe | undefined): boolean {
+  return Boolean(recipe?.deletedAt)
+}
+
+export function visibleRecipes(recipes: Recipe[]): Recipe[] {
+  return recipes.filter((r) => !isRecipeDeleted(r))
 }
 
 function recipeUpdatedAtMs(recipe: Recipe | undefined): number {
@@ -75,10 +88,24 @@ function recipeUpdatedAtMs(recipe: Recipe | undefined): number {
   return Number.isFinite(ms) ? ms : 0
 }
 
+/** Prefer tombstone / newer updatedAt so deleted batch standards stay deleted after sync. */
+export function preferRecipe(a: Recipe, b: Recipe): Recipe {
+  const aDel = tombstoneMs(a.deletedAt)
+  const bDel = tombstoneMs(b.deletedAt)
+  if (aDel || bDel) {
+    if (aDel !== bDel) return aDel > bDel ? a : b
+    if (a.deletedAt && !b.deletedAt) return a
+    if (b.deletedAt && !a.deletedAt) return b
+  }
+  const lt = recipeUpdatedAtMs(a)
+  const rt = recipeUpdatedAtMs(b)
+  if (rt > lt) return b
+  if (lt > rt) return a
+  return a
+}
+
 /**
- * Prefer the newer recipe (by updatedAt) for shared ids.
- * Remote-only / local-only rows are kept. When timestamps tie or are missing,
- * prefer local so in-progress edits are not wiped by a stale poll.
+ * Merge org batch standards with in-memory state — tombstones win over stale remote rows.
  */
 export function mergeRecipesFromRemote(local: Recipe[], remote: Recipe[]): Recipe[] {
   if (local.length === 0) return remote
@@ -100,10 +127,56 @@ export function mergeRecipesFromRemote(local: Recipe[], remote: Recipe[]): Recip
       merged.push(l)
       continue
     }
-    const lt = recipeUpdatedAtMs(l)
-    const rt = recipeUpdatedAtMs(r)
-    if (rt > lt) merged.push(r)
-    else merged.push(l)
+    merged.push(preferRecipe(l, r))
+  }
+
+  return merged
+}
+
+export function isKitchenStockDeleted(item: KitchenStockItem | undefined): boolean {
+  return Boolean(item?.deletedAt)
+}
+
+export function visibleKitchenStock(items: KitchenStockItem[]): KitchenStockItem[] {
+  return items.filter((k) => !isKitchenStockDeleted(k))
+}
+
+export function preferKitchenStock(a: KitchenStockItem, b: KitchenStockItem): KitchenStockItem {
+  const aDel = tombstoneMs(a.deletedAt)
+  const bDel = tombstoneMs(b.deletedAt)
+  if (aDel || bDel) {
+    if (aDel !== bDel) return aDel > bDel ? a : b
+    if (a.deletedAt && !b.deletedAt) return a
+    if (b.deletedAt && !a.deletedAt) return b
+  }
+  return a
+}
+
+/** Merge finished / prep stock — local tombstones must beat stale remote rows on refresh. */
+export function mergeKitchenStockFromRemote(
+  local: KitchenStockItem[],
+  remote: KitchenStockItem[],
+): KitchenStockItem[] {
+  if (local.length === 0) return remote
+  if (remote.length === 0) return local
+
+  const localById = new Map(local.map((k) => [k.id, k]))
+  const remoteById = new Map(remote.map((k) => [k.id, k]))
+  const ids = new Set([...localById.keys(), ...remoteById.keys()])
+  const merged: KitchenStockItem[] = []
+
+  for (const id of ids) {
+    const l = localById.get(id)
+    const r = remoteById.get(id)
+    if (!l) {
+      if (r) merged.push(r)
+      continue
+    }
+    if (!r) {
+      merged.push(l)
+      continue
+    }
+    merged.push(preferKitchenStock(l, r))
   }
 
   return merged
