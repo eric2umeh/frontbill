@@ -7,7 +7,7 @@ import { useClientMounted } from '@/hooks/use-client-mounted'
 import { useAuth } from '@/lib/auth-context'
 import { useSupplyChain } from '@/lib/supply-chain/supply-chain-context'
 import { formatNaira } from '@/lib/utils/currency'
-import { canonicalRoleKey, canManageKitchenBatchStandards, canOperateKitchenProduction, canRaisePurchaseRequest } from '@/lib/permissions'
+import { canonicalRoleKey, canEditKitchenBatchSellingPrice, canManageKitchenBatchStandards, canOperateKitchenProduction, canRaisePurchaseRequest } from '@/lib/permissions'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -140,6 +140,7 @@ export function KitchenWorkspace() {
     getRecipeEconomics,
     kitchenRawOnHand,
     setKitchenStockAvailable,
+    updateRecipeOutletFields,
   } = useSupplyChain()
 
   const [stockTick, setStockTick] = useState(0)
@@ -219,10 +220,66 @@ export function KitchenWorkspace() {
   const [closeDialog, setCloseDialog] = useState<string | null>(null)
   const [budgetQty, setBudgetQty] = useState<Record<string, string>>({})
   const [deleteRecipeId, setDeleteRecipeId] = useState<string | null>(null)
+  const [sellPriceDraft, setSellPriceDraft] = useState<Record<string, string>>({})
+  const [sellPriceSavingId, setSellPriceSavingId] = useState<string | null>(null)
   const [plannedInput, setPlannedInput] = useState('')
   const [stockCountDraft, setStockCountDraft] = useState<Record<string, string>>({})
   const actor = { name: name ?? 'Kitchen', role: canonicalRoleKey(role) ?? 'staff' }
   const canManageBatchStandards = canManageKitchenBatchStandards(role)
+  const canEditBatchSellPrice = canEditKitchenBatchSellingPrice(role)
+
+  const commitBatchSellPrice = async (recipe: Recipe) => {
+    const raw = sellPriceDraft[recipe.id] ?? String(recipe.sellingPricePerPortion)
+    const trimmed = raw.trim()
+    const price = trimmed === '' ? 0 : Number(trimmed)
+    if (!Number.isFinite(price) || price < 0) {
+      toast.error('Enter a valid selling price')
+      return
+    }
+    if (price === recipe.sellingPricePerPortion) {
+      setSellPriceDraft((prev) => {
+        const next = { ...prev }
+        delete next[recipe.id]
+        return next
+      })
+      return
+    }
+    setSellPriceSavingId(recipe.id)
+    try {
+      const res = updateRecipeOutletFields(
+        recipe.id,
+        { sellingPricePerPortion: price },
+        actor,
+      )
+      if ('error' in res) {
+        toast.error(res.error)
+        return
+      }
+      const outletSync = normalizeBatchOutletMenuSync(
+        recipe.outletMenuSync ?? recipe.fnbEligible,
+      )
+      if (shouldSyncBatchToOutlet(outletSync)) {
+        const sync = await syncBatchToRestaurantOutlet({
+          batchName: res.menuItemName,
+          categoryName: res.category,
+          kitchenStockId: res.kitchenStockId,
+          unitPrice: res.sellingPricePerPortion,
+          outletMenuSync: outletSync,
+        })
+        if (!sync.ok) {
+          toast.warning(`Kitchen price saved but Restaurant sync failed — ${sync.error}`)
+        }
+      }
+      toast.success(`${recipe.name} selling price updated`)
+      setSellPriceDraft((prev) => {
+        const next = { ...prev }
+        delete next[recipe.id]
+        return next
+      })
+    } finally {
+      setSellPriceSavingId(null)
+    }
+  }
   const canOpenProduction = canOperateKitchenProduction(role)
   const canCountKitchenStock = canOpenProduction
   const canRaiseKitchenPo = canRaisePurchaseRequest(role)
@@ -816,7 +873,31 @@ export function KitchenWorkspace() {
                 ) : null}
                 <div className="flex justify-between text-sm border-t pt-2">
                   <span>Cost / portion: {formatNaira(econ.costPerPortion)}</span>
-                  <span className="text-emerald-600 font-medium">Sell: {formatNaira(r.sellingPricePerPortion)}</span>
+                  {canEditBatchSellPrice ? (
+                    <span className="inline-flex items-center gap-1.5 text-emerald-600 font-medium">
+                      Sell:
+                      <Input
+                        className="h-7 w-24 text-right tabular-nums"
+                        inputMode="decimal"
+                        disabled={sellPriceSavingId === r.id}
+                        value={sellPriceDraft[r.id] ?? String(r.sellingPricePerPortion)}
+                        onChange={(e) =>
+                          setSellPriceDraft((prev) => ({
+                            ...prev,
+                            [r.id]: sanitizeQuantityInput(e.target.value),
+                          }))
+                        }
+                        onBlur={() => void commitBatchSellPrice(r)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') e.currentTarget.blur()
+                        }}
+                      />
+                    </span>
+                  ) : (
+                    <span className="text-emerald-600 font-medium">
+                      Sell: {formatNaira(r.sellingPricePerPortion)}
+                    </span>
+                  )}
                 </div>
                 <div className="text-xs text-muted-foreground">
                   Batch total cost {formatNaira(econ.totalCost)} → revenue {formatNaira(econ.revenue)} → profit {formatNaira(econ.profit)}
