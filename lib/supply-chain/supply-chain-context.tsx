@@ -123,7 +123,8 @@ import {
   mergeRecipesFromRemote,
   visibleProductionBatches,
 } from "./kitchen-sync-merge";
-import { canReadSupplySnapshots, snapshotsPayloadForRole } from "./supply-snapshot-payload";
+import { canReadSupplySnapshots, filterSnapshotPayload, snapshotsPayloadForRole } from "./supply-snapshot-payload";
+import type { SupplySnapshotKey } from "./supply-db-mappers";
 import { dedupeBatchMaterials } from "./parse-csv-row";
 import { broadcastSupplyLiveUpdate, subscribeSupplyLiveUpdates } from "./supply-live-sync";
 import {
@@ -641,24 +642,29 @@ function useSupplyChainImpl() {
     storeItems,
   ]);
 
-  const persistSnapshotsNow = useCallback(async (): Promise<void> => {
+  const persistSnapshotsNow = useCallback(async (
+    onlyKeys?: readonly SupplySnapshotKey[],
+  ): Promise<void> => {
     if (!useDbPersistence || !dbHydratedRef.current || snapshotSyncSkipRef.current) {
       return;
     }
-    const payload = snapshotsPayloadForRole(
-      {
-        recipes: recipesRef.current,
-        batches: batchesRef.current,
-        kitchen_stock: kitchenStockRef.current,
-        kitchen_raw_stock: kitchenRawStockRef.current,
-        bar_stock: barStockRef.current,
-        fnb_raw_stock: fnbRawStockRef.current,
-        fnb_daily_sheets: fnbDailySheetsRef.current,
-        fnb_movements: fnbMovementsRef.current,
-        issue_out_log: issueOutLogRef.current,
-        pending_items: pendingStoreItemsRef.current,
-      },
-      role,
+    const payload = filterSnapshotPayload(
+      snapshotsPayloadForRole(
+        {
+          recipes: recipesRef.current,
+          batches: batchesRef.current,
+          kitchen_stock: kitchenStockRef.current,
+          kitchen_raw_stock: kitchenRawStockRef.current,
+          bar_stock: barStockRef.current,
+          fnb_raw_stock: fnbRawStockRef.current,
+          fnb_daily_sheets: fnbDailySheetsRef.current,
+          fnb_movements: fnbMovementsRef.current,
+          issue_out_log: issueOutLogRef.current,
+          pending_items: pendingStoreItemsRef.current,
+        },
+        role,
+      ),
+      onlyKeys,
     );
     if (Object.keys(payload).length === 0) return;
     try {
@@ -798,11 +804,13 @@ function useSupplyChainImpl() {
   }, [useDbPersistence, persistPoBasketSnapshot]);
 
   /** Retry snapshot sync until DB hydration finishes (kitchen / outlet stock changes). */
-  const schedulePersistSnapshots = useCallback(() => {
+  const schedulePersistSnapshots = useCallback((
+    onlyKeys?: readonly SupplySnapshotKey[],
+  ) => {
     if (!useDbPersistence) return;
     const attempt = (triesLeft: number) => {
       if (dbHydratedRef.current && !snapshotSyncSkipRef.current) {
-        persistSnapshotsNow();
+        void persistSnapshotsNow(onlyKeys);
         return;
       }
       if (triesLeft > 0) {
@@ -4049,12 +4057,15 @@ function useSupplyChainImpl() {
       if (!existing) return { error: "Kitchen stock item not found" };
       const qty = Math.max(0, Number(availablePortions) || 0);
       if (!Number.isFinite(qty)) return { error: "Enter a valid quantity" };
-      setKitchenStock((prev) =>
-        prev.map((k) =>
+      setKitchenStock((prev) => {
+        const next = prev.map((k) =>
           k.id === stockId ? { ...k, availablePortions: qty } : k,
-        ),
-      );
+        );
+        kitchenStockRef.current = next;
+        return next;
+      });
       markLocalSupplyMutation();
+      notifyKitchenRawStockChanged();
       setActivityLog((a) =>
         log(
           a,
@@ -4064,7 +4075,7 @@ function useSupplyChainImpl() {
           stockId,
         ),
       );
-      schedulePersistSnapshots();
+      schedulePersistSnapshots(["kitchen_stock"]);
       return { ok: true };
     },
     [kitchenStock, schedulePersistSnapshots],
@@ -4081,12 +4092,15 @@ function useSupplyChainImpl() {
       if (!existing) return { error: "Bar stock item not found" };
       const qty = Math.max(0, Number(quantityOnHand) || 0);
       if (!Number.isFinite(qty)) return { error: "Enter a valid quantity" };
-      setBarStock((prev) =>
-        prev.map((b) =>
+      setBarStock((prev) => {
+        const next = prev.map((b) =>
           b.id === stockId ? { ...b, quantityOnHand: qty } : b,
-        ),
-      );
+        );
+        barStockRef.current = next;
+        return next;
+      });
       markLocalSupplyMutation();
+      notifyBarStockChanged();
       setActivityLog((a) =>
         log(
           a,
@@ -4096,7 +4110,7 @@ function useSupplyChainImpl() {
           stockId,
         ),
       );
-      schedulePersistSnapshots();
+      schedulePersistSnapshots(["bar_stock"]);
       return { ok: true };
     },
     [barStock, schedulePersistSnapshots],
@@ -4537,7 +4551,7 @@ function useSupplyChainImpl() {
           order.id,
         ),
       );
-      schedulePersistSnapshots();
+      schedulePersistSnapshots(["kitchen_stock"]);
       return { order };
     },
     [fnbOrders, kitchenStock, schedulePersistSnapshots],
@@ -4947,7 +4961,7 @@ function useSupplyChainImpl() {
           fnbRawId,
         ),
       );
-      schedulePersistSnapshots();
+      schedulePersistSnapshots(["fnb_raw_stock"]);
       notifyFnbDailyChanged();
       return { ok: true as const };
     },
@@ -5055,7 +5069,7 @@ function useSupplyChainImpl() {
       notifyFnbRawStockChanged();
       notifyBarStockChanged();
       notifyFnbDailyChanged();
-      schedulePersistSnapshots();
+      schedulePersistSnapshots(["bar_stock", "fnb_raw_stock", "fnb_movements"]);
       return {
         ok: true as const,
         barStockId,
@@ -5211,7 +5225,7 @@ function useSupplyChainImpl() {
       );
       notifyFnbRawStockChanged();
       notifyFnbDailyChanged();
-      schedulePersistSnapshots();
+      schedulePersistSnapshots(["fnb_daily_sheets", "fnb_raw_stock", "fnb_movements"]);
       return { ok: true as const, stamp };
     },
     [fnbRawStock, role, schedulePersistSnapshots],
@@ -5246,9 +5260,11 @@ function useSupplyChainImpl() {
       if (source === "kitchen") {
         const stockId = link.stockId || `ks-${outletStockSlug(item.name)}`;
         const serviceCode = `ks:${stockId}`;
-        setKitchenStock((prev) =>
-          upsertKitchenStockRow(prev, stockId, item.name, qty),
-        );
+        setKitchenStock((prev) => {
+          const next = upsertKitchenStockRow(prev, stockId, item.name, qty);
+          kitchenStockRef.current = next;
+          return next;
+        });
         setActivityLog((a) =>
           log(
             a,
@@ -5258,6 +5274,9 @@ function useSupplyChainImpl() {
             stockId,
           ),
         );
+        markLocalSupplyMutation();
+        notifyKitchenRawStockChanged();
+        schedulePersistSnapshots(["kitchen_stock"]);
         return { ok: true, stockId, serviceCode, unit: "portion" };
       }
 
@@ -5282,7 +5301,11 @@ function useSupplyChainImpl() {
           unitsPerSale: 1,
           unit: barUnit,
         };
-        setBarStock((prev) => upsertBarStockRow(prev, stockId, barRow, qty));
+        setBarStock((prev) => {
+          const next = upsertBarStockRow(prev, stockId, barRow, qty);
+          barStockRef.current = next;
+          return next;
+        });
         setActivityLog((a) =>
           log(
             a,
@@ -5292,12 +5315,15 @@ function useSupplyChainImpl() {
             stockId,
           ),
         );
+        markLocalSupplyMutation();
+        notifyBarStockChanged();
+        schedulePersistSnapshots(["bar_stock"]);
         return { ok: true, stockId, serviceCode, unit: barUnit };
       }
 
       return { error: "This outlet is not stock-controlled" };
     },
-    [kitchenStock, barStock, storeItems],
+    [kitchenStock, barStock, storeItems, schedulePersistSnapshots],
   );
 
   /**
@@ -5498,7 +5524,10 @@ function useSupplyChainImpl() {
       );
       if (touchedBar) notifyBarStockChanged();
       if (touchedKitchen) notifyKitchenRawStockChanged();
-      if (touchedBar || touchedKitchen) schedulePersistSnapshots();
+      const persistKeys: SupplySnapshotKey[] = [];
+      if (touchedBar) persistKeys.push("bar_stock");
+      if (touchedKitchen) persistKeys.push("kitchen_stock");
+      if (persistKeys.length) schedulePersistSnapshots(persistKeys);
     },
     [kitchenStock, barStock, schedulePersistSnapshots],
   );
