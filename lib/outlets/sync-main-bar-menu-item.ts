@@ -78,6 +78,22 @@ async function resolveDefaultCategoryId(
   return created?.id ?? null
 }
 
+async function existingMenuUnitPrice(
+  admin: SupabaseClient,
+  existing: MenuItemRow,
+): Promise<number> {
+  if (existing.unit_price != null && Number.isFinite(Number(existing.unit_price))) {
+    return Number(existing.unit_price)
+  }
+  const { data } = await admin
+    .from('outlet_menu_items')
+    .select('unit_price')
+    .eq('id', existing.id)
+    .maybeSingle()
+  const price = Number(data?.unit_price)
+  return Number.isFinite(price) && price >= 0 ? price : 0
+}
+
 /** Upsert one Main Bar menu row from a central-store catalogue item (qty stays in bar stock). */
 export async function syncMainBarMenuItemFromStore(
   admin: SupabaseClient,
@@ -115,15 +131,20 @@ export async function syncMainBarMenuItemFromStore(
     )
   }
 
-  // Outlet menu price is the POS selling price — store lastPrice only seeds new or unset rows.
-  const seedPriceFromStore =
-    !existing?.is_active || Number(existing.unit_price) === 0
+  // Outlet menu price is the POS selling price — never overwrite a price staff set manually.
+  let menuPriceToSeed: number | null = null
+  if (existing?.is_active) {
+    const currentMenuPrice = await existingMenuUnitPrice(admin, existing)
+    if (currentMenuPrice === 0 && unitPrice > 0) {
+      menuPriceToSeed = unitPrice
+    }
+  }
 
   if (existing?.is_active) {
     const nameMatches = existing.name.trim().toLowerCase() === nameNorm
     const codeMatches = existing.service_code === serviceCode
     const hasCategory = Boolean(categoryId)
-    if (nameMatches && codeMatches && hasCategory) {
+    if (nameMatches && codeMatches && hasCategory && menuPriceToSeed == null) {
       return { synced: 'skipped', itemId: existing.id }
     }
   }
@@ -136,8 +157,8 @@ export async function syncMainBarMenuItemFromStore(
     updated_by: input.userId,
     updated_at: new Date().toISOString(),
   }
-  if (seedPriceFromStore) {
-    itemPayload.unit_price = unitPrice
+  if (menuPriceToSeed != null) {
+    itemPayload.unit_price = menuPriceToSeed
   }
 
   if (existing) {
@@ -166,7 +187,7 @@ export async function syncMainBarMenuItemFromStore(
     existing.name = itemName
     existing.service_code = serviceCode
     existing.category_id = categoryId
-    if (seedPriceFromStore) existing.unit_price = unitPrice
+    if (menuPriceToSeed != null) existing.unit_price = menuPriceToSeed
     existing.is_active = true
     return { synced: 'updated', itemId: updated?.id ?? existing.id }
   }
