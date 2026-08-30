@@ -104,16 +104,6 @@ export async function syncMainBarMenuItemFromStore(
     return { synced: 'skipped', itemId: existing.id }
   }
 
-  if (existing?.is_active) {
-    const existingPrice = Number(existing.unit_price) || 0
-    const nameMatches = existing.name.trim().toLowerCase() === nameNorm
-    const priceMatches = existingPrice === unitPrice
-    const codeMatches = existing.service_code === serviceCode
-    if (nameMatches && priceMatches && codeMatches) {
-      return { synced: 'skipped', itemId: existing.id }
-    }
-  }
-
   let categoryId: string | null = existing?.category_id ?? null
   if (!categoryId) {
     categoryId = await resolveDefaultCategoryId(
@@ -125,14 +115,29 @@ export async function syncMainBarMenuItemFromStore(
     )
   }
 
-  const itemPayload = {
+  // Outlet menu price is the POS selling price — store lastPrice only seeds new or unset rows.
+  const seedPriceFromStore =
+    !existing?.is_active || Number(existing.unit_price) === 0
+
+  if (existing?.is_active) {
+    const nameMatches = existing.name.trim().toLowerCase() === nameNorm
+    const codeMatches = existing.service_code === serviceCode
+    const hasCategory = Boolean(categoryId)
+    if (nameMatches && codeMatches && hasCategory) {
+      return { synced: 'skipped', itemId: existing.id }
+    }
+  }
+
+  const itemPayload: Record<string, unknown> = {
     name: itemName,
     category_id: categoryId,
-    unit_price: unitPrice,
     service_code: serviceCode,
     is_active: true,
     updated_by: input.userId,
     updated_at: new Date().toISOString(),
+  }
+  if (seedPriceFromStore) {
+    itemPayload.unit_price = unitPrice
   }
 
   if (existing) {
@@ -161,6 +166,7 @@ export async function syncMainBarMenuItemFromStore(
     existing.name = itemName
     existing.service_code = serviceCode
     existing.category_id = categoryId
+    if (seedPriceFromStore) existing.unit_price = unitPrice
     existing.is_active = true
     return { synced: 'updated', itemId: updated?.id ?? existing.id }
   }
@@ -189,16 +195,20 @@ export async function syncMainBarMenuItemFromStore(
     if (!isDup) return { error: ie.message }
     const { data: racedItem } = await admin
       .from('outlet_menu_items')
-      .select('id, name, service_code, category_id, is_active')
+      .select('id, name, service_code, category_id, is_active, unit_price')
       .eq('organization_id', input.organizationId)
       .eq('department', 'main_bar')
       .eq('service_code', serviceCode)
       .maybeSingle()
     if (!racedItem) return { error: ie.message }
     if (!racedItem.is_active) return { synced: 'skipped', itemId: racedItem.id }
+    const racePayload = { ...itemPayload }
+    if (Number(racedItem.unit_price) === 0 && unitPrice > 0) {
+      racePayload.unit_price = unitPrice
+    }
     const { error: ue } = await admin
       .from('outlet_menu_items')
-      .update(itemPayload)
+      .update(racePayload)
       .eq('id', racedItem.id)
     if (ue) return { error: ue.message }
     return { synced: 'updated', itemId: racedItem.id }
