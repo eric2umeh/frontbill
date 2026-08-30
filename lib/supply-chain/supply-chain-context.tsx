@@ -733,6 +733,45 @@ function useSupplyChainImpl() {
     }
   }, [useDbPersistence, userId, role]);
 
+  /** Immediate cloud write for bar stock counts (POS / Main Bar menu qty). */
+  const persistBarStockSnapshot = useCallback(
+    async (rows: BarStockItem[], opts?: { required?: boolean }) => {
+      if (!useDbPersistence) {
+        if (opts?.required) {
+          throw new Error("Cloud sync is unavailable — sign in again and retry.");
+        }
+        return;
+      }
+      if (!dbHydratedRef.current || snapshotSyncSkipRef.current) {
+        if (opts?.required) {
+          throw new Error(
+            "Supply data is still loading — wait a moment and try again.",
+          );
+        }
+        return;
+      }
+      const payload = snapshotsPayloadForRole({ bar_stock: rows }, role);
+      if (!("bar_stock" in payload)) {
+        if (opts?.required) {
+          throw new Error("Your role cannot save bar stock to cloud.");
+        }
+        return;
+      }
+      try {
+        await saveSupplySnapshots(
+          userId,
+          { bar_stock: normalizeBarStockRows(rows) },
+          orgIdRef.current || undefined,
+        );
+        broadcastSupplyLiveUpdate();
+      } catch (err) {
+        if (opts?.required) throw err;
+        console.warn("[supply-chain] bar stock sync failed", err);
+      }
+    },
+    [useDbPersistence, userId, role],
+  );
+
   /** Small PUT for PO + basket only — avoids 502/timeouts from uploading the full org snapshot. */
   const persistPoBasketSnapshot = useCallback(
     async (opts?: {
@@ -943,7 +982,7 @@ function useSupplyChainImpl() {
         if (mergedKitchenStock.length) setKitchenStock(mergedKitchenStock);
         if (kitchenStockReconciled) markLocalSupplyMutation();
         if (mergedKitchenRaw.length) setKitchenRawStock(mergedKitchenRaw);
-        if (mergedBarStock.length) setBarStock(mergedBarStock);
+        setBarStock(mergedBarStock);
         if (mergedFnbRaw.length) setFnbRawStock(mergedFnbRaw);
         if (mergedFnbSheets.length) setFnbDailySheets(mergedFnbSheets);
         if (mergedFnbMovements.length) setFnbMovements(mergedFnbMovements);
@@ -4445,12 +4484,15 @@ function useSupplyChainImpl() {
       const existingIdx = findBarIdx(barStock);
       if (existingIdx >= 0) {
         const existing = barStock[existingIdx];
+        let nextBarStock: BarStockItem[] = barStock;
         setBarStock((prev) => {
           const idx = findBarIdx(prev);
           if (idx < 0) return prev;
-          return prev.map((b, i) =>
+          nextBarStock = prev.map((b, i) =>
             i === idx ? { ...b, quantityOnHand: qty } : b,
           );
+          barStockRef.current = nextBarStock;
+          return nextBarStock;
         });
         markLocalSupplyMutation();
         setActivityLog((a) =>
@@ -4463,7 +4505,13 @@ function useSupplyChainImpl() {
           ),
         );
         schedulePersistSnapshots();
-        void persistSnapshotsNow();
+        void persistBarStockSnapshot(nextBarStock, { required: true }).catch((err) => {
+          toast.error(
+            err instanceof Error
+              ? `Bar stock saved locally but not synced: ${err.message}`
+              : "Bar stock saved locally but not synced to cloud — cashiers may not see qty yet",
+          );
+        });
         notifyBarStockChanged();
         return { ok: true };
       }
@@ -4474,8 +4522,9 @@ function useSupplyChainImpl() {
         return { error: "Bar stock item not found" };
       }
       const canonicalId = canonicalBarStockId(store.id);
-      setBarStock((prev) =>
-        normalizeBarStockRows([
+      let nextBarStock: BarStockItem[] = barStock;
+      setBarStock((prev) => {
+        nextBarStock = normalizeBarStockRows([
           ...prev,
           {
             id: canonicalId,
@@ -4486,8 +4535,10 @@ function useSupplyChainImpl() {
             unitsPerSale: 1,
             unit: store.unit,
           },
-        ]),
-      );
+        ]);
+        barStockRef.current = nextBarStock;
+        return nextBarStock;
+      });
       markLocalSupplyMutation();
       setActivityLog((a) =>
         log(
@@ -4499,17 +4550,24 @@ function useSupplyChainImpl() {
         ),
       );
       schedulePersistSnapshots();
-      void persistSnapshotsNow();
+      void persistBarStockSnapshot(nextBarStock, { required: true }).catch((err) => {
+        toast.error(
+          err instanceof Error
+            ? `Bar stock saved locally but not synced: ${err.message}`
+            : "Bar stock saved locally but not synced to cloud — cashiers may not see qty yet",
+        );
+      });
       notifyBarStockChanged();
       return { ok: true };
     },
-    [barStock, storeItems, schedulePersistSnapshots, persistSnapshotsNow],
+    [barStock, storeItems, schedulePersistSnapshots, persistBarStockSnapshot],
   );
 
   /** Placeholder bar rows (qty 0) for every main_bar central-store item — menu sync does not create stock rows. */
   const ensureMainBarStockFromCatalog = useCallback(() => {
     const mainBarItems = storeItems.filter((s) => storeItemMatchesDept(s, "main_bar"));
     if (!mainBarItems.length) return;
+    let catalogStockChanged = false;
     setBarStock((prev) => {
       const next = normalizeBarStockRows(prev);
       let changed = false;
@@ -4548,10 +4606,13 @@ function useSupplyChainImpl() {
           changed = true;
         }
       }
+      if (changed) catalogStockChanged = true;
       return changed ? normalizeBarStockRows(next) : prev;
     });
-    markLocalSupplyMutation();
-    schedulePersistSnapshots();
+    if (catalogStockChanged) {
+      markLocalSupplyMutation();
+      schedulePersistSnapshots();
+    }
   }, [storeItems, schedulePersistSnapshots]);
 
   const deleteStoreItemDirect = useCallback(
@@ -5756,7 +5817,12 @@ function useSupplyChainImpl() {
           unitsPerSale: 1,
           unit: barUnit,
         };
-        setBarStock((prev) => upsertBarStockRow(prev, canonicalId, barRow, qty));
+        let nextBarStock: BarStockItem[] = barStock;
+        setBarStock((prev) => {
+          nextBarStock = upsertBarStockRow(prev, canonicalId, barRow, qty);
+          barStockRef.current = nextBarStock;
+          return nextBarStock;
+        });
         markLocalSupplyMutation();
         setActivityLog((a) =>
           log(
@@ -5768,14 +5834,20 @@ function useSupplyChainImpl() {
           ),
         );
         schedulePersistSnapshots();
-        void persistSnapshotsNow();
+        void persistBarStockSnapshot(nextBarStock, { required: true }).catch((err) => {
+          toast.error(
+            err instanceof Error
+              ? `Bar stock saved locally but not synced: ${err.message}`
+              : "Bar stock saved locally but not synced to cloud — cashiers may not see qty yet",
+          );
+        });
         notifyBarStockChanged();
         return { ok: true, stockId: canonicalId, serviceCode, unit: barUnit };
       }
 
       return { error: "This outlet is not stock-controlled" };
     },
-    [kitchenStock, barStock, storeItems, schedulePersistSnapshots, persistSnapshotsNow],
+    [kitchenStock, barStock, storeItems, schedulePersistSnapshots, persistBarStockSnapshot],
   );
 
   /**
