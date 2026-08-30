@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
-import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/lib/auth-context'
 import { hasPermission } from '@/lib/permissions'
 import { canManageOutletMenu, canEditOutletMenuPriceAndCategory, canManageOutletOrders } from '@/lib/outlets/access'
@@ -26,6 +25,7 @@ import { OutletKitchenItemsPanel } from '@/components/outlets/outlet-kitchen-ite
 import { storeIssueDestinationForOutletDepartment } from '@/lib/store/outlet-departments'
 import { syncMainBarMenuFromStore } from '@/lib/supply-chain/sync-bar-menu'
 import { useSupplyChain } from '@/lib/supply-chain/supply-chain-context'
+import { outletApiHeaders } from '@/lib/outlets/outlet-api-headers'
 
 export function OutletWorkspace({ department }: { department: OutletDepartmentKey }) {
   const { organizationId, role, name: staffName } = useAuth()
@@ -57,32 +57,45 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
   const [receiptAutoPrint, setReceiptAutoPrint] = useState(false)
   const [receiptBillKind, setReceiptBillKind] = useState<OutletBillPrintKind>('auto')
   const mainBarSyncInFlight = useRef(false)
+  /** Skip catalogue→menu sync briefly after staff save a selling price (avoids race with store sync). */
+  const mainBarPriceEditHoldUntilRef = useRef(0)
 
   const fetchMenuRows = useCallback(async () => {
     if (!organizationId) return
-    const supabase = createClient()
-    if (!supabase) return
-    const [{ data: c }, { data: i }] = await Promise.all([
-      supabase
-        .from('outlet_menu_categories')
-        .select('*')
-        .eq('organization_id', organizationId)
-        .eq('department', department)
-        .order('name'),
-      supabase
-        .from('outlet_menu_items')
-        .select('*')
-        .eq('organization_id', organizationId)
-        .eq('department', department)
-        .order('name'),
+    const headers = await outletApiHeaders()
+    const [catRes, itemRes] = await Promise.all([
+      fetch(`/api/outlets/menu/categories?department=${encodeURIComponent(department)}`, {
+        headers,
+        credentials: 'include',
+        cache: 'no-store',
+      }),
+      fetch(`/api/outlets/menu/items?department=${encodeURIComponent(department)}`, {
+        headers,
+        credentials: 'include',
+        cache: 'no-store',
+      }),
     ])
-    setCategories(sortOutletMenuByName((c as OutletMenuCategoryRow[]) ?? []))
-    setItems(sortOutletMenuByName((i as OutletMenuItemRow[]) ?? []))
+    const catJson = await catRes.json().catch(() => ({}))
+    const itemJson = await itemRes.json().catch(() => ({}))
+    if (!catRes.ok || !itemRes.ok) {
+      throw new Error(String(catJson.error || itemJson.error || 'Failed to load outlet menu'))
+    }
+    setCategories(sortOutletMenuByName((catJson.categories as OutletMenuCategoryRow[]) ?? []))
+    setItems(sortOutletMenuByName((itemJson.items as OutletMenuItemRow[]) ?? []))
   }, [organizationId, department])
+
+  const patchMenuItem = useCallback((updated: OutletMenuItemRow) => {
+    setItems((prev) =>
+      sortOutletMenuByName(
+        prev.map((row) => (row.id === updated.id ? { ...row, ...updated } : row)),
+      ),
+    )
+  }, [])
 
   const runMainBarStoreSync = useCallback(
     async (opts?: { refreshMenu?: boolean }) => {
       if (department !== 'main_bar' || mainBarSyncInFlight.current) return
+      if (Date.now() < mainBarPriceEditHoldUntilRef.current) return
       mainBarSyncInFlight.current = true
       try {
         const sync = await syncMainBarMenuFromStore()
@@ -148,15 +161,20 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
     const onBar = () => {
       if (department === 'main_bar') void loadMenuRef.current({ silent: true })
     }
+    const onMenuPriceSaved = () => {
+      mainBarPriceEditHoldUntilRef.current = Date.now() + 120_000
+    }
     window.addEventListener('frontbill:outlet-menu-cleared', onCleared)
     window.addEventListener('frontbill:outlet-menu-synced', onSynced)
     window.addEventListener('frontbill:supply-stock-changed', onSupply)
     window.addEventListener('frontbill:bar-stock-changed', onBar)
+    window.addEventListener('frontbill:outlet-menu-price-saved', onMenuPriceSaved)
     return () => {
       window.removeEventListener('frontbill:outlet-menu-cleared', onCleared)
       window.removeEventListener('frontbill:outlet-menu-synced', onSynced)
       window.removeEventListener('frontbill:supply-stock-changed', onSupply)
       window.removeEventListener('frontbill:bar-stock-changed', onBar)
+      window.removeEventListener('frontbill:outlet-menu-price-saved', onMenuPriceSaved)
     }
   }, [department])
 
@@ -276,7 +294,8 @@ export function OutletWorkspace({ department }: { department: OutletDepartmentKe
               items={items}
               canManage={canManageMenu}
               canEditMenuPricing={canEditMenuPricing}
-              onRefresh={() => void loadMenu()}
+              onRefresh={() => void loadMenu({ silent: true })}
+              onMenuItemUpdated={patchMenuItem}
             />
           </TabsContent>
         )}
