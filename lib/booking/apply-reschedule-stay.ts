@@ -22,9 +22,11 @@ export async function applyRescheduleStay(
     check_out: string
     callerId: string
     reason?: string | null
+    adjustment_date?: string | null
   },
 ): Promise<ApplyRescheduleStayResult> {
-  const { organizationId, bookingId, check_in, check_out, callerId, reason } = params
+  const { organizationId, bookingId, check_in, check_out, callerId, reason, adjustment_date } =
+    params
 
   const { data: existing, error: loadErr } = await admin.from('bookings').select('*').eq('id', bookingId).single()
   if (loadErr || !existing) {
@@ -88,6 +90,7 @@ export async function applyRescheduleStay(
     { check_in: prevCi, check_out: prevCo },
     { check_in: fields.check_in, check_out: fields.check_out },
     reason,
+    adjustment_date,
   )
 
   const { data: updated, error: upErr } = await admin
