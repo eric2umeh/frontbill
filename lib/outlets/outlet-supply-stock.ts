@@ -149,10 +149,6 @@ function barLink(
   }
 }
 
-function barStockHasId(stockId: string, barStock: BarStockItem[]): boolean {
-  return Boolean(findBarStockRow(stockId, barStock))
-}
-
 function unlinkedStockControlledLink(source: 'kitchen' | 'bar'): ResolvedOutletStockLink {
   return {
     source,
@@ -188,7 +184,7 @@ export function resolveOutletItemStock(
   if (parsed?.source === 'kitchen') {
     return kitchenLink(parsed.stockId, parsed.portionsPerSale, kitchenStock)
   }
-  if (parsed?.source === 'bar' && source === 'bar' && barStockHasId(parsed.stockId, barStock)) {
+  if (parsed?.source === 'bar' && source === 'bar') {
     return barLink(parsed.stockId, parsed.portionsPerSale, barStock)
   }
 
