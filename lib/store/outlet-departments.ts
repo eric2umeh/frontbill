@@ -7,6 +7,10 @@ export const OUTLET_DEPARTMENTS = [
   'Kitchen',
   'Maintenance',
   'Gym & Wellness',
+  'Admin',
+  'Front Desk',
+  'Security',
+  'Accountant',
 ] as const
 
 export type OutletDepartment = (typeof OUTLET_DEPARTMENTS)[number]
