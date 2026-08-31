@@ -138,7 +138,11 @@ import {
 import { deactivateBatchFromRestaurantOutlet, reconcileRestaurantKitchenMenu } from "./deactivate-restaurant-batch";
 import { syncBatchToRestaurantOutlet } from "./sync-restaurant-outlet";
 import { shouldSyncBatchToOutlet } from "./batch-outlet-sync";
-import { canReadSupplySnapshots, snapshotsPayloadForRole } from "./supply-snapshot-payload";
+import {
+  bulkSnapshotsPayloadForRole,
+  canReadSupplySnapshots,
+  snapshotsPayloadForRole,
+} from "./supply-snapshot-payload";
 import { dedupeBatchMaterials } from "./parse-csv-row";
 import { broadcastSupplyLiveUpdate, subscribeSupplyLiveUpdates } from "./supply-live-sync";
 import {
@@ -699,7 +703,7 @@ function useSupplyChainImpl() {
     if (!useDbPersistence || !dbHydratedRef.current || snapshotSyncSkipRef.current) {
       return;
     }
-    const payload = snapshotsPayloadForRole(
+    const payload = bulkSnapshotsPayloadForRole(
       {
         recipes: recipesRef.current,
         batches: batchesRef.current,
@@ -1026,7 +1030,7 @@ function useSupplyChainImpl() {
           : [];
         const mergedBarStock = normalizeBarStockRows(
           mergeBarStockFromRemote(localBarStock, remoteBarStock, {
-            trustLocalBackup: true,
+            preferRemote: true,
           }),
         );
         const mergedFnbRaw = resolveSupplySnapshot(localFnbRaw, snapshots.fnb_raw_stock);
@@ -1136,13 +1140,8 @@ function useSupplyChainImpl() {
         if (kitchenStockReconciled && mergedKitchenStock.length) {
           toUpload.kitchen_stock = mergedKitchenStock;
         }
-        const remoteBarNormalized = normalizeBarStockRows(remoteBarStock);
-        if (
-          mergedBarStock.length &&
-          JSON.stringify(mergedBarStock) !== JSON.stringify(remoteBarNormalized)
-        ) {
-          toUpload.bar_stock = mergedBarStock;
-        }
+        // Do not PUT bar_stock just because local qty differs — that resurrects
+        // stale POS localStorage over sales/counts already in the cloud.
         if (Object.keys(toUpload).length > 0) {
           const rolePayload = snapshotsPayloadForRole(toUpload, role);
           if (Object.keys(rolePayload).length > 0) {

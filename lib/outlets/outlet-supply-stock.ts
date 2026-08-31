@@ -183,14 +183,18 @@ export function resolveOutletItemStock(
   const parsed = parseMenuStockLink(item.service_code)
   if (parsed?.source === 'kitchen') {
     const link = kitchenLink(parsed.stockId, parsed.portionsPerSale, kitchenStock)
-    if (link.available <= 0 && link.stockId) {
-      const byName = matchKitchenByName(item.name, kitchenStock)
-      if (byName) {
+    const linkedRowExists = kitchenStock.some((k) => k.id === parsed.stockId)
+    // ID drift only: linked row missing. Sold-out (qty 0) must stay 0 — do not
+    // steal portions from a similarly named batch ("Rice" vs "Jollof Rice").
+    if (!linkedRowExists && parsed.stockId) {
+      const target = normalizeName(item.name)
+      const byExactName = kitchenStock.find((k) => normalizeName(k.name) === target)
+      if (byExactName) {
         return {
           ...link,
-          stockId: byName.id,
-          available: byName.availablePortions,
-          unit: byName.unit || link.unit,
+          stockId: byExactName.id,
+          available: byExactName.availablePortions,
+          unit: byExactName.unit || link.unit,
         }
       }
     }

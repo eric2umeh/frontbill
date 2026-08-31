@@ -172,9 +172,9 @@ export function mergeKitchenStockPair(
   const rQty = kitchenStockQty(remote)
   if (lQty === rQty) return local
 
+  // After a local count/sale, keep this device for a short window. Otherwise cloud
+  // wins — including sold-out 0. Stale POS localStorage must not resurrect qty.
   if (opts?.preferLocalRecent) return local
-  if (lQty === 0 && rQty > 0) return remote
-  if (rQty === 0 && lQty > 0) return local
   return remote
 }
 

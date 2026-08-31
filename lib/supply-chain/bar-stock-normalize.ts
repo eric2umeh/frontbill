@@ -54,14 +54,13 @@ function resolveBarStockQty(
   opts?: {
     preferLocalWhenLower?: boolean
     preferLocalRecent?: boolean
-    trustLocalBackup?: boolean
+    /** Hydrate / other-terminal refresh — cloud qty wins, including sold-out 0. */
+    preferRemote?: boolean
   },
 ): number {
   if (localQty === remoteQty) return localQty
+  if (opts?.preferRemote) return remoteQty
   if (opts?.preferLocalRecent) return localQty
-  if (opts?.trustLocalBackup && localQty > 0) return localQty
-  if (localQty === 0 && remoteQty > 0) return remoteQty
-  if (remoteQty === 0 && localQty > 0) return localQty
   if (opts?.preferLocalWhenLower && localQty < remoteQty) return localQty
   return remoteQty
 }
@@ -73,7 +72,7 @@ export function mergeBarStockFromRemote(
   opts?: {
     preferLocalWhenLower?: boolean
     preferLocalRecent?: boolean
-    trustLocalBackup?: boolean
+    preferRemote?: boolean
   },
 ): BarStockItem[] {
   const storeIds = new Set<string>()

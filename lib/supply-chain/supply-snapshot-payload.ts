@@ -75,3 +75,20 @@ export function snapshotsPayloadForRole(
   }
   return out
 }
+
+/**
+ * Debounced full-snapshot PUT (`schedulePersistSnapshots`).
+ * Outlet POS roles still write bar/kitchen stock via persistBarStockSnapshot /
+ * persistKitchenStockSnapshot — a Main Bar sale must not PUT stale kitchen_stock.
+ */
+export function bulkSnapshotsPayloadForRole(
+  all: Partial<Record<SupplySnapshotKey, unknown>>,
+  role: string | null | undefined,
+): Partial<Record<SupplySnapshotKey, unknown>> {
+  const payload = snapshotsPayloadForRole(all, role)
+  if (!isOutletOnlyStockRole(role)) return payload
+  const out: Partial<Record<SupplySnapshotKey, unknown>> = { ...payload }
+  delete out.bar_stock
+  delete out.kitchen_stock
+  return out
+}
