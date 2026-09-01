@@ -93,6 +93,31 @@ export function isKitchenMenuItemForActiveBatch(
   return kitchenStockIdsForActiveRecipes(recipes, stock).has(ksId)
 }
 
+/**
+ * Kitchen-synced outlet rows whose batch standard is gone.
+ * Empty `validKitchenStockIds` is fail-closed: never treat that as “every dish is an orphan”
+ * (hydrate/snapshot fetch failure would otherwise deactivate the whole Restaurant POS).
+ */
+export function orphanKitchenSyncedMenuItemIds(
+  items: Array<{
+    id: string
+    service_code?: string | null
+    is_active?: boolean | null
+  }>,
+  validKitchenStockIds: readonly string[],
+): string[] {
+  if (validKitchenStockIds.length === 0) return []
+  const validSet = new Set(validKitchenStockIds)
+  const ids: string[] = []
+  for (const item of items) {
+    if (item.is_active === false) continue
+    const ksId = kitchenStockIdFromServiceCode(item.service_code)
+    if (!ksId) continue
+    if (!validSet.has(ksId)) ids.push(item.id)
+  }
+  return ids
+}
+
 /** Tombstone finished-stock rows with no matching batch standard (persisted for cloud merge). */
 export function reconcileKitchenStockWithRecipes(
   recipes: Recipe[],

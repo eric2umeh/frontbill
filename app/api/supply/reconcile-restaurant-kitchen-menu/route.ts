@@ -2,12 +2,7 @@ import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { createClient } from '@/lib/supabase/server'
 import { hasPermission } from '@/lib/permissions'
-
-function parseKitchenStockId(serviceCode: string | null | undefined): string | null {
-  if (!serviceCode?.startsWith('ks:')) return null
-  const id = serviceCode.slice(3).trim()
-  return id || null
-}
+import { orphanKitchenSyncedMenuItemIds } from '@/lib/supply-chain/kitchen-batch-link'
 
 export async function POST(request: Request) {
   const cookieSb = await createClient()
@@ -40,7 +35,9 @@ export async function POST(request: Request) {
   const validIds = Array.isArray(body?.validKitchenStockIds)
     ? body.validKitchenStockIds.map((id: unknown) => String(id || '').trim()).filter(Boolean)
     : []
-  const validSet = new Set(validIds)
+  if (!validIds.length) {
+    return NextResponse.json({ deactivated: 0, skipped: 'empty_valid_ids' })
+  }
   const organizationId = profile.organization_id as string
   const now = new Date().toISOString()
 
@@ -53,14 +50,7 @@ export async function POST(request: Request) {
 
   if (fe) return NextResponse.json({ error: fe.message }, { status: 400 })
 
-  const orphanIds = (items ?? [])
-    .filter((item) => {
-      if (item.is_active === false) return false
-      const ksId = parseKitchenStockId(item.service_code)
-      if (!ksId) return false
-      return !validSet.has(ksId)
-    })
-    .map((item) => item.id)
+  const orphanIds = orphanKitchenSyncedMenuItemIds(items ?? [], validIds)
 
   if (!orphanIds.length) {
     return NextResponse.json({ deactivated: 0 })

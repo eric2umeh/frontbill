@@ -1442,6 +1442,9 @@ function useSupplyChainImpl() {
     if (restaurantMenuReconcileRef.current === activeKitchenBatchKey) return;
     restaurantMenuReconcileRef.current = activeKitchenBatchKey;
     const validIds = [...kitchenStockIdsForActiveRecipes(recipes, kitchenStock)];
+    // Empty list means recipes have not loaded (or none exist) — never ask the API
+    // to deactivate every kitchen-synced POS row.
+    if (!validIds.length) return;
     void reconcileRestaurantKitchenMenu(validIds);
   }, [
     useDbPersistence,
