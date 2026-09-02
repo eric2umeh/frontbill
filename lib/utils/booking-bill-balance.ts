@@ -138,3 +138,23 @@ export function shouldReconcileBookingPaymentPaid(
     return false;
   return folioPositiveOutstandingSum(folioCharges ?? []) <= 0;
 }
+
+/**
+ * After `sync-outlet-folio`, the first paint's charge list is stale.
+ * Heal `payment_status` only from post-sync rows; if backfill ran but reload
+ * failed, skip the paid heal so we cannot mark a folio paid while restaurant
+ * lines were just posted.
+ */
+export function folioChargesForPaidHeal<T>(
+  initialCharges: T[],
+  refreshedCharges: T[] | null,
+  outletSyncRan: boolean,
+): { charges: T[]; allowPaidHeal: boolean } {
+  if (!outletSyncRan) {
+    return { charges: initialCharges, allowPaidHeal: true };
+  }
+  if (!Array.isArray(refreshedCharges)) {
+    return { charges: initialCharges, allowPaidHeal: false };
+  }
+  return { charges: refreshedCharges, allowPaidHeal: true };
+}

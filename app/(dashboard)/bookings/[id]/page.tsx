@@ -110,6 +110,7 @@ import {
 import {
   bookingDisplayBillBalance,
   shouldReconcileBookingPaymentPaid,
+  folioChargesForPaidHeal,
   folioGuestCreditAmount,
 } from "@/lib/utils/booking-bill-balance";
 import {
@@ -333,6 +334,7 @@ export default function BookingDetailPage({
       });
     }
 
+    let outletSyncRan = false;
     if (uid && uid !== "placeholder") {
       try {
         const rb = await fetch(
@@ -370,9 +372,47 @@ export default function BookingDetailPage({
             body: JSON.stringify({ caller_id: uid }),
           },
         );
+        outletSyncRan = true;
       } catch {
-        /* non-fatal */
+        /* non-fatal — still try to reload charges */
+        outletSyncRan = true;
       }
+    }
+
+    let refreshedCharges: typeof initialCharges | null = null;
+    let refreshedBookingPatch: {
+      balance?: number | null;
+      payment_status?: string | null;
+    } | null = null;
+    if (outletSyncRan) {
+      const { data: chargeRows, error: chargeErr } = await supabase
+        .from("folio_charges")
+        .select(
+          "id, created_at, description, amount, charge_type, payment_status, payment_method, created_by",
+        )
+        .eq("booking_id", id)
+        .order("created_at", { ascending: true });
+      if (!chargeErr && Array.isArray(chargeRows)) {
+        refreshedCharges = chargeRows;
+      }
+      const { data: bkRow } = await supabase
+        .from("bookings")
+        .select("balance, payment_status")
+        .eq("id", id)
+        .maybeSingle();
+      if (bkRow) refreshedBookingPatch = bkRow;
+    }
+
+    const { charges: chargeSource, allowPaidHeal } = folioChargesForPaidHeal(
+      initialCharges,
+      refreshedCharges,
+      outletSyncRan,
+    );
+
+    let nextBooking = bookingData;
+    if (refreshedBookingPatch) {
+      nextBooking = { ...bookingData, ...refreshedBookingPatch };
+      setBooking(nextBooking);
     }
 
     const bookingUserIds = [
@@ -393,11 +433,11 @@ export default function BookingDetailPage({
       });
     }
 
-    const chargeCreatorIds = initialCharges
+    const chargeCreatorIds = chargeSource
       .map((charge) => charge.created_by)
       .filter(Boolean) as string[];
     const chargeCreatorMap = await fetchUserDisplayNameMap(chargeCreatorIds, uid);
-    let chargesWithCreator = initialCharges.map((charge) =>
+    let chargesWithCreator = chargeSource.map((charge) =>
       mapFolioChargeRow(charge, chargeCreatorMap),
     );
     setFolioCharges(chargesWithCreator);
@@ -436,14 +476,16 @@ export default function BookingDetailPage({
       })),
     );
 
-    let nextBooking = bookingData;
-    if (shouldReconcileBookingPaymentPaid(bookingData, chargesWithCreator)) {
+    if (
+      allowPaidHeal &&
+      shouldReconcileBookingPaymentPaid(nextBooking, chargesWithCreator)
+    ) {
       const { error: psFixErr } = await supabase
         .from("bookings")
         .update({ payment_status: "paid" })
         .eq("id", id);
       if (!psFixErr) {
-        nextBooking = { ...bookingData, payment_status: "paid" };
+        nextBooking = { ...nextBooking, payment_status: "paid" };
         setBooking(nextBooking);
       }
     }
