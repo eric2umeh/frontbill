@@ -3,7 +3,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { resolveOutletAuthed, nextOrderNumber } from '@/lib/outlets/api-auth'
 import { canAccessOutletDepartment } from '@/lib/outlets/access'
 import { isOutletDepartmentKey, getOutletDepartment } from '@/lib/outlets/departments'
-import { parseOutletOrderExtraFees } from '@/lib/outlets/order-extra-fees'
+import { outletOrderChargeTotal, parseOutletOrderExtraFees } from '@/lib/outlets/order-extra-fees'
 import { hasOutletCityLedgerChargeTarget, resolveOutletCustomerContext } from '@/lib/outlets/resolve-outlet-customer'
 import { isOutletOrderType } from '@/lib/outlets/order-types'
 import { itemAllowsPosPriceEdit } from '@/lib/outlets/category-price-editable'
@@ -178,8 +178,8 @@ export async function POST(request: Request) {
   if (feeResult.error) {
     return NextResponse.json({ error: feeResult.error }, { status: 400 })
   }
-  const { roomServiceFee, takeawayFee, extraFeesTotal } = feeResult.fees
-  const subtotal = Math.round((itemsSubtotal + extraFeesTotal) * 100) / 100
+  const { roomServiceFee, takeawayFee } = feeResult.fees
+  const subtotal = outletOrderChargeTotal(itemsSubtotal, roomServiceFee, takeawayFee)
   const orderNumber = nextOrderNumber(department)
 
   const resolvedCustomer = await resolveOutletCustomerContext(admin, auth.ctx.organizationId, {

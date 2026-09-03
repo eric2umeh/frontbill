@@ -41,3 +41,39 @@ export const OUTLET_FEE_LINE_NAMES = {
   roomService: 'Room service delivery fee',
   takeaway: 'Take-away fee',
 } as const
+
+const FEE_LINE_NAMES = new Set<string>([
+  OUTLET_FEE_LINE_NAMES.roomService,
+  OUTLET_FEE_LINE_NAMES.takeaway,
+])
+
+export function isOutletFeeLineName(name: string): boolean {
+  return FEE_LINE_NAMES.has(name.trim())
+}
+
+export function roundOutletMoney(n: number): number {
+  return Math.round(n * 100) / 100
+}
+
+/** Product (non-fee) line total. Fee rows in `lines` are ignored so they cannot double-count. */
+export function outletOrderItemsSubtotal(
+  lines: Array<{ item_name?: string | null; qty: number; unit_price: number }>,
+): number {
+  return roundOutletMoney(
+    lines
+      .filter((l) => !isOutletFeeLineName(String(l.item_name ?? '')))
+      .reduce((s, l) => s + roundOutletMoney(Number(l.qty) * Number(l.unit_price)), 0),
+  )
+}
+
+/**
+ * Amount charged on create, edit, settle, and folio — items plus room-service / take-away fees.
+ * Matches POST /api/outlets/orders (`itemsSubtotal + extraFeesTotal`).
+ */
+export function outletOrderChargeTotal(
+  itemsSubtotal: number,
+  roomServiceFee: number,
+  takeawayFee: number,
+): number {
+  return roundOutletMoney(itemsSubtotal + (roomServiceFee || 0) + (takeawayFee || 0))
+}

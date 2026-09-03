@@ -3,15 +3,14 @@ import { getOutletDepartment } from '@/lib/outlets/departments'
 import { buildOutletFolioDescription } from '@/lib/outlets/booking-folio'
 import {
   OUTLET_FEE_LINE_NAMES,
+  isOutletFeeLineName,
+  outletOrderChargeTotal,
+  outletOrderItemsSubtotal,
   parseOutletOrderExtraFees,
+  roundOutletMoney,
 } from '@/lib/outlets/order-extra-fees'
 import { isOutletOrderType } from '@/lib/outlets/order-types'
 import { reverseOutletOrderSettlement } from '@/lib/outlets/reverse-outlet-order-settlement'
-
-const FEE_NAMES = new Set<string>([
-  OUTLET_FEE_LINE_NAMES.roomService,
-  OUTLET_FEE_LINE_NAMES.takeaway,
-])
 
 export type OutletOrderLineInput = {
   item_id?: string | null
@@ -20,16 +19,16 @@ export type OutletOrderLineInput = {
   unit_price: number
 }
 
-function roundMoney(n: number): number {
-  return Math.round(n * 100) / 100
-}
-
-function isFeeLineName(name: string): boolean {
-  return FEE_NAMES.has(name.trim())
-}
-
-function productLinesFromOrder(lines: Array<{ item_name: string; qty: number; unit_price: number; line_total?: number }>) {
-  return lines.filter((l) => !isFeeLineName(String(l.item_name)))
+function productLinesFromOrder(
+  lines: Array<{
+    item_id?: string | null
+    item_name: string
+    qty: number
+    unit_price: number
+    line_total?: number
+  }>,
+) {
+  return lines.filter((l) => !isOutletFeeLineName(String(l.item_name)))
 }
 
 async function removeOpenOutletFolioCharge(
@@ -52,7 +51,7 @@ async function removeOpenOutletFolioCharge(
       .select('balance')
       .eq('id', bookingId)
       .maybeSingle()
-    const newBalance = Math.max(0, roundMoney((Number(bk?.balance) || 0) - amount))
+    const newBalance = Math.max(0, roundOutletMoney((Number(bk?.balance) || 0) - amount))
     await admin.from('bookings').update({ balance: newBalance }).eq('id', bookingId)
   }
 }
@@ -87,14 +86,14 @@ async function syncOpenOutletFolioCharge(
     .update({ amount: input.newAmount, description })
     .eq('id', input.folioChargeId)
 
-  const delta = roundMoney(input.newAmount - oldAmount)
+  const delta = roundOutletMoney(input.newAmount - oldAmount)
   if (delta !== 0) {
     const { data: bk } = await admin
       .from('bookings')
       .select('balance')
       .eq('id', input.bookingId)
       .maybeSingle()
-    const newBalance = roundMoney((Number(bk?.balance) || 0) + delta)
+    const newBalance = roundOutletMoney((Number(bk?.balance) || 0) + delta)
     await admin.from('bookings').update({ balance: newBalance }).eq('id', input.bookingId)
   }
 }
@@ -118,7 +117,7 @@ function buildLinesToInsert(
       item_name: String(l.item_name).trim(),
       qty,
       unit_price: unit,
-      line_total: roundMoney(qty * unit),
+      line_total: roundOutletMoney(qty * unit),
     }
   })
   if (roomServiceFee > 0) {
@@ -194,38 +193,7 @@ export async function updateOutletOrder(
     patch.room_service_fee = roomServiceFee
     patch.takeaway_fee = takeawayFee
 
-    if (input.lines != null) {
-      if (!Array.isArray(input.lines) || input.lines.length === 0) {
-        throw new Error('At least one line item is required')
-      }
-      for (const l of input.lines) {
-        const qty = Number(l.qty)
-        const price = Number(l.unit_price)
-        if (!l.item_name?.trim()) throw new Error('Each line needs an item name')
-        if (!Number.isFinite(qty) || qty <= 0) throw new Error('Invalid quantity on a line')
-        if (!Number.isFinite(price) || price < 0) throw new Error('Invalid price on a line')
-      }
-
-      const chargeSubtotal = roundMoney(
-        input.lines.reduce((s, l) => s + roundMoney(Number(l.qty) * Number(l.unit_price)), 0),
-      )
-      patch.subtotal = chargeSubtotal
-
-      const linesToInsert = buildLinesToInsert(input.lines, roomServiceFee, takeawayFee)
-      await admin.from('outlet_order_lines').delete().eq('order_id', input.orderId)
-      const { error: le } = await admin.from('outlet_order_lines').insert(
-        linesToInsert.map((ol) => ({
-          order_id: input.orderId,
-          item_id: ol.item_id,
-          item_name: ol.item_name,
-          qty: ol.qty,
-          unit_price: ol.unit_price,
-          line_total: ol.line_total,
-        })),
-      )
-      if (le) throw new Error(le.message)
-
-      const lineDetail = input.lines.map((l) => `${l.item_name} ×${l.qty}`).join(', ')
+    const syncFolioForCharge = async (chargeSubtotal: number, lineDetail: string) => {
       if (
         order.folio_charge_id &&
         order.booking_id &&
@@ -245,23 +213,65 @@ export async function updateOutletOrder(
         await removeOpenOutletFolioCharge(admin, order.folio_charge_id, order.booking_id)
         patch.folio_charge_id = null
       }
+    }
+
+    if (input.lines != null) {
+      if (!Array.isArray(input.lines) || input.lines.length === 0) {
+        throw new Error('At least one line item is required')
+      }
+      for (const l of input.lines) {
+        const qty = Number(l.qty)
+        const price = Number(l.unit_price)
+        if (!l.item_name?.trim()) throw new Error('Each line needs an item name')
+        if (!Number.isFinite(qty) || qty <= 0) throw new Error('Invalid quantity on a line')
+        if (!Number.isFinite(price) || price < 0) throw new Error('Invalid price on a line')
+      }
+
+      const productLines = productLinesFromOrder(input.lines)
+      if (productLines.length === 0) {
+        throw new Error('At least one line item is required')
+      }
+      const chargeSubtotal = outletOrderChargeTotal(
+        outletOrderItemsSubtotal(productLines),
+        roomServiceFee,
+        takeawayFee,
+      )
+      patch.subtotal = chargeSubtotal
+
+      const linesToInsert = buildLinesToInsert(productLines, roomServiceFee, takeawayFee)
+      await admin.from('outlet_order_lines').delete().eq('order_id', input.orderId)
+      const { error: le } = await admin.from('outlet_order_lines').insert(
+        linesToInsert.map((ol) => ({
+          order_id: input.orderId,
+          item_id: ol.item_id,
+          item_name: ol.item_name,
+          qty: ol.qty,
+          unit_price: ol.unit_price,
+          line_total: ol.line_total,
+        })),
+      )
+      if (le) throw new Error(le.message)
+
+      const lineDetail = productLines.map((l) => `${l.item_name} ×${l.qty}`).join(', ')
+      await syncFolioForCharge(chargeSubtotal, lineDetail)
     } else if (input.roomServiceFee !== undefined || input.takeawayFee !== undefined) {
       const existingProducts = productLinesFromOrder(
         (order.outlet_order_lines ?? []) as Array<{
+          item_id?: string | null
           item_name: string
           qty: number
           unit_price: number
         }>,
       )
-      const chargeSubtotal = roundMoney(
-        existingProducts.reduce(
-          (s, l) => s + roundMoney(Number(l.qty) * Number(l.unit_price)),
-          0,
-        ),
+      const chargeSubtotal = outletOrderChargeTotal(
+        outletOrderItemsSubtotal(existingProducts),
+        roomServiceFee,
+        takeawayFee,
       )
+      patch.subtotal = chargeSubtotal
       const linesToInsert = buildLinesToInsert(
         existingProducts.map((l) => ({
-          item_id: null,
+          item_id: l.item_id ?? null,
           item_name: l.item_name,
           qty: Number(l.qty),
           unit_price: Number(l.unit_price),
@@ -280,6 +290,8 @@ export async function updateOutletOrder(
           line_total: ol.line_total,
         })),
       )
+      const lineDetail = existingProducts.map((l) => `${l.item_name} ×${l.qty}`).join(', ')
+      await syncFolioForCharge(chargeSubtotal, lineDetail)
     }
   } else if (
     input.lines != null ||
