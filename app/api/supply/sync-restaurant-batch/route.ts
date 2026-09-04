@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server'
 import { hasPermission } from '@/lib/permissions'
 import { outletSlugify } from '@/lib/outlets/slug'
 import type { BatchOutletMenuSync } from '@/lib/supply-chain/batch-outlet-sync'
+import { kitchenMenuUnitPriceForSync } from '@/lib/supply-chain/kitchen-menu-sync-price'
 
 async function upsertKitchenMenuItem(
   admin: ReturnType<typeof createAdminClient>,
@@ -48,7 +49,7 @@ async function upsertKitchenMenuItem(
 
   const { data: existingItems } = await admin
     .from('outlet_menu_items')
-    .select('id, name, service_code')
+    .select('id, name, service_code, unit_price')
     .eq('organization_id', organizationId)
     .eq('department', department)
 
@@ -61,17 +62,20 @@ async function upsertKitchenMenuItem(
     existingItems?.find((i) => i.name.trim().toLowerCase() === nameNorm)
 
   if (existing) {
+    const patch: Record<string, unknown> = {
+      name: batchName,
+      category_id: categoryId,
+      service_code: serviceCode,
+      is_active: true,
+      updated_by: userId,
+      updated_at: new Date().toISOString(),
+    }
+    const syncedPrice = kitchenMenuUnitPriceForSync(existing.unit_price, unitPrice)
+    if (syncedPrice != null) patch.unit_price = syncedPrice
+
     const { data: updated, error: ue } = await admin
       .from('outlet_menu_items')
-      .update({
-        name: batchName,
-        category_id: categoryId,
-        unit_price: unitPrice,
-        service_code: serviceCode,
-        is_active: true,
-        updated_by: userId,
-        updated_at: new Date().toISOString(),
-      })
+      .update(patch)
       .eq('id', existing.id)
       .select()
       .single()

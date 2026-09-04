@@ -136,9 +136,8 @@ import {
   reconcileKitchenStockWithRecipes,
 } from "./kitchen-batch-link";
 import { deactivateBatchFromRestaurantOutlet, reconcileRestaurantKitchenMenu } from "./deactivate-restaurant-batch";
-import { syncBatchToRestaurantOutlet } from "./sync-restaurant-outlet";
-import { shouldSyncBatchToOutlet } from "./batch-outlet-sync";
 import { canReadSupplySnapshots, snapshotsPayloadForRole } from "./supply-snapshot-payload";
+import { applyKitchenCatalogToRawStock } from "./kitchen-raw-from-catalog";
 import { dedupeBatchMaterials } from "./parse-csv-row";
 import { broadcastSupplyLiveUpdate, subscribeSupplyLiveUpdates } from "./supply-live-sync";
 import {
@@ -4408,25 +4407,8 @@ function useSupplyChainImpl() {
         return nextKitchenStock;
       });
       markLocalSupplyMutation();
-      const recipe = existing.linkedRecipeId
-        ? recipes.find((r) => r.id === existing.linkedRecipeId)
-        : recipes.find(
-            (r) =>
-              !isRecipeDeleted(r) &&
-              kitchenStockIdForRecipe(r) === stockId,
-          );
-      const outletSync = recipe
-        ? normalizeBatchOutletMenuSync(recipe.outletMenuSync ?? recipe.fnbEligible)
-        : "none";
-      if (recipe && shouldSyncBatchToOutlet(outletSync)) {
-        void syncBatchToRestaurantOutlet({
-          batchName: recipe.name,
-          categoryName: recipe.category,
-          kitchenStockId: stockId,
-          unitPrice: recipe.sellingPricePerPortion,
-          outletMenuSync: outletSync,
-        });
-      }
+      // Do not POST /sync-restaurant-batch from a physical count. That endpoint
+      // wrote unit_price and overwrote POS selling prices with recipe.sellingPricePerPortion.
       if (typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent("frontbill:supply-stock-changed"));
       }
@@ -4447,39 +4429,31 @@ function useSupplyChainImpl() {
       );
       return { ok: true };
     },
-    [kitchenStock, recipes, schedulePersistSnapshots, persistKitchenStockSnapshot],
+    [kitchenStock, schedulePersistSnapshots, persistKitchenStockSnapshot],
   );
 
   /** Placeholder kitchen raw rows (qty 0) for every kitchen catalogue item; drop non-kitchen rows. */
   const ensureKitchenRawStockFromCatalog = useCallback(() => {
     const kitchenItems = storeItems.filter((s) => storeItemMatchesDept(s, "kitchen"));
-    const kitchenIds = new Set(kitchenItems.map((s) => s.id));
-    const existingIds = new Set<string>();
+    let catalogStockChanged = false;
     setKitchenRawStock((prev) => {
-      const next = prev.filter((k) => kitchenIds.has(k.storeItemId));
-      let changed = next.length !== prev.length;
-      for (const row of next) {
-        existingIds.add(row.storeItemId);
-      }
-      for (const store of kitchenItems) {
-        if (existingIds.has(store.id)) continue;
-        const id = `kraw-${store.id}`;
-        next.push({
-          id,
-          storeItemId: store.id,
+      const { next, changed, skipped } = applyKitchenCatalogToRawStock(
+        prev,
+        kitchenItems.map((store) => ({
+          id: store.id,
           name: store.name,
-          quantityOnHand: 0,
-          reorderLevel: Math.max(0, store.reorderLevel ?? 0),
           unit: store.unit,
-        });
-        changed = true;
-      }
-      if (changed) {
-        markLocalSupplyMutation();
-        schedulePersistSnapshots();
-      }
-      return changed ? next : prev;
+          reorderLevel: store.reorderLevel,
+        })),
+      );
+      if (skipped === "empty_catalog") return prev;
+      if (changed) catalogStockChanged = true;
+      return next;
     });
+    if (catalogStockChanged) {
+      markLocalSupplyMutation();
+      schedulePersistSnapshots();
+    }
   }, [storeItems, schedulePersistSnapshots]);
 
   /** Set absolute on-hand for kitchen raw store (physical count at kitchen). */
