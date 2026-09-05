@@ -134,3 +134,24 @@ export const OUTLET_STOCK_WRITE_SNAPSHOT_KEYS = [
   'kitchen_stock',
   'activity_log',
 ] as const satisfies readonly SupplySnapshotKey[]
+
+/**
+ * Keys pulled on live refresh (stock / movements). Excludes heavy recipes, batches,
+ * POs, basket, activity — those load on hydrate or catalog/full refresh.
+ */
+export const LIVE_SUPPLY_SNAPSHOT_KEYS = [
+  'kitchen_stock',
+  'kitchen_raw_stock',
+  'bar_stock',
+  'fnb_raw_stock',
+  'fnb_daily_sheets',
+  'fnb_movements',
+  'issue_out_log',
+] as const satisfies readonly SupplySnapshotKey[]
+
+/** Periodic catch-up: live stock + recipes/batches (still skips PO/basket/activity). */
+export const LIVE_SUPPLY_EXTENDED_SNAPSHOT_KEYS = [
+  ...LIVE_SUPPLY_SNAPSHOT_KEYS,
+  'recipes',
+  'batches',
+] as const satisfies readonly SupplySnapshotKey[]
