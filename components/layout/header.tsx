@@ -515,20 +515,38 @@ export function Header({ user, onMenuClick }: HeaderProps) {
 
   useEffect(() => {
     void fetchCoreNotifications()
-    const interval = window.setInterval(() => void fetchCoreNotifications(), NOTIFICATION_CORE_POLL_MS)
-    return () => window.clearInterval(interval)
+    const interval = window.setInterval(() => {
+      if (document.visibilityState !== 'visible') return
+      void fetchCoreNotifications()
+    }, NOTIFICATION_CORE_POLL_MS)
+    const onVis = () => {
+      if (document.visibilityState === 'visible') void fetchCoreNotifications()
+    }
+    document.addEventListener('visibilitychange', onVis)
+    return () => {
+      window.clearInterval(interval)
+      document.removeEventListener('visibilitychange', onVis)
+    }
   }, [fetchCoreNotifications])
 
   useEffect(() => {
     void fetchBackdateNotifications()
-    const interval = window.setInterval(() => void fetchBackdateNotifications(), NOTIFICATION_BACKDATE_POLL_MS)
+    const interval = window.setInterval(() => {
+      if (document.visibilityState !== 'visible') return
+      void fetchBackdateNotifications()
+    }, NOTIFICATION_BACKDATE_POLL_MS)
     const onPending = () => void fetchBackdateNotifications()
+    const onVis = () => {
+      if (document.visibilityState === 'visible') void fetchBackdateNotifications()
+    }
     window.addEventListener('frontbill-night-audit-pending-changed', onPending)
     window.addEventListener('frontbill-backdate-pending-changed', onPending)
+    document.addEventListener('visibilitychange', onVis)
     return () => {
       window.clearInterval(interval)
       window.removeEventListener('frontbill-night-audit-pending-changed', onPending)
       window.removeEventListener('frontbill-backdate-pending-changed', onPending)
+      document.removeEventListener('visibilitychange', onVis)
     }
   }, [fetchBackdateNotifications])
 
