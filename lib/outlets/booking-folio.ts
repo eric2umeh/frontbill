@@ -145,6 +145,26 @@ export async function postPaidOutletSaleToBookingFolio(
   })
 }
 
+/**
+ * Open room bills add the pending folio amount to booking.balance.
+ * Paid-on-spot inserts are already `paid` and must not reduce the room bill.
+ */
+export function outletSettlementReversesBookingBalance(
+  priorPaymentStatus: string | null | undefined,
+): boolean {
+  const status = String(priorPaymentStatus || '')
+    .trim()
+    .toLowerCase()
+  return status === 'pending' || status === 'unpaid'
+}
+
+export function bookingBalanceAfterReversingPendingOutletCharge(
+  currentBalance: number,
+  folioAmount: number,
+): number {
+  return Math.max(0, Math.round(((Number(currentBalance) || 0) - (Number(folioAmount) || 0)) * 100) / 100)
+}
+
 export async function updateOutletFolioOnSettlement(
   supabase: SupabaseClient,
   input: {
@@ -154,10 +174,34 @@ export async function updateOutletFolioOnSettlement(
     amount: number
     complimentary: boolean
   },
-): Promise<void> {
+): Promise<{ deleted: boolean }> {
+  const { data: fc } = await supabase
+    .from('folio_charges')
+    .select('amount, payment_status')
+    .eq('id', input.folioChargeId)
+    .maybeSingle()
+
+  const priorAmount = Number(fc?.amount) || 0
+  const reversePending = outletSettlementReversesBookingBalance(fc?.payment_status)
+
+  const reversePendingFromBalance = async (amount: number) => {
+    if (!reversePending || amount <= 0) return
+    const { data: bk } = await supabase
+      .from('bookings')
+      .select('balance')
+      .eq('id', input.bookingId)
+      .maybeSingle()
+    const newBalance = bookingBalanceAfterReversingPendingOutletCharge(
+      Number(bk?.balance) || 0,
+      amount,
+    )
+    await supabase.from('bookings').update({ balance: newBalance }).eq('id', input.bookingId)
+  }
+
   if (input.complimentary || input.amount <= 0) {
     await supabase.from('folio_charges').delete().eq('id', input.folioChargeId)
-    return
+    await reversePendingFromBalance(priorAmount)
+    return { deleted: true }
   }
 
   const isCityLedger =
@@ -172,7 +216,7 @@ export async function updateOutletFolioOnSettlement(
         amount: input.amount,
       })
       .eq('id', input.folioChargeId)
-    return
+    return { deleted: false }
   }
 
   await supabase
@@ -184,13 +228,8 @@ export async function updateOutletFolioOnSettlement(
     })
     .eq('id', input.folioChargeId)
 
-  const { data: bk } = await supabase
-    .from('bookings')
-    .select('balance')
-    .eq('id', input.bookingId)
-    .maybeSingle()
-  const newBalance = Math.max(0, (Number(bk?.balance) || 0) - input.amount)
-  await supabase.from('bookings').update({ balance: newBalance }).eq('id', input.bookingId)
+  await reversePendingFromBalance(priorAmount > 0 ? priorAmount : input.amount)
+  return { deleted: false }
 }
 
 type OutletOrderForSync = {

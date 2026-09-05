@@ -170,14 +170,15 @@ export async function settleOutletOrderRecord(
     }
   }
 
-  if (folioChargeId && bookingId && !complimentary) {
-    await updateOutletFolioOnSettlement(admin, {
+  if (folioChargeId && bookingId) {
+    const folioResult = await updateOutletFolioOnSettlement(admin, {
       folioChargeId,
       bookingId,
       paymentMethod,
       amount: subtotal,
       complimentary,
     })
+    if (folioResult.deleted) folioChargeId = null
   }
 
   const settledAt = new Date().toISOString()
@@ -191,6 +192,7 @@ export async function settleOutletOrderRecord(
       room_number: roomNumber,
       folio_charge_id: folioChargeId,
       city_ledger_account_id: ledgerAccountId,
+      is_complimentary: complimentary,
       settled_by: input.userId,
       settled_at: settledAt,
     })
