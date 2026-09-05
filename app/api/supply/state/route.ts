@@ -42,11 +42,27 @@ export async function GET(request: Request) {
     const denied = requireSupplySnapshotRead(auth)
     if (denied) return denied
 
+    const keysParam = searchParams.get('keys')
+    const requestedKeys = keysParam
+      ? keysParam
+          .split(',')
+          .map((k) => k.trim())
+          .filter((k): k is SupplySnapshotKey =>
+            (SUPPLY_SNAPSHOT_KEYS as readonly string[]).includes(k),
+          )
+      : null
+
     const admin = createAdminClient()
-    const { data, error } = await admin
+    let query = admin
       .from('supply_chain_snapshots')
       .select('snapshot_key, data')
       .eq('organization_id', auth.orgId)
+
+    if (requestedKeys && requestedKeys.length > 0) {
+      query = query.in('snapshot_key', requestedKeys)
+    }
+
+    const { data, error } = await query
 
     if (error) {
       const missing = missingTableResponse(error.message)
