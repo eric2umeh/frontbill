@@ -139,6 +139,10 @@ import { deactivateBatchFromRestaurantOutlet, reconcileRestaurantKitchenMenu } f
 import { syncBatchToRestaurantOutlet } from "./sync-restaurant-outlet";
 import { shouldSyncBatchToOutlet } from "./batch-outlet-sync";
 import { canReadSupplySnapshots, snapshotsPayloadForRole } from "./supply-snapshot-payload";
+import {
+  LIVE_SUPPLY_EXTENDED_SNAPSHOT_KEYS,
+  LIVE_SUPPLY_SNAPSHOT_KEYS,
+} from "./supply-db-mappers";
 import { dedupeBatchMaterials } from "./parse-csv-row";
 import { broadcastSupplyLiveUpdate, subscribeSupplyLiveUpdates } from "./supply-live-sync";
 import {
@@ -278,7 +282,12 @@ function applyRemoteBarStockArray(
 /** Skip applying a remote poll for a short window after this tab mutated stock. */
 let lastLocalSupplyMutationAt = 0;
 let liveSupplyInFlight = false;
-let lastRemotePoRefreshAt = 0;
+/** Coalesce Realtime-driven fetches so bursts don't download stock repeatedly. */
+let lastLiveSupplyFetchAt = 0;
+let liveSupplyThrottleTimer: ReturnType<typeof setTimeout> | null = null;
+let liveSupplyPending: { fromOtherTab: boolean; includeCatalog: boolean } | null = null;
+const LIVE_SUPPLY_THROTTLE_MS = 8_000;
+const LIVE_SUPPLY_INTERVAL_MS = 60_000;
 /** Serializes PO/basket PUTs so a slow full snapshot cannot overwrite a fresh clear/send. */
 let poBasketPutChain: Promise<void> = Promise.resolve();
 /** Bumped on clear/send so stale debounced PO PUTs cannot restore the cart after refresh. */
@@ -1274,15 +1283,23 @@ function useSupplyChainImpl() {
 
     let cancelled = false;
 
-    const refreshLiveSupply = async (fromOtherTab = false, includeCatalog = fromOtherTab) => {
+    const runLiveSupplyFetch = async (fromOtherTab = false, includeCatalog = fromOtherTab) => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+        return;
+      }
       if (!fromOtherTab && Date.now() - lastLocalSupplyMutationAt < 4000) {
         return;
       }
       if (liveSupplyInFlight) return;
       liveSupplyInFlight = true;
+      lastLiveSupplyFetchAt = Date.now();
       try {
+        // Live path: stock keys only. Extended (recipes/batches) on catalog / visibility catch-up.
+        const keys = includeCatalog
+          ? LIVE_SUPPLY_EXTENDED_SNAPSHOT_KEYS
+          : LIVE_SUPPLY_SNAPSHOT_KEYS;
         const [snapshots, catalog] = await Promise.all([
-          fetchSupplySnapshots(userId, organizationId || undefined),
+          fetchSupplySnapshots(userId, organizationId || undefined, keys),
           includeCatalog
             ? fetchSupplyCatalog(userId, organizationId || undefined).catch(() => null)
             : Promise.resolve(null),
@@ -1321,42 +1338,25 @@ function useSupplyChainImpl() {
           });
         }
 
-        const remoteBatches = snapshots.batches;
-        if (Array.isArray(remoteBatches)) {
-          setBatches((prev) => {
-            const merged = mergeProductionBatchesFromRemote(
-              prev,
-              remoteBatches as ProductionBatch[],
-            );
-            if (JSON.stringify(prev) === JSON.stringify(merged)) return prev;
-            changed = true;
-            return merged;
-          });
-        }
-
-        const remoteRecipes = snapshots.recipes;
-        if (Array.isArray(remoteRecipes)) {
-          setRecipes((prev) => {
-            const merged = mergeRecipesFromRemote(prev, remoteRecipes as Recipe[]);
-            if (JSON.stringify(prev) === JSON.stringify(merged)) return prev;
-            changed = true;
-            return merged;
-          });
-        }
-
-        if (
-          Date.now() - lastLocalSupplyMutationAt >= 45_000 &&
-          Date.now() - lastRemotePoRefreshAt >= 45_000
-        ) {
-          const remotePos = snapshots.purchase_orders;
-          if (Array.isArray(remotePos)) {
-            setPurchaseOrders((prev) => {
-              const merged = mergePurchaseOrdersFromRemote(
+        if (includeCatalog) {
+          const remoteBatches = snapshots.batches;
+          if (Array.isArray(remoteBatches)) {
+            setBatches((prev) => {
+              const merged = mergeProductionBatchesFromRemote(
                 prev,
-                remotePos as PurchaseOrder[],
+                remoteBatches as ProductionBatch[],
               );
               if (JSON.stringify(prev) === JSON.stringify(merged)) return prev;
-              lastRemotePoRefreshAt = Date.now();
+              changed = true;
+              return merged;
+            });
+          }
+
+          const remoteRecipes = snapshots.recipes;
+          if (Array.isArray(remoteRecipes)) {
+            setRecipes((prev) => {
+              const merged = mergeRecipesFromRemote(prev, remoteRecipes as Recipe[]);
+              if (JSON.stringify(prev) === JSON.stringify(merged)) return prev;
               changed = true;
               return merged;
             });
@@ -1378,23 +1378,54 @@ function useSupplyChainImpl() {
       }
     };
 
-    const onVis = () => {
-      if (document.visibilityState === "visible") void refreshLiveSupply(false, true);
+    const scheduleLiveSupplyFetch = (fromOtherTab = false, includeCatalog = false) => {
+      const prev = liveSupplyPending;
+      liveSupplyPending = {
+        fromOtherTab: fromOtherTab || Boolean(prev?.fromOtherTab),
+        includeCatalog: includeCatalog || Boolean(prev?.includeCatalog),
+      };
+      const elapsed = Date.now() - lastLiveSupplyFetchAt;
+      if (elapsed >= LIVE_SUPPLY_THROTTLE_MS) {
+        const next = liveSupplyPending;
+        liveSupplyPending = null;
+        if (liveSupplyThrottleTimer) {
+          clearTimeout(liveSupplyThrottleTimer);
+          liveSupplyThrottleTimer = null;
+        }
+        void runLiveSupplyFetch(next.fromOtherTab, next.includeCatalog);
+        return;
+      }
+      if (liveSupplyThrottleTimer) return;
+      liveSupplyThrottleTimer = setTimeout(() => {
+        liveSupplyThrottleTimer = null;
+        const next = liveSupplyPending;
+        liveSupplyPending = null;
+        if (next) void runLiveSupplyFetch(next.fromOtherTab, next.includeCatalog);
+      }, LIVE_SUPPLY_THROTTLE_MS - elapsed);
     };
 
-    const firstPoll = window.setTimeout(() => void refreshLiveSupply(false, true), 2_000);
+    const onVis = () => {
+      if (document.visibilityState === "visible") {
+        scheduleLiveSupplyFetch(false, true);
+      }
+    };
+
+    const firstPoll = window.setTimeout(() => scheduleLiveSupplyFetch(false, true), 2_000);
     document.addEventListener("visibilitychange", onVis);
-    const interval = window.setInterval(() => void refreshLiveSupply(true, false), 30_000);
+    const interval = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      scheduleLiveSupplyFetch(true, false);
+    }, LIVE_SUPPLY_INTERVAL_MS);
     const unsubscribeLive = subscribeSupplyLiveUpdates(() => {
       window.setTimeout(() => {
-        if (!cancelled) void refreshLiveSupply(true);
+        if (!cancelled) scheduleLiveSupplyFetch(true, false);
       }, 150);
     });
     const onOrgLiveSupply = () => {
-      if (!cancelled) void refreshLiveSupply(true, false);
+      if (!cancelled) scheduleLiveSupplyFetch(true, false);
     };
     const onOrgLiveCatalog = () => {
-      if (!cancelled) void refreshLiveSupply(true, true);
+      if (!cancelled) scheduleLiveSupplyFetch(true, true);
     };
     window.addEventListener(ORG_LIVE_SUPPLY, onOrgLiveSupply);
     window.addEventListener(ORG_LIVE_CATALOG, onOrgLiveCatalog);
@@ -1406,6 +1437,11 @@ function useSupplyChainImpl() {
       window.removeEventListener(ORG_LIVE_CATALOG, onOrgLiveCatalog);
       window.clearTimeout(firstPoll);
       window.clearInterval(interval);
+      if (liveSupplyThrottleTimer) {
+        clearTimeout(liveSupplyThrottleTimer);
+        liveSupplyThrottleTimer = null;
+      }
+      liveSupplyPending = null;
       unsubscribeLive();
     };
   }, [useDbPersistence, dbHydrated, userId, organizationId, role]);

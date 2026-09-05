@@ -11,12 +11,16 @@ import {
   dispatchOrgLiveEvent,
 } from '@/lib/live/org-live-events'
 
-const FALLBACK_POLL_MS = 3_000
-const DEBOUNCE_MS = 200
+/** When Realtime is down — still rare; must not re-download full state every few seconds. */
+const OFFLINE_FALLBACK_POLL_MS = 45_000
+/** When Realtime is up — rare catch-up only (missed events). */
+const ONLINE_SAFETY_POLL_MS = 90_000
+const DEBOUNCE_MS = 400
 
 /**
  * Keeps all signed-in staff in sync: supply/bar stock, outlet menus, bookings.
- * Uses Supabase Realtime when enabled; always polls as a fallback.
+ * Uses Supabase Realtime for change signals; polls only as a slow fallback.
+ * Never pulses on a fast timer — that forced full API refetches and burned egress.
  */
 export function OrgLiveSync() {
   const { organizationId } = useAuth()
@@ -50,16 +54,24 @@ export function OrgLiveSync() {
     }
 
     document.addEventListener('visibilitychange', onVisible)
-    const poll = window.setInterval(() => {
-      if (document.visibilityState === 'visible') pulseAll()
-    }, FALLBACK_POLL_MS)
+
+    let pollHandle = 0
+    const reschedulePoll = (ms: number) => {
+      window.clearInterval(pollHandle)
+      pollHandle = window.setInterval(() => {
+        if (document.visibilityState !== 'visible') return
+        pulseAll()
+      }, ms)
+    }
+
+    // Start conservative until Realtime reports SUBSCRIBED.
+    reschedulePoll(OFFLINE_FALLBACK_POLL_MS)
 
     const supabase = createClient()
     if (!supabase) {
-      pulseAll()
       return () => {
         document.removeEventListener('visibilitychange', onVisible)
-        window.clearInterval(poll)
+        window.clearInterval(pollHandle)
         debouncers.forEach((t) => clearTimeout(t))
         debouncers.clear()
       }
@@ -120,13 +132,13 @@ export function OrgLiveSync() {
         },
         () => pulse(ORG_LIVE_BOOKINGS),
       )
-      .subscribe()
-
-    pulseAll()
+      .subscribe((status) => {
+        reschedulePoll(status === 'SUBSCRIBED' ? ONLINE_SAFETY_POLL_MS : OFFLINE_FALLBACK_POLL_MS)
+      })
 
     return () => {
       document.removeEventListener('visibilitychange', onVisible)
-      window.clearInterval(poll)
+      window.clearInterval(pollHandle)
       debouncers.forEach((t) => clearTimeout(t))
       debouncers.clear()
       void supabase.removeChannel(channel)

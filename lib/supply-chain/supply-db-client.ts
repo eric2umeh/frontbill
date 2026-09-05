@@ -158,8 +158,11 @@ export async function deleteSupplyCatalogItem(
 export async function fetchSupplySnapshots(
   userId: string,
   organizationId?: string,
+  keys?: readonly SupplySnapshotKey[],
 ): Promise<Partial<Record<SupplySnapshotKey, unknown>>> {
-  const body = await supplyJson(`/api/supply/state?${queryParams(userId, organizationId)}`)
+  const params = queryParams(userId, organizationId)
+  if (keys && keys.length > 0) params.set('keys', keys.join(','))
+  const body = await supplyJson(`/api/supply/state?${params}`)
   return (body.snapshots ?? {}) as Partial<Record<SupplySnapshotKey, unknown>>
 }
 

@@ -616,6 +616,7 @@ export default function BookingDetailPage({
     if (!bookingId || loading || !booking) return;
     if (isBookingCheckedOut(booking)) return;
     const iv = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return;
       fetchBookingDetails(bookingId);
     }, 120_000);
     return () => window.clearInterval(iv);
