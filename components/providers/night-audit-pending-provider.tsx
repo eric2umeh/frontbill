@@ -50,7 +50,10 @@ export function NightAuditPendingProvider({ children }: { children: React.ReactN
     }
 
     void load()
-    const interval = window.setInterval(load, PENDING_COUNT_POLL_MS)
+    const interval = window.setInterval(() => {
+      if (document.visibilityState !== 'visible') return
+      load()
+    }, PENDING_COUNT_POLL_MS)
 
     const onVis = () => {
       if (document.visibilityState === 'visible') void load()
