@@ -88,6 +88,7 @@ import {
   isGuestBookingCashbackEligible,
   paymentMethodFromBookingNotes,
 } from "@/lib/cashback/cashback-eligibility";
+import { ORG_LIVE_BOOKINGS } from "@/lib/live/org-live-events";
 import { createClient } from "@/lib/supabase/client";
 import { reconcileRoomStatusesClient } from "@/lib/rooms/reconcile-room-status-client";
 import { roomHousekeepingPatchAfterCheckout } from "@/lib/rooms/sync-housekeeping-status";
@@ -104,6 +105,7 @@ import {
   parseCheckoutTimeHM,
   localTodayYmd,
   isBookingCheckedOut,
+  shouldRefreshOpenBookingFolio,
   isPastCheckoutCutoff,
   normalizeBookingCheckoutYmd,
 } from "@/lib/utils/booking-checkout-ui";
@@ -615,11 +617,26 @@ export default function BookingDetailPage({
   useEffect(() => {
     if (!bookingId || loading || !booking) return;
     if (isBookingCheckedOut(booking)) return;
-    const iv = window.setInterval(() => {
-      if (document.visibilityState !== "visible") return;
+    const refreshIfVisible = () => {
+      if (
+        !shouldRefreshOpenBookingFolio({
+          visibilityState: document.visibilityState,
+          loading,
+          checkedOut: isBookingCheckedOut(booking),
+        })
+      ) {
+        return;
+      }
       fetchBookingDetails(bookingId);
-    }, 120_000);
-    return () => window.clearInterval(iv);
+    };
+    const iv = window.setInterval(refreshIfVisible, 120_000);
+    document.addEventListener("visibilitychange", refreshIfVisible);
+    window.addEventListener(ORG_LIVE_BOOKINGS, refreshIfVisible);
+    return () => {
+      window.clearInterval(iv);
+      document.removeEventListener("visibilitychange", refreshIfVisible);
+      window.removeEventListener(ORG_LIVE_BOOKINGS, refreshIfVisible);
+    };
   }, [bookingId, loading, booking?.status, booking?.folio_status]);
 
 

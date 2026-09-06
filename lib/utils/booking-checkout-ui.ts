@@ -140,6 +140,19 @@ export function manualCheckoutEligible(b: CheckoutEligibilityBooking, checkoutCl
   return true
 }
 
+/**
+ * Booking detail interval / live refresh. PR #344 skipped the 120s poll while the
+ * tab was hidden but never reloaded on return, so checkout used a stale folio.
+ */
+export function shouldRefreshOpenBookingFolio(params: {
+  visibilityState?: string
+  loading?: boolean
+  checkedOut?: boolean
+}): boolean {
+  if (params.loading || params.checkedOut) return false
+  return (params.visibilityState ?? 'visible') === 'visible'
+}
+
 /** Server / detail effect: overdue for auto-checkout (matches cron statuses) */
 export function shouldAutoCheckoutDueBooking(
   b: Pick<FolioLockBooking, 'status' | 'folio_status' | 'check_out'>,
