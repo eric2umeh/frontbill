@@ -30,6 +30,7 @@ import { createClient } from "@/lib/supabase/client";
 import { isSelectableLedgerName } from "@/lib/utils/ledger-organization";
 import { mergeCounterpartyOrganizationRows } from "@/lib/utils/search-counterparty-organizations";
 import { resolveOrganizationLedgerAccount } from "@/lib/utils/resolve-ledger-account";
+import { applyCityLedgerChargeIncrement } from "@/lib/utils/guest-city-ledger";
 import { PaymentAccountSelect } from "@/components/payments/payment-account-select";
 import {
   appendAccountToNotes,
@@ -279,76 +280,32 @@ export function AddChargeModal({
         /* non-fatal */
       }
 
-      // If city ledger: bump guest/org balance AND city_ledger_accounts balance
+      // City ledger: resolve by guest name for individuals. Auto-select uses
+      // guests.id as a UI key, which is not city_ledger_accounts.id.
       if (paymentMethod === "city_ledger") {
-        if (booking.guestId) {
-          const { data: guestRow } = await supabase
-            .from("guests")
-            .select("name")
-            .eq("id", booking.guestId)
-            .single();
-          if (guestRow) {
-            // If no city_ledger_account was selected, create one for this guest
-            if (!selectedLedger?.id && guestRow.name) {
-              // Check if account already exists
-              const { data: existingAcct } = await supabase
-                .from("city_ledger_accounts")
-                .select("id, balance")
-                .eq("organization_id", booking.organization_id)
-                .ilike("account_name", guestRow.name)
-                .maybeSingle();
+        await applyCityLedgerChargeIncrement(supabase, {
+          organizationId: booking.organization_id,
+          amount: chargeAmount,
+          guestName: booking.guestName,
+          guestId: booking.guestId,
+          ledgerType,
+          selectedLedgerId: selectedLedger?.id ?? null,
+        });
 
-              if (existingAcct) {
-                // Update existing
-                await supabase
-                  .from("city_ledger_accounts")
-                  .update({
-                    balance: (existingAcct.balance || 0) + chargeAmount,
-                  })
-                  .eq("id", existingAcct.id);
-              } else {
-                // Create new city_ledger_account for this guest
-                await supabase.from("city_ledger_accounts").insert([
-                  {
-                    organization_id: booking.organization_id,
-                    account_name: guestRow.name,
-                    account_type: "individual",
-                    balance: chargeAmount,
-                  },
-                ]);
-              }
-            }
-          }
-        }
-
-        // If a specific ledger account was selected, update it
-        if (selectedLedger?.id) {
-          const { data: acct } = await supabase
-            .from("city_ledger_accounts")
-            .select("balance")
+        if (ledgerType === "organization" && selectedLedger?.id) {
+          const { data: orgRow } = await supabase
+            .from("organizations")
+            .select("current_balance")
             .eq("id", selectedLedger.id)
-            .single();
-          await supabase
-            .from("city_ledger_accounts")
-            .update({ balance: (acct?.balance || 0) + chargeAmount })
-            .eq("id", selectedLedger.id);
-
-          // If it's an organization ledger, also bump organizations.current_balance
-          if (ledgerType === "organization") {
-            const { data: orgRow } = await supabase
+            .maybeSingle();
+          if (orgRow) {
+            await supabase
               .from("organizations")
-              .select("current_balance")
-              .eq("id", selectedLedger.id)
-              .single();
-            if (orgRow) {
-              await supabase
-                .from("organizations")
-                .update({
-                  current_balance:
-                    ((orgRow.current_balance as number) || 0) + chargeAmount,
-                })
-                .eq("id", selectedLedger.id);
-            }
+              .update({
+                current_balance:
+                  ((orgRow.current_balance as number) || 0) + chargeAmount,
+              })
+              .eq("id", selectedLedger.id);
           }
         }
       }
