@@ -68,6 +68,33 @@ export function normalizeLedgerAccountName(name: string): string {
 }
 
 /**
+ * Add Charge / Extend Stay auto-select the in-house guest with
+ * `{ id: booking.guestId }`. That UUID is `guests.id`, not
+ * `city_ledger_accounts.id`. Writing the ledger by that id matches zero rows.
+ */
+export function cityLedgerChargeShouldUseGuestNameLookup(args: {
+  ledgerType?: string | null;
+  selectedLedgerId?: string | null;
+  guestId?: string | null;
+}): boolean {
+  const type = String(args.ledgerType || "individual")
+    .trim()
+    .toLowerCase();
+  if (type !== "organization") return true;
+  const selectedId = String(args.selectedLedgerId || "").trim();
+  if (!selectedId) return true;
+  const guestId = String(args.guestId || "").trim();
+  return Boolean(guestId && selectedId === guestId);
+}
+
+export function nextCityLedgerBalanceAfterCharge(
+  currentBalance: number,
+  chargeAmount: number,
+): number {
+  return (Number(currentBalance) || 0) + (Number(chargeAmount) || 0);
+}
+
+/**
  * Signed guest/city-ledger amount (debit +, credit −) — same rules as the
  * Guest Database city ledger card so booking pages stay in sync.
  *
@@ -442,6 +469,77 @@ export async function syncGuestCityLedgerBalances(
     .in("id", [...ids]);
   if (error) throw new Error(`Ledger sync failed: ${error.message}`);
   return ids.size;
+}
+
+/**
+ * Post an unpaid city-ledger charge onto AR. Individual (default) always
+ * resolves by guest name so the in-house guest placeholder id cannot no-op.
+ * Organization charges update the selected `city_ledger_accounts` row.
+ */
+export async function applyCityLedgerChargeIncrement(
+  supabase: SupabaseClient,
+  args: {
+    organizationId?: string | null;
+    amount: number;
+    guestName?: string | null;
+    guestId?: string | null;
+    ledgerType?: string | null;
+    selectedLedgerId?: string | null;
+  },
+): Promise<void> {
+  const amount = Number(args.amount) || 0;
+  const organizationId = String(args.organizationId || "").trim();
+  if (amount <= 0 || !organizationId) return;
+
+  if (
+    cityLedgerChargeShouldUseGuestNameLookup({
+      ledgerType: args.ledgerType,
+      selectedLedgerId: args.selectedLedgerId,
+      guestId: args.guestId,
+    })
+  ) {
+    const guestName = String(args.guestName || "").trim();
+    if (!guestName) return;
+    const acct = await fetchGuestCityLedgerAccount(
+      supabase,
+      organizationId,
+      guestName,
+    );
+    const newBal = nextCityLedgerBalanceAfterCharge(
+      Number(acct?.balance) || 0,
+      amount,
+    );
+    await syncGuestCityLedgerBalances(supabase, {
+      organizationId,
+      guestName,
+      balance: newBal,
+      primaryAccountId: acct?.id ?? null,
+    });
+    return;
+  }
+
+  const accountId = String(args.selectedLedgerId || "").trim();
+  if (!accountId) return;
+  const { data: acct, error } = await supabase
+    .from("city_ledger_accounts")
+    .select("balance")
+    .eq("id", accountId)
+    .maybeSingle();
+  if (error) throw new Error(`Ledger lookup failed: ${error.message}`);
+  if (!acct) return;
+  const { error: updateError } = await supabase
+    .from("city_ledger_accounts")
+    .update({
+      balance: nextCityLedgerBalanceAfterCharge(
+        Number(acct.balance) || 0,
+        amount,
+      ),
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", accountId);
+  if (updateError) {
+    throw new Error(`Ledger update failed: ${updateError.message}`);
+  }
 }
 
 function mapFolioRows(
