@@ -871,6 +871,26 @@ export async function applyPaymentToGuestCityLedger(
 }
 
 /**
+ * Next city-ledger balance after a booking folio payment.
+ * Amount above `bookingBillBefore` becomes prepaid credit (negative balance).
+ * Callers must pass the full cash received (plus cashback applied to the bill),
+ * not a collect amount capped at the remaining bill.
+ */
+export function nextLedgerBalanceAfterBookingPayment(args: {
+  ledgerBalance: number;
+  bookingBillBefore: number;
+  paymentAmount: number;
+}): number {
+  const P = Number(args.paymentAmount) || 0;
+  const B = Math.max(0, Number(args.bookingBillBefore) || 0);
+  const L = Number(args.ledgerBalance) || 0;
+  if (P <= 0) return L;
+  const excess = Math.max(0, P - B);
+  const towardDebit = Math.min(Math.max(P - excess, 0), Math.max(0, L));
+  return L - towardDebit - excess;
+}
+
+/**
  * When recording a booking folio payment: reduce ledger debit first, then post any amount over bill balance as credit.
  */
 export async function applyBookingPaymentToGuestLedger(
@@ -884,7 +904,6 @@ export async function applyBookingPaymentToGuestLedger(
 ): Promise<void> {
   const { organizationId, guestName, bookingBillBefore, paymentAmount } = args;
   const P = paymentAmount;
-  const B = Math.max(0, bookingBillBefore);
   if (P <= 0 || !guestName.trim()) return;
 
   const acct = await fetchGuestCityLedgerAccount(
@@ -893,9 +912,11 @@ export async function applyBookingPaymentToGuestLedger(
     guestName,
   );
   const L = acct?.id ? Number(acct.balance) || 0 : 0;
-  const excess = Math.max(0, P - B);
-  const towardDebit = Math.min(Math.max(P - excess, 0), Math.max(0, L));
-  const newBal = L - towardDebit - excess;
+  const newBal = nextLedgerBalanceAfterBookingPayment({
+    ledgerBalance: L,
+    bookingBillBefore,
+    paymentAmount: P,
+  });
 
   if (acct?.id) {
     const { error } = await supabase

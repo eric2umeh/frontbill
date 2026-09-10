@@ -129,7 +129,9 @@ import {
   applyBookingPaymentToGuestLedger,
   applyPaymentToGuestCityLedger,
   recordGuestLedgerCashMovement,
+  postGuestPrepaidCreditToFolio,
 } from "@/lib/utils/guest-city-ledger";
+import { recordPaymentApplication } from "@/lib/booking/record-payment-overpay";
 import { isOutletFolioDescription } from "@/lib/outlets/booking-folio";
 
 function isFolioAdditionalChargeRow(c: {
@@ -946,8 +948,13 @@ export default function BookingDetailPage({
         cashPaying: cashEntered,
         applyCashback: applyCashback && Boolean(guestId) && cashbackOk,
       });
-      const totalApplied =
-        breakdown.cashbackDiscount + breakdown.cashToCollect;
+      const application = recordPaymentApplication({
+        cashEntered,
+        cashbackDiscount: breakdown.cashbackDiscount,
+        dueAfterDiscount: breakdown.dueAfterDiscount,
+        applyOverpaymentAsCredit,
+      });
+      const totalApplied = application.totalAppliedToBill;
 
       if (
         cashEntered > breakdown.dueAfterDiscount + 0.001 &&
@@ -968,7 +975,7 @@ export default function BookingDetailPage({
           bookingId,
           organizationId: booking.organization_id || "",
           cashbackDiscount: breakdown.cashbackDiscount,
-          cashAmount: breakdown.cashToCollect,
+          cashAmount: application.cashToCollect,
           cashPaymentMethod: paymentMethod,
           createdBy: userId,
           sourceType: "folio_payment",
@@ -984,7 +991,7 @@ export default function BookingDetailPage({
         const paymentEntry: Record<string, unknown> = {
           booking_id: bookingId,
           description: `Payment Received - ${paymentMethod.replace("_", " ")}`,
-          amount: -breakdown.cashToCollect,
+          amount: -application.cashToCollect,
           charge_type: "payment",
           payment_method: paymentMethod,
           payment_status: "paid",
@@ -1026,15 +1033,37 @@ export default function BookingDetailPage({
           organizationId: booking.organization_id,
           guestName,
           bookingBillBefore: billBefore,
-          paymentAmount: totalApplied,
+          paymentAmount: application.ledgerPaymentAmount,
+        });
+      }
+
+      if (
+        application.excessCredit > 0.005 &&
+        guestId &&
+        userId &&
+        booking.organization_id
+      ) {
+        await postGuestPrepaidCreditToFolio(supabase, {
+          organizationId: booking.organization_id,
+          guestId,
+          creditAmount: application.excessCredit,
+          paymentMethod,
+          userId,
+          notes: "Overpayment applied as account credit",
         });
       }
 
       try {
-        const txDescBase =
+        const txDescBase = [
           breakdown.cashbackDiscount > 0
             ? `Payment received - ${paymentMethod.replace(/_/g, " ")} (incl. ${formatNaira(breakdown.cashbackDiscount)} cashback discount)`
-            : `Payment received - ${paymentMethod.replace(/_/g, " ")}`;
+            : `Payment received - ${paymentMethod.replace(/_/g, " ")}`,
+          application.excessCredit > 0.005
+            ? `(${formatNaira(application.excessCredit)} account credit)`
+            : "",
+        ]
+          .filter(Boolean)
+          .join(" ");
         await supabase.from("transactions").insert([
           {
             organization_id: booking.organization_id || null,
@@ -1042,7 +1071,7 @@ export default function BookingDetailPage({
             transaction_id: `PAY-${bookingId}-${Date.now()}`,
             guest_name: booking.guests?.name || "Guest",
             room: booking.rooms?.room_number || null,
-            amount: breakdown.cashToCollect,
+            amount: application.transactionAmount,
             payment_method: paymentMethod,
             status: "paid",
             description: appendAccountToNotes(
@@ -1060,11 +1089,11 @@ export default function BookingDetailPage({
       if (
         guestId &&
         paymentMethodEarnsCashback(paymentMethod) &&
-        breakdown.cashToCollect > 0
+        application.cashToCollect > 0
       ) {
         const earned = await earnCashbackClient(supabase, {
           guestId,
-          amount: breakdown.cashToCollect,
+          amount: application.cashToCollect,
           paymentMethod,
           sourceType: "folio_payment",
           sourceId: bookingId,
@@ -1076,8 +1105,7 @@ export default function BookingDetailPage({
 
       await fetchBookingDetails(bookingId);
 
-      const excess = Math.max(0, cashEntered - breakdown.dueAfterDiscount);
-      const method = paymentMethod;
+      const excess = application.excessCredit;
       const discountNote =
         breakdown.cashbackDiscount > 0
           ? ` (${formatNaira(breakdown.cashbackDiscount)} cashback discount applied)`
