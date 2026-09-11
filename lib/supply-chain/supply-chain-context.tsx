@@ -140,6 +140,10 @@ import { syncBatchToRestaurantOutlet } from "./sync-restaurant-outlet";
 import { shouldSyncBatchToOutlet } from "./batch-outlet-sync";
 import { canReadSupplySnapshots, snapshotsPayloadForRole } from "./supply-snapshot-payload";
 import {
+  kitchenRawAfterProductionClose,
+  kitchenStockAfterProductionClose,
+} from "./close-batch-snapshots";
+import {
   LIVE_SUPPLY_EXTENDED_SNAPSHOT_KEYS,
   LIVE_SUPPLY_SNAPSHOT_KEYS,
 } from "./supply-db-mappers";
@@ -4966,32 +4970,6 @@ function useSupplyChainImpl() {
         };
       }
 
-      if (materialLines.length) {
-        deductKitchenRawMaterials(
-          materialLines
-            .filter((l) => l.quantity > 0 && l.source !== "kitchen_stock")
-            .map((l) => ({
-              storeItemId: l.storeItemId,
-              quantity: l.quantity,
-            })),
-        );
-        const kitchenStockLines = materialLines.filter(
-          (l) => l.quantity > 0 && l.source === "kitchen_stock",
-        );
-        if (kitchenStockLines.length) {
-          setKitchenStock((prev) =>
-            prev.map((k) => {
-              const line = kitchenStockLines.find((l) => l.storeItemId === k.id);
-              if (!line) return k;
-              return {
-                ...k,
-                availablePortions: Math.max(0, k.availablePortions - line.quantity),
-              };
-            }),
-          );
-        }
-      }
-
       const foodCost =
         batch.batchCost && batch.batchCost > 0
           ? batch.batchCost
@@ -5020,66 +4998,69 @@ function useSupplyChainImpl() {
         disposition.waste -
         disposition.returned;
 
-      setBatches((prev) =>
-        prev.map((b) =>
-          b.id === batchId
-            ? {
-                ...b,
-                status: "completed",
-                actualPortions,
-                foodCostPct,
-                variancePct,
-                batchCost: foodCost,
-                closedAt: new Date().toISOString(),
-                disposition,
-                deductedMaterials: materialLines
-                  .filter((l) => l.quantity > 0 && l.source !== "kitchen_stock")
-                  .map((l) => ({
-                    storeItemId: l.storeItemId,
-                    quantity: l.quantity,
-                  })),
-                deductedKitchenStock: materialLines
-                  .filter((l) => l.quantity > 0 && l.source === "kitchen_stock")
-                  .map((l) => ({
-                    kitchenStockId: l.storeItemId,
-                    quantity: l.quantity,
-                  })),
-                materialsUsed: materialLines.map(
-                  (i) => `${i.quantity} ${i.unit} ${i.name}`,
-                ),
-              }
-            : b,
-        ),
+      const rawDeductLines = materialLines
+        .filter((l) => l.quantity > 0 && l.source !== "kitchen_stock")
+        .map((l) => ({
+          storeItemId: l.storeItemId,
+          quantity: l.quantity,
+        }));
+      const kitchenStockDeductLines = materialLines
+        .filter((l) => l.quantity > 0 && l.source === "kitchen_stock")
+        .map((l) => ({
+          storeItemId: l.storeItemId,
+          quantity: l.quantity,
+        }));
+
+      const nextRaw = kitchenRawAfterProductionClose(
+        kitchenRawStockRef.current,
+        rawDeductLines,
       );
+      if (rawDeductLines.length) {
+        kitchenRawStockRef.current = nextRaw;
+        setKitchenRawStock(nextRaw);
+        notifyKitchenRawStockChanged();
+      }
 
       const stockId =
         batch.kitchenStockId ??
         (recipe
-          ? kitchenStock.find((k) => k.linkedRecipeId === recipe.id)?.id
+          ? kitchenStockRef.current.find((k) => k.linkedRecipeId === recipe.id)?.id
           : undefined);
-      if (stockId && sellable > 0) {
-        setKitchenStock((ks) => {
-          const idx = ks.findIndex((k) => k.id === stockId);
-          if (idx >= 0) {
-            return ks.map((k, i) =>
-              i === idx
-                ? { ...k, availablePortions: k.availablePortions + sellable }
-                : k,
-            );
-          }
-          return [
-            ...ks,
-            {
-              id: stockId,
-              name: batch.recipeName,
-              source: "produced" as const,
-              availablePortions: sellable,
-              reorderLevel: Math.max(2, Math.ceil(sellable * 0.15)),
-              linkedRecipeId: recipe?.id,
-            },
-          ];
-        });
-      }
+      const nextKitchenStock = kitchenStockAfterProductionClose({
+        kitchenStock: kitchenStockRef.current,
+        deductLines: kitchenStockDeductLines,
+        stockId,
+        sellable,
+        recipeName: batch.recipeName,
+        recipeId: recipe?.id,
+      });
+      kitchenStockRef.current = nextKitchenStock;
+      setKitchenStock(nextKitchenStock);
+
+      const nextBatches = batchesRef.current.map((b) =>
+        b.id === batchId
+          ? {
+              ...b,
+              status: "completed" as const,
+              actualPortions,
+              foodCostPct,
+              variancePct,
+              batchCost: foodCost,
+              closedAt: new Date().toISOString(),
+              disposition,
+              deductedMaterials: rawDeductLines,
+              deductedKitchenStock: kitchenStockDeductLines.map((l) => ({
+                kitchenStockId: l.storeItemId,
+                quantity: l.quantity,
+              })),
+              materialsUsed: materialLines.map(
+                (i) => `${i.quantity} ${i.unit} ${i.name}`,
+              ),
+            }
+          : b,
+      );
+      batchesRef.current = nextBatches;
+      setBatches(nextBatches);
 
       setActivityLog((a) =>
         log(
@@ -5090,6 +5071,7 @@ function useSupplyChainImpl() {
           batchId,
         ),
       );
+      markLocalSupplyMutation();
       persistSnapshotsNow();
       return { ok: true };
     },
@@ -5098,7 +5080,6 @@ function useSupplyChainImpl() {
       recipes,
       kitchenStock,
       kitchenRawOnHand,
-      deductKitchenRawMaterials,
       recipeTotalCostWithLivePrices,
       recipeGrossMarginPctWithLivePrices,
       persistSnapshotsNow,
