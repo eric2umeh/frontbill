@@ -140,6 +140,12 @@ import { syncBatchToRestaurantOutlet } from "./sync-restaurant-outlet";
 import { shouldSyncBatchToOutlet } from "./batch-outlet-sync";
 import { canReadSupplySnapshots, snapshotsPayloadForRole } from "./supply-snapshot-payload";
 import {
+  allowSupplyCatalogSync,
+  allowSupplySnapshotPersist,
+  shouldCatchupUploadAfterHydrate,
+  shouldRecoverLocalCatalogToCloud,
+} from "./supply-hydrate-guard";
+import {
   LIVE_SUPPLY_EXTENDED_SNAPSHOT_KEYS,
   LIVE_SUPPLY_SNAPSHOT_KEYS,
 } from "./supply-db-mappers";
@@ -584,6 +590,8 @@ function useSupplyChainImpl() {
   dbHydratedRef.current = dbHydrated;
   const catalogSyncSkipRef = useRef(true);
   const snapshotSyncSkipRef = useRef(true);
+  const snapshotHydrateOkRef = useRef(!useDbPersistence);
+  const catalogHydrateOkRef = useRef(!useDbPersistence);
 
   const [storeItems, setStoreItems] = usePersistedArrayState<StoreItem>(
     STORE_ITEMS_STORAGE_KEY,
@@ -708,6 +716,9 @@ function useSupplyChainImpl() {
     if (!useDbPersistence || !dbHydratedRef.current || snapshotSyncSkipRef.current) {
       return;
     }
+    if (!allowSupplySnapshotPersist(snapshotHydrateOkRef.current)) {
+      return;
+    }
     const payload = snapshotsPayloadForRole(
       {
         recipes: recipesRef.current,
@@ -775,6 +786,14 @@ function useSupplyChainImpl() {
         }
         return;
       }
+      if (!allowSupplySnapshotPersist(snapshotHydrateOkRef.current)) {
+        if (opts?.required) {
+          throw new Error(
+            "Supply data failed to load from cloud — refresh and retry.",
+          );
+        }
+        return;
+      }
       const payload = snapshotsPayloadForRole({ bar_stock: rows }, role);
       if (!("bar_stock" in payload)) {
         if (opts?.required) {
@@ -811,6 +830,14 @@ function useSupplyChainImpl() {
         if (opts?.required) {
           throw new Error(
             "Supply data is still loading — wait a moment and try again.",
+          );
+        }
+        return;
+      }
+      if (!allowSupplySnapshotPersist(snapshotHydrateOkRef.current)) {
+        if (opts?.required) {
+          throw new Error(
+            "Supply data failed to load from cloud — refresh and retry.",
           );
         }
         return;
@@ -862,6 +889,14 @@ function useSupplyChainImpl() {
           if (opts?.required) {
             throw new Error(
               "Supply data is still loading — wait a moment and try again.",
+            );
+          }
+          return;
+        }
+        if (!allowSupplySnapshotPersist(snapshotHydrateOkRef.current)) {
+          if (opts?.required) {
+            throw new Error(
+              "Supply data failed to load from cloud — refresh and retry.",
             );
           }
           return;
@@ -969,18 +1004,56 @@ function useSupplyChainImpl() {
     let cancelled = false;
     catalogSyncSkipRef.current = true;
     snapshotSyncSkipRef.current = true;
+    snapshotHydrateOkRef.current = false;
+    catalogHydrateOkRef.current = false;
 
     void (async () => {
       try {
-        const [catalog, snapshots] = await Promise.all([
-          fetchSupplyCatalog(userId, organizationId || undefined).catch(
-            () => [] as StoreItem[],
+        const [catalogResult, snapshotResult] = await Promise.all([
+          fetchSupplyCatalog(userId, organizationId || undefined).then(
+            (items) => ({ ok: true as const, items }),
+            (error: unknown) => ({ ok: false as const, error }),
           ),
-          fetchSupplySnapshots(userId, organizationId || undefined).catch(
-            () => ({}),
+          fetchSupplySnapshots(userId, organizationId || undefined).then(
+            (snapshots) => ({ ok: true as const, snapshots }),
+            (error: unknown) => ({ ok: false as const, error }),
           ),
         ]);
         if (cancelled) return;
+
+        if (!catalogResult.ok && !snapshotResult.ok) {
+          throw catalogResult.error instanceof Error
+            ? catalogResult.error
+            : snapshotResult.error instanceof Error
+              ? snapshotResult.error
+              : new Error("Failed to load supply data from database");
+        }
+
+        catalogHydrateOkRef.current = catalogResult.ok;
+        snapshotHydrateOkRef.current = snapshotResult.ok;
+
+        const catalog = catalogResult.ok ? catalogResult.items : [];
+        const snapshots = snapshotResult.ok ? snapshotResult.snapshots : {};
+
+        if (!snapshotResult.ok) {
+          const message =
+            snapshotResult.error instanceof Error
+              ? snapshotResult.error.message
+              : "Could not load kitchen / stock from cloud";
+          console.warn("[supply-chain] snapshot hydrate failed:", message);
+          toast.error(
+            "Could not load stock from cloud — refresh before changing counts so empty data cannot overwrite the hotel.",
+          );
+        } else if (!catalogResult.ok) {
+          const message =
+            catalogResult.error instanceof Error
+              ? catalogResult.error.message
+              : "Could not load store catalogue from cloud";
+          console.warn("[supply-chain] catalogue hydrate failed:", message);
+          toast.error(
+            "Could not load the store catalogue from cloud — refresh before editing items.",
+          );
+        }
 
         const localCatalog = loadPersistedStock<StoreItem>(
           STORE_ITEMS_STORAGE_KEY,
@@ -991,6 +1064,10 @@ function useSupplyChainImpl() {
         ).map(applyStoreItemDeptFields);
 
         setStoreItems(catalogItems);
+
+        if (!snapshotResult.ok) {
+          return;
+        }
 
         const localRecipes = loadPersistedStock<Recipe>(RECIPES_STORAGE_KEY, EMPTY_RECIPES);
         const localBatches = loadPersistedStock<ProductionBatch>(BATCHES_STORAGE_KEY, EMPTY_BATCHES);
@@ -1104,7 +1181,14 @@ function useSupplyChainImpl() {
           setPendingStoreItems(snapshots.pending_items as PendingStoreItem[]);
         }
 
-        if (catalog.length === 0 && localCatalog.length > 0 && hasPermission(role, "supply:store")) {
+        if (
+          shouldRecoverLocalCatalogToCloud({
+            catalogLoadOk: catalogResult.ok,
+            remoteCatalogLen: catalog.length,
+            localCatalogLen: localCatalog.length,
+          }) &&
+          hasPermission(role, "supply:store")
+        ) {
           await syncSupplyCatalog(userId, localCatalog, organizationId || undefined);
         }
 
@@ -1130,29 +1214,37 @@ function useSupplyChainImpl() {
         for (const [key, localRows] of Object.entries(localSnapshots)) {
           const remote = snapshots[key as keyof typeof snapshots];
           const remoteLen = Array.isArray(remote) ? remote.length : 0;
-          if (Array.isArray(localRows) && localRows.length > remoteLen) {
+          if (
+            shouldCatchupUploadAfterHydrate({
+              snapshotLoadOk: snapshotResult.ok,
+              localLen: Array.isArray(localRows) ? localRows.length : 0,
+              remoteLen,
+            })
+          ) {
             toUpload[key] = localRows;
           }
         }
         // Tombstones keep the same array length — still upload when merge differs from remote.
         if (
+          snapshotResult.ok &&
           mergedPurchaseOrders.length &&
           JSON.stringify(mergedPurchaseOrders) !==
             JSON.stringify(remotePurchaseOrders)
         ) {
           toUpload.purchase_orders = mergedPurchaseOrders;
         }
-        if (kitchenStockReconciled && mergedKitchenStock.length) {
+        if (snapshotResult.ok && kitchenStockReconciled && mergedKitchenStock.length) {
           toUpload.kitchen_stock = mergedKitchenStock;
         }
         const remoteBarNormalized = normalizeBarStockRows(remoteBarStock);
         if (
+          snapshotResult.ok &&
           mergedBarStock.length &&
           JSON.stringify(mergedBarStock) !== JSON.stringify(remoteBarNormalized)
         ) {
           toUpload.bar_stock = mergedBarStock;
         }
-        if (Object.keys(toUpload).length > 0) {
+        if (snapshotResult.ok && Object.keys(toUpload).length > 0) {
           const rolePayload = snapshotsPayloadForRole(toUpload, role);
           if (Object.keys(rolePayload).length > 0) {
             await saveSupplySnapshots(
@@ -1163,7 +1255,9 @@ function useSupplyChainImpl() {
           }
         }
 
-        removeAllPersistedSupplyKeys();
+        if (snapshotResult.ok && catalogResult.ok) {
+          removeAllPersistedSupplyKeys();
+        }
       } catch (err) {
         if (cancelled) return;
         const message =
@@ -1200,6 +1294,7 @@ function useSupplyChainImpl() {
   /** Debounced catalogue sync (qty changes from issue-out, PO receive, etc.). */
   useEffect(() => {
     if (!useDbPersistence || !dbHydrated || catalogSyncSkipRef.current) return;
+    if (!allowSupplyCatalogSync(catalogHydrateOkRef.current)) return;
     if (!hasPermission(role, "supply:store")) return;
     const timer = window.setTimeout(() => {
       void syncSupplyCatalog(userId, storeItems.map(applyStoreItemDeptFields), orgIdRef.current || undefined).catch((err) => {
@@ -1449,6 +1544,7 @@ function useSupplyChainImpl() {
   /** Tombstone finished stock rows that lost their batch standard (e.g. after sync). */
   useEffect(() => {
     if (!dbHydrated) return;
+    if (!allowSupplySnapshotPersist(snapshotHydrateOkRef.current)) return;
     setKitchenStock((prev) => {
       const { stock, changed } = reconcileKitchenStockWithRecipes(recipesRef.current, prev);
       if (!changed) return prev;
@@ -1468,6 +1564,7 @@ function useSupplyChainImpl() {
   /** Deactivate orphaned kitchen-synced outlet menu rows in Supabase. */
   useEffect(() => {
     if (!useDbPersistence || !dbHydrated || !organizationId) return;
+    if (!allowSupplySnapshotPersist(snapshotHydrateOkRef.current)) return;
     if (
       !hasPermission(role, "supply:kitchen") &&
       !hasPermission(role, "outlet:menu") &&
