@@ -7,6 +7,7 @@ import {
   writableSupplySnapshotKeys,
 } from '@/lib/supply-chain/supply-api-auth'
 import { SUPPLY_SNAPSHOT_KEYS, type SupplySnapshotKey } from '@/lib/supply-chain/supply-db-mappers'
+import { shouldSkipEmptySnapshotOverwrite } from '@/lib/supply-chain/supply-hydrate-guard'
 import { mergePurchaseOrdersFromRemote } from '@/lib/supply-chain/po-sync-merge'
 import type { PurchaseOrder } from '@/lib/supply-chain/types'
 
@@ -112,6 +113,18 @@ export async function PUT(request: Request) {
     for (const key of Object.keys(snapshots) as SupplySnapshotKey[]) {
       if (!writableKeySet.has(key)) continue
       let data = snapshots[key]
+
+      if (Array.isArray(data) && data.length === 0) {
+        const { data: existingRow } = await admin
+          .from('supply_chain_snapshots')
+          .select('data')
+          .eq('organization_id', auth.orgId)
+          .eq('snapshot_key', key)
+          .maybeSingle()
+        if (shouldSkipEmptySnapshotOverwrite(key, data, existingRow?.data)) {
+          continue
+        }
+      }
 
       // Merge purchase orders so a stale client cannot overwrite a newer reject/approve.
       if (key === 'purchase_orders' && Array.isArray(data)) {
