@@ -45,6 +45,8 @@ import { GuestProfileEditPanel } from '@/components/guests/guest-profile-edit-pa
 import { Input } from '@/components/ui/input'
 import { buildGuestAccountStatementHtml } from '@/lib/receipts/guest-account-statement'
 import { printHtmlDocument } from '@/lib/receipts/receipt-pdf-print'
+import { applyFolioStayCheckout } from '@/lib/booking/checkout-folio-stay'
+import { reconcileRoomStatusesClient } from '@/lib/rooms/reconcile-room-status-client'
 
 interface Guest {
   id: string
@@ -493,19 +495,22 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
     setIsCheckingOut(true)
     try {
       const supabase = createClient()
-      const { error } = await supabase
-        .from('bookings')
-        .update({ folio_status: 'checked_out' })
-        .eq('folio_id', selectedFolioId)
-      if (error) throw error
-      // Update local bookings state to reflect checkout
-      setBookings(bookings.map(b => 
-        b.folio_id === selectedFolioId 
-          ? { ...b, folio_status: 'checked_out' as any } 
-          : b
+      const { checkOut } = await applyFolioStayCheckout(supabase, {
+        folioId: selectedFolioId,
+        organizationId: orgId || undefined,
+        updatedBy: currentUserId,
+      })
+      await reconcileRoomStatusesClient()
+      setBookings(bookings.map((b) =>
+        b.folio_id === selectedFolioId
+          ? { ...b, folio_status: 'checked_out', status: 'checked_out', check_out: checkOut }
+          : b,
       ))
+      toast.success('Folio checked out')
     } catch (err) {
       console.error('Checkout error:', err)
+      const message = err instanceof Error ? err.message : 'Failed to check out folio'
+      toast.error(message)
     } finally {
       setIsCheckingOut(false)
     }
