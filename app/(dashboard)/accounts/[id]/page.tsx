@@ -33,6 +33,8 @@ import { PageLoadingState } from '@/components/loading-screen'
 import { fetchGuestCashbackBalanceClient } from '@/lib/cashback/cashback-client'
 import { GuestCashbackPanel } from '@/components/cashback/guest-cashback-panel'
 import { GuestProfileEditPanel } from '@/components/guests/guest-profile-edit-panel'
+import { applyFolioStayCheckout } from '@/lib/booking/checkout-folio-stay'
+import { reconcileRoomStatusesClient } from '@/lib/rooms/reconcile-room-status-client'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 interface GuestAccount {
@@ -295,14 +297,22 @@ export default function AccountDetailPage() {
     setIsCheckingOut(true)
     try {
       const supabase = createClient()
-      const { error } = await supabase
-        .from('bookings')
-        .update({ folio_status: 'checked_out' })
-        .eq('folio_id', selectedFolioId)
-      if (error) throw error
-      setBookings(bookings.map(b => b.folio_id === selectedFolioId ? { ...b, folio_status: 'checked_out' as any } : b))
+      const { checkOut } = await applyFolioStayCheckout(supabase, {
+        folioId: selectedFolioId,
+        organizationId: orgId || undefined,
+        updatedBy: currentUserId,
+      })
+      await reconcileRoomStatusesClient()
+      setBookings(bookings.map((b) =>
+        b.folio_id === selectedFolioId
+          ? { ...b, folio_status: 'checked_out', status: 'checked_out', check_out: checkOut }
+          : b,
+      ))
+      toast.success('Folio checked out')
     } catch (err) {
       console.error('Checkout error:', err)
+      const message = err instanceof Error ? err.message : 'Failed to check out folio'
+      toast.error(message)
     } finally {
       setIsCheckingOut(false)
     }
