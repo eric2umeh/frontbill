@@ -1,7 +1,11 @@
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { resolveEventsAuthed } from '@/lib/events/api-auth'
-import { parseEventPaymentFromBody } from '@/lib/events/record-event-payment'
+import {
+  eventPaymentCollectedDelta,
+  parseEventPaymentFromBody,
+  recordEventPaymentSideEffects,
+} from '@/lib/events/record-event-payment'
 import { resolveEventClientRecord, type EventClientType } from '@/lib/events/resolve-event-client'
 import {
   computeEventEstimatedTotal,
@@ -25,7 +29,7 @@ export async function PATCH(
   const { data: existing, error: fe } = await admin
     .from('hotel_events')
     .select(
-      'organization_id, start_date, end_date, estimated_value, venue, other_services, client_type, client_name, client_phone, client_email, guest_id, client_organization_id',
+      'organization_id, start_date, end_date, estimated_value, amount_paid, title, venue, other_services, client_type, client_name, client_phone, client_email, guest_id, client_organization_id',
     )
     .eq('id', id)
     .single()
@@ -156,6 +160,7 @@ export async function PATCH(
           : Math.max(0, Number(body.estimated_value) || 0)
         : existing.estimated_value
 
+  let payment: ReturnType<typeof parseEventPaymentFromBody> | null = null
   if (
     body.payment_status != null ||
     body.payment_method != null ||
@@ -165,7 +170,7 @@ export async function PATCH(
     body.estimated_base_value !== undefined ||
     body.other_services !== undefined
   ) {
-    const payment = parseEventPaymentFromBody(body as Record<string, unknown>, estimatedForPayment)
+    payment = parseEventPaymentFromBody(body as Record<string, unknown>, estimatedForPayment)
     if (payment.uiPaymentStatus === 'partial' && payment.depositAmount <= 0) {
       return NextResponse.json({ error: 'Enter the amount paid for partial payment' }, { status: 400 })
     }
@@ -190,6 +195,40 @@ export async function PATCH(
     .single()
 
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+
+  if (payment) {
+    const collectedDelta = eventPaymentCollectedDelta(
+      (existing as { amount_paid?: unknown }).amount_paid,
+      payment.amount_paid,
+    )
+    if (collectedDelta > 0) {
+      const side = await recordEventPaymentSideEffects(admin, {
+        organizationId: auth.ctx.organizationId,
+        userId: auth.ctx.userId,
+        eventId: data.id,
+        title: data.title,
+        clientName: data.client_name,
+        venue: data.venue,
+        guestId: data.guest_id,
+        estimatedValue: estimatedForPayment,
+        paymentMethod: payment.payment_method,
+        storedPaymentStatus: payment.payment_status,
+        depositAmount: collectedDelta,
+        balanceAmount: payment.balance,
+        paymentAccountId:
+          body.payment_account_id != null ? String(body.payment_account_id) : null,
+        paymentAccountLabel:
+          body.payment_account_label != null ? String(body.payment_account_label) : null,
+      })
+      if (side.error) {
+        return NextResponse.json(
+          { event: data, warning: `Event saved but payment ledger failed: ${side.error}` },
+          { status: 200 },
+        )
+      }
+    }
+  }
+
   return NextResponse.json({ event: data })
 }
 
