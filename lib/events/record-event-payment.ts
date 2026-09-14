@@ -50,6 +50,16 @@ export function parseEventPaymentFromBody(
   }
 }
 
+/** Newly collected cash/POS on an event edit. Never negative (refunds are a separate path). */
+export function eventPaymentCollectedDelta(
+  previousAmountPaid: unknown,
+  nextAmountPaid: unknown,
+): number {
+  const prev = Math.max(0, Math.round((Number(previousAmountPaid) || 0) * 100) / 100)
+  const next = Math.max(0, Math.round((Number(nextAmountPaid) || 0) * 100) / 100)
+  return Math.max(0, Math.round((next - prev) * 100) / 100)
+}
+
 export async function recordEventPaymentSideEffects(
   admin: SupabaseClient,
   input: {
