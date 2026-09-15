@@ -9,6 +9,10 @@ import {
   extensionAdditionalNights,
   toYmd,
 } from '@/lib/booking/edit-booking-patch'
+import {
+  buildExtendStayDiscountCollectionRow,
+  relatedRecordString,
+} from '@/lib/booking/extend-stay-discount-collection'
 
 const DECISION = ['approved', 'rejected'] as const
 
@@ -236,7 +240,9 @@ export async function PATCH(request: Request) {
 
     const { data: booking } = await admin
       .from('bookings')
-      .select('id, deposit, balance, total_amount, number_of_nights, check_in, guest_id, folio_id, organization_id')
+      .select(
+        'id, deposit, balance, total_amount, number_of_nights, check_in, guest_id, folio_id, organization_id, guests:guest_id(name), rooms:room_id(room_number)',
+      )
       .eq('id', row.booking_id)
       .single()
     if (!booking) return NextResponse.json({ error: 'Booking missing' }, { status: 400 })
@@ -277,6 +283,23 @@ export async function PATCH(request: Request) {
         balance: Math.max(0, nextTotal - nextDeposit),
       })
       .eq('id', row.booking_id)
+
+    const collectionRow = buildExtendStayDiscountCollectionRow({
+      organizationId: String(booking.organization_id || row.organization_id),
+      bookingId: row.booking_id,
+      guestName: relatedRecordString(booking.guests, 'name'),
+      roomNumber: relatedRecordString(booking.rooms, 'room_number') || null,
+      amount: discTotal,
+      paymentMethod: String(row.payment_method || 'cash'),
+      nights,
+      userId: caller_id,
+    })
+    if (collectionRow) {
+      const { error: txErr } = await admin.from('transactions').insert([collectionRow])
+      if (txErr) {
+        console.error('[extend-stay-discount] collection transaction insert failed', txErr)
+      }
+    }
 
     const { data: updated, error: ue } = await admin
       .from('extend_stay_discount_requests')
