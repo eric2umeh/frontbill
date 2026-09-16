@@ -27,7 +27,7 @@ type Props = {
 export function SupplyHistoryClearButton({
   actor,
   label = 'Clear history',
-  description = 'Removes all purchase order history, issue-out log entries, and supply activity log on this device. Stock and kitchen data are not affected.',
+  description = 'Hides the supply activity log on this screen. Purchase orders, issue-out records, and cloud history are not deleted.',
   className,
 }: Props) {
   const mounted = useClientMounted()
@@ -62,7 +62,9 @@ export function SupplyHistoryClearButton({
             onClick={() => {
               const res = clearSupplyHistory(actor)
               toast.success(
-                `History cleared — ${res.purchaseOrdersCleared} PO(s), ${res.issueOutCleared} issue-out record(s), ${res.activityCleared} activity entry(ies)`,
+                res.activityCleared
+                  ? `Activity log hidden on this screen (${res.activityCleared} ${res.activityCleared === 1 ? 'entry' : 'entries'}). Cloud history is unchanged.`
+                  : 'Activity log is already empty on this screen.',
               )
             }}
           >

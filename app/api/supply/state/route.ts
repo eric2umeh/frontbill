@@ -9,6 +9,10 @@ import {
 import { SUPPLY_SNAPSHOT_KEYS, type SupplySnapshotKey } from '@/lib/supply-chain/supply-db-mappers'
 import { mergePurchaseOrdersFromRemote } from '@/lib/supply-chain/po-sync-merge'
 import type { PurchaseOrder } from '@/lib/supply-chain/types'
+import {
+  isAuditSnapshotKey,
+  shouldSkipEmptyAuditSnapshotOverwrite,
+} from '@/lib/supply-chain/audit-snapshot-guard'
 
 function isAbortLike(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err ?? '')
@@ -131,6 +135,19 @@ export async function PUT(request: Request) {
       // Empty basket from client always wins (clear basket / post-send must stick).
       if (key === 'basket' && Array.isArray(data) && data.length === 0) {
         data = []
+      }
+
+      // Never replace a live issue-out / activity trail with [] ("clear on this device").
+      if (isAuditSnapshotKey(key) && Array.isArray(data) && data.length === 0) {
+        const { data: existingRow } = await admin
+          .from('supply_chain_snapshots')
+          .select('data')
+          .eq('organization_id', auth.orgId)
+          .eq('snapshot_key', key)
+          .maybeSingle()
+        if (shouldSkipEmptyAuditSnapshotOverwrite(key, data, existingRow?.data)) {
+          continue
+        }
       }
 
       const { error } = await admin.from('supply_chain_snapshots').upsert(

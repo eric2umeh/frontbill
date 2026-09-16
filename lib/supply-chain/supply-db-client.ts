@@ -2,6 +2,7 @@
 
 import type { StoreItem } from './types'
 import type { SupplySnapshotKey } from './supply-db-mappers'
+import { omitEmptyAuditSnapshots } from './audit-snapshot-guard'
 import { isRetryableSupplyError, withFetchRetry } from '@/lib/utils/fetch-retry'
 
 async function authHeaders(forceRefresh = false): Promise<Record<string, string>> {
@@ -171,13 +172,17 @@ export async function saveSupplySnapshots(
   snapshots: Partial<Record<SupplySnapshotKey, unknown>>,
   organizationId?: string,
 ): Promise<void> {
+  const payload = omitEmptyAuditSnapshots(
+    snapshots as Record<string, unknown>,
+  ) as Partial<Record<SupplySnapshotKey, unknown>>
+  if (Object.keys(payload).length === 0) return
   await withFetchRetry(
     async () =>
       parseJson(
         await supplyRequest('/api/supply/state', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(authBody(userId, organizationId, { snapshots })),
+          body: JSON.stringify(authBody(userId, organizationId, { snapshots: payload })),
         }),
       ),
     { retries: 4, baseDelayMs: 800, retryIf: isRetryableSupplyError },

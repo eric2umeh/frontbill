@@ -4168,20 +4168,17 @@ function useSupplyChainImpl() {
   }, [storeItems]);
 
   const clearSupplyHistory = useCallback((_actor: Actor) => {
-    const poCount = purchaseOrders.length;
-    const issueCount = issueOutLog.length;
+    // Device-local activity view only. Emptying POs / basket / issue-out and
+    // letting the 900ms persist PUT `[]` would wipe the org audit trail.
     const activityCount = activityLog.length;
-    setPurchaseOrders([]);
-    setBasket([]);
-    setIssueOutLog([]);
     setActivityLog([]);
     return {
       ok: true as const,
-      purchaseOrdersCleared: poCount,
-      issueOutCleared: issueCount,
+      purchaseOrdersCleared: 0,
+      issueOutCleared: 0,
       activityCleared: activityCount,
     };
-  }, [purchaseOrders, issueOutLog, activityLog]);
+  }, [activityLog]);
 
   const clearAllSupplyChainData = useCallback((actor: Actor) => {
     setStoreItems([]);

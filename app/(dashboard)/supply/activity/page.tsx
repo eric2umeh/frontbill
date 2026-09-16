@@ -36,7 +36,7 @@ export default function SupplyActivityPage() {
           <SupplyHistoryClearButton
             actor={actor}
             label="Clear activity log"
-            description="Removes all supply activity log entries, purchase order history, and issue-out records on this device."
+            description="Hides the activity log on this screen. Purchase orders, issue-out records, and cloud history are not deleted."
           />
         )}
       </div>
