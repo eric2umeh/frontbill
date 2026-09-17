@@ -346,6 +346,7 @@ export async function deleteOrVoidOutletOrder(
 
   await reverseOutletOrderSettlement(admin, {
     organizationId: input.organizationId,
+    userId: input.userId,
     order: order as {
       id: string
       order_number: string

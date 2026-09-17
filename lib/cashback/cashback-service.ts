@@ -4,6 +4,12 @@ import {
   fetchCashbackConfig,
   paymentMethodEarnsCashback,
 } from "@/lib/cashback/cashback-config";
+import {
+  cashbackVoidSourceType,
+  groupEarnAmountsByGuest,
+  nextCashbackTotalsAfterEarnVoid,
+  shouldReverseCashbackEarns,
+} from "@/lib/cashback/reverse-cashback-earn";
 
 export type GuestCashbackBalance = {
   guestId: string;
@@ -296,4 +302,104 @@ export async function recordCashbackAdjust(
   if (txnErr) throw new Error(txnErr.message);
 
   return { balanceAfter: newBalance };
+}
+
+/**
+ * Claw back cashback earned for a specific source (e.g. an outlet order).
+ * Idempotent: a second call with the same source is a no-op.
+ */
+export async function reverseCashbackEarnForSource(
+  admin: SupabaseClient,
+  input: {
+    organizationId: string;
+    sourceType: string;
+    sourceId: string;
+    userId?: string | null;
+    description?: string;
+  },
+): Promise<{ reversed: number }> {
+  const sourceId = String(input.sourceId || "").trim();
+  const sourceType = String(input.sourceType || "").trim();
+  if (!sourceId || !sourceType) return { reversed: 0 };
+
+  const voidSourceType = cashbackVoidSourceType(sourceType);
+
+  const { data: existingVoid, error: voidErr } = await admin
+    .from("cashback_transactions")
+    .select("id")
+    .eq("organization_id", input.organizationId)
+    .eq("source_type", voidSourceType)
+    .eq("source_id", sourceId)
+    .limit(1);
+
+  if (voidErr) {
+    if (isCashbackTableError(voidErr)) return { reversed: 0 };
+    throw new Error(voidErr.message);
+  }
+
+  const { data: earns, error: earnErr } = await admin
+    .from("cashback_transactions")
+    .select("guest_id, amount")
+    .eq("organization_id", input.organizationId)
+    .eq("source_type", sourceType)
+    .eq("source_id", sourceId)
+    .eq("txn_type", "earn");
+
+  if (earnErr) {
+    if (isCashbackTableError(earnErr)) return { reversed: 0 };
+    throw new Error(earnErr.message);
+  }
+
+  if (
+    !shouldReverseCashbackEarns({
+      earnCount: earns?.length ?? 0,
+      alreadyReversed: !!(existingVoid && existingVoid.length > 0),
+    })
+  ) {
+    return { reversed: 0 };
+  }
+
+  const grouped = groupEarnAmountsByGuest(earns ?? []);
+  let reversed = 0;
+
+  for (const { guestId, amount } of grouped) {
+    const current = await ensureBalanceRow(
+      admin,
+      input.organizationId,
+      guestId,
+    );
+    if (!current) continue;
+
+    const next = nextCashbackTotalsAfterEarnVoid(current, amount);
+
+    const { error: upErr } = await admin
+      .from("guest_cashback_balances")
+      .update({
+        earned_total: next.earnedTotal,
+        balance: next.balance,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("organization_id", input.organizationId)
+      .eq("guest_id", guestId);
+
+    if (upErr) throw new Error(upErr.message);
+
+    const { error: txnErr } = await admin.from("cashback_transactions").insert({
+      organization_id: input.organizationId,
+      guest_id: guestId,
+      txn_type: "adjust",
+      amount,
+      balance_after: next.balance,
+      source_type: voidSourceType,
+      source_id: sourceId,
+      description:
+        input.description || "Cashback reversed because the sale was voided",
+      created_by: input.userId || null,
+    });
+
+    if (txnErr) throw new Error(txnErr.message);
+    reversed = Math.round((reversed + amount) * 100) / 100;
+  }
+
+  return { reversed };
 }
