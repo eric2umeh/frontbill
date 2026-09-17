@@ -4,6 +4,8 @@ import {
   buildOutletSettlementNotes,
 } from "@/lib/outlets/outlet-financial-integration";
 import { getOutletDepartment } from "@/lib/outlets/departments";
+import { reverseCashbackEarnForSource } from "@/lib/cashback/cashback-service";
+import { OUTLET_SETTLEMENT_CASHBACK_SOURCE } from "@/lib/cashback/reverse-cashback-earn";
 
 function roundMoney(n: number): number {
   return Math.round(n * 100) / 100;
@@ -111,6 +113,7 @@ export async function reverseOutletOrderSettlement(
   admin: SupabaseClient,
   input: {
     organizationId: string;
+    userId?: string | null;
     order: {
       id: string;
       order_number: string;
@@ -187,5 +190,20 @@ export async function reverseOutletOrderSettlement(
       .delete()
       .eq("organization_id", input.organizationId)
       .eq("notes", notes);
+  }
+
+  try {
+    await reverseCashbackEarnForSource(admin, {
+      organizationId: input.organizationId,
+      sourceType: OUTLET_SETTLEMENT_CASHBACK_SOURCE,
+      sourceId: input.order.id,
+      userId: input.userId,
+      description: `Cashback reversed — voided ${orderNumber}: ${input.voidReason}`.slice(
+        0,
+        500,
+      ),
+    });
+  } catch (err) {
+    console.warn("[reverseOutletOrderSettlement] cashback reverse", err);
   }
 }
