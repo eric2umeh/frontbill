@@ -10,6 +10,14 @@ import {
 } from '@/lib/hotel-date'
 import { hotelBusinessNightUtcBounds } from '@/lib/payments/business-night-bounds'
 import { summarizeDayLedgerCollections } from '@/lib/payments/day-ledger-collections'
+import {
+  NIGHT_AUDIT_IN_HOUSE_STATUSES,
+  type NightAuditStayRow,
+  nightAuditOccupiedRoomIds,
+  nightAuditPendingCheckouts,
+  occupiedRoomsMissingInHouseStay,
+  selectInHouseForNightAudit,
+} from '@/lib/night-audit/in-house-for-audit'
 
 export async function POST(request: Request) {
   try {
@@ -104,7 +112,7 @@ export async function POST(request: Request) {
         .from('bookings')
         .select('*, rooms(id, room_number), guests:guest_id(name)')
         .eq('organization_id', orgId)
-        .eq('status', 'checked_in'),
+        .in('status', [...NIGHT_AUDIT_IN_HOUSE_STATUSES]),
       dayBounds.empty
         ? Promise.resolve({ data: [] as unknown[] })
         : admin
@@ -157,11 +165,16 @@ export async function POST(request: Request) {
       })
     })
 
-    checkedInBookings?.forEach((b: Record<string, unknown>) => {
+    const inHouseBookings = selectInHouseForNightAudit(
+      (checkedInBookings || []) as NightAuditStayRow[],
+      closingDate,
+    )
+
+    inHouseBookings.forEach((b) => {
       const balance = Number(b.balance) || 0
       const total = Number(b.total_amount) || 0
       if (balance > total * 0.5) {
-        const guests = b.guests as { name?: string } | null
+        const guests = b.guests
         anomalies.push({
           type: 'High outstanding balance',
           severity: 'medium',
@@ -171,25 +184,25 @@ export async function POST(request: Request) {
       }
     })
 
-    const checkedInRoomIds = new Set(checkedInBookings?.map((b) => b.room_id as string) || [])
-    occupiedRooms?.forEach((room: Record<string, unknown>) => {
-      if (!checkedInRoomIds.has(room.id as string)) {
-        anomalies.push({
-          type: 'Room status mismatch',
-          severity: 'high',
-          description: `Room ${room.room_number} is marked occupied but has no active checked-in booking.`,
-        })
-      }
+    const inHouseRoomIds = nightAuditOccupiedRoomIds(inHouseBookings)
+    occupiedRoomsMissingInHouseStay(
+      (occupiedRooms || []) as Array<{ id: string; room_number?: unknown }>,
+      inHouseRoomIds,
+    ).forEach((room) => {
+      anomalies.push({
+        type: 'Room status mismatch',
+        severity: 'high',
+        description: `Room ${room.room_number} is marked occupied but has no active in-house booking.`,
+      })
     })
 
     const totalRooms = allRooms?.length || 0
-    const occupiedCount = checkedInBookings?.length || 0
+    const occupiedCount = inHouseBookings.length
     const collections = summarizeDayLedgerCollections(dayTransactions || [], payments || [])
     const totalRevenue = collections.totalRevenue
     const occupancyRate = totalRooms > 0 ? Math.round((occupiedCount / totalRooms) * 100) : 0
 
-    const pendingCheckouts =
-      checkedInBookings?.filter((b) => String(b.check_out).slice(0, 10) === closingDate) || []
+    const pendingCheckouts = nightAuditPendingCheckouts(inHouseBookings, closingDate)
 
     const { data: auditRow, error: insertErr } = await admin
       .from('night_audits')

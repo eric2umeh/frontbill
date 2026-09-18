@@ -39,6 +39,11 @@ import {
 } from '@/lib/hotel-date'
 import { fetchHotelBusinessNightUtcBounds } from '@/lib/payments/business-night-bounds'
 import { summarizeDayLedgerCollections } from '@/lib/payments/day-ledger-collections'
+import {
+  NIGHT_AUDIT_IN_HOUSE_STATUSES,
+  nightAuditPendingCheckouts,
+  selectInHouseForNightAudit,
+} from '@/lib/night-audit/in-house-for-audit'
 
 interface AuditTrailLog {
   id: string
@@ -168,7 +173,7 @@ export default function NightAuditPage() {
             .from('bookings')
             .select('*, rooms(id, room_number), guests:guest_id(name)')
             .eq('organization_id', organizationId)
-            .eq('status', 'checked_in'),
+            .in('status', [...NIGHT_AUDIT_IN_HOUSE_STATUSES]),
           !dayBounds || dayBounds.empty
             ? Promise.resolve({ data: [] as unknown[] })
             : supabase
@@ -201,8 +206,9 @@ export default function NightAuditPage() {
             .eq('check_in', arrivalsDate),
         ])
 
+      const inHouse = selectInHouseForNightAudit(bookings || [], closingDate)
       const totalRooms = allRooms?.length || 0
-      const occupiedRooms = bookings?.length || 0
+      const occupiedRooms = inHouse.length
       const collections = summarizeDayLedgerCollections(dayTransactions || [], payments || [])
 
       setAuditData({
@@ -211,7 +217,7 @@ export default function NightAuditPage() {
         occupiedRooms,
         totalRevenue: collections.totalRevenue,
         revenues: collections.revenues,
-        pendingCheckouts: bookings?.filter((b: any) => String(b.check_out).slice(0, 10) === closingDate) || [],
+        pendingCheckouts: nightAuditPendingCheckouts(inHouse, closingDate),
         expectedArrivals: arrivals || [],
         anomalies: []
       })
