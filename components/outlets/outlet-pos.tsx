@@ -332,10 +332,12 @@ export function OutletPos({
       return
     }
     if (link.tracked) {
-      const inCartQty = cart
-        .filter((l) => l.item.id === item.id)
-        .reduce((s, l) => s + l.qty, 0)
-      if (inCartQty + 1 > maxSellableQty(link)) {
+      const remaining = supply.remainingOutletSellableQty(
+        department,
+        item,
+        cart.map((l) => ({ item: l.item, qty: l.qty })),
+      )
+      if (remaining < 1) {
         toast.error(
           `${item.name} — insufficient stock (${formatStockAvailabilityLabel(link) ?? formatOutletStockQtyDisplay(link)})`,
         )
@@ -372,10 +374,12 @@ export function OutletPos({
           .filter((l) => l.qty > 0)
       }
       const link = supply.getOutletItemStock(department, line.item)
-      const inCartQty = prev
-        .filter((l) => l.item.id === line.item.id && l.id !== lineId)
-        .reduce((s, l) => s + l.qty, 0)
-      if (inCartQty + line.qty + delta > maxSellableQty(link)) {
+      const remaining = supply.remainingOutletSellableQty(
+        department,
+        line.item,
+        prev.map((l) => ({ item: l.item, qty: l.qty })),
+      )
+      if (delta > remaining) {
         toast.error(
           `${line.item.name} — only ${formatOutletStockQtyDisplay(link)} available`,
         )
