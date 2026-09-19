@@ -58,9 +58,10 @@ import type { OutletMenuItemRow } from "@/lib/outlets/types";
 import { outletStockSlug } from "@/lib/outlets/outlet-stock-slug";
 import {
   effectiveStockSource,
-  maxSellableQty,
   parseMenuStockLink,
+  remainingSellableQtyAfterCart,
   resolveOutletItemStock,
+  validateOutletCartStock,
 } from "@/lib/outlets/outlet-supply-stock";
 import {
   formatPurchaseOrderNumber,
@@ -6076,42 +6077,28 @@ function useSupplyChainImpl() {
     [kitchenStock, barStock],
   );
 
+  const remainingOutletSellableQty = useCallback(
+    (
+      department: OutletDepartmentKey,
+      item: OutletMenuItemRow,
+      cartLines: { item: OutletMenuItemRow; qty: number }[],
+    ): number =>
+      remainingSellableQtyAfterCart(
+        department,
+        item,
+        cartLines,
+        kitchenStock,
+        barStock,
+      ),
+    [kitchenStock, barStock],
+  );
+
   const validateOutletCart = useCallback(
     (
       department: OutletDepartmentKey,
       lines: { item: OutletMenuItemRow; qty: number }[],
-    ): { ok: true } | { error: string; shortages?: StockShortageLine[] } => {
-      const shortages: StockShortageLine[] = [];
-      for (const line of lines) {
-        const link = resolveOutletItemStock(
-          line.item,
-          department,
-          kitchenStock,
-          barStock,
-        );
-        if (!link.tracked) continue;
-        const need = link.portionsPerSale * line.qty;
-        const maxQty = maxSellableQty(link);
-        if (line.qty > maxQty || need > link.available) {
-          shortages.push({
-            name: line.item.name,
-            need,
-            onHand: link.available,
-            unit: link.unit,
-          });
-        }
-      }
-      if (shortages.length) {
-        return {
-          error:
-            shortages.length === 1
-              ? `${shortages[0].name} — not enough stock on hand.`
-              : `${shortages.length} items are out of stock for this order.`,
-          shortages,
-        };
-      }
-      return { ok: true };
-    },
+    ): { ok: true } | { error: string; shortages?: StockShortageLine[] } =>
+      validateOutletCartStock(department, lines, kitchenStock, barStock),
     [kitchenStock, barStock],
   );
 
@@ -6361,6 +6348,7 @@ function useSupplyChainImpl() {
     kickstartOutletMenuStock,
     issueRawToKitchenPortions,
     getOutletItemStock,
+    remainingOutletSellableQty,
     validateOutletCart,
     deductOutletCart,
     batches: visibleBatchesList,
@@ -6522,5 +6510,24 @@ export function useSupplyChain() {
     kitchenOrdersAtStore: ctx.kitchenOrdersAtStore ?? [],
     ordersAwaitingAccountant: ctx.ordersAwaitingAccountant ?? [],
     ordersAwaitingManager: ctx.ordersAwaitingManager ?? [],
+    remainingOutletSellableQty:
+      ctx.remainingOutletSellableQty ??
+      ((department, item, cartLines) =>
+        remainingSellableQtyAfterCart(
+          department,
+          item,
+          cartLines,
+          ctx.kitchenStock ?? [],
+          ctx.barStock ?? [],
+        )),
+    validateOutletCart:
+      ctx.validateOutletCart ??
+      ((department, lines) =>
+        validateOutletCartStock(
+          department,
+          lines,
+          ctx.kitchenStock ?? [],
+          ctx.barStock ?? [],
+        )),
   };
 }

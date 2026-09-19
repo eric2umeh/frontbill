@@ -254,6 +254,95 @@ export function maxSellableQty(link: ResolvedOutletStockLink): number {
   return Math.floor(link.available / link.portionsPerSale)
 }
 
+export type OutletCartStockLine = {
+  item: OutletMenuItemRow
+  qty: number
+}
+
+export type OutletCartStockShortage = {
+  name: string
+  need: number
+  onHand: number
+  unit: string
+}
+
+function trackedStockKey(link: ResolvedOutletStockLink): string | null {
+  if (!link.tracked || !link.stockId) return null
+  return `${link.source}:${link.stockId}`
+}
+
+/**
+ * How many more units of `item` can be sold given `cartLines` already reserved.
+ * Shared kitchen/bar rows (name match or `ks:` / `bar:` links) count against the same on-hand.
+ */
+export function remainingSellableQtyAfterCart(
+  department: OutletDepartmentKey,
+  item: OutletMenuItemRow,
+  cartLines: OutletCartStockLine[],
+  kitchenStock: KitchenStockItem[],
+  barStock: BarStockItem[],
+): number {
+  const link = resolveOutletItemStock(item, department, kitchenStock, barStock)
+  if (!link.tracked || link.portionsPerSale <= 0) return Infinity
+  const key = trackedStockKey(link)
+  let reserved = 0
+  if (key) {
+    for (const line of cartLines) {
+      if (line.qty <= 0) continue
+      const other = resolveOutletItemStock(line.item, department, kitchenStock, barStock)
+      if (trackedStockKey(other) !== key) continue
+      reserved += Math.max(1, other.portionsPerSale) * line.qty
+    }
+  }
+  const remaining = Math.max(0, link.available - reserved)
+  return Math.floor(remaining / link.portionsPerSale)
+}
+
+/**
+ * Reject a cart whose lines together need more than on-hand for any shared stock row.
+ * Per-line checks against the full balance are not enough: Fried Rice + Special Fried Rice
+ * can both resolve to the same kitchen row, and a stout single + bucket share bar stock.
+ */
+export function validateOutletCartStock(
+  department: OutletDepartmentKey,
+  lines: OutletCartStockLine[],
+  kitchenStock: KitchenStockItem[],
+  barStock: BarStockItem[],
+): { ok: true } | { error: string; shortages: OutletCartStockShortage[] } {
+  const shortages: OutletCartStockShortage[] = []
+  const reservedByStock = new Map<string, number>()
+
+  for (const line of lines) {
+    if (line.qty <= 0) continue
+    const link = resolveOutletItemStock(line.item, department, kitchenStock, barStock)
+    if (!link.tracked) continue
+    const need = Math.max(1, link.portionsPerSale) * line.qty
+    const key = trackedStockKey(link)
+    const already = key ? (reservedByStock.get(key) ?? 0) : 0
+    const totalNeed = already + need
+    if (line.qty > maxSellableQty(link) || totalNeed > link.available) {
+      shortages.push({
+        name: line.item.name,
+        need: totalNeed,
+        onHand: link.available,
+        unit: link.unit,
+      })
+    }
+    if (key) reservedByStock.set(key, totalNeed)
+  }
+
+  if (shortages.length) {
+    return {
+      error:
+        shortages.length === 1
+          ? `${shortages[0].name} — not enough stock on hand.`
+          : `${shortages.length} items are out of stock for this order.`,
+      shortages,
+    }
+  }
+  return { ok: true }
+}
+
 /** Human-readable qty with unit for POS cards (e.g. "12 bottles", "0 portions"). */
 export function formatOutletStockQtyDisplay(link: ResolvedOutletStockLink): string {
   const unit = pluralUnit(link.unit, link.available)
