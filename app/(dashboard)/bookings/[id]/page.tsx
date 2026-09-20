@@ -70,6 +70,11 @@ import {
 } from "@/lib/receipts/booking-receipt-utils";
 import { canAdministerBookingRecord } from "@/lib/booking/can-administer-booking-record";
 import {
+  pickMatchingPaymentTransaction,
+  reconcileBookingAfterRemovedFolioLine,
+  reopenPositiveChargeIds,
+} from "@/lib/booking/reconcile-folio-line-delete";
+import {
   earnCashbackClient,
   fetchGuestCashbackBalanceClient,
 } from "@/lib/cashback/cashback-client";
@@ -1268,33 +1273,81 @@ export default function BookingDetailPage({
       setAddChargeLoading(true);
       const supabase = createClient();
 
-                  const { data: chargeData } = await supabase
+      const { data: chargeData } = await supabase
         .from("folio_charges")
-        .select("payment_status, amount")
+        .select("payment_status, amount, charge_type, payment_method")
         .eq("id", chargeId)
         .single();
 
-                  const { error: deleteError } = await supabase
+      const { error: deleteError } = await supabase
         .from("folio_charges")
-                    .delete()
+        .delete()
         .eq("id", chargeId);
       if (deleteError) throw deleteError;
 
-      if (chargeData?.payment_status === "pending") {
-        const newBalance = Math.max(
-          0,
-          (booking?.balance || 0) - Math.abs(Number(chargeData.amount)),
-        );
-                    await supabase
-          .from("bookings")
-                      .update({ balance: newBalance })
-          .eq("id", bookingId);
-                  }
-                  
+      const { data: remaining, error: remainingError } = await supabase
+        .from("folio_charges")
+        .select("id, amount, charge_type, payment_status, payment_method")
+        .eq("booking_id", bookingId);
+      if (remainingError) throw remainingError;
+
+      const next = reconcileBookingAfterRemovedFolioLine({
+        deposit: Number(booking?.deposit || 0),
+        removed: {
+          amount: chargeData?.amount,
+          charge_type: chargeData?.charge_type,
+          payment_status: chargeData?.payment_status,
+          payment_method: chargeData?.payment_method,
+        },
+        remaining: remaining || [],
+      });
+
+      const { error: bookingMoneyError } = await supabase
+        .from("bookings")
+        .update({
+          deposit: next.deposit,
+          balance: next.balance,
+          payment_status: next.payment_status,
+        })
+        .eq("id", bookingId);
+      if (bookingMoneyError) throw bookingMoneyError;
+
+      if (next.reopenPositiveCharges) {
+        const reopenIds = reopenPositiveChargeIds(remaining || []);
+        if (reopenIds.length > 0) {
+          await supabase
+            .from("folio_charges")
+            .update({ payment_status: "pending" })
+            .in("id", reopenIds);
+        }
+      }
+
+      if (next.voidMatchingPaymentTransaction) {
+        try {
+          const { data: txs } = await supabase
+            .from("transactions")
+            .select("id, amount, description, transaction_id, status, created_at")
+            .eq("booking_id", bookingId)
+            .order("created_at", { ascending: false });
+          const match = pickMatchingPaymentTransaction(
+            txs || [],
+            next.removedPaymentAmount,
+          );
+          if (match) {
+            await supabase
+              .from("transactions")
+              .update({ status: "void" })
+              .eq("id", match.id);
+          }
+        } catch {
+          /* Daily book void is best-effort; folio money already reconciled */
+        }
+      }
+
       await fetchBookingDetails(bookingId);
       toast.success("Charge deleted");
       setDeleteChargeTarget(null);
-                } catch (error: any) {
+    } catch (error: any) {
       toast.error(error.message || "Failed to delete charge");
     } finally {
       setAddChargeLoading(false);
