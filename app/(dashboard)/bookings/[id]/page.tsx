@@ -70,6 +70,13 @@ import {
 } from "@/lib/receipts/booking-receipt-utils";
 import { canAdministerBookingRecord } from "@/lib/booking/can-administer-booking-record";
 import {
+  isEditedFolioPaymentLine,
+  pickMatchingPaymentTransaction,
+  reconcileBookingAfterEditedFolioLine,
+  reopenPositiveChargeIds,
+  settlePositiveChargeIds,
+} from "@/lib/booking/reconcile-folio-line-edit";
+import {
   earnCashbackClient,
   fetchGuestCashbackBalanceClient,
 } from "@/lib/cashback/cashback-client";
@@ -1313,14 +1320,27 @@ export default function BookingDetailPage({
       toast.error("Please enter an amount");
       return;
     }
+    const parsedAmount = Number(editChargeAmount);
+    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+      toast.error("Please enter a valid amount");
+      return;
+    }
     try {
       setEditChargeLoading(true);
       const supabase = createClient();
+      const previous = {
+        id: editingCharge.id,
+        amount: editingCharge.amount,
+        charge_type: editingCharge.type ?? editingCharge.charge_type,
+        payment_status:
+          editingCharge.paymentStatus ?? editingCharge.payment_status,
+        payment_method:
+          editingCharge.paymentMethod ?? editingCharge.payment_method,
+      };
       // Preserve sign: payments are stored as negative
-      const newAmount =
-        editingCharge.amount < 0
-        ? -Math.abs(Number(editChargeAmount))
-          : Math.abs(Number(editChargeAmount));
+      const newAmount = isEditedFolioPaymentLine(previous)
+        ? -Math.abs(parsedAmount)
+        : Math.abs(parsedAmount);
 
       const { error } = await supabase
         .from("folio_charges")
@@ -1329,26 +1349,67 @@ export default function BookingDetailPage({
 
       if (error) throw error;
 
-      // Recalculate booking balance from all charges
-      const { data: allCharges } = await supabase
+      const { data: allCharges, error: chargesError } = await supabase
         .from("folio_charges")
-        .select("amount, payment_status")
+        .select("id, amount, charge_type, payment_status, payment_method")
         .eq("booking_id", bookingId);
+      if (chargesError) throw chargesError;
 
-      const unpaidTotal = (allCharges || [])
-        .filter((c: any) => c.payment_status !== "paid")
-        .reduce((sum: number, c: any) => sum + Number(c.amount), 0);
+      const next = reconcileBookingAfterEditedFolioLine({
+        previous,
+        nextAmount: newAmount,
+        remaining: allCharges || [],
+      });
 
-      const nextBal = Math.max(0, unpaidTotal);
-      const nextPaid = unpaidTotal <= 0;
-
-      await supabase
+      const { error: bookingMoneyError } = await supabase
         .from("bookings")
         .update({
-          balance: nextBal,
-          payment_status: nextPaid ? "paid" : "partial",
+          deposit: next.deposit,
+          balance: next.balance,
+          payment_status: next.payment_status,
         })
         .eq("id", bookingId);
+      if (bookingMoneyError) throw bookingMoneyError;
+
+      if (next.reopenPositiveCharges) {
+        const reopenIds = reopenPositiveChargeIds(allCharges || []);
+        if (reopenIds.length > 0) {
+          await supabase
+            .from("folio_charges")
+            .update({ payment_status: "pending" })
+            .in("id", reopenIds);
+        }
+      } else if (next.settlePositiveCharges) {
+        const settleIds = settlePositiveChargeIds(allCharges || []);
+        if (settleIds.length > 0) {
+          await supabase
+            .from("folio_charges")
+            .update({ payment_status: "paid" })
+            .in("id", settleIds);
+        }
+      }
+
+      if (next.updateMatchingPaymentTransaction) {
+        try {
+          const { data: txs } = await supabase
+            .from("transactions")
+            .select("id, amount, description, transaction_id, status, created_at")
+            .eq("booking_id", bookingId)
+            .order("created_at", { ascending: false });
+          const match = pickMatchingPaymentTransaction(
+            txs || [],
+            next.previousPaymentAmount,
+          );
+          if (match) {
+            await supabase
+              .from("transactions")
+              .update({ amount: next.nextPaymentAmount })
+              .eq("id", match.id);
+          }
+        } catch {
+          /* Daily book amount sync is best-effort; folio money already reconciled */
+        }
+      }
 
       toast.success("Charge updated successfully");
       setEditChargeModalOpen(false);
