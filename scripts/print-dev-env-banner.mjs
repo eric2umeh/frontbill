@@ -35,13 +35,20 @@ const env = {
 }
 
 const url = env.NEXT_PUBLIC_SUPABASE_URL || ''
-const projectRef =
-  url.match(/https:\/\/([a-z0-9-]+)\.supabase\.co/i)?.[1]?.toLowerCase() || 'not configured'
+const isLocalDocker =
+  /127\.0\.0\.1|localhost/i.test(url) ||
+  ['local', 'docker'].includes(
+    (env.SUPABASE_ENV || env.NEXT_PUBLIC_SUPABASE_ENV || '').trim().toLowerCase(),
+  )
+const projectRef = isLocalDocker
+  ? 'local-docker (127.0.0.1)'
+  : url.match(/https:\/\/([a-z0-9-]+)\.supabase\.co/i)?.[1]?.toLowerCase() || 'not configured'
 
 const envLabel = (env.SUPABASE_ENV || env.NEXT_PUBLIC_SUPABASE_ENV || 'unset').trim().toLowerCase()
 const appUrl = env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
 
 const isProdLabel = envLabel === 'production' || envLabel === 'prod'
+const isLocalLabel = envLabel === 'local' || envLabel === 'docker' || isLocalDocker
 const isStagingLabel =
   envLabel === 'staging' || envLabel === 'development' || envLabel === 'dev'
 
@@ -56,7 +63,10 @@ const cyan = '\x1b[36m'
 let statusColor = yellow
 let statusText = 'SUPABASE_ENV not set — add SUPABASE_ENV=staging or production to .env.local'
 
-if (isStagingLabel) {
+if (isLocalLabel) {
+  statusColor = green
+  statusText = 'LOCAL Docker Supabase — no cloud egress'
+} else if (isStagingLabel) {
   statusColor = green
   statusText = 'Development / Staging (safe for local work)'
 } else if (isProdLabel) {
