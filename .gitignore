@@ -86,3 +86,7 @@ $RECYCLE.BIN/
 *.db
 *.sqlite
 *.sqlite3
+
+.env.local.cloud
+.env.local.docker
+staging-seed.sql
