@@ -145,6 +145,29 @@ export async function postPaidOutletSaleToBookingFolio(
   })
 }
 
+/**
+ * Open room bills add the pending folio amount to booking.balance.
+ * Paid-on-spot inserts are already `paid` and must not reduce the room bill.
+ */
+export function outletSettlementReversesBookingBalance(
+  priorPaymentStatus: string | null | undefined,
+): boolean {
+  const status = String(priorPaymentStatus || '')
+    .trim()
+    .toLowerCase()
+  return status === 'pending' || status === 'unpaid'
+}
+
+export function bookingBalanceAfterReversingPendingOutletCharge(
+  currentBalance: number,
+  folioAmount: number,
+): number {
+  return Math.max(
+    0,
+    Math.round(((Number(currentBalance) || 0) - (Number(folioAmount) || 0)) * 100) / 100,
+  )
+}
+
 export async function updateOutletFolioOnSettlement(
   supabase: SupabaseClient,
   input: {
@@ -175,6 +198,12 @@ export async function updateOutletFolioOnSettlement(
     return
   }
 
+  const { data: existing } = await supabase
+    .from('folio_charges')
+    .select('amount, payment_status')
+    .eq('id', input.folioChargeId)
+    .maybeSingle()
+
   await supabase
     .from('folio_charges')
     .update({
@@ -184,12 +213,18 @@ export async function updateOutletFolioOnSettlement(
     })
     .eq('id', input.folioChargeId)
 
+  if (!outletSettlementReversesBookingBalance(existing?.payment_status)) return
+
+  const priorAmount = Number(existing?.amount) || input.amount
   const { data: bk } = await supabase
     .from('bookings')
     .select('balance')
     .eq('id', input.bookingId)
     .maybeSingle()
-  const newBalance = Math.max(0, (Number(bk?.balance) || 0) - input.amount)
+  const newBalance = bookingBalanceAfterReversingPendingOutletCharge(
+    Number(bk?.balance) || 0,
+    priorAmount,
+  )
   await supabase.from('bookings').update({ balance: newBalance }).eq('id', input.bookingId)
 }
 

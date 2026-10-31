@@ -14,6 +14,27 @@ function isCityLedgerMethod(method: string | null | undefined): boolean {
   return m === "city_ledger" || m === "room_charge";
 }
 
+/**
+ * A paid cash/POS/transfer outlet line is not part of the room balance:
+ * an open bill was added then removed at settlement, and a paid-on-spot
+ * line was never added. Voiding it must not put the meal back on the stay.
+ * Pending and city-ledger lines are still owed, so void subtracts them.
+ */
+export function bookingBalanceAfterVoidingOutletFolioLine(
+  currentBalance: number,
+  folioAmount: number,
+  paymentStatus: string | null | undefined,
+  paymentMethod: string | null | undefined,
+): number {
+  const status = String(paymentStatus || "").trim().toLowerCase();
+  const balance = Number(currentBalance) || 0;
+  const amount = Number(folioAmount) || 0;
+  if (status === "paid" && !isCityLedgerMethod(paymentMethod)) {
+    return roundMoney(balance);
+  }
+  return Math.max(0, roundMoney(balance - amount));
+}
+
 async function reverseFolioCharge(
   admin: SupabaseClient,
   folioChargeId: string,
@@ -40,15 +61,12 @@ async function reverseFolioCharge(
     .eq("id", bookingId)
     .maybeSingle();
   const balance = Number(bk?.balance) || 0;
-  const wasPaid = String(fc.payment_status || "").toLowerCase() === "paid";
-  const method = String(paymentMethod || "").toLowerCase();
-
-  let newBalance = balance;
-  if (wasPaid && !isCityLedgerMethod(method)) {
-    newBalance = roundMoney(balance + amount);
-  } else {
-    newBalance = Math.max(0, roundMoney(balance - amount));
-  }
+  const newBalance = bookingBalanceAfterVoidingOutletFolioLine(
+    balance,
+    amount,
+    fc.payment_status,
+    paymentMethod,
+  );
 
   await admin
     .from("bookings")
