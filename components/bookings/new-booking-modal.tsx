@@ -43,6 +43,7 @@ import { DATE_HOLD_BOOKING_STATUSES } from '@/lib/rooms/room-occupancy'
 import { reconcileRoomStatusesClient } from '@/lib/rooms/reconcile-room-status-client'
 import { Checkbox } from '@/components/ui/checkbox'
 import { insertFolioCharges } from '@/lib/utils/insert-folio-charges'
+import { cityLedgerStayPosting } from '@/lib/booking/city-ledger-stay-posting'
 import { applyPaymentToGuestCityLedger } from '@/lib/utils/guest-city-ledger'
 import { buildBackdateDedupeKey } from '@/lib/backdate/dedupe-key'
 import type { SerializedBookingPayload } from '@/lib/backdate/booking-payload'
@@ -813,6 +814,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
       const effectiveRate = customPrice > 0 ? customPrice : pricePerNight
       const total = effectiveRate * nights
       const isCityLedger = paymentMethod === 'city_ledger'
+      const ledgerPost = isCityLedger ? cityLedgerStayPosting(total) : null
       const paidAmount = displayPaidAmount
       const balanceAmount = displayBalanceAmount
       if (!isCityLedger && paymentStatus === 'partial' && paidAmount <= 0) {
@@ -834,9 +836,13 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
           number_of_nights: nights,
           rate_per_night: effectiveRate,
           total_amount: total,
-          deposit: paidAmount,
-          balance: balanceAmount,
-          payment_status: isCityLedger ? 'pending' : balanceAmount <= 0 ? 'paid' : 'partial',
+          deposit: ledgerPost ? ledgerPost.deposit : paidAmount,
+          balance: ledgerPost ? ledgerPost.balance : balanceAmount,
+          payment_status: ledgerPost
+            ? ledgerPost.paymentStatus
+            : balanceAmount <= 0
+              ? 'paid'
+              : 'partial',
           // Future check-in dates are reservations; today/past are confirmed bookings
           status: checkInYmd > hotelCalendarTodayYmd() ? 'reserved' : 'confirmed',
           created_by: user?.id,
@@ -858,7 +864,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
           .single()
         await supabase
           .from('city_ledger_accounts')
-          .update({ balance: (acc?.balance || 0) + total })
+          .update({ balance: (acc?.balance || 0) + (ledgerPost?.ledgerAmount ?? total) })
           .eq('id', ledgerAccount)
 
         const acctType = acc?.account_type || (ledgerTab === 'individual' ? 'individual' : 'organization')
@@ -868,7 +874,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
           if (orgRow) {
             await supabase
               .from('organizations')
-              .update({ current_balance: ((orgRow.current_balance as number) || 0) + total })
+              .update({ current_balance: ((orgRow.current_balance as number) || 0) + (ledgerPost?.ledgerAmount ?? total) })
               .eq('id', ledgerAccount)
           }
         }
@@ -900,7 +906,11 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
               ? 'individual'
               : 'organization'
             : null,
-        payment_status: isCityLedger ? 'city_ledger' : balanceAmount <= 0 ? 'paid' : 'unpaid',
+        payment_status: ledgerPost
+          ? ledgerPost.folioPaymentStatus
+          : balanceAmount <= 0
+            ? 'paid'
+            : 'unpaid',
         created_by: user?.id,
       }])
       if (folioInsertError) throw folioInsertError

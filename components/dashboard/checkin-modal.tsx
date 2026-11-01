@@ -31,6 +31,7 @@ import {
   describeSupabaseError,
 } from '@/lib/utils/counterparty-organization'
 import { insertFolioCharges } from '@/lib/utils/insert-folio-charges'
+import { cityLedgerStayPosting } from '@/lib/booking/city-ledger-stay-posting'
 import { StayDateRangeFields } from '@/components/shared/stay-date-range-fields'
 import {
   minSelectableCheckInYmdHotel,
@@ -388,6 +389,7 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
       const rate = customPrice !== '' ? Number(customPrice) : (selectedRoom.price_per_night || 0)
       const total = rate * nights
       const isPaid = paymentMethod !== 'city_ledger'
+      const ledgerPost = isPaid ? null : cityLedgerStayPosting(total)
       const folioId = `FOL-${Date.now().toString(36).toUpperCase()}`
 
       const { data: booking, error: be } = await supabase.from('bookings').insert([{
@@ -400,9 +402,9 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
         number_of_nights: nights,
         rate_per_night: rate,
         total_amount: total,
-        deposit: isPaid ? total : 0,
-        balance: isPaid ? 0 : total,
-        payment_status: isPaid ? 'paid' : 'pending',
+        deposit: ledgerPost ? ledgerPost.deposit : total,
+        balance: ledgerPost ? ledgerPost.balance : 0,
+        payment_status: ledgerPost ? ledgerPost.paymentStatus : 'paid',
         status: 'confirmed',
         created_by: user?.id,
         notes: paymentMethod === 'city_ledger'
@@ -418,10 +420,10 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
           .eq('id', selectedLedger.id)
           .maybeSingle()
 
-        if (account) {
+        if (account && ledgerPost) {
           await supabase
             .from('city_ledger_accounts')
-            .update({ balance: (Number(account.balance) || 0) + total })
+            .update({ balance: (Number(account.balance) || 0) + ledgerPost.ledgerAmount })
             .eq('id', selectedLedger.id)
         }
       }
@@ -438,7 +440,9 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
         amount: total,
         charge_type: 'room_charge',
         payment_method: paymentMethod,
-        payment_status: isPaid ? 'paid' : 'unpaid',
+        ledger_account_id: ledgerPost ? selectedLedger?.id || null : null,
+        ledger_account_type: ledgerPost ? 'organization' : null,
+        payment_status: ledgerPost ? ledgerPost.folioPaymentStatus : 'paid',
         created_by: user?.id,
       }])
       if (folioErr) throw folioErr
@@ -464,20 +468,22 @@ export function CheckinModal({ open, onClose, onSuccess }: CheckinModalProps) {
         ...accountFields,
       }])
 
-      await supabase.from('payments').insert([{
-        organization_id: orgId,
-        booking_id: booking.id,
-        guest_id: finalGuestId,
-        amount: total,
-        payment_method: paymentMethod,
-        payment_date: new Date().toISOString(),
-        notes: appendAccountToNotes(
-          `Check-in payment — Folio ${folioId}`,
-          accountFields.payment_account_label,
-        ),
-        received_by: user?.id,
-        ...accountFields,
-      }])
+      if (!ledgerPost) {
+        await supabase.from('payments').insert([{
+          organization_id: orgId,
+          booking_id: booking.id,
+          guest_id: finalGuestId,
+          amount: total,
+          payment_method: paymentMethod,
+          payment_date: new Date().toISOString(),
+          notes: appendAccountToNotes(
+            `Check-in payment — Folio ${folioId}`,
+            accountFields.payment_account_label,
+          ),
+          received_by: user?.id,
+          ...accountFields,
+        }])
+      }
 
       toast.success(`Guest checked in! Ref: ${folioId}`)
       onSuccess?.()
