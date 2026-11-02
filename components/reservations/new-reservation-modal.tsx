@@ -39,6 +39,7 @@ import { DATE_HOLD_BOOKING_STATUSES } from '@/lib/rooms/room-occupancy'
 import { reconcileRoomStatusesClient } from '@/lib/rooms/reconcile-room-status-client'
 import { Checkbox } from '@/components/ui/checkbox'
 import { applyPaymentToGuestCityLedger } from '@/lib/utils/guest-city-ledger'
+import { drawerCollectionAmount } from '@/lib/payments/drawer-collection'
 import { insertFolioCharges } from '@/lib/utils/insert-folio-charges'
 import {
   formatReservationPaymentMethodLabel,
@@ -723,14 +724,17 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
         ? paymentAccountInsertFields(paymentAccount)
         : { payment_account_id: null, payment_account_label: null }
 
-      if (!pendingHold) {
+      const drawerCash = pendingHold
+        ? 0
+        : drawerCollectionAmount(cashbackBreakdown.cashToCollect)
+      if (drawerCash > 0) {
         await supabase.from('transactions').insert([{
           organization_id: orgId,
           booking_id: booking.id,
           transaction_id: `TXN-${Date.now().toString(36).toUpperCase()}`,
           guest_name: formattedGuestName,
           room: selectedRoom.room_number,
-          amount: totalAmount,
+          amount: drawerCash,
           payment_method: paymentMethod,
           status: bookingPaymentStatus,
           description: appendAccountToNotes(
@@ -740,11 +744,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
           received_by: currentUserId,
           ...accountFields,
         }])
-      }
 
-      const paidAmount = pendingHold ? 0 : depositAmount
-      const cashRecorded = pendingHold ? 0 : cashbackBreakdown.cashToCollect
-      if (paidAmount > 0) {
         const payNotesBase = cashbackBreakdown.cashbackDiscount > 0
           ? `Reservation payment — Folio ${folioId} (incl. ${formatNaira(cashbackBreakdown.cashbackDiscount)} cashback discount)`
           : `Reservation payment — Folio ${folioId}`
@@ -752,7 +752,7 @@ export function NewReservationModal({ open, onClose, onSuccess }: NewReservation
           organization_id: orgId,
           booking_id: booking.id,
           guest_id: finalGuestId,
-          amount: cashRecorded > 0 ? cashRecorded : paidAmount,
+          amount: drawerCash,
           payment_method: paymentMethod,
           payment_date: new Date().toISOString(),
           notes: appendAccountToNotes(payNotesBase, accountFields.payment_account_label),
