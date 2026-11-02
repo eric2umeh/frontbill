@@ -65,6 +65,7 @@ import {
   paymentMethodRequiresAccount,
   type PaymentAccount,
 } from '@/lib/payments/payment-accounts'
+import { drawerCollectionAmount } from '@/lib/payments/drawer-collection'
 import { computeCashbackDiscount } from '@/lib/cashback/cashback-payment-math'
 import { applyCashbackDiscountAndFolioPayments } from '@/lib/cashback/apply-cashback-folio-payment'
 import {
@@ -956,27 +957,32 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
         ? `Booking payment — Folio ${folioId} (incl. ${formatNaira(bookingCashback.cashbackDiscount)} cashback discount)`
         : `Booking payment — Folio ${folioId}`
 
-      // Record in transactions table (legacy)
-      await supabase.from('transactions').insert([{
-        organization_id: organizationId,
-        booking_id: booking.id,
-        transaction_id: `TXN-${Date.now().toString(36).toUpperCase()}`,
-        guest_name: formattedGuestName,
-        room: selectedRoom.room_number,
-        amount: cashToCollect > 0 ? cashToCollect : paidAmount || total,
-        payment_method: paymentMethod,
-        status: balanceAmount <= 0 ? 'completed' : 'pending',
-        description: appendAccountToNotes(txDescBase, accountFields.payment_account_label),
-        received_by: user?.id || null,
-        ...accountFields,
-      }])
+      // City ledger stays a pending charge for the room total. Cash/POS/transfer
+      // rows are only the money received — not the stay total or a cashback credit.
+      const drawerCash = isCityLedger ? 0 : drawerCollectionAmount(cashToCollect)
+      const transactionAmount = isCityLedger ? total : drawerCash
+      if (transactionAmount > 0) {
+        await supabase.from('transactions').insert([{
+          organization_id: organizationId,
+          booking_id: booking.id,
+          transaction_id: `TXN-${Date.now().toString(36).toUpperCase()}`,
+          guest_name: formattedGuestName,
+          room: selectedRoom.room_number,
+          amount: transactionAmount,
+          payment_method: paymentMethod,
+          status: balanceAmount <= 0 ? 'completed' : 'pending',
+          description: appendAccountToNotes(txDescBase, accountFields.payment_account_label),
+          received_by: user?.id || null,
+          ...accountFields,
+        }])
+      }
 
-      if (paidAmount > 0) {
+      if (drawerCash > 0) {
         await supabase.from('payments').insert([{
           organization_id: organizationId,
           booking_id: booking.id,
           guest_id: finalGuestId,
-          amount: cashToCollect > 0 ? cashToCollect : paidAmount,
+          amount: drawerCash,
           payment_method: paymentMethod,
           payment_date: new Date().toISOString(),
           notes: appendAccountToNotes(payNotesBase, accountFields.payment_account_label),

@@ -25,6 +25,7 @@ import { Plus, Trash2, Loader2, Users, Building2, ChevronLeft, ChevronRight, X }
 import { format, differenceInDays, addDays } from 'date-fns'
 import { toast } from 'sonner'
 import { formatNaira } from '@/lib/utils/currency'
+import { drawerCollectionAmount } from '@/lib/payments/drawer-collection'
 import { resolveOrganizationLedgerAccount } from '@/lib/utils/resolve-ledger-account'
 import { formatPersonName, normalizeName, normalizeNameKey, titleCaseWhileTyping } from '@/lib/utils/name-format'
 import { guestOrOrganizationNameTaken } from '@/lib/utils/guest-org-name-uniqueness'
@@ -1222,6 +1223,12 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
           if (payFcErr) throw payFcErr
         }
 
+        const recordedCash = Math.min(
+          drawerCollectionAmount(pay.cashToCollect),
+          totalAmt,
+        )
+        if (recordedCash <= 0) return
+
         const accountFields = paymentMethodRequiresAccount(paymentMethod)
           ? paymentAccountInsertFields(paymentAccount)
           : { payment_account_id: null, payment_account_label: null }
@@ -1239,7 +1246,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
               organization_id: orgId,
               booking_id: bookingId,
               guest_id: guestId,
-              amount: Math.min(pay.cashToCollect || pay.depositAmt, totalAmt),
+              amount: recordedCash,
               payment_method: paymentMethod,
               payment_date: new Date().toISOString(),
               notes: appendAccountToNotes(
@@ -1260,7 +1267,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
             guest_name:
               selectedGroupGuest?.name || selectedOrg?.name || 'Bulk Guest',
             room: roomNumber,
-            amount: Math.min(pay.cashToCollect || pay.depositAmt, totalAmt),
+            amount: recordedCash,
             payment_method: paymentMethod,
             status:
               pay.bookingPaymentStatus === 'paid'
