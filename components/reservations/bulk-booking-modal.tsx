@@ -61,7 +61,7 @@ import { applyPaymentToGuestCityLedger } from '@/lib/utils/guest-city-ledger'
 import { buildBackdateDedupeKey } from '@/lib/backdate/dedupe-key'
 import { SelectedRoomsStickyBar } from '@/components/shared/selected-rooms-sticky-bar'
 import { CashbackPaymentPanel } from '@/components/cashback/cashback-payment-panel'
-import { computeCashbackDiscount } from '@/lib/cashback/cashback-payment-math'
+import { splitRoomPrepay } from '@/lib/payments/room-prepay'
 import { applyCashbackDiscountAndFolioPayments } from '@/lib/cashback/apply-cashback-folio-payment'
 import {
   earnCashbackClient,
@@ -85,47 +85,6 @@ function sortRoomsByNumber<T extends { room_number?: string | number | null }>(r
   )
 }
 
-function computeBulkRoomPaymentAmounts(
-  total: number,
-  opts: {
-    pendingHold: boolean
-    paymentStatus: 'paid' | 'partial' | 'unpaid'
-    payAboveBulkRoomTotal: boolean
-    partialAmount: number | ''
-  },
-): {
-  depositAmt: number
-  balanceAmt: number
-  bookingPaymentStatus: string
-  folioChargePaid: boolean
-} {
-  if (opts.pendingHold) {
-    return {
-      depositAmt: 0,
-      balanceAmt: total,
-      bookingPaymentStatus: 'pending',
-      folioChargePaid: false,
-    }
-  }
-  let depositAmt = 0
-  if (opts.paymentStatus === 'paid') {
-    depositAmt = opts.payAboveBulkRoomTotal
-      ? Math.max(total, Number(opts.partialAmount) || total)
-      : total
-  } else if (opts.paymentStatus === 'partial') {
-    depositAmt = Number(opts.partialAmount) || 0
-  }
-  const balanceAmt = Math.max(0, total - depositAmt)
-  const bookingPaymentStatus =
-    balanceAmt <= 0 ? 'paid' : depositAmt > 0 ? 'partial' : 'pending'
-  return {
-    depositAmt,
-    balanceAmt,
-    bookingPaymentStatus,
-    folioChargePaid: balanceAmt <= 0,
-  }
-}
-
 function resolveBulkRoomPayment(
   total: number,
   opts: {
@@ -136,34 +95,40 @@ function resolveBulkRoomPayment(
   },
   cashback?: { balance: number; apply: boolean } | null,
 ) {
-  if (!cashback?.apply || cashback.balance <= 0 || opts.pendingHold) {
-    const base = computeBulkRoomPaymentAmounts(total, opts)
+  if (opts.pendingHold) {
     return {
-      ...base,
+      depositAmt: 0,
+      balanceAmt: total,
+      bookingPaymentStatus: 'pending',
+      folioChargePaid: false,
       cashbackDiscount: 0,
-      cashToCollect: base.depositAmt,
+      cashToCollect: 0,
+      cashDrawer: 0,
+      excessCredit: 0,
       cashbackBalanceAfter: cashback?.balance ?? 0,
     }
   }
 
-  let cashPaying = 0
+  let cashTendered = 0
   if (opts.paymentStatus === 'paid') {
-    cashPaying = opts.payAboveBulkRoomTotal
+    cashTendered = opts.payAboveBulkRoomTotal
       ? Math.max(total, Number(opts.partialAmount) || total)
       : total
   } else if (opts.paymentStatus === 'partial') {
-    cashPaying = Number(opts.partialAmount) || 0
+    cashTendered = Number(opts.partialAmount) || 0
   }
 
-  const d = computeCashbackDiscount({
-    totalDue: total,
-    cashbackBalance: cashback.balance,
-    cashPaying,
-    applyCashback: true,
+  const applyCashback = Boolean(cashback?.apply && (cashback.balance ?? 0) > 0)
+  const prepay = splitRoomPrepay({
+    roomTotal: total,
+    cashTendered,
+    cashbackBalance: cashback?.balance ?? 0,
+    applyCashback,
+    payAboveRoomTotal:
+      opts.payAboveBulkRoomTotal || cashTendered > total + 0.001,
   })
-
-  const depositAmt = d.cashbackDiscount + d.cashToCollect
-  const balanceAmt = d.balanceRemaining
+  const depositAmt = prepay.depositApplied
+  const balanceAmt = prepay.balanceRemaining
   const bookingPaymentStatus =
     balanceAmt <= 0 ? 'paid' : depositAmt > 0 ? 'partial' : 'pending'
 
@@ -172,9 +137,14 @@ function resolveBulkRoomPayment(
     balanceAmt,
     bookingPaymentStatus,
     folioChargePaid: balanceAmt <= 0,
-    cashbackDiscount: d.cashbackDiscount,
-    cashToCollect: d.cashToCollect,
-    cashbackBalanceAfter: Math.max(0, cashback.balance - d.cashbackDiscount),
+    cashbackDiscount: prepay.cashbackDiscount,
+    cashToCollect: prepay.cashTowardBill,
+    cashDrawer: prepay.cashDrawer,
+    excessCredit: prepay.excessCredit,
+    cashbackBalanceAfter: Math.max(
+      0,
+      (cashback?.balance ?? 0) - prepay.cashbackDiscount,
+    ),
   }
 }
 
@@ -1168,6 +1138,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
       const postBulkPaymentLines = async (args: {
         bookingId: string
         guestId: string | null
+        guestName?: string | null
         folioId: string
         roomNumber: string | number
         totalAmt: number
@@ -1175,9 +1146,9 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
         slotIndex: number
       }) => {
         const { bookingId, guestId, folioId, roomNumber, totalAmt, pay, slotIndex } = args
-        if (pendingHold || pay.depositAmt <= 0) return
+        if (pendingHold || (pay.depositAmt <= 0 && pay.excessCredit <= 0)) return
 
-        if (bulkCashbackEligible && guestId) {
+        if (pay.depositAmt > 0 && bulkCashbackEligible && guestId) {
           await applyCashbackDiscountAndFolioPayments(supabase, {
             guestId,
             bookingId,
@@ -1204,7 +1175,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
               sourceId: bookingId,
             })
           }
-        } else {
+        } else if (pay.depositAmt > 0) {
           const { error: payFcErr } = await insertFolioCharges(supabase, [
             {
               booking_id: bookingId,
@@ -1232,14 +1203,18 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
         const txDescBase = `${
           wording === 'booking' ? 'Bulk booking' : 'Bulk reservation'
         } payment — ${folioId}`
+        const recordedCash =
+          pay.excessCredit > 0
+            ? pay.cashDrawer
+            : Math.min(pay.cashToCollect || pay.depositAmt, totalAmt)
 
-        if (guestId) {
+        if (guestId && recordedCash > 0) {
           await supabase.from('payments').insert([
             {
               organization_id: orgId,
               booking_id: bookingId,
               guest_id: guestId,
-              amount: Math.min(pay.cashToCollect || pay.depositAmt, totalAmt),
+              amount: recordedCash,
               payment_method: paymentMethod,
               payment_date: new Date().toISOString(),
               notes: appendAccountToNotes(
@@ -1252,30 +1227,63 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
           ])
         }
 
-        await supabase.from('transactions').insert([
-          {
-            organization_id: orgId,
-            booking_id: bookingId,
-            transaction_id: `TXN-${Date.now().toString(36).toUpperCase()}-${slotIndex}`,
-            guest_name:
-              selectedGroupGuest?.name || selectedOrg?.name || 'Bulk Guest',
-            room: roomNumber,
-            amount: Math.min(pay.cashToCollect || pay.depositAmt, totalAmt),
-            payment_method: paymentMethod,
-            status:
-              pay.bookingPaymentStatus === 'paid'
-                ? 'paid'
-                : pay.bookingPaymentStatus === 'partial'
-                  ? 'partial'
-                  : 'pending',
-            description: appendAccountToNotes(
-              txDescBase,
-              accountFields.payment_account_label,
-            ),
-            received_by: currentUserId,
-            ...accountFields,
-          },
-        ])
+        if (recordedCash > 0) {
+          await supabase.from('transactions').insert([
+            {
+              organization_id: orgId,
+              booking_id: bookingId,
+              transaction_id: `TXN-${Date.now().toString(36).toUpperCase()}-${slotIndex}`,
+              guest_name:
+                selectedGroupGuest?.name || selectedOrg?.name || 'Bulk Guest',
+              room: roomNumber,
+              amount: recordedCash,
+              payment_method: paymentMethod,
+              status:
+                pay.bookingPaymentStatus === 'paid'
+                  ? 'paid'
+                  : pay.bookingPaymentStatus === 'partial'
+                    ? 'partial'
+                    : 'pending',
+              description: appendAccountToNotes(
+                txDescBase,
+                accountFields.payment_account_label,
+              ),
+              received_by: currentUserId,
+              ...accountFields,
+            },
+          ])
+        }
+
+        if (pay.excessCredit > 0 && guestId) {
+          const { data: gRow } = await supabase
+            .from('guests')
+            .select('name')
+            .eq('id', guestId)
+            .maybeSingle()
+          const ledgerGuestName = String(gRow?.name || args.guestName || '').trim()
+          if (ledgerGuestName) {
+            await applyPaymentToGuestCityLedger(supabase, {
+              organizationId: orgId,
+              guestName: ledgerGuestName,
+              paymentAmount: pay.excessCredit,
+              createIfMissingExcess: pay.excessCredit,
+            })
+          } else {
+            const { error: creditErr } = await insertFolioCharges(supabase, [
+              {
+                booking_id: bookingId,
+                organization_id: orgId,
+                description: 'Prepaid credit — amount above room total',
+                amount: -pay.excessCredit,
+                charge_type: 'payment',
+                payment_method: paymentMethod,
+                payment_status: 'paid',
+                created_by: currentUserId,
+              },
+            ])
+            if (creditErr) throw creditErr
+          }
+        }
       }
 
       const findOrCreateGuest = async (name: string, phone?: string | null) => {
@@ -1383,18 +1391,13 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
             )
           }
           const totalAmt = ratePn * nights
-          const pay = bulkCashbackEligible
-            ? resolveBulkRoomPayment(totalAmt, bulkPaymentOpts, {
-                balance: runningCashbackBalance,
-                apply: applyCashback,
-              })
-            : {
-                ...computeBulkRoomPaymentAmounts(totalAmt, bulkPaymentOpts),
-                cashbackDiscount: 0,
-                cashToCollect: computeBulkRoomPaymentAmounts(totalAmt, bulkPaymentOpts)
-                  .depositAmt,
-                cashbackBalanceAfter: runningCashbackBalance,
-              }
+          const pay = resolveBulkRoomPayment(
+            totalAmt,
+            bulkPaymentOpts,
+            bulkCashbackEligible
+              ? { balance: runningCashbackBalance, apply: applyCashback }
+              : null,
+          )
           if (bulkCashbackEligible) {
             runningCashbackBalance = pay.cashbackBalanceAfter
           }
@@ -1506,18 +1509,13 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
             }
 
             const total = ratePn * nights
-            const pay = bulkCashbackEligible
-              ? resolveBulkRoomPayment(total, bulkPaymentOpts, {
-                  balance: runningCashbackBalance,
-                  apply: applyCashback,
-                })
-              : {
-                  ...computeBulkRoomPaymentAmounts(total, bulkPaymentOpts),
-                  cashbackDiscount: 0,
-                  cashToCollect: computeBulkRoomPaymentAmounts(total, bulkPaymentOpts)
-                    .depositAmt,
-                  cashbackBalanceAfter: runningCashbackBalance,
-                }
+            const pay = resolveBulkRoomPayment(
+              total,
+              bulkPaymentOpts,
+              bulkCashbackEligible
+                ? { balance: runningCashbackBalance, apply: applyCashback }
+                : null,
+            )
             if (bulkCashbackEligible) {
               runningCashbackBalance = pay.cashbackBalanceAfter
             }
@@ -1560,6 +1558,7 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
             await postBulkPaymentLines({
               bookingId: booking.id,
               guestId: finalGuestId,
+              guestName: entryGuestName || selectedGroupGuest?.name || null,
               folioId,
               roomNumber: room.room_number,
               totalAmt: total,
@@ -1567,20 +1566,6 @@ export function BulkBookingModal({ open, onClose, onSuccess, wording = 'reservat
               slotIndex: createdCount,
             })
 
-            const prepayExcess = Math.max(0, depositAmt - total)
-            if (prepayExcess > 0 && finalGuestId) {
-              const gn = formatPersonName(entry.guestName) || ''
-              const { data: gRow } = await supabase.from('guests').select('name').eq('id', finalGuestId).maybeSingle()
-              const ledgerGuestName = (gRow?.name || gn || selectedGroupGuest?.name || '').trim()
-              if (ledgerGuestName) {
-                await applyPaymentToGuestCityLedger(supabase, {
-                  organizationId: orgId,
-                  guestName: ledgerGuestName,
-                  paymentAmount: prepayExcess,
-                  createIfMissingExcess: prepayExcess,
-                })
-              }
-            }
             createdCount++
           }
         }

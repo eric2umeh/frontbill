@@ -65,7 +65,7 @@ import {
   paymentMethodRequiresAccount,
   type PaymentAccount,
 } from '@/lib/payments/payment-accounts'
-import { computeCashbackDiscount } from '@/lib/cashback/cashback-payment-math'
+import { splitRoomPrepay } from '@/lib/payments/room-prepay'
 import { applyCashbackDiscountAndFolioPayments } from '@/lib/cashback/apply-cashback-folio-payment'
 import {
   earnCashbackClient,
@@ -597,15 +597,21 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
       paidCalc = payAboveRoomTotal ? Math.max(0, rawPaidAmount) : Math.min(rawPaidAmount, bookingTotal)
     }
   }
-  const bookingCashback = computeCashbackDiscount({
-    totalDue: bookingTotal,
+  const prepay = splitRoomPrepay({
+    roomTotal: bookingTotal,
+    cashTendered: isCityLedgerMethod ? 0 : paidCalc,
     cashbackBalance: guestCashbackBalance,
-    cashPaying: paidCalc,
-    applyCashback: applyCashback && Boolean(guestId) && cashbackEligible,
+    applyCashback:
+      !isCityLedgerMethod && applyCashback && Boolean(guestId) && cashbackEligible,
+    payAboveRoomTotal: !isCityLedgerMethod && payAboveRoomTotal,
   })
-  const displayPaidAmount = bookingCashback.cashbackDiscount + bookingCashback.cashToCollect
-  const displayBalanceAmount = bookingCashback.balanceRemaining
-  const cashToCollect = bookingCashback.cashToCollect
+  const bookingCashback = {
+    cashbackDiscount: prepay.cashbackDiscount,
+    cashToCollect: prepay.cashTowardBill,
+  }
+  const displayPaidAmount = prepay.depositApplied
+  const displayBalanceAmount = prepay.balanceRemaining
+  const cashToCollect = prepay.cashTowardBill
 
   const canSubmitForm = () => {
     if (!(guestId || fullName.trim())) return false
@@ -963,7 +969,12 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
         transaction_id: `TXN-${Date.now().toString(36).toUpperCase()}`,
         guest_name: formattedGuestName,
         room: selectedRoom.room_number,
-        amount: cashToCollect > 0 ? cashToCollect : paidAmount || total,
+        amount:
+          prepay.excessCredit > 0
+            ? prepay.cashDrawer
+            : cashToCollect > 0
+              ? cashToCollect
+              : paidAmount || total,
         payment_method: paymentMethod,
         status: balanceAmount <= 0 ? 'completed' : 'pending',
         description: appendAccountToNotes(txDescBase, accountFields.payment_account_label),
@@ -971,12 +982,17 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
         ...accountFields,
       }])
 
-      if (paidAmount > 0) {
+      if (paidAmount > 0 || prepay.excessCredit > 0) {
         await supabase.from('payments').insert([{
           organization_id: organizationId,
           booking_id: booking.id,
           guest_id: finalGuestId,
-          amount: cashToCollect > 0 ? cashToCollect : paidAmount,
+          amount:
+            prepay.excessCredit > 0
+              ? prepay.cashDrawer
+              : cashToCollect > 0
+                ? cashToCollect
+                : paidAmount,
           payment_method: paymentMethod,
           payment_date: new Date().toISOString(),
           notes: appendAccountToNotes(payNotesBase, accountFields.payment_account_label),
@@ -984,7 +1000,7 @@ export function NewBookingModal({ open, onClose, onSuccess }: NewBookingModalPro
         }])
       }
 
-      const prepayExcess = Math.max(0, paidAmount - total)
+      const prepayExcess = isCityLedger ? 0 : prepay.excessCredit
       if (!isCityLedger && prepayExcess > 0 && paymentMethod !== 'city_ledger' && finalGuestId) {
         const { data: gRow } = await supabase.from('guests').select('name').eq('id', finalGuestId).maybeSingle()
         const ledgerName = (gRow?.name || formattedGuestName).trim()
