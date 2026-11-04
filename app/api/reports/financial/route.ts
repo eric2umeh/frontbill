@@ -21,11 +21,10 @@ import {
   addOutletOrdersToRevenueBuckets,
   fetchSettledOutletOrdersInRange,
   fetchVoidedOutletOrderNumbers,
-  isPaymentForVoidedOutletOrder,
   mergeOutletOrdersIntoDailyRevenue,
-  skipOutletTxnInSalesCollection,
 } from "@/lib/outlets/outlet-financial-integration";
 import { buildDailyFrontDeskPack } from "@/lib/reports/daily-front-desk-pack";
+import { summarizeSalesCollection } from "@/lib/reports/sales-collection-inflows";
 import { isOccupyingHotelNight } from "@/lib/utils/booking-in-house-dates";
 
 const VAT_RATE = 0.075;
@@ -219,7 +218,9 @@ export async function GET(request: Request) {
     if (report === "sales_collection") {
       const { data: payments, error: payE } = await admin
         .from("payments")
-        .select("id, amount, payment_date, booking_id, guest_id, notes")
+        .select(
+          "id, amount, payment_date, booking_id, guest_id, notes, payment_method, reference_number",
+        )
         .eq("organization_id", orgId)
         .gte("payment_date", startD.toISOString())
         .lte("payment_date", endD.toISOString());
@@ -244,58 +245,38 @@ export async function GET(request: Request) {
 
       const { data: txrows, error: txE } = await admin
         .from("transactions")
-        .select("id, amount, created_at, description, booking_id, status")
+        .select(
+          "id, amount, created_at, description, booking_id, status, payment_method, transaction_id",
+        )
         .eq("organization_id", orgId)
         .gte("created_at", startD.toISOString())
         .lte("created_at", endD.toISOString());
       if (txE)
         return NextResponse.json({ error: txE.message }, { status: 500 });
 
-      const classifyPay = (p: any): RevenueDepartment => {
-        if (p.booking_id) return "accommodation";
-        return resolveRevenueCategory(null, "charge", String(p.notes || ""));
-      };
-
-      const classifyTx = (desc: string | null | undefined): RevenueDepartment =>
-        resolveRevenueCategory(null, "charge", desc || "");
-
-      let paySum = 0;
-      for (const p of payments || []) {
-        const amt = Number((p as any).amount) || 0;
-        if (amt <= 0) continue;
-        if (isPaymentForVoidedOutletOrder((p as any).notes, voidedOutletOrders))
-          continue;
-        const cat = classifyPay(p);
-        if (department === "all" || department === cat) paySum += amt;
-      }
-
-      let txSum = 0;
-      for (const t of txrows || []) {
-        const st = String((t as any).status || "").toLowerCase();
-        if (st === "void" || st === "cancelled") continue;
-        if (skipOutletTxnInSalesCollection(t as any)) continue;
-        const amt = Number((t as any).amount) || 0;
-        if (amt <= 0) continue;
-        const cat = classifyTx((t as any).description);
-        if (department === "all" || department === cat) txSum += amt;
-      }
+      const collected = summarizeSalesCollection({
+        payments: payments || [],
+        transactions: txrows || [],
+        voidedOutletOrderNumbers: voidedOutletOrders,
+        department,
+      });
 
       const refundTotal = (refunds || []).reduce(
         (s, r) => s + Number((r as any).amount || 0),
         0,
       );
-      const gross = paySum + txSum;
+      const gross = collected.gross;
       const net = gross - refundTotal;
 
       return NextResponse.json({
         report: "sales_collection",
         department,
-        paymentsTotal: paySum,
-        transactionsTotal: txSum,
+        paymentsTotal: collected.paymentsTotal,
+        transactionsTotal: collected.transactionsTotal,
         grossInflows: gross,
         refundsTotal: refundTotal,
         netSalesCollection: net,
-        note: "Sales collection = sum of payments and transaction receipts in the period minus refunds. Revenue (earned) is reported separately under Daily revenue.",
+        note: "Sales collection counts each cash receipt once. Check-in and outlet flows that store both a payment and a transaction are not added twice. Refunds are subtracted. Revenue (earned) is reported separately under Daily revenue.",
       });
     }
 
@@ -553,14 +534,18 @@ export async function GET(request: Request) {
 
       const { data: payments } = await admin
         .from("payments")
-        .select("amount, notes")
+        .select(
+          "amount, notes, payment_method, payment_date, booking_id, reference_number",
+        )
         .eq("organization_id", orgId)
         .gte("payment_date", startD.toISOString())
         .lte("payment_date", endD.toISOString());
 
       const { data: txrows } = await admin
         .from("transactions")
-        .select("amount, status")
+        .select(
+          "amount, status, payment_method, created_at, booking_id, transaction_id, description",
+        )
         .eq("organization_id", orgId)
         .gte("created_at", startD.toISOString())
         .lte("created_at", endD.toISOString());
@@ -581,27 +566,16 @@ export async function GET(request: Request) {
         .lte("refund_date", end);
       refunds = rf || [];
 
-      let paySum = 0;
-      for (const p of payments || []) {
-        const amt = Number((p as any).amount) || 0;
-        if (amt <= 0) continue;
-        if (isPaymentForVoidedOutletOrder((p as any).notes, voidedOutletOrders))
-          continue;
-        paySum += amt;
-      }
-      let txSum = 0;
-      for (const t of txrows || []) {
-        const st = String((t as any).status || "").toLowerCase();
-        if (st === "void" || st === "cancelled") continue;
-        if (skipOutletTxnInSalesCollection(t as any)) continue;
-        const amt = Number((t as any).amount) || 0;
-        if (amt > 0) txSum += amt;
-      }
+      const collected = summarizeSalesCollection({
+        payments: payments || [],
+        transactions: txrows || [],
+        voidedOutletOrderNumbers: voidedOutletOrders,
+      });
       const refundTotal = (refunds || []).reduce(
         (s, r) => s + Number((r as any).amount || 0),
         0,
       );
-      const salesCollectionNet = paySum + txSum - refundTotal;
+      const salesCollectionNet = collected.gross - refundTotal;
 
       return NextResponse.json(
         buildProfitAndLossPayload(
