@@ -34,6 +34,10 @@ import {
   calendarNightsBetween,
   toYmd,
 } from "@/lib/booking/edit-booking-patch";
+import {
+  balanceAfterStayExtension,
+  outstandingBeforeStayExtension,
+} from "@/lib/booking/stay-extension-balance";
 import { guestOrOrganizationNameTaken } from "@/lib/utils/guest-org-name-uniqueness";
 import { isSelectableLedgerName } from "@/lib/utils/ledger-organization";
 import { mergeCounterpartyOrganizationRows } from "@/lib/utils/search-counterparty-organizations";
@@ -453,20 +457,27 @@ export function ExtendStayModal({
       const prevTotal = Number(freshBk?.total_amount) || 0;
       const nextTotal = prevTotal + additionalAmount;
       const prevDeposit = Number(freshBk?.deposit) || 0;
-      const prevBalance = Number(freshBk?.balance) || 0;
+      const prevBalance = outstandingBeforeStayExtension(
+        freshBk?.balance,
+        prevTotal,
+        prevDeposit,
+      );
 
       const bookingUpdate: Record<string, unknown> = {
         check_out: newCheckoutStr,
         number_of_nights: totalNights,
         total_amount: nextTotal,
       };
-      if (paymentMethod === "city_ledger") {
-        bookingUpdate.balance = prevBalance + additionalAmount;
-        bookingUpdate.payment_status = "pending";
-      } else {
+      const extensionPaidNow = paymentMethod !== "city_ledger";
+      bookingUpdate.balance = balanceAfterStayExtension({
+        previousBalance: prevBalance,
+        addedToTotal: additionalAmount,
+        addedToDeposit: extensionPaidNow ? additionalAmount : 0,
+      });
+      if (extensionPaidNow) {
         bookingUpdate.deposit = prevDeposit + additionalAmount;
-        // Paid extension: owed room total rose but deposit covered the add-on.
-        bookingUpdate.balance = Math.max(0, nextTotal - (prevDeposit + additionalAmount));
+      } else {
+        bookingUpdate.payment_status = "pending";
       }
 
       const { error: bookingError } = await supabase

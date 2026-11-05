@@ -9,6 +9,10 @@ import {
   extensionAdditionalNights,
   toYmd,
 } from '@/lib/booking/edit-booking-patch'
+import {
+  balanceAfterStayExtension,
+  outstandingBeforeStayExtension,
+} from '@/lib/booking/stay-extension-balance'
 
 const DECISION = ['approved', 'rejected'] as const
 
@@ -248,8 +252,20 @@ export async function PATCH(request: Request) {
     const totalNights = stayCheckIn && newCo
       ? calendarNightsBetween(stayCheckIn, newCo)
       : Math.max(1, (Number(booking.number_of_nights) || 0) + nights)
-    const nextTotal = (Number(booking.total_amount) || 0) + discTotal
-    const nextDeposit = (Number(booking.deposit) || 0) + discTotal
+    const prevTotal = Number(booking.total_amount) || 0
+    const prevDeposit = Number(booking.deposit) || 0
+    const prevBalance = outstandingBeforeStayExtension(
+      booking.balance,
+      prevTotal,
+      prevDeposit,
+    )
+    const nextTotal = prevTotal + discTotal
+    const nextDeposit = prevDeposit + discTotal
+    const nextBalance = balanceAfterStayExtension({
+      previousBalance: prevBalance,
+      addedToTotal: discTotal,
+      addedToDeposit: discTotal,
+    })
     const approverLabel = (await admin.from('profiles').select('full_name').eq('id', caller_id).maybeSingle()).data
       ?.full_name || caller_id.slice(0, 8)
 
@@ -274,7 +290,7 @@ export async function PATCH(request: Request) {
         number_of_nights: totalNights,
         total_amount: nextTotal,
         deposit: nextDeposit,
-        balance: Math.max(0, nextTotal - nextDeposit),
+        balance: nextBalance,
       })
       .eq('id', row.booking_id)
 
