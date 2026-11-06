@@ -4,6 +4,7 @@ import { hasPermission } from '@/lib/permissions'
 import {
   calendarDateMinusOneDay,
   formatYMDInTimeZone,
+  nightAuditCloseAllowed,
   nightAuditClosingDateYmd,
   nightAuditNextBusinessDateYmd,
   resolveHotelTimeZone,
@@ -72,6 +73,15 @@ export async function POST(request: Request) {
         { error: `Night audit for ${closingDate} was already completed` },
         { status: 409 },
       )
+    }
+
+    const allowed = nightAuditCloseAllowed({
+      closingDate,
+      openBusinessDate: orgBusinessDate,
+      suggestedClosingDate: nightAuditClosingDateYmd(now, tz),
+    })
+    if (!allowed.ok) {
+      return NextResponse.json({ error: allowed.error }, { status: 400 })
     }
 
     const { data: prevAudit } = await admin
