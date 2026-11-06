@@ -264,6 +264,34 @@ export function nightAuditNextBusinessDateYmd(closingYmd: string): string {
   return calendarDatePlusOneDay(closingYmd)
 }
 
+/**
+ * Night audit may close only the open business night.
+ * Closing a later date (the morning default after a missed audit) stores an empty
+ * revenue window and jumps `organizations.business_date` past the night that held the cash.
+ * Closing an earlier date rewinds front-office "today".
+ */
+export function nightAuditCloseAllowed(input: {
+  closingDate: string
+  /** `organizations.business_date`, or null before the first audit. */
+  openBusinessDate: string | null
+  /** `nightAuditClosingDateYmd` — used only when the hotel has no stored business date. */
+  suggestedClosingDate: string
+}): { ok: true } | { ok: false; error: string } {
+  const open = parseOrgBusinessDateYmd(input.openBusinessDate)
+  if (open) {
+    if (input.closingDate === open) return { ok: true }
+    return {
+      ok: false,
+      error: `Night audit can only close the open business date (${open}). Close that date before another one so the hotel date does not skip or rewind.`,
+    }
+  }
+  if (input.closingDate === input.suggestedClosingDate) return { ok: true }
+  return {
+    ok: false,
+    error: `Night audit must close ${input.suggestedClosingDate}, the current business night. Closing ${input.closingDate} would move the hotel date to the wrong day.`,
+  }
+}
+
 /** en-GB display for audit UI (dd/MM/yyyy). */
 export function formatHotelDateDisplayGB(ymd: string): string {
   const [y, m, d] = ymd.split('-').map(Number)

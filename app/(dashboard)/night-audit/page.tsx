@@ -463,6 +463,7 @@ export default function NightAuditPage() {
                 <p className="text-xs text-muted-foreground">
                   Morning audit (before 6pm hotel time) defaults to yesterday — e.g. run on 16 May closes 15 May.
                   Revenue and departures use this date; arrivals use {formatHotelDateDisplayGB(nextBusinessDateYmd)}.
+                  If a night was missed, close the open business date first. Each run moves the hotel date forward one day.
                 </p>
               </div>
               {!auditComplete && (
