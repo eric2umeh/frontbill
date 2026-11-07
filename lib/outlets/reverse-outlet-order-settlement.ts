@@ -4,6 +4,7 @@ import {
   buildOutletSettlementNotes,
 } from "@/lib/outlets/outlet-financial-integration";
 import { getOutletDepartment } from "@/lib/outlets/departments";
+import { cityLedgerBalanceAfterChargeReversal } from "@/lib/outlets/city-ledger-reversal";
 
 function roundMoney(n: number): number {
   return Math.round(n * 100) / 100;
@@ -73,9 +74,9 @@ async function reverseCityLedgerBalances(
     .maybeSingle();
 
   if (acct) {
-    const newBal = Math.max(
-      0,
-      roundMoney((Number(acct.balance) || 0) - input.amount),
+    const newBal = cityLedgerBalanceAfterChargeReversal(
+      Number(acct.balance) || 0,
+      input.amount,
     );
     await admin
       .from("city_ledger_accounts")
@@ -92,9 +93,9 @@ async function reverseCityLedgerBalances(
         await admin
           .from("organizations")
           .update({
-            current_balance: Math.max(
-              0,
-              roundMoney((Number(orgRow.current_balance) || 0) - input.amount),
+            current_balance: cityLedgerBalanceAfterChargeReversal(
+              Number(orgRow.current_balance) || 0,
+              input.amount,
             ),
           })
           .eq("id", acct.id);
