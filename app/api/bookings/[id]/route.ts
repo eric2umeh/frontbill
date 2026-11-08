@@ -4,8 +4,15 @@ import {
   mergeBookingPatch,
   roomHousekeepingAfterEdit,
 } from '@/lib/booking/edit-booking-patch'
+import {
+  bookingCollectionFromFolio,
+  planStayFolioAfterTotalEdit,
+  type StayFolioCharge,
+  type StayFolioTotalEditPlan,
+} from '@/lib/booking/edit-stay-folio'
 import { hasRoomDateConflict } from '@/lib/booking/room-date-conflict'
 import { isBookingCheckedOut } from '@/lib/utils/booking-checkout-ui'
+import { insertFolioCharges } from '@/lib/utils/insert-folio-charges'
 import { NextResponse } from 'next/server'
 
 const ADMIN_ROLES = new Set(['superadmin', 'admin'])
@@ -14,6 +21,86 @@ async function loadCaller(admin: ReturnType<typeof createAdminClient>, callerId:
   const { data: profile, error } = await admin.from('profiles').select('role, organization_id').eq('id', callerId).single()
   if (error || !profile?.organization_id) return null
   return profile as { role: string; organization_id: string }
+}
+
+/** Write folio + company-account changes before the booking row, so a failed folio write does not leave a new total with the old bill. */
+async function applyStayFolioPlan(
+  admin: ReturnType<typeof createAdminClient>,
+  input: {
+    bookingId: string
+    organizationId: string
+    callerId: string
+    plan: StayFolioTotalEditPlan
+    updatedAt: string
+  },
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  for (const update of input.plan.updates) {
+    const { error } = await admin
+      .from('folio_charges')
+      .update({ amount: update.amount })
+      .eq('id', update.id)
+      .eq('booking_id', input.bookingId)
+    if (error) return { ok: false, error: error.message }
+  }
+
+  if (input.plan.insert) {
+    const row: Record<string, unknown> = {
+      booking_id: input.bookingId,
+      organization_id: input.organizationId,
+      description: input.plan.insert.description,
+      amount: input.plan.insert.amount,
+      charge_type: input.plan.insert.charge_type,
+      payment_status: input.plan.insert.payment_status,
+      created_by: input.callerId,
+    }
+    if (input.plan.insert.payment_method) row.payment_method = input.plan.insert.payment_method
+    if (input.plan.insert.ledger_account_id) {
+      row.ledger_account_id = input.plan.insert.ledger_account_id
+      row.ledger_account_type = input.plan.insert.ledger_account_type
+    }
+    const { error } = await insertFolioCharges(admin, [row])
+    if (error) return { ok: false, error: error.message }
+  }
+
+  for (const delta of input.plan.ledgerDeltas) {
+    if (!delta.ledgerAccountId || Math.abs(delta.delta) < 0.005) continue
+    const { data: account, error: accountErr } = await admin
+      .from('city_ledger_accounts')
+      .select('id, balance, account_type')
+      .eq('id', delta.ledgerAccountId)
+      .eq('organization_id', input.organizationId)
+      .maybeSingle()
+    if (accountErr) return { ok: false, error: accountErr.message }
+    if (!account) continue
+
+    const nextBalance = Math.round(((Number(account.balance) || 0) + delta.delta) * 100) / 100
+    const { error: ledgerErr } = await admin
+      .from('city_ledger_accounts')
+      .update({ balance: nextBalance, updated_at: input.updatedAt })
+      .eq('id', account.id)
+    if (ledgerErr) return { ok: false, error: ledgerErr.message }
+
+    const accountType = String(delta.accountType || account.account_type || '').toLowerCase()
+    if (accountType === 'organization') {
+      const { data: orgRow, error: orgErr } = await admin
+        .from('organizations')
+        .select('current_balance')
+        .eq('id', account.id)
+        .maybeSingle()
+      if (orgErr) return { ok: false, error: orgErr.message }
+      if (orgRow) {
+        const nextOrg =
+          Math.round(((Number(orgRow.current_balance) || 0) + delta.delta) * 100) / 100
+        const { error: orgUpdateErr } = await admin
+          .from('organizations')
+          .update({ current_balance: nextOrg })
+          .eq('id', account.id)
+        if (orgUpdateErr) return { ok: false, error: orgUpdateErr.message }
+      }
+    }
+  }
+
+  return { ok: true }
 }
 
 export async function PATCH(request: Request, ctx: { params: Promise<{ id: string }> }) {
@@ -124,6 +211,54 @@ export async function PATCH(request: Request, ctx: { params: Promise<{ id: strin
       ...merged,
       updated_at,
       updated_by: caller_id,
+    }
+
+    const previousTotal = Number((existing as { total_amount?: unknown }).total_amount ?? 0)
+    const totalEdited =
+      parsed.data.total_amount !== undefined && Math.abs(merged.total_amount - previousTotal) > 0.004
+
+    let folioPlan: StayFolioTotalEditPlan | null = null
+    if (totalEdited) {
+      const { data: folioRows, error: folioLoadErr } = await admin
+        .from('folio_charges')
+        .select(
+          'id, amount, charge_type, payment_status, payment_method, ledger_account_id, ledger_account_type',
+        )
+        .eq('booking_id', bookingId)
+      if (folioLoadErr) {
+        return NextResponse.json({ error: folioLoadErr.message }, { status: 500 })
+      }
+      const folioCharges = (folioRows || []) as StayFolioCharge[]
+      folioPlan = planStayFolioAfterTotalEdit({
+        nextTotal: merged.total_amount,
+        charges: folioCharges,
+      })
+      if (folioCharges.length > 0) {
+        const projected =
+          folioPlan?.projected ??
+          folioCharges.map((charge) => ({
+            amount: charge.amount,
+            charge_type: charge.charge_type,
+            payment_status: charge.payment_status,
+            payment_method: charge.payment_method,
+          }))
+        const money = bookingCollectionFromFolio(projected)
+        updateRow.balance = money.balance
+        updateRow.payment_status = money.payment_status
+      }
+    }
+
+    if (folioPlan) {
+      const applied = await applyStayFolioPlan(admin, {
+        bookingId,
+        organizationId: caller.organization_id,
+        callerId: caller_id,
+        plan: folioPlan,
+        updatedAt: updated_at,
+      })
+      if (!applied.ok) {
+        return NextResponse.json({ error: applied.error }, { status: 500 })
+      }
     }
 
     const { data: updated, error: upErr } = await admin.from('bookings').update(updateRow).eq('id', bookingId).select('*').single()
