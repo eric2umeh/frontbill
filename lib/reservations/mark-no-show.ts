@@ -1,10 +1,16 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { insertFolioCharges } from '@/lib/utils/insert-folio-charges'
-import { bookingDisplayBillBalance } from '@/lib/utils/booking-bill-balance'
 import {
   calculateNoShowFee,
   fetchNoShowPolicy,
 } from '@/lib/reservations/no-show-policy'
+import {
+  folioLinesAfterNoShowFee,
+  noShowBookingTotals,
+  stayChargesReplacedByNoShow,
+  voidedNoShowStayDescription,
+  type NoShowFolioSnapshotLine,
+} from '@/lib/reservations/no-show-folio'
 
 const NO_SHOW_ELIGIBLE_STATUSES = ['reserved', 'confirmed']
 
@@ -33,7 +39,7 @@ export async function markBookingNoShow(
   const { data: booking, error: fetchErr } = await supabase
     .from('bookings')
     .select(
-      'id, status, room_id, guest_id, folio_id, organization_id, rate_per_night, total_amount, check_in, check_out, number_of_nights, balance, deposit, folio_status',
+      'id, status, room_id, guest_id, folio_id, organization_id, rate_per_night, total_amount, check_in, check_out, number_of_nights, balance, deposit, payment_status, folio_status',
     )
     .eq('id', input.bookingId)
     .eq('organization_id', input.organizationId)
@@ -88,6 +94,18 @@ export async function markBookingNoShow(
       .in('status', ['reserved', 'occupied'])
   }
 
+  const { data: existingLines, error: linesErr } = await supabase
+    .from('folio_charges')
+    .select('id, description, amount, charge_type, payment_status, payment_method')
+    .eq('booking_id', input.bookingId)
+
+  if (linesErr) return { data: null, error: linesErr.message }
+
+  const lines = (existingLines || []) as NoShowFolioSnapshotLine[]
+  const projected = folioLinesAfterNoShowFee(lines, feeAmount)
+  const totals = noShowBookingTotals(projected, booking.payment_status as string | null)
+  const stayLines = stayChargesReplacedByNoShow(lines)
+
   if (feeAmount > 0) {
     const chargeRow: Record<string, unknown> = {
       booking_id: input.bookingId,
@@ -103,35 +121,69 @@ export async function markBookingNoShow(
 
     const { error: fcErr } = await insertFolioCharges(supabase, [chargeRow])
     if (fcErr) return { data: null, error: fcErr.message }
-
-    const { data: fcRows } = await supabase
-      .from('folio_charges')
-      .select('amount, charge_type, payment_status, payment_method')
-      .eq('booking_id', input.bookingId)
-
-    const billBalance = bookingDisplayBillBalance(
-      {
-        balance: booking.balance,
-        deposit: booking.deposit,
-        total_amount: booking.total_amount,
-      },
-      (fcRows || []).map((r) => ({
-        amount: r.amount,
-        charge_type: r.charge_type,
-        payment_status: r.payment_status,
-        payment_method: r.payment_method,
-      })),
-    )
-
-    await supabase
-      .from('bookings')
-      .update({
-        balance: billBalance,
-        total_amount: Math.max(Number(booking.total_amount || 0), billBalance),
-        payment_status: billBalance > 0 ? 'pending' : 'paid',
-      })
-      .eq('id', input.bookingId)
   }
 
+  if (stayLines.length) {
+    const clearErr = await voidStayChargesForNoShow(supabase, input.bookingId, stayLines)
+    if (clearErr) {
+      if (feeAmount > 0) {
+        await supabase
+          .from('folio_charges')
+          .delete()
+          .eq('booking_id', input.bookingId)
+          .eq('charge_type', 'no_show_fee')
+      }
+      return { data: null, error: clearErr }
+    }
+  }
+
+  const { error: balErr } = await supabase
+    .from('bookings')
+    .update({
+      balance: totals.balance,
+      total_amount: totals.total_amount,
+      payment_status: totals.payment_status,
+    })
+    .eq('id', input.bookingId)
+
+  if (balErr) return { data: null, error: balErr.message }
+
   return { data: { feeAmount, bookingId: input.bookingId }, error: null }
+}
+
+async function voidStayChargesForNoShow(
+  supabase: SupabaseClient,
+  bookingId: string,
+  stayLines: NoShowFolioSnapshotLine[],
+): Promise<string | null> {
+  const cleared: NoShowFolioSnapshotLine[] = []
+  for (const line of stayLines) {
+    const id = String(line.id || '').trim()
+    if (!id) continue
+    const { error } = await supabase
+      .from('folio_charges')
+      .update({
+        amount: 0,
+        payment_status: 'void',
+        description: voidedNoShowStayDescription(line),
+      })
+      .eq('id', id)
+      .eq('booking_id', bookingId)
+    if (error) {
+      for (const prev of cleared) {
+        await supabase
+          .from('folio_charges')
+          .update({
+            amount: Number(prev.amount) || 0,
+            payment_status: prev.payment_status ?? prev.paymentStatus ?? 'unpaid',
+            description: String(prev.description || 'Stay charge'),
+          })
+          .eq('id', prev.id)
+          .eq('booking_id', bookingId)
+      }
+      return error.message
+    }
+    cleared.push(line)
+  }
+  return null
 }
