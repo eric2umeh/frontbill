@@ -5,6 +5,11 @@ import {
   roomHousekeepingAfterEdit,
 } from '@/lib/booking/edit-booking-patch'
 import { hasRoomDateConflict } from '@/lib/booking/room-date-conflict'
+import {
+  applyCityLedgerReversals,
+  planCityLedgerReversalsForDeletedBooking,
+  type FolioChargeForLedgerReversal,
+} from '@/lib/booking/reverse-city-ledger-on-booking-delete'
 import { isBookingCheckedOut } from '@/lib/utils/booking-checkout-ui'
 import { NextResponse } from 'next/server'
 
@@ -192,6 +197,20 @@ export async function DELETE(request: Request, ctx: { params: Promise<{ id: stri
       return NextResponse.json({ error: 'Cannot delete a checked-out booking' }, { status: 400 })
     }
 
+    const { data: folioRows, error: folioLoadErr } = await admin
+      .from('folio_charges')
+      .select(
+        'amount, charge_type, payment_method, payment_status, ledger_account_id, ledger_account_type, description',
+      )
+      .eq('booking_id', bookingId)
+    if (folioLoadErr) {
+      return NextResponse.json({ error: folioLoadErr.message }, { status: 500 })
+    }
+    const ledgerReversalPlan = planCityLedgerReversalsForDeletedBooking(
+      (folioRows || []) as FolioChargeForLedgerReversal[],
+      (booking as { notes?: string | null }).notes,
+    )
+
     const clearBookingChildren = async (table: string) => {
       const { error: deleteError } = await admin.from(table).delete().eq('booking_id', bookingId)
       if (!deleteError) return
@@ -212,6 +231,22 @@ export async function DELETE(request: Request, ctx: { params: Promise<{ id: stri
     }
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 })
+    }
+
+    try {
+      await applyCityLedgerReversals(
+        admin,
+        (booking as { organization_id: string }).organization_id,
+        ledgerReversalPlan,
+      )
+    } catch (ledgerErr: unknown) {
+      const ledgerMessage = ledgerErr instanceof Error ? ledgerErr.message : 'City ledger reversal failed'
+      return NextResponse.json(
+        {
+          error: `Booking was deleted, but the city ledger balance could not be reversed: ${ledgerMessage}`,
+        },
+        { status: 500 },
+      )
     }
 
     const freedRoomId = (booking as { room_id?: string }).room_id
