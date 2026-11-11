@@ -1,6 +1,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { NextResponse } from "next/server";
 import { hasPermission } from "@/lib/permissions";
+import { applyGuestRefundCredit } from "@/lib/refunds/apply-guest-refund-credit";
 
 function canProcessRefunds(role: string | null | undefined): boolean {
   return hasPermission(role, "payments:refund");
@@ -124,13 +125,19 @@ export async function POST(request: Request) {
     if (booking_id) {
       const { data: bk, error: be } = await admin
         .from("bookings")
-        .select("id, organization_id, deposit, balance")
+        .select("id, organization_id, guest_id")
         .eq("id", booking_id)
         .single();
       if (be || !bk || bk.organization_id !== orgId) {
         return NextResponse.json(
           { error: "Booking not found in this hotel" },
           { status: 404 },
+        );
+      }
+      if (bk.guest_id && bk.guest_id !== guest_id) {
+        return NextResponse.json(
+          { error: "Booking does not belong to this guest" },
+          { status: 400 },
         );
       }
     }
@@ -170,23 +177,25 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: insE.message }, { status: 500 });
     }
 
-    if (booking_id) {
-      const { data: bk } = await admin
-        .from("bookings")
-        .select("deposit, balance")
-        .eq("id", booking_id)
-        .single();
-      if (bk) {
-        const dep = Number(bk.deposit) || 0;
-        const bal = Number(bk.balance) || 0;
-        const depNext = Math.max(0, dep - amt);
-        const remainder = Math.max(0, amt - dep);
-        const balNext = Math.max(0, bal - remainder);
-        await admin
-          .from("bookings")
-          .update({ deposit: depNext, balance: balNext })
-          .eq("id", booking_id);
+    const refundId = String((inserted as { id?: string }).id || "");
+    try {
+      await applyGuestRefundCredit(admin, {
+        organizationId: orgId,
+        guestId: guest_id,
+        guestName: String(guest.name || ""),
+        explicitBookingId: booking_id || null,
+        amount: amt,
+        reason: String(reason).trim(),
+        callerId: caller_id,
+        refundId,
+      });
+    } catch (creditErr) {
+      if (refundId) {
+        await admin.from("refunds").delete().eq("id", refundId);
       }
+      const message =
+        creditErr instanceof Error ? creditErr.message : "Could not apply refund to the guest balance";
+      return NextResponse.json({ error: message }, { status: 500 });
     }
 
     return NextResponse.json({ refund: inserted });
