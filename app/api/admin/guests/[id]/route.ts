@@ -6,6 +6,13 @@ import { formatPersonName } from '@/lib/utils/name-format'
 import { guestOrOrganizationNameTaken } from '@/lib/utils/guest-org-name-uniqueness'
 import { syncGuestAssociatedNames } from '@/lib/guests/sync-guest-associated-names'
 import { isBookingCheckedOut } from '@/lib/utils/booking-checkout-ui'
+import {
+  ilikeExactPattern,
+  ilikeNameWordPattern,
+  individualLedgerIdsForGuestName,
+  ledgerIdsToDeleteWithGuest,
+} from '@/lib/guests/guest-ledger-delete'
+import { normalizeLedgerAccountName } from '@/lib/utils/guest-city-ledger'
 
 type RouteCtx = { params: Promise<{ id: string }> }
 
@@ -125,7 +132,7 @@ export async function PATCH(request: Request, ctx: RouteCtx) {
   }
 }
 
-/** DELETE — remove guest and dependent bookings (cascade), ledger rows by name, orphan payments. */
+/** DELETE — remove guest and dependent bookings (cascade), this guest's ledger row, orphan payments. */
 export async function DELETE(request: Request, ctx: RouteCtx) {
   try {
     const { id: guestId } = await ctx.params
@@ -208,14 +215,11 @@ export async function DELETE(request: Request, ctx: RouteCtx) {
     }
 
     if (guestName.trim()) {
-      const { data: ledgers } = await admin
-        .from('city_ledger_accounts')
-        .select('id')
-        .eq('organization_id', orgId)
-        .in('account_type', ['individual', 'guest'])
-        .ilike('account_name', guestName.trim())
-
-      const ledgerIds = (ledgers || []).map((r: { id: string }) => r.id)
+      const ledgerIds = await cityLedgerIdsSafeToRemoveWithGuest(admin, {
+        organizationId: orgId,
+        guestId,
+        guestName,
+      })
       if (ledgerIds.length > 0) {
         await admin.from('city_ledger_accounts').delete().in('id', ledgerIds)
       }
@@ -231,4 +235,100 @@ export async function DELETE(request: Request, ctx: RouteCtx) {
     const message = err instanceof Error ? err.message : 'Server error'
     return NextResponse.json({ error: message }, { status: 500 })
   }
+}
+
+type AdminClient = ReturnType<typeof createAdminClient>
+
+/**
+ * City-ledger rows removed with a guest profile.
+ * Exact name match only. Shared names and rows still referenced by a folio
+ * or outlet order are left in place so another guest's receivable survives.
+ * Lookup failures return nothing (do not delete).
+ */
+async function cityLedgerIdsSafeToRemoveWithGuest(
+  admin: AdminClient,
+  args: { organizationId: string; guestId: string; guestName: string },
+): Promise<string[]> {
+  const exactPattern = ilikeExactPattern(args.guestName)
+  const wordPattern = ilikeNameWordPattern(args.guestName)
+  if (!exactPattern || !wordPattern) return []
+
+  const { data: ledgers, error: ledgerErr } = await admin
+    .from('city_ledger_accounts')
+    .select('id, account_name, account_type')
+    .eq('organization_id', args.organizationId)
+    .in('account_type', ['individual', 'guest'])
+    .ilike('account_name', exactPattern)
+
+  if (ledgerErr) {
+    console.warn('[admin/guests DELETE] ledger lookup:', ledgerErr.message)
+    return []
+  }
+
+  const matchedIds = individualLedgerIdsForGuestName(ledgers || [], args.guestName)
+  if (matchedIds.length === 0) return []
+
+  const { data: otherGuests, error: guestErr } = await admin
+    .from('guests')
+    .select('id, name')
+    .eq('organization_id', args.organizationId)
+    .neq('id', args.guestId)
+    .ilike('name', wordPattern)
+    .limit(50)
+
+  if (guestErr || (otherGuests || []).length >= 50) {
+    if (guestErr) {
+      console.warn('[admin/guests DELETE] same-name guest lookup:', guestErr.message)
+    }
+    return []
+  }
+
+  const nameKey = normalizeLedgerAccountName(args.guestName)
+  const anotherGuestSharesName = (otherGuests || []).some(
+    (row: { name?: string | null }) =>
+      normalizeLedgerAccountName(String(row.name || '')) === nameKey,
+  )
+  if (anotherGuestSharesName) return []
+
+  const [{ data: folioRefs, error: folioErr }, { data: orderRefs, error: orderErr }] =
+    await Promise.all([
+      admin
+        .from('folio_charges')
+        .select('ledger_account_id')
+        .in('ledger_account_id', matchedIds)
+        .limit(100),
+      admin
+        .from('outlet_orders')
+        .select('city_ledger_account_id')
+        .in('city_ledger_account_id', matchedIds)
+        .limit(100),
+    ])
+
+  if (folioErr) {
+    console.warn('[admin/guests DELETE] folio ledger refs:', folioErr.message)
+    return []
+  }
+  if (orderErr && !/does not exist|schema cache|could not find/i.test(orderErr.message || '')) {
+    console.warn('[admin/guests DELETE] outlet ledger refs:', orderErr.message)
+    return []
+  }
+  if ((folioRefs || []).length >= 100 || (orderRefs || []).length >= 100) {
+    return []
+  }
+
+  const referenced = new Set<string>()
+  for (const row of folioRefs || []) {
+    const id = (row as { ledger_account_id?: string | null }).ledger_account_id
+    if (id) referenced.add(id)
+  }
+  for (const row of orderRefs || []) {
+    const id = (row as { city_ledger_account_id?: string | null }).city_ledger_account_id
+    if (id) referenced.add(id)
+  }
+
+  return ledgerIdsToDeleteWithGuest({
+    matchedIds,
+    anotherGuestSharesName: false,
+    referencedIds: referenced,
+  })
 }
