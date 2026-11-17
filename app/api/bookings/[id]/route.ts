@@ -6,6 +6,10 @@ import {
 } from '@/lib/booking/edit-booking-patch'
 import { hasRoomDateConflict } from '@/lib/booking/room-date-conflict'
 import { isBookingCheckedOut } from '@/lib/utils/booking-checkout-ui'
+import {
+  ilikeExactPattern,
+  individualLedgerIdsForGuestName,
+} from '@/lib/guests/guest-ledger-delete'
 import { NextResponse } from 'next/server'
 
 const ADMIN_ROLES = new Set(['superadmin', 'admin'])
@@ -235,14 +239,26 @@ export async function DELETE(request: Request, ctx: { params: Promise<{ id: stri
           guestName
             ? admin
                 .from('city_ledger_accounts')
-                .select('id, balance')
+                .select('id, account_name, account_type, balance')
                 .eq('organization_id', orgId)
-                .ilike('account_name', guestName)
                 .in('account_type', ['individual', 'guest'])
-            : Promise.resolve({ data: [] as { id: string; balance: number }[] }),
+                .ilike('account_name', ilikeExactPattern(guestName))
+            : Promise.resolve({
+                data: [] as {
+                  id: string
+                  account_name?: string | null
+                  account_type?: string | null
+                  balance: number
+                }[],
+              }),
         ])
 
-      const ledgerAccounts = ledgerResult.data || []
+      const exactLedgerIds = new Set(
+        individualLedgerIdsForGuestName(ledgerResult.data || [], guestName || ''),
+      )
+      const ledgerAccounts = (ledgerResult.data || []).filter((account) =>
+        exactLedgerIds.has(account.id),
+      )
       const hasLedgerBalance = ledgerAccounts.some((account) => Number(account.balance || 0) !== 0)
       if (
         (otherBookings || []).length === 0 &&
