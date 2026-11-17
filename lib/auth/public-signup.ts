@@ -17,7 +17,13 @@ export function isPublicSignupEnabled(): boolean {
     .trim()
     .toLowerCase()
 
-  return env === 'staging' || env === 'development' || env === 'dev'
+  return (
+    env === 'staging' ||
+    env === 'development' ||
+    env === 'dev' ||
+    env === 'local' ||
+    env === 'docker'
+  )
 }
 
 /** Client-safe check (uses NEXT_PUBLIC_* only). */
@@ -27,5 +33,11 @@ export function isPublicSignupEnabledClient(): boolean {
   if (flag === 'false') return false
 
   const env = (process.env.NEXT_PUBLIC_SUPABASE_ENV || '').trim().toLowerCase()
-  return env === 'staging' || env === 'development' || env === 'dev'
+  return (
+    env === 'staging' ||
+    env === 'development' ||
+    env === 'dev' ||
+    env === 'local' ||
+    env === 'docker'
+  )
 }

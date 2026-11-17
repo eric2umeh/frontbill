@@ -22,7 +22,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { CalendarIcon } from 'lucide-react'
 
 export function DashboardStats() {
-  const { organizationId } = useAuth()
+  const { organizationId, userId } = useAuth()
   const [dayYmd, setDayYmd] = useState(() => todayYmdHotel())
   const [calOpen, setCalOpen] = useState(false)
   const [stats, setStats] = useState([
@@ -36,7 +36,7 @@ export function DashboardStats() {
   useEffect(() => {
     if (!organizationId) return
     void fetchStats(dayYmd)
-  }, [organizationId, dayYmd])
+  }, [organizationId, userId, dayYmd])
 
   const fetchStats = async (ymd: string) => {
     if (!organizationId) return
@@ -48,48 +48,8 @@ export function DashboardStats() {
 
       let netProfit = 0
       let roomRevenue = 0
-      const bounds = await fetchHotelBusinessNightUtcBounds({
-        supabase,
-        organizationId,
-        ymd,
-        timeZone: tz,
-      })
 
-      const nightBookQ = supabase
-        .from('bookings')
-        .select(
-          'id, check_in, check_out, status, rate_per_night, folio_id, payment_status, guests:guest_id(name), rooms:room_id(room_number, room_type)',
-        )
-        .eq('organization_id', organizationId)
-        .in('status', ['confirmed', 'checked_in', 'reserved', 'checked_out'])
-        .lte('check_in', ymd)
-        .gt('check_out', ymd)
-        .limit(500)
-
-      let txQ = bounds.empty
-        ? null
-        : supabase
-            .from('transactions')
-            .select('*')
-            .eq('organization_id', organizationId)
-            .gte('created_at', bounds.startIso)
-            .lte('created_at', bounds.endInclusiveIso)
-            .limit(5000)
-
-      let payQ = bounds.empty
-        ? null
-        : supabase
-            .from('payments')
-            .select('*')
-            .eq('organization_id', organizationId)
-            .gte('payment_date', bounds.startIso)
-            .lte('payment_date', bounds.endInclusiveIso)
-            .limit(5000)
-
-      const [nightBookRes, txRes, payRes, inHouseRes, roomRes] = await Promise.all([
-        nightBookQ,
-        txQ || Promise.resolve({ data: [] as unknown[], error: null }),
-        payQ || Promise.resolve({ data: [] as unknown[], error: null }),
+      const [inHouseRes, roomRes] = await Promise.all([
         supabase
           .from('bookings')
           .select('id, room_id, status, check_in, check_out, folio_status, rate_per_night')
@@ -98,17 +58,91 @@ export function DashboardStats() {
         supabase.from('rooms').select('status').eq('organization_id', organizationId),
       ])
 
-      try {
-        const pack = buildDailyFrontDeskPack({
-          dateYmd: ymd,
-          bookings: (nightBookRes.data || []) as any,
-          transactions: (txRes.data || []) as any,
-          payments: (payRes.data || []) as any,
+      // Prefer service-role daily book API (same source as Bookings / Daily book).
+      // Client-side payments/transactions often under-count Net sales due to RLS / bounds.
+      let loadedFromApi = false
+      if (userId) {
+        try {
+          const res = await fetch(
+            `/api/reports/daily-front-desk?caller_id=${encodeURIComponent(userId)}&date=${encodeURIComponent(ymd)}`,
+            { credentials: 'include' },
+          )
+          if (res.ok) {
+            const body = (await res.json()) as {
+              pack?: {
+                roomRevenueGenerated?: number
+                salesCollection?: { total?: number }
+              }
+            }
+            const pack = body.pack
+            if (pack) {
+              roomRevenue = Number(pack.roomRevenueGenerated ?? 0)
+              netProfit = Number(pack.salesCollection?.total ?? 0)
+              loadedFromApi = true
+            }
+          }
+        } catch (e) {
+          console.warn('[dashboard] daily-front-desk stats:', e)
+        }
+      }
+
+      if (!loadedFromApi) {
+        const bounds = await fetchHotelBusinessNightUtcBounds({
+          supabase,
+          organizationId,
+          ymd,
+          timeZone: tz,
         })
-        netProfit = pack.salesCollection.total
-        roomRevenue = pack.roomRevenueGenerated
-      } catch {
-        roomRevenue = sumRoomRevenueForHotelNight(inHouseRes.data ?? [], ymd)
+
+        const nightBookQ = supabase
+          .from('bookings')
+          .select(
+            'id, check_in, check_out, status, rate_per_night, folio_id, payment_status, guests:guest_id(name), rooms:room_id(room_number, room_type)',
+          )
+          .eq('organization_id', organizationId)
+          .in('status', ['confirmed', 'checked_in', 'reserved', 'checked_out'])
+          .lte('check_in', ymd)
+          .gt('check_out', ymd)
+          .limit(500)
+
+        const txQ = bounds.empty
+          ? null
+          : supabase
+              .from('transactions')
+              .select('*')
+              .eq('organization_id', organizationId)
+              .gte('created_at', bounds.startIso)
+              .lte('created_at', bounds.endInclusiveIso)
+              .limit(5000)
+
+        const payQ = bounds.empty
+          ? null
+          : supabase
+              .from('payments')
+              .select('*')
+              .eq('organization_id', organizationId)
+              .gte('payment_date', bounds.startIso)
+              .lte('payment_date', bounds.endInclusiveIso)
+              .limit(5000)
+
+        const [nightBookRes, txRes, payRes] = await Promise.all([
+          nightBookQ,
+          txQ || Promise.resolve({ data: [] as unknown[], error: null }),
+          payQ || Promise.resolve({ data: [] as unknown[], error: null }),
+        ])
+
+        try {
+          const pack = buildDailyFrontDeskPack({
+            dateYmd: ymd,
+            bookings: (nightBookRes.data || []) as any,
+            transactions: (txRes.data || []) as any,
+            payments: (payRes.data || []) as any,
+          })
+          netProfit = pack.salesCollection.total
+          roomRevenue = pack.roomRevenueGenerated
+        } catch {
+          roomRevenue = sumRoomRevenueForHotelNight(inHouseRes.data ?? [], ymd)
+        }
       }
 
       const inHouseBookings = inHouseRes.data

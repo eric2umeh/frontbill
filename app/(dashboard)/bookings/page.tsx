@@ -302,10 +302,16 @@ export default function BookingsPage() {
           { credentials: "include" },
         );
         if (res.ok) {
-          const pack = (await res.json()) as {
+          const body = (await res.json()) as {
+            pack?: {
+              roomRevenueGenerated?: number;
+              salesCollection?: { total?: number };
+            };
             roomRevenueGenerated?: number;
             salesCollection?: { total?: number };
           };
+          // API returns `{ pack: DailyFrontDeskPack }`; tolerate a flat shape too.
+          const pack = body.pack ?? body;
           applyRevenueStats(
             Number(pack.roomRevenueGenerated ?? 0),
             Number(pack.salesCollection?.total ?? 0),
