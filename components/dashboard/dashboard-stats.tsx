@@ -11,7 +11,7 @@ import {
   computeFrontOfficeStayStats,
   countPhysicallyHeldRooms,
 } from '@/lib/rooms/front-office-stay'
-import { resolveHotelTimeZone } from '@/lib/hotel-date'
+import { frontOfficeTodayYmd, resolveHotelTimeZone } from '@/lib/hotel-date'
 import { todayYmdHotel, calendarPickerYmd } from '@/lib/utils/booking-in-house-dates'
 import { fetchHotelBusinessNightUtcBounds } from '@/lib/payments/business-night-bounds'
 import { buildDailyFrontDeskPack } from '@/lib/reports/daily-front-desk-pack'
@@ -23,7 +23,9 @@ import { CalendarIcon } from 'lucide-react'
 
 export function DashboardStats() {
   const { organizationId, userId } = useAuth()
+  /** Same front-office “today” as Bookings (org business_date after night audit). */
   const [dayYmd, setDayYmd] = useState(() => todayYmdHotel())
+  const [dayReady, setDayReady] = useState(false)
   const [calOpen, setCalOpen] = useState(false)
   const [stats, setStats] = useState([
     { title: 'Net sales', value: formatNaira(0), icon: Wallet, description: '—' },
@@ -35,8 +37,31 @@ export function DashboardStats() {
 
   useEffect(() => {
     if (!organizationId) return
+    let cancelled = false
+    ;(async () => {
+      const supabase = createClient()
+      if (!supabase) {
+        if (!cancelled) setDayReady(true)
+        return
+      }
+      const { data: orgRow } = await supabase
+        .from('organizations')
+        .select('business_date')
+        .eq('id', organizationId)
+        .maybeSingle()
+      if (cancelled) return
+      setDayYmd(frontOfficeTodayYmd(orgRow?.business_date))
+      setDayReady(true)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [organizationId])
+
+  useEffect(() => {
+    if (!organizationId || !dayReady) return
     void fetchStats(dayYmd)
-  }, [organizationId, userId, dayYmd])
+  }, [organizationId, userId, dayYmd, dayReady])
 
   const fetchStats = async (ymd: string) => {
     if (!organizationId) return
