@@ -4291,8 +4291,11 @@ function useSupplyChainImpl() {
         ...restInput,
         name,
         unit: input.unit?.trim() || existing.unit,
-        // On-hand qty only changes via Add to stock / issue-out — never manual edit.
-        quantityInStore: existing.quantityInStore,
+        // Temporary: allow manual qty from Edit store item while bootstrapping stock.
+        quantityInStore:
+          input.quantityInStore != null
+            ? Math.max(0, Number(input.quantityInStore) || 0)
+            : existing.quantityInStore,
         reorderLevel:
           input.reorderLevel != null
             ? Math.max(0, input.reorderLevel)
