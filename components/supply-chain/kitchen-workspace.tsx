@@ -7,7 +7,7 @@ import { useClientMounted } from '@/hooks/use-client-mounted'
 import { useAuth } from '@/lib/auth-context'
 import { useSupplyChain } from '@/lib/supply-chain/supply-chain-context'
 import { formatNaira } from '@/lib/utils/currency'
-import { canonicalRoleKey, canCountKitchenRawStock, canEditKitchenBatchSellingPrice, canManageKitchenBatchStandards, canOperateKitchenProduction, canRaisePurchaseRequest } from '@/lib/permissions'
+import { canonicalRoleKey, canCountKitchenFinishedStock, canCountKitchenRawStock, canEditKitchenBatchSellingPrice, canManageKitchenBatchStandards, canOperateKitchenProduction, canRaisePurchaseRequest } from '@/lib/permissions'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -350,7 +350,7 @@ export function KitchenWorkspace() {
     }
   }
   const canOpenProduction = canOperateKitchenProduction(role)
-  const canCountKitchenStock = canOpenProduction
+  const canCountKitchenStock = canCountKitchenFinishedStock(role)
   const canCountKitchenRaw = canCountKitchenRawStock(role)
   const canRaiseKitchenPo = canRaisePurchaseRequest(role)
 
