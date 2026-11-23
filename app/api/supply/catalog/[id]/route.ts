@@ -8,7 +8,7 @@ import {
 } from '@/lib/supply-chain/supply-db-mappers'
 import type { StoreItem } from '@/lib/supply-chain/types'
 import { toTitleCaseWords } from '@/lib/supply-chain/title-case'
-import { canManageStoreCatalog } from '@/lib/permissions'
+import { canCountStoreStock, canManageStoreCatalog } from '@/lib/permissions'
 
 function missingTableResponse(message: string) {
   if (/supply_catalog_items|schema cache|does not exist/i.test(message)) {
@@ -36,15 +36,32 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     const auth = await resolveSupplyAuthedUser(request, caller_id, body as Record<string, unknown>)
     if (auth instanceof NextResponse) return auth
 
-    if (!canManageStoreCatalog(auth.role)) {
+    const canFullEdit = canManageStoreCatalog(auth.role)
+    const canStockCount = canCountStoreStock(auth.role)
+
+    if (!canFullEdit && !canStockCount) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+
+    // Stock-count roles (e.g. auditor) may only change on-hand qty — strip other fields.
+    const effectivePatch: Partial<StoreItem> = canFullEdit
+      ? {
+          ...patch,
+          ...(patch.name != null ? { name: toTitleCaseWords(patch.name) } : {}),
+        }
+      : { quantityInStore: patch.quantityInStore }
+
+    if (!canFullEdit && patch.quantityInStore == null) {
+      return NextResponse.json(
+        { error: 'Stock count may only update quantity in store' },
+        { status: 400 },
+      )
     }
 
     const dbPatch = storeItemToCatalogUpdate(
       {
         id,
-        ...patch,
-        ...(patch.name != null ? { name: toTitleCaseWords(patch.name) } : {}),
+        ...effectivePatch,
       },
       auth.userId,
     )
