@@ -101,7 +101,7 @@ import {
 } from "./unit-factor-storage";
 import type { StockShortageLine } from "@/lib/ui/stock-shortage-dialog";
 import { useAuth } from "@/lib/auth-context";
-import { canManageFnbStore, canManageKitchenBatchStandards, canEditKitchenBatchSellingPrice, canCountKitchenRawStock, canCountOutletDepartmentStock, canOperateKitchenProduction, canRaisePurchaseRequest, canSubmitMarketRetirement, canAddPurchasedToStock, canSupplyRetirementReview, canSupplyPoAccountantReview, canSupplyPoManagerReview, canAdminTestApproveSupplyPo, canDirectDisbursePurchaseOrder, canonicalRoleKey, hasPermission } from "@/lib/permissions";
+import { canManageFnbStore, canManageKitchenBatchStandards, canEditKitchenBatchSellingPrice, canCountKitchenFinishedStock, canCountKitchenRawStock, canCountOutletDepartmentStock, canCountStoreStock, canOperateKitchenProduction, canRaisePurchaseRequest, canSubmitMarketRetirement, canAddPurchasedToStock, canSupplyRetirementReview, canSupplyPoAccountantReview, canSupplyPoManagerReview, canAdminTestApproveSupplyPo, canDirectDisbursePurchaseOrder, canonicalRoleKey, hasPermission } from "@/lib/permissions";
 import { isRetryableSupplyError } from "@/lib/utils/fetch-retry";
 import { isMainBarIssueDestination } from "@/lib/store/outlet-departments";
 import { formatSupplyActorStamp } from "./fnb-store";
@@ -4375,13 +4375,16 @@ function useSupplyChainImpl() {
     [storeItems, useDbPersistence, userId, schedulePersistSnapshots, persistSnapshotsNow],
   );
 
-  /** Instant stock-count override of on-hand qty (Store role UI only). */
+  /** Instant stock-count override of on-hand qty (Store / Auditor / Admin). */
   const setStoreOnHandForStockCount = useCallback(
     (
       itemId: string,
       quantityInStore: number,
       actor: Actor,
     ): { ok: true } | { error: string } => {
+      if (!canCountStoreStock(actor.role)) {
+        return { error: "You do not have permission to count store stock" };
+      }
       const existing = storeItems.find((s) => s.id === itemId);
       if (!existing) return { error: "Store item not found" };
       const qty = Math.max(0, Number(quantityInStore) || 0);
@@ -4431,6 +4434,9 @@ function useSupplyChainImpl() {
       availablePortions: number,
       actor: Actor,
     ): { ok: true } | { error: string } => {
+      if (!canCountKitchenFinishedStock(actor.role)) {
+        return { error: "You do not have permission to count Finished Menu stock" };
+      }
       const existing = kitchenStock.find((k) => k.id === stockId);
       if (!existing) return { error: "Kitchen stock item not found" };
       const qty = Math.max(0, Number(availablePortions) || 0);

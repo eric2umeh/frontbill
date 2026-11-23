@@ -589,7 +589,7 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
     key: "auditor",
     label: "Auditor",
     description:
-      "Internal audit: view-only access to the same finance and operations screens accountants use (dashboard, transactions, reports, expenses, ledger, supply). Cannot record payments, raise purchase orders, approve POs, retire at market, or open kitchen production batches.",
+      "Internal audit: finance and operations access (dashboard, transactions, reports, expenses, ledger, supply). May run Central Store stock counts and edit Kitchen Finished Menu on-hand levels. Cannot record payments, raise purchase orders, approve POs, retire at market, or open kitchen production batches.",
     color: "bg-slate-200 text-slate-900 dark:bg-slate-800 dark:text-slate-100",
     permissions: [
       "dashboard:view",
@@ -1181,6 +1181,22 @@ export function canCountKitchenRawStock(
     roleKey === "superadmin" ||
     roleKey === "auditor"
   );
+}
+
+/** Kitchen → Finished Menu — set available portions (chef/production roles, admin, auditor). */
+export function canCountKitchenFinishedStock(
+  userRole: string | null | undefined,
+): boolean {
+  const roleKey = canonicalRoleKey(userRole);
+  if (
+    roleKey === "auditor" ||
+    roleKey === "admin" ||
+    roleKey === "superadmin" ||
+    roleKey === "chef"
+  ) {
+    return true;
+  }
+  return canOperateKitchenProduction(userRole);
 }
 
 /** Add catalogue items directly to central store (no approval). */
