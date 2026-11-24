@@ -158,6 +158,7 @@ import {
   SUPPLY_LIVE_SYNC_ENABLED,
   SUPPLY_STOCK_REFRESH_TTL_MS,
   pathnameNeedsFullSupplyHydration,
+  pathnameNeedsStoreCatalogRefresh,
 } from "./supply-egress";
 import type { SupplySnapshotKey } from "./supply-db-mappers";
 import {
@@ -771,8 +772,8 @@ function useSupplyChainImpl() {
     if (!useDbPersistence || !dbHydratedRef.current || snapshotSyncSkipRef.current) {
       return;
     }
-    // Never bulk-PUT kitchen/bar stock here — that overwrote other users' item patches
-    // with stale in-memory arrays. Stock uses patchSupplySnapshotItem / persist*StockSnapshot.
+    // Option C: never bulk-PUT kitchen/bar stock or issue_out_log here.
+    // Stock → patch / persist*StockSnapshot; issue-out → persistIssueOutLogSnapshot.
     const payload = snapshotsPayloadForRole(
       {
         recipes: recipesRef.current,
@@ -780,7 +781,6 @@ function useSupplyChainImpl() {
         fnb_raw_stock: fnbRawStockRef.current,
         fnb_daily_sheets: fnbDailySheetsRef.current,
         fnb_movements: fnbMovementsRef.current,
-        issue_out_log: issueOutLogRef.current,
         pending_items: pendingStoreItemsRef.current,
       },
       role,
@@ -952,6 +952,45 @@ function useSupplyChainImpl() {
     [useDbPersistence, userId, role],
   );
 
+  /** Small PUT for issue-out log only — avoids re-uploading recipes/F&B on every issue. */
+  const persistIssueOutLogSnapshot = useCallback(
+    async (rows: IssueOutRecord[], opts?: { required?: boolean }) => {
+      if (!useDbPersistence) {
+        if (opts?.required) {
+          throw new Error("Cloud sync is unavailable — sign in again and retry.");
+        }
+        return;
+      }
+      if (!dbHydratedRef.current || snapshotSyncSkipRef.current) {
+        if (opts?.required) {
+          throw new Error(
+            "Supply data is still loading — wait a moment and try again.",
+          );
+        }
+        return;
+      }
+      const payload = snapshotsPayloadForRole({ issue_out_log: rows }, role);
+      if (!("issue_out_log" in payload)) {
+        if (opts?.required) {
+          throw new Error("Your role cannot save the issue-out log to cloud.");
+        }
+        return;
+      }
+      try {
+        await saveSupplySnapshots(
+          userId,
+          { issue_out_log: rows },
+          orgIdRef.current || undefined,
+        );
+        if (SUPPLY_LIVE_SYNC_ENABLED) broadcastSupplyLiveUpdate();
+      } catch (err) {
+        if (opts?.required) throw err;
+        console.warn("[supply-chain] issue-out log sync failed", err);
+      }
+    },
+    [useDbPersistence, userId, role],
+  );
+
   /** Small PUT for PO + basket only — avoids 502/timeouts from uploading the full org snapshot. */
   const persistPoBasketSnapshot = useCallback(
     async (opts?: {
@@ -1003,12 +1042,12 @@ function useSupplyChainImpl() {
         }
         try {
           await saveSupplySnapshots(userId, payload, orgIdRef.current || undefined);
-          broadcastSupplyLiveUpdate();
+          if (SUPPLY_LIVE_SYNC_ENABLED) broadcastSupplyLiveUpdate();
         } catch (err) {
           await new Promise((r) => setTimeout(r, 400));
           try {
             await saveSupplySnapshots(userId, payload, orgIdRef.current || undefined);
-            broadcastSupplyLiveUpdate();
+            if (SUPPLY_LIVE_SYNC_ENABLED) broadcastSupplyLiveUpdate();
           } catch (err2) {
             const msg = err2 instanceof Error ? err2.message : "";
             if (/^forbidden$/i.test(msg.trim())) {
@@ -1562,11 +1601,9 @@ function useSupplyChainImpl() {
   }, [useDbPersistence, dbHydrated, userId, storeItems, role]);
 
   /**
-   * Debounced org snapshot sync for non-count payloads.
-   * kitchen_stock / kitchen_raw_stock / bar_stock are excluded — stock counts use
-   * patchSupplySnapshotItem (Option C) so we do not re-upload whole arrays on every qty edit.
-   * Issue-out / production / POS still call persistKitchenStockSnapshot / persistBarStockSnapshot
-   * or schedulePersistSnapshots explicitly when needed.
+   * Debounced org snapshot sync for non-count payloads (Option C).
+   * kitchen/bar stock excluded — use item patches / persist*StockSnapshot.
+   * issue_out_log excluded — use persistIssueOutLogSnapshot after issue-out (avoids fat PUTs).
    */
   useEffect(() => {
     if (!useDbPersistence || !dbHydrated || snapshotSyncSkipRef.current) return;
@@ -1591,7 +1628,6 @@ function useSupplyChainImpl() {
     fnbRawStock,
     fnbDailySheets,
     fnbMovements,
-    issueOutLog,
     pendingStoreItems,
     role,
   ]);
@@ -1812,16 +1848,19 @@ function useSupplyChainImpl() {
   }, [recipes, dbHydrated, persistKitchenStockSnapshot]);
 
   /**
-   * Soft stock refresh on Supply/Outlets (replaces Realtime while live sync is off).
-   * Pulls bar/kitchen/issue-out so other users' saves appear after navigation or tab focus.
+   * Soft stock refresh on Supply/Outlets — Option D substitute when live sync is OFF.
+   * Throttled (SUPPLY_STOCK_REFRESH_TTL_MS); does not run alongside Realtime live sync.
+   * Catalogue soft-pull only on /supply/store (Option G / egress).
    */
   useEffect(() => {
+    if (SUPPLY_LIVE_SYNC_ENABLED) return;
     if (!useDbPersistence || !dbHydrated) return;
     if (!fullSupplyHydrationNeeded) return;
     if (!canReadSupplySnapshots(role)) return;
 
     let cancelled = false;
     let lastPullAt = 0;
+    const needStoreCatalog = pathnameNeedsStoreCatalogRefresh(pathname);
 
     const pullStock = async () => {
       if (cancelled) return;
@@ -1872,8 +1911,11 @@ function useSupplyChainImpl() {
         applyRemoteArray(setFnbDailySheets, snapshots.fnb_daily_sheets);
         applyRemoteArray(setFnbMovements, snapshots.fnb_movements);
 
-        // Central store qty lives in catalogue rows — soft-pull so Store page sees DB.
-        if (!recentLocal && Date.now() - lastLocalSupplyMutationAt >= 12_000) {
+        if (
+          needStoreCatalog &&
+          !recentLocal &&
+          Date.now() - lastLocalSupplyMutationAt >= 12_000
+        ) {
           const catalog = await fetchSupplyCatalog(
             userId,
             organizationId || undefined,
@@ -1903,6 +1945,7 @@ function useSupplyChainImpl() {
     userId,
     organizationId,
     role,
+    pathname,
   ]);
 
   const activeKitchenBatchKey = useMemo(
@@ -5832,19 +5875,19 @@ function useSupplyChainImpl() {
       notifyBarStockChanged();
       notifyIssueOutLogChanged();
       markLocalSupplyMutation();
-      // Flush pending qty patches first, then write bar + issue log (not a stale full stock PUT).
+      // Option C/E: flush count patches, then dedicated bar + issue-log PUTs (no fat snapshot).
       void (async () => {
         await flushStockCountPatches();
         await persistBarStockSnapshot(nextBarStock);
-        schedulePersistSnapshots();
+        await persistIssueOutLogSnapshot(issueOutLogRef.current);
       })();
       return { ok: true as const };
     },
     [
       storeItems,
-      schedulePersistSnapshots,
       flushStockCountPatches,
       persistBarStockSnapshot,
+      persistIssueOutLogSnapshot,
     ],
   );
 
@@ -5989,16 +6032,16 @@ function useSupplyChainImpl() {
         ) {
           await persistKitchenRawStockSnapshot(nextKitchenRaw);
         }
-        schedulePersistSnapshots();
+        await persistIssueOutLogSnapshot(issueOutLogRef.current);
       })();
       return { ok: true as const };
     },
     [
       storeItems,
       issueFromStoreToBar,
-      schedulePersistSnapshots,
       flushStockCountPatches,
       persistKitchenRawStockSnapshot,
+      persistIssueOutLogSnapshot,
     ],
   );
 
@@ -6082,10 +6125,10 @@ function useSupplyChainImpl() {
         );
         if ("error" in res) return res;
       }
-      void persistSnapshotsNow();
+      // Per-line issue already wrote bar/raw + issue log (Option C). Avoid fat snapshot PUT.
       return { ok: true, issued: lines.length };
     },
-    [issueFromStoreToDepartment, storeItems, persistSnapshotsNow],
+    [issueFromStoreToDepartment, storeItems],
   );
 
   const updateFnbRawSellingPrice = useCallback(
