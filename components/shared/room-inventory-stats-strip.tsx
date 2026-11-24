@@ -8,18 +8,17 @@ import {
   type RoomInventoryStats,
 } from '@/lib/rooms/compute-room-inventory-stats'
 import { OCCUPYING_BOOKING_STATUSES } from '@/lib/rooms/room-occupancy'
-import { reconcileRoomStatusesClient } from '@/lib/rooms/reconcile-room-status-client'
 import { Bed, DoorOpen, AlertTriangle, Loader2, CalendarClock, CalendarDays } from 'lucide-react'
 import { frontOfficeTodayYmd } from '@/lib/hotel-date'
 import { cn } from '@/lib/utils'
 
 type Props = {
   className?: string
-  /** Refresh counts every N ms (0 = load once). */
+  /** Refresh counts every N ms (0 = load once). Default 3 min — stats only, no reconcile. */
   refreshMs?: number
 }
 
-export function RoomInventoryStatsStrip({ className, refreshMs = 60_000 }: Props) {
+export function RoomInventoryStatsStrip({ className, refreshMs = 180_000 }: Props) {
   const { organizationId } = useAuth()
   const [stats, setStats] = useState<RoomInventoryStats | null>(null)
   const [loading, setLoading] = useState(true)
@@ -35,7 +34,7 @@ export function RoomInventoryStatsStrip({ className, refreshMs = 60_000 }: Props
       setLoading(false)
       return
     }
-    await reconcileRoomStatusesClient()
+    // Read-only stats — reconcile runs after check-in/out mutations (TTL-gated), not on a timer.
 
     const [{ data: rooms, error: roomErr }, { data: bookings, error: bookErr }, { data: orgRow }] = await Promise.all([
       supabase.from('rooms').select('status, housekeeping_status').eq('organization_id', organizationId),
