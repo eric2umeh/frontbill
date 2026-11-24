@@ -81,10 +81,18 @@ Heavy stock setup (Central Store, Kitchen Finished Menu, Kitchen Store, Main Bar
 2. Sign in on local, enter opening stock / physical counts as needed
 3. Keep cloud for live hotel work; avoid multi-hour “count everything” sessions on staging/prod
 
-Cloud already batches stock-count saves and pauses supply Realtime by default. Re-enable live multi-user stock sync only if needed:
+Cloud egress controls (keep these defaults unless you need live multi-user stock):
+
+| Option | Default |
+|--------|---------|
+| **C** | Per-item qty patches (not full kitchen/bar JSON) |
+| **D** | Supply Realtime/live refetch **off** (`NEXT_PUBLIC_SUPPLY_LIVE_SYNC` unset) |
+| **E** | Stock-count writes batched (~2.5s; flush on tab hide) |
+| **G** | Fat supply hydrate only on `/supply` and `/outlets` |
+| **H** | Bulk opening counts on Docker (this section) |
 
 ```bash
-# .env.local (cloud) — optional
+# .env.local (cloud) — optional; turns Option D live sync back on
 NEXT_PUBLIC_SUPPLY_LIVE_SYNC=true
 ```
 
