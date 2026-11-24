@@ -109,6 +109,7 @@ import {
   deleteSupplyCatalogItem,
   fetchSupplyCatalog,
   fetchSupplySnapshots,
+  patchSupplySnapshotItem,
   insertSupplyCatalogItem,
   saveSupplySnapshots,
   syncSupplyCatalog,
@@ -1216,7 +1217,13 @@ function useSupplyChainImpl() {
     return () => window.clearTimeout(timer);
   }, [useDbPersistence, dbHydrated, userId, storeItems, role]);
 
-  /** Debounced org snapshot sync (stock, recipes, etc.) — never PO/basket (see persistPoBasketSnapshot). */
+  /**
+   * Debounced org snapshot sync for non-count payloads.
+   * kitchen_stock / kitchen_raw_stock / bar_stock are excluded — stock counts use
+   * patchSupplySnapshotItem (Option C) so we do not re-upload whole arrays on every qty edit.
+   * Issue-out / production / POS still call persistKitchenStockSnapshot / persistBarStockSnapshot
+   * or schedulePersistSnapshots explicitly when needed.
+   */
   useEffect(() => {
     if (!useDbPersistence || !dbHydrated || snapshotSyncSkipRef.current) return;
     if (
@@ -1237,9 +1244,6 @@ function useSupplyChainImpl() {
     persistSnapshotsNow,
     recipes,
     batches,
-    kitchenStock,
-    kitchenRawStock,
-    barStock,
     fnbRawStock,
     fnbDailySheets,
     fnbMovements,
@@ -4393,6 +4397,8 @@ function useSupplyChainImpl() {
       const qty = Math.max(0, Number(quantityInStore) || 0);
       if (!Number.isFinite(qty)) return { error: "Enter a valid quantity" };
       const nextItem: StoreItem = { ...existing, quantityInStore: qty };
+      // Skip debounced full catalogue sync — we PATCH qty only below.
+      catalogSyncSkipRef.current = true;
       setStoreItems((prev) => prev.map((s) => (s.id === itemId ? nextItem : s)));
       markLocalSupplyMutation();
       setActivityLog((a) =>
@@ -4405,14 +4411,10 @@ function useSupplyChainImpl() {
         ),
       );
       if (useDbPersistence) {
-        catalogSyncSkipRef.current = true;
         void updateSupplyCatalogItem(
           userId,
           itemId,
-          {
-            ...nextItem,
-            ...storeItemDeptFieldsForDb(nextItem),
-          },
+          { quantityInStore: qty },
           orgIdRef.current || undefined,
         )
           .catch((err) => {
@@ -4421,9 +4423,15 @@ function useSupplyChainImpl() {
             toast.error(message);
           })
           .finally(() => {
-            catalogSyncSkipRef.current = false;
+            window.setTimeout(() => {
+              catalogSyncSkipRef.current = false;
+            }, 1200);
             broadcastSupplyLiveUpdate();
           });
+      } else {
+        window.setTimeout(() => {
+          catalogSyncSkipRef.current = false;
+        }, 1200);
       }
       return { ok: true };
     },
@@ -4484,15 +4492,24 @@ function useSupplyChainImpl() {
           stockId,
         ),
       );
-      schedulePersistSnapshots();
-      void persistKitchenStockSnapshot(nextKitchenStock, { required: false }).catch(
-        (err) => {
-          console.warn("[supply-chain] kitchen stock count sync failed", err);
-        },
-      );
+      if (useDbPersistence) {
+        void patchSupplySnapshotItem(userId, {
+          snapshotKey: "kitchen_stock",
+          match: { id: stockId },
+          patch: { availablePortions: qty },
+          organizationId: orgIdRef.current || undefined,
+        }).catch((err) => {
+          console.warn("[supply-chain] kitchen stock count patch failed", err);
+          toast.error(
+            err instanceof Error
+              ? err.message
+              : "Failed to sync Finished Menu count",
+          );
+        });
+      }
       return { ok: true };
     },
-    [kitchenStock, recipes, schedulePersistSnapshots, persistKitchenStockSnapshot],
+    [kitchenStock, recipes, useDbPersistence, userId],
   );
 
   /** Placeholder kitchen raw rows (qty 0) for every kitchen catalogue item; drop non-kitchen rows. */
@@ -4577,11 +4594,36 @@ function useSupplyChainImpl() {
           rowId,
         ),
       );
-      schedulePersistSnapshots();
-      void persistSnapshotsNow();
+      if (useDbPersistence) {
+        void patchSupplySnapshotItem(userId, {
+          snapshotKey: "kitchen_raw_stock",
+          match: { storeItemId, id: rowId },
+          patch: {
+            quantityOnHand: qty,
+            name: store.name,
+            unit: store.unit,
+          },
+          upsertRow: {
+            id: rowId,
+            storeItemId,
+            name: store.name,
+            quantityOnHand: qty,
+            reorderLevel: Math.max(0, store.reorderLevel ?? 0),
+            unit: store.unit,
+          },
+          organizationId: orgIdRef.current || undefined,
+        }).catch((err) => {
+          console.warn("[supply-chain] kitchen raw count patch failed", err);
+          toast.error(
+            err instanceof Error
+              ? err.message
+              : "Failed to sync kitchen store count",
+          );
+        });
+      }
       return { ok: true };
     },
-    [storeItems, schedulePersistSnapshots, persistSnapshotsNow],
+    [storeItems, useDbPersistence, userId],
   );
 
   /** Set absolute on-hand qty for a main bar stock row (physical count). Issue-out still adds on top later. */
@@ -4634,7 +4676,12 @@ function useSupplyChainImpl() {
           ),
         );
         try {
-          await persistBarStockSnapshot(nextBarStock, { required: true });
+          await patchSupplySnapshotItem(userId, {
+            snapshotKey: "bar_stock",
+            match: { id: existing.id, storeItemId: existing.storeItemId },
+            patch: { quantityOnHand: qty },
+            organizationId: orgIdRef.current || undefined,
+          });
         } catch (err) {
           return {
             error:
@@ -4653,20 +4700,18 @@ function useSupplyChainImpl() {
         return { error: "Bar stock item not found" };
       }
       const canonicalId = canonicalBarStockId(store.id);
+      const newRow: BarStockItem = {
+        id: canonicalId,
+        storeItemId: store.id,
+        name: store.name,
+        quantityOnHand: qty,
+        reorderLevel: Math.max(6, store.reorderLevel || 0),
+        unitsPerSale: 1,
+        unit: store.unit,
+      };
       let nextBarStock: BarStockItem[] | null = null;
       setBarStock((prev) => {
-        nextBarStock = normalizeBarStockRows([
-          ...prev,
-          {
-            id: canonicalId,
-            storeItemId: store.id,
-            name: store.name,
-            quantityOnHand: qty,
-            reorderLevel: Math.max(6, store.reorderLevel || 0),
-            unitsPerSale: 1,
-            unit: store.unit,
-          },
-        ]);
+        nextBarStock = normalizeBarStockRows([...prev, newRow]);
         barStockRef.current = nextBarStock;
         return nextBarStock;
       });
@@ -4682,7 +4727,13 @@ function useSupplyChainImpl() {
         ),
       );
       try {
-        await persistBarStockSnapshot(nextBarStock, { required: true });
+        await patchSupplySnapshotItem(userId, {
+          snapshotKey: "bar_stock",
+          match: { id: canonicalId, storeItemId: store.id },
+          patch: { quantityOnHand: qty },
+          upsertRow: newRow as unknown as Record<string, unknown>,
+          organizationId: orgIdRef.current || undefined,
+        });
       } catch (err) {
         return {
           error:
@@ -4694,7 +4745,7 @@ function useSupplyChainImpl() {
       notifyBarStockChanged();
       return { ok: true };
     },
-    [barStock, storeItems, persistBarStockSnapshot],
+    [barStock, storeItems, userId],
   );
 
   /** Placeholder bar rows (qty 0) for every main_bar central-store item — menu sync does not create stock rows. */
