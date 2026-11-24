@@ -13,9 +13,12 @@ export function mergeSnapshotRowsById<T extends { id: string }>(
 export function resolveSupplySnapshot<T extends { id: string }>(
   local: T[],
   remote: unknown,
+  opts?: { preferRemote?: boolean },
 ): T[] {
   const remoteArr = Array.isArray(remote) ? (remote as T[]) : []
   if (local.length === 0) return remoteArr
   if (remoteArr.length === 0) return local
+  // Cloud-first for multi-user stock (kitchen / bar / F&B); local only fills gaps.
+  if (opts?.preferRemote) return mergeSnapshotRowsById(local, remoteArr)
   return mergeSnapshotRowsById(remoteArr, local)
 }

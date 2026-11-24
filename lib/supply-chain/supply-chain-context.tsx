@@ -648,6 +648,7 @@ function useSupplyChainImpl() {
     EMPTY_PURCHASE_ORDERS,
     persistLocal,
   );
+  // Recipes/batches may keep a local draft cache; stock qty must not — DB is source of truth.
   const [recipes, setRecipes] = usePersistedArrayState<Recipe>(
     RECIPES_STORAGE_KEY,
     EMPTY_RECIPES,
@@ -656,32 +657,32 @@ function useSupplyChainImpl() {
   const [kitchenStock, setKitchenStock] = usePersistedArrayState<KitchenStockItem>(
     KITCHEN_STOCK_STORAGE_KEY,
     EMPTY_KITCHEN_STOCK,
-    true,
+    persistLocal,
   );
   const [barStock, setBarStock] = usePersistedArrayState<BarStockItem>(
     BAR_STOCK_STORAGE_KEY,
     EMPTY_BAR_STOCK,
-    true,
+    persistLocal,
   );
   const [kitchenRawStock, setKitchenRawStock] = usePersistedArrayState<KitchenRawStockItem>(
     KITCHEN_RAW_STOCK_STORAGE_KEY,
     EMPTY_KITCHEN_RAW_STOCK,
-    true,
+    persistLocal,
   );
   const [fnbRawStock, setFnbRawStock] = usePersistedArrayState<FnbRawStockItem>(
     FNB_RAW_STOCK_KEY,
     [],
-    true,
+    persistLocal,
   );
   const [fnbDailySheets, setFnbDailySheets] = usePersistedArrayState<FnbDailySheet>(
     FNB_DAILY_SHEETS_KEY,
     [],
-    true,
+    persistLocal,
   );
   const [fnbMovements, setFnbMovements] = usePersistedArrayState<FnbMovement>(
     FNB_MOVEMENTS_KEY,
     [],
-    true,
+    persistLocal,
   );
   const [issueOutLog, setIssueOutLog] = usePersistedArrayState<IssueOutRecord>(
     ISSUE_OUT_LOG_STORAGE_KEY,
@@ -698,8 +699,30 @@ function useSupplyChainImpl() {
   const [activityLog, setActivityLog] = usePersistedArrayState<ActivityEntry>(
     ACTIVITY_LOG_STORAGE_KEY,
     EMPTY_ACTIVITY_LOG,
-    true,
+    persistLocal,
   );
+
+  // Drop legacy stock localStorage so old browser caches cannot shadow the DB.
+  useEffect(() => {
+    if (!useDbPersistence || typeof window === "undefined") return;
+    try {
+      for (const key of [
+        KITCHEN_STOCK_STORAGE_KEY,
+        KITCHEN_RAW_STOCK_STORAGE_KEY,
+        BAR_STOCK_STORAGE_KEY,
+        FNB_RAW_STOCK_KEY,
+        FNB_DAILY_SHEETS_KEY,
+        FNB_MOVEMENTS_KEY,
+        ISSUE_OUT_LOG_STORAGE_KEY,
+        ACTIVITY_LOG_STORAGE_KEY,
+        STORE_ITEMS_STORAGE_KEY,
+      ]) {
+        window.localStorage.removeItem(key);
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [useDbPersistence]);
 
   const recipesRef = useRef(recipes);
   const kitchenStockRef = useRef(kitchenStock);
@@ -1289,31 +1312,48 @@ function useSupplyChainImpl() {
             ? (snapshots.batches as ProductionBatch[])
             : [],
         );
+        // Cloud-first for all stock qty (store catalog is separate; kitchen/bar/F&B/issue-out).
+        const recentLocalStock = Date.now() - lastLocalSupplyMutationAt < 12_000;
         const mergedKitchenStockRaw = mergeKitchenStockFromRemote(
           localKitchenStock,
           Array.isArray(snapshots.kitchen_stock)
             ? (snapshots.kitchen_stock as KitchenStockItem[])
             : [],
+          { preferLocalRecent: recentLocalStock },
         );
         const { stock: mergedKitchenStock, changed: kitchenStockReconciled } =
           reconcileKitchenStockWithRecipes(mergedRecipes, mergedKitchenStockRaw);
-        const mergedKitchenRaw = resolveSupplySnapshot(localKitchenRaw, snapshots.kitchen_raw_stock);
+        const mergedKitchenRaw = resolveSupplySnapshot(
+          localKitchenRaw,
+          snapshots.kitchen_raw_stock,
+          { preferRemote: !recentLocalStock },
+        );
         const remoteBarStock = Array.isArray(snapshots.bar_stock)
           ? (snapshots.bar_stock as BarStockItem[])
           : [];
-        // Prefer cloud on hydrate so other users' qty patches win over stale localStorage.
-        const recentLocalBar = Date.now() - lastLocalSupplyMutationAt < 12_000;
         const mergedBarStock = normalizeBarStockRows(
           mergeBarStockFromRemote(localBarStock, remoteBarStock, {
-            preferLocalWhenLower: recentLocalBar,
-            preferLocalRecent: recentLocalBar,
+            preferLocalWhenLower: recentLocalStock,
+            preferLocalRecent: recentLocalStock,
             trustLocalBackup: false,
           }),
         );
-        const mergedFnbRaw = resolveSupplySnapshot(localFnbRaw, snapshots.fnb_raw_stock);
-        const mergedFnbSheets = resolveSupplySnapshot(localFnbSheets, snapshots.fnb_daily_sheets);
-        const mergedFnbMovements = resolveSupplySnapshot(localFnbMovements, snapshots.fnb_movements);
-        const mergedActivity = resolveSupplySnapshot(localActivity, snapshots.activity_log);
+        const mergedFnbRaw = resolveSupplySnapshot(localFnbRaw, snapshots.fnb_raw_stock, {
+          preferRemote: !recentLocalStock,
+        });
+        const mergedFnbSheets = resolveSupplySnapshot(
+          localFnbSheets,
+          snapshots.fnb_daily_sheets,
+          { preferRemote: !recentLocalStock },
+        );
+        const mergedFnbMovements = resolveSupplySnapshot(
+          localFnbMovements,
+          snapshots.fnb_movements,
+          { preferRemote: !recentLocalStock },
+        );
+        const mergedActivity = resolveSupplySnapshot(localActivity, snapshots.activity_log, {
+          preferRemote: true,
+        });
 
         if (mergedRecipes.length) setRecipes(mergedRecipes);
         if (mergedBatches.length) setBatches(mergedBatches);
@@ -1382,32 +1422,50 @@ function useSupplyChainImpl() {
             await syncSupplyCatalog(userId, localCatalog, organizationId || undefined);
           }
 
-          const localSnapshots = {
-            recipes: mergedRecipes,
-            batches: mergedBatches,
-            kitchen_stock: mergedKitchenStock,
-            kitchen_raw_stock: mergedKitchenRaw,
-            bar_stock: mergedBarStock,
-            fnb_raw_stock: mergedFnbRaw,
-            fnb_daily_sheets: mergedFnbSheets,
-            fnb_movements: mergedFnbMovements,
-            activity_log: mergedActivity,
-            purchase_orders: mergedPurchaseOrders,
-            issue_out_log: loadPersistedStock<IssueOutRecord>(
+          // Seed cloud only when the org snapshot key is empty — never overwrite
+          // kitchen/bar/F&B qty with stale browser localStorage from another session.
+          const seedIfRemoteEmpty = (
+            key: string,
+            localRows: unknown,
+            remote: unknown,
+          ) => {
+            const remoteLen = Array.isArray(remote) ? remote.length : 0;
+            if (remoteLen > 0) return;
+            if (Array.isArray(localRows) && localRows.length > 0) {
+              toUpload[key] = localRows;
+            }
+          };
+          const toUpload: Record<string, unknown> = {};
+          seedIfRemoteEmpty("recipes", mergedRecipes, snapshots.recipes);
+          seedIfRemoteEmpty("batches", mergedBatches, snapshots.batches);
+          seedIfRemoteEmpty("kitchen_stock", mergedKitchenStock, snapshots.kitchen_stock);
+          seedIfRemoteEmpty(
+            "kitchen_raw_stock",
+            mergedKitchenRaw,
+            snapshots.kitchen_raw_stock,
+          );
+          seedIfRemoteEmpty("bar_stock", mergedBarStock, snapshots.bar_stock);
+          seedIfRemoteEmpty("fnb_raw_stock", mergedFnbRaw, snapshots.fnb_raw_stock);
+          seedIfRemoteEmpty(
+            "fnb_daily_sheets",
+            mergedFnbSheets,
+            snapshots.fnb_daily_sheets,
+          );
+          seedIfRemoteEmpty("fnb_movements", mergedFnbMovements, snapshots.fnb_movements);
+          seedIfRemoteEmpty("activity_log", mergedActivity, snapshots.activity_log);
+          seedIfRemoteEmpty(
+            "issue_out_log",
+            loadPersistedStock<IssueOutRecord>(
               ISSUE_OUT_LOG_STORAGE_KEY,
               EMPTY_ISSUE_OUT_LOG,
             ),
-            pending_items: loadPersistedStock<PendingStoreItem>(PENDING_STORE_ITEMS_KEY, []),
-            basket: loadPersistedStock<BasketLine>(BASKET_STORAGE_KEY, EMPTY_BASKET),
-          };
-          const toUpload: Record<string, unknown> = {};
-          for (const [key, localRows] of Object.entries(localSnapshots)) {
-            const remote = snapshots[key as keyof typeof snapshots];
-            const remoteLen = Array.isArray(remote) ? remote.length : 0;
-            if (Array.isArray(localRows) && localRows.length > remoteLen) {
-              toUpload[key] = localRows;
-            }
-          }
+            snapshots.issue_out_log,
+          );
+          seedIfRemoteEmpty(
+            "pending_items",
+            loadPersistedStock<PendingStoreItem>(PENDING_STORE_ITEMS_KEY, []),
+            snapshots.pending_items,
+          );
           // Tombstones keep the same array length — still upload when merge differs from remote.
           if (
             mergedPurchaseOrders.length &&
@@ -1416,15 +1474,9 @@ function useSupplyChainImpl() {
           ) {
             toUpload.purchase_orders = mergedPurchaseOrders;
           }
+          // Structural kitchen reconcile (tombstones) after cloud-first merge — qty already from remote.
           if (kitchenStockReconciled && mergedKitchenStock.length) {
             toUpload.kitchen_stock = mergedKitchenStock;
-          }
-          const remoteBarNormalized = normalizeBarStockRows(remoteBarStock);
-          if (
-            mergedBarStock.length &&
-            JSON.stringify(mergedBarStock) !== JSON.stringify(remoteBarNormalized)
-          ) {
-            toUpload.bar_stock = mergedBarStock;
           }
           if (Object.keys(toUpload).length > 0) {
             const rolePayload = snapshotsPayloadForRole(toUpload, role);
@@ -1812,9 +1864,24 @@ function useSupplyChainImpl() {
           );
         }
         applyRemoteIssueOutLogArray(setIssueOutLog, snapshots.issue_out_log);
-        applyRemoteStockArray(setFnbRawStock, snapshots.fnb_raw_stock);
+        if (recentLocal) {
+          applyRemoteStockArray(setFnbRawStock, snapshots.fnb_raw_stock);
+        } else if (Array.isArray(snapshots.fnb_raw_stock)) {
+          setFnbRawStock(snapshots.fnb_raw_stock as FnbRawStockItem[]);
+        }
         applyRemoteArray(setFnbDailySheets, snapshots.fnb_daily_sheets);
         applyRemoteArray(setFnbMovements, snapshots.fnb_movements);
+
+        // Central store qty lives in catalogue rows — soft-pull so Store page sees DB.
+        if (!recentLocal && Date.now() - lastLocalSupplyMutationAt >= 12_000) {
+          const catalog = await fetchSupplyCatalog(
+            userId,
+            organizationId || undefined,
+          ).catch(() => null);
+          if (!cancelled && Array.isArray(catalog) && catalog.length > 0) {
+            setStoreItems(catalog.map(applyStoreItemDeptFields));
+          }
+        }
       } catch {
         /* non-blocking */
       }
@@ -3835,13 +3902,15 @@ function useSupplyChainImpl() {
 
   const deductKitchenRawMaterials = useCallback(
     (lines: { storeItemId: string; quantity: number }[]) => {
-      setKitchenRawStock((prev) =>
-        prev.map((k) => {
+      setKitchenRawStock((prev) => {
+        const next = prev.map((k) => {
           const line = lines.find((l) => l.storeItemId === k.storeItemId);
           if (!line) return k;
           return { ...k, quantityOnHand: Math.max(0, k.quantityOnHand - line.quantity) };
-        }),
-      );
+        });
+        kitchenRawStockRef.current = next;
+        return next;
+      });
       notifyKitchenRawStockChanged();
     },
     [],
@@ -3870,6 +3939,7 @@ function useSupplyChainImpl() {
             });
           }
         }
+        kitchenRawStockRef.current = next;
         return next;
       });
       notifyKitchenRawStockChanged();
@@ -4077,10 +4147,11 @@ function useSupplyChainImpl() {
       const recipeId = `rcp-${outletStockSlug(batchName)}`;
       const yieldUnit = input.yieldUnit || "portion";
 
+      let nextKitchenAfterBatch = kitchenStockRef.current;
       setKitchenStock((prev) => {
         const idx = prev.findIndex((k) => k.id === kitchenStockId);
         if (idx >= 0) {
-          return prev.map((k, i) =>
+          nextKitchenAfterBatch = prev.map((k, i) =>
             i === idx
               ? {
                   ...k,
@@ -4092,19 +4163,22 @@ function useSupplyChainImpl() {
                 }
               : k,
           );
+        } else {
+          nextKitchenAfterBatch = [
+            ...prev,
+            {
+              id: kitchenStockId,
+              name: batchName,
+              source: "produced" as const,
+              availablePortions: 0,
+              unit: yieldUnit,
+              reorderLevel: Math.max(2, Math.ceil(input.plannedPortions * 0.15)),
+              linkedRecipeId: recipeId,
+            },
+          ];
         }
-        return [
-          ...prev,
-          {
-            id: kitchenStockId,
-            name: batchName,
-            source: "produced" as const,
-            availablePortions: 0,
-            unit: yieldUnit,
-            reorderLevel: Math.max(2, Math.ceil(input.plannedPortions * 0.15)),
-            linkedRecipeId: recipeId,
-          },
-        ];
+        kitchenStockRef.current = nextKitchenAfterBatch;
+        return nextKitchenAfterBatch;
       });
 
       const recipeRow: Recipe = {
@@ -4156,9 +4230,10 @@ function useSupplyChainImpl() {
         ),
       );
       void persistSnapshotsNow();
+      void persistKitchenStockSnapshot(nextKitchenAfterBatch);
       return { ok: true, kitchenStockId, recipeId };
     },
-    [storeItems, persistSnapshotsNow],
+    [storeItems, persistSnapshotsNow, persistKitchenStockSnapshot],
   );
 
   const updateRecipe = useCallback(
@@ -4403,13 +4478,16 @@ function useSupplyChainImpl() {
             : r,
         ),
       );
-      setKitchenStock((prev) =>
-        prev.map((k) =>
+      let nextKitchenAfterDelete = kitchenStockRef.current;
+      setKitchenStock((prev) => {
+        nextKitchenAfterDelete = prev.map((k) =>
           (k.linkedRecipeId === recipeId || k.id === linkedStockId) && !k.deletedAt
             ? { ...k, deletedAt: nowIso }
             : k,
-        ),
-      );
+        );
+        kitchenStockRef.current = nextKitchenAfterDelete;
+        return nextKitchenAfterDelete;
+      });
       setBatches((prev) =>
         prev.map((b) =>
           b.recipeId === recipeId && !b.deletedAt
@@ -4428,6 +4506,7 @@ function useSupplyChainImpl() {
       );
       schedulePersistSnapshots();
       void persistSnapshotsNow();
+      void persistKitchenStockSnapshot(nextKitchenAfterDelete);
       void deactivateBatchFromRestaurantOutlet({
         kitchenStockId: linkedStockId,
         outletMenuSync: normalizeBatchOutletMenuSync(
@@ -4436,7 +4515,14 @@ function useSupplyChainImpl() {
       });
       return { ok: true };
     },
-    [recipes, batches, kitchenStock, schedulePersistSnapshots, persistSnapshotsNow],
+    [
+      recipes,
+      batches,
+      kitchenStock,
+      schedulePersistSnapshots,
+      persistSnapshotsNow,
+      persistKitchenStockSnapshot,
+    ],
   );
 
   /** Wipe kitchen finished stock, raw-from-store, batch standards, production runs, and batch draft. Categories stay in Restaurant outlet DB. */
@@ -4451,15 +4537,20 @@ function useSupplyChainImpl() {
     }).length;
 
     setRecipes([]);
+    kitchenStockRef.current = [];
     setKitchenStock([]);
+    kitchenRawStockRef.current = [];
     setKitchenRawStock([]);
     setBatches([]);
-    setIssueOutLog((prev) =>
-      prev.filter((r) => {
+    let nextIssueLog: IssueOutRecord[] = [];
+    setIssueOutLog((prev) => {
+      nextIssueLog = prev.filter((r) => {
         const d = r.destination.trim().toLowerCase();
         return d !== "kitchen" && !d.includes("kitchen");
-      }),
-    );
+      });
+      issueOutLogRef.current = nextIssueLog;
+      return nextIssueLog;
+    });
     removePersistedStock(RECIPES_STORAGE_KEY);
     removePersistedStock(BATCHES_STORAGE_KEY);
     removePersistedStock(KITCHEN_STOCK_STORAGE_KEY);
@@ -4480,7 +4571,10 @@ function useSupplyChainImpl() {
       window.dispatchEvent(new CustomEvent("frontbill:outlet-menu-cleared"));
     }
 
+    markLocalSupplyMutation();
     schedulePersistSnapshots();
+    void persistKitchenStockSnapshot([]);
+    void persistKitchenRawStockSnapshot([]);
 
     return {
       ok: true as const,
@@ -4490,7 +4584,16 @@ function useSupplyChainImpl() {
       kitchenIssuesCleared: kitchenIssueCount,
       batchesCleared: batchCount,
     };
-  }, [recipes, kitchenStock, kitchenRawStock, issueOutLog, batches, schedulePersistSnapshots]);
+  }, [
+    recipes,
+    kitchenStock,
+    kitchenRawStock,
+    issueOutLog,
+    batches,
+    schedulePersistSnapshots,
+    persistKitchenStockSnapshot,
+    persistKitchenRawStockSnapshot,
+  ]);
 
   const deleteInProgressBatch = useCallback(
     (batchId: string, actor: Actor): { ok: true } | { error: string } => {
@@ -4527,9 +4630,16 @@ function useSupplyChainImpl() {
       );
       schedulePersistSnapshots();
       void persistSnapshotsNow();
+      void persistKitchenRawStockSnapshot(kitchenRawStockRef.current);
       return { ok: true };
     },
-    [batches, returnKitchenRawMaterials, schedulePersistSnapshots, persistSnapshotsNow],
+    [
+      batches,
+      returnKitchenRawMaterials,
+      schedulePersistSnapshots,
+      persistSnapshotsNow,
+      persistKitchenRawStockSnapshot,
+    ],
   );
 
   const clearAllStoreItems = useCallback((actor: Actor) => {
@@ -5456,27 +5566,31 @@ function useSupplyChainImpl() {
         (recipe
           ? kitchenStock.find((k) => k.linkedRecipeId === recipe.id)?.id
           : undefined);
+      let nextKitchenAfterClose = kitchenStockRef.current;
       if (stockId && sellable > 0) {
         setKitchenStock((ks) => {
           const idx = ks.findIndex((k) => k.id === stockId);
           if (idx >= 0) {
-            return ks.map((k, i) =>
+            nextKitchenAfterClose = ks.map((k, i) =>
               i === idx
                 ? { ...k, availablePortions: k.availablePortions + sellable }
                 : k,
             );
+          } else {
+            nextKitchenAfterClose = [
+              ...ks,
+              {
+                id: stockId,
+                name: batch.recipeName,
+                source: "produced" as const,
+                availablePortions: sellable,
+                reorderLevel: Math.max(2, Math.ceil(sellable * 0.15)),
+                linkedRecipeId: recipe?.id,
+              },
+            ];
           }
-          return [
-            ...ks,
-            {
-              id: stockId,
-              name: batch.recipeName,
-              source: "produced" as const,
-              availablePortions: sellable,
-              reorderLevel: Math.max(2, Math.ceil(sellable * 0.15)),
-              linkedRecipeId: recipe?.id,
-            },
-          ];
+          kitchenStockRef.current = nextKitchenAfterClose;
+          return nextKitchenAfterClose;
         });
       }
 
@@ -5489,7 +5603,12 @@ function useSupplyChainImpl() {
           batchId,
         ),
       );
+      markLocalSupplyMutation();
       persistSnapshotsNow();
+      if (stockId && sellable > 0) {
+        void persistKitchenStockSnapshot(nextKitchenAfterClose);
+        void persistKitchenRawStockSnapshot(kitchenRawStockRef.current);
+      }
       return { ok: true };
     },
     [
@@ -5501,6 +5620,8 @@ function useSupplyChainImpl() {
       recipeTotalCostWithLivePrices,
       recipeGrossMarginPctWithLivePrices,
       persistSnapshotsNow,
+      persistKitchenStockSnapshot,
+      persistKitchenRawStockSnapshot,
     ],
   );
 
@@ -5534,22 +5655,25 @@ function useSupplyChainImpl() {
         subtotal += menu.sellingPrice * qty;
       }
 
+      let nextKitchenAfterOrder = kitchenStockRef.current;
       for (const ol of orderLines) {
         const menu = fnbOrders.find((m) => m.id === ol.menuItemId)!;
         if (menu.portionsPerSale <= 0) continue;
-        setKitchenStock((ks) =>
-          ks.map((k) =>
-            k.id === menu.kitchenStockId
-              ? {
-                  ...k,
-                  availablePortions: Math.max(
-                    0,
-                    k.availablePortions - menu.portionsPerSale * ol.qty,
-                  ),
-                }
-              : k,
-          ),
+        nextKitchenAfterOrder = nextKitchenAfterOrder.map((k) =>
+          k.id === menu.kitchenStockId
+            ? {
+                ...k,
+                availablePortions: Math.max(
+                  0,
+                  k.availablePortions - menu.portionsPerSale * ol.qty,
+                ),
+              }
+            : k,
         );
+      }
+      if (nextKitchenAfterOrder !== kitchenStockRef.current) {
+        kitchenStockRef.current = nextKitchenAfterOrder;
+        setKitchenStock(nextKitchenAfterOrder);
       }
 
       const vat = calcVat(subtotal);
@@ -5574,10 +5698,17 @@ function useSupplyChainImpl() {
           order.id,
         ),
       );
+      markLocalSupplyMutation();
       schedulePersistSnapshots();
+      void persistKitchenStockSnapshot(nextKitchenAfterOrder);
       return { order };
     },
-    [fnbOrders, kitchenStock, schedulePersistSnapshots],
+    [
+      fnbOrders,
+      kitchenStock,
+      schedulePersistSnapshots,
+      persistKitchenStockSnapshot,
+    ],
   );
 
   const issueFromStoreToBar = useCallback(
