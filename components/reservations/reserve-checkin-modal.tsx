@@ -288,7 +288,7 @@ export function ReserveCheckInModal({
         .update(roomHousekeepingPatchForInHouse("checked_in"))
         .eq("id", selectedRoomId);
 
-      await reconcileRoomStatusesClient();
+      await reconcileRoomStatusesClient({ force: true });
 
       toast.success(
         stay.check_in !== String(booking.check_in).slice(0, 10)
