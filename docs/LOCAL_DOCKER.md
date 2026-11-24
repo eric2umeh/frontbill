@@ -70,3 +70,20 @@ Or use Studio → SQL Editor at http://127.0.0.1:54323
 ## Verify you are not hitting cloud
 
 In the browser on localhost → Network: API calls should go to `127.0.0.1:54321`, not `*.supabase.co`.
+
+## Bulk opening stock / auditor counts (Option H)
+
+Heavy stock setup (Central Store, Kitchen Finished Menu, Kitchen Store, Main Bar qty) burns **cloud Supabase egress** when two people edit all night on staging/prod.
+
+**Do large opening counts on Docker local**, then only use cloud for day-to-day ops:
+
+1. `cp .env.local.docker .env.local` and `supabase start` + `pnpm dev`
+2. Sign in on local, enter opening stock / physical counts as needed
+3. Keep cloud for live hotel work; avoid multi-hour “count everything” sessions on staging/prod
+
+Cloud already batches stock-count saves and pauses supply Realtime by default. Re-enable live multi-user stock sync only if needed:
+
+```bash
+# .env.local (cloud) — optional
+NEXT_PUBLIC_SUPPLY_LIVE_SYNC=true
+```
