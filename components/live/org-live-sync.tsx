@@ -10,6 +10,7 @@ import {
   ORG_LIVE_SUPPLY,
   dispatchOrgLiveEvent,
 } from '@/lib/live/org-live-events'
+import { SUPPLY_LIVE_SYNC_ENABLED } from '@/lib/supply-chain/supply-egress'
 
 /** When Realtime is down — still rare; must not re-download full state every few seconds. */
 const OFFLINE_FALLBACK_POLL_MS = 45_000
@@ -18,8 +19,8 @@ const ONLINE_SAFETY_POLL_MS = 90_000
 const DEBOUNCE_MS = 400
 
 /**
- * Keeps all signed-in staff in sync: supply/bar stock, outlet menus, bookings.
- * Uses Supabase Realtime for change signals; polls only as a slow fallback.
+ * Keeps signed-in staff in sync: outlet menus, bookings, and optionally supply stock.
+ * Supply Realtime/poll is off by default (Option D) — set NEXT_PUBLIC_SUPPLY_LIVE_SYNC=true to enable.
  * Never pulses on a fast timer — that forced full API refetches and burned egress.
  */
 export function OrgLiveSync() {
@@ -30,6 +31,7 @@ export function OrgLiveSync() {
     if (!organizationId) return
 
     const debouncers = debouncersRef.current
+    const supplyLive = SUPPLY_LIVE_SYNC_ENABLED
 
     const pulse = (eventName: string) => {
       const pending = debouncers.get(eventName)
@@ -44,7 +46,7 @@ export function OrgLiveSync() {
     }
 
     const pulseAll = () => {
-      pulse(ORG_LIVE_SUPPLY)
+      if (supplyLive) pulse(ORG_LIVE_SUPPLY)
       pulse(ORG_LIVE_OUTLET_MENU)
       pulse(ORG_LIVE_BOOKINGS)
     }
@@ -77,31 +79,36 @@ export function OrgLiveSync() {
       }
     }
 
-    const channel = supabase
-      .channel(`org-live:${organizationId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'supply_chain_snapshots',
-          filter: `organization_id=eq.${organizationId}`,
-        },
-        () => pulse(ORG_LIVE_SUPPLY),
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'supply_catalog_items',
-          filter: `organization_id=eq.${organizationId}`,
-        },
-        () => {
-          pulse(ORG_LIVE_CATALOG)
-          pulse(ORG_LIVE_SUPPLY)
-        },
-      )
+    let channel = supabase.channel(`org-live:${organizationId}`)
+
+    if (supplyLive) {
+      channel = channel
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'supply_chain_snapshots',
+            filter: `organization_id=eq.${organizationId}`,
+          },
+          () => pulse(ORG_LIVE_SUPPLY),
+        )
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'supply_catalog_items',
+            filter: `organization_id=eq.${organizationId}`,
+          },
+          () => {
+            pulse(ORG_LIVE_CATALOG)
+            pulse(ORG_LIVE_SUPPLY)
+          },
+        )
+    }
+
+    channel = channel
       .on(
         'postgres_changes',
         {
