@@ -32,9 +32,12 @@ import { BRAND_LOGO_SESSION_KEY } from '@/lib/branding/constants'
 import { isTransientNetworkError, quietBrowserFetch } from '@/lib/utils/fetch-retry'
 
 /** Supabase-backed notification slice (transactions, bookings, rooms, …) */
-const NOTIFICATION_CORE_POLL_MS = 60_000
+const NOTIFICATION_CORE_POLL_MS = 180_000
 /** Heavy `/api/backdate-requests` list — decoupled from core polling */
-const NOTIFICATION_BACKDATE_POLL_MS = 180_000
+const NOTIFICATION_BACKDATE_POLL_MS = 300_000
+/** Cap outstanding-balance folios in the bell (was unbounded). */
+const NOTIFICATION_BALANCE_LIMIT = 30
+const NOTIFICATION_OVERDUE_LIMIT = 40
 
 interface DashboardUser {
   id: string
@@ -207,13 +210,17 @@ export function Header({ user, onMenuClick }: HeaderProps) {
           .select('id, folio_id, check_in, check_out, balance, status, guests:guest_id(id, name), rooms:room_id(room_number)')
           .eq('organization_id', organizationId)
           .in('status', ['confirmed', 'checked_in'])
-          .lt('check_out', today),
+          .lt('check_out', today)
+          .order('check_out', { ascending: true })
+          .limit(NOTIFICATION_OVERDUE_LIMIT),
         supabase
           .from('bookings')
           .select('id, folio_id, check_in, check_out, balance, status, guests:guest_id(id, name), rooms:room_id(room_number)')
           .eq('organization_id', organizationId)
           .gt('balance', 0)
-          .in('status', ['confirmed', 'checked_in', 'reserved']),
+          .in('status', ['confirmed', 'checked_in', 'reserved'])
+          .order('balance', { ascending: false })
+          .limit(NOTIFICATION_BALANCE_LIMIT),
         supabase
           .from('rooms')
           .select('id, room_number, status, updated_at')
