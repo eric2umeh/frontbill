@@ -184,6 +184,41 @@ export async function saveSupplySnapshots(
   )
 }
 
+/** Patch one stock row inside a snapshot (stock counts) — avoids uploading the full array. */
+export async function patchSupplySnapshotItem(
+  userId: string,
+  args: {
+    snapshotKey: Extract<
+      SupplySnapshotKey,
+      'kitchen_stock' | 'kitchen_raw_stock' | 'bar_stock'
+    >
+    match: { id?: string; storeItemId?: string }
+    patch: Record<string, unknown>
+    /** When the row is missing, insert this object (merged with patch). */
+    upsertRow?: Record<string, unknown>
+    organizationId?: string
+  },
+): Promise<void> {
+  await withFetchRetry(
+    async () =>
+      parseJson(
+        await supplyRequest('/api/supply/state/item', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(
+            authBody(userId, args.organizationId, {
+              snapshot_key: args.snapshotKey,
+              match: args.match,
+              patch: args.patch,
+              ...(args.upsertRow ? { upsert_row: args.upsertRow } : {}),
+            }),
+          ),
+        }),
+      ),
+    { retries: 3, baseDelayMs: 500, retryIf: isRetryableSupplyError },
+  )
+}
+
 export async function syncSupplyCatalog(
   userId: string,
   items: StoreItem[],
