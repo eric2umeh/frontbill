@@ -102,6 +102,10 @@ import {
 import type { StockShortageLine } from "@/lib/ui/stock-shortage-dialog";
 import { useAuth } from "@/lib/auth-context";
 import { canManageFnbStore, canManageKitchenBatchStandards, canEditKitchenBatchSellingPrice, canCountKitchenFinishedStock, canCountKitchenRawStock, canCountOutletDepartmentStock, canCountStoreStock, canOperateKitchenProduction, canRaisePurchaseRequest, canSubmitMarketRetirement, canAddPurchasedToStock, canSupplyRetirementReview, canSupplyPoAccountantReview, canSupplyPoManagerReview, canAdminTestApproveSupplyPo, canDirectDisbursePurchaseOrder, canonicalRoleKey, hasPermission } from "@/lib/permissions";
+import {
+  catalogPatchPreservingOnHand,
+  explicitStoreOnHandQty,
+} from "./edit-item-on-hand";
 import { isRetryableSupplyError } from "@/lib/utils/fetch-retry";
 import { isMainBarIssueDestination } from "@/lib/store/outlet-departments";
 import { formatSupplyActorStamp } from "./fnb-store";
@@ -4286,16 +4290,17 @@ function useSupplyChainImpl() {
                   : undefined,
             })
           : null;
+      // Only an explicit edit-form count may replace on-hand. A blank or
+      // unchanged field must not PATCH the browser's quantity over receipts
+      // or issue-outs that landed while the dialog was open.
+      const explicitQty = explicitStoreOnHandQty(input.quantityInStore);
       let nextItem: StoreItem = applyStoreItemDeptFields({
         ...existing,
         ...restInput,
         name,
         unit: input.unit?.trim() || existing.unit,
-        // Temporary: allow manual qty from Edit store item while bootstrapping stock.
         quantityInStore:
-          input.quantityInStore != null
-            ? Math.max(0, Number(input.quantityInStore) || 0)
-            : existing.quantityInStore,
+          explicitQty != null ? explicitQty : existing.quantityInStore,
         reorderLevel:
           input.reorderLevel != null
             ? Math.max(0, input.reorderLevel)
@@ -4357,10 +4362,13 @@ function useSupplyChainImpl() {
         void updateSupplyCatalogItem(
           userId,
           itemId,
-          {
-            ...nextItem,
-            ...storeItemDeptFieldsForDb(nextItem),
-          },
+          catalogPatchPreservingOnHand(
+            {
+              ...nextItem,
+              ...storeItemDeptFieldsForDb(nextItem),
+            },
+            explicitQty,
+          ),
           orgIdRef.current || undefined,
         )
           .catch((err) => {

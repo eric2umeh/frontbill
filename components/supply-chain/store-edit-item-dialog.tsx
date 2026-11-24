@@ -12,6 +12,7 @@ import {
   type SupplyDept,
 } from '@/lib/supply-chain/types'
 import { titleCaseWhileTyping, toTitleCaseWords } from '@/lib/supply-chain/title-case'
+import { quantityInStoreFromEditForm } from '@/lib/supply-chain/edit-item-on-hand'
 import { formatUnitLabel, sanitizeQuantityInput } from '@/lib/supply-chain/measurement-units'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -178,7 +179,7 @@ export function StoreEditItemDialog({ item, open, onOpenChange, onSave }: Props)
               onChange={(e) => setQty(sanitizeQuantityInput(e.target.value))}
             />
             <p className="text-[10px] text-muted-foreground mt-1">
-              Temporary: manual qty edit allowed while stock is set up from scratch.
+              Type a number to replace on-hand stock. Leave blank to keep the current quantity.
             </p>
           </div>
           <div>
@@ -253,6 +254,7 @@ export function StoreEditItemDialog({ item, open, onOpenChange, onSave }: Props)
                 unitFactors && conversionDef
                   ? storeUnitPriceFromEntryPrice(rawBenchmark, unit.trim(), conversionUnit, unitFactors)
                   : rawBenchmark || lastPrice
+              const quantityInStore = quantityInStoreFromEditForm(qty, item.quantityInStore)
               const res = onSave({
                 name: toTitleCaseWords(name),
                 unit: unit.trim(),
@@ -261,7 +263,7 @@ export function StoreEditItemDialog({ item, open, onOpenChange, onSave }: Props)
                 reorderLevel: Number(reorder) || 0,
                 lastPrice,
                 benchmarkPrice,
-                quantityInStore: Math.max(0, Number(qty) || 0),
+                ...(quantityInStore != null ? { quantityInStore } : {}),
                 kitchenCategory: selected.includes('kitchen') ? kitchenCategory : undefined,
                 unitFactors,
               })
