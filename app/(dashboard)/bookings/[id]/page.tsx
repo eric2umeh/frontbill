@@ -1614,7 +1614,7 @@ export default function BookingDetailPage({
                 .update(roomHousekeepingPatchAfterCheckout())
                 .eq("id", booking.room_id);
             }
-            await reconcileRoomStatusesClient();
+            await reconcileRoomStatusesClient({ force: true });
 
             setBooking((prev: any) =>
               prev

@@ -87,3 +87,12 @@ Cloud already batches stock-count saves and pauses supply Realtime by default. R
 # .env.local (cloud) — optional
 NEXT_PUBLIC_SUPPLY_LIVE_SYNC=true
 ```
+
+### Realtime egress SQL (staging → prod)
+
+After enabling org-live Realtime (`scripts/084_…`), also run on **staging first**, then **prod after deploy**:
+
+- `scripts/085_realtime_supply_snapshots_default_identity.sql`
+- `scripts/086_realtime_org_live_default_identity.sql` (bookings / outlet menus / catalog)
+
+Git push alone does not apply these — run them in the Supabase SQL Editor per project.

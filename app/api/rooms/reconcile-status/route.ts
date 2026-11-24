@@ -4,8 +4,12 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { reconcileRoomStatusesForOrganization } from "@/lib/rooms/room-occupancy";
 import { NextResponse } from "next/server";
 
+/** Warm-instance coalesce — cuts repeat full rooms+bookings scans within a few minutes. */
+const RECONCILE_SERVER_TTL_MS = 90_000
+const lastReconcileByOrg = new Map<string, number>()
+
 /** POST — sync rooms.status with active in-house folios (fixes stuck occupied after checkout). */
-export async function POST() {
+export async function POST(request: Request) {
   try {
     const supabase = await createClient();
     const {
@@ -36,11 +40,25 @@ export async function POST() {
       });
     }
 
+    const force =
+      request.headers.get("x-frontbill-reconcile-force") === "1" ||
+      new URL(request.url).searchParams.get("force") === "1"
+
+    const lastAt = lastReconcileByOrg.get(organizationId) ?? 0
+    if (!force && Date.now() - lastAt < RECONCILE_SERVER_TTL_MS) {
+      return NextResponse.json({
+        ok: true,
+        skipped: true,
+        reason: "ttl",
+      })
+    }
+
     const admin = createAdminClient();
     const result = await reconcileRoomStatusesForOrganization(
       admin,
       organizationId,
     );
+    lastReconcileByOrg.set(organizationId, Date.now())
     return NextResponse.json({ ok: true, ...result });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Reconcile failed";
