@@ -88,9 +88,10 @@ import {
 } from "@/lib/utils/table-mobile";
 
 const BOOKINGS_SCOPE_LIMIT = 500;
-/** List/catalog columns only — avoid select(*) fat rows on every OrgLive refetch. */
+/** List/catalog columns only — avoid select(*) fat rows on every OrgLive refetch.
+ * Do not select is_bulk / bulk_group_id — those are client-only (derived from notes). */
 const BOOKINGS_LIST_SELECT =
-  "id, folio_id, guest_id, room_id, check_in, check_out, number_of_nights, status, payment_status, payment_method, folio_status, rate_per_night, total_amount, balance, deposit, notes, created_by, updated_by, updated_at, is_bulk, bulk_group_id, organization_id, guests(name, phone), rooms(id, room_number, room_type)";
+  "id, folio_id, guest_id, room_id, check_in, check_out, number_of_nights, status, payment_status, payment_method, folio_status, rate_per_night, total_amount, balance, deposit, notes, created_by, updated_by, updated_at, created_at, organization_id, guests(name, phone), rooms(id, room_number, room_type)";
 /** Coalesce Realtime-driven list refetches. */
 const BOOKINGS_LIVE_DEBOUNCE_MS = 1_200;
 
