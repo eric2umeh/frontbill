@@ -7,8 +7,15 @@
 export const SUPPLY_LIVE_SYNC_ENABLED =
   process.env.NEXT_PUBLIC_SUPPLY_LIVE_SYNC === 'true'
 
-/** Option E — coalesce stock-count cloud writes (ms). Flushes earlier on tab hide. */
-export const STOCK_COUNT_FLUSH_MS = 45_000
+/**
+ * Option E — coalesce stock-count cloud writes (ms).
+ * Keep short: long queues + paused live sync made counts look "not in the database".
+ * Still flushes immediately on tab hide / before issue-out persists.
+ */
+export const STOCK_COUNT_FLUSH_MS = 2_500
+
+/** Soft re-pull of stock / issue-out when entering Supply or Outlets (no Realtime). */
+export const SUPPLY_STOCK_REFRESH_TTL_MS = 20_000
 
 /** Snapshot keys that are cheap enough to load outside Supply/Outlets (badges / alerts). */
 export const SUPPLY_LIGHT_HYDRATE_KEYS = [
