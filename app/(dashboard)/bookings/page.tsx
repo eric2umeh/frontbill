@@ -88,6 +88,11 @@ import {
 } from "@/lib/utils/table-mobile";
 
 const BOOKINGS_SCOPE_LIMIT = 500;
+/** List/catalog columns only — avoid select(*) fat rows on every OrgLive refetch. */
+const BOOKINGS_LIST_SELECT =
+  "id, folio_id, guest_id, room_id, check_in, check_out, number_of_nights, status, payment_status, payment_method, folio_status, rate_per_night, total_amount, balance, deposit, notes, created_by, updated_by, updated_at, is_bulk, bulk_group_id, organization_id, guests(name, phone), rooms(id, room_number, room_type)";
+/** Coalesce Realtime-driven list refetches. */
+const BOOKINGS_LIVE_DEBOUNCE_MS = 1_200;
 
 function describeFetchError(err: unknown): string {
   if (err instanceof Error) return err.message;
@@ -471,7 +476,7 @@ export default function BookingsPage() {
 
         let query = supabase
           .from("bookings")
-          .select("*, guests(name, phone), rooms(id, room_number, room_type)")
+          .select(BOOKINGS_LIST_SELECT)
           .eq("organization_id", organizationId)
           .limit(BOOKINGS_SCOPE_LIMIT);
 
@@ -617,7 +622,7 @@ export default function BookingsPage() {
 
           let query = supabase
             .from("bookings")
-            .select("*, guests(name, phone), rooms(id, room_number, room_type)")
+            .select(BOOKINGS_LIST_SELECT)
             .eq("organization_id", organizationId)
             .limit(BOOKINGS_SCOPE_LIMIT);
 
@@ -737,7 +742,7 @@ export default function BookingsPage() {
         await withFetchRetry(async () => {
           const { data, error } = await supabase
             .from("bookings")
-            .select("*, guests(name, phone), rooms(id, room_number, room_type)")
+            .select(BOOKINGS_LIST_SELECT)
             .eq("organization_id", organizationId)
             .in("status", ["confirmed", "checked_in", "reserved", "checked_out"])
             .lte("check_in", dayYmd)
@@ -840,12 +845,20 @@ export default function BookingsPage() {
 
   useEffect(() => {
     if (!organizationId) return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
     const onLiveBookings = () => {
-      void fetchBookings();
-      void refreshRoomStats(stayDateYmd ?? frontOfficeToday);
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        timer = null;
+        void fetchBookings();
+        void refreshRoomStats(stayDateYmd ?? frontOfficeToday);
+      }, BOOKINGS_LIVE_DEBOUNCE_MS);
     };
     window.addEventListener(ORG_LIVE_BOOKINGS, onLiveBookings);
-    return () => window.removeEventListener(ORG_LIVE_BOOKINGS, onLiveBookings);
+    return () => {
+      window.removeEventListener(ORG_LIVE_BOOKINGS, onLiveBookings);
+      if (timer) clearTimeout(timer);
+    };
   }, [
     organizationId,
     fetchBookings,
@@ -1086,7 +1099,7 @@ export default function BookingsPage() {
             .update(roomHousekeepingPatchAfterCheckout())
             .eq("id", booking.room_id);
         }
-        await reconcileRoomStatusesClient();
+        await reconcileRoomStatusesClient({ force: true });
         toast.success(`${booking.guests?.name} checked out successfully`);
         setCheckoutDraft(null);
         fetchBookings();
@@ -1123,7 +1136,7 @@ export default function BookingsPage() {
             .eq("id", m.room_id);
         }
       }
-      await reconcileRoomStatusesClient();
+      await reconcileRoomStatusesClient({ force: true });
       toast.success(
         `Checked out ${targets.length} room${targets.length === 1 ? "" : "s"}`,
       );
