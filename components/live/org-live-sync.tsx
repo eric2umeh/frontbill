@@ -12,20 +12,23 @@ import {
 } from '@/lib/live/org-live-events'
 import { SUPPLY_LIVE_SYNC_ENABLED } from '@/lib/supply-chain/supply-egress'
 
-/** When Realtime is down — still rare; must not re-download full state every few seconds. */
-const OFFLINE_FALLBACK_POLL_MS = 45_000
-/** When Realtime is up — rare catch-up only (missed events). */
-const ONLINE_SAFETY_POLL_MS = 90_000
+/** When Realtime is down — slow catch-up only (was 45s; burned list refetch egress). */
+const OFFLINE_FALLBACK_POLL_MS = 180_000
+/** When Realtime is up — rare safety net only (was 90s). */
+const ONLINE_SAFETY_POLL_MS = 600_000
 const DEBOUNCE_MS = 400
+/** Ignore rapid tab focus pulses so visibilitychange does not refetch every switch. */
+const VISIBILITY_PULSE_COOLDOWN_MS = 60_000
 
 /**
  * Keeps signed-in staff in sync: outlet menus, bookings, and optionally supply stock.
- * Supply Realtime/poll is off by default (Option D) — set NEXT_PUBLIC_SUPPLY_LIVE_SYNC=true to enable.
- * Never pulses on a fast timer — that forced full API refetches and burned egress.
+ * Supply Realtime/poll is off by default — set NEXT_PUBLIC_SUPPLY_LIVE_SYNC=true to enable.
+ * Safety polls are slow; Realtime change signals drive normal refresh.
  */
 export function OrgLiveSync() {
   const { organizationId } = useAuth()
   const debouncersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>())
+  const lastVisibilityPulseAtRef = useRef(0)
 
   useEffect(() => {
     if (!organizationId) return
@@ -52,7 +55,11 @@ export function OrgLiveSync() {
     }
 
     const onVisible = () => {
-      if (document.visibilityState === 'visible') pulseAll()
+      if (document.visibilityState !== 'visible') return
+      const now = Date.now()
+      if (now - lastVisibilityPulseAtRef.current < VISIBILITY_PULSE_COOLDOWN_MS) return
+      lastVisibilityPulseAtRef.current = now
+      pulseAll()
     }
 
     document.addEventListener('visibilitychange', onVisible)
@@ -140,7 +147,9 @@ export function OrgLiveSync() {
         () => pulse(ORG_LIVE_BOOKINGS),
       )
       .subscribe((status) => {
-        reschedulePoll(status === 'SUBSCRIBED' ? ONLINE_SAFETY_POLL_MS : OFFLINE_FALLBACK_POLL_MS)
+        reschedulePoll(
+          status === 'SUBSCRIBED' ? ONLINE_SAFETY_POLL_MS : OFFLINE_FALLBACK_POLL_MS,
+        )
       })
 
     return () => {
