@@ -166,6 +166,12 @@ import {
   mergeBarStockFromRemote,
   normalizeBarStockRows,
 } from "./bar-stock-normalize";
+import {
+  createSnapshotWriteQueue,
+  creditBarStockOnIssue,
+  creditKitchenRawOnIssue,
+  decrementStoreOnHand,
+} from "./issue-out-apply";
 import { applyRetirementLinesToCatalog } from "./retirement-stock";
 import {
   applyRetirementBatchDecision,
@@ -301,6 +307,15 @@ const LIVE_SUPPLY_THROTTLE_MS = 8_000;
 const LIVE_SUPPLY_INTERVAL_MS = 60_000;
 /** Serializes PO/basket PUTs so a slow full snapshot cannot overwrite a fresh clear/send. */
 let poBasketPutChain: Promise<void> = Promise.resolve();
+/**
+ * Full-array stock PUTs must not overlap. A slower write of an earlier
+ * snapshot would otherwise replace a newer one and drop issued quantities.
+ */
+const barStockWriteQueue = createSnapshotWriteQueue();
+const kitchenStockWriteQueue = createSnapshotWriteQueue();
+const kitchenRawWriteQueue = createSnapshotWriteQueue();
+const issueOutLogWriteQueue = createSnapshotWriteQueue();
+const catalogQtyWriteQueue = createSnapshotWriteQueue();
 /** Bumped on clear/send so stale debounced PO PUTs cannot restore the cart after refresh. */
 let poBasketSyncGeneration = 0;
 
@@ -829,6 +844,7 @@ function useSupplyChainImpl() {
   /** Immediate cloud write for bar stock counts (POS / Main Bar menu qty). */
   const persistBarStockSnapshot = useCallback(
     async (rows: BarStockItem[], opts?: { required?: boolean }) => {
+      await barStockWriteQueue(async () => {
       if (!useDbPersistence) {
         if (opts?.required) {
           throw new Error("Cloud sync is unavailable — sign in again and retry.");
@@ -864,6 +880,7 @@ function useSupplyChainImpl() {
         if (opts?.required) throw err;
         console.warn("[supply-chain] bar stock sync failed", err);
       }
+      });
     },
     [useDbPersistence, userId, role],
   );
@@ -871,6 +888,7 @@ function useSupplyChainImpl() {
   /** Immediate cloud write for kitchen stock after outlet POS sales (Restaurant, etc.). */
   const persistKitchenStockSnapshot = useCallback(
     async (rows: KitchenStockItem[], opts?: { required?: boolean }) => {
+      await kitchenStockWriteQueue(async () => {
       if (!useDbPersistence) {
         if (opts?.required) {
           throw new Error("Cloud sync is unavailable — sign in again and retry.");
@@ -906,6 +924,7 @@ function useSupplyChainImpl() {
         if (opts?.required) throw err;
         console.warn("[supply-chain] kitchen stock sync failed", err);
       }
+      });
     },
     [useDbPersistence, userId, role],
   );
@@ -913,6 +932,7 @@ function useSupplyChainImpl() {
   /** Immediate cloud write for kitchen raw stock (issue-out → kitchen). */
   const persistKitchenRawStockSnapshot = useCallback(
     async (rows: KitchenRawStockItem[], opts?: { required?: boolean }) => {
+      await kitchenRawWriteQueue(async () => {
       if (!useDbPersistence) {
         if (opts?.required) {
           throw new Error("Cloud sync is unavailable — sign in again and retry.");
@@ -948,6 +968,7 @@ function useSupplyChainImpl() {
         if (opts?.required) throw err;
         console.warn("[supply-chain] kitchen raw stock sync failed", err);
       }
+      });
     },
     [useDbPersistence, userId, role],
   );
@@ -955,6 +976,7 @@ function useSupplyChainImpl() {
   /** Small PUT for issue-out log only — avoids re-uploading recipes/F&B on every issue. */
   const persistIssueOutLogSnapshot = useCallback(
     async (rows: IssueOutRecord[], opts?: { required?: boolean }) => {
+      await issueOutLogWriteQueue(async () => {
       if (!useDbPersistence) {
         if (opts?.required) {
           throw new Error("Cloud sync is unavailable — sign in again and retry.");
@@ -987,8 +1009,38 @@ function useSupplyChainImpl() {
         if (opts?.required) throw err;
         console.warn("[supply-chain] issue-out log sync failed", err);
       }
+      });
     },
     [useDbPersistence, userId, role],
+  );
+
+  /**
+   * Stock-count flushes set catalogSyncSkipRef, so the debounced catalogue
+   * effect never uploads the issue-out decrement. PATCH the new on-hand qty.
+   */
+  const persistIssuedCatalogQty = useCallback(
+    (storeItemId: string) =>
+      catalogQtyWriteQueue(async () => {
+        if (!useDbPersistence || !userId) return;
+        const row = storeItemsRef.current.find((item) => item.id === storeItemId);
+        if (!row) return;
+        try {
+          await updateSupplyCatalogItem(
+            userId,
+            storeItemId,
+            { quantityInStore: row.quantityInStore },
+            orgIdRef.current || undefined,
+          );
+        } catch (err) {
+          console.warn("[supply-chain] issue-out store qty sync failed", err);
+          toast.error(
+            err instanceof Error
+              ? `Issued locally but central store qty did not sync: ${err.message}`
+              : "Issued locally but central store qty did not sync",
+          );
+        }
+      }),
+    [useDbPersistence, userId],
   );
 
   /** Small PUT for PO + basket only — avoids 502/timeouts from uploading the full org snapshot. */
@@ -5768,7 +5820,11 @@ function useSupplyChainImpl() {
       },
     ) => {
       if (qty <= 0) return { error: "Enter a quantity to issue" };
-      const store = storeItems.find((s) => s.id === storeItemId);
+      const liveStore =
+        storeItemsRef.current.length > 0 || storeItems.length === 0
+          ? storeItemsRef.current
+          : storeItems;
+      const store = liveStore.find((s) => s.id === storeItemId);
       if (!store) {
         return { error: "Item not found" };
       }
@@ -5778,54 +5834,16 @@ function useSupplyChainImpl() {
         };
       }
 
-      setStoreItems((items) =>
-        items.map((s) =>
-          s.id === storeItemId
-            ? { ...s, quantityInStore: s.quantityInStore - qty }
-            : s,
-        ),
-      );
+      const nextStoreItems = decrementStoreOnHand(liveStore, storeItemId, qty);
+      storeItemsRef.current = nextStoreItems;
+      setStoreItems(nextStoreItems);
 
-      let nextBarStock: BarStockItem[] = barStockRef.current;
-      setBarStock((prev) => {
-        const next = normalizeBarStockRows(prev);
-        const canonicalId = canonicalBarStockId(storeItemId);
-        const idx = next.findIndex(
-          (b) => b.storeItemId === storeItemId || b.id === canonicalId,
-        );
-        if (idx >= 0) {
-          nextBarStock = normalizeBarStockRows(
-            next.map((b, i) =>
-              i === idx
-                ? {
-                    ...b,
-                    id: canonicalId,
-                    storeItemId,
-                    name: store.name,
-                    unit: store.unit,
-                    quantityOnHand: b.quantityOnHand + qty,
-                    unitsPerSale: Math.max(1, b.unitsPerSale || 1),
-                  }
-                : b,
-            ),
-          );
-        } else {
-          nextBarStock = normalizeBarStockRows([
-            ...next,
-            {
-              id: canonicalId,
-              storeItemId,
-              name: store.name,
-              quantityOnHand: qty,
-              reorderLevel: store.reorderLevel,
-              unitsPerSale: 1,
-              unit: store.unit,
-            },
-          ]);
-        }
-        barStockRef.current = nextBarStock;
-        return nextBarStock;
-      });
+      // Apply on the ref now. A later line in the same cart must not close over
+      // this partial array — React skips the eager updater once a lane is pending,
+      // and each line used to PUT that partial snapshot.
+      const nextBarStock = creditBarStockOnIssue(barStockRef.current, store, qty);
+      barStockRef.current = nextBarStock;
+      setBarStock(nextBarStock);
 
       const dest = opts?.destination?.trim() || "Main Bar";
       const receivedBy = opts?.receivedBy?.trim() || actor.name;
@@ -5848,11 +5866,9 @@ function useSupplyChainImpl() {
         issuedAt: new Date().toISOString(),
         issuedBy: actor.name,
       };
-      setIssueOutLog((prev) => {
-        const next = [issueRow, ...prev];
-        issueOutLogRef.current = next;
-        return next;
-      });
+      const nextIssueLog = [issueRow, ...issueOutLogRef.current];
+      issueOutLogRef.current = nextIssueLog;
+      setIssueOutLog(nextIssueLog);
 
       setActivityLog((a) =>
         log(
@@ -5875,11 +5891,13 @@ function useSupplyChainImpl() {
       notifyBarStockChanged();
       notifyIssueOutLogChanged();
       markLocalSupplyMutation();
-      // Option C/E: flush count patches, then dedicated bar + issue-log PUTs (no fat snapshot).
+      // Flush count patches first, then write the latest bar array and store qty.
+      // Read the refs after the await so every line in this cart sends the final snapshot.
       void (async () => {
         await flushStockCountPatches();
-        await persistBarStockSnapshot(nextBarStock);
+        await persistBarStockSnapshot(barStockRef.current);
         await persistIssueOutLogSnapshot(issueOutLogRef.current);
+        await persistIssuedCatalogQty(storeItemId);
       })();
       return { ok: true as const };
     },
@@ -5888,6 +5906,7 @@ function useSupplyChainImpl() {
       flushStockCountPatches,
       persistBarStockSnapshot,
       persistIssueOutLogSnapshot,
+      persistIssuedCatalogQty,
     ],
   );
 
@@ -5919,7 +5938,11 @@ function useSupplyChainImpl() {
       const receivedBy = opts?.receivedBy?.trim();
       if (!receivedBy) return { error: "Received by is required" };
 
-      const store = storeItems.find((s) => s.id === storeItemId);
+      const liveStore =
+        storeItemsRef.current.length > 0 || storeItems.length === 0
+          ? storeItemsRef.current
+          : storeItems;
+      const store = liveStore.find((s) => s.id === storeItemId);
       if (!store) return { error: "Item not found" };
       if (!Number.isFinite(qty) || qty <= 0)
         return { error: "Enter a quantity to issue" };
@@ -5943,38 +5966,15 @@ function useSupplyChainImpl() {
         return { ok: true as const };
       }
 
-      setStoreItems((items) =>
-        items.map((s) =>
-          s.id === storeItemId
-            ? { ...s, quantityInStore: s.quantityInStore - qty }
-            : s,
-        ),
-      );
+      const nextStoreItems = decrementStoreOnHand(liveStore, storeItemId, qty);
+      storeItemsRef.current = nextStoreItems;
+      setStoreItems(nextStoreItems);
 
       let nextKitchenRaw = kitchenRawStockRef.current;
       if (storeItemMatchesDept(store, "kitchen") && destinationCreditsKitchenRaw(dest)) {
-        setKitchenRawStock((prev) => {
-          const idx = prev.findIndex((k) => k.storeItemId === storeItemId);
-          if (idx >= 0) {
-            nextKitchenRaw = prev.map((k, i) =>
-              i === idx ? { ...k, quantityOnHand: k.quantityOnHand + qty } : k,
-            );
-          } else {
-            nextKitchenRaw = [
-              ...prev,
-              {
-                id: `kraw-${storeItemId}`,
-                storeItemId,
-                name: store.name,
-                quantityOnHand: qty,
-                reorderLevel: store.reorderLevel,
-                unit: store.unit,
-              },
-            ];
-          }
-          kitchenRawStockRef.current = nextKitchenRaw;
-          return nextKitchenRaw;
-        });
+        nextKitchenRaw = creditKitchenRawOnIssue(kitchenRawStockRef.current, store, qty);
+        kitchenRawStockRef.current = nextKitchenRaw;
+        setKitchenRawStock(nextKitchenRaw);
         setActivityLog((a) =>
           log(
             a,
@@ -5999,26 +5999,24 @@ function useSupplyChainImpl() {
 
       const summary = `Stock out: ${displayQty} ${displayUnit} ${store.name} → ${dest} (${extra})`;
 
-      setIssueOutLog((prev) => {
-        const next = [
-          {
-            id: uid("issue"),
-            storeItemId,
-            itemName: store.name,
-            unit: displayUnit,
-            quantity: displayQty,
-            destination: dest,
-            receivedBy,
-            receivedById: opts?.receivedById || undefined,
-            notes: opts?.notes?.trim() || undefined,
-            issuedAt: new Date().toISOString(),
-            issuedBy: actor.name,
-          },
-          ...prev,
-        ];
-        issueOutLogRef.current = next;
-        return next;
-      });
+      const nextIssueLog = [
+        {
+          id: uid("issue"),
+          storeItemId,
+          itemName: store.name,
+          unit: displayUnit,
+          quantity: displayQty,
+          destination: dest,
+          receivedBy,
+          receivedById: opts?.receivedById || undefined,
+          notes: opts?.notes?.trim() || undefined,
+          issuedAt: new Date().toISOString(),
+          issuedBy: actor.name,
+        },
+        ...issueOutLogRef.current,
+      ];
+      issueOutLogRef.current = nextIssueLog;
+      setIssueOutLog(nextIssueLog);
       setActivityLog((a) =>
         log(a, "stock_issued_out", actor, summary, storeItemId),
       );
@@ -6030,9 +6028,10 @@ function useSupplyChainImpl() {
           storeItemMatchesDept(store, "kitchen") &&
           destinationCreditsKitchenRaw(dest)
         ) {
-          await persistKitchenRawStockSnapshot(nextKitchenRaw);
+          await persistKitchenRawStockSnapshot(kitchenRawStockRef.current);
         }
         await persistIssueOutLogSnapshot(issueOutLogRef.current);
+        await persistIssuedCatalogQty(storeItemId);
       })();
       return { ok: true as const };
     },
@@ -6042,6 +6041,7 @@ function useSupplyChainImpl() {
       flushStockCountPatches,
       persistKitchenRawStockSnapshot,
       persistIssueOutLogSnapshot,
+      persistIssuedCatalogQty,
     ],
   );
 
