@@ -7,7 +7,8 @@ import { BackdatePendingCountContext } from '@/hooks/use-backdate-pending-count'
 import { quietBrowserFetch } from '@/lib/utils/fetch-retry'
 
 /** Single poll for sidebar + Night Audit badges (avoids duplicate hooks calling the same API). */
-const PENDING_COUNT_POLL_MS = 180_000
+const PENDING_COUNT_POLL_MS = 600_000
+const PENDING_VISIBILITY_COOLDOWN_MS = 120_000
 
 export function BackdatePendingProvider({ children }: { children: React.ReactNode }) {
   const { userId, role } = useAuth()
@@ -21,8 +22,14 @@ export function BackdatePendingProvider({ children }: { children: React.ReactNod
     }
 
     let cancelled = false
+    let lastLoadAt = 0
 
-    const load = async () => {
+    const load = async (force = false) => {
+      const now = Date.now()
+      if (!force && lastLoadAt > 0 && now - lastLoadAt < PENDING_VISIBILITY_COOLDOWN_MS) {
+        return
+      }
+      lastLoadAt = now
       try {
         const res = await quietBrowserFetch(
           `/api/backdate-requests/pending-count?caller_id=${encodeURIComponent(userId)}`,
@@ -36,19 +43,19 @@ export function BackdatePendingProvider({ children }: { children: React.ReactNod
       }
     }
 
-    void load()
+    void load(true)
 
     const interval = window.setInterval(() => {
       if (document.visibilityState !== 'visible') return
-      load()
+      void load(true)
     }, PENDING_COUNT_POLL_MS)
 
     const onVis = () => {
-      if (document.visibilityState === 'visible') void load()
+      if (document.visibilityState === 'visible') void load(false)
     }
     document.addEventListener('visibilitychange', onVis)
 
-    const onCustom = () => void load()
+    const onCustom = () => void load(true)
     window.addEventListener('frontbill-backdate-pending-changed', onCustom)
 
     return () => {
