@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef } from 'react'
+import { usePathname } from 'next/navigation'
 import { useAuth } from '@/lib/auth-context'
 import { createClient } from '@/lib/supabase/client'
 import {
@@ -12,23 +13,54 @@ import {
 } from '@/lib/live/org-live-events'
 import { SUPPLY_LIVE_SYNC_ENABLED } from '@/lib/supply-chain/supply-egress'
 
-/** When Realtime is down — slow catch-up only (was 45s; burned list refetch egress). */
-const OFFLINE_FALLBACK_POLL_MS = 180_000
-/** When Realtime is up — rare safety net only (was 90s). */
-const ONLINE_SAFETY_POLL_MS = 600_000
+/** When Realtime is down — slow catch-up only (was 180s). */
+const OFFLINE_FALLBACK_POLL_MS = 300_000
+/** When Realtime is up — rare safety net only (was 600s). */
+const ONLINE_SAFETY_POLL_MS = 900_000
 const DEBOUNCE_MS = 400
 /** Ignore rapid tab focus pulses so visibilitychange does not refetch every switch. */
-const VISIBILITY_PULSE_COOLDOWN_MS = 60_000
+const VISIBILITY_PULSE_COOLDOWN_MS = 120_000
+
+function pathWantsBookingsLive(pathname: string | null): boolean {
+  if (!pathname) return false
+  return (
+    pathname === '/dashboard' ||
+    pathname.startsWith('/dashboard/') ||
+    pathname.startsWith('/bookings') ||
+    pathname.startsWith('/reservations') ||
+    pathname.startsWith('/bulk-bookings') ||
+    pathname.startsWith('/daily-book') ||
+    pathname.startsWith('/rooms') ||
+    pathname.startsWith('/housekeeping') ||
+    pathname.startsWith('/front-office')
+  )
+}
+
+function pathWantsOutletMenuLive(pathname: string | null): boolean {
+  if (!pathname) return false
+  return (
+    pathname.startsWith('/outlets') ||
+    pathname.startsWith('/pos') ||
+    pathname.startsWith('/supply') ||
+    pathname.startsWith('/kitchen')
+  )
+}
 
 /**
  * Keeps signed-in staff in sync: outlet menus, bookings, and optionally supply stock.
  * Supply Realtime/poll is off by default — set NEXT_PUBLIC_SUPPLY_LIVE_SYNC=true to enable.
- * Safety polls are slow; Realtime change signals drive normal refresh.
+ * Safety polls are slow and path-gated so idle tabs on non-FO routes do not refetch lists.
  */
 export function OrgLiveSync() {
   const { organizationId } = useAuth()
+  const pathname = usePathname()
+  const pathnameRef = useRef(pathname)
   const debouncersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>())
   const lastVisibilityPulseAtRef = useRef(0)
+
+  useEffect(() => {
+    pathnameRef.current = pathname
+  }, [pathname])
 
   useEffect(() => {
     if (!organizationId) return
@@ -48,10 +80,12 @@ export function OrgLiveSync() {
       )
     }
 
-    const pulseAll = () => {
+    /** Timed / visibility catch-up — only pulse channels the current route cares about. */
+    const pulseSafety = () => {
+      const path = pathnameRef.current
       if (supplyLive) pulse(ORG_LIVE_SUPPLY)
-      pulse(ORG_LIVE_OUTLET_MENU)
-      pulse(ORG_LIVE_BOOKINGS)
+      if (pathWantsOutletMenuLive(path)) pulse(ORG_LIVE_OUTLET_MENU)
+      if (pathWantsBookingsLive(path)) pulse(ORG_LIVE_BOOKINGS)
     }
 
     const onVisible = () => {
@@ -59,7 +93,7 @@ export function OrgLiveSync() {
       const now = Date.now()
       if (now - lastVisibilityPulseAtRef.current < VISIBILITY_PULSE_COOLDOWN_MS) return
       lastVisibilityPulseAtRef.current = now
-      pulseAll()
+      pulseSafety()
     }
 
     document.addEventListener('visibilitychange', onVisible)
@@ -69,7 +103,7 @@ export function OrgLiveSync() {
       window.clearInterval(pollHandle)
       pollHandle = window.setInterval(() => {
         if (document.visibilityState !== 'visible') return
-        pulseAll()
+        pulseSafety()
       }, ms)
     }
 
@@ -124,7 +158,9 @@ export function OrgLiveSync() {
           table: 'outlet_menu_items',
           filter: `organization_id=eq.${organizationId}`,
         },
-        () => pulse(ORG_LIVE_OUTLET_MENU),
+        () => {
+          if (pathWantsOutletMenuLive(pathnameRef.current)) pulse(ORG_LIVE_OUTLET_MENU)
+        },
       )
       .on(
         'postgres_changes',
@@ -134,7 +170,9 @@ export function OrgLiveSync() {
           table: 'outlet_menu_categories',
           filter: `organization_id=eq.${organizationId}`,
         },
-        () => pulse(ORG_LIVE_OUTLET_MENU),
+        () => {
+          if (pathWantsOutletMenuLive(pathnameRef.current)) pulse(ORG_LIVE_OUTLET_MENU)
+        },
       )
       .on(
         'postgres_changes',
@@ -144,7 +182,9 @@ export function OrgLiveSync() {
           table: 'bookings',
           filter: `organization_id=eq.${organizationId}`,
         },
-        () => pulse(ORG_LIVE_BOOKINGS),
+        () => {
+          if (pathWantsBookingsLive(pathnameRef.current)) pulse(ORG_LIVE_BOOKINGS)
+        },
       )
       .subscribe((status) => {
         reschedulePoll(
