@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Dialog,
   DialogContent,
@@ -34,6 +34,7 @@ import {
   calendarNightsBetween,
   toYmd,
 } from "@/lib/booking/edit-booking-patch";
+import { extendChargeFromFreshBooking } from "@/lib/booking/extend-charge-from-fresh";
 import { guestOrOrganizationNameTaken } from "@/lib/utils/guest-org-name-uniqueness";
 import { isSelectableLedgerName } from "@/lib/utils/ledger-organization";
 import { mergeCounterpartyOrganizationRows } from "@/lib/utils/search-counterparty-organizations";
@@ -96,6 +97,7 @@ export function ExtendStayModal({
     null,
   );
   const [loading, setLoading] = useState(false);
+  const extendLockRef = useRef(false);
   const [ledgerType, setLedgerType] = useState("individual");
   const [showOrgSearch, setShowOrgSearch] = useState(false);
   const [selectedLedger, setSelectedLedger] = useState<any>(null);
@@ -421,52 +423,55 @@ export function ExtendStayModal({
   };
 
   const handleExtend = async () => {
-    if (!newCheckOutDate || !paymentMethod) {
-      toast.error("Please complete all fields");
-      return;
-    }
-    if (activePlans.length === 0 || additionalAmount <= 0) {
-      toast.error(
-        isBulkExtend
-          ? "New checkout must be after every room’s current checkout date"
-          : "New checkout must be after the current checkout date",
-      );
-      return;
-    }
-    if (activePlans.some((p) => !(p.rate > 0))) {
-      toast.error("Rate per night is missing or zero — fix the booking rate first");
-      return;
-    }
-
-    if (activePlans.some((p) => !p.target.id)) {
-      toast.error(
-        "Booking ID is missing. Please close and reopen this dialog.",
-      );
-      return;
-    }
-
-    if (paymentMethod === "city_ledger" && !selectedLedger) {
-      toast.error("Please select an account for City Ledger");
-      return;
-    }
-    if (paymentMethodRequiresAccount(paymentMethod) && !paymentAccountId) {
-      toast.error(
-        "Select the POS / bank account where this payment was received",
-      );
-      return;
-    }
-
-    if (
-      activePlans.some(
-        (p) => (p.target.folio_status || "active") === "checked_out",
-      )
-    ) {
-      toast.error("One or more folios are checked out and cannot be extended");
-      return;
-    }
-
-    setLoading(true);
+    if (extendLockRef.current) return;
+    extendLockRef.current = true;
+    let postedCount = 0;
     try {
+      if (!newCheckOutDate || !paymentMethod) {
+        toast.error("Please complete all fields");
+        return;
+      }
+      if (activePlans.length === 0 || additionalAmount <= 0) {
+        toast.error(
+          isBulkExtend
+            ? "New checkout must be after every room’s current checkout date"
+            : "New checkout must be after the current checkout date",
+        );
+        return;
+      }
+      if (activePlans.some((p) => !(p.rate > 0))) {
+        toast.error("Rate per night is missing or zero — fix the booking rate first");
+        return;
+      }
+
+      if (activePlans.some((p) => !p.target.id)) {
+        toast.error(
+          "Booking ID is missing. Please close and reopen this dialog.",
+        );
+        return;
+      }
+
+      if (paymentMethod === "city_ledger" && !selectedLedger) {
+        toast.error("Please select an account for City Ledger");
+        return;
+      }
+      if (paymentMethodRequiresAccount(paymentMethod) && !paymentAccountId) {
+        toast.error(
+          "Select the POS / bank account where this payment was received",
+        );
+        return;
+      }
+
+      if (
+        activePlans.some(
+          (p) => (p.target.folio_status || "active") === "checked_out",
+        )
+      ) {
+        toast.error("One or more folios are checked out and cannot be extended");
+        return;
+      }
+
+      setLoading(true);
       const supabase = createClient();
       const { data: authData } = await supabase.auth.getUser();
       const currentUserId = authData.user?.id || booking.created_by || null;
@@ -476,16 +481,137 @@ export function ExtendStayModal({
         ? paymentAccountInsertFields(paymentAccount)
         : { payment_account_id: null, payment_account_label: null };
 
-      let cityLedgerBumpTotal = 0;
+      const addCityLedgerBalance = async (delta: number) => {
+        if (!(delta > 0) || paymentMethod !== "city_ledger") return;
+        try {
+          if (booking.guestId && !selectedLedger?.id) {
+            const { data: guestRow } = await supabase
+              .from("guests")
+              .select("name")
+              .eq("id", booking.guestId)
+              .single();
+            if (guestRow?.name) {
+              const { data: existingAcct } = await supabase
+                .from("city_ledger_accounts")
+                .select("id, balance")
+                .eq("organization_id", booking.organization_id)
+                .ilike("account_name", guestRow.name)
+                .maybeSingle();
+
+              if (existingAcct) {
+                await supabase
+                  .from("city_ledger_accounts")
+                  .update({
+                    balance: (existingAcct.balance || 0) + delta,
+                  })
+                  .eq("id", existingAcct.id);
+              } else {
+                await supabase.from("city_ledger_accounts").insert([
+                  {
+                    organization_id: booking.organization_id,
+                    account_name: guestRow.name,
+                    account_type: "individual",
+                    balance: delta,
+                  },
+                ]);
+              }
+            }
+          }
+
+          if (selectedLedger?.id) {
+            const { data: acct } = await supabase
+              .from("city_ledger_accounts")
+              .select("balance")
+              .eq("id", selectedLedger.id)
+              .single();
+            await supabase
+              .from("city_ledger_accounts")
+              .update({
+                balance: (acct?.balance || 0) + delta,
+              })
+              .eq("id", selectedLedger.id);
+
+            if (ledgerType === "organization") {
+              const { data: orgRow } = await supabase
+                .from("organizations")
+                .select("current_balance")
+                .eq("id", selectedLedger.id)
+                .single();
+              if (orgRow) {
+                await supabase
+                  .from("organizations")
+                  .update({
+                    current_balance:
+                      ((orgRow.current_balance as number) || 0) + delta,
+                  })
+                  .eq("id", selectedLedger.id);
+              }
+            }
+          }
+        } catch (ledgerError: any) {
+          toast.warning(
+            `Room extended but city ledger was not updated: ${ledgerError?.message || "request failed"}`,
+          );
+        }
+      };
 
       for (const plan of activePlans) {
         const target = plan.target;
+        const { data: freshBk, error: freshError } = await supabase
+          .from("bookings")
+          .select(
+            "balance, deposit, total_amount, number_of_nights, check_in, check_out, rate_per_night, folio_status",
+          )
+          .eq("id", target.id)
+          .single();
+        if (freshError || !freshBk) {
+          throw new Error(
+            freshError?.message ||
+              `Could not load ${target.room || "this room"} before extending`,
+          );
+        }
+        if ((freshBk.folio_status || "active") === "checked_out") {
+          throw new Error(
+            `${target.room || "A room"} is checked out and cannot be extended`,
+          );
+        }
+
+        const decision = extendChargeFromFreshBooking({
+          freshCheckIn: freshBk.check_in,
+          freshCheckOut: freshBk.check_out,
+          freshRate: freshBk.rate_per_night,
+          fallbackCheckIn: plan.checkInYmd,
+          fallbackCheckOut: plan.currentCheckOutYmd,
+          fallbackRate: plan.rate,
+          newCheckOutYmd: newCheckoutStr,
+        });
+        if (decision.alreadyExtended) continue;
+        if (!(decision.rate > 0) || !(decision.amount > 0)) {
+          throw new Error(
+            `Rate per night is missing or zero for ${target.room || "a room"}`,
+          );
+        }
+
+        const nightLabel = `${decision.nights} night${decision.nights !== 1 ? "s" : ""}`;
+        const groupLabel = isBulkExtend ? " (group)" : "";
+        // Date in the description makes a retry of this exact extension find the
+        // charge if it was saved but the checkout update did not.
+        const chargeDescription = `Extended Stay - ${nightLabel}${groupLabel} to ${newCheckoutStr}`;
+        const { data: existingCharges, error: existingChargeError } =
+          await supabase
+            .from("folio_charges")
+            .select("id")
+            .eq("booking_id", target.id)
+            .eq("charge_type", "extended_stay")
+            .eq("description", chargeDescription)
+            .eq("amount", decision.amount)
+            .limit(1);
+        if (existingChargeError) throw existingChargeError;
+
         const chargeData: Record<string, unknown> = {
           booking_id: target.id,
-          description: `Extended Stay - ${plan.nights} night${plan.nights !== 1 ? "s" : ""}${
-            isBulkExtend ? " (group)" : ""
-          }`,
-          amount: plan.amount,
+          description: chargeDescription,
+          amount: decision.amount,
           charge_type: "extended_stay",
           payment_method: paymentMethod,
           ledger_account_id:
@@ -499,30 +625,24 @@ export function ExtendStayModal({
           chargeData.organization_id = target.organization_id;
         }
 
-        const { error: chargeError } = await insertFolioCharges(supabase, [
-          chargeData,
-        ]);
-        if (chargeError) throw chargeError;
+        if (!existingCharges?.length) {
+          const { error: chargeError } = await insertFolioCharges(supabase, [
+            chargeData,
+          ]);
+          if (chargeError) throw chargeError;
+        }
 
-        const { data: freshBk } = await supabase
-          .from("bookings")
-          .select(
-            "balance, deposit, total_amount, number_of_nights, check_in, check_out, rate_per_night",
-          )
-          .eq("id", target.id)
-          .single();
-
-        const stayCheckIn = toYmd(freshBk?.check_in) || plan.checkInYmd;
+        const stayCheckIn = decision.checkInYmd;
         const totalNights = stayCheckIn
           ? calendarNightsBetween(stayCheckIn, newCheckoutStr)
           : Math.max(
               1,
-              (Number(freshBk?.number_of_nights) || 0) + plan.nights,
+              (Number(freshBk.number_of_nights) || 0) + decision.nights,
             );
-        const prevTotal = Number(freshBk?.total_amount) || 0;
-        const nextTotal = prevTotal + plan.amount;
-        const prevDeposit = Number(freshBk?.deposit) || 0;
-        const prevBalance = Number(freshBk?.balance) || 0;
+        const prevTotal = Number(freshBk.total_amount) || 0;
+        const nextTotal = prevTotal + decision.amount;
+        const prevDeposit = Number(freshBk.deposit) || 0;
+        const prevBalance = Number(freshBk.balance) || 0;
 
         const bookingUpdate: Record<string, unknown> = {
           check_out: newCheckoutStr,
@@ -530,13 +650,13 @@ export function ExtendStayModal({
           total_amount: nextTotal,
         };
         if (paymentMethod === "city_ledger") {
-          bookingUpdate.balance = prevBalance + plan.amount;
+          bookingUpdate.balance = prevBalance + decision.amount;
           bookingUpdate.payment_status = "pending";
         } else {
-          bookingUpdate.deposit = prevDeposit + plan.amount;
+          bookingUpdate.deposit = prevDeposit + decision.amount;
           bookingUpdate.balance = Math.max(
             0,
-            nextTotal - (prevDeposit + plan.amount),
+            nextTotal - (prevDeposit + decision.amount),
           );
         }
 
@@ -546,102 +666,41 @@ export function ExtendStayModal({
           .eq("id", target.id);
         if (bookingError) throw bookingError;
 
-        try {
-          await supabase.from("transactions").insert([
-            {
-              organization_id: target.organization_id || null,
-              booking_id: target.id,
-              transaction_id: `EXT-${target.id}-${Date.now()}`,
-              guest_name: target.guestName || "Guest",
-              room: target.room || null,
-              amount: plan.amount,
-              payment_method: paymentMethod,
-              status: isPaidNow ? "paid" : "pending",
-              description: appendAccountToNotes(
-                `Extended Stay — ${plan.nights} night${plan.nights !== 1 ? "s" : ""}${
-                  isBulkExtend ? " (group)" : ""
-                }`,
-                accountFields.payment_account_label,
-              ),
-              received_by: currentUserId,
-              ...accountFields,
-            },
-          ]);
-        } catch (_) {
-          /* non-fatal */
-        }
-
-        if (paymentMethod === "city_ledger") {
-          cityLedgerBumpTotal += plan.amount;
-        }
-      }
-
-      if (paymentMethod === "city_ledger" && cityLedgerBumpTotal > 0) {
-        if (booking.guestId && !selectedLedger?.id) {
-          const { data: guestRow } = await supabase
-            .from("guests")
-            .select("name")
-            .eq("id", booking.guestId)
-            .single();
-          if (guestRow?.name) {
-            const { data: existingAcct } = await supabase
-              .from("city_ledger_accounts")
-              .select("id, balance")
-              .eq("organization_id", booking.organization_id)
-              .ilike("account_name", guestRow.name)
-              .maybeSingle();
-
-            if (existingAcct) {
-              await supabase
-                .from("city_ledger_accounts")
-                .update({
-                  balance: (existingAcct.balance || 0) + cityLedgerBumpTotal,
-                })
-                .eq("id", existingAcct.id);
-            } else {
-              await supabase.from("city_ledger_accounts").insert([
-                {
-                  organization_id: booking.organization_id,
-                  account_name: guestRow.name,
-                  account_type: "individual",
-                  balance: cityLedgerBumpTotal,
-                },
-              ]);
-            }
+        const transactionDescription = appendAccountToNotes(
+          `Extended Stay — ${nightLabel}${groupLabel} to ${newCheckoutStr}`,
+          accountFields.payment_account_label,
+        );
+        const { data: existingTxns, error: existingTxnError } = await supabase
+          .from("transactions")
+          .select("id")
+          .eq("booking_id", target.id)
+          .eq("description", transactionDescription)
+          .eq("amount", decision.amount)
+          .limit(1);
+        if (!existingTxnError && !existingTxns?.length) {
+          try {
+            await supabase.from("transactions").insert([
+              {
+                organization_id: target.organization_id || null,
+                booking_id: target.id,
+                transaction_id: `EXT-${target.id}-${Date.now()}`,
+                guest_name: target.guestName || "Guest",
+                room: target.room || null,
+                amount: decision.amount,
+                payment_method: paymentMethod,
+                status: isPaidNow ? "paid" : "pending",
+                description: transactionDescription,
+                received_by: currentUserId,
+                ...accountFields,
+              },
+            ]);
+          } catch (_) {
+            /* non-fatal */
           }
         }
 
-        if (selectedLedger?.id) {
-          const { data: acct } = await supabase
-            .from("city_ledger_accounts")
-            .select("balance")
-            .eq("id", selectedLedger.id)
-            .single();
-          await supabase
-            .from("city_ledger_accounts")
-            .update({
-              balance: (acct?.balance || 0) + cityLedgerBumpTotal,
-            })
-            .eq("id", selectedLedger.id);
-
-          if (ledgerType === "organization") {
-            const { data: orgRow } = await supabase
-              .from("organizations")
-              .select("current_balance")
-              .eq("id", selectedLedger.id)
-              .single();
-            if (orgRow) {
-              await supabase
-                .from("organizations")
-                .update({
-                  current_balance:
-                    ((orgRow.current_balance as number) || 0) +
-                    cityLedgerBumpTotal,
-                })
-                .eq("id", selectedLedger.id);
-            }
-          }
-        }
+        await addCityLedgerBalance(decision.amount);
+        postedCount += 1;
       }
 
       const accountInfo =
@@ -649,7 +708,17 @@ export function ExtendStayModal({
           ? ` to ${selectedLedger.name}`
           : "";
 
-      if (booking.organization_id) {
+      if (postedCount === 0) {
+        toast.message(
+          `Already extended to ${format(newCheckOutDate, "PPP")}`,
+        );
+        onClose();
+        resetForm();
+        onSuccess?.();
+        return;
+      }
+
+      if (booking.organization_id && postedCount > 0) {
         const attachResult = await persistFolioAttachments(supabase, {
           organizationId: booking.organization_id,
           bookingId: booking.id,
@@ -667,15 +736,21 @@ export function ExtendStayModal({
 
       toast.success(
         isBulkExtend
-          ? `Extended ${activePlans.length} room${activePlans.length === 1 ? "" : "s"} to ${format(newCheckOutDate, "PPP")}${accountInfo}`
+          ? `Extended ${postedCount} room${postedCount === 1 ? "" : "s"} to ${format(newCheckOutDate, "PPP")}${accountInfo}`
           : `Stay extended to ${format(newCheckOutDate, "PPP")}${accountInfo}`,
       );
       onClose();
       resetForm();
       onSuccess?.();
     } catch (error: any) {
-      toast.error(error.message || "Failed to extend stay");
+      const detail = error?.message || "Failed to extend stay";
+      toast.error(
+        postedCount > 0
+          ? `${detail}. ${postedCount} room${postedCount === 1 ? "" : "s"} already extended — retry will not charge them again.`
+          : detail,
+      );
     } finally {
+      extendLockRef.current = false;
       setLoading(false);
     }
   };
