@@ -31,13 +31,21 @@ import { addDays, formatDistanceToNow, setHours, setMinutes } from 'date-fns'
 import { BRAND_LOGO_SESSION_KEY } from '@/lib/branding/constants'
 import { isTransientNetworkError, quietBrowserFetch } from '@/lib/utils/fetch-retry'
 
-/** Supabase-backed notification slice (transactions, bookings, rooms, …) */
-const NOTIFICATION_CORE_POLL_MS = 180_000
+/**
+ * Bell notification PostgREST fan-out — keep slow.
+ * Each tick used to fire ~8 queries every 3 min on every open dashboard tab
+ * (major Logs Ingest + egress driver). Prefer open-bell refresh + Realtime.
+ */
+const NOTIFICATION_CORE_POLL_MS = 600_000
 /** Heavy `/api/backdate-requests` list — decoupled from core polling */
-const NOTIFICATION_BACKDATE_POLL_MS = 300_000
+const NOTIFICATION_BACKDATE_POLL_MS = 600_000
+/** Ignore rapid tab-focus refetches (visibilitychange storms). */
+const NOTIFICATION_VISIBILITY_COOLDOWN_MS = 120_000
 /** Cap outstanding-balance folios in the bell (was unbounded). */
 const NOTIFICATION_BALANCE_LIMIT = 30
 const NOTIFICATION_OVERDUE_LIMIT = 40
+const BOOKING_NOTIF_SELECT =
+  'id, folio_id, check_in, check_out, balance, status, guests:guest_id(id, name), rooms:room_id(room_number)'
 
 interface DashboardUser {
   id: string
@@ -88,6 +96,8 @@ export function Header({ user, onMenuClick }: HeaderProps) {
   const nightAuditPendingNotificationsRef = useRef<Notification[]>([])
   const supplyNotificationsRef = useRef<Notification[]>([])
   const coreNotifInFlight = useRef(false)
+  const lastCoreNotifAtRef = useRef(0)
+  const lastBackdateNotifAtRef = useRef(0)
   const roleKey = canonicalRoleKey(user.role) ?? ''
   const router = useRouter()
   const { organizationId } = useAuth()
@@ -143,11 +153,21 @@ export function Header({ user, onMenuClick }: HeaderProps) {
     mergeNotificationSlices()
   }, [roleKey, mergeNotificationSlices])
 
-  const fetchCoreNotifications = useCallback(async () => {
+  const fetchCoreNotifications = useCallback(
+    async (opts?: { force?: boolean; includeRooms?: boolean }) => {
     const supabase = createClient()
     if (!supabase || !organizationId) return
     if (coreNotifInFlight.current) return
+    const nowMs = Date.now()
+    if (
+      !opts?.force &&
+      lastCoreNotifAtRef.current > 0 &&
+      nowMs - lastCoreNotifAtRef.current < NOTIFICATION_VISIBILITY_COOLDOWN_MS
+    ) {
+      return
+    }
     coreNotifInFlight.current = true
+    lastCoreNotifAtRef.current = nowMs
 
     try {
       const now = new Date()
@@ -159,55 +179,55 @@ export function Header({ user, onMenuClick }: HeaderProps) {
       }
       const today = toLocalDateStr(now)
       const tomorrow = toLocalDateStr(addDays(now, 1))
-      const checkoutReminderTime = setMinutes(setHours(now, 11), 30)
-      const checkinReminderTime = setMinutes(setHours(now, 9), 0)
-      const eveningReminderTime = setMinutes(setHours(now, 21), 0)
+      const needTodayCheckin = now >= setMinutes(setHours(now, 9), 0)
+      const needTodayCheckout = now >= setMinutes(setHours(now, 11), 30)
+      const needTomorrowReminders = now >= setMinutes(setHours(now, 21), 0)
 
+      const checkInDates = [
+        ...(needTodayCheckin ? [today] : []),
+        ...(needTomorrowReminders ? [tomorrow] : []),
+      ]
+      const checkOutDates = [
+        ...(needTodayCheckout ? [today] : []),
+        ...(needTomorrowReminders ? [tomorrow] : []),
+      ]
+
+      const emptyBookings = Promise.resolve({ data: [] as any[], error: null })
       const [
         transactionsRes,
-        checkinsRes,
-        tomorrowCheckinsRes,
-        checkoutsRes,
-        tomorrowCheckoutsRes,
+        reservedRes,
+        checkoutWindowRes,
         overdueRes,
         balancesRes,
         roomsRes,
       ] = await Promise.all([
         supabase
-        .from('transactions')
-        .select(
-          'id, description, amount, created_at, booking_id, guest_name, transaction_id, bookings(guest_id, folio_id)',
-        )
-        .eq('organization_id', organizationId)
-        .order('created_at', { ascending: false })
-        .limit(8),
-        supabase
-          .from('bookings')
-          .select('id, folio_id, check_in, check_out, balance, status, guests:guest_id(id, name), rooms:room_id(room_number)')
+          .from('transactions')
+          .select(
+            'id, description, amount, created_at, booking_id, guest_name, transaction_id, bookings(guest_id, folio_id)',
+          )
           .eq('organization_id', organizationId)
-          .eq('status', 'reserved')
-          .eq('check_in', today),
+          .order('created_at', { ascending: false })
+          .limit(5),
+        checkInDates.length
+          ? supabase
+              .from('bookings')
+              .select(BOOKING_NOTIF_SELECT)
+              .eq('organization_id', organizationId)
+              .eq('status', 'reserved')
+              .in('check_in', checkInDates)
+          : emptyBookings,
+        checkOutDates.length
+          ? supabase
+              .from('bookings')
+              .select(BOOKING_NOTIF_SELECT)
+              .eq('organization_id', organizationId)
+              .in('status', ['confirmed', 'checked_in'])
+              .in('check_out', checkOutDates)
+          : emptyBookings,
         supabase
           .from('bookings')
-          .select('id, folio_id, check_in, check_out, balance, status, guests:guest_id(id, name), rooms:room_id(room_number)')
-          .eq('organization_id', organizationId)
-          .eq('status', 'reserved')
-          .eq('check_in', tomorrow),
-        supabase
-          .from('bookings')
-          .select('id, folio_id, check_in, check_out, balance, status, guests:guest_id(id, name), rooms:room_id(room_number)')
-          .eq('organization_id', organizationId)
-          .in('status', ['confirmed', 'checked_in'])
-          .eq('check_out', today),
-        supabase
-          .from('bookings')
-          .select('id, folio_id, check_in, check_out, balance, status, guests:guest_id(id, name), rooms:room_id(room_number)')
-          .eq('organization_id', organizationId)
-          .in('status', ['confirmed', 'checked_in'])
-          .eq('check_out', tomorrow),
-        supabase
-          .from('bookings')
-          .select('id, folio_id, check_in, check_out, balance, status, guests:guest_id(id, name), rooms:room_id(room_number)')
+          .select(BOOKING_NOTIF_SELECT)
           .eq('organization_id', organizationId)
           .in('status', ['confirmed', 'checked_in'])
           .lt('check_out', today)
@@ -215,17 +235,19 @@ export function Header({ user, onMenuClick }: HeaderProps) {
           .limit(NOTIFICATION_OVERDUE_LIMIT),
         supabase
           .from('bookings')
-          .select('id, folio_id, check_in, check_out, balance, status, guests:guest_id(id, name), rooms:room_id(room_number)')
+          .select(BOOKING_NOTIF_SELECT)
           .eq('organization_id', organizationId)
           .gt('balance', 0)
           .in('status', ['confirmed', 'checked_in', 'reserved'])
           .order('balance', { ascending: false })
           .limit(NOTIFICATION_BALANCE_LIMIT),
-        supabase
-          .from('rooms')
-          .select('id, room_number, status, updated_at')
-          .eq('organization_id', organizationId)
-          .in('status', ['cleaning', 'maintenance']),
+        opts?.includeRooms
+          ? supabase
+              .from('rooms')
+              .select('id, room_number, status, updated_at')
+              .eq('organization_id', organizationId)
+              .in('status', ['cleaning', 'maintenance'])
+          : emptyBookings,
       ])
 
       const getGuestName = (booking: any) => Array.isArray(booking.guests) ? booking.guests[0]?.name : booking.guests?.name
@@ -255,64 +277,76 @@ export function Header({ user, onMenuClick }: HeaderProps) {
         console.warn('[notifications] transactions:', transactionsRes.error.message)
       }
 
-      const checkinNotifications: Notification[] = now >= checkinReminderTime
-        ? (checkinsRes.data || []).map((b: any) => ({
-            id: `checkin-${b.id}`,
-            description: `${getGuestName(b) || 'Guest'} is due to check in today at 1pm${getRoomNumber(b) ? ` - Room ${getRoomNumber(b)}` : ''}`,
-            amount: Number(b.balance || 0),
-            created_at: `${today}T09:00:00`,
-            booking_id: b.id,
-            guest_id: getGuestId(b) ?? null,
-            folio_id: b.folio_id ?? null,
-            read: readIds.has(`checkin-${b.id}`),
-            type: 'reservation',
-            actionLabel: 'View reservation',
-          }))
+      const reservedRows = reservedRes.data || []
+      const checkoutWindowRows = checkoutWindowRes.data || []
+      const ymdOf = (v: unknown) => String(v ?? '').slice(0, 10)
+
+      const checkinNotifications: Notification[] = needTodayCheckin
+        ? reservedRows
+            .filter((b: any) => ymdOf(b.check_in) === today)
+            .map((b: any) => ({
+              id: `checkin-${b.id}`,
+              description: `${getGuestName(b) || 'Guest'} is due to check in today at 1pm${getRoomNumber(b) ? ` - Room ${getRoomNumber(b)}` : ''}`,
+              amount: Number(b.balance || 0),
+              created_at: `${today}T09:00:00`,
+              booking_id: b.id,
+              guest_id: getGuestId(b) ?? null,
+              folio_id: b.folio_id ?? null,
+              read: readIds.has(`checkin-${b.id}`),
+              type: 'reservation' as const,
+              actionLabel: 'View reservation',
+            }))
         : []
 
-      const tomorrowCheckinNotifications: Notification[] = now >= eveningReminderTime
-        ? (tomorrowCheckinsRes.data || []).map((b: any) => ({
-            id: `checkin-tomorrow-${b.id}`,
-            description: `${getGuestName(b) || 'Guest'} is due to check in tomorrow at 1pm${getRoomNumber(b) ? ` - Room ${getRoomNumber(b)}` : ''}`,
-            amount: Number(b.balance || 0),
-            created_at: `${today}T21:00:00`,
-            booking_id: b.id,
-            guest_id: getGuestId(b) ?? null,
-            folio_id: b.folio_id ?? null,
-            read: readIds.has(`checkin-tomorrow-${b.id}`),
-            type: 'reservation',
-            actionLabel: 'View reservation',
-          }))
+      const tomorrowCheckinNotifications: Notification[] = needTomorrowReminders
+        ? reservedRows
+            .filter((b: any) => ymdOf(b.check_in) === tomorrow)
+            .map((b: any) => ({
+              id: `checkin-tomorrow-${b.id}`,
+              description: `${getGuestName(b) || 'Guest'} is due to check in tomorrow at 1pm${getRoomNumber(b) ? ` - Room ${getRoomNumber(b)}` : ''}`,
+              amount: Number(b.balance || 0),
+              created_at: `${today}T21:00:00`,
+              booking_id: b.id,
+              guest_id: getGuestId(b) ?? null,
+              folio_id: b.folio_id ?? null,
+              read: readIds.has(`checkin-tomorrow-${b.id}`),
+              type: 'reservation' as const,
+              actionLabel: 'View reservation',
+            }))
         : []
 
-      const checkoutNotifications: Notification[] = now >= checkoutReminderTime
-        ? (checkoutsRes.data || []).map((b: any) => ({
-            id: `checkout-${b.id}`,
-            description: `${getGuestName(b) || 'Guest'} checkout is due by 12pm today${getRoomNumber(b) ? ` - Room ${getRoomNumber(b)}` : ''}`,
-            amount: Number(b.balance || 0),
-            created_at: `${today}T11:30:00`,
-            booking_id: b.id,
-            guest_id: getGuestId(b) ?? null,
-            folio_id: b.folio_id ?? null,
-            read: readIds.has(`checkout-${b.id}`),
-            type: 'checkout',
-            actionLabel: 'View booking',
-          }))
+      const checkoutNotifications: Notification[] = needTodayCheckout
+        ? checkoutWindowRows
+            .filter((b: any) => ymdOf(b.check_out) === today)
+            .map((b: any) => ({
+              id: `checkout-${b.id}`,
+              description: `${getGuestName(b) || 'Guest'} checkout is due by 12pm today${getRoomNumber(b) ? ` - Room ${getRoomNumber(b)}` : ''}`,
+              amount: Number(b.balance || 0),
+              created_at: `${today}T11:30:00`,
+              booking_id: b.id,
+              guest_id: getGuestId(b) ?? null,
+              folio_id: b.folio_id ?? null,
+              read: readIds.has(`checkout-${b.id}`),
+              type: 'checkout' as const,
+              actionLabel: 'View booking',
+            }))
         : []
 
-      const tomorrowCheckoutNotifications: Notification[] = now >= eveningReminderTime
-        ? (tomorrowCheckoutsRes.data || []).map((b: any) => ({
-            id: `checkout-tomorrow-${b.id}`,
-            description: `${getGuestName(b) || 'Guest'} is due to check out tomorrow by 12pm${getRoomNumber(b) ? ` - Room ${getRoomNumber(b)}` : ''}`,
-            amount: Number(b.balance || 0),
-            created_at: `${today}T21:00:00`,
-            booking_id: b.id,
-            guest_id: getGuestId(b) ?? null,
-            folio_id: b.folio_id ?? null,
-            read: readIds.has(`checkout-tomorrow-${b.id}`),
-            type: 'checkout',
-            actionLabel: 'View booking',
-          }))
+      const tomorrowCheckoutNotifications: Notification[] = needTomorrowReminders
+        ? checkoutWindowRows
+            .filter((b: any) => ymdOf(b.check_out) === tomorrow)
+            .map((b: any) => ({
+              id: `checkout-tomorrow-${b.id}`,
+              description: `${getGuestName(b) || 'Guest'} is due to check out tomorrow by 12pm${getRoomNumber(b) ? ` - Room ${getRoomNumber(b)}` : ''}`,
+              amount: Number(b.balance || 0),
+              created_at: `${today}T21:00:00`,
+              booking_id: b.id,
+              guest_id: getGuestId(b) ?? null,
+              folio_id: b.folio_id ?? null,
+              read: readIds.has(`checkout-tomorrow-${b.id}`),
+              type: 'checkout' as const,
+              actionLabel: 'View booking',
+            }))
         : []
 
       const overdueNotifications: Notification[] = (overdueRes.data || []).map((b: any) => ({
@@ -341,18 +375,20 @@ export function Header({ user, onMenuClick }: HeaderProps) {
         actionLabel: 'Settle balance',
       }))
 
-      const roomNotifications: Notification[] = (roomsRes.data || []).map((room: any) => ({
-        id: `room-${room.id}-${room.status}`,
-        description: `Room ${room.room_number} is marked ${String(room.status).replace('_', ' ')}`,
-        amount: 0,
-        created_at: room.updated_at || now.toISOString(),
-        booking_id: null,
-        guest_id: null,
-        folio_id: null,
-        read: readIds.has(`room-${room.id}-${room.status}`),
-        type: 'room',
-        actionLabel: 'View rooms',
-      }))
+      const roomNotifications: Notification[] = opts?.includeRooms
+        ? (roomsRes.data || []).map((room: any) => ({
+            id: `room-${room.id}-${room.status}`,
+            description: `Room ${room.room_number} is marked ${String(room.status).replace('_', ' ')}`,
+            amount: 0,
+            created_at: room.updated_at || now.toISOString(),
+            booking_id: null,
+            guest_id: null,
+            folio_id: null,
+            read: readIds.has(`room-${room.id}-${room.status}`),
+            type: 'room' as const,
+            actionLabel: 'View rooms',
+          }))
+        : nonBackdateNotificationsRef.current.filter((n) => n.type === 'room')
 
       nonBackdateNotificationsRef.current = [
         ...overdueNotifications,
@@ -374,8 +410,17 @@ export function Header({ user, onMenuClick }: HeaderProps) {
     }
   }, [organizationId, readIds, user.id, user.role, mergeNotificationSlices])
 
-  const fetchBackdateNotifications = useCallback(async () => {
+  const fetchBackdateNotifications = useCallback(async (opts?: { force?: boolean }) => {
     if (!organizationId) return
+    const nowMs = Date.now()
+    if (
+      !opts?.force &&
+      lastBackdateNotifAtRef.current > 0 &&
+      nowMs - lastBackdateNotifAtRef.current < NOTIFICATION_VISIBILITY_COOLDOWN_MS
+    ) {
+      return
+    }
+    lastBackdateNotifAtRef.current = nowMs
     const now = new Date()
     try {
       const [backdateJson, pendingJson] = await Promise.all([
@@ -521,10 +566,10 @@ export function Header({ user, onMenuClick }: HeaderProps) {
   }, [loadSupplyChainNotifications])
 
   useEffect(() => {
-    void fetchCoreNotifications()
+    void fetchCoreNotifications({ force: true })
     const interval = window.setInterval(() => {
       if (document.visibilityState !== 'visible') return
-      void fetchCoreNotifications()
+      void fetchCoreNotifications({ force: true })
     }, NOTIFICATION_CORE_POLL_MS)
     const onVis = () => {
       if (document.visibilityState === 'visible') void fetchCoreNotifications()
@@ -537,12 +582,12 @@ export function Header({ user, onMenuClick }: HeaderProps) {
   }, [fetchCoreNotifications])
 
   useEffect(() => {
-    void fetchBackdateNotifications()
+    void fetchBackdateNotifications({ force: true })
     const interval = window.setInterval(() => {
       if (document.visibilityState !== 'visible') return
-      void fetchBackdateNotifications()
+      void fetchBackdateNotifications({ force: true })
     }, NOTIFICATION_BACKDATE_POLL_MS)
-    const onPending = () => void fetchBackdateNotifications()
+    const onPending = () => void fetchBackdateNotifications({ force: true })
     const onVis = () => {
       if (document.visibilityState === 'visible') void fetchBackdateNotifications()
     }
@@ -559,8 +604,8 @@ export function Header({ user, onMenuClick }: HeaderProps) {
 
   useEffect(() => {
     if (!notifOpen) return
-    void fetchCoreNotifications()
-    void fetchBackdateNotifications()
+    void fetchCoreNotifications({ force: true, includeRooms: true })
+    void fetchBackdateNotifications({ force: true })
   }, [notifOpen, fetchCoreNotifications, fetchBackdateNotifications])
 
   const unreadCount = notifications.filter((n) => !n.read).length
