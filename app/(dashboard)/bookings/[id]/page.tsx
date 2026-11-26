@@ -89,6 +89,7 @@ import {
   paymentMethodFromBookingNotes,
 } from "@/lib/cashback/cashback-eligibility";
 import { createClient } from "@/lib/supabase/client";
+import { ORG_LIVE_BOOKINGS } from "@/lib/live/org-live-events";
 import { reconcileRoomStatusesClient } from "@/lib/rooms/reconcile-room-status-client";
 import { roomHousekeepingPatchAfterCheckout } from "@/lib/rooms/sync-housekeeping-status";
 import { useAuth } from "@/lib/auth-context";
@@ -615,11 +616,26 @@ export default function BookingDetailPage({
   useEffect(() => {
     if (!bookingId || loading || !booking) return;
     if (isBookingCheckedOut(booking)) return;
-    const iv = window.setInterval(() => {
+    let liveTimer: ReturnType<typeof setTimeout> | null = null;
+    const refresh = () => {
       if (document.visibilityState !== "visible") return;
       fetchBookingDetails(bookingId);
-    }, 120_000);
-    return () => window.clearInterval(iv);
+    };
+    const onLive = () => {
+      if (liveTimer) clearTimeout(liveTimer);
+      liveTimer = setTimeout(() => {
+        liveTimer = null;
+        refresh();
+      }, 1_200);
+    };
+    // Prefer Realtime/org-live; rare timer as safety net (was every 2 min).
+    const iv = window.setInterval(refresh, 300_000);
+    window.addEventListener(ORG_LIVE_BOOKINGS, onLive);
+    return () => {
+      window.clearInterval(iv);
+      window.removeEventListener(ORG_LIVE_BOOKINGS, onLive);
+      if (liveTimer) clearTimeout(liveTimer);
+    };
   }, [bookingId, loading, booking?.status, booking?.folio_status]);
 
 

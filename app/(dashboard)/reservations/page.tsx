@@ -27,7 +27,6 @@ import { isNoShowEligibleStatus } from '@/lib/reservations/mark-no-show'
 import { MarkNoShowDialog } from '@/components/reservations/mark-no-show-dialog'
 import { networkFetchHint, withFetchRetry } from '@/lib/utils/fetch-retry'
 import { toast } from 'sonner'
-import { reconcileRoomStatusesClient } from '@/lib/rooms/reconcile-room-status-client'
 import { useReservationsEventsHeader } from '@/components/reservations/reservations-events-header'
 import { formatShortStayDates, MobileTableSubdetail } from '@/lib/utils/table-mobile'
 import { calendarPickerYmd } from '@/lib/utils/booking-in-house-dates'
@@ -126,11 +125,19 @@ export default function ReservationsPage() {
 
   useEffect(() => {
     if (!organizationId) return
+    let timer: ReturnType<typeof setTimeout> | null = null
     const onLive = () => {
-      void fetchReservations()
+      if (timer) clearTimeout(timer)
+      timer = setTimeout(() => {
+        timer = null
+        void fetchReservations()
+      }, 1_200)
     }
     window.addEventListener(ORG_LIVE_BOOKINGS, onLive)
-    return () => window.removeEventListener(ORG_LIVE_BOOKINGS, onLive)
+    return () => {
+      window.removeEventListener(ORG_LIVE_BOOKINGS, onLive)
+      if (timer) clearTimeout(timer)
+    }
   }, [organizationId])
 
   useEffect(() => {
@@ -222,7 +229,8 @@ export default function ReservationsPage() {
 
     try {
       startFetch()
-      void reconcileRoomStatusesClient()
+      // Reconcile is TTL-gated elsewhere after mutations — skip on every list fetch
+      // so OrgLive pulses do not POST /api/rooms/reconcile-status.
 
       const data = await Promise.race([
         withFetchRetry(async () => {
