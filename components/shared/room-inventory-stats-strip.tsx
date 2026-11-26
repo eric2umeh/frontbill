@@ -14,11 +14,11 @@ import { cn } from '@/lib/utils'
 
 type Props = {
   className?: string
-  /** Refresh counts every N ms (0 = load once). Default 3 min — stats only, no reconcile. */
+  /** Refresh counts every N ms (0 = load once). Default 10 min — stats only, no reconcile. */
   refreshMs?: number
 }
 
-export function RoomInventoryStatsStrip({ className, refreshMs = 180_000 }: Props) {
+export function RoomInventoryStatsStrip({ className, refreshMs = 600_000 }: Props) {
   const { organizationId } = useAuth()
   const [stats, setStats] = useState<RoomInventoryStats | null>(null)
   const [loading, setLoading] = useState(true)
@@ -72,12 +72,18 @@ export function RoomInventoryStatsStrip({ className, refreshMs = 180_000 }: Prop
     setLoading(true)
     void load()
     if (!refreshMs || refreshMs <= 0) return
+    let lastVisLoadAt = 0
     const id = window.setInterval(() => {
       if (document.visibilityState !== 'visible') return
+      lastVisLoadAt = Date.now()
       void load()
     }, refreshMs)
     const onVis = () => {
-      if (document.visibilityState === 'visible') void load()
+      if (document.visibilityState !== 'visible') return
+      const now = Date.now()
+      if (now - lastVisLoadAt < 120_000) return
+      lastVisLoadAt = now
+      void load()
     }
     document.addEventListener('visibilitychange', onVis)
     return () => {
