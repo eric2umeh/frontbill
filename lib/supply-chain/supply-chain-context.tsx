@@ -298,7 +298,8 @@ let lastLiveSupplyFetchAt = 0;
 let liveSupplyThrottleTimer: ReturnType<typeof setTimeout> | null = null;
 let liveSupplyPending: { fromOtherTab: boolean; includeCatalog: boolean } | null = null;
 const LIVE_SUPPLY_THROTTLE_MS = 8_000;
-const LIVE_SUPPLY_INTERVAL_MS = 60_000;
+/** Only used when NEXT_PUBLIC_SUPPLY_LIVE_SYNC=true — keep slow for Logs Ingest. */
+const LIVE_SUPPLY_INTERVAL_MS = 180_000;
 /** Serializes PO/basket PUTs so a slow full snapshot cannot overwrite a fresh clear/send. */
 let poBasketPutChain: Promise<void> = Promise.resolve();
 /** Bumped on clear/send so stale debounced PO PUTs cannot restore the cart after refresh. */
