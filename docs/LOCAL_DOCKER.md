@@ -104,3 +104,16 @@ After enabling org-live Realtime (`scripts/084_…`), also run on **staging firs
 - `scripts/086_realtime_org_live_default_identity.sql` (bookings / outlet menus / catalog)
 
 Git push alone does not apply these — run them in the Supabase SQL Editor per project.
+
+### Logs Ingest (staging → prod)
+
+Dashboard **Log Ingestion** grows with every API/Postgres/Auth/Realtime log line. App polls are slowed in code; also run on each cloud project:
+
+- `scripts/087_reduce_postgres_log_ingest.sql` (`log_statement=none`, slow-query threshold 2s)
+
+Optional CLI (connection open/close spam):
+
+```bash
+supabase postgres-config update --experimental --remote=<project-ref> \
+  --config log_connections=false --config log_disconnections=false
+```
