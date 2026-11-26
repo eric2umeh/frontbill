@@ -56,6 +56,7 @@ export default function BulkBookingDetailPage({ params }: { params: Promise<{ gr
   const [extendModalOpen, setExtendModalOpen] = useState(false)
   const [addChargeModalOpen, setAddChargeModalOpen] = useState(false)
   const [actionBooking, setActionBooking] = useState<any | null>(null)
+  const [extendBulkMembers, setExtendBulkMembers] = useState<any[] | null>(null)
 
   const rowToActionBooking = (row: any) => ({
     id: row.id,
@@ -82,6 +83,10 @@ export default function BulkBookingDetailPage({ params }: { params: Promise<{ gr
       },
       orgCheckoutTime,
     )
+
+  const extendableRows = rows.filter(
+    (r) => r.room_id && !rowChargeExtendHidden(r),
+  )
 
   useEffect(() => {
     if (!organizationId) return
@@ -269,9 +274,14 @@ export default function BulkBookingDetailPage({ params }: { params: Promise<{ gr
             onClose={() => {
               setExtendModalOpen(false)
               setActionBooking(null)
+              setExtendBulkMembers(null)
             }}
-            onSuccess={() => void fetchBulkRows(groupId)}
+            onSuccess={() => {
+              setExtendBulkMembers(null)
+              void fetchBulkRows(groupId)
+            }}
             booking={actionBooking}
+            bulkMembers={extendBulkMembers || undefined}
           />
           <AddChargeModal
             open={addChargeModalOpen}
@@ -345,6 +355,21 @@ export default function BulkBookingDetailPage({ params }: { params: Promise<{ gr
                 <Ban className="mr-2 h-4 w-4" />
               )}
               Cancel group
+            </Button>
+          )}
+          {canManageFolio && extendableRows.length > 0 && (
+            <Button
+              variant="outline"
+              disabled={checkoutDialogBusy || cancelGroupLoading}
+              onClick={() => {
+                const targets = extendableRows.map(rowToActionBooking)
+                setActionBooking(targets[0])
+                setExtendBulkMembers(targets.length > 1 ? targets : null)
+                setExtendModalOpen(true)
+              }}
+            >
+              <CalendarClock className="mr-2 h-4 w-4" />
+              Extend all rooms
             </Button>
           )}
           {canManageFolio && rows.some((r) => checkoutRowEligible(r)) && (
@@ -498,6 +523,7 @@ export default function BulkBookingDetailPage({ params }: { params: Promise<{ gr
                               variant="outline"
                               className="h-7 px-2 text-[11px]"
                               onClick={() => {
+                                setExtendBulkMembers(null)
                                 setActionBooking(rowToActionBooking(row))
                                 setExtendModalOpen(true)
                               }}
