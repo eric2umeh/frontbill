@@ -161,6 +161,10 @@ export default function BookingsPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [bulkModalOpen, setBulkModalOpen] = useState(false);
   const [extendModalOpen, setExtendModalOpen] = useState(false);
+  /** When extending a bulk/group row, all eligible folios (not just the first). */
+  const [extendBulkMembers, setExtendBulkMembers] = useState<any[] | null>(
+    null,
+  );
   const [addChargeModalOpen, setAddChargeModalOpen] = useState(false);
   const [selectedBooking, setSelectedBooking] = useState<any>(null);
   const [checkoutLoadingId, setCheckoutLoadingId] = useState<string | null>(
@@ -357,6 +361,14 @@ export default function BookingsPage() {
         const roomTypes = Array.from(
           new Set(groupRows.map((row) => row.rooms?.room_type).filter(Boolean)),
         );
+        const checkIns = groupRows
+          .map((row) => row.check_in)
+          .filter(Boolean)
+          .sort();
+        const checkOuts = groupRows
+          .map((row) => row.check_out)
+          .filter(Boolean)
+          .sort();
         return {
           ...first,
           id: first.id,
@@ -366,6 +378,9 @@ export default function BookingsPage() {
           bulk_members: groupRows,
           room_count: groupRows.length,
           guest_count: guestNames.length,
+          // Honest span for the grouped row (not just the first member).
+          check_in: checkIns[0] || first.check_in,
+          check_out: checkOuts[checkOuts.length - 1] || first.check_out,
           total_amount: groupRows.reduce(
             (sum, row) => sum + Number(row.total_amount || 0),
             0,
@@ -1260,16 +1275,22 @@ export default function BookingsPage() {
       />
       {selectedBooking && (
         <>
-          <ExtendStayModal 
-            open={extendModalOpen} 
+          <ExtendStayModal
+            open={extendModalOpen}
             onClose={() => {
               setExtendModalOpen(false);
+              setExtendBulkMembers(null);
+              fetchBookings();
+            }}
+            onSuccess={() => {
+              setExtendBulkMembers(null);
               fetchBookings();
             }}
             booking={selectedBooking}
+            bulkMembers={extendBulkMembers || undefined}
           />
-          <AddChargeModal 
-            open={addChargeModalOpen} 
+          <AddChargeModal
+            open={addChargeModalOpen}
             onClose={() => {
               setAddChargeModalOpen(false);
               fetchBookings();
@@ -1770,7 +1791,7 @@ export default function BookingsPage() {
                     orgCheckoutTime,
                   ),
                 );
-                const actionableMember = members.find(
+                const extendableMembers = members.filter(
                   (m) =>
                     m.room_id &&
                     !hideChargeExtendInBookingsTable(
@@ -1783,6 +1804,7 @@ export default function BookingsPage() {
                       orgCheckoutTime,
                     ),
                 );
+                const actionableMember = extendableMembers[0];
                 const gid = booking.bulk_group_id || "";
                 if (!showBulkCheckout && !actionableMember) {
                   return (
@@ -1813,6 +1835,7 @@ export default function BookingsPage() {
                           className="h-7 px-2 text-[11px] leading-tight whitespace-nowrap"
                           onClick={(e) => {
                             e.stopPropagation();
+                            setExtendBulkMembers(null);
                             setSelectedBooking({
                               id: actionableMember.id,
                               folioId: actionableMember.folio_id,
@@ -1832,24 +1855,32 @@ export default function BookingsPage() {
                         <Button
                           size="sm"
                           variant="outline"
-                          title="Extend stay for a room in this group"
+                          title={`Extend stay for all ${extendableMembers.length} eligible room${extendableMembers.length === 1 ? "" : "s"} in this group`}
                           className="h-7 px-2 text-[11px] leading-tight whitespace-nowrap"
                           onClick={(e) => {
                             e.stopPropagation();
-                            setSelectedBooking({
-                              id: actionableMember.id,
-                              folioId: actionableMember.folio_id,
-                              guestName: actionableMember.guests?.name,
-                              guestId: actionableMember.guest_id,
-                              room: `Room ${actionableMember.rooms?.room_number}`,
-                              currentCheckOut: actionableMember.check_out,
-                              check_in: actionableMember.check_in,
-                              ratePerNight: actionableMember.rate_per_night,
-                              organization_id: actionableMember.organization_id,
-                              created_by: actionableMember.created_by,
-                              status: actionableMember.status,
-                              folio_status: actionableMember.folio_status,
+                            const toTarget = (m: Booking) => ({
+                              id: m.id,
+                              folioId: m.folio_id,
+                              guestName:
+                                m.guests?.name ||
+                                booking.guests?.name ||
+                                "Guest",
+                              guestId: m.guest_id,
+                              room: `Room ${m.rooms?.room_number}`,
+                              currentCheckOut: m.check_out,
+                              check_in: m.check_in,
+                              ratePerNight: m.rate_per_night,
+                              organization_id: m.organization_id,
+                              created_by: m.created_by,
+                              status: m.status,
+                              folio_status: m.folio_status,
                             });
+                            const targets = extendableMembers.map(toTarget);
+                            setSelectedBooking(targets[0]);
+                            setExtendBulkMembers(
+                              targets.length > 1 ? targets : null,
+                            );
                             setExtendModalOpen(true);
                           }}
                         >
@@ -1978,6 +2009,7 @@ export default function BookingsPage() {
                             className="h-7 px-2 text-[11px] leading-tight whitespace-nowrap"
                   onClick={(e) => {
                               e.stopPropagation();
+                              setExtendBulkMembers(null);
                     setSelectedBooking({
                       id: booking.id,
                       folioId: booking.folio_id,
