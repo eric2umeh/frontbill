@@ -52,26 +52,33 @@ import {
   type PaymentAccount,
 } from "@/lib/payments/payment-accounts";
 
+export type ExtendStayFolioTarget = {
+  /** Booking row id (same as booking id used by API) */
+  id: string;
+  folioId: string;
+  guestName: string;
+  room: string;
+  currentCheckOut: string;
+  ratePerNight: number;
+  guestId: string;
+  guestBalance?: number;
+  organization_id?: string;
+  created_by?: string;
+  status?: string;
+  check_in?: string;
+  folio_status?: string;
+};
+
 interface ExtendStayModalProps {
   open: boolean;
   onClose: () => void;
   onSuccess?: () => void;
-  booking: {
-    /** Booking row id (same as booking id used by API) */
-    id: string;
-    folioId: string;
-    guestName: string;
-    room: string;
-    currentCheckOut: string;
-    ratePerNight: number;
-    guestId: string;
-    guestBalance?: number;
-    organization_id?: string;
-    created_by?: string;
-    status?: string;
-    check_in?: string;
-    folio_status?: string;
-  };
+  booking: ExtendStayFolioTarget;
+  /**
+   * When set (bulk/group from Bookings list), every eligible folio gets the same
+   * new checkout date — not just the first room shown on the grouped row.
+   */
+  bulkMembers?: ExtendStayFolioTarget[];
 }
 
 export function ExtendStayModal({
@@ -79,6 +86,7 @@ export function ExtendStayModal({
   onClose,
   onSuccess,
   booking,
+  bulkMembers,
 }: ExtendStayModalProps) {
   const { userId } = useAuth();
   const [newCheckOutDate, setNewCheckOutDate] = useState<Date | undefined>();
@@ -256,27 +264,76 @@ export function ExtendStayModal({
 
   // Calendar YMD math only — never `new Date('yyyy-MM-dd')` + differenceInDays
   // (that timezone path can charge 3 nights while the UI still says “2 nights”).
-  const currentCheckOutYmd = toYmd(booking.currentCheckOut);
-  const checkInYmd = toYmd(booking.check_in);
+  const extendTargets: ExtendStayFolioTarget[] =
+    bulkMembers && bulkMembers.length > 0 ? bulkMembers : [booking];
+  const isBulkExtend = extendTargets.length > 1;
+
   const newCheckOutYmd = newCheckOutDate
     ? format(newCheckOutDate, "yyyy-MM-dd")
     : "";
-  const additionalNights = newCheckOutYmd
-    ? extensionAdditionalNights({
-        checkInYmd,
-        currentCheckOutYmd,
-        newCheckOutYmd,
-      })
-    : 0;
+
+  const targetPlans = extendTargets.map((target) => {
+    const currentCheckOutYmd = toYmd(target.currentCheckOut);
+    const checkInYmd = toYmd(target.check_in);
+    const nights = newCheckOutYmd
+      ? extensionAdditionalNights({
+          checkInYmd,
+          currentCheckOutYmd,
+          newCheckOutYmd,
+        })
+      : 0;
+    const rate = Math.max(0, Number(target.ratePerNight) || 0);
+    return {
+      target,
+      currentCheckOutYmd,
+      checkInYmd,
+      nights,
+      rate,
+      amount: Math.max(0, nights) * rate,
+    };
+  });
+
+  const activePlans = targetPlans.filter((p) => p.nights > 0);
+  const additionalNights = isBulkExtend
+    ? activePlans.reduce((s, p) => s + p.nights, 0)
+    : activePlans[0]?.nights ?? 0;
+  const additionalAmount = activePlans.reduce((s, p) => s + p.amount, 0);
   const ratePerNight = Math.max(0, Number(booking.ratePerNight) || 0);
-  const additionalAmount = additionalNights * ratePerNight;
+
+  /** Calendar must move past every room's current checkout so the whole group advances. */
+  const calendarMinCheckOutYmd = targetPlans.reduce((max, p) => {
+    if (!p.currentCheckOutYmd) return max;
+    return !max || p.currentCheckOutYmd > max ? p.currentCheckOutYmd : max;
+  }, "");
+
   const currentCheckOutLabel = (() => {
+    if (isBulkExtend) {
+      const ymids = targetPlans
+        .map((p) => p.currentCheckOutYmd)
+        .filter(Boolean)
+        .sort();
+      if (!ymids.length) return "—";
+      const first = ymids[0];
+      const last = ymids[ymids.length - 1];
+      const fmt = (ymd: string) => {
+        const [y, m, d] = ymd.split("-").map(Number);
+        return format(new Date(y, m - 1, d), "PP");
+      };
+      return first === last ? fmt(first) : `${fmt(first)} – ${fmt(last)}`;
+    }
+    const currentCheckOutYmd = toYmd(booking.currentCheckOut);
     if (!currentCheckOutYmd) return "—";
     const [y, m, d] = currentCheckOutYmd.split("-").map(Number);
     return format(new Date(y, m - 1, d), "PP");
   })();
 
   const handleDiscountRequest = async () => {
+    if (isBulkExtend) {
+      toast.error(
+        "Discount requests are per room — open the group and extend each folio, or extend the group at the standard rate.",
+      );
+      return;
+    }
     if (!newCheckOutDate || !paymentMethod || paymentMethod === "city_ledger") {
       toast.error(
         "Discount requests use cash, POS, or transfer only (not city ledger in this version)",
@@ -368,16 +425,20 @@ export function ExtendStayModal({
       toast.error("Please complete all fields");
       return;
     }
-    if (additionalNights <= 0) {
-      toast.error("New checkout must be after the current checkout date");
+    if (activePlans.length === 0 || additionalAmount <= 0) {
+      toast.error(
+        isBulkExtend
+          ? "New checkout must be after every room’s current checkout date"
+          : "New checkout must be after the current checkout date",
+      );
       return;
     }
-    if (!(ratePerNight > 0)) {
+    if (activePlans.some((p) => !(p.rate > 0))) {
       toast.error("Rate per night is missing or zero — fix the booking rate first");
       return;
     }
 
-    if (!booking.id) {
+    if (activePlans.some((p) => !p.target.id)) {
       toast.error(
         "Booking ID is missing. Please close and reopen this dialog.",
       );
@@ -395,9 +456,12 @@ export function ExtendStayModal({
       return;
     }
 
-    // Prevent extending checked-out folios
-    if ((booking?.folio_status || "active") === "checked_out") {
-      toast.error("This folio has been checked out and cannot be extended");
+    if (
+      activePlans.some(
+        (p) => (p.target.folio_status || "active") === "checked_out",
+      )
+    ) {
+      toast.error("One or more folios are checked out and cannot be extended");
       return;
     }
 
@@ -407,142 +471,146 @@ export function ExtendStayModal({
       const { data: authData } = await supabase.auth.getUser();
       const currentUserId = authData.user?.id || booking.created_by || null;
       const newCheckoutStr = newCheckOutYmd;
-
-      // Add charge to folio_charges
-      // For immediate payments (cash/pos/transfer): status = 'paid'
-      // For deferred payments (city_ledger): status = 'pending'
       const isPaidNow = paymentMethod !== "city_ledger";
-      const chargeData: Record<string, unknown> = {
-        booking_id: booking.id,
-        description: `Extended Stay - ${additionalNights} night${additionalNights !== 1 ? "s" : ""}`,
-        amount: additionalAmount,
-        charge_type: "extended_stay",
-        payment_method: paymentMethod,
-        ledger_account_id:
-          paymentMethod === "city_ledger" ? selectedLedger?.id : null,
-        ledger_account_type:
-          paymentMethod === "city_ledger" ? ledgerType : null,
-        payment_status: isPaidNow ? "paid" : "pending",
-        created_by: currentUserId,
-      };
-      if (booking.organization_id) {
-        chargeData.organization_id = booking.organization_id;
-      }
-
-      const { error: chargeError } = await insertFolioCharges(supabase, [
-        chargeData,
-      ]);
-      if (chargeError) throw chargeError;
-
-      // Keep booking stay totals in sync with the extension (dates + nights + room total).
-      const { data: freshBk } = await supabase
-        .from("bookings")
-        .select(
-          "balance, deposit, total_amount, number_of_nights, check_in, check_out, rate_per_night",
-        )
-        .eq("id", booking.id)
-        .single();
-
-      const stayCheckIn = toYmd(freshBk?.check_in) || checkInYmd;
-      const totalNights = stayCheckIn
-        ? calendarNightsBetween(stayCheckIn, newCheckoutStr)
-        : Math.max(
-            1,
-            (Number(freshBk?.number_of_nights) || 0) + additionalNights,
-          );
-      const prevTotal = Number(freshBk?.total_amount) || 0;
-      const nextTotal = prevTotal + additionalAmount;
-      const prevDeposit = Number(freshBk?.deposit) || 0;
-      const prevBalance = Number(freshBk?.balance) || 0;
-
-      const bookingUpdate: Record<string, unknown> = {
-        check_out: newCheckoutStr,
-        number_of_nights: totalNights,
-        total_amount: nextTotal,
-      };
-      if (paymentMethod === "city_ledger") {
-        bookingUpdate.balance = prevBalance + additionalAmount;
-        bookingUpdate.payment_status = "pending";
-      } else {
-        bookingUpdate.deposit = prevDeposit + additionalAmount;
-        // Paid extension: owed room total rose but deposit covered the add-on.
-        bookingUpdate.balance = Math.max(0, nextTotal - (prevDeposit + additionalAmount));
-      }
-
-      const { error: bookingError } = await supabase
-        .from("bookings")
-        .update(bookingUpdate)
-        .eq("id", booking.id);
-      if (bookingError) throw bookingError;
-
       const accountFields = paymentMethodRequiresAccount(paymentMethod)
         ? paymentAccountInsertFields(paymentAccount)
         : { payment_account_id: null, payment_account_label: null };
 
-      // Write to transactions table (non-fatal)
-      try {
-        await supabase.from("transactions").insert([
-          {
-            organization_id: booking.organization_id || null,
-            booking_id: booking.id,
-            transaction_id: `EXT-${booking.id}-${Date.now()}`,
-            guest_name: booking.guestName || "Guest",
-            room: booking.room || null,
-            amount: additionalAmount,
-            payment_method: paymentMethod,
-            status: isPaidNow ? "paid" : "pending",
-            description: appendAccountToNotes(
-              `Extended Stay — ${additionalNights} night${additionalNights !== 1 ? "s" : ""}`,
-              accountFields.payment_account_label,
-            ),
-            received_by: currentUserId,
-            ...accountFields,
-          },
+      let cityLedgerBumpTotal = 0;
+
+      for (const plan of activePlans) {
+        const target = plan.target;
+        const chargeData: Record<string, unknown> = {
+          booking_id: target.id,
+          description: `Extended Stay - ${plan.nights} night${plan.nights !== 1 ? "s" : ""}${
+            isBulkExtend ? " (group)" : ""
+          }`,
+          amount: plan.amount,
+          charge_type: "extended_stay",
+          payment_method: paymentMethod,
+          ledger_account_id:
+            paymentMethod === "city_ledger" ? selectedLedger?.id : null,
+          ledger_account_type:
+            paymentMethod === "city_ledger" ? ledgerType : null,
+          payment_status: isPaidNow ? "paid" : "pending",
+          created_by: currentUserId,
+        };
+        if (target.organization_id) {
+          chargeData.organization_id = target.organization_id;
+        }
+
+        const { error: chargeError } = await insertFolioCharges(supabase, [
+          chargeData,
         ]);
-      } catch (_) {
-        /* non-fatal */
+        if (chargeError) throw chargeError;
+
+        const { data: freshBk } = await supabase
+          .from("bookings")
+          .select(
+            "balance, deposit, total_amount, number_of_nights, check_in, check_out, rate_per_night",
+          )
+          .eq("id", target.id)
+          .single();
+
+        const stayCheckIn = toYmd(freshBk?.check_in) || plan.checkInYmd;
+        const totalNights = stayCheckIn
+          ? calendarNightsBetween(stayCheckIn, newCheckoutStr)
+          : Math.max(
+              1,
+              (Number(freshBk?.number_of_nights) || 0) + plan.nights,
+            );
+        const prevTotal = Number(freshBk?.total_amount) || 0;
+        const nextTotal = prevTotal + plan.amount;
+        const prevDeposit = Number(freshBk?.deposit) || 0;
+        const prevBalance = Number(freshBk?.balance) || 0;
+
+        const bookingUpdate: Record<string, unknown> = {
+          check_out: newCheckoutStr,
+          number_of_nights: totalNights,
+          total_amount: nextTotal,
+        };
+        if (paymentMethod === "city_ledger") {
+          bookingUpdate.balance = prevBalance + plan.amount;
+          bookingUpdate.payment_status = "pending";
+        } else {
+          bookingUpdate.deposit = prevDeposit + plan.amount;
+          bookingUpdate.balance = Math.max(
+            0,
+            nextTotal - (prevDeposit + plan.amount),
+          );
+        }
+
+        const { error: bookingError } = await supabase
+          .from("bookings")
+          .update(bookingUpdate)
+          .eq("id", target.id);
+        if (bookingError) throw bookingError;
+
+        try {
+          await supabase.from("transactions").insert([
+            {
+              organization_id: target.organization_id || null,
+              booking_id: target.id,
+              transaction_id: `EXT-${target.id}-${Date.now()}`,
+              guest_name: target.guestName || "Guest",
+              room: target.room || null,
+              amount: plan.amount,
+              payment_method: paymentMethod,
+              status: isPaidNow ? "paid" : "pending",
+              description: appendAccountToNotes(
+                `Extended Stay — ${plan.nights} night${plan.nights !== 1 ? "s" : ""}${
+                  isBulkExtend ? " (group)" : ""
+                }`,
+                accountFields.payment_account_label,
+              ),
+              received_by: currentUserId,
+              ...accountFields,
+            },
+          ]);
+        } catch (_) {
+          /* non-fatal */
+        }
+
+        if (paymentMethod === "city_ledger") {
+          cityLedgerBumpTotal += plan.amount;
+        }
       }
 
-      // City ledger: update guest balance + city_ledger_accounts balance
-      if (paymentMethod === "city_ledger") {
-        if (booking.guestId) {
+      if (paymentMethod === "city_ledger" && cityLedgerBumpTotal > 0) {
+        if (booking.guestId && !selectedLedger?.id) {
           const { data: guestRow } = await supabase
             .from("guests")
             .select("name")
             .eq("id", booking.guestId)
             .single();
-          if (guestRow) {
-            // If no city_ledger_account was selected, create/update one for this guest
-            if (!selectedLedger?.id && guestRow.name) {
-              const { data: existingAcct } = await supabase
-                .from("city_ledger_accounts")
-                .select("id, balance")
-                .eq("organization_id", booking.organization_id)
-                .ilike("account_name", guestRow.name)
-                .maybeSingle();
+          if (guestRow?.name) {
+            const { data: existingAcct } = await supabase
+              .from("city_ledger_accounts")
+              .select("id, balance")
+              .eq("organization_id", booking.organization_id)
+              .ilike("account_name", guestRow.name)
+              .maybeSingle();
 
-              if (existingAcct) {
-                await supabase
-                  .from("city_ledger_accounts")
-                  .update({
-                    balance: (existingAcct.balance || 0) + additionalAmount,
-                  })
-                  .eq("id", existingAcct.id);
-              } else {
-                await supabase.from("city_ledger_accounts").insert([
-                  {
-                    organization_id: booking.organization_id,
-                    account_name: guestRow.name,
-                    account_type: "individual",
-                    balance: additionalAmount,
-                  },
-                ]);
-              }
+            if (existingAcct) {
+              await supabase
+                .from("city_ledger_accounts")
+                .update({
+                  balance: (existingAcct.balance || 0) + cityLedgerBumpTotal,
+                })
+                .eq("id", existingAcct.id);
+            } else {
+              await supabase.from("city_ledger_accounts").insert([
+                {
+                  organization_id: booking.organization_id,
+                  account_name: guestRow.name,
+                  account_type: "individual",
+                  balance: cityLedgerBumpTotal,
+                },
+              ]);
             }
           }
         }
 
-        // If a specific ledger account was selected, update it
         if (selectedLedger?.id) {
           const { data: acct } = await supabase
             .from("city_ledger_accounts")
@@ -551,10 +619,11 @@ export function ExtendStayModal({
             .single();
           await supabase
             .from("city_ledger_accounts")
-            .update({ balance: (acct?.balance || 0) + additionalAmount })
+            .update({
+              balance: (acct?.balance || 0) + cityLedgerBumpTotal,
+            })
             .eq("id", selectedLedger.id);
 
-          // If it's an organization ledger, also bump organizations.current_balance
           if (ledgerType === "organization") {
             const { data: orgRow } = await supabase
               .from("organizations")
@@ -567,7 +636,7 @@ export function ExtendStayModal({
                 .update({
                   current_balance:
                     ((orgRow.current_balance as number) || 0) +
-                    additionalAmount,
+                    cityLedgerBumpTotal,
                 })
                 .eq("id", selectedLedger.id);
             }
@@ -597,7 +666,9 @@ export function ExtendStayModal({
       }
 
       toast.success(
-        `Stay extended to ${format(newCheckOutDate, "PPP")}${accountInfo}`,
+        isBulkExtend
+          ? `Extended ${activePlans.length} room${activePlans.length === 1 ? "" : "s"} to ${format(newCheckOutDate, "PPP")}${accountInfo}`
+          : `Stay extended to ${format(newCheckOutDate, "PPP")}${accountInfo}`,
       );
       onClose();
       resetForm();
@@ -643,10 +714,14 @@ export function ExtendStayModal({
       >
         <DialogHeader className="relative shrink-0 space-y-1 border-b px-4 pb-3 pt-4 text-left sm:px-5 sm:pt-5">
           <DialogTitle className="pr-10 text-base font-semibold leading-snug sm:text-lg">
-            Extend stay · {booking.folioId}
+            {isBulkExtend
+              ? `Extend group · ${extendTargets.length} rooms`
+              : `Extend stay · ${booking.folioId}`}
           </DialogTitle>
           <DialogDescription className="text-xs text-muted-foreground sm:text-sm">
-            Pick a new checkout date, then choose payment and confirm below.
+            {isBulkExtend
+              ? "One new checkout date is applied to every eligible room in this group."
+              : "Pick a new checkout date, then choose payment and confirm below."}
           </DialogDescription>
         </DialogHeader>
 
@@ -660,8 +735,14 @@ export function ExtendStayModal({
               </span>
             </div>
             <div className="flex justify-between gap-2">
-              <span className="text-muted-foreground">Room</span>
-              <span className="font-medium">{booking.room}</span>
+              <span className="text-muted-foreground">
+                {isBulkExtend ? "Rooms" : "Room"}
+              </span>
+              <span className="max-w-[70%] text-right font-medium">
+                {isBulkExtend
+                  ? extendTargets.map((t) => t.room).join(", ")
+                  : booking.room}
+              </span>
             </div>
             <div className="flex justify-between gap-2">
               <span className="shrink-0 text-muted-foreground">
@@ -672,9 +753,18 @@ export function ExtendStayModal({
               </span>
             </div>
             <div className="flex justify-between gap-2">
-              <span className="text-muted-foreground">Rate / night</span>
+              <span className="text-muted-foreground">
+                {isBulkExtend ? "Combined rate / night" : "Rate / night"}
+              </span>
               <span className="font-medium">
-                {formatNaira(ratePerNight)}
+                {isBulkExtend
+                  ? formatNaira(
+                      extendTargets.reduce(
+                        (s, t) => s + Math.max(0, Number(t.ratePerNight) || 0),
+                        0,
+                      ),
+                    )
+                  : formatNaira(ratePerNight)}
               </span>
             </div>
           </div>
@@ -690,8 +780,10 @@ export function ExtendStayModal({
                   selected={newCheckOutDate}
                   onSelect={setNewCheckOutDate}
                   disabled={(date) => {
-                    if (!currentCheckOutYmd) return true;
-                    const [y, m, d] = currentCheckOutYmd.split("-").map(Number);
+                    if (!calendarMinCheckOutYmd) return true;
+                    const [y, m, d] = calendarMinCheckOutYmd
+                      .split("-")
+                      .map(Number);
                     const min = new Date(y, m - 1, d);
                     min.setHours(0, 0, 0, 0);
                     const day = new Date(date);
@@ -703,7 +795,7 @@ export function ExtendStayModal({
               </div>
             </div>
 
-            {newCheckOutDate && additionalNights > 0 && (
+            {newCheckOutDate && additionalAmount > 0 && (
               <div className="space-y-2 rounded-lg bg-muted p-3 text-xs sm:p-4 sm:text-sm">
                 <div className="flex justify-between gap-2">
                   <span className="text-muted-foreground">New checkout</span>
@@ -712,9 +804,19 @@ export function ExtendStayModal({
                   </span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-muted-foreground">Extra nights</span>
+                  <span className="text-muted-foreground">
+                    {isBulkExtend ? "Room-nights" : "Extra nights"}
+                  </span>
                   <span className="font-semibold">{additionalNights}</span>
                 </div>
+                {isBulkExtend && (
+                  <div className="flex justify-between text-muted-foreground">
+                    <span>Rooms updated</span>
+                    <span className="font-medium text-foreground">
+                      {activePlans.length} of {extendTargets.length}
+                    </span>
+                  </div>
+                )}
                 <div className="flex justify-between border-t border-border/60 pt-2 text-sm font-bold sm:text-base">
                   <span>Total</span>
                   <span className="text-primary">
@@ -928,7 +1030,7 @@ export function ExtendStayModal({
             )}
           </div>
 
-          {newCheckOutDate && additionalNights > 0 && (
+          {newCheckOutDate && additionalAmount > 0 && !isBulkExtend && (
             <div className="mt-3 space-y-2 rounded-lg border border-amber-200 bg-amber-50/80 p-3 text-xs sm:text-sm">
               <label className="flex items-start gap-2 cursor-pointer">
                 <input
@@ -1017,7 +1119,7 @@ export function ExtendStayModal({
             />
           </div>
 
-          {wantDiscountRequest ? (
+          {wantDiscountRequest && !isBulkExtend ? (
             <Button
               type="button"
               onClick={() => void handleDiscountRequest()}
@@ -1025,7 +1127,7 @@ export function ExtendStayModal({
               disabled={
                 !paymentMethod ||
                 !newCheckOutDate ||
-                additionalNights <= 0 ||
+                additionalAmount <= 0 ||
                 discountSubmitting ||
                 paymentMethod === "city_ledger"
               }
@@ -1040,12 +1142,16 @@ export function ExtendStayModal({
               disabled={
                 !paymentMethod ||
                 !newCheckOutDate ||
-                additionalNights <= 0 ||
+                additionalAmount <= 0 ||
                 loading
               }
             >
               <CreditCard className="mr-2 h-4 w-4 shrink-0" />
-              {loading ? "Processing…" : "Confirm extension"}
+              {loading
+                ? "Processing…"
+                : isBulkExtend
+                  ? `Confirm extension (${activePlans.length} rooms)`
+                  : "Confirm extension"}
             </Button>
           )}
         </div>
