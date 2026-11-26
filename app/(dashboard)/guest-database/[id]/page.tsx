@@ -150,10 +150,15 @@ export default function GuestDetailPage({ params }: { params: Promise<{ id: stri
   useEffect(() => {
     if (id) loadGuest()
 
-    // Re-fetch whenever the user returns to this tab/page
-    // so data is always fresh after actions on the booking detail page
+    // Re-fetch when returning to this tab, with cooldown so focus storms
+    // do not hammer Auth + guest queries (Logs Ingest).
+    let lastVisLoadAt = 0
     const handleVisibility = () => {
-      if (document.visibilityState === 'visible' && id) loadGuest()
+      if (document.visibilityState !== 'visible' || !id) return
+      const now = Date.now()
+      if (now - lastVisLoadAt < 60_000) return
+      lastVisLoadAt = now
+      loadGuest()
     }
     document.addEventListener('visibilitychange', handleVisibility)
     return () => document.removeEventListener('visibilitychange', handleVisibility)
