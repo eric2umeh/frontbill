@@ -23,6 +23,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { History } from 'lucide-react'
+import { StoreItemPriceHistoryModal } from '@/components/supply-chain/store-item-price-history-modal'
 import {
   Select,
   SelectContent,
@@ -71,6 +73,11 @@ export function StoreEditItemDialog({ item, open, onOpenChange, onSave }: Props)
   const [kitchenCategory, setKitchenCategory] = useState<KitchenMaterialCategory>('other')
   const [conversionUnit, setConversionUnit] = useState('pack')
   const [conversionQty, setConversionQty] = useState('')
+  const [priceHistoryOpen, setPriceHistoryOpen] = useState(false)
+
+  useEffect(() => {
+    if (!open) setPriceHistoryOpen(false)
+  }, [open])
 
   useEffect(() => {
     if (!item || !open) return
@@ -111,10 +118,23 @@ export function StoreEditItemDialog({ item, open, onOpenChange, onSave }: Props)
   const conversionDef = unitFactorDefinition(unit, conversionUnit)
 
   return (
+    <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Edit store item</DialogTitle>
+          <div className="flex items-start justify-between gap-2 pr-6">
+            <DialogTitle>Edit store item</DialogTitle>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 shrink-0 gap-1.5"
+              onClick={() => setPriceHistoryOpen(true)}
+            >
+              <History className="h-3.5 w-3.5" />
+              Price history
+            </Button>
+          </div>
         </DialogHeader>
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="sm:col-span-2">
@@ -274,5 +294,13 @@ export function StoreEditItemDialog({ item, open, onOpenChange, onSave }: Props)
         </DialogFooter>
       </DialogContent>
     </Dialog>
+
+    <StoreItemPriceHistoryModal
+      open={priceHistoryOpen}
+      onOpenChange={setPriceHistoryOpen}
+      itemId={item.id}
+      itemName={item.name}
+    />
+    </>
   )
 }
