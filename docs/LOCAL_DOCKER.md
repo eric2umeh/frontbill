@@ -105,6 +105,14 @@ After enabling org-live Realtime (`scripts/084_…`), also run on **staging firs
 
 Git push alone does not apply these — run them in the Supabase SQL Editor per project.
 
+### Central Store price history (staging → prod)
+
+After deploying the Price history UI on Central Store item edit:
+
+- `scripts/088_supply_catalog_price_history.sql` (table + trigger on `last_price` / `benchmark_price`)
+
+Git push alone does not apply this — run it in the Supabase SQL Editor per project.
+
 ### Logs Ingest (staging → prod)
 
 Dashboard **Log Ingestion** grows with every API/Postgres/Auth/Realtime log line. App polls are slowed in code; also run on each cloud project:
